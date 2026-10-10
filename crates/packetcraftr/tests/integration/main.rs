@@ -36,4 +36,5 @@ mod scanner_corpus_contracts;
 mod send_set_contracts;
 mod staged_preparation_contracts;
 mod traceroute_contracts;
+mod traceroute_hosts_contracts;
 mod udp_profile_document_contracts;

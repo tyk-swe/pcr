@@ -2,12 +2,13 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
-All structured command envelopes now identify `packetcraftr.output/v10` and
-validate against `schemas/packetcraftr.output.v10.schema.json`. The
-`packetcraftr.output/v6` through `packetcraftr.output/v9` schemas remain
+All structured command envelopes now identify `packetcraftr.output/v11` and
+validate against `schemas/packetcraftr.output.v11.schema.json`. The
+`packetcraftr.output/v6` through `packetcraftr.output/v10` schemas remain
 frozen and available for validating previously emitted output. The current
-producer and bundled examples have moved to v10; consumers pinned to an
-earlier family must explicitly support the new one.
+producer and bundled examples have moved to v11; consumers pinned to an
+earlier family must explicitly support the new one. This cycle published two
+families: v10 added adaptive scheduling, and v11 adds the scan trace stage.
 Packet documents now use
 `packetcraftr.packet/v2` and the corresponding v2 schema. Earlier
 packet-document versions are rejected with a schema error.
@@ -1061,6 +1062,75 @@ In `packetcraftr-cli`, `output::scan::Report::publish` and
 position (empty when no lookup ran), and the published `Plan` gains
 `discovery`.
 
+## Scan traceroute and output/v11
+
+`scan --traceroute` traces every scanned host after the scan and before any
+reverse-DNS lookup. Without it nothing changes: no trace probe is sent and the
+result has no `traceroute` member. Each host is traced with a TCP port or an
+ICMP echo probe the scan saw it answer (a SYN/ACK over a reset over an echo
+reply, and a UDP reply never), and the host's record names that scan probe.
+A host without such an answer is traced with `--traceroute-strategy udp|icmp|tcp`
+(and `--traceroute-port`, defaulting to 33434 for UDP and 80 for TCP), and is
+`not_traced` without one. `--traceroute-first-hop`, `--traceroute-max-hops`,
+`--traceroute-attempts`, and `--traceroute-max-probes` bound the plan, with
+the standalone defaults. One authorization and one probe and duration budget
+cover every traced host, and the stage spends what is left of
+`--max-duration`. `--traceroute-reuse-max-age-ms MS` lets a host reuse hops an
+earlier host's trace observed within this operation, for hops younger than
+`MS`; reused hops are reported apart from probed ones. Every `--traceroute-*`
+option requires `--traceroute`, and the stage needs the raw method:
+`--connect`, `--method tcp-connect`, an automatic choice of connect, and
+`--list` are usage errors before any probe, as are a port without a strategy,
+a port with `icmp`, and invalid bounds. A trace failure fails the command with
+the trace's own classification. The standalone `traceroute` command is
+unchanged apart from the output version.
+
+Output/v11 changes, all additive within the new family:
+
+- Raw scan results gain an optional `traceroute` member: the `plan`, one record
+  per scanned host in host order, `undecoded` frames with their `destination`,
+  and `retained_evidence_bytes`. A host has `status` (`complete`, `incomplete`,
+  or `not_traced`), a `reason` when not traced (`no_responsive_probe` or
+  `scoped_target`), a `completion` and `selection` when traced, `hops` that
+  hold only this host's own probes, and `reused_hops`.
+- A `selection` states its `basis`: `observed`, with the scan probe's `stage`,
+  `sequence`, `reply`, and `observed_at`, or `requested`.
+- A reused hop has its `source` host, the source's `probes`, its `responders`,
+  `observed_at`, and `age`. It is a claim from another host's path, not an
+  observation for this host.
+- NDJSON adds `traceroute_probe`, `traceroute_undecoded`, and
+  `traceroute_host` records while the stage runs, and `complete` gains an
+  optional `traceroute` object with the `plan` and `retained_evidence_bytes`.
+- The trace's packets and time count in the scan's `stats`, and its
+  diagnostics in the scan's `diagnostics`.
+
+In Rust, `traceroute::Error` gains `TargetSelection`, `InvalidObservation`,
+and `Collection` — the last preserves the underlying exchange, capture, or
+neighbor-configuration error and its classification — and `traceroute::hosts` with
+`Client::trace_hosts` is new. `hosts::Report` carries a `neighbor_stats`
+summary of the neighbor requests the probes' routes resolved; those packets
+and bytes are already inside `stats`, so it is a library field for
+accounting, not a new output member. Multi-host `hosts::Request::validate`
+is stricter before any DNS work: a TCP-selected probe with a nonzero
+`payload_size` fails `InvalidProbeOption`
+whether TCP came from the fallback strategy or a valid observation.
+`Client::with_remaining_budget` is a new additive view helper that
+narrows an operation's packet and byte ceilings by what an earlier stage
+already sent; `scan --traceroute` uses it so the trace and its lookups
+share the scan's policy budget. `Client::with_parent_deadline` is a new
+additive view helper that attaches an absolute bound as the parent of
+every deadline the client's operations derive. `hosts::Request` gains
+`first_sequence` (the sequence number the plan starts at; `0` keeps
+standalone numbering) and `resolved_targets` (an exact list of numeric or
+scoped `Target`s a containing operation already resolved, each
+re-authorized on entry, while `targets` keeps the bounded declaration;
+`None` keeps expansion unchanged). The standalone
+`traceroute::Request`, `Report`, and `Aggregate` are unchanged.
+`probe::runner::run_batches` keeps its behavior over the new `run_planned`.
+In `packetcraftr-cli`, `output::scan::Report::publish` takes the optional trace
+member, and the NDJSON `complete` conversion takes the optional trace summary
+as a third value.
+
 ## Send packet sets
 
 `send` expands `--axis` templates as `build` and `exchange` do, and repeats the
@@ -1999,3 +2069,7 @@ socket setup happens before this boundary. Use the new `completed()` accessor
 when the acceptance-return marker is needed. Attempt `sent_at` and latency now
 refer to submission start; neither interval endpoint is precise wire departure,
 causality, or authenticated responder identity. Machine output remains v10.
+
+That version describes the M5 timing change. The M11 output/v11 family
+preserves these timing fields, and native discovery validation accepts both
+families without changing its evidence requirements.

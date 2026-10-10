@@ -8,6 +8,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- Structured command output moves to `packetcraftr.output/v11`, which adds the
+  scan trace stage; the v6 through v10 families and schemas stay frozen.
+  Raw scan results gain an optional `traceroute` member, NDJSON scans gain
+  `traceroute_probe`, `traceroute_undecoded`, and `traceroute_host` records,
+  and `complete` gains an optional `traceroute`. `traceroute::Error` gains
+  `TargetSelection`, `InvalidObservation`, and `Collection` (the last keeps
+  the underlying exchange and capture classification as its source). CLI
+  `output::scan::Report::publish`
+  takes the optional trace member, and the NDJSON `complete` conversion takes
+  the optional trace summary. See `docs/migration-unreleased.md`.
 - `neighbor::Error::Cleanup` gains `attempts`, the requests sent before the
   capture cleanup failed.
 - Structured command output moves to `packetcraftr.output/v10`, which adds a
@@ -735,6 +745,17 @@ All notable changes to PacketcraftR are documented here. The format follows
   routes preserve exact revision, corpus/source/executable digests, commands,
   runtime output, isolation, and precise unsupported/unavailable paths across
   the five build profiles without claiming unexecuted native coverage.
+- Scan-informed traceroute (roadmap M11). `scan --traceroute` traces every
+  scanned host after the scan, within the remaining `--max-duration`, with each
+  host's TCP or ICMP echo probe taken from what the scan saw it answer
+  (`--traceroute-strategy` and `--traceroute-port` cover the rest, and a host
+  without either is `not_traced`). `--traceroute-first-hop`,
+  `--traceroute-max-hops`, `--traceroute-attempts`, and
+  `--traceroute-max-probes` bound one plan authorized for every host before any
+  probe, and `--traceroute-reuse-max-age-ms` lets a host reuse hops an earlier
+  host observed in the same operation, published as `reused_hops` with their
+  source and age. The library adds `traceroute::hosts`, `hosts::observed`, and
+  `Client::trace_hosts`. See `docs/roadmap/m11-scan-informed-traceroute.md`.
 - `scan --adaptive` opts raw and `--connect` scans into adaptive scheduling:
   per-attempt timeouts follow a bounded per-host RTO estimate inside
   `--min-timeout-ms`/`--max-timeout-ms`, an additive-increase
@@ -749,7 +770,6 @@ All notable changes to PacketcraftR are documented here. The format follows
   `--adaptive`; the fixed scheduler remains the default, and
   `observed_peak_window` reports the largest pending count actually held, not
   achieved throughput.
-
 - Host discovery (roadmap M5). `scan --discovery before|only|skip` runs a
   discovery stage before the scan, alone, or records that it was skipped;
   without the flag hosts are labelled `not_requested`. `--discovery-probes`
@@ -1971,10 +1991,82 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Native discovery evidence verification accepts output/v11 as well as the
+  frozen output/v10 family, retaining its revision, capture, and admission checks.
 - Correlate immediate native replies captured during successful exact-byte
   transmission, including ARP/NDP discovery and TCP/ICMP-error responses. Keep
   socket preparation outside the eligible interval and reject missing/stale
   ingress; submission timing is not precise wire departure or identity proof.
+- A multi-host trace resting on a TCP observation rejects a nonzero
+  `payload_size` before hostname resolution, not only when TCP is the
+  fallback strategy.
+- The trace stage on an automatic or link-layer route only enforces the
+  neighbor pacing interval when the plan can actually probe: a no-strategy,
+  no-observation trace stays admissible since it resolves no neighbor.
+- Trace probe sequences continue the scan's namespace via
+  `hosts::Request::first_sequence` instead of restarting at zero, so no
+  trace probe's identifier collides with one scan evidence already cites.
+- `hosts::Request::resolved_targets` hands the scan's exact resolved hosts
+  to the trace (numeric or scoped addresses only, each re-authorized) while
+  `targets` keeps the original bounded declaration; a 4 096+ host scan no
+  longer expands to 4 096+ selection specs.
+- The raw `scan` command bounds the whole operation with an absolute
+  parent deadline (`Client::with_parent_deadline`) shared by the scan,
+  trace, and reverse-DNS stages, so stage setup cannot extend its expiry.
+- The text summary counts only records the trace marks complete or
+  incomplete, not not-traced records.
+- `scan --traceroute` and the reverse-DNS lookups after it run inside the
+  scan's policy packet and byte budget rather than a fresh one: the trace
+  stage and each lookup share `Client::with_remaining_budget`, so an
+  exhausted allowance refuses the trace before any further I/O.
+- `scan --link-mode layer3` is honored in the trace stage's early
+  validation, so its neighbor-pacing timeout rule applies only to routes
+  that can resolve a neighbor.
+- `traceroute::hosts` defaults TCP and UDP probes to source port 49151, just
+  below the source ports a scan's generated UDP probes use, so a reply to a
+  scan probe can never terminate a trace hop under tuple-only correlation;
+  `Request::source_port` still overrides it.
+- `traceroute::hosts::Request` refuses an automatic or link-layer rate whose
+  interval fills or exceeds the probe timeout before admission: a neighbor
+  request spends that interval inside each probe's window, so a timeout that
+  cannot outlast it could only expire after the request was sent.
+- `traceroute::hosts` plans each host's anchor and reuse decisions on a fresh
+  clock sample after every event publication, so a slow sink can no longer
+  make a stale reuse cache look fresh.
+- `Client::trace_hosts` authorizes its neighbor requests against the policy
+  itself and resolves each neighbor once per operation, paced at the trace's
+  rate; `--traceroute-max-probes` and the operation's packet and byte budgets
+  now conservatively reserve one neighbor request per link-layer trace probe,
+  and the requests it actually sends count in `Report::stats` (and the new
+  `Report::neighbor_stats`).
+- `scan --traceroute` and the lookups after it pace from monotonic markers:
+  a stage that sent anything conservatively owes a full rate interval, and
+  wall-clock `sent_at` fields stay evidence only, so a clock adjustment
+  cannot collapse a planned wait.
+- `scan --traceroute` applies the shared evidence budget under NDJSON output
+  too: the stream tracker strips matched response frames, so the scan's
+  retained counts are accumulated from the published events rather than
+  re-derived from what the tracker kept.
+- `scan --traceroute` authorizes the trace's neighbor requests (such as a
+  gateway's ARP or NDP resolution) against the destination policy before
+  sending them; the workflow client the stage composes now carries
+  `with_neighbor_request_authorization`.
+- `traceroute::hosts::Request` rejects observations that repeat one scan
+  sequence on different addresses with `InvalidObservation` before admission,
+  since two hosts cannot share one probe's reply.
+- `scan --traceroute` validates the trace request again against the workflow's
+  finalized route and collection before the scan sends, so a queue
+  configuration a hop's attempts cannot retain fails with
+  `cli.traceroute_limit` before any probe instead of during trace admission.
+- `scan --traceroute` shares one evidence budget with its scan: the frames and
+  bytes the scan already retained, including undecoded and unattributed
+  frames, are deducted from the trace's evidence limits and capture queues, so
+  a trace that cannot retain a hop's responses is refused after the scan
+  rather than overrunning it. A plan in which no host can be traced deducts
+  nothing.
+- `scan --traceroute` paces its first probe conservatively: when the scan sent
+  traffic, the first trace batch owes a full `--rate` interval, because a
+  wall-clock `sent_at` cannot name a monotonic pacing marker.
 - Adaptive raw scans admit the conservative worst live wave before any traffic:
   the per-probe and per-route maxima retained across wave-sized chunks plus
   capture interface unions, so a scan over the `capture.interfaces` source

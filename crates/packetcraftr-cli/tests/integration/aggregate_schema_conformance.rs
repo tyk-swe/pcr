@@ -160,3 +160,129 @@ fn unknown_envelope_invalid_payload_reject() {
     document["result"]["packet"]["undeclared"] = Value::from(1);
     assert!(schema_validator().validate(&document).is_err());
 }
+
+fn trace_plan() -> packetcraftr_cli::output::traceroute::hosts::Plan {
+    use packetcraftr_cli::output::traceroute::hosts::{Plan, ReusePlan, StrategyPlan};
+    Plan {
+        first_hop: 1,
+        max_hops: 30,
+        attempts: 1,
+        max_probes: 4096,
+        strategy: Some(StrategyPlan {
+            strategy: packetcraftr::probe::Transport::Tcp,
+            destination_port: Some(443),
+        }),
+        reuse: Some(ReusePlan {
+            max_age: std::time::Duration::from_secs(30),
+        }),
+    }
+}
+
+#[test]
+fn scan_traceroute_member_matches_the_published_schema() {
+    use packetcraftr_cli::output::traceroute::hosts::Report;
+
+    let mut document: Value = serde_json::from_str(include_str!(
+        "../../../../examples/documents/output-scan-success.json"
+    ))
+    .expect("published scan example must parse");
+    let report =
+        Report::new(trace_plan(), common::trace_hosts::aggregate()).expect("a representable trace");
+    let member = serde_json::to_value(&report).expect("the trace serializes");
+    document["result"]["traceroute"] = member.clone();
+    schema_validator()
+        .validate(&document)
+        .unwrap_or_else(|error| panic!("the trace member must match the schema: {error}"));
+
+    let statuses: Vec<_> = member["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|host| host["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            "complete",
+            "complete",
+            "incomplete",
+            "not_traced",
+            "not_traced"
+        ]
+    );
+    assert_eq!(member["hosts"][0]["selection"]["basis"], "observed");
+    assert_eq!(
+        member["hosts"][0]["selection"]["observation"]["reply"],
+        "tcp_syn_ack"
+    );
+    assert_eq!(member["hosts"][1]["selection"]["basis"], "requested");
+    assert_eq!(member["hosts"][1]["reused_hops"][0]["source"], "192.0.2.10");
+    assert_eq!(member["hosts"][4]["reason"], "scoped_target");
+    assert_eq!(member["hosts"][4]["scope"]["zone"], "eth0");
+
+    for (pointer, value) in [
+        ("/hosts/0/completion", Value::from("timeout")),
+        ("/hosts/3/completion", Value::from("timeout")),
+        ("/hosts/0/selection/basis", Value::from("guessed")),
+        ("/hosts/1/reused_hops/0/age", Value::from("long")),
+    ] {
+        let mut invalid = document.clone();
+        let (parent, key) = pointer.rsplit_once('/').expect("JSON pointer");
+        invalid["result"]["traceroute"]
+            .pointer_mut(parent)
+            .expect("parent exists")[key] = value;
+        assert!(
+            schema_validator().validate(&invalid).is_err(),
+            "{pointer} must fail validation"
+        );
+    }
+}
+
+#[test]
+fn an_adaptive_scan_with_a_traceroute_member_matches_the_published_schema() {
+    use packetcraftr_cli::output::traceroute::hosts::Report;
+
+    let mut document: Value = serde_json::from_str(include_str!(
+        "../../../../examples/documents/output-scan-success.json"
+    ))
+    .expect("published scan example must parse");
+    document["result"]["scheduling"] = serde_json::json!({
+        "mode": "adaptive",
+        "adaptive": {
+            "min_timeout": {"secs": 0, "nanos": 10_000_000},
+            "max_timeout": {"secs": 0, "nanos": 100_000_000},
+            "min_window": 1,
+            "initial_window": 4,
+            "host_timeout": {"secs": 30, "nanos": 0},
+            "retry_backoff": {"secs": 0, "nanos": 50_000_000},
+            "max_backoff": {"secs": 1, "nanos": 0}
+        },
+        "observed_peak_window": 3,
+        "retries_started": 2,
+        "conditions": [],
+        "incomplete": []
+    });
+    let member = serde_json::to_value(
+        Report::new(trace_plan(), common::trace_hosts::aggregate()).expect("a representable trace"),
+    )
+    .expect("the trace serializes");
+    document["result"]["traceroute"] = member;
+    schema_validator()
+        .validate(&document)
+        .unwrap_or_else(|error| {
+            panic!("adaptive scan with a trace must match the schema: {error}")
+        });
+
+    assert_eq!(
+        document["result"]["scheduling"]["mode"],
+        Value::from("adaptive")
+    );
+    assert_eq!(
+        document["result"]["traceroute"]["hosts"][0]["selection"]["basis"],
+        Value::from("observed")
+    );
+    assert_eq!(
+        document["result"]["traceroute"]["hosts"][0]["selection"]["observation"]["reply"],
+        Value::from("tcp_syn_ack")
+    );
+}

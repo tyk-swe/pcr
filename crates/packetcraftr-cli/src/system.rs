@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 mod client;
-mod exchange;
+pub(crate) mod exchange;
 mod interface;
 mod preparation;
 mod route;

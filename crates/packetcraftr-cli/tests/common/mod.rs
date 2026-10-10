@@ -4,6 +4,7 @@
 
 pub(crate) mod application_output;
 pub(crate) mod http2_capture;
+pub(crate) mod trace_hosts;
 
 use std::path::Path;
 use std::process::{Command, Output};

@@ -308,6 +308,9 @@ pub struct Report {
     pub retained_evidence_bytes: usize,
     pub rtt: Rtt,
     pub scheduling: Scheduling,
+    /// Present only when the scan traced its hosts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub traceroute: Option<super::traceroute::hosts::Report>,
 }
 
 /// A correlated frame no probe outcome carries.
@@ -339,6 +342,7 @@ impl Report {
         aggregate: library::Aggregate,
         plan: plan::Plan,
         reverse_dns: Vec<Option<host::ReverseDns>>,
+        traceroute: Option<super::traceroute::hosts::Report>,
     ) -> Result<Published<Self>, Error> {
         let library::Aggregate {
             planned_duration,
@@ -384,6 +388,7 @@ impl Report {
                 retained_evidence_bytes,
                 rtt: rtt.into(),
                 scheduling: scheduling.into(),
+                traceroute,
             },
             diagnostics,
         )
@@ -483,6 +488,8 @@ pub enum Event {
         retained_evidence_bytes: usize,
         rtt: Rtt,
         scheduling: Scheduling,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        traceroute: Option<super::traceroute::hosts::Complete>,
     },
 }
 
@@ -560,8 +567,20 @@ impl From<library::Endpoint> for Published<Event> {
     }
 }
 
-impl From<(library::Report, plan::Plan)> for Published<Event> {
-    fn from((summary, plan): (library::Report, plan::Plan)) -> Self {
+impl
+    From<(
+        library::Report,
+        plan::Plan,
+        Option<super::traceroute::hosts::Complete>,
+    )> for Published<Event>
+{
+    fn from(
+        (summary, plan, traceroute): (
+            library::Report,
+            plan::Plan,
+            Option<super::traceroute::hosts::Complete>,
+        ),
+    ) -> Self {
         Self::new(
             Event::Complete {
                 planned_duration: summary.planned_duration,
@@ -572,6 +591,7 @@ impl From<(library::Report, plan::Plan)> for Published<Event> {
                 retained_evidence_bytes: summary.retained_evidence_bytes,
                 rtt: summary.rtt.into(),
                 scheduling: summary.scheduling.into(),
+                traceroute,
             },
             Vec::new(),
         )

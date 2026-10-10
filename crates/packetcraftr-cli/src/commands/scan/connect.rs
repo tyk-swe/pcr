@@ -45,19 +45,11 @@ pub(super) fn run(
                     &client,
                     &aggregate.report.hosts,
                     started,
+                    // Wall-clock `scheduled_at` is evidence, never pacing:
+                    // any attempted connection conservatively marks now.
                     super::reverse::last_transmission(
                         aggregate.report.stats.connections_attempted > 0,
-                        aggregate
-                            .discovery
-                            .iter()
-                            .chain(
-                                aggregate
-                                    .endpoints
-                                    .iter()
-                                    .flat_map(|endpoint| &endpoint.probes),
-                            )
-                            .filter(|probe| probe.attempted)
-                            .map(|probe| probe.scheduled_at),
+                        std::iter::empty::<Instant>(),
                     ),
                 );
                 if let Some(lookups) = &lookups {
@@ -97,17 +89,7 @@ pub(super) fn run(
                         started,
                         super::reverse::last_transmission(
                             report.stats.connections_attempted > 0,
-                            aggregate
-                                .discovery
-                                .iter()
-                                .chain(
-                                    aggregate
-                                        .endpoints
-                                        .iter()
-                                        .flat_map(|endpoint| &endpoint.probes),
-                                )
-                                .filter(|probe| probe.attempted)
-                                .map(|probe| probe.scheduled_at),
+                            std::iter::empty::<Instant>(),
                         ),
                     );
                     if let Some(lookups) = &lookups {

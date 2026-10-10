@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v10",
+  "schema": "packetcraftr.output/v11",
   "command": "traceroute",
   "mode": "stream",
   "sequence": 3,

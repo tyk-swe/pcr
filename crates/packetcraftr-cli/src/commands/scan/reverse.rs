@@ -6,7 +6,7 @@
 //! other.
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use packetcraftr::dns::{self, batch};
 use packetcraftr::scan::discovery::{Host, State};
@@ -87,7 +87,7 @@ impl Lookup {
         client: &Client,
         hosts: &[Host],
         started: Instant,
-        last_sent: Option<SystemTime>,
+        last_sent: Option<Instant>,
     ) -> (Vec<Option<ReverseDns>>, packetcraftr::Stats) {
         let deadline = started.checked_add(self.template.limits.max_duration);
         // A batch paces its own questions; this pause keeps the scan's rate
@@ -164,7 +164,7 @@ impl Lookup {
         client: &Client,
         addresses: &[IpAddr],
         remaining: Duration,
-    ) -> (Vec<ReverseDns>, packetcraftr::Stats, Option<SystemTime>) {
+    ) -> (Vec<ReverseDns>, packetcraftr::Stats, Option<Instant>) {
         let ended = |status, error: Option<String>| {
             (
                 addresses
@@ -272,14 +272,14 @@ fn batched(
     hosts: &[Host],
     pause: Duration,
     batch_size: usize,
-    last_sent: Option<SystemTime>,
+    last_sent: Option<Instant>,
     deadline: Option<Instant>,
     cancellation: &Cancellation,
     mut name_budget: usize,
     mut lookup: impl FnMut(
         &[IpAddr],
         Duration,
-    ) -> (Vec<ReverseDns>, packetcraftr::Stats, Option<SystemTime>),
+    ) -> (Vec<ReverseDns>, packetcraftr::Stats, Option<Instant>),
 ) -> (Vec<Option<ReverseDns>>, packetcraftr::Stats) {
     let mut names: Vec<Option<ReverseDns>> = hosts.iter().map(|_| None).collect();
     let mut statistics = packetcraftr::Stats::default();
@@ -302,7 +302,7 @@ fn batched(
         // Only what remains of the pause since the last transmission is owed;
         // its replies' wait already spaced it from this batch.
         let owed = last_sent.map_or(Duration::ZERO, |sent| {
-            pause.saturating_sub(SystemTime::now().duration_since(sent).unwrap_or_default())
+            pause.saturating_sub(Instant::now().saturating_duration_since(sent))
         });
         let waited = owed.min(remaining());
         if !waited.is_zero() {
@@ -311,9 +311,9 @@ fn batched(
         }
         let addresses: Vec<IpAddr> = chunk.iter().map(|&index| hosts[index].address).collect();
         let (lookups, stats, sent) = lookup(&addresses, remaining());
-        // A TCP lookup counts no packets but still reports when it sent.
+        // A TCP lookup counts no packets but still reports that it sent.
         if sent.is_some() || stats.packets_attempted > 0 {
-            last_sent = Some(sent.unwrap_or_else(SystemTime::now));
+            last_sent = Some(sent.unwrap_or_else(Instant::now));
         }
         for (&index, mut lookup) in chunk.iter().zip(lookups) {
             retain_names(&mut lookup, &mut name_budget);
@@ -353,7 +353,7 @@ pub(super) fn names(
     client: &Client,
     hosts: &[Host],
     started: Instant,
-    last_sent: Option<SystemTime>,
+    last_sent: Option<Instant>,
 ) -> (Vec<Option<ReverseDns>>, Option<packetcraftr::Stats>) {
     let Some(lookup) = lookup else {
         return Default::default();
@@ -369,28 +369,31 @@ pub(super) fn names(
 fn last_batch_send(
     questions: &[batch::Question<dns::Aggregate>],
     stats: &packetcraftr::Stats,
-) -> Option<SystemTime> {
+) -> Option<Instant> {
     let failed = questions
         .iter()
         .any(|question| question.status == batch::QuestionStatus::Failed);
     if failed && (stats.bytes > 0 || stats.packets_attempted > 0) {
-        return Some(SystemTime::now());
+        return Some(Instant::now());
     }
+    // An attempt's wall-clock `sent_at` is wire evidence, not a pacing marker:
+    // any sent attempt marks the batch's end conservatively.
     questions
         .iter()
         .filter_map(|question| question.result.as_ref())
         .flat_map(dns::Aggregate::attempts)
-        .filter_map(dns::AttemptEvidence::sent_at)
-        .max()
+        .any(|attempt| attempt.sent_at().is_some())
+        .then(Instant::now)
 }
 
-/// When the transmission before the lookups was sent: the latest of `sent`,
-/// or now when packets were `attempted` at no known time.
+/// A conservative monotonic marker for a stage that sent: the latest of
+/// `sent`'s markers, or now when packets were `attempted` with no marker.
+/// Wire `sent_at` fields stay wall-clock evidence and never reach pacing.
 pub(super) fn last_transmission(
     attempted: bool,
-    sent: impl IntoIterator<Item = SystemTime>,
-) -> Option<SystemTime> {
-    attempted.then(|| sent.into_iter().max().unwrap_or_else(SystemTime::now))
+    sent: impl IntoIterator<Item = Instant>,
+) -> Option<Instant> {
+    attempted.then(|| sent.into_iter().max().unwrap_or_else(Instant::now))
 }
 
 #[cfg(test)]
@@ -463,6 +466,26 @@ mod tests {
     }
 
     #[test]
+    fn a_lookup_runs_in_the_allowance_the_scan_and_trace_left() {
+        let lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
+        let client = budget_client(2, 3);
+        // The earlier stages spent the whole two-packet allowance: the
+        // narrowed view authorizes no question, so the host keeps a failed
+        // record and no traffic leaves, without the command failing.
+        let spent = packetcraftr::Stats {
+            packets_attempted: 2,
+            ..packetcraftr::Stats::default()
+        };
+        let view = client.with_remaining_budget(&spent);
+        assert_eq!(view.policy().max_packets_per_operation, 0);
+        let (records, stats) = lookup.run(&view, &responding(1), Instant::now(), None);
+        assert_eq!(records.len(), 1);
+        let record = records[0].as_ref().expect("the host keeps a record");
+        assert_eq!(record.status, QuestionStatus::Failed, "{record:?}");
+        assert_eq!(stats.packets_attempted, 0, "nothing was sent");
+    }
+
+    #[test]
     fn every_batch_of_lookups_shares_one_policy_budget() {
         let lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
         let client = budget_client(batch::MAX_QUESTIONS, 3);
@@ -517,7 +540,7 @@ mod tests {
             &client,
             &silent,
             Instant::now(),
-            Some(SystemTime::now()),
+            Some(Instant::now()),
         );
         assert_eq!(records, [None, None]);
         assert_eq!(stats, None, "no lookup ran, so none has statistics");
@@ -527,7 +550,7 @@ mod tests {
             &client,
             &responding(1),
             Instant::now(),
-            Some(SystemTime::now()),
+            Some(Instant::now()),
         );
         assert!(records[0].is_some());
         assert!(stats.is_some());
@@ -547,7 +570,7 @@ mod tests {
             &client,
             &responding(batch::MAX_QUESTIONS + 1),
             Instant::now(),
-            Some(SystemTime::now()),
+            Some(Instant::now()),
         );
         assert!(
             names
@@ -598,10 +621,10 @@ mod tests {
         // A transmission a whole pause ago, such as a probe whose reply took
         // that long, already satisfied the rate.
         assert_eq!(
-            waited(SystemTime::now().checked_sub(pause), pause),
+            waited(Instant::now().checked_sub(pause), pause),
             Duration::ZERO
         );
-        let owed = waited(Some(SystemTime::now()), pause);
+        let owed = waited(Some(Instant::now()), pause);
         assert!(!owed.is_zero() && owed <= pause, "{owed:?}");
     }
 
@@ -623,7 +646,7 @@ mod tests {
                 (
                     lookups,
                     packetcraftr::Stats::default(),
-                    Some(SystemTime::now()),
+                    Some(Instant::now()),
                 )
             },
         );
@@ -681,7 +704,7 @@ mod tests {
             result: None,
             error: None,
         };
-        let before = SystemTime::now();
+        let before = Instant::now();
         let sent_tcp = packetcraftr::Stats {
             bytes: 64,
             ..packetcraftr::Stats::default()
@@ -705,7 +728,7 @@ mod tests {
                 &hosts,
                 pause,
                 batch::MAX_QUESTIONS,
-                Some(SystemTime::now()),
+                Some(Instant::now()),
                 Instant::now().checked_add(hour),
                 cancellation,
                 usize::MAX,

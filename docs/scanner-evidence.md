@@ -23,6 +23,10 @@ The four vocabularies are:
   policy limit, an exhausted budget, an operation deadline, or a
   cancellation. These are never expressed as network observations.
 
+The scan's [traceroute stage](#traceroute-stage) adds no vocabulary: its probes
+are attempt observations, its host `status` and `completion` are host
+observations, and a reused hop is a claim kept apart from them.
+
 Everything else in the output is *metadata supporting a layer*, not a fifth
 claim vocabulary: coordinates that identify which attempt a record describes,
 timestamps and counters that bound the observation, routing and capture
@@ -399,6 +403,81 @@ Every discovery probe carries `stage: "discovery"` and every scan probe
 `stage: "scan"` in one sequence space. Endpoints and their `counts` hold only
 scan-stage probes; discovery probes appear only in host records.
 
+## Traceroute stage
+
+[M11][m11] traces the scanned hosts after the scan, with `scan --traceroute`.
+The result is `traceroute` in scan results, with one record per scanned host
+in host order, and `traceroute_probe`, `traceroute_undecoded`, and
+`traceroute_host` stream records ([library][trace-hosts],
+[output][trace-output]). Trace probes keep the standalone traceroute's probe
+record and its `response_kind`, `responder`, and `reason`; they are attempt
+observations like the scan's own.
+
+| Field | Role |
+| --- | --- |
+| `status` | Host observation: `complete` when a probe reached the destination or drew an unreachable, `incomplete` when the hop bounds ran out first, and `not_traced` when no trace ran. |
+| `reason` | Metadata, `not_traced` only: `no_responsive_probe` (no scan observation and no fallback strategy) or `scoped_target` (a scoped address is never traced). |
+| `completion` | Host observation: `destination_reached`, `unreachable`, `maximum_hops`, or `timeout`, folded from this host's probes. |
+| `selection` | Metadata: the probe the trace used. Its `basis` is `observed` (the scan probe in `observation`) or `requested` (the fallback strategy). |
+| `selection.observation` | Metadata: the scan probe's `stage`, `sequence`, and `reply`, and when its reply was captured. |
+| `hops[]` | Attempt observations: only hops that this host's own probes observed. |
+| `reused_hops[]` | Claim, not observation: a hop an earlier host's trace observed, with its `source`, the source's `probes`, its `responders`, `observed_at`, and `age`. |
+
+The record keeps these rules:
+
+- A probe is selected from a scan observation only when the host itself
+  replied: a TCP SYN/ACK, then a TCP reset, then an ICMP echo reply, and the
+  lowest scan sequence among equals. A router's ICMP error never selects a
+  probe, and a UDP reply never does because a UDP trace changes its
+  destination port on every probe.
+- A host with no observation and no strategy is not traced; a probe is never
+  guessed.
+- An intermediate router is never the destination: a destination reply counts
+  only when it comes from the destination itself.
+- A reused hop appears only in `reused_hops`, never as a probe, and its
+  `age` and `source` say whose observation it is and how old. It is fresh for
+  at most the requested `max_age` since its source batch was planned, within
+  one operation. On a reconvergent or equal-cost path it can name a router
+  that this host's own probes would not show.
+- A silent hop is a timeout probe, not an absent hop, and a host that ran out
+  of hops is `incomplete`, not unreachable.
+- The stage shares the scan's evidence budget: the response frames the scan
+  retained, its undecoded and unattributed frames, and
+  `retained_evidence_bytes` are deducted from the trace's evidence limits and
+  capture queues. A trace that cannot retain a hop's responses is refused with
+  a typed limit after the scan and before any trace probe; a plan in which no
+  host can be traced deducts nothing. The finalized trace collection is
+  validated before the scan sends.
+- The stage's TCP and UDP probes default to source port 49151, one below
+  the range the scan's generated UDP probes use, so a replayed scan reply
+  cannot match a trace probe's tuple.
+- A scan that sent traffic paces the trace's first batch by a full `--rate`
+  interval, and the trace marks its own sends for the lookups after it the
+  same way: pacing rides on monotonic markers, so a wall-clock `sent_at` stays
+  evidence and a clock adjustment can never collapse a wait.
+- On a link-layer route each probe may resolve a neighbor: the plan reserves
+  one request per probe inside `--traceroute-max-probes` and the operation's
+  packet and byte budgets, authorizes it like a probe, sends it once, paces
+  it on the trace's rate, and keeps its answer for the operation; the
+  requests sent count in the operation's `stats` (and `neighbor_stats` in the
+  library `Report`). Because that interval is spent inside each probe's
+  window, an automatic or link-layer trace whose `--timeout-ms` cannot
+  outlast the `--rate` interval is refused with `cli.traceroute_limit`
+  before any capture or send.
+- The trace stage numbers its probes one past the scan's last sequence
+  (`first_sequence`), so no trace identifier collides with a scan probe's,
+  and it hands the scan's exact resolved hosts over as `resolved_targets`
+  while `targets` keeps the compact declaration — a scan of more than 4096
+  hosts no longer expands to that many specs.
+- The command's absolute deadline parents every stage's own bound, so no
+  stage's setup can extend its expiry.
+- The trace and the lookups after it share the scan's policy packet and
+  byte budget: each stage runs in a `with_remaining_budget` view of the
+  allowance remaining after earlier traffic. An exhausted allowance
+  refuses tracing before capture or transmission; refused reverse lookups
+  retain failed enrichment records without sending. A trace plan in which
+  no host can be traced requires no additional allowance.
+
 [compatibility]: consumer-compatibility.md
 [connect-engine]: ../crates/packetcraftr/src/scan/connect/engine.rs
 [connect-output]: ../crates/packetcraftr-cli/src/output/scan/connect.rs
@@ -411,6 +490,7 @@ scan-stage probes; discovery probes appear only in host records.
 [m1]: roadmap/m01-claims-evidence.md
 [m5]: roadmap/m05-host-discovery.md
 [m6]: roadmap/m06-port-planning-inference.md
+[m11]: roadmap/m11-scan-informed-traceroute.md
 [m12]: roadmap/m12-tcp-diagnostic-scans.md
 [scan-engine]: ../crates/packetcraftr/src/scan/engine.rs
 [scan-error]: ../crates/packetcraftr/src/scan/error.rs
@@ -418,6 +498,8 @@ scan-stage probes; discovery probes appear only in host records.
 [scan-output]: ../crates/packetcraftr-cli/src/output/scan.rs
 [scan-report]: ../crates/packetcraftr/src/scan/report.rs
 [scheduling-output]: ../crates/packetcraftr-cli/src/output/scan.rs
+[trace-hosts]: ../crates/packetcraftr/src/traceroute/hosts.rs
+[trace-output]: ../crates/packetcraftr-cli/src/output/traceroute/hosts.rs
 [udp-document]: ../crates/packetcraftr-core/src/document/udp_profiles.rs
 
 ### Successful native submission intervals

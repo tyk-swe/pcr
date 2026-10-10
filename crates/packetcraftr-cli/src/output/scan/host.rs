@@ -54,20 +54,25 @@ published_enum! {
     }
 }
 
+/// The published name of a correlated scan reply.
+pub(crate) const fn reply_name(reply: Reply) -> &'static str {
+    match reply {
+        Reply::TcpSynAck => "tcp_syn_ack",
+        Reply::TcpReset => "tcp_reset",
+        Reply::TcpOther => "tcp_other",
+        Reply::UdpPayload => "udp_payload",
+        Reply::IcmpEchoReply => "icmp_echo_reply",
+        Reply::IcmpPortUnreachable => "icmp_port_unreachable",
+        Reply::IcmpAdministrativelyProhibited => "icmp_administratively_prohibited",
+        Reply::IcmpDestinationUnreachable => "icmp_destination_unreachable",
+        Reply::IcmpTimeExceeded => "icmp_time_exceeded",
+    }
+}
+
 const fn reason_kind(kind: discovery::ReasonKind) -> &'static str {
     use discovery::ReasonKind;
     match kind {
-        ReasonKind::Reply(reply) => match reply {
-            Reply::TcpSynAck => "tcp_syn_ack",
-            Reply::TcpReset => "tcp_reset",
-            Reply::TcpOther => "tcp_other",
-            Reply::UdpPayload => "udp_payload",
-            Reply::IcmpEchoReply => "icmp_echo_reply",
-            Reply::IcmpPortUnreachable => "icmp_port_unreachable",
-            Reply::IcmpAdministrativelyProhibited => "icmp_administratively_prohibited",
-            Reply::IcmpDestinationUnreachable => "icmp_destination_unreachable",
-            Reply::IcmpTimeExceeded => "icmp_time_exceeded",
-        },
+        ReasonKind::Reply(reply) => reply_name(reply),
         ReasonKind::NeighborReply => "neighbor_reply",
         ReasonKind::NeighborCache => "neighbor_cache",
         ReasonKind::Connected => "tcp_connected",

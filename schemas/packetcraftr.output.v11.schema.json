@@ -13703,7 +13703,28 @@
         "confidence",
         "provenance"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "confidence": {
+                "const": "protocol"
+              }
+            },
+            "required": [
+              "confidence"
+            ]
+          },
+          "then": {
+            "properties": {
+              "version": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
     },
     "identifyIdentification": {
       "type": "object",

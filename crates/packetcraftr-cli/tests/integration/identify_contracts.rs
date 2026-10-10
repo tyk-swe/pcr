@@ -467,6 +467,16 @@ fn dns_udp_on_a_nonstandard_port_matches_protocol_without_a_version() {
     assert_eq!(record["candidates"][0]["product"], "DNS service");
     assert_eq!(record["candidates"][0]["confidence"], "protocol");
     assert!(record["candidates"][0]["version"].is_null());
+    let validator = crate::common::schema_validator();
+    validator.validate(&report).unwrap();
+    for path in [
+        "/result/records/0/candidates/0/version",
+        "/result/records/0/probes/0/identification/candidates/0/version",
+    ] {
+        let mut unsupported_version = report.clone();
+        *unsupported_version.pointer_mut(path).unwrap() = serde_json::json!("1.2");
+        assert!(validator.validate(&unsupported_version).is_err(), "{path}");
+    }
 }
 
 #[test]

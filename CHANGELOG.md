@@ -34,12 +34,14 @@ All notable changes to PacketcraftR are documented here. The format follows
   limits. Overlapping entries preserve their separate reasons and provenance.
   Output/v11 requires every identification candidate to reference at least one
   observed field and validates outcome/candidate uncertainty, including erased
-  versions in ambiguous endpoint and probe results.
+  versions in ambiguous endpoint and probe results. Protocol-only candidates
+  cannot assert product versions.
 - Bounded TCP exchanges flush nonempty requests under the write deadline before
   reading replies, including injected buffered streams. SSH identification stops
   after its complete banner even when subsequent binary data shares the read.
   A valid banner may follow all sixteen permitted pre-identification lines.
-  Newline-terminated malformed SSH lines also stop collection immediately;
+  Newline-terminated malformed SSH lines and definitively invalid HTTP heads
+  also stop collection immediately;
   HTTP and SSH parser resource limits remain truncated evidence rather than
   malformed wire syntax.
 - Identification and connected UDP peer checks ignore irrelevant IPv6 scope IDs

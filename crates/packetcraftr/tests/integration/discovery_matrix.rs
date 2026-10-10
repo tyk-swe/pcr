@@ -245,9 +245,10 @@ fn request(target: IpAddr, probe: ProbeEndpoint, then: Then) -> Request {
         address_family: Family::Any,
         attempts: 1,
         adaptive: None,
-        // This matrix checks host states, not preparation latency under
-        // parallel test load. Preserve real send and capture timestamps.
-        timeout: Duration::from_millis(200),
+        // The matrix asserts discovery state and protocol behavior, not
+        // scheduler latency: a wide window keeps loaded CI honest while the
+        // 3-second operation bound still caps the worst case.
+        timeout: Duration::from_millis(500),
         probes_per_second: None,
         limits: scan::Limits {
             max_duration: Duration::from_secs(3),

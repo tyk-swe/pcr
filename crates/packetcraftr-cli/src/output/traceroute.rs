@@ -6,6 +6,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+pub mod hosts;
+
 use super::contract::Error;
 use super::envelope::Published;
 use super::frame::{Captured, Timestamp};

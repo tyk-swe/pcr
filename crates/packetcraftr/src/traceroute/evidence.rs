@@ -74,6 +74,39 @@ fn packet_destination(packet: &Packet, strategy: Transport) -> Option<IpAddr> {
     Some(path.final_destination)
 }
 
+pub(super) fn probe_evidence(
+    probe: &Probe,
+    sent: &SentPacket,
+    outcome: Outcome<CorrelatedResponse>,
+) -> ProbeEvidence {
+    let mut evidence = ProbeEvidence {
+        sequence: probe.sequence,
+        hop_limit: probe.hop_limit,
+        attempt: probe.attempt,
+        destination: probe.address,
+        strategy: probe.target.transport(),
+        destination_port: probe.target.port(),
+        status: ProbeStatus::Timeout,
+        response_kind: None,
+        responder: None,
+        sent_at: sent.timing().freshness_marker().wall_clock(),
+        received_at: None,
+        latency: None,
+        response: None,
+        reason: NO_RESPONSE_REASON.to_owned(),
+    };
+    if let Outcome::Reply(reply) = outcome {
+        evidence.status = ProbeStatus::Response;
+        evidence.response_kind = Some(reply.observation.kind);
+        evidence.responder = Some(reply.observation.responder);
+        evidence.received_at = reply.received_at;
+        evidence.latency = Some(reply.latency);
+        evidence.response = reply.frame;
+        evidence.reason = reply.observation.reason.to_owned();
+    }
+    evidence
+}
+
 pub(super) struct ProbeClassifier<'a> {
     pub(super) registry: &'a Registry,
     pub(super) target: Arc<str>,
@@ -82,15 +115,25 @@ pub(super) struct ProbeClassifier<'a> {
 
 impl ProbeClassifier<'_> {
     fn observe(&mut self, probe: &ProbeEvidence) {
-        self.termination = match (self.termination, probe.response_kind, probe.status) {
-            (_, Some(ResponseKind::DestinationReached), _)
-            | (Termination::DestinationReached, _, _) => Termination::DestinationReached,
-            (_, Some(ResponseKind::Unreachable), _) | (Termination::Unreachable, _, _) => {
-                Termination::Unreachable
-            }
-            (_, _, ProbeStatus::Response) => Termination::MaximumHops,
-            (termination, _, _) => termination,
-        };
+        self.termination = fold_termination(self.termination, probe.response_kind, probe.status);
+    }
+}
+
+/// Folds one probe outcome into a trace's termination: a destination reply
+/// outranks an unreachable, which outranks any other response.
+pub(super) fn fold_termination(
+    termination: Termination,
+    kind: Option<ResponseKind>,
+    status: ProbeStatus,
+) -> Termination {
+    match (termination, kind, status) {
+        (_, Some(ResponseKind::DestinationReached), _)
+        | (Termination::DestinationReached, _, _) => Termination::DestinationReached,
+        (_, Some(ResponseKind::Unreachable), _) | (Termination::Unreachable, _, _) => {
+            Termination::Unreachable
+        }
+        (_, _, ProbeStatus::Response) => Termination::MaximumHops,
+        (termination, _, _) => termination,
     }
 }
 
@@ -131,31 +174,7 @@ impl Classifier for ProbeClassifier<'_> {
         sent: &SentPacket,
         outcome: Outcome<CorrelatedResponse>,
     ) -> Event {
-        let mut evidence = ProbeEvidence {
-            sequence: probe.sequence,
-            hop_limit: probe.hop_limit,
-            attempt: probe.attempt,
-            destination: probe.address,
-            strategy: probe.target.transport(),
-            destination_port: probe.target.port(),
-            status: ProbeStatus::Timeout,
-            response_kind: None,
-            responder: None,
-            sent_at: sent.timing().freshness_marker().wall_clock(),
-            received_at: None,
-            latency: None,
-            response: None,
-            reason: NO_RESPONSE_REASON.to_owned(),
-        };
-        if let Outcome::Reply(reply) = outcome {
-            evidence.status = ProbeStatus::Response;
-            evidence.response_kind = Some(reply.observation.kind);
-            evidence.responder = Some(reply.observation.responder);
-            evidence.received_at = reply.received_at;
-            evidence.latency = Some(reply.latency);
-            evidence.response = reply.frame;
-            evidence.reason = reply.observation.reason.to_owned();
-        }
+        let evidence = probe_evidence(probe, sent, outcome);
         self.observe(&evidence);
         Event::Probe {
             target: Arc::clone(&self.target),

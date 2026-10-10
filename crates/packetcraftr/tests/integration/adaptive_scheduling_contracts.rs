@@ -278,8 +278,19 @@ fn a_paced_send_inside_a_truncated_window_still_completes_on_reply() {
     let io = real_io();
     let client = client(&io, |_, _| Reply::SynAck, &clock);
     let mut request = request(vec![host("192.0.2.2")], &[80, 81], 1);
-    request.probes_per_second = Some(100);
-    request.adaptive.as_mut().unwrap().min_window = 2;
+    // Real-clock CI margins: a 30 ms host deadline expired under load before
+    // the paced send. The window is still host-truncated (response timeout
+    // 4s > host timeout 3s), but the immediate reply now has seconds, not
+    // milliseconds, of margin.
+    request.timeout = Duration::from_secs(4);
+    request.probes_per_second = Some(1);
+    {
+        let adaptive = request.adaptive.as_mut().unwrap();
+        adaptive.min_timeout = Duration::from_secs(4);
+        adaptive.max_timeout = Duration::from_secs(4);
+        adaptive.host_timeout = Duration::from_secs(3);
+        adaptive.min_window = 2;
+    }
     let aggregate = run(&client, request).expect("both endpoints answer in time");
     assert!(
         aggregate.scheduling.incomplete.is_empty(),
@@ -287,6 +298,20 @@ fn a_paced_send_inside_a_truncated_window_still_completes_on_reply() {
         aggregate.scheduling
     );
     assert_eq!(aggregate.hosts[0].scan, scan::discovery::Scan::Scanned);
+    assert_eq!(
+        aggregate.stats.packets_attempted, 2,
+        "{:?}",
+        aggregate.stats
+    );
+    assert!(
+        aggregate
+            .endpoints
+            .iter()
+            .flat_map(|endpoint| &endpoint.probes)
+            .all(|probe| probe.status == packetcraftr::probe::ProbeStatus::Response),
+        "{:?}",
+        aggregate.endpoints
+    );
 }
 
 #[test]

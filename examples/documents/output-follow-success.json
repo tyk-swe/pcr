@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v10",
+  "schema": "packetcraftr.output/v12",
   "command": "follow",
   "mode": "aggregate",
   "status": "success",

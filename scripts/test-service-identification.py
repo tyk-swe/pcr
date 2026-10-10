@@ -25,7 +25,7 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = "packetcraftr.output/v11"
+SCHEMA = "packetcraftr.output/v12"
 PROFILES = {
     "portable": ["--no-default-features"],
     "default": [],

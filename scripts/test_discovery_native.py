@@ -54,6 +54,13 @@ class DiscoveryEvidenceContracts(unittest.TestCase):
                               error=dict(kind='capability', code='capability.unsupported'))))])
         for name in ('portable', 'default', 'pcap-free', 'layer2', 'full-native'):
             self.assertEqual(expected_capability_refusal(dict(name=name), case), name in ('portable', 'default', 'pcap-free'))
+        for schema in ('packetcraftr.output/v10', 'packetcraftr.output/v11', 'packetcraftr.output/v12'):
+            changed = copy.deepcopy(case)
+            output = json.loads(changed['runs'][0]['stdout'])
+            output['schema'] = schema
+            changed['runs'][0]['stdout'] = json.dumps(output)
+            with self.subTest(schema=schema):
+                self.assertTrue(expected_capability_refusal(dict(name='default'), changed))
         for code in (None, 0, True):
             changed = copy.deepcopy(case)
             changed['runs'][0]['exit_code'] = code
@@ -85,12 +92,24 @@ class DiscoveryEvidenceContracts(unittest.TestCase):
                 observation=dict(discovery='responded', scan=scan, reasons=['tcp_connected'],
                                  hosts=1, endpoints=0 if mode == 'only' else 1)))
         validate(report)
-        for mutation in ('target', 'command', 'evidence', 'modes', 'exit'):
+        for schema in ('packetcraftr.output/v10', 'packetcraftr.output/v11', 'packetcraftr.output/v12'):
+            changed = copy.deepcopy(report)
+            observed = next(row for row in changed['profiles'][0]['scenarios']
+                            if row['name'] == 'connect-responsive' and row['family'] == 'ipv4')
+            for run in observed['runs']:
+                output = json.loads(run['stdout'])
+                output['schema'] = schema
+                run['stdout'] = json.dumps(output)
+            with self.subTest(schema=schema):
+                validate(changed)
+        for mutation in ('schema', 'target', 'command', 'evidence', 'modes', 'exit'):
             changed = copy.deepcopy(report)
             observed = next(row for row in changed['profiles'][0]['scenarios']
                             if row['name'] == 'connect-responsive' and row['family'] == 'ipv4')
             output = json.loads(observed['runs'][0]['stdout'])
-            if mutation == 'target':
+            if mutation == 'schema':
+                output['schema'] = 'unsupported-output-family'
+            elif mutation == 'target':
                 output['result']['hosts'][0]['address'] = '203.0.113.9'
             elif mutation == 'command':
                 observed['runs'][0]['command'][4] = '203.0.113.9'

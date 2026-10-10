@@ -265,6 +265,7 @@ jobs:
               "examples/consumers/forwarding.py",
               "examples/consumers/fixtures/v6-forwarding.json",
               "examples/consumers/fixtures/v11-forwarding.json",
+              "examples/consumers/fixtures/v12-forwarding.json",
           )
           for source in map(pathlib.Path, assets):
               destination = staging / source

@@ -230,7 +230,7 @@ fn http_claims_and_matched_candidates_are_separate_with_exact_evidence() {
         path_text(&corpus),
     ]));
     assert_eq!(server.join().unwrap(), b"HEAD / HTTP/1.0\r\n\r\n");
-    assert_eq!(report["schema"], "packetcraftr.output/v11");
+    assert_eq!(report["schema"], "packetcraftr.output/v12");
     assert_eq!(report["command"], "identify");
     let record = &report["result"]["records"][0];
     assert_eq!(record["endpoint"]["address"], address);

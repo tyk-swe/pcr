@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::IpAddr;
 
 use packetcraftr_core::budget::Deadline;
@@ -121,6 +121,94 @@ where
     let operation = operation(&plan)?;
     approve_operation(authorizer, operation, deadline, gates)?;
     Ok((selected, plan))
+}
+
+/// Admits the operation from an exact target list the caller already
+/// resolved: every entry is re-authorized on its own through
+/// [`resolve_selected`], while the original declaration still validates and
+/// gates exclusions, family, and `max_targets` for the reported selection.
+/// No hostname reaches this path; the workflow validates the list first.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn admit_resolved_selection<A, G, P, Plan, Build>(
+    authorizer: &mut A,
+    deadline: &Deadline,
+    gates: &G,
+    targets: DeclaredTargets<'_, G::Error>,
+    resolved: &[Target],
+    invalid: impl Fn(SelectionError) -> G::Error,
+    plan: Plan,
+    operation: Build,
+) -> Result<(SelectedTargets, P), G::Error>
+where
+    A: Authorizer + ResolveTarget,
+    G: Errors,
+    Plan: FnOnce(&SelectedTargets) -> Result<P, G::Error>,
+    Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, G::Error>,
+{
+    let DeclaredTargets {
+        selection,
+        family,
+        max_targets,
+    } = targets;
+    selection.validate().map_err(&invalid)?;
+    if resolved.len() > MAX_CANDIDATES {
+        return Err(invalid(SelectionError::Limit {
+            field: "target_candidates",
+            limit: MAX_CANDIDATES,
+        }));
+    }
+    let family_kind = family.family();
+    let enforce = || {
+        deadline
+            .enforce()
+            .map_err(|source| gates.interrupted(G::Step::default(), source))
+    };
+    let mut selected = Vec::new();
+    let mut seen = HashSet::<(IpAddr, Option<InterfaceId>)>::new();
+    for target in resolved {
+        enforce()?;
+        let address = match target {
+            Target::Address(address) => *address,
+            Target::ScopedAddress(scoped) => IpAddr::V6(scoped.address()),
+            Target::Hostname(_) => {
+                return Err(invalid(SelectionError::Network {
+                    value: target.to_string(),
+                }));
+            }
+        };
+        if selection.excludes(address) || !family_kind.accepts(address) {
+            continue;
+        }
+        let authorized = resolve_selected(authorizer, target, family_kind, deadline, gates)?;
+        for record in authorized.targets {
+            enforce()?;
+            if selection.excludes(record.address) {
+                continue;
+            }
+            let key = (
+                record.address,
+                record.scope.as_ref().map(|scope| scope.interface.clone()),
+            );
+            if seen.insert(key) {
+                if selected.len() >= max_targets {
+                    return Err(invalid(SelectionError::Limit {
+                        field: "max_targets",
+                        limit: max_targets,
+                    }));
+                }
+                selected.push(record);
+            }
+        }
+    }
+    let selected = SelectedTargets {
+        declared: selection.to_string(),
+        targets: selected,
+        declarations: Vec::new(),
+        duplicates: Vec::new(),
+    };
+    admit_selected(
+        authorizer, deadline, gates, family, selected, plan, operation,
+    )
 }
 
 pub(crate) fn resolve_selection<A, G>(

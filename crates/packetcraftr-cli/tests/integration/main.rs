@@ -58,4 +58,5 @@ mod scanner_corpus_conformance;
 mod stdout_failure_contracts;
 mod target_planning_contracts;
 mod tls_workflow_contracts;
+mod traceroute_stage_contracts;
 mod udp_profile_contracts;

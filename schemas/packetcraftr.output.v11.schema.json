@@ -65,8 +65,7 @@
             "export",
             "rewrite",
             "verify-forwarding",
-            "http2",
-            "identify"
+            "http2"
           ]
         },
         "mode": {
@@ -245,9 +244,6 @@
             },
             {
               "$ref": "#/$defs/http2Success"
-            },
-            {
-              "$ref": "#/$defs/identifySuccess"
             }
           ]
         }
@@ -353,9 +349,6 @@
             },
             {
               "$ref": "#/$defs/http2StreamSuccess"
-            },
-            {
-              "$ref": "#/$defs/identifyStreamSuccess"
             }
           ]
         }
@@ -3125,6 +3118,23 @@
                 },
                 "scheduling": {
                   "$ref": "#/$defs/scanScheduling"
+                },
+                "traceroute": {
+                  "type": "object",
+                  "required": [
+                    "plan",
+                    "retained_evidence_bytes"
+                  ],
+                  "properties": {
+                    "plan": {
+                      "$ref": "#/$defs/scanTraceroutePlan"
+                    },
+                    "retained_evidence_bytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "additionalProperties": false
@@ -3269,6 +3279,65 @@
                 {
                   "properties": {
                     "probes": {
+                      "items": {
+                        "$ref": "#/$defs/uint64"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "traceroute_probe"
+            },
+            "result": {
+              "$ref": "#/$defs/traceProbe"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "traceroute_undecoded"
+            },
+            "result": {
+              "$ref": "#/$defs/scanTraceUndecoded"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "traceroute_host"
+            },
+            "result": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/scanTraceHostRecord"
+                },
+                {
+                  "required": [
+                    "probes"
+                  ],
+                  "properties": {
+                    "probes": {
+                      "type": "array",
                       "items": {
                         "$ref": "#/$defs/uint64"
                       }
@@ -4563,6 +4632,9 @@
         },
         "scheduling": {
           "$ref": "#/$defs/scanScheduling"
+        },
+        "traceroute": {
+          "$ref": "#/$defs/scanTraceroute"
         }
       },
       "additionalProperties": true
@@ -13419,6 +13491,74 @@
       },
       "additionalProperties": true
     },
+    "scanTraceroutePlan": {
+      "type": "object",
+      "description": "The bounds the trace stage ran under.",
+      "required": [
+        "first_hop",
+        "max_hops",
+        "attempts",
+        "max_probes"
+      ],
+      "properties": {
+        "first_hop": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "max_hops": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "max_probes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "strategy": {
+          "type": "object",
+          "description": "The probe for hosts no scan observation covered; absent when those hosts were not traced.",
+          "required": [
+            "strategy"
+          ],
+          "properties": {
+            "strategy": {
+              "type": "string",
+              "enum": [
+                "udp",
+                "icmp",
+                "tcp"
+              ]
+            },
+            "destination_port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          },
+          "additionalProperties": false
+        },
+        "reuse": {
+          "type": "object",
+          "description": "Present when path reuse was enabled for this operation.",
+          "required": [
+            "max_age"
+          ],
+          "properties": {
+            "max_age": {
+              "$ref": "#/$defs/duration"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
     "scanHostId": {
       "type": "object",
       "description": "A scoped host the scheduler names in conditions or as incomplete.",
@@ -13488,6 +13628,132 @@
       },
       "additionalProperties": true
     },
+    "scanTraceSelection": {
+      "type": "object",
+      "description": "The probe a host was traced with and what it rests on.",
+      "required": [
+        "strategy",
+        "basis"
+      ],
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "udp",
+            "icmp",
+            "tcp"
+          ]
+        },
+        "destination_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "basis": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "requested"
+          ]
+        },
+        "observation": {
+          "type": "object",
+          "description": "The scan probe the selection rests on.",
+          "required": [
+            "stage",
+            "sequence",
+            "reply"
+          ],
+          "properties": {
+            "stage": {
+              "$ref": "#/$defs/scanStage"
+            },
+            "sequence": {
+              "$ref": "#/$defs/uint64"
+            },
+            "reply": {
+              "type": "string",
+              "enum": [
+                "tcp_syn_ack",
+                "tcp_reset",
+                "icmp_echo_reply"
+              ]
+            },
+            "observed_at": {
+              "$ref": "#/$defs/timestamp"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "basis": {
+                "const": "observed"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "observation"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "observation"
+              ]
+            }
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "scanTraceReusedHop": {
+      "type": "object",
+      "description": "A hop another host's trace observed in this operation, claimed for this host. It is a sourced claim, not an observation for this host.",
+      "required": [
+        "hop_limit",
+        "source",
+        "probes",
+        "responders",
+        "age"
+      ],
+      "properties": {
+        "hop_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "source": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "probes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/uint64"
+          },
+          "description": "The source trace's probe sequences that observed the hop."
+        },
+        "responders": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ipAddress"
+          }
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "age": {
+          "$ref": "#/$defs/duration"
+        }
+      },
+      "additionalProperties": true
+    },
     "scanScheduling": {
       "type": "object",
       "description": "How one operation scheduled its probes. mode is fixed or adaptive; observed_peak_window is the largest count of probes pending at once the operation actually held, not a throughput rate; ceilings are resource bounds, not achieved concurrency.",
@@ -13538,691 +13804,209 @@
       },
       "additionalProperties": true
     },
-    "identifyEndpoint": {
+    "scanTraceHostRecord": {
       "type": "object",
-      "properties": {
-        "address": {
-          "type": "string"
-        },
-        "transport": {
-          "type": "string",
-          "enum": [
-            "tcp",
-            "udp"
-          ]
-        }
-      },
+      "description": "One scanned host's trace. not_traced hosts carry a reason and no probes; reused hops are separate from the freshly probed ones.",
       "required": [
         "address",
-        "transport"
+        "status",
+        "reused_hops"
       ],
-      "additionalProperties": false
-    },
-    "identifyClaim": {
-      "type": "object",
       "properties": {
-        "field": {
+        "address": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "status": {
           "type": "string",
           "enum": [
-            "ssh_banner",
-            "ssh_software",
-            "http_status",
-            "http_server",
-            "dns_rcode",
-            "dns_txt"
+            "complete",
+            "incomplete",
+            "not_traced"
           ]
         },
-        "value_hex": {
-          "$ref": "#/$defs/hexBytes"
+        "reason": {
+          "type": "string",
+          "enum": [
+            "no_responsive_probe",
+            "scoped_target"
+          ]
         },
-        "unauthenticated": {
-          "const": true
+        "completion": {
+          "type": "string",
+          "enum": [
+            "destination_reached",
+            "unreachable",
+            "maximum_hops",
+            "timeout"
+          ]
+        },
+        "selection": {
+          "$ref": "#/$defs/scanTraceSelection"
+        },
+        "reused_hops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanTraceReusedHop"
+          }
         }
       },
-      "required": [
-        "field",
-        "value_hex",
-        "unauthenticated"
-      ],
-      "additionalProperties": false
-    },
-    "identifyObservation": {
-      "type": "object",
-      "properties": {
-        "protocol": {
-          "anyOf": [
-            {
-              "type": "string",
-              "enum": [
-                "ssh",
-                "http",
-                "dns"
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_traced"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reason"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "completion"
+                  ]
+                },
+                {
+                  "required": [
+                    "selection"
+                  ]
+                }
               ]
-            },
-            {
-              "type": "null"
             }
-          ]
-        },
-        "outcome": {
-          "type": "string",
-          "enum": [
-            "complete",
-            "unknown",
-            "malformed",
-            "truncated"
-          ]
-        },
-        "claims": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/identifyClaim"
+          },
+          "else": {
+            "required": [
+              "completion",
+              "selection"
+            ],
+            "not": {
+              "required": [
+                "reason"
+              ]
+            }
           }
         },
-        "diagnostic": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "protocol",
-        "outcome",
-        "claims",
-        "diagnostic"
-      ],
-      "additionalProperties": false
-    },
-    "identifyProvenance": {
-      "type": "object",
-      "properties": {
-        "corpus": {
-          "type": "string"
-        },
-        "version": {
-          "type": "string"
-        },
-        "probe": {
-          "type": "string"
-        },
-        "rule": {
-          "type": "string"
-        },
-        "field_indices": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "$ref": "#/$defs/uint64"
-          }
-        }
-      },
-      "required": [
-        "corpus",
-        "version",
-        "probe",
-        "rule",
-        "field_indices"
-      ],
-      "additionalProperties": false
-    },
-    "identifyCandidate": {
-      "type": "object",
-      "properties": {
-        "product": {
-          "type": "string"
-        },
-        "version": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "confidence": {
-          "type": "string",
-          "enum": [
-            "claim",
-            "protocol"
-          ]
-        },
-        "provenance": {
-          "$ref": "#/$defs/identifyProvenance"
-        }
-      },
-      "required": [
-        "product",
-        "version",
-        "confidence",
-        "provenance"
-      ],
-      "additionalProperties": false,
-      "allOf": [
         {
           "if": {
             "properties": {
-              "confidence": {
-                "const": "protocol"
+              "status": {
+                "const": "complete"
               }
-            },
-            "required": [
-              "confidence"
-            ]
+            }
           },
           "then": {
             "properties": {
-              "version": {
-                "type": "null"
-              }
-            }
-          }
-        }
-      ]
-    },
-    "identifyIdentification": {
-      "type": "object",
-      "properties": {
-        "outcome": {
-          "type": "string",
-          "enum": [
-            "unknown",
-            "matched",
-            "ambiguous",
-            "malformed",
-            "truncated"
-          ]
-        },
-        "candidates": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/identifyCandidate"
-          }
-        }
-      },
-      "required": [
-        "outcome",
-        "candidates"
-      ],
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "$ref": "#/$defs/identifyOutcomeInvariants"
-        }
-      ]
-    },
-    "identifyEvidence": {
-      "type": "object",
-      "properties": {
-        "probe": {
-          "type": "string"
-        },
-        "attempt": {
-          "$ref": "#/$defs/uint64"
-        },
-        "request_hex": {
-          "$ref": "#/$defs/hexBytes"
-        },
-        "response_hex": {
-          "$ref": "#/$defs/hexBytes"
-        },
-        "bytes_written": {
-          "$ref": "#/$defs/uint64"
-        },
-        "io_outcome": {
-          "type": "string",
-          "enum": [
-            "complete",
-            "eof",
-            "truncated",
-            "timed_out",
-            "cancelled",
-            "failed"
-          ]
-        },
-        "observation": {
-          "$ref": "#/$defs/identifyObservation"
-        },
-        "identification": {
-          "$ref": "#/$defs/identifyIdentification"
-        },
-        "local_address": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "peer_address": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "elapsed": {
-          "$ref": "#/$defs/duration"
-        },
-        "diagnostic": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "started_at": {
-          "$ref": "#/$defs/timestamp"
-        },
-        "completed_at": {
-          "$ref": "#/$defs/timestamp"
-        }
-      },
-      "required": [
-        "probe",
-        "attempt",
-        "request_hex",
-        "response_hex",
-        "bytes_written",
-        "io_outcome",
-        "observation",
-        "identification",
-        "local_address",
-        "peer_address",
-        "elapsed",
-        "diagnostic",
-        "started_at",
-        "completed_at"
-      ],
-      "additionalProperties": false
-    },
-    "identifyRecord": {
-      "type": "object",
-      "properties": {
-        "endpoint": {
-          "$ref": "#/$defs/identifyEndpoint"
-        },
-        "outcome": {
-          "type": "string",
-          "enum": [
-            "excluded",
-            "unknown",
-            "matched",
-            "ambiguous",
-            "malformed",
-            "truncated",
-            "budget_exhausted"
-          ]
-        },
-        "probes": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/identifyEvidence"
-          }
-        },
-        "candidates": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/identifyCandidate"
-          }
-        }
-      },
-      "required": [
-        "endpoint",
-        "outcome",
-        "probes",
-        "candidates"
-      ],
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "$ref": "#/$defs/identifyOutcomeInvariants"
-        },
-        {
-          "if": {
-            "properties": {
-              "outcome": {
+              "completion": {
                 "enum": [
-                  "ambiguous"
+                  "destination_reached",
+                  "unreachable"
                 ]
               }
-            },
-            "required": [
-              "outcome"
-            ]
-          },
-          "then": {
-            "properties": {
-              "candidates": {
-                "minItems": 2
-              },
-              "probes": {
-                "items": {
-                  "properties": {
-                    "identification": {
-                      "properties": {
-                        "candidates": {
-                          "items": {
-                            "properties": {
-                              "version": {
-                                "type": "null"
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
             }
           }
         },
         {
           "if": {
             "properties": {
-              "outcome": {
-                "enum": [
-                  "unknown",
-                  "malformed",
-                  "truncated"
-                ]
-              }
-            },
-            "required": [
-              "outcome"
-            ]
-          },
-          "then": {
-            "properties": {
-              "probes": {
-                "items": {
-                  "properties": {
-                    "identification": {
-                      "properties": {
-                        "candidates": {
-                          "maxItems": 0
-                        }
-                      }
-                    }
-                  }
-                }
+              "status": {
+                "const": "incomplete"
               }
             }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "outcome": {
-                "enum": [
-                  "excluded"
-                ]
-              }
-            },
-            "required": [
-              "outcome"
-            ]
           },
           "then": {
             "properties": {
-              "probes": {
-                "maxItems": 0
+              "completion": {
+                "enum": [
+                  "maximum_hops",
+                  "timeout"
+                ]
               }
             }
           }
         }
-      ]
-    },
-    "identifyUsage": {
-      "type": "object",
-      "properties": {
-        "attempts": {
-          "$ref": "#/$defs/uint64"
-        },
-        "write_bytes": {
-          "$ref": "#/$defs/uint64"
-        },
-        "read_bytes": {
-          "$ref": "#/$defs/uint64"
-        }
-      },
-      "required": [
-        "attempts",
-        "write_bytes",
-        "read_bytes"
       ],
-      "additionalProperties": false
+      "additionalProperties": true
     },
-    "identifyReport": {
-      "type": "object",
-      "properties": {
-        "corpus": {
-          "type": "string"
-        },
-        "corpus_version": {
-          "type": "string"
-        },
-        "exclusion_set": {
-          "type": "string"
-        },
-        "exclusion_version": {
-          "type": "string"
-        },
-        "usage": {
-          "$ref": "#/$defs/identifyUsage"
-        },
-        "elapsed": {
-          "$ref": "#/$defs/duration"
-        },
-        "complete": {
-          "type": "boolean"
-        },
-        "cancelled": {
-          "type": "boolean"
-        },
-        "records": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/identifyRecord"
-          }
-        }
-      },
-      "required": [
-        "corpus",
-        "corpus_version",
-        "exclusion_set",
-        "exclusion_version",
-        "usage",
-        "elapsed",
-        "complete",
-        "cancelled",
-        "records"
-      ],
-      "additionalProperties": false
-    },
-    "identifyComplete": {
-      "type": "object",
-      "properties": {
-        "corpus": {
-          "type": "string"
-        },
-        "corpus_version": {
-          "type": "string"
-        },
-        "exclusion_set": {
-          "type": "string"
-        },
-        "exclusion_version": {
-          "type": "string"
-        },
-        "usage": {
-          "$ref": "#/$defs/identifyUsage"
-        },
-        "elapsed": {
-          "$ref": "#/$defs/duration"
-        },
-        "complete": {
-          "type": "boolean"
-        },
-        "cancelled": {
-          "type": "boolean"
-        },
-        "endpoints": {
-          "$ref": "#/$defs/uint64"
-        }
-      },
-      "required": [
-        "corpus",
-        "corpus_version",
-        "exclusion_set",
-        "exclusion_version",
-        "usage",
-        "elapsed",
-        "complete",
-        "cancelled",
-        "endpoints"
-      ],
-      "additionalProperties": false
-    },
-    "identifySuccess": {
-      "properties": {
-        "command": {
-          "const": "identify"
-        },
-        "result": {
-          "$ref": "#/$defs/identifyReport"
-        }
-      },
-      "required": [
-        "command",
-        "result"
-      ]
-    },
-    "identifyStreamSuccess": {
-      "properties": {
-        "command": {
-          "const": "identify"
-        }
-      },
-      "required": [
-        "command",
-        "result",
-        "event"
-      ],
-      "oneOf": [
+    "scanTraceHost": {
+      "allOf": [
         {
+          "$ref": "#/$defs/scanTraceHostRecord"
+        },
+        {
+          "required": [
+            "hops"
+          ],
           "properties": {
-            "event": {
-              "const": "identify_endpoint"
-            },
-            "result": {
-              "$ref": "#/$defs/identifyRecord"
-            }
-          }
-        },
-        {
-          "properties": {
-            "event": {
-              "const": "complete"
-            },
-            "result": {
-              "$ref": "#/$defs/identifyComplete"
+            "hops": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/traceHop"
+              }
             }
           }
         }
       ]
     },
-    "identifyOutcomeInvariants": {
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "outcome": {
-                "enum": [
-                  "unknown",
-                  "malformed",
-                  "truncated",
-                  "excluded"
-                ]
-              }
-            },
-            "required": [
-              "outcome"
-            ]
-          },
-          "then": {
-            "properties": {
-              "candidates": {
-                "maxItems": 0
-              }
-            }
-          }
+    "scanTraceUndecoded": {
+      "type": "object",
+      "required": [
+        "destination",
+        "hop_limit",
+        "frame"
+      ],
+      "properties": {
+        "destination": {
+          "$ref": "#/$defs/ipAddress"
         },
-        {
-          "if": {
-            "properties": {
-              "outcome": {
-                "enum": [
-                  "matched"
-                ]
-              }
-            },
-            "required": [
-              "outcome"
-            ]
-          },
-          "then": {
-            "properties": {
-              "candidates": {
-                "minItems": 1
-              }
-            }
-          }
+        "hop_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
         },
-        {
-          "if": {
-            "properties": {
-              "outcome": {
-                "enum": [
-                  "ambiguous"
-                ]
-              }
-            },
-            "required": [
-              "outcome"
-            ]
-          },
-          "then": {
-            "properties": {
-              "candidates": {
-                "minItems": 1,
-                "items": {
-                  "properties": {
-                    "version": {
-                      "type": "null"
-                    }
-                  }
-                }
-              }
-            }
-          }
+        "frame": {
+          "$ref": "#/$defs/frame"
         }
-      ]
+      },
+      "additionalProperties": true
+    },
+    "scanTraceroute": {
+      "type": "object",
+      "description": "The trace stage requested by --traceroute: one record per scanned host, in host order.",
+      "required": [
+        "plan",
+        "hosts",
+        "undecoded",
+        "retained_evidence_bytes"
+      ],
+      "properties": {
+        "plan": {
+          "$ref": "#/$defs/scanTraceroutePlan"
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanTraceHost"
+          }
+        },
+        "undecoded": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanTraceUndecoded"
+          }
+        },
+        "retained_evidence_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
     }
   }
 }

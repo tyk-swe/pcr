@@ -51,9 +51,6 @@ fn schema_accepts_based_source_reject_zero() {
         "../../../../examples/documents/output-read-dissect-event.json"
     ))
     .expect("published read example must be JSON");
-    common::frozen_v10_schema_validator()
-        .validate(&original)
-        .unwrap();
     for (validator, family) in [
         (
             common::frozen_v10_schema_validator(),
@@ -61,7 +58,7 @@ fn schema_accepts_based_source_reject_zero() {
         ),
         (
             schema_validator(),
-            packetcraftr_cli::output::contract::SCHEMA_V11,
+            packetcraftr_cli::output::contract::SCHEMA_V12,
         ),
     ] {
         let mut document = original.clone();
@@ -352,6 +349,10 @@ fn every_published_declared_schema() {
         "../../../../schemas/packetcraftr.output.v10.schema.json"
     ));
 
+    let v11_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.output.v11.schema.json"
+    ));
+
     let directory = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/documents");
     let mut paths: Vec<_> = std::fs::read_dir(directory)
         .expect("published examples directory")
@@ -378,7 +379,8 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v11" => output_validator,
+            "packetcraftr.output/v12" => output_validator,
+            "packetcraftr.output/v11" => &v11_validator,
             "packetcraftr.output/v10" => &v10_validator,
             "packetcraftr.output/v9" => &v9_validator,
             "packetcraftr.output/v8" => &v8_validator,
@@ -405,4 +407,19 @@ fn every_published_declared_schema() {
         validated > 100,
         "expected every published example to be validated, saw {validated}"
     );
+}
+
+#[test]
+fn frozen_v10_schema_validates_its_published_fixture() {
+    let v10_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.output.v10.schema.json"
+    ));
+    let document: Value = serde_json::from_str(include_str!(
+        "../../../../examples/consumers/fixtures/v10-forwarding.json"
+    ))
+    .expect("frozen v10 fixture must be JSON");
+    assert_eq!(document["schema"], "packetcraftr.output/v10");
+    v10_validator
+        .validate(&document)
+        .expect("the frozen v10 fixture must match the frozen v10 schema");
 }

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v10",
+  "schema": "packetcraftr.output/v12",
   "command": "fragment",
   "mode": "aggregate",
   "status": "success",

@@ -14,7 +14,7 @@ use packetcraftr::scan::discovery::{
     Basis, Evidence, Mode, NeighborOutcome, Options, ReasonKind, Scan, State, Unresponsive,
 };
 use packetcraftr::scan::{self, Reply, Request, Stage, connect};
-use packetcraftr::target::{Family, Specification, Target};
+use packetcraftr::target::{Family, Selection, Specification, Target};
 use packetcraftr::{ProviderSet, route};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::{
@@ -713,6 +713,50 @@ fn a_probe_through_a_denied_gateway_sends_no_neighbor_request() {
 }
 
 #[test]
+fn a_trace_through_a_denied_gateway_sends_no_neighbor_request() {
+    let steps = Steps::default();
+    let io = RecordingTransmit::new(steps.clone());
+    // The plain client already authorizes a trace's neighbor requests like
+    // its probes'.
+    let client = |allowed: &[&str]| {
+        Client::new(
+            builtin::registry(),
+            Policy {
+                allowed_destinations: allowed
+                    .iter()
+                    .map(|text| DestinationConstraint::Exact(address(text)))
+                    .collect(),
+                ..Policy::default()
+            },
+            common::providers(GatewayRoutes, io.clone()),
+        )
+    };
+    let mut plan = trace_request(&[FIRST], 8, 10_000);
+    let collector = packetcraftr::traceroute::hosts::Collector::default();
+    let error = client(&[FIRST])
+        .trace_hosts(plan.clone(), collector)
+        .expect_err("the policy denies the gateway the trace resolves");
+    assert_eq!(
+        error.classification().code,
+        "policy.destination_not_allowed",
+        "{error:?}"
+    );
+    assert!(steps.take().is_empty(), "no neighbor request or probe");
+    assert_eq!(io.armed(), 0, "no capture was armed");
+
+    let collector = packetcraftr::traceroute::hosts::Collector::default();
+    plan.observed.clear();
+    client(&[FIRST, GATEWAY])
+        .trace_hosts(plan, collector)
+        .expect("an authorized gateway is resolved");
+    let steps = steps.take();
+    assert!(
+        matches!(steps.first(), Some(Step::Neighbor(gateway)) if *gateway == address(GATEWAY)),
+        "{steps:?}"
+    );
+}
+
+#[test]
 fn a_stage_resolves_its_gateway_before_any_capture_and_counts_the_request() {
     let steps = Steps::default();
     let io = RecordingTransmit::new(steps.clone());
@@ -1184,4 +1228,153 @@ fn a_silent_next_hop_leaves_its_host_unresponsive_and_unscanned() {
             assert_eq!(host.scan, scan, "{mode:?}");
         }
     }
+}
+
+/// A two-hop link-layer trace request, built like the stage builds it.
+fn trace_request(
+    addresses: &[&str],
+    max_hops: u8,
+    max_probes: usize,
+) -> packetcraftr::traceroute::hosts::Request {
+    packetcraftr::traceroute::hosts::Request {
+        targets: Selection {
+            include: addresses
+                .iter()
+                .map(|text| Specification::Target(Target::Address(address(text))))
+                .collect(),
+            exclude: Vec::new(),
+        },
+        max_targets: 16,
+        first_sequence: 0,
+        resolved_targets: None,
+        address_family: Family::Any,
+        strategy: Some(packetcraftr::traceroute::hosts::Strategy {
+            transport: packetcraftr::probe::Transport::Tcp,
+            destination_port: Some(80),
+        }),
+        observed: Vec::new(),
+        source_port: None,
+        payload_size: 0,
+        dont_fragment: false,
+        dscp: 0,
+        first_hop: 1,
+        max_hops,
+        probes_per_hop: 1,
+        timeout: Duration::from_millis(50),
+        probes_per_second: None,
+        paced_after: None,
+        reuse: None,
+        limits: packetcraftr::traceroute::Limits {
+            max_duration: Duration::from_secs(10),
+            max_probes,
+            ..Default::default()
+        },
+        route: route::Options {
+            link_mode: LinkMode::Layer2,
+            ..route::Options::default()
+        },
+        collection: packetcraftr::exchange::Collection::default(),
+    }
+}
+
+#[test]
+fn a_trace_admits_its_reserved_neighbor_requests_against_every_bound() {
+    let steps = Steps::default();
+    let io = RecordingTransmit::new(steps.clone());
+    let client = |packet_cap: u64, byte_cap: u64| {
+        Client::new(
+            builtin::registry(),
+            Policy {
+                allowed_destinations: [FIRST, GATEWAY]
+                    .iter()
+                    .map(|text| DestinationConstraint::Exact(address(text)))
+                    .collect(),
+                max_packets_per_operation: packet_cap,
+                max_bytes_per_operation: byte_cap,
+                ..Policy::default()
+            },
+            common::providers(GatewayRoutes, io.clone()),
+        )
+    };
+    let collector = || packetcraftr::traceroute::hosts::Collector::default();
+    // Two trace probes plus one possible neighbor request each: four
+    // transmissions worst case. A limit under the combined plan refuses
+    // before any capture or send.
+    for max_probes in [2, 3] {
+        let error = client(64, u64::MAX)
+            .trace_hosts(trace_request(&[FIRST], 2, max_probes), collector())
+            .expect_err("the probe limit covers neighbor requests too");
+        assert_eq!(
+            error.classification().code,
+            "cli.traceroute_limit",
+            "{error:?}"
+        );
+        assert!(steps.take().is_empty());
+        assert_eq!(io.armed(), 0);
+    }
+    // A policy packet cap below the admitted transmissions refuses as well.
+    let error = client(3, u64::MAX)
+        .trace_hosts(trace_request(&[FIRST], 2, 4), collector())
+        .expect_err("the operation cap covers neighbor requests too");
+    assert!(
+        error.classification().code.starts_with("policy."),
+        "{error:?}"
+    );
+    assert!(steps.take().is_empty());
+    assert_eq!(io.armed(), 0);
+
+    // The byte bound counts them too: two TCP probes of 74 worst-case wire
+    // bytes and two possible IPv4 ARP/NDP requests.
+    let worst_wire = 2 * (74 + 60 + 4 * packetcraftr::neighbor::MAX_VLAN_TAGS as u64);
+    let error = client(64, worst_wire - 1)
+        .trace_hosts(trace_request(&[FIRST], 2, 4), collector())
+        .expect_err("the byte bound covers neighbor requests too");
+    assert!(
+        error.classification().code.starts_with("policy."),
+        "{error:?}"
+    );
+    assert!(steps.take().is_empty());
+    assert_eq!(io.armed(), 0);
+
+    // Within every bound the trace runs: two probes, and the one neighbor
+    // request the shared operation cache pinned serves both batches.
+    let collector = packetcraftr::traceroute::hosts::Collector::default();
+    let report = client(64, worst_wire)
+        .trace_hosts(trace_request(&[FIRST], 2, 4), collector.clone())
+        .expect("the admitted trace runs");
+    let steps = steps.take();
+    assert!(
+        matches!(
+            steps.as_slice(),
+            [Step::Neighbor(gateway), Step::Transmit(_), Step::Transmit(_)]
+                if *gateway == address(GATEWAY)
+        ),
+        "{steps:?}"
+    );
+    assert_eq!(
+        report.stats.packets_attempted, 3,
+        "two probes and one neighbor request: {:?}",
+        report.stats
+    );
+    assert_eq!(
+        report.neighbor_stats.packets_attempted, 1,
+        "{:?}",
+        report.stats
+    );
+    assert_eq!(report.neighbor_stats.bytes, 60, "{:?}", report.stats);
+    let wire: usize = steps
+        .iter()
+        .map(|step| match step {
+            Step::Transmit(wire) => wire.len(),
+            _ => 0,
+        })
+        .sum();
+    assert_eq!(
+        report.stats.bytes,
+        wire as u64 + report.neighbor_stats.bytes,
+        "the probes' wire bytes plus the ARP request's: {:?}",
+        report.stats
+    );
+    let outcome = collector.finish(report);
+    assert!(outcome.is_ok(), "{:?}", outcome.err());
 }

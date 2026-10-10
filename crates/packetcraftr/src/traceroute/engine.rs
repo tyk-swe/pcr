@@ -12,7 +12,7 @@ use crate::execution::Errors as _;
 use crate::execution::{ExchangeExecutor, Executor, publisher};
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
-use crate::probe::{Batch, check_collection_evidence, check_probe_count, check_probe_duration};
+use crate::probe::{Batch, check_probe_count, check_probe_duration};
 use crate::providers::{PacketProviders, TargetProviders};
 use crate::target::ResolveTarget;
 use crate::target::{FamilyGate, admit_operation, wire_limits};
@@ -124,7 +124,7 @@ fn approve_traceroute<A: Authorizer + ResolveTarget>(
     deadline: &Deadline,
 ) -> Result<ApprovedTraceroute, Error> {
     request.validate()?;
-    validate_collection(request)?;
+    super::request::check_collection(&request.collection, &request.limits, request.probes_per_hop)?;
     let (selected, _) = admit_operation(
         authorizer,
         deadline,
@@ -176,22 +176,6 @@ fn approve_traceroute<A: Authorizer + ResolveTarget>(
         resolved_addresses,
         destination,
     })
-}
-
-fn validate_collection(request: &Request) -> Result<(), Error> {
-    check_collection_evidence(&Probes, &request.collection, request.limits.evidence())?;
-    let hop_probes = usize::try_from(request.probes_per_hop).unwrap_or(usize::MAX);
-    if request.collection.max_responses < hop_probes {
-        return Err(Error::InvalidLimit {
-            field: "max_responses",
-            value: u64::try_from(request.collection.max_responses).unwrap_or(u64::MAX),
-            reason: format!(
-                "must retain at least one response per probe of a hop (probes_per_hop={})",
-                request.probes_per_hop
-            ),
-        });
-    }
-    Ok(())
 }
 
 fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Error> {

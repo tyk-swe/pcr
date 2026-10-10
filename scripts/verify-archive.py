@@ -20,11 +20,13 @@ ASSETS = (
     'schemas/packetcraftr.output.v9.schema.json',
     'schemas/packetcraftr.output.v10.schema.json',
     'schemas/packetcraftr.output.v11.schema.json',
+    'schemas/packetcraftr.output.v12.schema.json',
     'docs/verification-contract.md', 'docs/consumer-compatibility.md',
     'docs/resource-presets.md', 'docs/tasks.md', 'docs/native-validation.md',
     'examples/consumers/forwarding.py',
     'examples/consumers/fixtures/v6-forwarding.json',
     'examples/consumers/fixtures/v11-forwarding.json',
+    'examples/consumers/fixtures/v12-forwarding.json',
     'schemas/packetcraftr.rewrite.v2.schema.json',
     'schemas/packetcraftr.udp-profiles.v1.schema.json',
     'schemas/packetcraftr.service-probes.v1.schema.json',
@@ -115,7 +117,7 @@ def verify(root, version, commit, target, variant):
     if len(records) != expected_frames + 1:
         raise ValueError(f'packaged capture must produce {expected_frames} frames and one completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v11'
+        if (record.get('schema') != 'packetcraftr.output/v12'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):
@@ -137,8 +139,8 @@ def verify(root, version, commit, target, variant):
         expected = json.loads((root / 'examples/documents' / example).read_text(encoding='utf-8'))
         if expected.get('schema') != 'packetcraftr.output/v10':
             raise ValueError(f'{example} must preserve its released output/v10 family')
-        if actual.get('schema') != 'packetcraftr.output/v11':
-            raise ValueError(f'packaged stats output for {example} must use output/v11')
+        if actual.get('schema') != 'packetcraftr.output/v12':
+            raise ValueError(f'packaged stats output for {example} must use output/v12')
         # Preserve released examples and compare every other envelope/payload
         # field against the current producer without changing archived files.
         expected['schema'] = actual['schema']

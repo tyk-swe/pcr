@@ -370,3 +370,83 @@ fn diags_published_before_probes_event() {
         ]
     );
 }
+
+fn plan_run(
+    sizes: &[u64],
+    paced_after: impl FnOnce(Instant) -> Option<Instant>,
+) -> (Result<Stats, Failure>, Vec<Event>, Vec<Duration>, usize) {
+    let mut deadline = Deadline::new(Duration::from_secs(10));
+    let mut clock = RecordingClock::default();
+    let paced_after = paced_after(clock.now());
+    let mut planned = batches(sizes).into_iter();
+    let mut calls = 0;
+    let mut events = Vec::new();
+    let mut evidence = BatchEvidence::new(
+        Workflow::Traceroute,
+        TestErrors,
+        LIMITS,
+        TestClassifier::default(),
+        |event, _: &Deadline| {
+            events.push(event);
+            Ok(())
+        },
+    );
+    let mut executor = ScriptedExecutor::default();
+    let result = run_planned(
+        |evidence, _, deadline| {
+            calls += 1;
+            let batch = planned.next();
+            if let Some(batch) = &batch {
+                evidence.emit(diagnostic(&format!("before-{}", batch.sequence)), deadline)?;
+            }
+            Ok(batch)
+        },
+        Some(5),
+        paced_after,
+        &mut deadline,
+        &mut clock,
+        &mut executor,
+        &mut evidence,
+    );
+    drop(evidence);
+    (result, events, clock.delays(), calls)
+}
+
+#[test]
+fn planner_sees_evidence_before_each_batch_and_ends_the_run() {
+    let (result, events, delays, calls) = plan_run(&[1, 2, 1], |_| None);
+
+    result.expect("planned run completes");
+    assert_eq!(calls, 4);
+    assert_eq!(
+        events,
+        [
+            diagnostic("before-0"),
+            probe(0),
+            diagnostic("before-1"),
+            probe(1),
+            probe(2),
+            diagnostic("before-3"),
+            probe(3),
+        ]
+    );
+    assert_eq!(
+        delays,
+        [Duration::from_millis(200), Duration::from_millis(400)]
+    );
+}
+
+#[test]
+fn first_batch_waits_what_remains_of_one_rate_interval() {
+    for (elapsed, expected) in [
+        (Duration::from_millis(50), vec![Duration::from_millis(150)]),
+        (Duration::ZERO, vec![Duration::from_millis(200)]),
+        (Duration::from_millis(200), Vec::new()),
+        (Duration::from_secs(5), Vec::new()),
+    ] {
+        let (result, _, delays, _) = plan_run(&[1], |now| now.checked_sub(elapsed));
+
+        result.expect("paced run completes");
+        assert_eq!(delays, expected, "elapsed {elapsed:?}");
+    }
+}

@@ -37,8 +37,12 @@ impl DeadlineExt for Deadline {
     }
 
     fn for_wait(&self, requested: Duration) -> Result<Self, DeadlineExceeded> {
+        // Sampling `remaining` and preparing the send take time the child's
+        // own limit cannot see, so the parent stays attached too: the
+        // child's cooperative boundaries keep enforcing it.
         Ok(Self::new(self.bounded_timeout(requested)?)
-            .with_cancellation(self.cancellation().cloned()))
+            .with_cancellation(self.cancellation().cloned())
+            .with_parent(Some(std::sync::Arc::new(self.clone()))))
     }
 }
 
@@ -79,6 +83,26 @@ mod tests {
         signal.cancel();
         assert!(wait.check_cancelled().is_err());
         assert!(deadline.check().is_ok());
+    }
+
+    #[test]
+    fn a_wait_inherits_an_expired_parent_even_before_its_own_time() {
+        let clock = crate::test_support::RecordingClock::default();
+        let parent = clock.deadline(Duration::from_secs(1));
+        // A fresh child would still own up to its share of the remaining
+        // second, but the parent's clock already passed the operation's
+        // end.
+        let child = parent.for_wait(Duration::from_secs(30)).unwrap();
+        clock.advance(Duration::from_secs(2));
+        assert!(child.enforce().is_err());
+        // A child with no parent still lives: the parent was what expired.
+        assert!(
+            Deadline::new(Duration::from_secs(30))
+                .for_wait(Duration::from_secs(10))
+                .unwrap()
+                .enforce()
+                .is_ok()
+        );
     }
 
     #[test]

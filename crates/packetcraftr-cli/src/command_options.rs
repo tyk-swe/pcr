@@ -39,7 +39,9 @@ mod compression;
 pub(crate) use compression::{Compression, CompressionArgs};
 
 mod duration;
-pub(crate) use duration::{Bounded, LongTimeoutArgs, MaxDurationArgs, TimeoutArgs};
+pub(crate) use duration::{
+    Bounded, LongTimeoutArgs, MAX_MILLISECONDS, MaxDurationArgs, TimeoutArgs,
+};
 
 mod selectors;
 pub(crate) use selectors::{InterfaceSelector, Selector, interface_selector, stream_selector};

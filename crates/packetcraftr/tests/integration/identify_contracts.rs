@@ -1262,6 +1262,30 @@ fn fragmented_valid_http_line_endings_keep_collecting_until_the_head_is_complete
 }
 
 #[test]
+fn interim_http_responses_collect_the_final_head_across_read_boundaries() {
+    let response = b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 103 Early Hints\r\nServer: nginx/99.0\r\n\r\nHTTP/1.1 200 OK\r\nServer: nginx/1.26.2\r\n\r\n";
+    for read_chunk in [None, Some(1), Some(25)] {
+        let tcp = FakeTcp {
+            timeout_after_response: true,
+            read_chunk,
+            ..FakeTcp::replying([response.to_vec()])
+        };
+        let mut request = request(vec![endpoint(38080, identify::Transport::Tcp)]);
+        corpus_with(&mut request, "http-head");
+        let report = client(tcp, FakeUdp::default()).identify(&request).unwrap();
+        let evidence = &report.records[0].probes[0];
+        assert_eq!(evidence.response, response);
+        assert_eq!(evidence.io_outcome, identify::IoOutcome::Complete);
+        assert_eq!(evidence.observation.fields.len(), 2);
+        assert_eq!(report.records[0].outcome, identify::Outcome::Matched);
+        assert_eq!(
+            report.records[0].candidates[0].version.as_deref(),
+            Some("1.26.2")
+        );
+    }
+}
+
+#[test]
 fn mapped_exact_allowlist_survives_final_native_peer_authorization() {
     for (requested, allowed) in [
         ("[::ffff:127.0.0.1]:38080", "::ffff:127.0.0.1"),

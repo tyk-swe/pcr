@@ -21,6 +21,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Service-corpus schemas reject repeated probe/rule objects, matching indexes
+  candidate identities instead of repeatedly scanning them, and HTTP
+  identification collects the final response after informational heads.
 - Identification rejects terminated invalid HTTP lines before timeout, retains
   DNS decoder resource limits as truncated evidence, and rejects replies with
   the reserved DNS header bit instead of publishing protocol matches.

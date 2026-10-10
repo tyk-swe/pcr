@@ -21,6 +21,7 @@
     },
     "probes": {
       "type": "array",
+      "uniqueItems": true,
       "minItems": 1,
       "maxItems": 64,
       "items": {
@@ -203,6 +204,7 @@
     },
     "matches": {
       "type": "array",
+      "uniqueItems": true,
       "minItems": 1,
       "maxItems": 512,
       "items": {

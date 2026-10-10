@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     Candidate, Confidence, Corpus, Field, Identification, MAX_CANDIDATES, MAX_FIELD_BYTES,
@@ -48,7 +48,13 @@ impl Corpus {
             };
         }
         let mut candidates: Vec<Candidate> = Vec::new();
-        for rule in self.matches.iter().filter(|rule| rule.probe == probe.id) {
+        let mut candidate_indices: BTreeMap<_, usize> = BTreeMap::new();
+        for (rule_index, rule) in self
+            .matches
+            .iter()
+            .enumerate()
+            .filter(|(_, rule)| rule.probe == probe.id)
+        {
             if observation.protocol != Some(rule.field.protocol()) {
                 continue;
             }
@@ -68,10 +74,12 @@ impl Corpus {
                 } else {
                     Confidence::Claim
                 };
-                if let Some(candidate) = candidates.iter_mut().find(|candidate| {
-                    candidate.provenance.rule == rule.id && candidate.version == version
-                }) {
-                    candidate.provenance.field_indices.push(index);
+                let key = (rule_index, version.clone());
+                if let Some(&candidate_index) = candidate_indices.get(&key) {
+                    candidates[candidate_index]
+                        .provenance
+                        .field_indices
+                        .push(index);
                     continue;
                 }
                 if candidates.len() == MAX_CANDIDATES {
@@ -80,6 +88,7 @@ impl Corpus {
                         candidates: Vec::new(),
                     };
                 }
+                candidate_indices.insert(key, candidates.len());
                 candidates.push(Candidate {
                     product: rule.product.clone(),
                     version,

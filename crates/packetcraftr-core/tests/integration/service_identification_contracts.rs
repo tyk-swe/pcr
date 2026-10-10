@@ -107,6 +107,93 @@ fn http_parser_resource_limits_are_truncated_and_syntax_errors_are_malformed() {
 }
 
 #[test]
+fn http_interim_heads_preserve_only_final_response_claims() {
+    let corpus = corpus();
+    let probe = probe(&corpus, "http-head");
+    let interim =
+        b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 103 Early Hints\r\nServer: nginx/99.0\r\n\r\n";
+    let final_head = b"HTTP/1.1 200 OK\r\nServer: nginx/1.26.2\r\n\r\n";
+    let wire = [interim.as_slice(), final_head.as_slice()].concat();
+    for end in 0..wire.len() {
+        assert!(!service_probes::http_collection_complete(&wire[..end]));
+    }
+    assert!(service_probes::http_collection_complete(&wire));
+    let observation = service_probes::observe(probe, &wire, false);
+    assert_eq!(observation.outcome, ObservationOutcome::Complete);
+    assert_eq!(observation.fields.len(), 2);
+    assert_eq!(observation.fields[0].value, b"200");
+    assert_eq!(observation.fields[1].value, b"nginx/1.26.2");
+    assert_eq!(
+        corpus.identify(probe, &observation).candidates[0]
+            .version
+            .as_deref(),
+        Some("1.26.2")
+    );
+    let incomplete = service_probes::observe(probe, interim, false);
+    assert_eq!(incomplete.outcome, ObservationOutcome::Truncated);
+    assert!(incomplete.fields.is_empty());
+    assert!(corpus.identify(probe, &incomplete).candidates.is_empty());
+    let invalid = [interim.as_slice(), b"HTTP/1.1 XYZ Bad\r\n"].concat();
+    assert!(service_probes::http_collection_complete(&invalid));
+    assert_eq!(
+        service_probes::observe(probe, &invalid, false).outcome,
+        ObservationOutcome::Malformed
+    );
+    let switching = b"HTTP/1.1 101 Switching Protocols\r\nServer: nginx/1.26.2\r\n\r\n";
+    assert!(service_probes::http_collection_complete(switching));
+    assert_eq!(
+        service_probes::observe(probe, switching, false).fields[0].value,
+        b"101"
+    );
+}
+
+#[test]
+fn maximal_rule_and_field_matching_preserves_deterministic_provenance() {
+    let mut corpus = corpus();
+    let probe = probe(&corpus, "dns-version-udp").clone();
+    let rule = corpus
+        .matches
+        .iter()
+        .find(|rule| rule.id == "bind-claim-udp")
+        .unwrap()
+        .clone();
+    corpus.matches = (0..service_probes::MAX_MATCHES)
+        .map(|index| {
+            let mut rule = rule.clone();
+            rule.id = format!("indexed-rule-{index}");
+            rule
+        })
+        .collect();
+    corpus.validate().unwrap();
+    let mut fields = vec![service_probes::ObservedField {
+        field: Field::DnsRcode,
+        value: b"0".to_vec(),
+    }];
+    fields.extend((1..service_probes::MAX_OBSERVED_FIELDS).map(|_| {
+        service_probes::ObservedField {
+            field: Field::DnsTxt,
+            value: b"BIND 9.20.0".to_vec(),
+        }
+    }));
+    let observation = service_probes::Observation {
+        protocol: Some(service_probes::Protocol::Dns),
+        outcome: ObservationOutcome::Complete,
+        fields,
+        diagnostic: None,
+    };
+    let result = corpus.identify(&probe, &observation);
+    assert_eq!(result.outcome, MatchOutcome::Matched);
+    assert_eq!(result.candidates.len(), service_probes::MAX_CANDIDATES);
+    let indices: Vec<_> = (1..service_probes::MAX_OBSERVED_FIELDS).collect();
+    for (index, candidate) in result.candidates.iter().enumerate() {
+        assert_eq!(candidate.provenance.rule, format!("indexed-rule-{index}"));
+        assert_eq!(candidate.provenance.field_indices, indices);
+        assert_eq!(candidate.version.as_deref(), Some("9.20.0"));
+    }
+    assert_eq!(corpus.identify(&probe, &observation), result);
+}
+
+#[test]
 fn ssh_preamble_resource_limits_remain_truncated_evidence() {
     let corpus = corpus();
     let probe = probe(&corpus, "ssh-banner");

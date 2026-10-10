@@ -39,6 +39,10 @@ on any allowed port of their transport. A conventional port number is neither a
 probe selector nor evidence of a service. Each attempt uses one fresh TCP
 connection or one datagram. There is no automatic UDP-to-TCP fallback.
 
+HTTP collection retains informational heads and waits for the final response;
+101 Switching Protocols is terminal. Status and Server claims come only from
+the final head, while preceding heads remain in the exact response evidence.
+
 The versioned [probe document schema](../schemas/packetcraftr.service-probes.v1.schema.json)
 accepts a closed request language: banner collection, HTTP HEAD, and the two
 nonrecursive DNS queries above. Operator documents cannot introduce arbitrary
@@ -49,6 +53,8 @@ metadata, and each match rule has its own provenance. Core owns document
 validation, response parsing and deterministic matching independently of I/O.
 Shared descriptive text is limited to 512 Unicode characters and 2,048 UTF-8
 bytes per value, in addition to each document's enclosing byte-size limit.
+The schema rejects repeated objects; the runtime also checks unique IDs and
+probe/rule references, which require validation across document entries.
 
 ## Budgets and sensitive endpoints
 

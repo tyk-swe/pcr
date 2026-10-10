@@ -187,12 +187,40 @@ fn ssh_progress(bytes: &[u8]) -> (Observation, bool) {
     (base(None, ObservationOutcome::Unknown), false)
 }
 
+/// Returns whether bounded HTTP bytes have reached a final head or a
+/// definitive parser boundary. Non-switching informational heads remain open.
+pub fn http_collection_complete(bytes: &[u8]) -> bool {
+    bytes.len() > MAX_RESPONSE_BYTES
+        || !matches!(
+            final_http_head(&bytes[..bytes.len().min(MAX_RESPONSE_BYTES)]),
+            Ok(None)
+        )
+}
+
+fn final_http_head(bytes: &[u8]) -> Result<Option<http::Head>, http::Error> {
+    let input = Bytes::copy_from_slice(bytes);
+    let mut offset = 0;
+    while offset < input.len() {
+        let Some((head, consumed)) = http::parse_head(&input.slice(offset..))? else {
+            return Ok(None);
+        };
+        if !head
+            .status()
+            .is_some_and(|status| (100..200).contains(&status) && status != 101)
+        {
+            return Ok(Some(head));
+        }
+        offset += consumed;
+    }
+    Ok(None)
+}
+
 fn http(bytes: &[u8]) -> Observation {
     if !bytes.starts_with(b"HTTP/") {
         return base(None, ObservationOutcome::Unknown);
     }
-    match http::parse_head(&Bytes::copy_from_slice(bytes)) {
-        Ok(Some((head, _))) => {
+    match final_http_head(bytes) {
+        Ok(Some(head)) => {
             let Some(status) = head.status() else {
                 return failure(
                     Protocol::Http,
@@ -214,7 +242,7 @@ fn http(bytes: &[u8]) -> Observation {
         Ok(None) => failure(
             Protocol::Http,
             ObservationOutcome::Truncated,
-            "HTTP response head is incomplete",
+            "HTTP final response head is incomplete",
         ),
         Err(error) => {
             let outcome = if matches!(error, http::Error::Limit(_)) {

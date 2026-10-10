@@ -20,7 +20,7 @@ use crate::{
 mod matching;
 mod observation;
 
-pub use observation::{observe, ssh_collection_complete};
+pub use observation::{http_collection_complete, observe, ssh_collection_complete};
 
 pub const SERVICE_PROBES_SCHEMA_V1: &str = "packetcraftr.service-probes/v1";
 pub const MAX_DOCUMENT_BYTES: usize = 512 * 1024;

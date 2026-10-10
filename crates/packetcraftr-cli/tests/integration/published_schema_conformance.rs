@@ -183,6 +183,26 @@ fn service_probe_ascii_fields_agree_with_runtime_validation() {
 }
 
 #[test]
+fn service_corpus_schemas_reject_repeated_objects() {
+    use packetcraftr_core::document::service_probes;
+    let schema = validator(include_str!(
+        "../../../../schemas/packetcraftr.service-probes.v1.schema.json"
+    ));
+    let original: Value = serde_json::from_str(include_str!(
+        "../../../packetcraftr/data/service-probes.json"
+    ))
+    .unwrap();
+    assert!(schema.is_valid(&original));
+    for name in ["probes", "matches"] {
+        let mut document = original.clone();
+        let repeated = document[name][0].clone();
+        document[name].as_array_mut().unwrap().push(repeated);
+        assert!(!schema.is_valid(&document), "schema: {name}");
+        assert!(service_probes::parse(&serde_json::to_vec(&document).unwrap()).is_err());
+    }
+}
+
+#[test]
 fn service_document_text_fields_agree_on_characters_and_length_units() {
     use packetcraftr_core::document::{service_exclusions, service_probes};
 

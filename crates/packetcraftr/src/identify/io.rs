@@ -4,11 +4,9 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::document::service_probes::{self, Probe, Request};
 use packetcraftr_core::error::Source;
-use packetcraftr_core::protocol::application::http;
 use packetcraftr_netio::tcp::Stream as _;
 use packetcraftr_netio::udp::Provider as _;
 use packetcraftr_netio::{bounded, tcp, udp};
@@ -235,11 +233,7 @@ fn tcp_exchange<P: TcpProviders>(
 fn complete(probe: &Probe, bytes: &[u8]) -> bool {
     match probe.request {
         Request::Banner {} => service_probes::ssh_collection_complete(bytes),
-        Request::HttpHead {} => {
-            // Completion means enough bytes to classify, including definitive
-            // syntax failures and parser limits before the terminating blank line.
-            !matches!(http::parse_head(&Bytes::copy_from_slice(bytes)), Ok(None))
-        }
+        Request::HttpHead {} => service_probes::http_collection_complete(bytes),
         Request::Dns { .. } => bytes.get(..2).is_some_and(|prefix| {
             bytes.len() >= 2 + usize::from(u16::from_be_bytes([prefix[0], prefix[1]]))
         }),

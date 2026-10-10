@@ -70,7 +70,7 @@ pub enum Error {
     DurationLimit { actual: Duration, limit: Duration },
 }
 
-crate::deadline::deadline_error_conversions!(Error);
+packetcraftr_core::deadline_error_conversions!(Error);
 
 impl Classified for Error {
     fn classification(&self) -> Classification {

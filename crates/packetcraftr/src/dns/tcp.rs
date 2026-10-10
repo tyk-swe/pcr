@@ -396,8 +396,9 @@ where
         .map_err(|source| map_connect_error(request.endpoint, source))?;
     let outcome = wait(&mut pending, &connect_deadline)
         .map_err(|source| map_connect_error(request.endpoint, source))?;
-    packetcraftr_netio::deadline::remaining(&connect_deadline).map_err(|interrupted| {
-        match interrupted {
+    connect_deadline
+        .live_remaining()
+        .map_err(|interrupted| match interrupted {
             Interrupted::Cancelled(cancelled) => Error::Cancelled {
                 phase: Phase::Connect,
                 transferred: 0,
@@ -407,8 +408,7 @@ where
                 phase: Phase::Connect,
                 transferred: 0,
             },
-        }
-    })?;
+        })?;
     remaining(deadline, now(), Phase::Connect, 0)?;
     let stream = outcome
         .ok_or(Error::Timeout {

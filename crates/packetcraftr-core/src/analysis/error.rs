@@ -200,7 +200,7 @@ impl Classified for Error {
     }
 }
 
-crate::budget::deadline_error_conversions!(Error);
+crate::deadline_error_conversions!(Error);
 
 /// Rejects a zero limit and one above its fixed ceiling.
 pub(super) fn check_ceiling(field: &'static str, value: u64, maximum: u64) -> Result<(), Error> {

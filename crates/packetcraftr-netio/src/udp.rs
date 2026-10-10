@@ -56,7 +56,7 @@ impl Provider for SystemProvider {
         {
             return Err(Error::Limit);
         }
-        crate::deadline::remaining(deadline)?;
+        deadline.live_remaining()?;
         let destination = crate::bounded::socket_endpoint(endpoint);
         let bind = if destination.is_ipv4() {
             SocketAddr::from(([0, 0, 0, 0], 0))
@@ -115,7 +115,7 @@ impl Provider for SystemProvider {
                 match crate::platform::receive_datagram(&socket, &mut response) {
                     Ok((count, truncated)) => {
                         bytes_read = count;
-                        if let Err(source) = crate::deadline::remaining(deadline) {
+                        if let Err(source) = deadline.live_remaining() {
                             break 'exchange Outcome::interrupted(source);
                         }
                         break 'exchange if truncated {

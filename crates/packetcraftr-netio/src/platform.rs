@@ -14,6 +14,7 @@ mod interface;
 mod route;
 #[cfg(native_send)]
 mod transmit;
+mod udp;
 
 #[cfg(native_send)]
 pub(crate) use dispatch::interfaces_for_identity;

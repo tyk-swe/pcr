@@ -61,8 +61,8 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
                 .neighbors
                 .one_attempt(
                     request.timeout,
-                    request.limits.max_evidence_frames,
-                    request.limits.max_evidence_bytes,
+                    request.limits.evidence.max_frames,
+                    request.limits.evidence.max_bytes,
                     request.collection.capture.snap_length,
                     request.limits.max_probes,
                 )
@@ -119,7 +119,7 @@ where
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
         Probes,
-        request.limits.evidence(),
+        request.limits.evidence,
         HostsClassifier {
             registry,
             batch: Vec::new(),

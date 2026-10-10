@@ -4,10 +4,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 use packetcraftr_netio::deadline::MAX_WAIT;
 
-use crate::execution::limits::EvidenceLimits;
 use crate::execution::limits::{check_limits, check_rate, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
@@ -24,9 +22,8 @@ use crate::traceroute::{
 pub struct Limits {
     pub max_probes: usize,
     pub max_duration: Duration,
-    pub max_evidence_frames: usize,
-    pub max_evidence_bytes: usize,
-    pub max_undecoded: usize,
+    #[serde(flatten)]
+    pub evidence: crate::evidence::Limits,
 }
 
 impl Default for Limits {
@@ -34,22 +31,15 @@ impl Default for Limits {
         Self {
             max_probes: packetcraftr_core::template::DEFAULT_MAX_TEMPLATE_PACKETS,
             max_duration: MAX_WAIT,
-            max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
-            max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
-            max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
+            evidence: crate::evidence::Limits {
+                max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
+                ..crate::evidence::Limits::default()
+            },
         }
     }
 }
 
 impl Limits {
-    pub(crate) const fn evidence(&self) -> EvidenceLimits {
-        EvidenceLimits {
-            max_frames: self.max_evidence_frames,
-            max_bytes: self.max_evidence_bytes,
-            max_undecoded: self.max_undecoded,
-        }
-    }
-
     pub fn validate(&self) -> Result<(), Error> {
         check_limits(
             &[("max_probes", self.max_probes, MAX_PROBES)],
@@ -60,7 +50,7 @@ impl Limits {
                 reason,
             },
         )?;
-        self.evidence()
+        self.evidence
             .validate(|field, value, reason| Error::InvalidLimit {
                 field,
                 value,
@@ -181,14 +171,14 @@ impl Bounds<'_> {
             });
         }
         if usize::try_from(self.probes_per_hop).unwrap_or(usize::MAX)
-            > self.limits.max_evidence_frames
+            > self.limits.evidence.max_frames
         {
             return Err(Error::InvalidLimit {
                 field: "probes_per_hop",
                 value: u64::from(self.probes_per_hop),
                 reason: format!(
                     "cannot exceed max_evidence_frames={} because every probe may receive a response",
-                    self.limits.max_evidence_frames
+                    self.limits.evidence.max_frames
                 ),
             });
         }
@@ -222,7 +212,7 @@ pub(super) fn check_collection(
     limits: &Limits,
     probes_per_hop: u32,
 ) -> Result<(), Error> {
-    check_collection_evidence(&Probes, collection, limits.evidence())?;
+    check_collection_evidence(&Probes, collection, limits.evidence)?;
     let hop_probes = usize::try_from(probes_per_hop).unwrap_or(usize::MAX);
     if collection.max_responses < hop_probes {
         return Err(Error::InvalidLimit {

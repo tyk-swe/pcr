@@ -123,9 +123,7 @@ impl Lookup {
                 queries_per_second: scan.probes_per_second,
                 limits: dns::Limits {
                     message: dns::MessageLimits::default(),
-                    max_evidence_frames: scan.limits.max_evidence_frames,
-                    max_evidence_bytes: scan.limits.max_evidence_bytes,
-                    max_undecoded: scan.limits.max_undecoded,
+                    evidence: scan.limits.evidence,
                     max_duration: scan.limits.max_duration,
                 },
                 route: scan.route.clone(),
@@ -182,7 +180,7 @@ impl Lookup {
             last_sent,
             deadline,
             client.cancellation.as_ref(),
-            self.template.limits.max_evidence_bytes,
+            self.template.limits.evidence.max_bytes,
             || client.now(),
             |waited| {
                 let _ = client.clock.sleep(waited, &client.deadline(waited));
@@ -310,8 +308,8 @@ impl Lookup {
             .iter()
             .map(|address| {
                 self.question(*address, remaining).map(|mut question| {
-                    question.limits.max_evidence_frames /= share;
-                    question.limits.max_evidence_bytes /= share;
+                    question.limits.evidence.max_frames /= share;
+                    question.limits.evidence.max_bytes /= share;
                     question
                 })
             })
@@ -324,8 +322,8 @@ impl Lookup {
         let limits = &self.template.limits;
         let snap_length = self.template.collection.capture.snap_length.max(1);
         batch::MAX_QUESTIONS
-            .min(limits.max_evidence_frames)
-            .min(limits.max_evidence_bytes / snap_length)
+            .min(limits.evidence.max_frames)
+            .min(limits.evidence.max_bytes / snap_length)
             .max(1)
     }
 

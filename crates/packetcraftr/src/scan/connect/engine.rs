@@ -819,11 +819,11 @@ fn record(request: &Request, progress: &mut Progress, probe: &ProbeEvidence) -> 
                     .map_or(0, |error| error.to_string().len()),
             )
         })
-        .filter(|bytes| *bytes <= request.limits.max_evidence_bytes)
+        .filter(|bytes| *bytes <= request.limits.evidence.max_bytes)
         .ok_or_else(|| {
             invalid(
                 "max_evidence_bytes",
-                request.limits.max_evidence_bytes,
+                request.limits.evidence.max_bytes,
                 "socket evidence budget exceeded",
             )
         })?;

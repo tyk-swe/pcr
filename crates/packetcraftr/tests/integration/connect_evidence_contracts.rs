@@ -62,7 +62,10 @@ fn scoped_evidence_is_charged_before_publication() {
             probes_per_second: None,
             max_in_flight: 1,
             limits: scan::Limits {
-                max_evidence_bytes: budget,
+                evidence: packetcraftr::evidence::Limits {
+                    max_bytes: budget,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             route: Default::default(),

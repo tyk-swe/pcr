@@ -202,7 +202,7 @@ fn scans_stop_undecoded_limit_diagnosed() {
         request.endpoints = (80..=84)
             .map(|port| packetcraftr::probe::ProbeEndpoint::Tcp { port })
             .collect();
-        request.limits.max_undecoded = 2;
+        request.limits.evidence.max_undecoded = 2;
         request.collection.decode.limits.max_packet_size = 39;
 
         let clock = VirtualClock::default();
@@ -292,7 +292,7 @@ fn extra_replies_are_retained_beside_each_outcome_under_the_undecoded_count() {
     let observe = |max_in_flight, max_undecoded| {
         let mut request = request();
         request.max_in_flight = max_in_flight;
-        request.limits.max_undecoded = max_undecoded;
+        request.limits.evidence.max_undecoded = max_undecoded;
         // Every probe draws two resets; one becomes the outcome.
         let state = Arc::new(Mutex::new(State {
             tied_resets: true,
@@ -343,9 +343,9 @@ fn duplicates_cannot_take_outstanding_winners_evidence_capacity() {
         for (frames, bytes, duplicates) in [(4, 1500, 0), (8, 160, 0), (5, 1500, 1), (8, 200, 1)] {
             let mut request = request();
             request.max_in_flight = max_in_flight;
-            request.limits.max_evidence_frames = frames;
-            request.limits.max_evidence_bytes = bytes;
-            request.limits.max_undecoded = frames;
+            request.limits.evidence.max_frames = frames;
+            request.limits.evidence.max_bytes = bytes;
+            request.limits.evidence.max_undecoded = frames;
             request.collection.capture.max_frames = frames;
             request.collection.capture.max_bytes = bytes;
             request.collection.capture.snap_length = bytes.min(1500);
@@ -392,9 +392,9 @@ fn a_duplicate_cannot_take_the_winners_last_evidence_slot() {
     for (endpoints, frames, bytes) in [(1, 1, 1500), (1, 2, 40), (2, 2, 1500)] {
         let mut request = request();
         request.endpoints.truncate(endpoints);
-        request.limits.max_evidence_frames = frames;
-        request.limits.max_evidence_bytes = bytes;
-        request.limits.max_undecoded = frames;
+        request.limits.evidence.max_frames = frames;
+        request.limits.evidence.max_bytes = bytes;
+        request.limits.evidence.max_undecoded = frames;
         let state = Arc::new(Mutex::new(State {
             tied_resets: true,
             ..State::default()
@@ -656,7 +656,7 @@ fn serial_final_drain_retains_only_fresh_late_evidence() {
         let mut request = request();
         request.max_in_flight = 1;
         request.endpoints.truncate(1);
-        request.limits.max_undecoded = max_undecoded;
+        request.limits.evidence.max_undecoded = max_undecoded;
         let clock = VirtualClock::default();
         let state = Arc::new(Mutex::new(State {
             idle_clock: Some(clock.clone()),
@@ -849,9 +849,9 @@ fn adaptive_replies_release_their_unstarted_attempt_reservations() {
     });
     request.limits.max_duration = Duration::from_secs(60);
     request.collection.capture.snap_length = 60;
-    request.limits.max_evidence_frames = 6;
-    request.limits.max_evidence_bytes = 360;
-    request.limits.max_undecoded = 6;
+    request.limits.evidence.max_frames = 6;
+    request.limits.evidence.max_bytes = 360;
+    request.limits.evidence.max_undecoded = 6;
     let state = Arc::new(Mutex::new(State {
         repeated_syn_acks: true,
         ..State::default()

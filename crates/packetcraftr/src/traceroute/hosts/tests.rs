@@ -1433,8 +1433,8 @@ fn a_single_host_probes_exactly_like_standalone_traceroute() {
 #[test]
 fn evidence_limits_are_shared_across_hosts() {
     let mut plan = request(tcp());
-    plan.limits.max_evidence_frames = 3;
-    plan.limits.max_undecoded = 3;
+    plan.limits.evidence.max_frames = 3;
+    plan.limits.evidence.max_undecoded = 3;
     plan.collection.capture.max_frames = 3;
     plan.collection.max_responses = 3;
     plan.collection.max_unmatched_frames = 3;

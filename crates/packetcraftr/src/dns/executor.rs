@@ -87,7 +87,7 @@ const RESULT_FAULT: ExecutorFault = ExecutorFault::new(
 
 impl<P: PacketProviders, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
     fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
-        let max_responses = exchange.limits.max_evidence_frames;
+        let max_responses = exchange.limits.evidence.max_frames;
         if max_responses == 0 {
             return Err(EXECUTOR_FAULT.invalid("DNS exchange must retain at least one response"));
         }
@@ -100,14 +100,14 @@ impl<P: PacketProviders, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P
         // Captured evidence must fit the request's bounds; refuse before any I/O, not after.
         let capture = &self.collection.capture;
         if capture.max_frames > max_responses
-            || capture.max_bytes > exchange.limits.max_evidence_bytes
+            || capture.max_bytes > exchange.limits.evidence.max_bytes
         {
             return Err(EXECUTOR_FAULT.invalid(format!(
                 "the client captures up to {} frames and {} bytes but the DNS exchange retains at most {} frames and {} bytes",
                 capture.max_frames,
                 capture.max_bytes,
                 max_responses,
-                exchange.limits.max_evidence_bytes
+                exchange.limits.evidence.max_bytes
             )));
         }
         let registry = std::sync::Arc::clone(self.client.registry());

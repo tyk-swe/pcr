@@ -136,7 +136,7 @@ where
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
         Probes,
-        request.limits.evidence(),
+        request.limits.evidence,
         ProbeClassifier {
             registry,
             target: Arc::from(approved.declared_target.as_str()),
@@ -1149,8 +1149,8 @@ fn pipeline_options(
             .remaining()
             .map_err(|error| Probes.duration_limit(0, error))?,
         max_prepared_bytes: request.limits.max_prepared_bytes.saturating_sub(reserved),
-        max_evidence_frames: request.limits.max_evidence_frames,
-        max_evidence_bytes: request.limits.max_evidence_bytes,
+        max_evidence_frames: request.limits.evidence.max_frames,
+        max_evidence_bytes: request.limits.evidence.max_bytes,
         host_deadlines: Vec::new(),
         preceding,
     })
@@ -1401,7 +1401,7 @@ fn approve_scan<A: Authorizer + ResolveTarget>(
     let endpoints = request.planned_endpoints()?.to_vec();
     // Only the serial path reuses `collection` to retain each exchange's frames.
     if request.max_in_flight == 1 {
-        check_collection_evidence(&Probes, &request.collection, request.limits.evidence())?;
+        check_collection_evidence(&Probes, &request.collection, request.limits.evidence)?;
     }
     // Implementations must authorize the declared target before DNS and every
     // answer before anything below constructs a probe; `admit_selection` owns
@@ -1485,8 +1485,8 @@ fn plan_scan(
         crate::neighbor::Options::default()
             .single_attempt(
                 request.timeout,
-                request.limits.max_evidence_frames,
-                request.limits.max_evidence_bytes,
+                request.limits.evidence.max_frames,
+                request.limits.evidence.max_bytes,
                 request.collection.capture.snap_length,
             )
             .validate()
@@ -1519,16 +1519,16 @@ fn plan_scan(
         // which must hold a decodable reply just as explicit neighbor
         // discovery requires.
         let snap_length = request.collection.capture.snap_length;
-        let (field, value) = if snap_length < request.limits.max_evidence_bytes {
+        let (field, value) = if snap_length < request.limits.evidence.max_bytes {
             ("snap_length", snap_length)
         } else {
-            ("max_evidence_bytes", request.limits.max_evidence_bytes)
+            ("max_evidence_bytes", request.limits.evidence.max_bytes)
         };
         crate::neighbor::Options::default()
             .one_attempt(
                 request.timeout,
-                request.limits.max_evidence_frames,
-                request.limits.max_evidence_bytes,
+                request.limits.evidence.max_frames,
+                request.limits.evidence.max_bytes,
                 snap_length,
             )
             .validate()

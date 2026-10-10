@@ -269,6 +269,138 @@ fn http_claims_and_matched_candidates_are_separate_with_exact_evidence() {
             "candidate needs a supporting field: {path}"
         );
     }
+    let validator = crate::common::schema_validator();
+    for path in [
+        "/result/records/0",
+        "/result/records/0/probes/0/identification",
+    ] {
+        for outcome in ["unknown", "malformed", "truncated"] {
+            let mut unsupported = report.clone();
+            unsupported.pointer_mut(path).unwrap()["outcome"] = outcome.into();
+            assert!(
+                validator.validate(&unsupported).is_err(),
+                "{path}: {outcome} needs no candidates"
+            );
+        }
+        let mut unsupported = report.clone();
+        unsupported.pointer_mut(path).unwrap()["candidates"] = serde_json::json!([]);
+        assert!(
+            validator.validate(&unsupported).is_err(),
+            "{path}: matched needs a candidate"
+        );
+    }
+    let mut budget = report.clone();
+    budget["result"]["records"][0]["outcome"] = "budget_exhausted".into();
+    assert!(
+        validator.validate(&budget).is_ok(),
+        "budget exhaustion retains earlier matches"
+    );
+    let mut empty = report.clone();
+    empty["result"]["records"][0]["probes"] = serde_json::json!([]);
+    empty["result"]["records"][0]["candidates"] = serde_json::json!([]);
+    for outcome in [
+        "unknown",
+        "malformed",
+        "truncated",
+        "excluded",
+        "budget_exhausted",
+    ] {
+        empty["result"]["records"][0]["outcome"] = outcome.into();
+        assert!(validator.validate(&empty).is_ok(), "empty {outcome}");
+    }
+}
+
+#[test]
+fn cross_probe_ambiguity_erases_versions_even_on_single_candidate_probes() {
+    let directory = TempDir::new().unwrap();
+    let path = corpus(&directory, "http-head");
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut second = document["probes"][0].clone();
+    second["id"] = "second-http".into();
+    document["probes"].as_array_mut().unwrap().push(second);
+    document["matches"].as_array_mut().unwrap().retain(|rule| {
+        matches!(
+            rule["product"].as_str(),
+            Some("nginx" | "Apache HTTP Server")
+        )
+    });
+    for rule in document["matches"].as_array_mut().unwrap() {
+        if rule["product"] == "Apache HTTP Server" {
+            rule["probe"] = "second-http".into();
+        }
+    }
+    std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let server = thread::spawn(move || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        for product in ["nginx/1.26.2", "Apache/2.4.62"] {
+            let mut socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "missing ambiguity probe"
+                        );
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("ambiguity fixture accept: {error}"),
+                }
+            };
+            socket.set_nonblocking(false).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut request = [0; 19];
+            socket.read_exact(&mut request).unwrap();
+            assert_eq!(&request, b"HEAD / HTTP/1.0\r\n\r\n");
+            socket
+                .write_all(format!("HTTP/1.0 200 OK\r\nServer: {product}\r\n\r\n").as_bytes())
+                .unwrap();
+        }
+    });
+    let report = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "identify",
+        &address,
+        "--corpus",
+        path_text(&path),
+    ]));
+    server.join().unwrap();
+    let record = &report["result"]["records"][0];
+    assert_eq!(record["outcome"], "ambiguous");
+    assert_eq!(record["candidates"].as_array().unwrap().len(), 2);
+    for probe in record["probes"].as_array().unwrap() {
+        assert_eq!(probe["identification"]["outcome"], "ambiguous");
+        assert_eq!(
+            probe["identification"]["candidates"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(probe["identification"]["candidates"][0]["version"].is_null());
+    }
+    for pointer in [
+        "/result/records/0/candidates/0/version",
+        "/result/records/0/probes/0/identification/candidates/0/version",
+    ] {
+        let mut unsupported = report.clone();
+        *unsupported.pointer_mut(pointer).unwrap() = "1.26.2".into();
+        assert!(
+            crate::common::schema_validator()
+                .validate(&unsupported)
+                .is_err(),
+            "ambiguity erases {pointer}"
+        );
+    }
 }
 
 #[test]

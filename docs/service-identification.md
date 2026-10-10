@@ -134,6 +134,10 @@ and truncated observations have explicit outcomes. Unknown and ambiguous
 outcomes expose no exact matched versions. Raw advertised strings remain in
 observed evidence so consumers can inspect the cause of uncertainty. The same
 corpus version and response evidence reproduce the same core match result.
+Output/v11 enforces empty candidates for nonmatching outcomes and erased versions
+for ambiguous results, including probe evidence. An endpoint's ambiguity can
+come from different probes, each retaining only one conflicting candidate.
+Budget exhaustion can retain earlier matches and their exact evidence.
 
 The [scanner data policy](scanner-data-policy.md) and the bundled
 [probe](../crates/packetcraftr/data/service-probes.provenance.yaml) and

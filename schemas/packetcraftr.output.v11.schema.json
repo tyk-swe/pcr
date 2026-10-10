@@ -13729,7 +13729,12 @@
         "outcome",
         "candidates"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/identifyOutcomeInvariants"
+        }
+      ]
     },
     "identifyEvidence": {
       "type": "object",
@@ -13861,7 +13866,106 @@
         "probes",
         "candidates"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/identifyOutcomeInvariants"
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "ambiguous"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "candidates": {
+                "minItems": 2
+              },
+              "probes": {
+                "items": {
+                  "properties": {
+                    "identification": {
+                      "properties": {
+                        "candidates": {
+                          "items": {
+                            "properties": {
+                              "version": {
+                                "type": "null"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "unknown",
+                  "malformed",
+                  "truncated"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "probes": {
+                "items": {
+                  "properties": {
+                    "identification": {
+                      "properties": {
+                        "candidates": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "excluded"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "probes": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
     },
     "identifyUsage": {
       "type": "object",
@@ -14017,6 +14121,83 @@
             },
             "result": {
               "$ref": "#/$defs/identifyComplete"
+            }
+          }
+        }
+      ]
+    },
+    "identifyOutcomeInvariants": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "unknown",
+                  "malformed",
+                  "truncated",
+                  "excluded"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "candidates": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "matched"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "candidates": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "ambiguous"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "candidates": {
+                "minItems": 1,
+                "items": {
+                  "properties": {
+                    "version": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
             }
           }
         }

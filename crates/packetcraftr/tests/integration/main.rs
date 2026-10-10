@@ -24,6 +24,7 @@ mod error_classification_contracts;
 mod exchange_dns_contracts;
 mod exchange_failure_contracts;
 mod fuzz_cancellation_contracts;
+mod identify_contracts;
 mod model_contracts;
 mod neighbor_contracts;
 mod neighbor_deadline_contracts;

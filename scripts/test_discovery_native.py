@@ -50,11 +50,11 @@ class DiscoveryEvidenceContracts(unittest.TestCase):
 
     def test_capture_free_profiles_require_a_real_typed_native_refusal(self):
         case = dict(name='discovery-responsive', status='unavailable', reason_code='unsupported_capability',
-                    runs=[dict(exit_code=1, stdout=json.dumps(dict(schema='packetcraftr.output/v10', status='error',
+                    runs=[dict(exit_code=1, stdout=json.dumps(dict(schema='packetcraftr.output/v11', status='error',
                               error=dict(kind='capability', code='capability.unsupported'))))])
         for name in ('portable', 'default', 'pcap-free', 'layer2', 'full-native'):
             self.assertEqual(expected_capability_refusal(dict(name=name), case), name in ('portable', 'default', 'pcap-free'))
-        for schema in ('packetcraftr.output/v10', 'packetcraftr.output/v11'):
+        for schema in ('packetcraftr.output/v10', 'packetcraftr.output/v11', 'packetcraftr.output/v12'):
             changed = copy.deepcopy(case)
             output = json.loads(changed['runs'][0]['stdout'])
             output['schema'] = schema
@@ -83,7 +83,7 @@ class DiscoveryEvidenceContracts(unittest.TestCase):
         case.update(name='connect-responsive', family='ipv4', status='exercised', runs=[])
         for mode in ('only', 'before', 'before_all'):
             scan = 'not_requested' if mode == 'only' else 'scanned'
-            output = dict(schema='packetcraftr.output/v10', status='success', result=dict(
+            output = dict(schema='packetcraftr.output/v11', status='success', result=dict(
                 hosts=[dict(address='127.0.0.1', discovery='responded', scan=scan,
                             reasons=[dict(kind='tcp_connected', evidence='socket', basis='direct')])],
                 endpoints=[] if mode == 'only' else [{}]))
@@ -92,7 +92,7 @@ class DiscoveryEvidenceContracts(unittest.TestCase):
                 observation=dict(discovery='responded', scan=scan, reasons=['tcp_connected'],
                                  hosts=1, endpoints=0 if mode == 'only' else 1)))
         validate(report)
-        for schema in ('packetcraftr.output/v10', 'packetcraftr.output/v11'):
+        for schema in ('packetcraftr.output/v10', 'packetcraftr.output/v11', 'packetcraftr.output/v12'):
             changed = copy.deepcopy(report)
             observed = next(row for row in changed['profiles'][0]['scenarios']
                             if row['name'] == 'connect-responsive' and row['family'] == 'ipv4')
@@ -108,7 +108,7 @@ class DiscoveryEvidenceContracts(unittest.TestCase):
                             if row['name'] == 'connect-responsive' and row['family'] == 'ipv4')
             output = json.loads(observed['runs'][0]['stdout'])
             if mutation == 'schema':
-                output['schema'] = 'packetcraftr.output/v12'
+                output['schema'] = 'unsupported-output-family'
             elif mutation == 'target':
                 output['result']['hosts'][0]['address'] = '203.0.113.9'
             elif mutation == 'command':

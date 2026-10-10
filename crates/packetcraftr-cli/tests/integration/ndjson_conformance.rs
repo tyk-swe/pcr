@@ -639,14 +639,23 @@ fn schema_reject_event_unknown_root_discs() {
         "../../../../examples/documents/output-tls-event.json"
     ))
     .unwrap();
-    schema_validator().validate(&original).unwrap();
-    let mut legacy = original.clone();
-    let event = legacy.as_object_mut().unwrap().remove("event").unwrap();
-    legacy["result"]["event"] = event;
-    assert!(schema_validator().validate(&legacy).is_err());
-    let mut unknown = original;
-    unknown["event"] = "future_unknown_event".into();
-    assert!(schema_validator().validate(&unknown).is_err());
+    for (validator, family) in [
+        (
+            common::frozen_v10_schema_validator(),
+            output::contract::SCHEMA_V10,
+        ),
+        (schema_validator(), output::contract::SCHEMA_V12),
+    ] {
+        let mut document = original.clone();
+        document["schema"] = family.into();
+        validator.validate(&document).unwrap();
+        let mut legacy = document.clone();
+        let event = legacy.as_object_mut().unwrap().remove("event").unwrap();
+        legacy["result"]["event"] = event;
+        assert!(validator.validate(&legacy).is_err());
+        document["event"] = "future_unknown_event".into();
+        assert!(validator.validate(&document).is_err());
+    }
 }
 
 #[test]

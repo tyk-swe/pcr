@@ -24,6 +24,17 @@ The kind decides the review focus (for example, payload bytes are creative
 content in a way bare port numbers are not), but every kind carries the same
 manifest and review requirements.
 
+The initial M8 service data is project-authored: a small
+[probe/match corpus](../crates/packetcraftr/data/service-probes.json) and separate
+[sensitive-service exclusions](../crates/packetcraftr/data/service-exclusions.json),
+with independent versions, per-entry source/maintenance metadata and completed
+[probe](../crates/packetcraftr/data/service-probes.provenance.yaml) and
+[exclusion](../crates/packetcraftr/data/service-exclusions.provenance.yaml)
+provenance manifests. Probe request forms are reviewed read-only operations;
+operator documents cannot introduce arbitrary outgoing bytes. Product/version
+strings are untrusted claims, and matching coverage is defined by independent
+fixtures rather than an upstream scanner's database.
+
 ## Per-data-set manifest
 
 Every bundled or shipped data set carries a manifest written from the

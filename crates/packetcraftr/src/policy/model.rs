@@ -40,13 +40,13 @@ pub enum DestinationConstraint {
 }
 
 impl DestinationConstraint {
-    /// An IPv4-mapped IPv6 address also matches an IPv4 entry through its
-    /// embedded address, exactly as [`Network::contains`] does.
+    /// Exact IPv4 and mapped IPv6 entries compare the same embedded address
+    /// in either direction. Networks follow [`Network::contains`].
     ///
     /// [`Network::contains`]: crate::target::Network::contains
     pub fn contains(&self, address: IpAddr) -> bool {
         match *self {
-            Self::Exact(expected) => expected == address || expected == address.to_canonical(),
+            Self::Exact(expected) => expected.to_canonical() == address.to_canonical(),
             Self::Network(network) => network.contains(address),
         }
     }

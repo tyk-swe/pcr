@@ -31,6 +31,7 @@ mod fragment;
 mod fuzz;
 mod http;
 mod http2;
+mod identify;
 mod interfaces;
 mod merge;
 mod offline_analysis;

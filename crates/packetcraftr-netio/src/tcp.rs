@@ -3,6 +3,7 @@
 
 mod connect;
 mod error;
+mod exchange;
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -12,6 +13,7 @@ use packetcraftr_core::budget::Deadline;
 
 pub use connect::{ConnectBudget, PendingConnect, start_connect};
 pub use error::Error;
+pub use exchange::exchange;
 
 /// Process-wide connections that may hold a worker or an open socket at once.
 pub const MAX_PENDING_CONNECTIONS: usize = crate::resources::WORKER_CAPACITY;
@@ -90,6 +92,7 @@ impl Provider for SystemProvider {
 
     fn connect(&self, endpoint: SocketAddr, deadline: &Deadline) -> Result<Self::Stream, Error> {
         let timeout = crate::deadline::remaining(deadline).map_err(Error::interrupted)?;
+        let endpoint = crate::bounded::socket_endpoint(endpoint);
         Ok(SystemStream(TcpStream::connect_timeout(
             &endpoint, timeout,
         )?))

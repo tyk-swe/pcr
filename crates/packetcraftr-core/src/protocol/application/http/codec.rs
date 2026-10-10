@@ -119,7 +119,8 @@ impl Head {
             }))
     }
 }
-/// Parses a complete header block. `None` means more bytes are required.
+/// Parses a complete header block and validates terminated lines as they arrive.
+/// `None` means the remaining bytes can still form a valid head.
 pub fn parse_head(input: &Bytes) -> Result<Option<(Head, usize)>, Error> {
     let end = memmem::find(&input[..input.len().min(MAX_HEADER_BYTES)], b"\r\n\r\n").map(|n| n + 4);
     let Some(end) = end else {
@@ -130,6 +131,16 @@ pub fn parse_head(input: &Bytes) -> Result<Option<(Head, usize)>, Error> {
             return Err(Error::Limit(Limit::StartLine));
         }
         validate_line_endings(input)?;
+        if let Some(first) = memmem::find(input, b"\r\n") {
+            if first > MAX_START_LINE {
+                return Err(Error::Limit(Limit::StartLine));
+            }
+            parse_start(&input.slice(..first))?;
+            // Leave the final unfinished line open, but reject syntax or
+            // count limits in every already-terminated header line.
+            let last = memmem::rfind(input, b"\r\n").expect("first terminator exists");
+            parse_headers(&input.slice(first + 2..last + 2))?;
+        }
         return Ok(None);
     };
     if end > MAX_HEADER_BYTES {

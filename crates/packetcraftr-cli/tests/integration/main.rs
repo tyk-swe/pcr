@@ -42,6 +42,7 @@ mod frame_selection_contracts;
 mod header_rewrite_contracts;
 mod http2_contracts;
 mod http_contracts;
+mod identify_contracts;
 mod ndjson_conformance;
 mod normalized_capture_contracts;
 mod offline_fuzz_contracts;

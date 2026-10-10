@@ -1,0 +1,41 @@
+manifest_version: 1
+
+dataset:
+  name: "project-sensitive-services"
+  kind: "service"
+  version: "1.0.0"
+  packaged_as: "bundled"
+  review_outcome: "accepted"
+
+source:
+  name: "PacketcraftR project-authored conservative sensitive-endpoint policy"
+  locator: "crates/packetcraftr/data/service-exclusions.json"
+  retrieved: "2026-10-09"
+  upstream_version: "none; project-authored"
+  license: "AGPL-3.0-only"
+  license_rationale: |
+    This is original project-authored policy under the repository license.
+    Factual port numbers and explanations were independently selected for
+    raw printer queues, industrial control, and out-of-band management. No
+    third-party scanner exclusions or database content were imported.
+
+transforms:
+  - step: "author"
+    detail: |
+      Expand printer queue ports 9100 through 9107 into explicit TCP/UDP
+      exclusions and declare conservative industrial-control and management
+      exclusions separately by transport. Keep reasons and maintenance/source
+      metadata on each entry. The policy is applied before probes are planned.
+
+maintenance:
+  maintainer: "tyk-swe"
+  refresh: |
+    Review endpoint risk and provenance for every change. Re-review source
+    terms if external source content is proposed. Bump this independent
+    version and the exclusions document version together; run exclusion and
+    workflow no-probe fixtures. This list is a conservative policy, not a
+    complete inventory of services that may be sensitive on other ports.
+
+coverage:
+  - fixture: "crates/packetcraftr-core/tests/integration/service_identification_contracts.rs"
+    covers: "Transport-specific printer, control, and management exclusions, ordinary ports, bounded parsing, duplicate and zero port rejection."

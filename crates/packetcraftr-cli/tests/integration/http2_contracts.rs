@@ -561,11 +561,27 @@ fn ndjson_bad_hdrs_emit_issue_single_conn() {
 #[test]
 fn published_http2_examples_match_real_cli() {
     let documents = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents");
-    let read_document = |name: &str| {
-        serde_json::from_str::<serde_json::Value>(
+    let read_current_family_document = |name: &str| {
+        let mut document = serde_json::from_str::<serde_json::Value>(
             &std::fs::read_to_string(documents.join(name)).expect("published example"),
         )
-        .expect("published example parses")
+        .expect("published example parses");
+        assert_eq!(
+            document["schema"],
+            packetcraftr_cli::output::contract::SCHEMA_V12
+        );
+        let mut frozen = document.clone();
+        frozen["schema"] = packetcraftr_cli::output::contract::SCHEMA_V10.into();
+        common::frozen_v10_schema_validator()
+            .validate(&frozen)
+            .expect("HTTP/2 payloads remain compatible with frozen output/v10");
+        // HTTP/2 payloads and envelope fields remain compatible. Only the
+        // current family's marker differs from the frozen released example.
+        document["schema"] = packetcraftr_cli::output::contract::SCHEMA_V12.into();
+        common::schema_validator()
+            .validate(&document)
+            .expect("the preserved HTTP/2 contract remains valid in output/v12");
+        document
     };
     let path = multiplexed();
     let aggregate = parse_json(&run_success(&[
@@ -574,7 +590,14 @@ fn published_http2_examples_match_real_cli() {
         "http2",
         common::path_text(&path),
     ]));
-    assert_eq!(aggregate, read_document("output-http2-success.json"));
+    assert_eq!(
+        aggregate["schema"],
+        packetcraftr_cli::output::contract::SCHEMA_V12
+    );
+    assert_eq!(
+        aggregate,
+        read_current_family_document("output-http2-success.json")
+    );
     let records = parse_ndjson(&run_success(&[
         "--output",
         "ndjson",
@@ -585,15 +608,15 @@ fn published_http2_examples_match_real_cli() {
         "output-http2-event.json",
         "output-http2-connection-event.json",
     ] {
-        let event = read_document(document);
+        let event = read_current_family_document(document);
         assert!(
             records.contains(&event),
-            "published {document} must appear verbatim in the stream"
+            "published {document} payload and envelope must be preserved in the current family"
         );
     }
     assert_eq!(
         records.last(),
-        Some(&read_document("output-http2-complete.json"))
+        Some(&read_current_family_document("output-http2-complete.json"))
     );
     let cutoff = parse_ndjson(&run_success(&[
         "--output",
@@ -603,11 +626,11 @@ fn published_http2_examples_match_real_cli() {
         "--stop-epoch",
         "0.008",
     ]));
-    let issue = read_document("output-http2-issue-event.json");
+    let issue = read_current_family_document("output-http2-issue-event.json");
     assert_eq!(issue["result"]["code"], "capture_end");
     assert!(
         cutoff.contains(&issue),
-        "published issue event must appear verbatim under the cutoff"
+        "published issue event payload and envelope must be preserved under the cutoff"
     );
     let failed = run(&[
         "--output",
@@ -620,7 +643,7 @@ fn published_http2_examples_match_real_cli() {
     assert_eq!(failed.status.code(), Some(6));
     assert_eq!(
         parse_json(&failed),
-        read_document("output-http2-error.json")
+        read_current_family_document("output-http2-error.json")
     );
 }
 

@@ -1,0 +1,110 @@
+{
+  "schema": "packetcraftr.service-exclusions/v1",
+  "name": "project-sensitive-services",
+  "version": "1.0.0",
+  "entries": [
+    {
+      "transport": "tcp",
+      "ports": [
+        9100,
+        9101,
+        9102,
+        9103,
+        9104,
+        9105,
+        9106,
+        9107
+      ],
+      "reason": "Raw printer queues may interpret unsolicited identification bytes as printable jobs.",
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "Project review of raw printer queue behavior",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    },
+    {
+      "transport": "udp",
+      "ports": [
+        9100,
+        9101,
+        9102,
+        9103,
+        9104,
+        9105,
+        9106,
+        9107
+      ],
+      "reason": "Raw printer queues may interpret unsolicited identification bytes as printable jobs.",
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "Project review of raw printer queue behavior",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    },
+    {
+      "transport": "tcp",
+      "ports": [
+        502,
+        20000,
+        44818
+      ],
+      "reason": "Industrial control endpoints should receive only explicitly reviewed protocol traffic.",
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "Project conservative policy for Modbus, DNP3, and EtherNet/IP endpoints",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    },
+    {
+      "transport": "udp",
+      "ports": [
+        502,
+        20000,
+        44818
+      ],
+      "reason": "Industrial control endpoints should receive only explicitly reviewed protocol traffic.",
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "Project conservative policy for Modbus, DNP3, and EtherNet/IP endpoints",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    },
+    {
+      "transport": "udp",
+      "ports": [
+        2222,
+        47808
+      ],
+      "reason": "Industrial control datagrams are excluded from unsolicited identification.",
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "Project conservative policy for EtherNet/IP I/O and BACnet endpoints",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    },
+    {
+      "transport": "udp",
+      "ports": [
+        623
+      ],
+      "reason": "Out-of-band management endpoints are excluded from unsolicited identification.",
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "Project conservative policy for IPMI/RMCP endpoints",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    }
+  ]
+}

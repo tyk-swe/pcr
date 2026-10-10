@@ -1,0 +1,59 @@
+{
+  "schema": "packetcraftr.service-identification-independent-audit/v1",
+  "revision": "99a9cf23216eb490892c0b6659e303d1a0b02c3d",
+  "status": "passed",
+  "reports": [
+    {
+      "path": "linux.json.gz",
+      "platform": "Linux",
+      "architecture": "x86_64",
+      "profiles": 5,
+      "cases": 360,
+      "status": "passed"
+    },
+    {
+      "path": "macos-arm64.json.gz",
+      "platform": "Darwin",
+      "architecture": "arm64",
+      "profiles": 5,
+      "cases": 360,
+      "status": "passed"
+    },
+    {
+      "path": "macos-x86_64.json.gz",
+      "platform": "Darwin",
+      "architecture": "x86_64",
+      "profiles": 5,
+      "cases": 360,
+      "status": "passed"
+    },
+    {
+      "path": "windows.json.gz",
+      "platform": "Windows",
+      "architecture": "AMD64",
+      "profiles": 5,
+      "cases": 360,
+      "status": "passed"
+    }
+  ],
+  "total_profiles": 20,
+  "total_cases": 1440,
+  "independently_checked": [
+    "exact fixture/profile/family/format inventory with no failed or empty cases",
+    "clean PR checkout revision, matching implementation tree and expected native platform/architecture",
+    "finite explicit loopback-only command flags and successful builds/exits",
+    "known/unknown/ambiguous/misleading/malformed/truncated outcomes",
+    "no exact uncertain versions; confidence and corpus/probe/field provenance",
+    "read-only wire requests, retained exact response prefixes and actual byte accounting",
+    "exclusions/intensity prevent retained I/O; explicit override provenance",
+    "deadline partial completion and bounded elapsed/timestamp evidence",
+    "inventory 1.4.0 known versions, misleading HTTP claim and separate nginx/Apache fields with distinct provenance indices"
+  ],
+  "residual_limits": [
+    "Artifacts retain result payloads, not raw output envelopes/NDJSON lines: cannot independently recheck output/v12 markers, event sequence, newline framing, or terminal uniqueness.",
+    "The temporary corpus documents and complete connection logs are not retained: cannot reconstruct every custom rule or prove unlogged provider calls solely from these reports.",
+    "Reports establish fixture behavior for these reviewed builds, not authentication, vulnerability truth, exhaustive remote protocol coverage, or TLS behavior."
+  ],
+  "checkout_revision": "103a1594fd8d94262404bd73b5aee94494877690",
+  "workflow_run": "https://github.com/tyk-swe/pcr/actions/runs/38009601998"
+}

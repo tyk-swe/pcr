@@ -6,8 +6,89 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Explicit, bounded `identify` workflow and CLI command for selected numeric
+  TCP/UDP endpoints, with SSH banner collection, HTTP HEAD and DNS probes on
+  any permitted port. Operation, host, connection and probe budgets preserve
+  partial evidence; reviewed sensitive-service exclusions apply before planning.
+- Independently versioned, core-only probe/match and exclusion documents with
+  bundled project-authored data and provenance. Output separates untrusted
+  claims, deterministic candidates, ordinal confidence and exact match evidence;
+  unknown and ambiguous outcomes do not assert exact versions.
+- DNS decoding recognizes CHAOS-class TXT metadata used by `version.bind`,
+  retaining its original wire class and bounded character-string values.
+
+### Fixed
+
+- Service-corpus schemas reject repeated probe/rule objects, matching indexes
+  candidate identities instead of repeatedly scanning them, and HTTP
+  identification collects the final response after informational heads.
+- Identification rejects terminated invalid HTTP lines before timeout, retains
+  DNS decoder resource limits as truncated evidence, and rejects replies with
+  the reserved DNS header bit instead of publishing protocol matches.
+- Refresh retained M8 reports from the integrated v12 implementation with all
+  inventory conditions and a 1,440-case independent audit; preserve the released
+  v10 clock/scope stats examples in v12 release packaging.
+- SSH collection stops at definitive preamble limits and preserves their precise
+  diagnostics and remaining budgets for later probes. Fragmented identification
+  after sixteen permitted preamble lines remains readable.
+- Service observations enforce the retained-field cap while parsing, reporting
+  excess valid fields as truncated rather than retaining oversized evidence.
+  The service-probe schema now enforces the parser's ASCII match-prefix and
+  version-delimiter contracts. Both service-document schemas reject Unicode
+  controls in shared text fields and require ASCII date digits. Shared text
+  limits count Unicode characters as published, with separate finite UTF-8 and
+  whole-document byte caps. The scanner-corpus schema requires its identification
+  scenario inventory.
+- Exclusion documents apply their 2,048-port bound and uniqueness per entry,
+  agreeing with the published schema while retaining the 64-entry and 64 KiB
+  limits. Overlapping entries preserve their separate reasons and provenance.
+  Output/v12 requires every identification candidate to reference at least one
+  observed field and validates outcome/candidate uncertainty, including erased
+  versions in ambiguous endpoint and probe results. Protocol-only candidates
+  cannot assert product versions.
+- Bounded TCP exchanges flush nonempty requests under the write deadline before
+  reading replies, including injected buffered streams. SSH identification stops
+  after its complete banner even when subsequent binary data shares the read.
+  A valid banner may follow all sixteen permitted pre-identification lines.
+  Newline-terminated malformed SSH lines and definitively invalid HTTP heads
+  also stop collection immediately;
+  HTTP and SSH parser resource limits remain truncated evidence rather than
+  malformed wire syntax.
+- Identification and connected UDP peer checks ignore irrelevant IPv6 scope IDs
+  while preserving exact addresses, ports, and link-local or multicast scopes.
+  TCP and UDP socket setup clears only those irrelevant scopes so they are also
+  accepted on Windows.
+  IPv4-mapped endpoints also use their native IPv4 socket family, with matching
+  canonical peer checks.
+  Exact destination allowlists compare mapped/native IPv4 identities in either
+  direction, including authorization of the connected peer before writes.
+- Identification policy declarations bound the selected probe traffic rather
+  than unused attempt allowances. Permanently unwritable probes are skipped so
+  later speak-first collection can run; exhausted shared budgets still stop I/O.
+  Duplicate endpoint aliases are rejected before
+  I/O, including irrelevant IPv6 scopes/flow information and mapped IPv4 aliases.
+  Cancellation while a TCP connection is pending remains cancelled evidence,
+  distinct from a connection timeout.
+- NDJSON identification checks worst-case endpoint publication size before I/O
+  against its 16 MiB record ceiling, including duplicated claims/candidates.
+  Larger bounded evidence remains available through aggregate JSON output.
+- Identification DNS transaction IDs start from system randomness and remain
+  distinct across an operation's probes and retries. Entropy failure preserves
+  its typed source and stops before any probe I/O.
+- Cross-platform identification acceptance now sends the inventory's separate
+  nginx and Apache fields for product ambiguity, and its declared known versions
+  and misleading HTTP claim, rather than substituting other fixture conditions.
+
 ### Breaking
 
+- Live identification no longer derives DNS transaction IDs from corpus
+  `id_base` values. Offline request reconstruction supplies an explicit ID.
+- Structured command output moves to `packetcraftr.output/v12`, preserving the
+  published v11 scan trace stage and adding explicit identification records and
+  terminal metadata. The v6 through v11 families and schemas remain frozen.
+  Consumers must accept v12 before reading current CLI output.
 - Structured command output moves to `packetcraftr.output/v11`, which adds the
   scan trace stage; the v6 through v10 families and schemas stay frozen.
   Raw scan results gain an optional `traceroute` member, NDJSON scans gain

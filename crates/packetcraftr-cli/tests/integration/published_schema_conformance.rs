@@ -47,20 +47,279 @@ fn scan_listing_accepts_port_zero_in_json_and_ndjson() {
 
 #[test]
 fn schema_accepts_based_source_reject_zero() {
-    let validator = schema_validator();
-    let mut document: Value = serde_json::from_str(include_str!(
+    let original: Value = serde_json::from_str(include_str!(
         "../../../../examples/documents/output-read-dissect-event.json"
     ))
     .expect("published read example must be JSON");
-    document["result"]["source_frame"] = json!(1);
-    validator
-        .validate(&document)
-        .unwrap_or_else(|error| panic!("source frame 1 is valid: {error}"));
-    document["result"]["source_frame"] = json!(0);
-    assert!(
-        validator.validate(&document).is_err(),
-        "source frame 0 is invalid"
-    );
+    for (validator, family) in [
+        (
+            common::frozen_v10_schema_validator(),
+            packetcraftr_cli::output::contract::SCHEMA_V10,
+        ),
+        (
+            schema_validator(),
+            packetcraftr_cli::output::contract::SCHEMA_V12,
+        ),
+    ] {
+        let mut document = original.clone();
+        document["schema"] = family.into();
+        document["result"]["source_frame"] = json!(1);
+        validator
+            .validate(&document)
+            .unwrap_or_else(|error| panic!("source frame 1 is valid in {family}: {error}"));
+        document["result"]["source_frame"] = json!(0);
+        assert!(
+            validator.validate(&document).is_err(),
+            "source frame 0 is invalid in {family}"
+        );
+    }
+}
+
+#[test]
+fn exclusion_entry_counts_and_overlaps_agree_with_runtime_validation() {
+    use packetcraftr_core::document::service_exclusions;
+
+    let schema = validator(include_str!(
+        "../../../../schemas/packetcraftr.service-exclusions.v1.schema.json"
+    ));
+    let original: Value = serde_json::from_str(include_str!(
+        "../../../packetcraftr/data/service-exclusions.json"
+    ))
+    .unwrap();
+    let entry = |transport: &str, ports: Vec<u16>| {
+        let mut entry = original["entries"][0].clone();
+        entry["transport"] = transport.into();
+        entry["ports"] = json!(ports);
+        entry
+    };
+    for (label, entries, expected) in [
+        ("empty override", vec![], true),
+        (
+            "overlapping reasons",
+            vec![entry("tcp", vec![9100]); 2],
+            true,
+        ),
+        (
+            "different transports",
+            vec![entry("tcp", vec![9100]), entry("udp", vec![9100])],
+            true,
+        ),
+        (
+            "2049 total ports",
+            vec![
+                entry("tcp", (1..=1024).collect()),
+                entry("tcp", (1025..=2049).collect()),
+            ],
+            true,
+        ),
+        (
+            "2048 ports per entry",
+            vec![entry("tcp", (1..=2048).collect())],
+            true,
+        ),
+        (
+            "2049 ports per entry",
+            vec![entry("tcp", (1..=2049).collect())],
+            false,
+        ),
+        (
+            "64 overlapping entries",
+            vec![entry("tcp", vec![9100]); 64],
+            true,
+        ),
+        ("65 entries", vec![entry("tcp", vec![9100]); 65], false),
+        (
+            "duplicate within entry",
+            vec![entry("tcp", vec![9100, 9100])],
+            false,
+        ),
+        ("zero port", vec![entry("tcp", vec![0])], false),
+    ] {
+        let mut document = original.clone();
+        document["entries"] = entries.into();
+        let bytes = serde_json::to_vec(&document).unwrap();
+        assert!(bytes.len() <= service_exclusions::MAX_EXCLUSIONS_BYTES);
+        assert_eq!(
+            service_exclusions::parse(&bytes).is_ok(),
+            expected,
+            "parser: {label}"
+        );
+        assert_eq!(schema.is_valid(&document), expected, "schema: {label}");
+    }
+}
+
+#[test]
+fn service_probe_ascii_fields_agree_with_runtime_validation() {
+    use packetcraftr_core::document::service_probes;
+
+    let schema = validator(include_str!(
+        "../../../../schemas/packetcraftr.service-probes.v1.schema.json"
+    ));
+    let original: Value = serde_json::from_str(include_str!(
+        "../../../packetcraftr/data/service-probes.json"
+    ))
+    .unwrap();
+    for character in (0..=127).map(char::from).chain(['é', '中', '🦀']) {
+        for version_stop in [false, true] {
+            let mut document = original.clone();
+            let expected = character.is_ascii() && (version_stop || !character.is_ascii_control());
+            if version_stop {
+                document["matches"][0]["version"]["stop_at"] = character.to_string().into();
+            } else {
+                document["matches"][0]["prefix"] = format!("OpenSSH_{character}").into();
+            }
+            assert_eq!(
+                service_probes::parse(&serde_json::to_vec(&document).unwrap()).is_ok(),
+                expected,
+                "parser: {character:?}, version stop: {version_stop}"
+            );
+            assert_eq!(
+                schema.is_valid(&document),
+                expected,
+                "schema: {character:?}, version stop: {version_stop}"
+            );
+        }
+    }
+}
+
+#[test]
+fn service_corpus_schemas_reject_repeated_objects() {
+    use packetcraftr_core::document::service_probes;
+    let schema = validator(include_str!(
+        "../../../../schemas/packetcraftr.service-probes.v1.schema.json"
+    ));
+    let original: Value = serde_json::from_str(include_str!(
+        "../../../packetcraftr/data/service-probes.json"
+    ))
+    .unwrap();
+    assert!(schema.is_valid(&original));
+    for name in ["probes", "matches"] {
+        let mut document = original.clone();
+        let repeated = document[name][0].clone();
+        document[name].as_array_mut().unwrap().push(repeated);
+        assert!(!schema.is_valid(&document), "schema: {name}");
+        assert!(service_probes::parse(&serde_json::to_vec(&document).unwrap()).is_err());
+    }
+}
+
+#[test]
+fn service_document_text_fields_agree_on_characters_and_length_units() {
+    use packetcraftr_core::document::{service_exclusions, service_probes};
+
+    for probes in [true, false] {
+        let (schema, original, mut paths) = if probes {
+            (
+                validator(include_str!(
+                    "../../../../schemas/packetcraftr.service-probes.v1.schema.json"
+                )),
+                serde_json::from_str::<Value>(include_str!(
+                    "../../../packetcraftr/data/service-probes.json"
+                ))
+                .unwrap(),
+                vec![
+                    "/version".to_owned(),
+                    "/matches/0/product".to_owned(),
+                    "/probes/0/read_only_review/reviewed_by".to_owned(),
+                    "/probes/0/read_only_review/statement".to_owned(),
+                ],
+            )
+        } else {
+            (
+                validator(include_str!(
+                    "../../../../schemas/packetcraftr.service-exclusions.v1.schema.json"
+                )),
+                serde_json::from_str::<Value>(include_str!(
+                    "../../../packetcraftr/data/service-exclusions.json"
+                ))
+                .unwrap(),
+                vec!["/version".to_owned(), "/entries/0/reason".to_owned()],
+            )
+        };
+        let metadata = if probes {
+            &["/probes/0/metadata", "/matches/0/metadata"][..]
+        } else {
+            &["/entries/0/metadata"][..]
+        };
+        for base in metadata {
+            for field in ["source", "reference", "license", "maintainer"] {
+                paths.push(format!("{base}/{field}"));
+            }
+        }
+        for path in paths {
+            for character in (0..=159)
+                .map(char::from)
+                .chain(['é', '中', '🦀', '\u{2028}', '\u{2029}'])
+            {
+                let mut document = original.clone();
+                *document.pointer_mut(&path).expect("text fixture field") =
+                    format!("text{character}").into();
+                let bytes = serde_json::to_vec(&document).unwrap();
+                let accepted = if probes {
+                    service_probes::parse(&bytes).is_ok()
+                } else {
+                    service_exclusions::parse(&bytes).is_ok()
+                };
+                assert_eq!(
+                    accepted,
+                    !character.is_control(),
+                    "parser: {path}, {character:?}"
+                );
+                assert_eq!(
+                    schema.is_valid(&document),
+                    accepted,
+                    "schema: {path}, {character:?}"
+                );
+            }
+            for character in ['a', 'é', '中', '🦀'] {
+                for length in [0, 1, 255, 256, 257, 511, 512, 513] {
+                    let mut document = original.clone();
+                    *document.pointer_mut(&path).expect("text fixture field") =
+                        character.to_string().repeat(length).into();
+                    let bytes = serde_json::to_vec(&document).unwrap();
+                    let accepted = if probes {
+                        service_probes::parse(&bytes).is_ok()
+                    } else {
+                        service_exclusions::parse(&bytes).is_ok()
+                    };
+                    assert_eq!(
+                        accepted,
+                        (1..=512).contains(&length),
+                        "{path}, {character:?} x {length}"
+                    );
+                    assert_eq!(
+                        schema.is_valid(&document),
+                        accepted,
+                        "schema: {path}, {character:?} x {length}"
+                    );
+                }
+            }
+        }
+        let mut dates: Vec<_> = metadata
+            .iter()
+            .map(|base| format!("{base}/updated"))
+            .collect();
+        if probes {
+            dates.push("/probes/0/read_only_review/reviewed".to_owned());
+        }
+        for path in dates {
+            for date in ["2026-10-09", "٢٠٢٦-١٠-٠٩", "२०२६-१०-०९"] {
+                let mut document = original.clone();
+                *document.pointer_mut(&path).expect("date fixture field") = date.into();
+                let bytes = serde_json::to_vec(&document).unwrap();
+                let accepted = if probes {
+                    service_probes::parse(&bytes).is_ok()
+                } else {
+                    service_exclusions::parse(&bytes).is_ok()
+                };
+                assert_eq!(accepted, date.is_ascii(), "parser date: {path}, {date}");
+                assert_eq!(
+                    schema.is_valid(&document),
+                    accepted,
+                    "schema date: {path}, {date}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -87,6 +346,12 @@ fn every_published_declared_schema() {
         "../../../../schemas/packetcraftr.udp-profiles.v1.schema.json"
     ));
     let rewrite_v2 = rewrite_v2_validator();
+    let service_probes_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.service-probes.v1.schema.json"
+    ));
+    let service_exclusions_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.service-exclusions.v1.schema.json"
+    ));
     let output_validator = schema_validator();
     let v6_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.output.v6.schema.json"
@@ -102,6 +367,10 @@ fn every_published_declared_schema() {
     ));
     let v10_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.output.v10.schema.json"
+    ));
+
+    let v11_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.output.v11.schema.json"
     ));
 
     let directory = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/documents");
@@ -130,7 +399,8 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v11" => output_validator,
+            "packetcraftr.output/v12" => output_validator,
+            "packetcraftr.output/v11" => &v11_validator,
             "packetcraftr.output/v10" => &v10_validator,
             "packetcraftr.output/v9" => &v9_validator,
             "packetcraftr.output/v8" => &v8_validator,
@@ -139,6 +409,8 @@ fn every_published_declared_schema() {
             "packetcraftr.packet/v2" => &packet_validator,
             "packetcraftr.rewrite/v2" => &rewrite_v2,
             "packetcraftr.udp-profiles/v1" => &udp_profiles_validator,
+            "packetcraftr.service-probes/v1" => &service_probes_validator,
+            "packetcraftr.service-exclusions/v1" => &service_exclusions_validator,
             other => panic!("{name} declares an unknown schema {other}"),
         };
         if let Err(error) = validator.validate(&document) {

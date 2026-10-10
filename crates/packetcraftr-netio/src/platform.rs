@@ -17,6 +17,7 @@ mod transmit;
 
 #[cfg(native_send)]
 pub(crate) use dispatch::interfaces_for_identity;
+pub(crate) use dispatch::receive_datagram;
 #[cfg(not(native_layer2))]
 pub(crate) use dispatch::unsupported;
 #[cfg(native_send)]

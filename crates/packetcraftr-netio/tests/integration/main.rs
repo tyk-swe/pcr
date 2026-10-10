@@ -10,6 +10,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod application_io_contracts;
 mod capture_group_contracts;
 mod deadline_contracts;
 mod error_contracts;

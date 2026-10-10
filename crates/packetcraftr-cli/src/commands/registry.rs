@@ -7,8 +7,8 @@ use serde::Serialize;
 use super::dispatch::Launch;
 use super::{
     Spec, build, capture, dissect, dns, dns_read, documentation, exchange, expert, export, follow,
-    fragment, fuzz, http, http2, interfaces, merge, plan, protocols, read, replay, rewrite, routes,
-    scan, send, stats, tls, topics, traceroute, verify_forwarding,
+    fragment, fuzz, http, http2, identify, interfaces, merge, plan, protocols, read, replay,
+    rewrite, routes, scan, send, stats, tls, topics, traceroute, verify_forwarding,
 };
 use crate::output::contract::Format;
 use crate::resources::Settings;
@@ -159,6 +159,9 @@ commands! {
     /// Run a structured network scan.
     #[command(after_long_help = scan::arguments::AFTER_LONG_HELP)]
     Scan(scan::arguments::Args) = "scan",
+    /// Explicitly identify services at selected numeric TCP or UDP endpoints.
+    #[command(after_long_help = identify::arguments::AFTER_LONG_HELP)]
+    Identify(identify::arguments::Args) = "identify",
     /// Compute aggregate statistics over a capture file.
     #[command(after_long_help = stats::arguments::AFTER_LONG_HELP)]
     Stats(stats::arguments::Args) = "stats",

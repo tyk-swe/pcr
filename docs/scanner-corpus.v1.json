@@ -1,6 +1,6 @@
 {
   "schema": "packetcraftr.scanner-corpus/v1",
-  "dataset_version": "1.3.0",
+  "dataset_version": "1.4.0",
   "families": ["ipv4", "ipv6"],
   "transports": ["tcp", "udp", "icmp"],
   "fixture_addresses": {
@@ -375,6 +375,178 @@
       "measurement_scope": "logical-byte boundary contract; charged bytes are not peak resident memory"
     }
   ],
+  "identification_scenarios": [
+    {
+      "id": "identification-known-ssh",
+      "condition": "A speak-first server on a nonstandard TCP port sends SSH-2.0-OpenSSH_9.8p1 with CRLF.",
+      "provision": "loopback_or_recording_provider",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "transport": "tcp",
+      "expected": {
+        "outcome": "matched",
+        "product": "OpenSSH",
+        "version": "9.8p1",
+        "confidence": "claim"
+      },
+      "measurement_scope": "Independent application evidence contract; a claim is not authenticated identity or a vulnerability finding."
+    },
+    {
+      "id": "identification-known-http",
+      "condition": "A nonstandard TCP port responds to the reviewed HEAD request with a complete HTTP response and Server: nginx/1.26.2.",
+      "provision": "loopback_or_recording_provider",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "transport": "tcp",
+      "expected": {
+        "outcome": "matched",
+        "product": "nginx",
+        "version": "1.26.2",
+        "confidence": "claim"
+      },
+      "measurement_scope": "Independent application evidence contract; a claim is not authenticated identity or a vulnerability finding."
+    },
+    {
+      "id": "identification-known-dns",
+      "condition": "A nonstandard UDP port echoes the nonrecursive root DNS question and its transaction ID in a valid response.",
+      "provision": "loopback_or_recording_provider",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "transport": "udp",
+      "expected": {
+        "outcome": "matched",
+        "product": "DNS service",
+        "version": null,
+        "confidence": "protocol"
+      },
+      "measurement_scope": "Independent application evidence contract; a claim is not authenticated identity or a vulnerability finding."
+    },
+    {
+      "id": "identification-unknown",
+      "condition": "Complete HTTP syntax contains an unfamiliar Server claim absent from the selected corpus.",
+      "provision": "protocol_fixture",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "transport": "tcp",
+      "expected": {
+        "outcome": "unknown",
+        "product": null,
+        "version": null,
+        "confidence": null
+      },
+      "measurement_scope": "Independent application evidence contract; a claim is not authenticated identity or a vulnerability finding."
+    },
+    {
+      "id": "identification-ambiguous-products",
+      "condition": "A complete HTTP response advertises both nginx/1.26.2 and Apache/2.4.62 in separate Server fields.",
+      "provision": "protocol_fixture",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "transport": "tcp",
+      "expected": {
+        "outcome": "ambiguous",
+        "product": null,
+        "version": null,
+        "confidence": "claim"
+      },
+      "measurement_scope": "Independent application evidence contract; a claim is not authenticated identity or a vulnerability finding."
+    },
+    {
+      "id": "identification-ambiguous-versions",
+      "condition": "A complete HTTP response advertises conflicting versions of nginx in separate Server fields.",
+      "provision": "protocol_fixture",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "transport": "tcp",
+      "expected": {
+        "outcome": "ambiguous",
+        "product": "nginx",
+        "version": null,
+        "confidence": "claim"
+      },
+      "measurement_scope": "Independent application evidence contract; a claim is not authenticated identity or a vulnerability finding."
+    },
+    {
+      "id": "identification-misleading-banner",
+      "condition": "A fixture unrelated to nginx deliberately sends a syntactically valid Server: nginx/99.0 response. The protocol claim is preserved without authenticating the fixture identity.",
+      "provision": "protocol_fixture",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "transport": "tcp",
+      "expected": {
+        "outcome": "matched",
+        "product": "nginx",
+        "version": "99.0",
+        "confidence": "claim"
+      },
+      "measurement_scope": "Independent application evidence contract; a claim is not authenticated identity or a vulnerability finding."
+    },
+    {
+      "id": "identification-malformed",
+      "condition": "A response beginning with HTTP/ contains a malformed response head.",
+      "provision": "protocol_fixture",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "transport": "tcp",
+      "expected": {
+        "outcome": "malformed",
+        "product": null,
+        "version": null,
+        "confidence": null
+      },
+      "measurement_scope": "Independent application evidence contract; a claim is not authenticated identity or a vulnerability finding."
+    },
+    {
+      "id": "identification-truncated",
+      "condition": "An otherwise recognized response ends at its explicit byte or time boundary before a complete record.",
+      "provision": "protocol_fixture",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "transport": "tcp",
+      "expected": {
+        "outcome": "truncated",
+        "product": null,
+        "version": null,
+        "confidence": null
+      },
+      "measurement_scope": "Independent application evidence contract; a claim is not authenticated identity or a vulnerability finding."
+    },
+    {
+      "id": "identification-excluded",
+      "condition": "An endpoint appears in the reviewed sensitive-service exclusion document.",
+      "provision": "loopback_or_recording_provider",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "transport": "tcp",
+      "expected": {
+        "outcome": "excluded",
+        "product": null,
+        "version": null,
+        "confidence": null
+      },
+      "measurement_scope": "Independent application evidence contract; a claim is not authenticated identity or a vulnerability finding."
+    }
+  ],
   "provenance": {
     "source": "Original PacketcraftR fixture specifications authored in this repository",
     "retrieved": "2026-10-06",
@@ -382,7 +554,7 @@
     "license": "AGPL-3.0-only",
     "license_rationale": "Original project-authored fixture specifications distributed under the repository license.",
     "maintainer": "tyk-swe",
-    "refresh": "Review condition and expected outcome together; increment dataset_version; rerun both IP families and all declared transports and windows.",
-    "coverage": "Six packet conditions across two IP families, three transports and two scheduling windows; native loopback connected/refused outcomes in both IP families; responsive/silent single-hop traceroutes for both IP families and all three transports; M4 numeric manifest/selection and native scoped host-local/two-link fixture conditions; eight M7 adaptive scheduling behavioral/resource contracts. M7 contracts are not relabeled as cross-platform native performance evidence."
+    "refresh": "Review condition and expected outcome together; increment dataset_version; rerun both IP families and all declared transports and windows. Review identification conditions against the read-only probe corpus; rerun deterministic parsing, workflow budgets and applicable ordinary-socket loopback profiles.",
+    "coverage": "Six packet conditions across two IP families, three transports and two scheduling windows; native loopback connected/refused outcomes in both IP families; responsive/silent single-hop traceroutes for both IP families and all three transports; M4 numeric manifest/selection and native scoped host-local/two-link fixture conditions; eight M7 adaptive scheduling behavioral/resource contracts. M7 contracts are not relabeled as cross-platform native performance evidence. Ten M8 application identification conditions cover known nonstandard services, unknown, ambiguous products and versions, deliberately misleading claims, malformed and truncated evidence, and exclusions."
   }
 }

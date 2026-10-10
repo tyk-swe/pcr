@@ -249,15 +249,19 @@ shell completion and `man1` directories of the platform.
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v2`](schemas/packetcraftr.packet.v2.schema.json)
-- Structured command output: [`packetcraftr.output/v11`](schemas/packetcraftr.output.v11.schema.json)
+- Structured command output: [`packetcraftr.output/v12`](schemas/packetcraftr.output.v12.schema.json)
   (the frozen [`v6`](schemas/packetcraftr.output.v6.schema.json),
   [`v7`](schemas/packetcraftr.output.v7.schema.json),
   [`v8`](schemas/packetcraftr.output.v8.schema.json),
-  [`v9`](schemas/packetcraftr.output.v9.schema.json), and
-  [`v10`](schemas/packetcraftr.output.v10.schema.json) families are retained
+  [`v9`](schemas/packetcraftr.output.v9.schema.json),
+  [`v10`](schemas/packetcraftr.output.v10.schema.json), and
+  [`v11`](schemas/packetcraftr.output.v11.schema.json) families are retained
   for previously published evidence)
 - Capture rewrite rules: [`packetcraftr.rewrite/v2`](schemas/packetcraftr.rewrite.v2.schema.json)
 - UDP scan profiles: [`packetcraftr.udp-profiles/v1`](schemas/packetcraftr.udp-profiles.v1.schema.json)
+- Service identification: [probe and match corpus](schemas/packetcraftr.service-probes.v1.schema.json)
+  and [sensitive-service exclusions](schemas/packetcraftr.service-exclusions.v1.schema.json),
+  independently versioned with reviewed data provenance
 - Bundled scanner data: the [port catalog](crates/packetcraftr/data/port-catalog.json)
   (`packetcraftr.port-catalog/v1`) and
   [curated UDP payloads](crates/packetcraftr/data/udp-payloads.json), each with
@@ -495,6 +499,7 @@ packetcraftr dns 192.0.2.53 example.test --type a
 packetcraftr dns 127.0.0.1 example.test --tcp
 packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
 packetcraftr scan 192.0.2.10 --targets-file targets.txt --exclude-file skip.txt
+packetcraftr identify 127.0.0.1:8080 --transport tcp --intensity 2
 printf '192.0.2.10\n192.0.2.11\n' | packetcraftr scan --targets-file -
 packetcraftr scan --list 192.0.2.0/30 10.0.0.1 --output json
 packetcraftr scan 192.0.2.0/28 --discovery only --discovery-probes icmp,neighbor
@@ -529,6 +534,12 @@ packetcraftr capture --interface 1 --write trace.pcapng --rotate-bytes 1048576 -
   saw it answer (or `--traceroute-strategy`), and `--traceroute-reuse-max-age-ms`
   lets a host reuse hops an earlier host observed, reported apart from probed
   hops with their source and age; it needs the raw method.
+- `identify` explicitly probes selected numeric TCP/UDP endpoints, including
+  nonstandard ports, using reviewed SSH banner, HTTP HEAD and DNS requests.
+  Ordinary sockets work in every build profile. [Identification controls](docs/service-identification.md)
+  bound operation, host, connection and probe work and apply sensitive-service
+  exclusions before planning. Observed product/version fields are unauthenticated
+  claims, and matched versions are never vulnerability findings.
 - `traceroute --payload-size`, `--dont-fragment` (IPv4 only), and `--dscp` shape
   the probes, `exchange --stop-when-answered` ends the response window once every
   request has a retained response, and `replay --max-gap-ms` clamps each

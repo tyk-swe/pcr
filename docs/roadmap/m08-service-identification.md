@@ -2,13 +2,13 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M7][m7] | [M9][m9] |
+| Complete | [M7][m7] | [M9][m9] |
 
 A scan says a port answered. It does not say what is listening. PacketcraftR's
-closest existing feature is the UDP profile, which sends a configured request
-and reports whether configured checks matched; `confirmed` there means the
-checks matched, not that a product was identified. The workflow crate exposes
-no identification engine, corpus, or result record.
+UDP profiles send configured requests and report whether configured checks
+matched; `confirmed` means those checks matched, not that a product was
+identified. Identification adds a separate workflow whose claims remain
+distinct from scan state.
 
 This milestone adds read-only identification of the application behind an
 endpoint, as an explicit operation with its own budgets, and reports what was
@@ -96,46 +96,63 @@ Unknown and ambiguous cases are results in their own right.
 
 | Change | Start here |
 | --- | --- |
-| Identification workflow | A new workflow module beside [`scan`][scan-limits], exported from [`lib.rs`][workflow-surface] |
-| Bounded streams | netio [`tcp.rs`][tcp-provider] |
-| Probe and match documents | core [`document/`][core-document], with [`udp_profiles.rs`][udp-document] as the precedent |
+| Identification workflow | workflow [`identify.rs`][identify-workflow], exported from [`lib.rs`][workflow-surface] |
+| Bounded socket exchanges | netio [`bounded.rs`][bounded-io], [`tcp.rs`][tcp-provider], and [`udp.rs`][udp-provider] |
+| Probe, match and exclusion documents | core [`service_probes.rs`][probe-document] and [`service_exclusions.rs`][exclusion-document], reusing [`udp_profiles.rs`][udp-document] |
 | Protocol parsing | core [`protocol/application/`][core-application] |
 | UDP building blocks | [`scan/profile.rs`][udp-profiles] |
-| Records and contract | [`output/scan.rs`][scan-output], [`output/contract.rs`][output-contract], `schemas/` |
+| Records and contract | [`output/identify.rs`][identify-output], [`output/contract.rs`][output-contract], output/v11 and service document schemas |
 
-## Decisions to settle
+## Recorded decisions
 
-1. Whether identification is a stage of `scan` or a separate command
-   (recommended: a stage that runs only when requested, over endpoints the scan
-   reported, so one authorization and budget cover both).
-2. The match language (recommended: start with anchored literals and bounded
-   field extraction over parsed protocol structures; add a pattern language
-   only with a linear-time engine and a dependency review).
-3. How confidence is expressed (recommended: ordinal levels defined by which
-   evidence supports the candidate, evaluated in [M9][m9-evaluation], not a
-   probability nobody has measured).
-4. The default sensitive-service exclusions (recommended: a reviewed list
-   shipped as data under the [M1 data policy][m1-data], overridable only
-   explicitly).
-5. What qualifies a probe as read-only (recommended: a per-probe review record
-   stating that it does not authenticate, change state, or follow redirects).
+1. Identification is a separate, explicitly invoked `identify` command and
+   `Client::identify` operation over selected numeric endpoints. The library
+   offers `Endpoint::from_scan` to select reported TCP open and UDP
+   open/open-or-filtered endpoints. Each invocation declares and authorizes its
+   own budgets; ordinary scans do not start identification.
+2. Matching uses anchored ASCII literals over bounded parsed fields, with
+   bounded version-token extraction. The request language is closed to SSH
+   banner reads, HTTP HEAD and reviewed nonrecursive DNS questions. No regex
+   engine or arbitrary operator request bytes are introduced.
+3. Confidence is ordinal: `claim` for an unauthenticated software claim and
+   `protocol` for protocol evidence. These are not measured probabilities.
+   Protocol classification does not conflict with a more specific product claim.
+   Coverage and calibration expansion belongs to [M9][m9-evaluation].
+4. Sensitive-service exclusions are independently versioned reviewed data,
+   applied before planning. `--ignore-exclusions` explicitly overrides only that
+   data; authorization and resource limits still apply.
+5. Every probe carries a read-only review record and source/maintenance metadata.
+   Core validates the reviewed request forms independently of transport I/O.
+
+See the [user guide](../service-identification.md),
+[independent fixture inventory](../scanner-corpus.v1.json), and
+[implementation evidence](evidence/m08/README.md). Reviewed implementation and
+fixtures `928ad8d555fe8b34abd144083612b54ace0fef1f` passed all 1,440 acceptance
+case-runs across five profiles on Linux, macOS ARM/Intel, and Windows on
+2026-10-09. The evidence index retains the original reports and links each
+criterion to its source contracts.
+
+M7's implementation prerequisites provide bounded connect resources,
+cancellation and deadline composition. Its broader native and performance
+acceptance remains open. M8 closes its own ground-truth and ordinary-socket
+runtime gates; broader M2/M3 inventories and M9 held-out quality remain open.
 
 ## Exit criteria
 
-- [ ] Known services on nonstandard ports, unknown services, ambiguous matches,
+- [x] Known services on nonstandard ports, unknown services, ambiguous matches,
       misleading banners, truncation, and malformed replies each have an
       explicit fixture outcome.
-- [ ] Unknown and ambiguous cases never become exact versions.
-- [ ] Reauthorization covers the final numeric endpoint of every connection and
+- [x] Unknown and ambiguous cases never become exact versions.
+- [x] Reauthorization covers the final numeric endpoint of every connection and
       datagram.
-- [ ] Hidden resolution, redirects, authentication attempts, and extra probing
+- [x] Hidden resolution, redirects, authentication attempts, and extra probing
       cannot bypass the declared policy and budget.
-- [ ] Identification runs only as an explicit operation.
-- [ ] A given corpus version reproduces the same matching results for the same
+- [x] Identification runs only as an explicit operation.
+- [x] A given corpus version reproduces the same matching results for the same
       evidence.
-- [ ] No output or document presents an identified version as a vulnerability
+- [x] No output or document presents an identified version as a vulnerability
       finding.
-- [ ] Applicable portable and native behavior passes on Linux, macOS, and
+- [x] Applicable portable and native behavior passes on Linux, macOS, and
       Windows, and contract changes follow the
       [compatibility policy][compatibility].
 
@@ -149,6 +166,12 @@ Unknown and ambiguous cases are results in their own right.
 [scan-limits]: ../../crates/packetcraftr/src/scan.rs
 [udp-profiles]: ../../crates/packetcraftr/src/scan/profile.rs
 [tcp-provider]: ../../crates/packetcraftr-netio/src/tcp.rs
+[udp-provider]: ../../crates/packetcraftr-netio/src/udp.rs
+[bounded-io]: ../../crates/packetcraftr-netio/src/bounded.rs
+[identify-workflow]: ../../crates/packetcraftr/src/identify.rs
+[probe-document]: ../../crates/packetcraftr-core/src/document/service_probes.rs
+[exclusion-document]: ../../crates/packetcraftr-core/src/document/service_exclusions.rs
+[identify-output]: ../../crates/packetcraftr-cli/src/output/identify.rs
 [core-document]: ../../crates/packetcraftr-core/src/document.rs
 [udp-document]: ../../crates/packetcraftr-core/src/document/udp_profiles.rs
 [core-application]: ../../crates/packetcraftr-core/src/protocol/application.rs

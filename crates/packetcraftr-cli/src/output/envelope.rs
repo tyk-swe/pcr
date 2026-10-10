@@ -8,7 +8,7 @@ use serde::Serialize;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
-use super::contract::{Command, Mode, SCHEMA_V11};
+use super::contract::{Command, Mode, SCHEMA_V12};
 
 pub use packetcraftr::Stats;
 
@@ -160,7 +160,7 @@ impl<T> Envelope<T> {
             stats,
         } = published;
         Self {
-            schema: SCHEMA_V11,
+            schema: SCHEMA_V12,
             command: Some(command),
             mode: Mode::Aggregate,
             sequence: None,
@@ -180,7 +180,7 @@ impl<T> Envelope<T> {
         diagnostics: Vec<Diagnostic>,
     ) -> Self {
         Self {
-            schema: SCHEMA_V11,
+            schema: SCHEMA_V12,
             command: Some(command),
             mode: Mode::Stream,
             sequence: Some(sequence),
@@ -208,7 +208,7 @@ impl<T> Envelope<T> {
 impl Envelope<()> {
     pub fn error(command: Option<Command>, error: Error) -> Self {
         Self {
-            schema: SCHEMA_V11,
+            schema: SCHEMA_V12,
             command,
             mode: Mode::Aggregate,
             sequence: None,
@@ -222,7 +222,7 @@ impl Envelope<()> {
 
     pub(super) fn error_record(command: Option<Command>, sequence: u64, error: Error) -> Self {
         Self {
-            schema: SCHEMA_V11,
+            schema: SCHEMA_V12,
             command,
             mode: Mode::Stream,
             sequence: Some(sequence),

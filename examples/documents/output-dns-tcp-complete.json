@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v11",
+  "schema": "packetcraftr.output/v12",
   "command": "dns",
   "mode": "stream",
   "status": "success",

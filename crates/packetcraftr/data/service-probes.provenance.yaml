@@ -1,0 +1,50 @@
+manifest_version: 1
+
+dataset:
+  name: "project-service-probes"
+  kind: "service"
+  version: "1.0.0"
+  packaged_as: "bundled"
+  review_outcome: "accepted"
+
+source:
+  name: "PacketcraftR project-authored probes and literal claim fixtures"
+  locator: "crates/packetcraftr/data/service-probes.json"
+  retrieved: "2026-10-09"
+  upstream_version: "none; project-authored"
+  license: "AGPL-3.0-only"
+  license_rationale: |
+    The project authored every request, match literal, and fixture under its
+    own license. Requests independently encode protocol constants from RFC
+    4253 section 4.2, RFC 9110 section 9.3.2, RFC 1035 section 4.1.2, and RFC
+    4892 section 2. Product names are factual labels in original fixtures;
+    no third-party probe or match database was copied or transformed. Nmap
+    content remains excluded by docs/scanner-data-policy.md.
+
+transforms:
+  - step: "author"
+    detail: |
+      Encoded a closed probe set (passive SSH identification, HTTP/1.0 HEAD,
+      nonrecursive root IN A, and version.bind CH TXT). Project-authored
+      anchored literals match parsed software claims, and bounded extraction
+      retains only ASCII version tokens. Each entry records its own source,
+      license, maintainer, update date, and each probe's read-only review.
+
+maintenance:
+  maintainer: "tyk-swe"
+  refresh: |
+    Review each proposed request against the cited standard and its read-only
+    behavior. Re-review source redistribution terms and entry provenance;
+    update entry dates and bump this independent version and the corpus
+    version together. Run core identification contracts and workflow fixtures;
+    update schemas and examples if document syntax changes. New signatures
+    require original, declared fixtures and retain unauthenticated confidence.
+
+coverage:
+  - fixture: "crates/packetcraftr-core/tests/integration/service_identification_contracts.rs"
+    covers: |
+      SSH OpenSSH claim, HTTP nginx/Apache claims, DNS response and BIND TXT
+      claim; unknown and ambiguous identities, competing versions, misleading
+      banners, malformed replies, truncation, bounded extraction, and exact
+      deterministic reproduction. Product/version coverage is limited to these
+      original fixtures, with no accuracy or vulnerability claim.

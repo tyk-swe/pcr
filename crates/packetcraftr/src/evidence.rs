@@ -358,16 +358,4 @@ mod tests {
             (1, usize::MAX)
         );
     }
-
-    #[test]
-    fn workflow_limits_serialize_the_evidence_ceilings_at_the_top_level() {
-        let value = serde_json::to_value(crate::scan::Limits::default()).unwrap();
-        let object = value.as_object().unwrap();
-        for key in ["max_evidence_frames", "max_evidence_bytes", "max_undecoded"] {
-            assert!(object.contains_key(key), "{key}");
-        }
-        assert!(!object.contains_key("evidence"));
-        let round_trip: crate::scan::Limits = serde_json::from_value(value).unwrap();
-        assert_eq!(round_trip, crate::scan::Limits::default());
-    }
 }

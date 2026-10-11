@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+mod limits_serde;
+
 use packetcraftr_netio::deadline::MAX_WAIT;
 
 use crate::execution::limits::{check_limits, check_rate, duration_violation};
@@ -19,10 +21,10 @@ use crate::traceroute::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "limits_serde::Limits", into = "limits_serde::Limits")]
 pub struct Limits {
     pub max_probes: usize,
     pub max_duration: Duration,
-    #[serde(flatten)]
     pub evidence: crate::evidence::Limits,
 }
 

@@ -15,8 +15,8 @@ for remaining acceptance gates and revision-bound evidence.
 
 - The evidence ceilings of `scan::Limits`, `traceroute::Limits`, and
   `dns::Limits` now live in `evidence: packetcraftr::evidence::Limits
-  { max_frames, max_bytes, max_undecoded }`; serialized field names are
-  unchanged.
+  { max_frames, max_bytes, max_undecoded }`; the existing Serde struct
+  representation is preserved for both JSON and binary formats.
 - Current packet documents use `packetcraftr.packet/v2`; machine output uses
   `packetcraftr.output/v12`. Consumers must explicitly support these families.
   Output v6–v11 schemas and published evidence stay frozen; see
@@ -110,6 +110,8 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Fixed
 
+- Update the YAML parser to enforce typed-deserialization resource budgets
+  (RUSTSEC-2026-0333), retaining the document layer's independent limits.
 - Scan follow-ups share the client's monotonic deadline and propagate reverse-DNS
   cancellation and pacing-clock failures before sending further queries.
 - Reverse-DNS batches narrow each question's capture settings to its share of

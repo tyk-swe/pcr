@@ -110,6 +110,8 @@ for remaining acceptance gates and revision-bound evidence.
   cancellation and pacing-clock failures before sending further queries.
 - Reverse-DNS batches narrow each question's capture settings to its share of
   the evidence budget, so multi-host lookups retain valid capture limits.
+- Scan follow-ups preserve configured neighbor bounds and authorize DNS neighbor
+  discovery after connect scans. Invalid DNS capture settings fail before scanning.
 - Preserve authorization before active discovery and validate every route-bearing
   address and final wire image. Reject malformed routing/VLAN state, invalid
   limits, unsupported socket route overrides, and impossible collection budgets

@@ -166,7 +166,15 @@ where
             .as_ref()
             .map(|reverse| Lookup::new(reverse, &scan))
             .transpose()?;
-        let client = self.with_parent_deadline(self.deadline(scan.limits.max_duration));
+        let mut client = self.with_parent_deadline(self.deadline(scan.limits.max_duration));
+        if reverse_dns
+            .as_ref()
+            .is_some_and(|reverse| reverse.transport != crate::dns::TransportMode::Tcp)
+        {
+            client = client
+                .with_neighbor_request_authorization()
+                .with_scan_neighbors(&scan)?;
+        }
         let started = client.now();
         // Probe events stream as they settle; the tracker keeps only what
         // each endpoint's inference needs.

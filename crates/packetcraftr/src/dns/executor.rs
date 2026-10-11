@@ -85,31 +85,39 @@ const RESULT_FAULT: ExecutorFault = ExecutorFault::new(
     "treat the DNS operation as incomplete because client evidence was inconsistent",
 );
 
-impl<P: PacketProviders, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
-    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
-        let max_responses = exchange.limits.max_evidence_frames;
-        if max_responses == 0 {
-            return Err(EXECUTOR_FAULT.invalid("DNS exchange must retain at least one response"));
-        }
-        if max_responses > self.collection.max_responses {
-            return Err(EXECUTOR_FAULT.invalid(format!(
-                "DNS exchange requests {} responses but the client is bounded to {}",
-                max_responses, self.collection.max_responses
-            )));
-        }
-        // Captured evidence must fit the request's bounds; refuse before any I/O, not after.
-        let capture = &self.collection.capture;
-        if capture.max_frames > max_responses
-            || capture.max_bytes > exchange.limits.max_evidence_bytes
-        {
-            return Err(EXECUTOR_FAULT.invalid(format!(
+/// Checks the capture boundary without preparing a route or doing any I/O.
+pub(super) fn validate_capture(
+    limits: &Limits,
+    collection: &crate::exchange::Collection,
+) -> Result<(), BoundaryError> {
+    let max_responses = limits.max_evidence_frames;
+    if max_responses == 0 {
+        return Err(EXECUTOR_FAULT.invalid("DNS exchange must retain at least one response"));
+    }
+    if max_responses > collection.max_responses {
+        return Err(EXECUTOR_FAULT.invalid(format!(
+            "DNS exchange requests {} responses but the client is bounded to {}",
+            max_responses, collection.max_responses
+        )));
+    }
+    // Captured evidence must fit the request's bounds; refuse before any I/O, not after.
+    let capture = &collection.capture;
+    if capture.max_frames > max_responses || capture.max_bytes > limits.max_evidence_bytes {
+        return Err(EXECUTOR_FAULT.invalid(format!(
                 "the client captures up to {} frames and {} bytes but the DNS exchange retains at most {} frames and {} bytes",
                 capture.max_frames,
                 capture.max_bytes,
                 max_responses,
-                exchange.limits.max_evidence_bytes
+                limits.max_evidence_bytes
             )));
-        }
+    }
+    collection.validate().map_err(BoundaryError::from_error)
+}
+
+impl<P: PacketProviders, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
+        validate_capture(&exchange.limits, &self.collection)?;
+        let max_responses = exchange.limits.max_evidence_frames;
         let registry = std::sync::Arc::clone(self.client.registry());
         let stop_probe = exchange.probe.clone();
         let stop_limits = exchange.limits.message;

@@ -23,6 +23,7 @@ use packetcraftr::traceroute::hosts::{self, Strategy};
 use packetcraftr::{Client, Stats};
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_netio::link::Mode;
+use packetcraftr_netio::{capture, transmit};
 
 type Providers = common::FakeProviders<Routes, Io>;
 
@@ -460,4 +461,221 @@ fn reverse_dns_questions_send_within_their_shared_capture_limits() {
     assert!(lookups.lookups.iter().all(Option::is_some));
     assert_eq!(lookups.stats.unwrap().packets_attempted, 2);
     assert_eq!(state.lock().unwrap().sends, 4);
+}
+
+#[test]
+fn connect_lookups_authorize_and_bound_neighbor_discovery() {
+    let router = common::discovery::family_addresses(true)[2];
+    for allow_router in [false, true] {
+        let steps = common::Steps::default();
+        let mut policy = Policy {
+            allowed_destinations: vec![
+                host(7).to_string().parse().unwrap(),
+                host(53).to_string().parse().unwrap(),
+            ],
+            ..Policy::default()
+        };
+        if allow_router {
+            policy
+                .allowed_destinations
+                .push(router.to_string().parse().unwrap());
+        }
+        let client = Client::new(
+            packetcraftr_core::protocol::builtin::registry(),
+            policy,
+            common::providers(
+                Layer2Routes { routed: true },
+                common::RecordingTransmit::silent(steps.clone()),
+            ),
+        )
+        .with_neighbor_options(packetcraftr::neighbor::Options {
+            attempt_timeout: Duration::from_millis(2),
+            ..Default::default()
+        })
+        .unwrap();
+        let mut scan = scan_request(&[7]);
+        scan.route = Default::default();
+        scan.timeout = Duration::from_millis(10);
+        let report = client
+            .scan_connect_with_followups(
+                followup::ConnectRequest {
+                    scan,
+                    reverse_dns: Some(reverse_dns()),
+                },
+                |_: scan::connect::Event| Ok(()),
+            )
+            .unwrap();
+        assert_eq!(report.scan.stats.connections_attempted, 1);
+        let actual = steps.take();
+        let expected = if allow_router {
+            vec![common::Step::Neighbor(router)]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(actual, expected, "allow_router={allow_router}");
+    }
+}
+
+#[test]
+fn invalid_dns_capture_settings_are_rejected_before_connecting() {
+    for zero_responses in [false, true] {
+        let steps = common::Steps::default();
+        let mut providers = common::providers(common::FixedRoutes, common::NeverTransmit);
+        providers.tcp.steps = steps.clone();
+        let client = Client::new(
+            packetcraftr_core::protocol::builtin::registry(),
+            Policy::default(),
+            providers,
+        );
+        let mut scan = scan_request(&[7]);
+        scan.route = Default::default();
+        if zero_responses {
+            scan.collection.max_responses = 0;
+        } else {
+            scan.collection.capture.max_bytes = scan.collection.capture.snap_length - 1;
+        }
+        let error = client
+            .scan_connect_with_followups(
+                followup::ConnectRequest {
+                    scan,
+                    reverse_dns: Some(reverse_dns()),
+                },
+                |_: scan::connect::Event| Ok(()),
+            )
+            .expect_err("an unusable DNS stage must be rejected before scanning");
+        assert!(matches!(error, followup::Error::Dns(_)), "{error:?}");
+        assert!(steps.take().is_empty(), "no connect probe was attempted");
+    }
+}
+
+#[test]
+fn tcp_reverse_lookups_do_not_require_capture_settings() {
+    let steps = common::Steps::default();
+    let mut providers = common::providers(common::FixedRoutes, common::NeverTransmit);
+    providers.tcp.steps = steps.clone();
+    let client = Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        Policy::default(),
+        providers,
+    );
+    let mut scan = scan_request(&[7]);
+    scan.route = Default::default();
+    scan.collection.max_responses = 0;
+    scan.collection.capture.max_bytes = 1;
+    let mut reverse = reverse_dns();
+    reverse.transport = dns::TransportMode::Tcp;
+    client
+        .scan_connect_with_followups(
+            followup::ConnectRequest {
+                scan,
+                reverse_dns: Some(reverse),
+            },
+            |_: scan::connect::Event| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(
+        steps.take(),
+        vec![
+            common::Step::Connect((host(7), 80).into()),
+            common::Step::Connect((host(53), dns::DEFAULT_SERVER_PORT).into()),
+        ]
+    );
+}
+
+#[derive(Clone, Default)]
+struct RecordingNeighborBounds {
+    link: common::RecordingTransmit,
+    active: Arc<Mutex<Option<capture::Limits>>>,
+    observed: Arc<Mutex<Vec<capture::Limits>>>,
+}
+
+#[derive(Clone, Copy)]
+struct Layer2Routes {
+    routed: bool,
+}
+
+impl packetcraftr_netio::route::Provider for Layer2Routes {
+    type Error = Infallible;
+
+    fn lookup_with_preferences(
+        &self,
+        destination: std::net::IpAddr,
+        interface: Option<&packetcraftr_netio::interface::Id>,
+        source: Option<std::net::IpAddr>,
+        deadline: &Deadline,
+    ) -> Result<packetcraftr_netio::route::Decision, Self::Error> {
+        let mut decision = common::discovery::Routes {
+            routed: self.routed,
+            layer2: true,
+        }
+        .lookup_with_preferences(destination, interface, source, deadline)?;
+        decision.capability = packetcraftr_netio::link::Capability::Layer2;
+        Ok(decision)
+    }
+}
+
+impl capture::Provider for RecordingNeighborBounds {
+    type Capture = common::ReplyCapture;
+
+    fn arm_capture(
+        &self,
+        request: &capture::Request,
+        deadline: &Deadline,
+    ) -> Result<Self::Capture, packetcraftr_netio::Error> {
+        *self.active.lock().unwrap() = Some(request.limits);
+        self.link.arm_capture(request, deadline)
+    }
+}
+
+impl transmit::Provider for RecordingNeighborBounds {
+    fn send(
+        &self,
+        frame: transmit::Outbound<'_>,
+    ) -> Result<transmit::Report, packetcraftr_netio::Error> {
+        // The injected IPv4 fixture uses untagged Ethernet ARP requests.
+        if frame.bytes().get(12..14) == Some(&[0x08, 0x06]) {
+            let limits = self
+                .active
+                .lock()
+                .unwrap()
+                .expect("capture armed before sending");
+            self.observed.lock().unwrap().push(limits);
+        }
+        self.link.send(frame)
+    }
+}
+
+#[test]
+fn trace_followups_preserve_configured_neighbor_capture_bounds() {
+    let link = RecordingNeighborBounds::default();
+    let options = packetcraftr::neighbor::Options {
+        max_capture_queue_frames: 2,
+        max_captured_bytes: 256,
+        snap_length: 128,
+        ..Default::default()
+    };
+    let client = Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        Policy::default(),
+        common::providers(Layer2Routes { routed: false }, link.clone()),
+    )
+    .with_neighbor_options(options.clone())
+    .unwrap();
+    let mut request = request(&[7]);
+    request.reverse_dns = None;
+    request.scan.route = Default::default();
+    request.scan.timeout = Duration::from_millis(10);
+    request.trace.as_mut().unwrap().max_hops = 1;
+    client
+        .scan_with_followups(request, |_: Event| Ok(()))
+        .unwrap();
+    let captures = link.observed.lock().unwrap();
+    assert_eq!(
+        captures.len(),
+        2,
+        "scan and trace use separate neighbor caches"
+    );
+    for capture in captures.iter() {
+        assert_eq!(*capture, options.capture_limits());
+    }
 }

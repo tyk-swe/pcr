@@ -65,6 +65,16 @@ pub(crate) struct State {
 }
 
 impl State {
+    /// Fresh caches under the same validated resolver configuration.
+    pub(crate) fn fresh(&self) -> Self {
+        Self {
+            options: self.options.clone(),
+            cache: Arc::new(NeighborCache::default()),
+            operation: None,
+            operation_entries: 0,
+        }
+    }
+
     pub(crate) fn try_new(options: Options) -> Result<Self, Error> {
         options.validate()?;
         Ok(Self {

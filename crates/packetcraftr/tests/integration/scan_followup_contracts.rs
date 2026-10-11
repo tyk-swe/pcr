@@ -318,6 +318,7 @@ fn the_shared_deadline_counts_setup_on_the_clients_clock() {
 struct FollowupClock {
     scan_finished: Arc<AtomicBool>,
     cancel: Option<Cancellation>,
+    fail: bool,
 }
 
 impl Clock for FollowupClock {
@@ -327,9 +328,12 @@ impl Clock for FollowupClock {
         if self.scan_finished.load(Ordering::SeqCst) {
             if let Some(cancel) = &self.cancel {
                 cancel.cancel();
-                return Ok(());
             }
-            return Err(io::Error::other("follow-up pacing failed"));
+            return if self.fail {
+                Err(io::Error::other("follow-up pacing failed"))
+            } else {
+                Ok(())
+            };
         }
         let Ok(()) = SystemClock.sleep(delay, deadline);
         Ok(())
@@ -339,13 +343,14 @@ impl Clock for FollowupClock {
 #[test]
 fn reverse_dns_pacing_failures_stop_raw_and_connect_followups() {
     for connect in [false, true] {
-        for cancel in [false, true] {
+        for (cancel, fail) in [(false, true), (true, false), (true, true)] {
             let state = network(&[7]);
             let cancellation = Cancellation::default();
             let scan_finished = Arc::new(AtomicBool::new(false));
             let clock = FollowupClock {
                 scan_finished: Arc::clone(&scan_finished),
                 cancel: cancel.then(|| cancellation.clone()),
+                fail,
             };
             let client = client(&state, Policy::default())
                 .with_clock(clock)
@@ -402,4 +407,57 @@ fn reverse_dns_pacing_failures_stop_raw_and_connect_followups() {
             );
         }
     }
+}
+
+#[derive(Clone)]
+struct QuestionPacingClock(Arc<Mutex<State>>);
+
+impl Clock for QuestionPacingClock {
+    type Error = io::Error;
+
+    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error> {
+        // The first two transmissions scan the hosts; fail pacing after the
+        // first DNS question has been sent, inside the DNS batch.
+        if self.0.lock().unwrap().sends > 2 {
+            return Err(io::Error::other("question pacing failed"));
+        }
+        let Ok(()) = SystemClock.sleep(delay, deadline);
+        Ok(())
+    }
+}
+
+#[test]
+fn reverse_dns_propagates_a_clock_failure_between_questions() {
+    let state = network(&[7, 8]);
+    let mut request = request(&[7, 8]);
+    request.trace = None;
+    request.scan.probes_per_second = Some(1000);
+    let error = client(&state, Policy::default())
+        .with_clock(QuestionPacingClock(Arc::clone(&state)))
+        .scan_with_followups(request, |_: Event| Ok(()))
+        .expect_err("per-question pacing failures cannot report success");
+    let followup::Error::Dns(dns::Error::Clock { source, .. }) = error else {
+        panic!("{error:?}");
+    };
+    assert_eq!(source.to_string(), "question pacing failed");
+    assert!(source.downcast_ref::<io::Error>().is_some());
+    assert_eq!(
+        state.lock().unwrap().sends,
+        3,
+        "no second DNS query was sent"
+    );
+}
+
+#[test]
+fn reverse_dns_questions_send_within_their_shared_capture_limits() {
+    let state = network(&[7, 8]);
+    let mut request = request(&[7, 8]);
+    request.trace = None;
+    let report = client(&state, Policy::default())
+        .scan_with_followups(request, |_: Event| Ok(()))
+        .unwrap();
+    let lookups = report.reverse_dns.unwrap();
+    assert!(lookups.lookups.iter().all(Option::is_some));
+    assert_eq!(lookups.stats.unwrap().packets_attempted, 2);
+    assert_eq!(state.lock().unwrap().sends, 4);
 }

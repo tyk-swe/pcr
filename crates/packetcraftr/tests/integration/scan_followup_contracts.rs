@@ -515,14 +515,19 @@ fn connect_lookups_authorize_and_bound_neighbor_discovery() {
                 common::RecordingTransmit::silent(steps.clone()),
             ),
         )
+        // Scheduling on a busy runner must not consume the DNS preparation
+        // window before the fixture can observe the authorized request.
+        .with_clock(VirtualClock::default())
         .with_neighbor_options(packetcraftr::neighbor::Options {
-            attempt_timeout: Duration::from_millis(2),
+            // The silent provider returns immediately. Real worker waits still
+            // need scheduling headroom even when the operation clock is fake.
+            attempt_timeout: Duration::from_secs(5),
             ..Default::default()
         })
         .unwrap();
         let mut scan = scan_request(&[7]);
         scan.route = Default::default();
-        scan.timeout = Duration::from_millis(10);
+        scan.timeout = Duration::from_secs(5);
         let report = client
             .scan_connect_with_followups(
                 followup::ConnectRequest {

@@ -82,6 +82,18 @@ pub(super) struct Streamed {
 
 impl Stage {
     pub(super) fn new(trace: &Trace, scan: &scan::Request) -> Result<Self, Error> {
+        if trace
+            .runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.capacity() == 0)
+        {
+            return Err(traceroute::Error::InvalidLimit {
+                field: "runtime.capacity",
+                value: 0,
+                reason: "trace publication requires at least one worker slot".to_owned(),
+            }
+            .into());
+        }
         let template = hosts::Request {
             targets: scan.targets.clone(),
             max_targets: scan.limits.max_targets,

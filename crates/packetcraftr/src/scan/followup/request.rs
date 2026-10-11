@@ -23,6 +23,7 @@ pub struct Trace {
     /// The worker runtime the trace stage publishes through. `None` gives it a
     /// fresh runtime of the client's capacity, so workers an earlier stage
     /// timed out cannot hold its permits.
+    /// An explicit runtime must have at least one worker slot.
     pub runtime: Option<crate::runtime::Runtime>,
 }
 

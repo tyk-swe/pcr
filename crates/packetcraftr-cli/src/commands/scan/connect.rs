@@ -112,7 +112,7 @@ pub(super) fn run(
                         Vec::new(),
                     )?;
                 }
-                super::rendering::emit_hosts(
+                super::streaming::emit_hosts(
                     std::mem::take(&mut report.hosts),
                     reverse_dns,
                     stream,

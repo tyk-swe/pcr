@@ -7,6 +7,7 @@ mod list;
 mod payload;
 mod profiles;
 mod rendering;
+mod streaming;
 mod traceroute;
 
 use crate::output::contract::Format;
@@ -412,7 +413,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     })
                 }
             }),
-            on_event: rendering::emit_event,
+            on_event: streaming::emit_event,
             into_result: Box::new({
                 let plan = plan.clone();
                 move |(report, names, traced)| {
@@ -446,7 +447,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     .map_err(CliError::classified)?,
                 )
             }),
-            complete: rendering::emit_complete,
+            complete: streaming::emit_complete,
         },
     )
 }
@@ -463,10 +464,31 @@ fn validated_reverse_dns(
 /// be; a scan failure keeps the partial evidence its pipeline retained.
 pub(super) fn followup_error(error: followup::Error) -> CliError {
     match error {
-        followup::Error::Scan(error) => rendering::scan_error(error),
+        followup::Error::Scan(error) => scan_error(error),
         followup::Error::StatsOverflow(error) => CliError::caused(Kind::Internal, &error),
         error => CliError::classified(error),
     }
+}
+
+fn scan_error(error: packetcraftr::scan::Error) -> CliError {
+    use packetcraftr_core::error::Classified;
+    let mut cli =
+        CliError::from_classification(error.classification(), error.to_string(), error.causes())
+            .with_context(error.context());
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+    while let Some(error) = source {
+        if let Some(pipeline) = error.downcast_ref::<packetcraftr::scan::PipelineFailure>() {
+            match output::scan::Failure::try_from(pipeline) {
+                Ok(partial) => cli = cli.with_scan(partial),
+                Err(error) => cli
+                    .causes
+                    .push(format!("could not render pending scan evidence: {error}")),
+            }
+            break;
+        }
+        source = error.source();
+    }
+    cli
 }
 
 /// Each host's PTR lookup, by position; empty when no lookup was requested.

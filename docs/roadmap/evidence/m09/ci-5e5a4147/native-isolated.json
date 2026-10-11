@@ -1,0 +1,256 @@
+{
+  "status": "passed",
+  "run_id": "ff0ba9de-69f8-403c-8bf0-aa1ea1836fc5",
+  "scenarios": [
+    {
+      "name": "loopback_exchange",
+      "status": "passed",
+      "reply_bytes": "4500002a0002000040117cbf7f0000017f000001d73eaaf00016e07b69736f6c617465642d7265706c79",
+      "command": [
+        "/home/runner/work/pcr/pcr/target/release/packetcraftr",
+        "--output",
+        "ndjson",
+        "exchange",
+        "--interface",
+        "lo",
+        "--link-mode",
+        "layer3",
+        "--timeout-ms",
+        "1000",
+        "--max-packets",
+        "1",
+        "--max-bytes",
+        "1024",
+        "--max-queue-frames",
+        "64",
+        "--max-captured-bytes",
+        "65536",
+        "--snap-length",
+        "2048",
+        "--max-responses",
+        "1",
+        "--max-unsolicited",
+        "64",
+        "--packet",
+        "ipv4(dst=127.0.0.1,identification=1)/udp(sport=43760,dport=55102)/raw(text=isolated-probe)"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"schema\":\"packetcraftr.output/v13\",\"command\":\"exchange\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"sent\",\"status\":\"success\",\"result\":{\"request_index\":0,\"frame\":{\"bytes_hex\":\"4500002a0001000040117cc07f0000017f000001aaf0d73e0016dd9269736f6c617465642d70726f6265\",\"length\":42}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"exchange\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"unsolicited\",\"status\":\"success\",\"result\":{\"frame\":{\"frame\":{\"timestamp\":{\"unix_seconds\":1791710380,\"nanoseconds\":1261000},\"captured_length\":56,\"original_length\":56,\"link_type\":1,\"interface\":1,\"bytes_hex\":\"00000000000000000000000008004500002a0001000040117cc07f0000017f000001aaf0d73e0016dd9269736f6c617465642d70726f6265\"},\"packet\":{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"ethernet\",\"fields\":{\"destination\":{\"type\":\"mac\",\"value\":[0,0,0,0,0,0]},\"ether_type\":{\"type\":\"unsigned\",\"value\":2048},\"source\":{\"type\":\"mac\",\"value\":[0,0,0,0,0,0]}}},{\"protocol\":\"ipv4\",\"fields\":{\"checksum\":{\"type\":\"unsigned\",\"value\":31936},\"destination\":{\"type\":\"ipv4\",\"value\":\"127.0.0.1\"},\"dont_fragment\":{\"type\":\"bool\",\"value\":false},\"dscp_ecn\":{\"type\":\"unsigned\",\"value\":0},\"fragment_offset\":{\"type\":\"unsigned\",\"value\":0},\"identification\":{\"type\":\"unsigned\",\"value\":1},\"more_fragments\":{\"type\":\"bool\",\"value\":false},\"options\":{\"type\":\"bytes\",\"value\":[]},\"protocol\":{\"type\":\"unsigned\",\"value\":17},\"reserved_flag\":{\"type\":\"bool\",\"value\":false},\"source\":{\"type\":\"ipv4\",\"value\":\"127.0.0.1\"},\"total_length\":{\"type\":\"unsigned\",\"value\":42},\"ttl\":{\"type\":\"unsigned\",\"value\":64}}},{\"protocol\":\"udp\",\"fields\":{\"checksum\":{\"type\":\"unsigned\",\"value\":56722},\"destination_port\":{\"type\":\"unsigned\",\"value\":55102},\"length\":{\"type\":\"unsigned\",\"value\":22},\"source_port\":{\"type\":\"unsigned\",\"value\":43760}}},{\"protocol\":\"raw\",\"fields\":{\"bytes\":{\"type\":\"bytes\",\"value\":[105,115,111,108,97,116,101,100,45,112,114,111,98,101]}}}]},\"layout\":{\"layers\":[{\"index\":0,\"protocol\":\"ethernet\",\"range\":{\"start\":0,\"end\":14},\"fields\":[{\"name\":\"destination\",\"range\":{\"start\":0,\"end\":6}},{\"name\":\"source\",\"range\":{\"start\":6,\"end\":12}},{\"name\":\"ether_type\",\"range\":{\"start\":12,\"end\":14}}]},{\"index\":1,\"protocol\":\"ipv4\",\"range\":{\"start\":14,\"end\":34},\"fields\":[{\"name\":\"dscp_ecn\",\"range\":{\"start\":15,\"end\":16}},{\"name\":\"total_length\",\"range\":{\"start\":16,\"end\":18}},{\"name\":\"identification\",\"range\":{\"start\":18,\"end\":20}},{\"name\":\"reserved_flag\",\"range\":{\"start\":20,\"end\":22}},{\"name\":\"dont_fragment\",\"range\":{\"start\":20,\"end\":22}},{\"name\":\"more_fragments\",\"range\":{\"start\":20,\"end\":22}},{\"name\":\"fragment_offset\",\"range\":{\"start\":20,\"end\":22}},{\"name\":\"ttl\",\"range\":{\"start\":22,\"end\":23}},{\"name\":\"protocol\",\"range\":{\"start\":23,\"end\":24}},{\"name\":\"checksum\",\"range\":{\"start\":24,\"end\":26}},{\"name\":\"source\",\"range\":{\"start\":26,\"end\":30}},{\"name\":\"destination\",\"range\":{\"start\":30,\"end\":34}},{\"name\":\"options\",\"range\":{\"start\":34,\"end\":34}}]},{\"index\":2,\"protocol\":\"udp\",\"range\":{\"start\":34,\"end\":42},\"fields\":[{\"name\":\"source_port\",\"range\":{\"start\":34,\"end\":36}},{\"name\":\"destination_port\",\"range\":{\"start\":36,\"end\":38}},{\"name\":\"length\",\"range\":{\"start\":38,\"end\":40}},{\"name\":\"checksum\",\"range\":{\"start\":40,\"end\":42}}]},{\"index\":3,\"protocol\":\"raw\",\"range\":{\"start\":42,\"end\":56},\"fields\":[{\"name\":\"bytes\",\"range\":{\"start\":42,\"end\":56}}]}]},\"diagnostics\":[]}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"exchange\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"response\",\"status\":\"success\",\"result\":{\"request_index\":0,\"response\":{\"frame\":{\"timestamp\":{\"unix_seconds\":1791710380,\"nanoseconds\":1510000},\"captured_length\":56,\"original_length\":56,\"link_type\":1,\"interface\":1,\"bytes_hex\":\"00000000000000000000000008004500002a0002000040117cbf7f0000017f000001d73eaaf00016e07b69736f6c617465642d7265706c79\"},\"packet\":{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"ethernet\",\"fields\":{\"destination\":{\"type\":\"mac\",\"value\":[0,0,0,0,0,0]},\"ether_type\":{\"type\":\"unsigned\",\"value\":2048},\"source\":{\"type\":\"mac\",\"value\":[0,0,0,0,0,0]}}},{\"protocol\":\"ipv4\",\"fields\":{\"checksum\":{\"type\":\"unsigned\",\"value\":31935},\"destination\":{\"type\":\"ipv4\",\"value\":\"127.0.0.1\"},\"dont_fragment\":{\"type\":\"bool\",\"value\":false},\"dscp_ecn\":{\"type\":\"unsigned\",\"value\":0},\"fragment_offset\":{\"type\":\"unsigned\",\"value\":0},\"identification\":{\"type\":\"unsigned\",\"value\":2},\"more_fragments\":{\"type\":\"bool\",\"value\":false},\"options\":{\"type\":\"bytes\",\"value\":[]},\"protocol\":{\"type\":\"unsigned\",\"value\":17},\"reserved_flag\":{\"type\":\"bool\",\"value\":false},\"source\":{\"type\":\"ipv4\",\"value\":\"127.0.0.1\"},\"total_length\":{\"type\":\"unsigned\",\"value\":42},\"ttl\":{\"type\":\"unsigned\",\"value\":64}}},{\"protocol\":\"udp\",\"fields\":{\"checksum\":{\"type\":\"unsigned\",\"value\":57467},\"destination_port\":{\"type\":\"unsigned\",\"value\":43760},\"length\":{\"type\":\"unsigned\",\"value\":22},\"source_port\":{\"type\":\"unsigned\",\"value\":55102}}},{\"protocol\":\"raw\",\"fields\":{\"bytes\":{\"type\":\"bytes\",\"value\":[105,115,111,108,97,116,101,100,45,114,101,112,108,121]}}}]},\"layout\":{\"layers\":[{\"index\":0,\"protocol\":\"ethernet\",\"range\":{\"start\":0,\"end\":14},\"fields\":[{\"name\":\"destination\",\"range\":{\"start\":0,\"end\":6}},{\"name\":\"source\",\"range\":{\"start\":6,\"end\":12}},{\"name\":\"ether_type\",\"range\":{\"start\":12,\"end\":14}}]},{\"index\":1,\"protocol\":\"ipv4\",\"range\":{\"start\":14,\"end\":34},\"fields\":[{\"name\":\"dscp_ecn\",\"range\":{\"start\":15,\"end\":16}},{\"name\":\"total_length\",\"range\":{\"start\":16,\"end\":18}},{\"name\":\"identification\",\"range\":{\"start\":18,\"end\":20}},{\"name\":\"reserved_flag\",\"range\":{\"start\":20,\"end\":22}},{\"name\":\"dont_fragment\",\"range\":{\"start\":20,\"end\":22}},{\"name\":\"more_fragments\",\"range\":{\"start\":20,\"end\":22}},{\"name\":\"fragment_offset\",\"range\":{\"start\":20,\"end\":22}},{\"name\":\"ttl\",\"range\":{\"start\":22,\"end\":23}},{\"name\":\"protocol\",\"range\":{\"start\":23,\"end\":24}},{\"name\":\"checksum\",\"range\":{\"start\":24,\"end\":26}},{\"name\":\"source\",\"range\":{\"start\":26,\"end\":30}},{\"name\":\"destination\",\"range\":{\"start\":30,\"end\":34}},{\"name\":\"options\",\"range\":{\"start\":34,\"end\":34}}]},{\"index\":2,\"protocol\":\"udp\",\"range\":{\"start\":34,\"end\":42},\"fields\":[{\"name\":\"source_port\",\"range\":{\"start\":34,\"end\":36}},{\"name\":\"destination_port\",\"range\":{\"start\":36,\"end\":38}},{\"name\":\"length\",\"range\":{\"start\":38,\"end\":40}},{\"name\":\"checksum\",\"range\":{\"start\":40,\"end\":42}}]},{\"index\":3,\"protocol\":\"raw\",\"range\":{\"start\":42,\"end\":56},\"fields\":[{\"name\":\"bytes\",\"range\":{\"start\":42,\"end\":56}}]}]},\"diagnostics\":[]},\"latency\":{\"secs\":0,\"nanos\":274034}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"exchange\",\"mode\":\"stream\",\"sequence\":3,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"unanswered\":[]},\"diagnostics\":[],\"stats\":{\"packets_attempted\":1,\"packets_completed\":1,\"bytes\":42,\"elapsed\":{\"secs\":1,\"nanos\":24089648},\"capture\":{\"received_frames\":2,\"received_bytes\":112,\"dropped_frames\":0,\"dropped_bytes\":0,\"overflow_events\":0}}}\n",
+      "stderr": "",
+      "received_messages": [
+        "69736f6c617465642d70726f6265"
+      ]
+    },
+    {
+      "name": "readiness_and_repeated_cleanup",
+      "status": "passed",
+      "command": [
+        "/home/runner/work/pcr/pcr/target/debug/deps/native_isolated-1fcb7d3ddcf7feee",
+        "--ignored",
+        "--exact",
+        "readiness_and_repeated_cleanup",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "stdout": "\nrunning 1 test\ntest readiness_and_repeated_cleanup ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.16s\n\n",
+      "stderr": ""
+    },
+    {
+      "name": "idle_deadline_and_cancellation",
+      "status": "passed",
+      "command": [
+        "/home/runner/work/pcr/pcr/target/debug/deps/native_isolated-1fcb7d3ddcf7feee",
+        "--ignored",
+        "--exact",
+        "idle_deadline_and_cancellation",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "stdout": "\nrunning 1 test\ntest idle_deadline_and_cancellation ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.14s\n\n",
+      "stderr": ""
+    },
+    {
+      "name": "bounded_queue_reports_real_capture_loss",
+      "status": "passed",
+      "command": [
+        "/home/runner/work/pcr/pcr/target/debug/deps/native_isolated-1fcb7d3ddcf7feee",
+        "--ignored",
+        "--exact",
+        "bounded_queue_reports_real_capture_loss",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "stdout": "\nrunning 1 test\ntest bounded_queue_reports_real_capture_loss ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.04s\n\n",
+      "stderr": ""
+    },
+    {
+      "name": "native_set_before_realized_values",
+      "status": "passed",
+      "command": [
+        "/home/runner/work/pcr/pcr/target/debug/deps/native_isolated-1fcb7d3ddcf7feee",
+        "--ignored",
+        "--exact",
+        "native_set_before_realized_values",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "stdout": "\nrunning 1 test\ntest native_set_before_realized_values ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.03s\n\n",
+      "stderr": ""
+    },
+    {
+      "name": "native_filter_error_releases_admission",
+      "status": "passed",
+      "command": [
+        "/home/runner/work/pcr/pcr/target/debug/deps/native_isolated-1fcb7d3ddcf7feee",
+        "--ignored",
+        "--exact",
+        "native_filter_error_releases_admission",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "stdout": "\nrunning 1 test\ntest native_filter_error_releases_admission ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.04s\n\n",
+      "stderr": ""
+    },
+    {
+      "name": "iface_disappearance_driver_fail_cleans_up",
+      "status": "passed",
+      "command": [
+        "/home/runner/work/pcr/pcr/target/debug/deps/native_isolated-1fcb7d3ddcf7feee",
+        "--ignored",
+        "--exact",
+        "iface_disappearance_driver_fail_cleans_up",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "stdout": "\nrunning 1 test\ntest iface_disappearance_driver_fail_cleans_up ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.08s\n\n",
+      "stderr": ""
+    },
+    {
+      "name": "scoped_ipv6_targets",
+      "status": "passed",
+      "corpus_sha256": "a6aca2246597b930c00e55a74eb4af040c90c6579748751354b07b8efaafd512",
+      "corpus_dataset_version": "1.4.0",
+      "runs": [
+        {
+          "command": [
+            "/home/runner/work/pcr/pcr/target/release/packetcraftr",
+            "--output",
+            "ndjson",
+            "scan",
+            "--list",
+            "fe80::2%pcrs0",
+            "fe80::2%4",
+            "fe80::2%pcrt0"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"target\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":4}},\"origins\":[{\"index\":0,\"source\":\"argument 1\"},{\"index\":1,\"source\":\"argument 2\"}]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"target\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrt0\",\"interface\":{\"name\":\"pcrt0\",\"index\":6}},\"origins\":[{\"index\":2,\"source\":\"argument 3\"}]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"target\":\"fe80::2%pcrs0,fe80::2%4,fe80::2%pcrt0\",\"resolution_performed\":false,\"count\":2,\"duplicates\":[]},\"diagnostics\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/home/runner/work/pcr/pcr/target/release/packetcraftr",
+            "--output",
+            "ndjson",
+            "scan",
+            "--connect",
+            "fe80::2%pcrs0",
+            "fe80::2%pcrt0",
+            "--ports",
+            "8443",
+            "--timeout-ms",
+            "1000"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"connect_probe\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"sequence\":0,\"stage\":\"scan\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":4}},\"port\":8443,\"attempt\":1,\"attempted\":true,\"connect_succeeded\":true,\"outcome\":\"connected\",\"classification\":\"open\",\"scheduled_at\":{\"unix_seconds\":1791710381,\"nanoseconds\":517237400},\"finished_at\":{\"unix_seconds\":1791710381,\"nanoseconds\":517423563},\"elapsed\":{\"secs\":0,\"nanos\":186253},\"local\":\"[fe80::1%4]:47200\",\"error\":null},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"connect_probe\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"sequence\":1,\"stage\":\"scan\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrt0\",\"interface\":{\"name\":\"pcrt0\",\"index\":6}},\"port\":8443,\"attempt\":1,\"attempted\":true,\"connect_succeeded\":false,\"outcome\":\"refused\",\"classification\":\"closed\",\"scheduled_at\":{\"unix_seconds\":1791710381,\"nanoseconds\":518506600},\"finished_at\":{\"unix_seconds\":1791710381,\"nanoseconds\":518635395},\"elapsed\":{\"secs\":0,\"nanos\":128916},\"local\":null,\"error\":{\"kind\":\"ConnectionRefused\",\"os_code\":111,\"message\":\"Connection refused (os error 111)\"}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"connect_endpoint\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":4}},\"port\":8443,\"classification\":\"open\",\"inference\":{\"state\":\"open\",\"rule\":\"tcp_connect.connected\",\"supporting\":[0],\"conflicting\":[],\"unanswered\":[],\"failed\":[]},\"probes\":[0]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":3,\"event\":\"connect_endpoint\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrt0\",\"interface\":{\"name\":\"pcrt0\",\"index\":6}},\"port\":8443,\"classification\":\"closed\",\"inference\":{\"state\":\"closed\",\"rule\":\"tcp_connect.refused\",\"supporting\":[1],\"conflicting\":[],\"unanswered\":[],\"failed\":[]},\"probes\":[1]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":4,\"event\":\"host\",\"status\":\"success\",\"result\":{\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":4}},\"discovery\":\"not_requested\",\"scan\":\"scanned\",\"reasons\":[],\"probes\":[]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":5,\"event\":\"host\",\"status\":\"success\",\"result\":{\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrt0\",\"interface\":{\"name\":\"pcrt0\",\"index\":6}},\"discovery\":\"not_requested\",\"scan\":\"scanned\",\"reasons\":[],\"probes\":[]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":6,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"target\":\"fe80::2%pcrs0,fe80::2%pcrt0\",\"resolved_addresses\":[\"fe80::2\",\"fe80::2\"],\"planned_duration\":{\"secs\":2,\"nanos\":0},\"plan\":{\"method\":{\"requested\":\"tcp_connect\",\"selected\":\"tcp_connect\"},\"port_catalog\":{\"name\":\"port-catalog\",\"version\":\"1.0.0\"},\"excluded_endpoints\":0,\"discovery\":{\"mode\":\"omitted\",\"probes\":[],\"neighbor\":false,\"excluded_endpoints\":0,\"unresponsive\":\"skip\"}},\"socket_stats\":{\"connections_scheduled\":2,\"connections_attempted\":2,\"connections_succeeded\":1,\"retained_evidence_bytes\":437,\"elapsed\":{\"secs\":0,\"nanos\":3427925},\"rtt\":{\"sent\":2,\"received\":2,\"lost\":0,\"min\":{\"secs\":0,\"nanos\":128916},\"avg\":{\"secs\":0,\"nanos\":157584},\"max\":{\"secs\":0,\"nanos\":186253}}},\"scheduling\":{\"mode\":\"fixed\",\"observed_peak_window\":1,\"retries_started\":0,\"conditions\":[],\"incomplete\":[],\"operation_ceiling\":1,\"process_ceiling\":16}},\"diagnostics\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "/home/runner/work/pcr/pcr/target/release/packetcraftr",
+            "--output",
+            "ndjson",
+            "scan",
+            "fe80::3%pcrs0",
+            "--ports",
+            "8443,8444",
+            "--timeout-ms",
+            "5000"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"diagnostic\",\"status\":\"success\",\"result\":{},\"diagnostics\":[{\"code\":\"exchange.integrity_rejected\",\"severity\":\"warning\",\"message\":\"a response whose checksum did not verify was not correlated\"}]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"probe\",\"status\":\"success\",\"result\":{\"target\":\"fe80::3%pcrs0\",\"probe\":{\"sequence\":0,\"stage\":\"scan\",\"protocol\":\"tcp\",\"destination\":\"fe80::3\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":4}},\"destination_port\":8443,\"attempt\":1,\"status\":\"response\",\"classification\":\"open\",\"responder\":\"fe80::3\",\"sent_at\":{\"unix_seconds\":1791710381,\"nanoseconds\":535067954},\"received_at\":{\"unix_seconds\":1791710381,\"nanoseconds\":535190000},\"latency\":{\"secs\":0,\"nanos\":122106},\"frame\":{\"timestamp\":{\"unix_seconds\":1791710381,\"nanoseconds\":535190000},\"captured_length\":74,\"original_length\":74,\"link_type\":1,\"interface\":4,\"bytes_hex\":\"b653306b9e7902ec99bb56a686dd6000000000140640fe800000000000000000000000000003fe80000000000000000000000000000120fbc35000001000000000015012ffffbe800000\"},\"reason\":\"correlated TCP SYN/ACK\"}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"probe\",\"status\":\"success\",\"result\":{\"target\":\"fe80::3%pcrs0\",\"probe\":{\"sequence\":1,\"stage\":\"scan\",\"protocol\":\"tcp\",\"destination\":\"fe80::3\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":4}},\"destination_port\":8444,\"attempt\":1,\"status\":\"response\",\"classification\":\"closed\",\"responder\":\"fe80::3\",\"sent_at\":{\"unix_seconds\":1791710386,\"nanoseconds\":559127884},\"received_at\":{\"unix_seconds\":1791710386,\"nanoseconds\":559253000},\"latency\":{\"secs\":0,\"nanos\":125176},\"frame\":{\"timestamp\":{\"unix_seconds\":1791710386,\"nanoseconds\":559253000},\"captured_length\":74,\"original_length\":74,\"link_type\":1,\"interface\":4,\"bytes_hex\":\"b653306b9e7902ec99bb56a686dd6000000000140640fe800000000000000000000000000003fe80000000000000000000000000000120fcc350000010000000000250140000be7c0000\"},\"reason\":\"correlated TCP reset\"}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":3,\"event\":\"endpoint\",\"status\":\"success\",\"result\":{\"endpoint\":{\"address\":\"fe80::3\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":4}},\"transport\":\"tcp\",\"port\":8443,\"classification\":\"open\",\"inference\":{\"state\":\"open\",\"rule\":\"tcp_syn.syn_ack\",\"supporting\":[0],\"conflicting\":[],\"unanswered\":[],\"failed\":[]},\"probes\":[0]}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":4,\"event\":\"endpoint\",\"status\":\"success\",\"result\":{\"endpoint\":{\"address\":\"fe80::3\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":4}},\"transport\":\"tcp\",\"port\":8444,\"classification\":\"closed\",\"inference\":{\"state\":\"closed\",\"rule\":\"tcp_syn.reset\",\"supporting\":[1],\"conflicting\":[],\"unanswered\":[],\"failed\":[]},\"probes\":[1]}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":5,\"event\":\"host\",\"status\":\"success\",\"result\":{\"address\":\"fe80::3\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":4}},\"discovery\":\"not_requested\",\"scan\":\"scanned\",\"reasons\":[],\"probes\":[]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v13\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":6,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"planned_duration\":{\"secs\":15,\"nanos\":0},\"target\":\"fe80::3%pcrs0\",\"resolved_addresses\":[\"fe80::3\"],\"plan\":{\"method\":{\"requested\":\"raw\",\"selected\":\"raw\"},\"port_catalog\":{\"name\":\"port-catalog\",\"version\":\"1.0.0\"},\"excluded_endpoints\":0,\"discovery\":{\"mode\":\"omitted\",\"probes\":[],\"neighbor\":false,\"excluded_endpoints\":0,\"unresponsive\":\"skip\"}},\"counts\":{\"open\":1,\"closed\":1,\"filtered\":0,\"unreachable\":0,\"unknown\":0,\"timeout\":0},\"retained_evidence_bytes\":148,\"rtt\":{\"sent\":2,\"received\":2,\"lost\":0,\"min\":{\"secs\":0,\"nanos\":122106},\"avg\":{\"secs\":0,\"nanos\":123641},\"max\":{\"secs\":0,\"nanos\":125176}},\"scheduling\":{\"mode\":\"fixed\",\"observed_peak_window\":1,\"retries_started\":0,\"conditions\":[],\"incomplete\":[]}},\"diagnostics\":[],\"stats\":{\"packets_attempted\":2,\"packets_completed\":2,\"bytes\":120,\"elapsed\":{\"secs\":10,\"nanos\":47488319},\"capture\":{\"received_frames\":13,\"received_bytes\":1034,\"dropped_frames\":0,\"dropped_bytes\":0,\"overflow_events\":0}}}\n",
+          "stderr": ""
+        }
+      ],
+      "responder_received": [
+        {
+          "interface": "pcrs1",
+          "destination_port": 8443,
+          "frame": "02ec99bb56a6b653306b9e7986dd6000000000140640fe800000000000000000000000000001fe800000000000000000000000000003c35020fb00000000000000005002ffffce910000"
+        },
+        {
+          "interface": "pcrs1",
+          "destination_port": 8444,
+          "frame": "02ec99bb56a6b653306b9e7986dd6000000100140640fe800000000000000000000000000001fe800000000000000000000000000003c35020fc00000001000000005002ffffce8f0000"
+        }
+      ],
+      "exit_code": 0,
+      "scoped_paths": {
+        "selection": "exercised",
+        "connect": "exercised",
+        "raw": "exercised"
+      }
+    }
+  ],
+  "other_platforms": [
+    {
+      "platform": "Windows",
+      "status": "not_exercised",
+      "reason": "no privileged lab lane configured"
+    },
+    {
+      "platform": "macOS",
+      "status": "not_exercised",
+      "reason": "no privileged lab lane configured"
+    }
+  ],
+  "schema_version": 1,
+  "commit": "5e5a41470c0c63404ca3e581067fded136eda1ce",
+  "dirty": false,
+  "binary_sha256": "fe78650414e2f2beda48f08bec39954c22f359131428d32283e93e7aa1b46980",
+  "binary_version": "packetcraftr 0.5.0-beta.3\nnative features: native-route, native-layer2, native-layer3",
+  "os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "native_test_sha256": "01bcfd8172936c6684fe7d8db3360ae63ed1bb5dbe7523a19f8bb33c613d92a2",
+  "namespace": 4026532218,
+  "parent_namespace": 4026531833,
+  "namespace_launcher": {
+    "command": [
+      "unshare",
+      "--user",
+      "--map-users=0:1001:1",
+      "--map-groups=0:1001:1",
+      "--setuid=0",
+      "--setgid=0",
+      "--net",
+      "/usr/bin/python3",
+      "/home/runner/work/pcr/pcr/scripts/test-native-isolated.py",
+      "--binary",
+      "/home/runner/work/pcr/pcr/target/release/packetcraftr",
+      "--native-test-binary",
+      "/home/runner/work/pcr/pcr/target/debug/deps/native_isolated-1fcb7d3ddcf7feee",
+      "--report",
+      "/home/runner/work/pcr/pcr/target/validation/native-isolated.json",
+      "--parent-namespace",
+      "4026531833",
+      "--run-id",
+      "ff0ba9de-69f8-403c-8bf0-aa1ea1836fc5"
+    ],
+    "exit_code": 0,
+    "stderr": ""
+  }
+}

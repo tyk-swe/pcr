@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| In progress | [M8][m8] | Qualified service inventory |
+| Complete | [M8][m8] | Qualified service inventory |
 
 M8 introduced cleartext identification for HTTP, SSH, and DNS. M9 adds bounded
 TLS wrapping and reviewed SMTP/FTP greeting rules, while keeping captured TLS
@@ -95,19 +95,25 @@ instances; they do not establish production prevalence or authenticated identity
 - Output/v13 freezes these additions; v12 remains published and immutable.
   [User guidance](../service-identification.md) explains budgets and evidence,
   and the [acceptance record](evidence/m09/README.md) owns runtime results.
+- Closing revision `5e5a41470c0c63404ca3e581067fded136eda1ce` passed 4,000
+  case-runs across all five profiles on Linux, macOS ARM/Intel, and Windows.
+  The [integrity manifest](evidence/m09/ci-5e5a4147/manifest.json) retains exact
+  reports and digests. The 18 eligible held-out instances yield 66.67% matched,
+  22.22% unknown, and 11.11% ambiguous; repetitions do not add independent
+  services, and claims do not establish authenticated identity.
 
 ## Exit criteria
 
-- [ ] Encrypted services have explicit fixture outcomes.
+- [x] Encrypted services have explicit fixture outcomes.
 - [x] The TLS dependency has a recorded dependency and license review.
 - [x] Passive TLS and JA3/JA4 observations are never presented as service
       identification.
-- [ ] Claimed coverage and confidence are evaluated against held-out fixtures,
+- [x] Claimed coverage and confidence are evaluated against held-out fixtures,
       not only the examples used to write rules.
 - [x] Hostname, device, and CPE metadata appear only when supported by an
       observation and the matching data.
 - [x] Every corpus addition has a provenance record and a read-only review.
-- [ ] Applicable portable and native behavior passes on Linux, macOS, and
+- [x] Applicable portable and native behavior passes on Linux, macOS, and
       Windows, and contract changes follow the
       [compatibility policy][compatibility].
 

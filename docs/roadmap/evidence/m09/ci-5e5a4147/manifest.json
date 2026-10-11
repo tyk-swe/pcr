@@ -1,0 +1,494 @@
+{
+  "manifest_version": 1,
+  "acceptance_status": "passed",
+  "implementation_revision": "5e5a41470c0c63404ca3e581067fded136eda1ce",
+  "workflow_run": "https://github.com/tyk-swe/pcr/actions/runs/38127739273",
+  "workflow_event": "workflow_dispatch",
+  "runner": "https://github.com/tyk-swe/pcr/blob/5e5a41470c0c63404ca3e581067fded136eda1ce/scripts/test-service-identification.py",
+  "profiles_per_platform": 5,
+  "scenarios": 50,
+  "cases_per_profile": 200,
+  "profile_names": [
+    "portable",
+    "default",
+    "layer2",
+    "layer3",
+    "all"
+  ],
+  "address_families": [
+    "ipv4",
+    "ipv6"
+  ],
+  "output_formats": [
+    "json",
+    "ndjson"
+  ],
+  "scenario_inventory": [
+    {
+      "name": "known-ssh",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "known-http",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "unknown",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "unknown-product",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "ambiguous-products",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "ambiguous-versions",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "misleading-banner",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "malformed",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "truncated",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "byte-limit",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "excluded",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "explicit-exclusion-override",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "intensity",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "deadline",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "known-dns-tcp",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "known-dns-version-tcp",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "known-dns-udp",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "known-dns-version-udp",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "known-smtp-postfix",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "known-tls-smtp-postfix",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "known-smtp-exim",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "known-ftp-vsftpd",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "known-ftp-proftpd",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "known-https",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "https-declared-name",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "tls-handshake-refused",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "tls-handshake-deadline",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "tls-wire-read-limit",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "tls-certificate-retention-limit",
+      "split": "training_or_acceptance"
+    },
+    {
+      "name": "heldout-ssh",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-http-nginx",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-http-apache",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-https-nginx",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-https-declared-name",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-https-unknown-product",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-https-ambiguous-products",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-https-ambiguous-versions",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-https-misleading",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-smtp-postfix",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-smtp-exim",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-smtp-unknown-product",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-ftp-vsftpd",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-ftp-proftpd",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-ftp-unknown-product",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-dns-protocol-tcp",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-dns-version-udp",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-unrecognized-banner",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-tls-handshake-refused",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-tls-handshake-timeout",
+      "split": "held_out"
+    },
+    {
+      "name": "heldout-malformed-http",
+      "split": "held_out"
+    }
+  ],
+  "total_profiles": 20,
+  "total_cases": 4000,
+  "failed": 0,
+  "unavailable": 0,
+  "shipped_corpus_sha256": "4de286fda3b0ea67c5967e7e66ee84a011301a2c4ec87e8acca4b50a282ee81a",
+  "held_out_manifest_sha256": "399ae8d919fe3ca2ac32c62962eee37e54a811c5dee30b02f9226e45be94774c",
+  "held_out_evaluation": {
+    "attempted_case_runs": 1680,
+    "eligible_case_runs": 1440,
+    "matched_case_runs": 960,
+    "unknown_case_runs": 320,
+    "ambiguous_case_runs": 160,
+    "misleading_claim_candidates": 80,
+    "outcomes": {
+      "matched": 960,
+      "unknown": 320,
+      "ambiguous": 160,
+      "malformed": 80,
+      "truncated": 0,
+      "tls_failed": 80,
+      "budget_exhausted": 80,
+      "missing_record": 0
+    },
+    "candidate_confidence_counts": {
+      "claim": 1200,
+      "protocol": 80
+    },
+    "faithful_unambiguous_presented_token_counts": {
+      "claim": 880,
+      "protocol": 80
+    },
+    "declared_service_instances": 21,
+    "eligible_service_instances": 18,
+    "coverage": 0.6666666666666666,
+    "unknown_share": 0.2222222222222222,
+    "ambiguous_share": 0.1111111111111111,
+    "identity_accuracy": null,
+    "confidence_calibration": null,
+    "limits": "Repeated IPv4/IPv6 and JSON/NDJSON case-runs are not additional independent service instances. Claim fidelity measures presented tokens, not actual software identity. Handshake/malformed cases are reported outside eligible service coverage. No production prevalence or confidence calibration is inferred. Feature profiles and operating systems also repeat the same declared instances."
+  },
+  "ci_jobs": {
+    "path": "ci-jobs.json",
+    "sha256": "ceeffde5f8208bb3530014c417519dd3fd9976fd52ed5361ee61feb3f8aa255c"
+  },
+  "reports": [
+    {
+      "path": "linux.json.gz",
+      "artifact": "service-identification-linux",
+      "artifact_id": 11697549935,
+      "artifact_digest": "sha256:540ee453ab92ee0441a7651c552e027f8e3bbf030f65c5604f9029db9c560114",
+      "platform": "Linux",
+      "architecture": "x86_64",
+      "recorded_at": "2026-10-11T09:20:13.973204+00:00",
+      "profiles": 5,
+      "cases": 1000,
+      "failed": 0,
+      "unavailable": 0,
+      "original_json_bytes": 7394719,
+      "original_json_sha256": "c56d73ca29f96f39206e72eac108cf64b053464aa9c72f0d01f024c89b2b0bc1",
+      "gzip_sha256": "8b712c2e95d3385b98858fd2c168139e87cc84a9cf048217a56ea93232f1cf15",
+      "held_out_evaluation": {
+        "attempted_case_runs": 420,
+        "eligible_case_runs": 360,
+        "matched_case_runs": 240,
+        "unknown_case_runs": 80,
+        "ambiguous_case_runs": 40,
+        "misleading_claim_candidates": 20,
+        "outcomes": {
+          "matched": 240,
+          "unknown": 80,
+          "ambiguous": 40,
+          "malformed": 20,
+          "truncated": 0,
+          "tls_failed": 20,
+          "budget_exhausted": 20,
+          "missing_record": 0
+        },
+        "candidate_confidence_counts": {
+          "claim": 300,
+          "protocol": 20
+        },
+        "faithful_unambiguous_presented_token_counts": {
+          "claim": 220,
+          "protocol": 20
+        },
+        "declared_service_instances": 21,
+        "eligible_service_instances": 18,
+        "coverage": 0.6666666666666666,
+        "unknown_share": 0.2222222222222222,
+        "ambiguous_share": 0.1111111111111111,
+        "identity_accuracy": null,
+        "confidence_calibration": null,
+        "limits": "Repeated IPv4/IPv6 and JSON/NDJSON case-runs are not additional independent service instances. Claim fidelity measures presented tokens, not actual software identity. Handshake/malformed cases are reported outside eligible service coverage. No production prevalence or confidence calibration is inferred. Feature profiles and operating systems also repeat the same declared instances."
+      }
+    },
+    {
+      "path": "macos-arm64.json.gz",
+      "artifact": "service-identification-macos-14",
+      "artifact_id": 11697829582,
+      "artifact_digest": "sha256:e9ab600a1e571ddb913c5e8c914a0114cc0a0addf37b8f7da1fbff87896c1594",
+      "platform": "Darwin",
+      "architecture": "arm64",
+      "recorded_at": "2026-10-11T09:20:45.204597+00:00",
+      "profiles": 5,
+      "cases": 1000,
+      "failed": 0,
+      "unavailable": 0,
+      "original_json_bytes": 7440218,
+      "original_json_sha256": "610b0d0eda89df33673a138d31ddd59e2b4ff06b3920bdaacd48466a54dd4e68",
+      "gzip_sha256": "a301d8b917aada5a69e5382c0b068768baa84335cd982e37ce9936ce783f6f45",
+      "held_out_evaluation": {
+        "attempted_case_runs": 420,
+        "eligible_case_runs": 360,
+        "matched_case_runs": 240,
+        "unknown_case_runs": 80,
+        "ambiguous_case_runs": 40,
+        "misleading_claim_candidates": 20,
+        "outcomes": {
+          "matched": 240,
+          "unknown": 80,
+          "ambiguous": 40,
+          "malformed": 20,
+          "truncated": 0,
+          "tls_failed": 20,
+          "budget_exhausted": 20,
+          "missing_record": 0
+        },
+        "candidate_confidence_counts": {
+          "claim": 300,
+          "protocol": 20
+        },
+        "faithful_unambiguous_presented_token_counts": {
+          "claim": 220,
+          "protocol": 20
+        },
+        "declared_service_instances": 21,
+        "eligible_service_instances": 18,
+        "coverage": 0.6666666666666666,
+        "unknown_share": 0.2222222222222222,
+        "ambiguous_share": 0.1111111111111111,
+        "identity_accuracy": null,
+        "confidence_calibration": null,
+        "limits": "Repeated IPv4/IPv6 and JSON/NDJSON case-runs are not additional independent service instances. Claim fidelity measures presented tokens, not actual software identity. Handshake/malformed cases are reported outside eligible service coverage. No production prevalence or confidence calibration is inferred. Feature profiles and operating systems also repeat the same declared instances."
+      }
+    },
+    {
+      "path": "macos-x86_64.json.gz",
+      "artifact": "service-identification-macos-15-intel",
+      "artifact_id": 11698916422,
+      "artifact_digest": "sha256:7d1e1daf37f70b0de1c8b83c7a64595df5d4ab83f29bf71ea854f87f0aab3503",
+      "platform": "Darwin",
+      "architecture": "x86_64",
+      "recorded_at": "2026-10-11T09:30:51.880526+00:00",
+      "profiles": 5,
+      "cases": 1000,
+      "failed": 0,
+      "unavailable": 0,
+      "original_json_bytes": 7441558,
+      "original_json_sha256": "8a4cf1f4461a5dcea41b485f3f59d85522f2f9de7fbbd3acd19859e97ce4fd08",
+      "gzip_sha256": "2c2293feb3ddfc87705fa292a5ef157f263f21dfed9a97ddc70054f2dc169fb1",
+      "held_out_evaluation": {
+        "attempted_case_runs": 420,
+        "eligible_case_runs": 360,
+        "matched_case_runs": 240,
+        "unknown_case_runs": 80,
+        "ambiguous_case_runs": 40,
+        "misleading_claim_candidates": 20,
+        "outcomes": {
+          "matched": 240,
+          "unknown": 80,
+          "ambiguous": 40,
+          "malformed": 20,
+          "truncated": 0,
+          "tls_failed": 20,
+          "budget_exhausted": 20,
+          "missing_record": 0
+        },
+        "candidate_confidence_counts": {
+          "claim": 300,
+          "protocol": 20
+        },
+        "faithful_unambiguous_presented_token_counts": {
+          "claim": 220,
+          "protocol": 20
+        },
+        "declared_service_instances": 21,
+        "eligible_service_instances": 18,
+        "coverage": 0.6666666666666666,
+        "unknown_share": 0.2222222222222222,
+        "ambiguous_share": 0.1111111111111111,
+        "identity_accuracy": null,
+        "confidence_calibration": null,
+        "limits": "Repeated IPv4/IPv6 and JSON/NDJSON case-runs are not additional independent service instances. Claim fidelity measures presented tokens, not actual software identity. Handshake/malformed cases are reported outside eligible service coverage. No production prevalence or confidence calibration is inferred. Feature profiles and operating systems also repeat the same declared instances."
+      }
+    },
+    {
+      "path": "windows.json.gz",
+      "artifact": "service-identification-windows-2022",
+      "artifact_id": 11698825055,
+      "artifact_digest": "sha256:66f32375a80f8b82373b3ac3a4c48305a62d3b87018f0f410047e874827e60bb",
+      "platform": "Windows",
+      "architecture": "AMD64",
+      "recorded_at": "2026-10-11T09:25:03.106374+00:00",
+      "profiles": 5,
+      "cases": 1000,
+      "failed": 0,
+      "unavailable": 0,
+      "original_json_bytes": 7630793,
+      "original_json_sha256": "953ecc5999e29ab4b6106dbced060c729713667240bc56cc3d9d590c598dbc0c",
+      "gzip_sha256": "08d659dc2bbd5c0686aba1e041ad7a4a7cdfdfece1afc818ad629d86fd795f34",
+      "held_out_evaluation": {
+        "attempted_case_runs": 420,
+        "eligible_case_runs": 360,
+        "matched_case_runs": 240,
+        "unknown_case_runs": 80,
+        "ambiguous_case_runs": 40,
+        "misleading_claim_candidates": 20,
+        "outcomes": {
+          "matched": 240,
+          "unknown": 80,
+          "ambiguous": 40,
+          "malformed": 20,
+          "truncated": 0,
+          "tls_failed": 20,
+          "budget_exhausted": 20,
+          "missing_record": 0
+        },
+        "candidate_confidence_counts": {
+          "claim": 300,
+          "protocol": 20
+        },
+        "faithful_unambiguous_presented_token_counts": {
+          "claim": 220,
+          "protocol": 20
+        },
+        "declared_service_instances": 21,
+        "eligible_service_instances": 18,
+        "coverage": 0.6666666666666666,
+        "unknown_share": 0.2222222222222222,
+        "ambiguous_share": 0.1111111111111111,
+        "identity_accuracy": null,
+        "confidence_calibration": null,
+        "limits": "Repeated IPv4/IPv6 and JSON/NDJSON case-runs are not additional independent service instances. Claim fidelity measures presented tokens, not actual software identity. Handshake/malformed cases are reported outside eligible service coverage. No production prevalence or confidence calibration is inferred. Feature profiles and operating systems also repeat the same declared instances."
+      }
+    }
+  ],
+  "isolated_native": {
+    "path": "native-isolated.json",
+    "sha256": "b81d6506f3f92cb85a0f71cc6fc986d599fb115ed2b37aaacaad96ec32813f60",
+    "status": "passed",
+    "scenarios": 8,
+    "native_test_sha256": "01bcfd8172936c6684fe7d8db3360ae63ed1bb5dbe7523a19f8bb33c613d92a2",
+    "platform": "Linux",
+    "other_privileged_platforms": [
+      {
+        "platform": "Windows",
+        "status": "not_exercised",
+        "reason": "no privileged lab lane configured"
+      },
+      {
+        "platform": "macOS",
+        "status": "not_exercised",
+        "reason": "no privileged lab lane configured"
+      }
+    ]
+  }
+}

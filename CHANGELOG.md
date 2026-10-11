@@ -110,6 +110,8 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Fixed
 
+- Update the YAML parser to enforce typed-deserialization resource budgets
+  (RUSTSEC-2026-0333), retaining the document layer's independent limits.
 - Scan follow-ups share the client's monotonic deadline and propagate reverse-DNS
   cancellation and pacing-clock failures before sending further queries.
 - Reverse-DNS batches narrow each question's capture settings to its share of

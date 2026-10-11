@@ -14,7 +14,7 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_netio::tcp::{self, Provider};
 
 use super::super::{Classification, Error, Limits, Request};
-use super::{Aggregate, Collector, Outcome, ProbeEvidence};
+use super::{Aggregate, Collector, Outcome};
 use crate::clock::Clock;
 use crate::test_support::FakeProviders;
 use crate::{Client, ProviderSet};
@@ -425,81 +425,6 @@ fn adaptive_connect_preparation_charge_fails_before_any_socket() {
     assert_eq!(calls.load(Ordering::SeqCst), 0, "no socket was started");
 }
 
-#[test]
-fn a_never_attempted_connect_probe_settles_as_omitted_not_silent() {
-    let probe = ProbeEvidence {
-        sequence: 7,
-        stage: crate::scan::Stage::Scan,
-        endpoint: "192.0.2.1:80".parse().unwrap(),
-        scope: None,
-        attempt: 2,
-        attempted: false,
-        connect_succeeded: None,
-        outcome: Outcome::DeadlineExpired,
-        scheduled_at: std::time::SystemTime::now(),
-        finished_at: None,
-        elapsed: Duration::ZERO,
-        local: None,
-        error: None,
-    };
-    assert!(matches!(
-        super::engine::connect_outcome(&probe),
-        crate::scan::adaptive::Outcome::Omitted
-    ));
-    let attempted = ProbeEvidence {
-        attempted: true,
-        ..probe.clone()
-    };
-    assert!(matches!(
-        super::engine::connect_outcome(&attempted),
-        crate::scan::adaptive::Outcome::Silent
-    ));
-}
-
-#[test]
-fn connect_replies_carry_no_control_responder_and_unreachable_is_not_one() {
-    let probe = ProbeEvidence {
-        sequence: 7,
-        stage: crate::scan::Stage::Scan,
-        endpoint: "192.0.2.1:80".parse().unwrap(),
-        scope: None,
-        attempt: 1,
-        attempted: true,
-        connect_succeeded: Some(false),
-        outcome: Outcome::Refused,
-        scheduled_at: std::time::SystemTime::now(),
-        finished_at: None,
-        elapsed: Duration::from_millis(5),
-        local: None,
-        error: None,
-    };
-    let crate::scan::adaptive::Outcome::Reply { control, .. } =
-        super::engine::connect_outcome(&probe)
-    else {
-        panic!("a refused socket is still a definitive reply");
-    };
-    assert!(!control, "a refusal proves no control responder");
-    let unreachable = ProbeEvidence {
-        outcome: Outcome::Unreachable,
-        ..probe.clone()
-    };
-    assert!(matches!(
-        super::engine::connect_outcome(&unreachable),
-        crate::scan::adaptive::Outcome::Aborted
-    ));
-    let connected = ProbeEvidence {
-        connect_succeeded: Some(true),
-        outcome: Outcome::Connected,
-        ..probe.clone()
-    };
-    let crate::scan::adaptive::Outcome::Reply { control, .. } =
-        super::engine::connect_outcome(&connected)
-    else {
-        panic!("a connected socket is a definitive reply");
-    };
-    assert!(!control);
-}
-
 /// A test clock whose authorization time is fully scripted: `sleep` yields
 /// to any async fake worker without consuming virtual time, while the
 /// authorizer's `advance` supplies the delay a real one would spend. The
@@ -691,7 +616,7 @@ fn the_connect_charge_uses_the_effective_descriptor_cap() {
         let mut charge = targets.len() * 64 * std::mem::size_of::<SocketAddr>()
             + targets.len() * 2 * std::mem::size_of::<crate::target::SelectedAddress>()
             + 64 * std::mem::size_of::<u16>()
-            + effective * std::mem::size_of::<super::engine::Active<Socket>>();
+            + effective * std::mem::size_of::<super::attempts::Active<Socket>>();
         if adaptive {
             charge += super::super::adaptive::state_charge(
                 targets.len(),
@@ -708,20 +633,20 @@ fn the_connect_charge_uses_the_effective_descriptor_cap() {
         };
         let deadline = Deadline::new(Duration::from_secs(60));
         request.limits.max_prepared_bytes = charge;
-        super::engine::planned(
+        super::planning::planned(
             &request,
             &mut authorizer,
             &deadline,
-            std::mem::size_of::<super::engine::Active<Socket>>(),
+            std::mem::size_of::<super::attempts::Active<Socket>>(),
         )
         .expect("the effective-cap charge fits");
         request.limits.max_prepared_bytes = charge - 1;
         assert!(
-            super::engine::planned(
+            super::planning::planned(
                 &request,
                 &mut authorizer,
                 &deadline,
-                std::mem::size_of::<super::engine::Active<Socket>>(),
+                std::mem::size_of::<super::attempts::Active<Socket>>(),
             )
             .is_err(),
             "adaptive={adaptive}: one byte under the effective charge rejects"

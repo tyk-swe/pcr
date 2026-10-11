@@ -222,7 +222,8 @@ provenance, retain wildcard versions, and inherit unauthenticated confidence.
 The bundled SMTP rules require explicit `Postfix VERSION` or `Exim VERSION`
 claims; a greeting with a hidden version can remain unknown. FTP rules likewise
 recognize only their reviewed literal formats, without inferring a product from
-its port.
+its port. Multiline FTP replies may contain uncoded intermediate lines; their
+full text remains available to matching rules.
 
 The [M9 evaluation](roadmap/evidence/m09/README.md) fixes held-out service
 instances before new rules are authored and reports coverage, unknown and

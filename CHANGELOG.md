@@ -116,6 +116,8 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Fixed
 
+- FTP multiline greeting detection retains uncoded continuation text, including
+  product markers at the start of a line.
 - Active TLS exchanges honor application timeouts within the connection lifetime
   and retain decrypted response bytes when cancellation or deadline expiry
   follows a completed read.

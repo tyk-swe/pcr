@@ -110,7 +110,8 @@ fn progress(bytes: &[u8], protocol: Protocol) -> (Observation, bool) {
                 });
                 // A numeric 220 greeting alone also occurs in SMTP. Require
                 // an explicit FTP marker before describing it as FTP evidence.
-                let text = reply.get(4..).unwrap_or_default();
+                // FTP continuation lines need not repeat the reply code.
+                let text = if coded { &reply[4..] } else { reply };
                 if text
                     .split(|byte| !byte.is_ascii_alphanumeric())
                     .any(|token| {
@@ -187,4 +188,106 @@ pub(super) fn valid_hostname(value: &[u8]) -> bool {
                     .iter()
                     .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::service_probes::{
+        Corpus, MatchOutcome, MatchRule, Metadata, Probe, ReadOnlyReview, Request,
+        SERVICE_PROBES_SCHEMA_V1, Transport, VersionExtraction,
+    };
+
+    #[test]
+    fn uncoded_ftp_continuations_preserve_markers_and_reply_boundaries() {
+        for continuation in ["FTP", "vsFTPd 3.0.5", "ProFTPD 1.3.8"] {
+            let wire = format!("220-Welcome\r\n{continuation}\r\n220 Ready\r\n");
+            for end in 0..wire.len() {
+                assert!(!ftp_collection_complete(&wire.as_bytes()[..end]));
+            }
+            assert!(ftp_collection_complete(wire.as_bytes()));
+            let observation = observe(wire.as_bytes(), Protocol::Ftp);
+            assert_eq!(observation.protocol, Some(Protocol::Ftp));
+            assert_eq!(observation.outcome, ObservationOutcome::Complete);
+            assert_eq!(observation.diagnostic, None);
+            assert_eq!(
+                observation.fields,
+                ["220-Welcome", continuation, "220 Ready"].map(|line| ObservedField {
+                    field: Field::FtpGreeting,
+                    value: line.as_bytes().to_vec(),
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn custom_rule_matches_exact_uncoded_ftp_continuation_and_version() {
+        let metadata = Metadata {
+            source: "project-authored test fixture".into(),
+            reference: "isolated greeting fixture".into(),
+            license: "AGPL-3.0-only".into(),
+            maintainer: "tyk-swe".into(),
+            updated: "2026-10-11".into(),
+        };
+        let probe = Probe {
+            id: "ftp-greeting".into(),
+            transport: Transport::Tcp,
+            intensity: 1,
+            request: Request::FtpGreeting {},
+            metadata: metadata.clone(),
+            read_only_review: ReadOnlyReview {
+                reviewed_by: "tyk-swe".into(),
+                reviewed: "2026-10-11".into(),
+                statement: "Reads the connection greeting without sending commands".into(),
+            },
+        };
+        let corpus = Corpus {
+            schema: SERVICE_PROBES_SCHEMA_V1.into(),
+            name: "ftp-continuation-fixture".into(),
+            version: "1".into(),
+            probes: vec![probe.clone()],
+            matches: vec![MatchRule {
+                id: "vsftpd-claim".into(),
+                probe: probe.id.clone(),
+                field: Field::FtpGreeting,
+                prefix: "vsFTPd ".into(),
+                product: "vsftpd".into(),
+                version: Some(VersionExtraction {
+                    max_bytes: 64,
+                    stop_at: " ;()".into(),
+                }),
+                hostname_field: None,
+                device_type: None,
+                cpe: None,
+                metadata,
+            }],
+        };
+        corpus.validate().unwrap();
+        let observation = crate::document::service_probes::observe(
+            &probe,
+            b"220-Welcome\r\nvsFTPd 3.0.5\r\n220 Ready\r\n",
+            false,
+        );
+        let identification = corpus.identify(&probe, &observation);
+        assert_eq!(identification.outcome, MatchOutcome::Matched);
+        assert_eq!(identification.candidates.len(), 1);
+        let candidate = &identification.candidates[0];
+        assert_eq!(candidate.product, "vsftpd");
+        assert_eq!(candidate.version.as_deref(), Some("3.0.5"));
+        assert_eq!(candidate.provenance.field_indices, [1]);
+    }
+
+    #[test]
+    fn smtp_rejects_uncoded_continuation_before_terminating_line() {
+        let wire = b"220-mail.example.test ESMTP Postfix 3.10.1\r\nvsFTPd 3.0.5\r\n220 Ready\r\n";
+        assert!(smtp_collection_complete(wire));
+        let observation = observe(wire, Protocol::Smtp);
+        assert_eq!(observation.outcome, ObservationOutcome::Malformed);
+        assert_eq!(observation.fields.len(), 3);
+        assert_eq!(observation.fields[0].field, Field::SmtpGreeting);
+        assert_eq!(
+            observation.fields[0].value,
+            b"220-mail.example.test ESMTP Postfix 3.10.1"
+        );
+    }
 }

@@ -130,12 +130,27 @@ impl Lookup {
                 collection: scan.collection.clone(),
             },
         };
-        lookup
-            .question(
-                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                lookup.template.limits.max_duration,
-            )?
-            .validate()?;
+        if lookup.template.transport != dns::TransportMode::Tcp {
+            // Reject invalid caller settings before narrowing them for a
+            // batch, so synthesis cannot hide an unusable collection.
+            lookup
+                .template
+                .collection
+                .validate()
+                .map_err(|source| dns::Error::Execution {
+                    attempt: 1,
+                    source: BoundaryError::from_error(source),
+                })?;
+        }
+        // Check the smallest share that any batch may assign. This uses
+        // the same synthesis and admission checks as the eventual query.
+        let question = lookup.question(
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            lookup.template.limits.max_duration,
+            lookup.batch_size(),
+        )?;
+        question.validate()?;
+        question.validate_capture()?;
         Ok(lookup)
     }
 
@@ -234,7 +249,7 @@ impl Lookup {
             .iter()
             .filter(|host| host.state != State::NoResponse)
             .map_while(|host| {
-                self.question(host.address, self.template.limits.max_duration)
+                self.question(host.address, self.template.limits.max_duration, 1)
                     .map_err(|error| failure = Some(error.to_string()))
                     .ok()
             });
@@ -332,28 +347,7 @@ impl Lookup {
         let share = addresses.len().max(1);
         addresses
             .iter()
-            .map(|address| {
-                self.question(*address, remaining).map(|mut question| {
-                    let frames = (question.limits.evidence.max_frames / share)
-                        .min(question.collection.max_responses);
-                    question.limits.evidence.max_frames = frames;
-                    question.limits.evidence.max_bytes /= share;
-                    question.limits.evidence.max_undecoded =
-                        (question.limits.evidence.max_undecoded / share).min(frames);
-                    // The synthesized question's capture configuration must
-                    // fit its share before the DNS executor admits any I/O.
-                    question.collection.capture.max_frames = frames;
-                    question.collection.capture.max_bytes = question
-                        .collection
-                        .capture
-                        .max_bytes
-                        .min(question.limits.evidence.max_bytes);
-                    question.collection.max_responses = frames;
-                    question.collection.max_unmatched_frames =
-                        question.collection.max_unmatched_frames.min(frames);
-                    question
-                })
-            })
+            .map(|address| self.question(*address, remaining, share))
             .collect()
     }
 
@@ -372,13 +366,14 @@ impl Lookup {
         &self,
         address: IpAddr,
         max_duration: Duration,
+        share: usize,
     ) -> Result<dns::Request, BoundaryError> {
         let source_port = if self.template.transport == dns::TransportMode::Tcp {
             0
         } else {
             dns::unpredictable_source_port()?
         };
-        Ok(dns::Request {
+        let mut question = dns::Request {
             query_name: dns::reverse_name(address),
             transaction_id: dns::unpredictable_transaction_id()?,
             source_port,
@@ -387,7 +382,32 @@ impl Lookup {
                 ..self.template.limits
             },
             ..self.template.clone()
-        })
+        };
+        question.limits.evidence.max_frames /= share;
+        question.limits.evidence.max_bytes /= share;
+        question.limits.evidence.max_undecoded /= share;
+        if question.transport != dns::TransportMode::Tcp {
+            let frames = question
+                .limits
+                .evidence
+                .max_frames
+                .min(question.collection.max_responses);
+            question.limits.evidence.max_frames = frames;
+            question.limits.evidence.max_undecoded =
+                question.limits.evidence.max_undecoded.min(frames);
+            // The synthesized question's capture configuration must fit
+            // its evidence share before the DNS executor admits any I/O.
+            question.collection.capture.max_frames = frames;
+            question.collection.capture.max_bytes = question
+                .collection
+                .capture
+                .max_bytes
+                .min(question.limits.evidence.max_bytes);
+            question.collection.max_responses = frames;
+            question.collection.max_unmatched_frames =
+                question.collection.max_unmatched_frames.min(frames);
+        }
+        Ok(question)
     }
 }
 

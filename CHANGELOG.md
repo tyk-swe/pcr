@@ -13,6 +13,10 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Breaking
 
+- The evidence ceilings of `scan::Limits`, `traceroute::Limits`, and
+  `dns::Limits` now live in `evidence: packetcraftr::evidence::Limits
+  { max_frames, max_bytes, max_undecoded }`; serialized field names are
+  unchanged.
 - Current packet documents use `packetcraftr.packet/v2`; machine output uses
   `packetcraftr.output/v12`. Consumers must explicitly support these families.
   Output v6–v11 schemas and published evidence stay frozen; see

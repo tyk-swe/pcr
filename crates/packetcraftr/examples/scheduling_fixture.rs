@@ -88,7 +88,10 @@ fn run(scenario: &str, family: &str, mode: &str) -> Result<Value, String> {
             max_probes: usize::from(ports) * attempts as usize,
             max_duration: Duration::from_millis(duration_ms),
             max_prepared_bytes: prepared_bytes,
-            max_evidence_bytes: 1_048_576,
+            evidence: packetcraftr::evidence::Limits {
+                max_bytes: 1_048_576,
+                ..Default::default()
+            },
             ..scan::Limits::default()
         },
         route: packetcraftr::route::Options {

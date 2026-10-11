@@ -85,16 +85,16 @@ fn denied_dst_arms_no_capture_sends_nothing() {
 
 fn narrowed_request(frames: usize, bytes: usize) -> traceroute::Request {
     let mut request = request();
-    request.limits.max_evidence_frames = frames;
-    request.limits.max_undecoded = frames;
-    request.limits.max_evidence_bytes = bytes;
+    request.limits.evidence.max_frames = frames;
+    request.limits.evidence.max_undecoded = frames;
+    request.limits.evidence.max_bytes = bytes;
     request
 }
 
 #[test]
 fn wide_collection_reject_before_capture() {
-    let bytes = traceroute::Limits::default().max_evidence_bytes;
-    let frames = traceroute::Limits::default().max_evidence_frames;
+    let bytes = traceroute::Limits::default().evidence.max_bytes;
+    let frames = traceroute::Limits::default().evidence.max_frames;
     for (request, field) in [
         (narrowed_request(16, bytes), "capture_max_frames"),
         (narrowed_request(frames, 1 << 20), "capture_max_bytes"),

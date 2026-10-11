@@ -216,7 +216,7 @@ impl<'a> PreparedOperation<'a> {
             delay: self.delay,
             context,
             report: &mut self.report,
-            evidence: EvidenceState::new(self.request.limits.evidence(), EVIDENCE_DIAGNOSTICS),
+            evidence: EvidenceState::new(self.request.limits.evidence, EVIDENCE_DIAGNOSTICS),
             emit: &mut emit,
         }
         .execute()

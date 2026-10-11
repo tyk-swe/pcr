@@ -1434,6 +1434,7 @@ for a row are in the sections above.
 | `fuzz::Summary { seed, first_case, stats }`, `fuzz::Report { seed, first_case, cases, stats }` | `fuzz::Report { seed, first_case, campaign, stats }`, `fuzz::Aggregate { seed, first_case, trials, campaign, stats }` |
 | `fuzz::Stats.{cases_generated, cases_built}` and `.{packets_attempted, packets_completed, bytes, elapsed, capture}` | `report.campaign.{cases_generated, cases_built}` (core `fuzz::Stats`) and `report.stats` (`packetcraftr::Stats`) |
 | `From<BoundaryError>` for `dns::Error` and `fuzz::Error` | construct `Error::Authorization(boundary_error)` explicitly |
+| `scan::Limits`, `traceroute::Limits`, `dns::Limits` fields `max_evidence_frames`, `max_evidence_bytes`, `max_undecoded` | `limits.evidence` (`evidence::Limits { max_frames, max_bytes, max_undecoded }`); serialized names unchanged |
 
 ### packetcraftr-cli
 

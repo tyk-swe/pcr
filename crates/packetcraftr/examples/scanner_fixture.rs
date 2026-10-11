@@ -179,7 +179,10 @@ fn scan_request(arguments: &Arguments) -> scan::Request {
         limits: scan::Limits {
             max_duration: MAX_DURATION,
             max_probes: MAX_PROBES,
-            max_evidence_bytes: MAX_EVIDENCE_BYTES,
+            evidence: packetcraftr::evidence::Limits {
+                max_bytes: MAX_EVIDENCE_BYTES,
+                ..Default::default()
+            },
             ..scan::Limits::default()
         },
         route,
@@ -222,8 +225,10 @@ fn traceroute_request(arguments: &Arguments) -> traceroute::Request {
         limits: traceroute::Limits {
             max_probes: MAX_PROBES,
             max_duration: MAX_DURATION,
-            max_evidence_bytes: MAX_EVIDENCE_BYTES,
-            ..traceroute::Limits::default()
+            evidence: packetcraftr::evidence::Limits {
+                max_bytes: MAX_EVIDENCE_BYTES,
+                ..Default::default()
+            },
         },
         route,
         collection: collection(),

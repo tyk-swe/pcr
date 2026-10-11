@@ -9,7 +9,6 @@ use packetcraftr_core::template::DEFAULT_MAX_TEMPLATE_PACKETS;
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 use packetcraftr_netio::deadline::MAX_WAIT;
 
-use crate::execution::limits::EvidenceLimits;
 use crate::execution::limits::{check_limits, check_rate, duration_violation};
 use crate::target::Family;
 use crate::target::Selection;
@@ -28,9 +27,8 @@ pub struct Limits {
     pub max_ports: usize,
     pub max_probes: usize,
     pub max_duration: Duration,
-    pub max_evidence_frames: usize,
-    pub max_evidence_bytes: usize,
-    pub max_undecoded: usize,
+    #[serde(flatten)]
+    pub evidence: crate::evidence::Limits,
 }
 
 impl Default for Limits {
@@ -41,22 +39,15 @@ impl Default for Limits {
             max_ports: DEFAULT_MAX_PORTS,
             max_probes: DEFAULT_MAX_TEMPLATE_PACKETS,
             max_duration: MAX_WAIT,
-            max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
-            max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
-            max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
+            evidence: crate::evidence::Limits {
+                max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
+                ..crate::evidence::Limits::default()
+            },
         }
     }
 }
 
 impl Limits {
-    pub(crate) const fn evidence(&self) -> EvidenceLimits {
-        EvidenceLimits {
-            max_frames: self.max_evidence_frames,
-            max_bytes: self.max_evidence_bytes,
-            max_undecoded: self.max_undecoded,
-        }
-    }
-
     pub fn validate(&self) -> Result<(), Error> {
         check_limits(
             &[
@@ -70,19 +61,19 @@ impl Limits {
                 ("max_probes", self.max_probes, MAX_PROBES),
                 (
                     "max_evidence_frames",
-                    self.max_evidence_frames,
+                    self.evidence.max_frames,
                     MAX_CAPTURE_QUEUE_FRAMES,
                 ),
                 (
                     "max_evidence_bytes",
-                    self.max_evidence_bytes,
+                    self.evidence.max_bytes,
                     MAX_CAPTURE_QUEUE_BYTES,
                 ),
             ],
             &[(
                 "max_undecoded",
-                self.max_undecoded,
-                self.max_evidence_frames,
+                self.evidence.max_undecoded,
+                self.evidence.max_frames,
                 "cannot exceed max_evidence_frames",
             )],
             |field, value, reason| Error::InvalidLimit {

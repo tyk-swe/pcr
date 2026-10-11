@@ -3,12 +3,63 @@
 
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::{build::BuiltPacket, diagnostic::Diagnostic, frame::Frame};
 use packetcraftr_netio::{
     Error as LiveIoError,
     transmit::{Report as TransmissionReport, SendEvidenceFault, Timing as TransmissionTiming},
 };
+
+/// What a workflow retains as evidence: matched/unmatched frames and their bytes, and undecoded frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Limits {
+    #[serde(rename = "max_evidence_frames")]
+    pub max_frames: usize,
+    #[serde(rename = "max_evidence_bytes")]
+    pub max_bytes: usize,
+    pub max_undecoded: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_frames: packetcraftr_netio::capture::MAX_CAPTURE_QUEUE_FRAMES,
+            max_bytes: packetcraftr_netio::capture::MAX_CAPTURE_QUEUE_BYTES,
+            max_undecoded: crate::scan::DEFAULT_MAX_UNDECODED_FRAMES,
+        }
+    }
+}
+
+impl Limits {
+    pub(crate) fn validate<E>(
+        &self,
+        invalid: impl Fn(&'static str, u64, String) -> E,
+    ) -> Result<(), E> {
+        crate::execution::limits::check_limits(
+            &[
+                (
+                    "max_evidence_frames",
+                    self.max_frames,
+                    packetcraftr_netio::capture::MAX_CAPTURE_QUEUE_FRAMES,
+                ),
+                (
+                    "max_evidence_bytes",
+                    self.max_bytes,
+                    packetcraftr_netio::capture::MAX_CAPTURE_QUEUE_BYTES,
+                ),
+            ],
+            &[(
+                "max_undecoded",
+                self.max_undecoded,
+                self.max_frames,
+                "cannot exceed max_evidence_frames",
+            )],
+            invalid,
+        )
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -306,5 +357,17 @@ mod tests {
             (budget.retained_frames, budget.retained_bytes),
             (1, usize::MAX)
         );
+    }
+
+    #[test]
+    fn workflow_limits_serialize_the_evidence_ceilings_at_the_top_level() {
+        let value = serde_json::to_value(crate::scan::Limits::default()).unwrap();
+        let object = value.as_object().unwrap();
+        for key in ["max_evidence_frames", "max_evidence_bytes", "max_undecoded"] {
+            assert!(object.contains_key(key), "{key}");
+        }
+        assert!(!object.contains_key("evidence"));
+        let round_trip: crate::scan::Limits = serde_json::from_value(value).unwrap();
+        assert_eq!(round_trip, crate::scan::Limits::default());
     }
 }

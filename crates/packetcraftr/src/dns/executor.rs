@@ -90,7 +90,7 @@ pub(super) fn validate_capture(
     limits: &Limits,
     collection: &crate::exchange::Collection,
 ) -> Result<(), BoundaryError> {
-    let max_responses = limits.max_evidence_frames;
+    let max_responses = limits.evidence.max_frames;
     if max_responses == 0 {
         return Err(EXECUTOR_FAULT.invalid("DNS exchange must retain at least one response"));
     }
@@ -102,13 +102,13 @@ pub(super) fn validate_capture(
     }
     // Captured evidence must fit the request's bounds; refuse before any I/O, not after.
     let capture = &collection.capture;
-    if capture.max_frames > max_responses || capture.max_bytes > limits.max_evidence_bytes {
+    if capture.max_frames > max_responses || capture.max_bytes > limits.evidence.max_bytes {
         return Err(EXECUTOR_FAULT.invalid(format!(
                 "the client captures up to {} frames and {} bytes but the DNS exchange retains at most {} frames and {} bytes",
                 capture.max_frames,
                 capture.max_bytes,
                 max_responses,
-                limits.max_evidence_bytes
+                limits.evidence.max_bytes
             )));
     }
     collection.validate().map_err(BoundaryError::from_error)
@@ -117,7 +117,7 @@ pub(super) fn validate_capture(
 impl<P: PacketProviders, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
     fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         validate_capture(&exchange.limits, &self.collection)?;
-        let max_responses = exchange.limits.max_evidence_frames;
+        let max_responses = exchange.limits.evidence.max_frames;
         let registry = std::sync::Arc::clone(self.client.registry());
         let stop_probe = exchange.probe.clone();
         let stop_limits = exchange.limits.message;

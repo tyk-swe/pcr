@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use packetcraftr_core::error::BoundaryError;
 
 use crate::clock::Clock;
+use crate::evidence;
 use crate::providers::{PacketProviders, TargetProviders};
 use crate::scan;
 use crate::target::{ScopedAddress, Target};
@@ -115,9 +116,7 @@ impl Stage {
             limits: traceroute::Limits {
                 max_probes: trace.max_probes,
                 max_duration: scan.limits.max_duration,
-                max_evidence_frames: scan.limits.max_evidence_frames,
-                max_evidence_bytes: scan.limits.max_evidence_bytes,
-                max_undecoded: scan.limits.max_undecoded,
+                evidence: scan.limits.evidence,
             },
             route: scan.route.clone(),
             collection: scan.collection.clone(),
@@ -161,27 +160,20 @@ impl Stage {
                 && (covered.contains(&host.address) || self.template.strategy.is_some())
         });
         let (limits, collection) = if sends {
-            let limits = traceroute::Limits {
-                max_evidence_frames: self
-                    .template
-                    .limits
-                    .max_evidence_frames
-                    .saturating_sub(retained.frames),
-                max_evidence_bytes: self
-                    .template
-                    .limits
-                    .max_evidence_bytes
+            let template = self.template.limits.evidence;
+            let evidence = evidence::Limits {
+                max_frames: template.max_frames.saturating_sub(retained.frames),
+                max_bytes: template
+                    .max_bytes
                     .saturating_sub(scan.retained_evidence_bytes),
-                max_undecoded: self
-                    .template
-                    .limits
-                    .max_undecoded
-                    .saturating_sub(retained.undecoded),
-                ..self.template.limits
+                max_undecoded: template.max_undecoded.saturating_sub(retained.undecoded),
             };
             let limits = traceroute::Limits {
-                max_undecoded: limits.max_undecoded.min(limits.max_evidence_frames),
-                ..limits
+                evidence: evidence::Limits {
+                    max_undecoded: evidence.max_undecoded.min(evidence.max_frames),
+                    ..evidence
+                },
+                ..self.template.limits
             };
             // The queues keep only what the shared budget leaves, never more
             // than the workflow configured.
@@ -189,9 +181,9 @@ impl Stage {
             collection.capture.max_frames = collection
                 .capture
                 .max_frames
-                .min(limits.max_evidence_frames);
+                .min(limits.evidence.max_frames);
             collection.capture.max_bytes =
-                collection.capture.max_bytes.min(limits.max_evidence_bytes);
+                collection.capture.max_bytes.min(limits.evidence.max_bytes);
             collection.max_responses = collection.max_responses.min(collection.capture.max_frames);
             collection.max_unmatched_frames = collection
                 .max_unmatched_frames

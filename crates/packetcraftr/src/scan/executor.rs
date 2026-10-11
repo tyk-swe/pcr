@@ -194,8 +194,8 @@ impl NeighborBounds {
         Self {
             resolves: request.route.link_mode != Mode::Layer3,
             attempt_timeout: request.timeout,
-            max_frames: request.limits.max_evidence_frames,
-            max_bytes: request.limits.max_evidence_bytes,
+            max_frames: request.limits.evidence.max_frames,
+            max_bytes: request.limits.evidence.max_bytes,
             snap_length: request.collection.capture.snap_length,
             max_neighbors: request.limits.max_targets,
         }

@@ -203,7 +203,10 @@ fn run_scan(
                 limits: scan::Limits {
                     max_duration: MAX_DURATION,
                     max_probes: MAX_PROBES,
-                    max_evidence_bytes: MAX_EVIDENCE_BYTES,
+                    evidence: packetcraftr::evidence::Limits {
+                        max_bytes: MAX_EVIDENCE_BYTES,
+                        ..Default::default()
+                    },
                     ..scan::Limits::default()
                 },
                 route,
@@ -271,8 +274,10 @@ fn run_trace(
                 limits: traceroute::Limits {
                     max_probes: MAX_PROBES,
                     max_duration: MAX_DURATION,
-                    max_evidence_bytes: MAX_EVIDENCE_BYTES,
-                    ..traceroute::Limits::default()
+                    evidence: packetcraftr::evidence::Limits {
+                        max_bytes: MAX_EVIDENCE_BYTES,
+                        ..Default::default()
+                    },
                 },
                 route,
                 collection: collection(),
@@ -475,7 +480,10 @@ fn window_two_publishes_sent_before_the_probe_event() {
                 limits: scan::Limits {
                     max_duration: MAX_DURATION,
                     max_probes: MAX_PROBES,
-                    max_evidence_bytes: MAX_EVIDENCE_BYTES,
+                    evidence: packetcraftr::evidence::Limits {
+                        max_bytes: MAX_EVIDENCE_BYTES,
+                        ..Default::default()
+                    },
                     ..scan::Limits::default()
                 },
                 route,

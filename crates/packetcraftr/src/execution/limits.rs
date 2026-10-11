@@ -29,41 +29,7 @@ pub(crate) fn check_limits<E>(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct EvidenceLimits {
-    pub(crate) max_frames: usize,
-    pub(crate) max_bytes: usize,
-    pub(crate) max_undecoded: usize,
-}
-
-impl EvidenceLimits {
-    pub(crate) fn validate<E>(
-        &self,
-        invalid: impl Fn(&'static str, u64, String) -> E,
-    ) -> Result<(), E> {
-        check_limits(
-            &[
-                (
-                    "max_evidence_frames",
-                    self.max_frames,
-                    packetcraftr_netio::capture::MAX_CAPTURE_QUEUE_FRAMES,
-                ),
-                (
-                    "max_evidence_bytes",
-                    self.max_bytes,
-                    packetcraftr_netio::capture::MAX_CAPTURE_QUEUE_BYTES,
-                ),
-            ],
-            &[(
-                "max_undecoded",
-                self.max_undecoded,
-                self.max_frames,
-                "cannot exceed max_evidence_frames",
-            )],
-            invalid,
-        )
-    }
-}
+pub(crate) use crate::evidence::Limits as EvidenceLimits;
 
 pub(crate) fn check_rate<R: Errors>(
     errors: &R,

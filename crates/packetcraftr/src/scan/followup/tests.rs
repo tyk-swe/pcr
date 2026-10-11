@@ -280,22 +280,25 @@ fn the_trace_request_deducts_the_scans_retained_evidence() {
 
     // Two answered probes, one undecoded frame, one unattributed frame.
     assert_eq!(
-        request.limits.max_evidence_frames,
-        limits.max_evidence_frames - 4
+        request.limits.evidence.max_frames,
+        limits.evidence.max_frames - 4
     );
     assert_eq!(
-        request.limits.max_evidence_bytes,
-        limits.max_evidence_bytes - 1_024
+        request.limits.evidence.max_bytes,
+        limits.evidence.max_bytes - 1_024
     );
-    assert_eq!(request.limits.max_undecoded, limits.max_undecoded - 1);
-    assert!(request.limits.max_undecoded <= request.limits.max_evidence_frames);
+    assert_eq!(
+        request.limits.evidence.max_undecoded,
+        limits.evidence.max_undecoded - 1
+    );
+    assert!(request.limits.evidence.max_undecoded <= request.limits.evidence.max_frames);
     assert_eq!(
         request.collection.capture.max_frames,
-        request.limits.max_evidence_frames
+        request.limits.evidence.max_frames
     );
     assert_eq!(
         request.collection.capture.max_bytes,
-        request.limits.max_evidence_bytes
+        request.limits.evidence.max_bytes
     );
     assert!(request.collection.max_responses <= request.collection.capture.max_frames);
     assert!(request.collection.max_unmatched_frames <= request.collection.capture.max_frames);
@@ -314,8 +317,8 @@ fn an_exhausted_evidence_budget_fails_with_a_typed_limit_before_tracing() {
     // Scan and trace share the queue: the template pairs a four-frame
     // evidence budget with a four-frame collection, like the CLI builds.
     let mut scan = scan_request();
-    scan.limits.max_evidence_frames = 4;
-    scan.limits.max_undecoded = 4;
+    scan.limits.evidence.max_frames = 4;
+    scan.limits.evidence.max_undecoded = 4;
     scan.collection.capture.max_frames = 4;
     scan.collection.max_responses = 4;
     scan.collection.max_unmatched_frames = 4;
@@ -363,7 +366,7 @@ fn an_exhausted_evidence_budget_fails_with_a_typed_limit_before_tracing() {
 fn a_byte_budget_under_one_snap_length_is_rejected() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7));
     // The scan's retained frames leave less than one snapshot length.
-    let retained = scan_request().limits.max_evidence_bytes
+    let retained = scan_request().limits.evidence.max_bytes
         - (scan_request().collection.capture.snap_length - 1);
     let stage = Stage::new(&options(), &scan_request()).expect("the template itself is valid");
     let aggregate = aggregate(
@@ -421,16 +424,16 @@ fn an_untraceable_scan_keeps_the_whole_evidence_budget() {
         .expect("a plan of only not_traced hosts needs no evidence budget");
 
     assert_eq!(
-        request.limits.max_evidence_frames,
-        stage.template.limits.max_evidence_frames
+        request.limits.evidence.max_frames,
+        stage.template.limits.evidence.max_frames
     );
     assert_eq!(
-        request.limits.max_evidence_bytes,
-        stage.template.limits.max_evidence_bytes
+        request.limits.evidence.max_bytes,
+        stage.template.limits.evidence.max_bytes
     );
     assert_eq!(
-        request.limits.max_undecoded,
-        stage.template.limits.max_undecoded
+        request.limits.evidence.max_undecoded,
+        stage.template.limits.evidence.max_undecoded
     );
     assert_eq!(request.collection, stage.template.collection);
 }
@@ -763,16 +766,16 @@ fn streamed_events_count_what_a_stripped_aggregate_no_longer_holds() {
         .expect("the narrowed request validates");
 
     assert_eq!(
-        request.limits.max_evidence_frames,
-        stage.template.limits.max_evidence_frames - 3
+        request.limits.evidence.max_frames,
+        stage.template.limits.evidence.max_frames - 3
     );
     assert_eq!(
-        request.limits.max_undecoded,
-        stage.template.limits.max_undecoded - 1
+        request.limits.evidence.max_undecoded,
+        stage.template.limits.evidence.max_undecoded - 1
     );
     assert_eq!(
-        request.limits.max_evidence_bytes,
-        stage.template.limits.max_evidence_bytes - 512
+        request.limits.evidence.max_bytes,
+        stage.template.limits.evidence.max_bytes - 512
     );
 }
 
@@ -780,8 +783,8 @@ fn streamed_events_count_what_a_stripped_aggregate_no_longer_holds() {
 fn an_exactly_full_frame_budget_fails_with_a_typed_limit() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7));
     let mut scan = scan_request();
-    scan.limits.max_evidence_frames = 1;
-    scan.limits.max_undecoded = 1;
+    scan.limits.evidence.max_frames = 1;
+    scan.limits.evidence.max_undecoded = 1;
     scan.collection.capture.max_frames = 1;
     scan.collection.max_responses = 1;
     scan.collection.max_unmatched_frames = 1;
@@ -1087,22 +1090,22 @@ fn a_window_too_short_for_one_question_leaves_its_lookups_unattempted() {
 fn a_batchs_questions_share_the_scans_evidence_limits() {
     let mut lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
     let snap_length = lookup.template.collection.capture.snap_length;
-    lookup.template.limits.max_evidence_frames = 1_000;
-    lookup.template.limits.max_evidence_bytes = 4 * snap_length;
+    lookup.template.limits.evidence.max_frames = 1_000;
+    lookup.template.limits.evidence.max_bytes = 4 * snap_length;
     assert_eq!(lookup.batch_size(), 4, "each share still holds a frame");
-    lookup.template.limits.max_evidence_bytes = 1_000 * snap_length;
-    lookup.template.limits.max_evidence_frames = 3;
+    lookup.template.limits.evidence.max_bytes = 1_000 * snap_length;
+    lookup.template.limits.evidence.max_frames = 3;
     assert_eq!(lookup.batch_size(), 3);
 
-    lookup.template.limits.max_evidence_frames = 1_000;
+    lookup.template.limits.evidence.max_frames = 1_000;
     let addresses: Vec<IpAddr> = (1..=4)
         .map(|host| IpAddr::V4(Ipv4Addr::new(192, 0, 2, host)))
         .collect();
     let questions = lookup
         .questions(&addresses, Duration::from_secs(1))
         .expect("questions build");
-    let frames: usize = questions.iter().map(|q| q.limits.max_evidence_frames).sum();
-    let bytes: usize = questions.iter().map(|q| q.limits.max_evidence_bytes).sum();
+    let frames: usize = questions.iter().map(|q| q.limits.evidence.max_frames).sum();
+    let bytes: usize = questions.iter().map(|q| q.limits.evidence.max_bytes).sum();
     assert_eq!((frames, bytes), (1_000, 1_000 * snap_length));
 }
 

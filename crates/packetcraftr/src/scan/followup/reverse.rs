@@ -123,9 +123,7 @@ impl Lookup {
                 queries_per_second: scan.probes_per_second,
                 limits: dns::Limits {
                     message: dns::MessageLimits::default(),
-                    max_evidence_frames: scan.limits.max_evidence_frames,
-                    max_evidence_bytes: scan.limits.max_evidence_bytes,
-                    max_undecoded: scan.limits.max_undecoded,
+                    evidence: scan.limits.evidence,
                     max_duration: scan.limits.max_duration,
                 },
                 route: scan.route.clone(),
@@ -203,7 +201,7 @@ impl Lookup {
             self.batch_size(),
             last_sent,
             &deadline,
-            self.template.limits.max_evidence_bytes,
+            self.template.limits.evidence.max_bytes,
             || client.now(),
             |waited| {
                 client
@@ -359,8 +357,8 @@ impl Lookup {
         let limits = &self.template.limits;
         let snap_length = self.template.collection.capture.snap_length.max(1);
         batch::MAX_QUESTIONS
-            .min(limits.max_evidence_frames)
-            .min(limits.max_evidence_bytes / snap_length)
+            .min(limits.evidence.max_frames)
+            .min(limits.evidence.max_bytes / snap_length)
             .max(1)
     }
 
@@ -385,16 +383,18 @@ impl Lookup {
             },
             ..self.template.clone()
         };
-        question.limits.max_evidence_frames /= share;
-        question.limits.max_evidence_bytes /= share;
-        question.limits.max_undecoded /= share;
+        question.limits.evidence.max_frames /= share;
+        question.limits.evidence.max_bytes /= share;
+        question.limits.evidence.max_undecoded /= share;
         if question.transport != dns::TransportMode::Tcp {
             let frames = question
                 .limits
-                .max_evidence_frames
+                .evidence
+                .max_frames
                 .min(question.collection.max_responses);
-            question.limits.max_evidence_frames = frames;
-            question.limits.max_undecoded = question.limits.max_undecoded.min(frames);
+            question.limits.evidence.max_frames = frames;
+            question.limits.evidence.max_undecoded =
+                question.limits.evidence.max_undecoded.min(frames);
             // The synthesized question's capture configuration must fit
             // its evidence share before the DNS executor admits any I/O.
             question.collection.capture.max_frames = frames;
@@ -402,7 +402,7 @@ impl Lookup {
                 .collection
                 .capture
                 .max_bytes
-                .min(question.limits.max_evidence_bytes);
+                .min(question.limits.evidence.max_bytes);
             question.collection.max_responses = frames;
             question.collection.max_unmatched_frames =
                 question.collection.max_unmatched_frames.min(frames);

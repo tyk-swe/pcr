@@ -81,7 +81,7 @@ where
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
         Probes,
-        request.limits.evidence(),
+        request.limits.evidence,
         ProbeClassifier {
             registry,
             target: Arc::from(approved.declared_target.as_str()),

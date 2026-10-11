@@ -390,8 +390,8 @@ pub(super) fn validate_dns_execution(
         &execution.responses,
         execution.unsolicited.iter(),
         &execution.undecoded,
-        limits.max_evidence_frames,
-        limits.max_evidence_bytes,
+        limits.evidence.max_frames,
+        limits.evidence.max_bytes,
     )
     .map_err(|error| map_dns_evidence_error(attempt, error))?;
     Ok(())

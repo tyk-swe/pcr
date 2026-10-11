@@ -119,9 +119,11 @@ fn prepare_request(
     let trace_limits = packetcraftr::traceroute::Limits {
         max_probes: arguments.max_probes,
         max_duration: arguments.duration.max_duration(),
-        max_evidence_frames: queue_limits.max_frames,
-        max_evidence_bytes: queue_limits.max_bytes,
-        max_undecoded: arguments.max_undecoded,
+        evidence: packetcraftr::evidence::Limits {
+            max_frames: queue_limits.max_frames,
+            max_bytes: queue_limits.max_bytes,
+            max_undecoded: arguments.max_undecoded,
+        },
     };
     let request = packetcraftr::traceroute::Request {
         target: parse_target(arguments.target.clone())?,

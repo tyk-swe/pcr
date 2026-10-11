@@ -449,10 +449,10 @@ fn unsolicited_duplicate_requires_a_winner_and_active_correlation() {
 fn serial_scan_reject_wide_collection() {
     let address = "192.0.2.1".parse().unwrap();
     let mut frames = tcp_scan_request(Target::Address(address));
-    frames.limits.max_evidence_frames = 16;
-    frames.limits.max_undecoded = 16;
+    frames.limits.evidence.max_frames = 16;
+    frames.limits.evidence.max_undecoded = 16;
     let mut bytes = tcp_scan_request(Target::Address(address));
-    bytes.limits.max_evidence_bytes = 1 << 20;
+    bytes.limits.evidence.max_bytes = 1 << 20;
 
     for (request, field) in [(frames, "capture_max_frames"), (bytes, "capture_max_bytes")] {
         let calls = Arc::new(AtomicUsize::new(0));
@@ -1199,7 +1199,7 @@ fn link_layer_probes_reject_evidence_limits_too_small_for_a_neighbor_reply() {
     let mut request = tcp_scan_request(Target::Address(address));
     request.collection.capture.snap_length = 64;
     request.collection.capture.max_bytes = 64;
-    request.limits.max_evidence_bytes = 64;
+    request.limits.evidence.max_bytes = 64;
     let calls = Arc::new(AtomicUsize::new(0));
     let error = run(
         &request,
@@ -1473,7 +1473,7 @@ fn skipped_hosts_release_their_evidence_reservation() {
     request.route.link_mode = packetcraftr_netio::link::Mode::Layer3;
     request.collection.capture.snap_length = 64;
     request.collection.capture.max_bytes = 128;
-    request.limits.max_evidence_bytes = 128;
+    request.limits.evidence.max_bytes = 128;
     let mut executor = SkippedHostExecutor {
         inner: TimeoutExecutor::default(),
         answered: Ipv4Addr::new(192, 0, 2, 10),
@@ -1698,7 +1698,7 @@ fn a_silent_neighbors_skipped_probes_release_their_evidence_reservation() {
     // the snap length holds a neighbor reply.
     request.collection.capture.snap_length = 128;
     request.collection.capture.max_bytes = 256;
-    request.limits.max_evidence_bytes = 256;
+    request.limits.evidence.max_bytes = 256;
     let mut executor = LateEchoNeighbors {
         neighbors: ScriptedNeighbors {
             outcomes: [

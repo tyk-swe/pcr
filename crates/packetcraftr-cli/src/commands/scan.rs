@@ -201,9 +201,11 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         max_ports,
         max_probes,
         max_duration: duration.max_duration(),
-        max_evidence_frames: queue_limits.max_frames,
-        max_evidence_bytes: queue_limits.max_bytes,
-        max_undecoded,
+        evidence: packetcraftr::evidence::Limits {
+            max_frames: queue_limits.max_frames,
+            max_bytes: queue_limits.max_bytes,
+            max_undecoded,
+        },
     };
     scan_limits.validate().map_err(CliError::classified)?;
     let selected = if scanning {

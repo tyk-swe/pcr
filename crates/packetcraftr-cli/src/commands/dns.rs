@@ -199,9 +199,11 @@ fn prepare_requests(
             max_txt_bytes: arguments.max_txt_bytes,
             max_rejected_records: arguments.max_rejected_records,
         },
-        max_evidence_frames: queue_limits.max_frames,
-        max_evidence_bytes: queue_limits.max_bytes,
-        max_undecoded: arguments.max_undecoded,
+        evidence: packetcraftr::evidence::Limits {
+            max_frames: queue_limits.max_frames,
+            max_bytes: queue_limits.max_bytes,
+            max_undecoded: arguments.max_undecoded,
+        },
         max_duration: arguments.duration.max_duration(),
     };
     questions

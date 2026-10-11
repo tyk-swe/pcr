@@ -5,7 +5,6 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 
 use crate::clock::Clock;
-use crate::deadline::DeadlineExt as _;
 use crate::target::SelectedAddress;
 
 use super::pacing::{Owed, settle};

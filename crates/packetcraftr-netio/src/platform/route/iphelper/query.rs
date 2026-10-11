@@ -36,7 +36,7 @@ pub(in crate::platform) fn route(
 ) -> Result<Decision, route::Error> {
     let available = adapter_snapshots()?;
     let constrained_interface = constrain_interface(&available, interface_hint, preferred_source)?;
-    crate::deadline::remaining(deadline).map_err(|interrupted| {
+    deadline.live_remaining().map_err(|interrupted| {
         route::Error::interrupted(interrupted, "selecting the Windows best route")
     })?;
     let BestRoute {

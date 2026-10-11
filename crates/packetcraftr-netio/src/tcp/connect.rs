@@ -177,7 +177,7 @@ where
     P: Provider + 'static,
     P::Stream: 'static,
 {
-    let deadline = crate::deadline::detach(caller).map_err(Error::interrupted)?;
+    let deadline = caller.detach().map_err(Error::interrupted)?;
     if deadline.limit() > crate::deadline::MAX_WAIT {
         return Err(Error::Timeout);
     }
@@ -201,7 +201,8 @@ where
                 let admitted = if state.cancelled {
                     Err(Error::Cancelled(Cancelled))
                 } else {
-                    crate::deadline::remaining(&deadline)
+                    deadline
+                        .live_remaining()
                         .map(drop)
                         .map_err(Error::interrupted)
                 };

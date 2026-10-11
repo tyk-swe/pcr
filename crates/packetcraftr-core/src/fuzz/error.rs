@@ -143,7 +143,7 @@ impl Classified for Error {
     }
 }
 
-crate::budget::deadline_error_conversions!(Error);
+crate::deadline_error_conversions!(Error);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

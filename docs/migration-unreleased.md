@@ -794,7 +794,8 @@ traffic. `build::BuiltPacket` now records the codec `mode` it was
 built with and exposes `contains_malformed()` and `contains_network_trailer()`;
 the predicate is `packetcraftr::policy::requires_live_opt_in(&built)`, and the
 published `requires_live_opt_in` output field is unchanged. `Deadline` gains
-`limit()` and `cancellation()` getters. `Cancelled::into_boundary_error` is
+`limit()` and `cancellation()` getters, plus `live_remaining()` and `detach()`,
+which check cancellation before the nonzero remainder. `Cancelled::into_boundary_error` is
 removed; build `BoundaryError::with_source(c.to_string(), c.classification(),
 Vec::new(), c)` instead. The other moved items are in
 [Renamed and removed paths](#renamed-and-removed-paths).
@@ -910,7 +911,7 @@ stop signal; a passive lookup whose operation has no deadline can use
 used to apply themselves. A fake provider that ignores time takes
 `_deadline: &Deadline`; one that recorded or slept for its timeout reads
 `deadline.remaining()`, and one that stalls until expiry can loop on
-`packetcraftr_netio::deadline::remaining(deadline)`. A system backend stopped by
+`deadline.live_remaining()`. A system backend stopped by
 the deadline reports `route::Error::DeadlineExceeded`,
 `interface::Error::DeadlineExceeded`, or `Error::DeadlineExceeded`, all
 classified `io.deadline_exceeded`; a cancelled one reports the `Cancelled`
@@ -1341,7 +1342,6 @@ for a row are in the sections above.
 | `analysis::follow::Direction` | `analysis::follow::PeerDirection`, distinct from `frame::Direction` |
 | `expression::Options`, `filter::Options` | `expression::Limits`, `filter::Limits` (each with `validate()`); `expression::Limits` also has `max_generated_bytes` |
 | `budget::Cancellation::POLL_INTERVAL` | `packetcraftr_netio::deadline::POLL_INTERVAL` |
-| `Deadline::bounded_timeout`, `Deadline::for_wait` | `packetcraftr::deadline::DeadlineExt` methods (import the trait) |
 | `document::PACKET_DOCUMENT_SCHEMA_V1` | `document::PACKET_DOCUMENT_SCHEMA_V2` |
 | `fuzz::Summary.diagnostics`, `fuzz::Report.diagnostics` | removed, so `Summary` is `{ seed, first_case, stats }` and `Report` is `{ seed, first_case, cases, stats }`; the field was always empty, and per-case diagnostics are `Case::diagnostics` |
 | `fuzz::CaseFailure::new(message, classification, causes)` | `fuzz::CaseFailure::with_source(message, classification, source_error)`; `causes()` is then the source chain |

@@ -382,7 +382,7 @@ impl<T> Task<T> {
             if !matches!(*slot, Slot::Running) {
                 return;
             }
-            let Ok(remaining) = crate::deadline::remaining(deadline) else {
+            let Ok(remaining) = deadline.live_remaining() else {
                 return;
             };
             // The caller's cancellation has no waker, so the wait is sliced to notice it.

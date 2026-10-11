@@ -59,14 +59,14 @@ impl SystemProvider {
     /// Enumerates interfaces with their IPv6 indexes for scoped addresses.
     /// Interfaces without an IPv6 index are omitted on Windows.
     pub fn ipv6_interfaces(&self, deadline: &Deadline) -> Result<Vec<Info>, Error> {
-        crate::deadline::remaining(deadline).map_err(Error::interrupted)?;
+        deadline.live_remaining().map_err(Error::interrupted)?;
         validate_snapshot(super::platform::ipv6_interfaces(deadline)?)
     }
 }
 
 impl Provider for SystemProvider {
     fn interfaces(&self, deadline: &Deadline) -> Result<Vec<Info>, Error> {
-        crate::deadline::remaining(deadline).map_err(Error::interrupted)?;
+        deadline.live_remaining().map_err(Error::interrupted)?;
         validate_snapshot(super::platform::interfaces(deadline)?)
     }
 }
@@ -76,7 +76,7 @@ impl Provider for SystemProvider {
 #[cfg(native_send)]
 #[cfg_attr(not(native_layer2), allow(dead_code))]
 pub(crate) fn current(expected: &Id, deadline: &Deadline) -> Result<Info, crate::Error> {
-    crate::deadline::remaining(deadline).map_err(Error::interrupted)?;
+    deadline.live_remaining().map_err(Error::interrupted)?;
     let mut interfaces = validate_snapshot(super::platform::interfaces_for_identity(
         expected, deadline,
     )?)?;

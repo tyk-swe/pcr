@@ -157,6 +157,33 @@ fn the_trace_continues_the_scans_probe_sequence_namespace() {
 }
 
 #[test]
+fn a_zero_capacity_trace_runtime_is_rejected_before_scanning() {
+    let state = network(&[7]);
+    let mut request = request(&[7]);
+    request.reverse_dns = None;
+    request.trace.as_mut().unwrap().runtime = Some(packetcraftr::runtime::Runtime::new(0).unwrap());
+    let error = client(&state, Policy::default())
+        .scan_with_followups(request, |_: Event| Ok(()))
+        .expect_err("the trace cannot publish with zero worker capacity");
+    assert_eq!(
+        state.lock().unwrap().sends,
+        0,
+        "the scan must not send first"
+    );
+    assert!(
+        matches!(
+            error,
+            followup::Error::Trace(packetcraftr::traceroute::Error::InvalidLimit {
+                field: "runtime.capacity",
+                value: 0,
+                ..
+            })
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
 fn the_report_totals_the_scan_the_trace_and_the_lookups() {
     let (report, _) = streamed(&[7, 8]);
 

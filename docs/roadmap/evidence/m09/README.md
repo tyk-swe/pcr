@@ -81,7 +81,7 @@ M9 TLS runtime acceptance.
 
 ## Validation
 
-`python3 -m unittest scripts/test_service_identification.py` passes 16 contracts,
+`python3 -m unittest scripts/test_service_identification.py` passes 17 contracts,
 including immutable holdout enforcement, independent TLS fixture certificate
 and SNI behavior, retained unexpected outcomes, uncertainty shares, separate
 confidence counts, source-backed hostname/CPE metadata, and failure paths in

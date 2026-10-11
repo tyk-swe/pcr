@@ -50,6 +50,21 @@ class FakePeer:
 
 
 class AcceptanceContracts(unittest.TestCase):
+    def test_failed_tls_handshake_retains_intended_request_without_transmitting_it(self):
+        scenario = next(case for case in RUNNER.scenarios() if case["name"] == "tls-handshake-refused")
+        fixture = SimpleNamespace(address=("127.0.0.1", 12345), transport="tcp", requests=[], connections=1)
+        probe = {"probe": "http-head", "attempt": 1, "request_hex": RUNNER.HTTP_REQUEST.hex(),
+                 "response_hex": "", "bytes_written": 0, "io_outcome": "failed"}
+        record = {"endpoint": {"address": "127.0.0.1:12345", "transport": "tcp"},
+                  "outcome": "tls_failed", "probes": [probe], "candidates": []}
+        summary = {"corpus": "fixture", "corpus_version": "1", "cancelled": False, "complete": True,
+                   "usage": {"attempts": 1, "read_bytes": 0, "write_bytes": 0}}
+        with patch.object(RUNNER, "verify_tls"):
+            RUNNER.verify_result(record, summary, fixture, scenario, {"name": "fixture", "version": "1"})
+            probe["bytes_written"] = summary["usage"]["write_bytes"] = 1
+            with self.assertRaisesRegex(ValueError, "application I/O"):
+                RUNNER.verify_result(record, summary, fixture, scenario, {"name": "fixture", "version": "1"})
+
     def test_holdout_is_fixed_and_not_silently_replaced_after_rule_authorship(self):
         scenarios = RUNNER.held_out_scenarios()
         self.assertEqual(len(scenarios), 21)

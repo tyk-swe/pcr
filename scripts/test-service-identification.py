@@ -403,8 +403,9 @@ def verify_result(record, summary, fixture, scenario, corpus):
         if scenario.get("tls"):
             verify_tls(probe, summary, fixture, scenario)
             if scenario.get("tls_failure"):
-                require(request == b"" and response == b"" and probe["bytes_written"] == 0,
+                require(response == b"" and probe["bytes_written"] == 0,
                         "failed TLS handshake performed application I/O")
+                require(request == HTTP_REQUEST, "failed TLS handshake lost its intended request evidence")
                 require(probe["io_outcome"] == ("timed_out" if scenario.get("hold") else
                         "truncated" if scenario.get("tls_read_limit") else "failed"),
                         "TLS failure did not preserve its I/O outcome")

@@ -46,7 +46,8 @@ fn open_with(
     reaper: impl FnOnce() -> Result<ReaperClient, ReaperStartError>,
 ) -> Result<Box<dyn Session>, Error> {
     // Native activation spends wall time even when the caller's clock is frozen.
-    let deadline = crate::deadline::detach(caller)
+    let deadline = caller
+        .detach()
         .map_err(|interrupted| Error::interrupted(interrupted, ARMING))?;
     // Both fallible cleanup-service steps happen before any native call.
     let reaper = reaper().map_err(|error| Error::Capture {
@@ -102,7 +103,7 @@ fn open_with(
         Ok(Ok(started)) => {
             let retention = permit.retention_marker();
             let session = NativeCaptureSession::attach(started, task, permit, reaper.clone());
-            if let Err(interrupted) = crate::deadline::remaining(&deadline) {
+            if let Err(interrupted) = deadline.live_remaining() {
                 retention.mark_retained();
                 reaper.transfer(Box::new(move || drop(session)));
                 return Err(Error::interrupted(interrupted, ARMING));
@@ -123,7 +124,7 @@ fn await_handoff(
 ) -> Result<Result<Started, Error>, Interrupted> {
     // The channel signals the handoff, not cancellation, so the wait is sliced.
     loop {
-        let remaining = crate::deadline::remaining(deadline)?;
+        let remaining = deadline.live_remaining()?;
         match claim.recv_timeout(remaining.min(POLL_INTERVAL)) {
             Ok(outcome) => return Ok(outcome),
             Err(RecvTimeoutError::Timeout) => {}

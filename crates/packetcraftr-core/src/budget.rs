@@ -154,6 +154,40 @@ impl Deadline {
         Ok(remaining)
     }
 
+    /// Nonzero remainder bounded by `requested`; does not check cancellation.
+    pub fn bounded_timeout(&self, requested: Duration) -> Result<Duration, DeadlineExceeded> {
+        let timeout = requested.min(self.remaining()?);
+        if timeout.is_zero() {
+            return Err(DeadlineExceeded {
+                actual: self.limit(),
+                limit: self.limit(),
+            });
+        }
+        Ok(timeout)
+    }
+
+    /// Child deadline for one wait: bounded remainder, same cancellation, this deadline as parent.
+    pub fn for_wait(&self, requested: Duration) -> Result<Self, DeadlineExceeded> {
+        // Sampling `remaining` and preparing the send take time the child's
+        // own limit cannot see, so the parent stays attached too: the
+        // child's cooperative boundaries keep enforcing it.
+        Ok(Self::new(self.bounded_timeout(requested)?)
+            .with_cancellation(self.cancellation().cloned())
+            .with_parent(Some(Arc::new(self.clone()))))
+    }
+
+    /// Cancellation first, then the nonzero remainder.
+    pub fn live_remaining(&self) -> Result<Duration, Interrupted> {
+        self.check_cancelled()?;
+        Ok(self.bounded_timeout(Duration::MAX)?)
+    }
+
+    /// Cancellation first, then a child holding the whole remainder.
+    pub fn detach(&self) -> Result<Self, Interrupted> {
+        self.check_cancelled()?;
+        Ok(self.for_wait(Duration::MAX)?)
+    }
+
     /// Commits a completed phase, charging whichever of wall time or reported
     /// elapsed time is larger.
     pub fn account(&mut self, elapsed: Duration) -> Result<(), DeadlineExceeded> {
@@ -212,6 +246,8 @@ impl crate::error::Classified for Interrupted {
     }
 }
 
+#[doc(hidden)]
+#[macro_export]
 macro_rules! deadline_error_conversions {
     ($error:ty) => {
         impl ::std::convert::From<$crate::budget::DeadlineExceeded> for $error {
@@ -230,8 +266,6 @@ macro_rules! deadline_error_conversions {
         }
     };
 }
-
-pub(crate) use deadline_error_conversions;
 
 #[derive(Clone, Debug, Default)]
 pub struct Cancellation(Arc<std::sync::atomic::AtomicBool>);
@@ -286,5 +320,83 @@ mod tests {
         assert!(deadline.check_cancelled().is_err());
         assert!(deadline.check().is_ok());
         assert!(independent.check().is_ok());
+    }
+
+    #[derive(Clone)]
+    struct Clock(Arc<std::sync::Mutex<Instant>>);
+
+    impl Clock {
+        fn new() -> Self {
+            Self(Arc::new(std::sync::Mutex::new(Instant::now())))
+        }
+
+        fn deadline(&self, limit: Duration) -> Deadline {
+            let shared = Arc::clone(&self.0);
+            Deadline::with_time_source(limit, move || *shared.lock().unwrap())
+        }
+
+        fn advance(&self, by: Duration) {
+            *self.0.lock().unwrap() += by;
+        }
+    }
+
+    #[test]
+    fn a_wait_shares_the_operation_cancellation_but_not_its_accounting() {
+        let signal = Cancellation::default();
+        let deadline =
+            Deadline::new(Duration::from_secs(60)).with_cancellation(Some(signal.clone()));
+        let wait = deadline.for_wait(Duration::from_secs(1)).unwrap();
+        assert!(wait.limit() <= Duration::from_secs(1));
+        signal.cancel();
+        assert!(wait.check_cancelled().is_err());
+        assert!(deadline.check().is_ok());
+    }
+
+    #[test]
+    fn a_wait_inherits_an_expired_parent_even_before_its_own_time() {
+        let clock = Clock::new();
+        let parent = clock.deadline(Duration::from_secs(1));
+        // A fresh child would still own up to its share of the remaining
+        // second, but the parent's clock already passed the operation's
+        // end.
+        let child = parent.for_wait(Duration::from_secs(30)).unwrap();
+        clock.advance(Duration::from_secs(2));
+        assert!(child.enforce().is_err());
+        // A child with no parent still lives: the parent was what expired.
+        assert!(
+            Deadline::new(Duration::from_secs(30))
+                .for_wait(Duration::from_secs(10))
+                .unwrap()
+                .enforce()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_spent_operation_refuses_a_child_boundary() {
+        let deadline = Deadline::new(Duration::ZERO);
+        let error = deadline
+            .bounded_timeout(Duration::from_secs(1))
+            .expect_err("nothing remains for the child");
+        assert_eq!(error.limit, Duration::ZERO);
+    }
+
+    #[test]
+    fn a_zero_remainder_is_expired_and_cancellation_comes_first() {
+        let frozen = Instant::now();
+        let spent = Deadline::with_time_source(Duration::ZERO, move || frozen);
+        assert!(matches!(
+            spent.live_remaining(),
+            Err(Interrupted::Exceeded(_))
+        ));
+
+        let signal = Cancellation::default();
+        let live = Deadline::new(Duration::from_secs(60)).with_cancellation(Some(signal.clone()));
+        assert!(live.live_remaining().unwrap() <= Duration::from_secs(60));
+        signal.cancel();
+        assert!(matches!(
+            live.live_remaining(),
+            Err(Interrupted::Cancelled(_))
+        ));
     }
 }

@@ -70,7 +70,8 @@ impl Outcome {
 }
 
 pub(crate) fn timeout(deadline: &Deadline) -> Result<std::time::Duration, Outcome> {
-    crate::deadline::remaining(deadline)
+    deadline
+        .live_remaining()
         .map(|remaining| remaining.min(crate::deadline::POLL_INTERVAL))
         .map_err(Outcome::interrupted)
 }

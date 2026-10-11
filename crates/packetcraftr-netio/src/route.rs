@@ -68,7 +68,8 @@ impl Provider for SystemProvider {
 }
 
 fn admit(deadline: &Deadline, operation: &'static str) -> Result<(), Error> {
-    crate::deadline::remaining(deadline)
+    deadline
+        .live_remaining()
         .map(drop)
         .map_err(|interrupted| Error::interrupted(interrupted, operation))
 }

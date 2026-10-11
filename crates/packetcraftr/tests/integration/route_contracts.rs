@@ -260,7 +260,7 @@ impl Provider for StalledBackend {
         _preferred_source: Option<IpAddr>,
         deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
-        while let Ok(remaining) = packetcraftr_netio::deadline::remaining(deadline) {
+        while let Ok(remaining) = deadline.live_remaining() {
             std::thread::sleep(remaining.min(packetcraftr_netio::deadline::POLL_INTERVAL));
         }
         Err(Self::Error::DeadlineExceeded {

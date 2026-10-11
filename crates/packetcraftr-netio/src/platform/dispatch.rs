@@ -5,13 +5,6 @@ use std::net::IpAddr;
 
 use packetcraftr_core::budget::Deadline;
 
-#[cfg(target_os = "windows")]
-#[path = "udp/winsock.rs"]
-mod udp_backend;
-#[cfg(not(target_os = "windows"))]
-#[path = "udp/stdlib.rs"]
-mod udp_backend;
-
 pub(crate) fn receive_datagram(
     socket: &std::net::UdpSocket,
     buffer: &mut [u8],
@@ -42,6 +35,11 @@ use super::{capture::libpcap as capture_backend, transmit::libpcap as transmit_b
 
 #[cfg(npcap_backend)]
 use super::{capture::npcap as capture_backend, transmit::npcap as transmit_backend};
+
+#[cfg(not(target_os = "windows"))]
+use super::udp::stdlib as udp_backend;
+#[cfg(target_os = "windows")]
+use super::udp::winsock as udp_backend;
 
 #[cfg(not(all(native_route, native_layer2, native_layer3)))]
 pub(crate) fn unsupported(

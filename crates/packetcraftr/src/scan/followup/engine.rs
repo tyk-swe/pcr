@@ -3,7 +3,6 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 
 use crate::clock::Clock;
@@ -44,8 +43,7 @@ where
         // The same absolute deadline parents the streamed scan, trace, and
         // lookups, so their setup cannot extend its expiry; it starts before
         // the `started` marker so it cannot end later.
-        let operation_deadline =
-            Deadline::new(scan.limits.max_duration).with_cancellation(self.cancellation.clone());
+        let operation_deadline = self.deadline(scan.limits.max_duration);
         // Reverse-DNS lookups can share the scan's next hop, so their neighbor
         // requests are authorized like its probes'. They resolve any next hop
         // within the scan's bounds, reusing its answers; without them the scan
@@ -135,7 +133,7 @@ where
                 scan_sent.into_iter().chain(trace_sent),
                 self.now(),
             ),
-        );
+        )?;
         if let Some(lookups) = reverse_dns
             .as_ref()
             .and_then(|lookups| lookups.stats.as_ref())
@@ -168,12 +166,13 @@ where
             .as_ref()
             .map(|reverse| Lookup::new(reverse, &scan))
             .transpose()?;
-        let started = self.now();
+        let client = self.with_parent_deadline(self.deadline(scan.limits.max_duration));
+        let started = client.now();
         // Probe events stream as they settle; the tracker keeps only what
         // each endpoint's inference needs.
         let tracker = connect::Collector::default();
         let mut tracked = tracker.clone();
-        let report = self.scan_connect(scan, move |event: connect::Event| {
+        let report = client.scan_connect(scan, move |event: connect::Event| {
             Sink::publish(&mut tracked, event.clone())?;
             sink.publish(event)
         })?;
@@ -182,7 +181,7 @@ where
         // connection conservatively marks now.
         let reverse_dns = names(
             lookup.as_ref(),
-            self,
+            &client,
             &report.hosts,
             started,
             last_transmission(
@@ -190,7 +189,7 @@ where
                 std::iter::empty(),
                 self.now(),
             ),
-        );
+        )?;
         Ok(ConnectReport {
             scan: report,
             endpoints: aggregate.endpoints,

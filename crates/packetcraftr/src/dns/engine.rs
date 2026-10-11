@@ -13,7 +13,6 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
-use crate::deadline::DeadlineExt as _;
 use crate::execution::Context;
 use crate::execution::evidence::{
     EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector,

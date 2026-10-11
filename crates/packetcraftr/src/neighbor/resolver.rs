@@ -17,8 +17,6 @@ use packetcraftr_netio::{
     transmit::{self, Layer2Frame},
 };
 
-use crate::deadline::DeadlineExt as _;
-
 use super::cache::{NeighborCache, NeighborCacheKey};
 use super::error::{invalid_options, map_io_error};
 use super::evidence::{

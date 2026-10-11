@@ -10,7 +10,6 @@ use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
 use super::Errors;
 use crate::Stats;
 use crate::clock::Clock;
-use crate::deadline::DeadlineExt as _;
 use crate::evidence::ExecutionPermit;
 use packetcraftr_core::error::BoundaryError;
 

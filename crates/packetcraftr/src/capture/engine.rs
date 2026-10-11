@@ -7,7 +7,6 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::capture::{self as native, Group, Session as _};
 
 use crate::clock::Clock;
-use crate::deadline::DeadlineExt as _;
 use crate::providers::CaptureProviders;
 use crate::{Client, Sink};
 use packetcraftr_core::error::BoundaryError;

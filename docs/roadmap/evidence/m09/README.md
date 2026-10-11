@@ -61,6 +61,33 @@ prevalence, broad Internet coverage, performance baseline, or operating-system
 identification result. Passive TLS decoding and JA3/JA4 are outside this active
 identification report.
 
+The clean Linux run records the same held-out outcome distribution in every
+profile. Its 21 independent instances produce 84 case-runs per profile because
+each instance is exercised through both address families and output formats.
+
+| Observed outcome | Per profile | Five profiles |
+| --- | ---: | ---: |
+| Matched | 48 | 240 |
+| Unknown | 16 | 80 |
+| Ambiguous | 8 | 40 |
+| Malformed | 4 | 20 |
+| TLS handshake failed | 4 | 20 |
+| Deadline budget exhausted | 4 | 20 |
+| Total held-out case-runs | 84 | 420 |
+
+The eligible denominator is 72 case-runs per profile, or 360 across five
+profiles: coverage is 66.67%, unknown share is 22.22%, and ambiguous share is
+11.11%. Equivalently, the 18 eligible independent instances comprise 12 matched,
+four unknown, and two ambiguous instances. The three failure fixtures remain
+outside this denominator and have their actual outcomes recorded above.
+
+Across five profiles, candidates retain 300 `claim` confidence labels and 20
+`protocol` labels. Unambiguous presented-token fidelity accounts for 220 claim
+results and 20 protocol results; ambiguous candidates are excluded from this
+count. The single misleading fixture appears in 20 case-runs and remains a
+claim in every run. These counts verify declared fixture behavior without
+asserting software identity accuracy.
+
 ## Runtime status
 
 The runner contains 29 training/acceptance fixtures and 21 held-out fixtures:
@@ -70,10 +97,17 @@ macOS Intel, and Windows x64 and preserves the complete report even on failure.
 
 | Platform | Runtime evidence | Status |
 | --- | --- | --- |
-| Linux x86_64 | Local acceptance is being recorded for this implementation. | Pending |
-| macOS ARM64 | CI route configured; no M9 runtime report recorded here. | Unavailable in the local environment |
-| macOS Intel | CI route configured; no M9 runtime report recorded here. | Unavailable in the local environment |
-| Windows x64 | CI route configured; no M9 runtime report recorded here. | Unavailable in the local environment |
+| Linux x86_64 | [Lossless local report](local-9289960d/linux-x86_64.json.gz): five profiles, 1,000 case-runs, zero failures. | Passed |
+| macOS ARM64 | CI route configured; no M9 runtime report recorded here. | Pending CI report |
+| macOS Intel | CI route configured; no M9 runtime report recorded here. | Pending CI report |
+| Windows x64 | CI route configured; no M9 runtime report recorded here. | Pending CI report |
+
+The local report records clean implementation revision
+`9289960d21738edce6d48f5c808a3405fe83597b`, Linux x86_64, Python 3.14.4,
+and OpenSSL 3.5.5. Its [integrity manifest](local-9289960d/manifest.json)
+retains the corpus and held-out digests, compressed and uncompressed report
+SHA-256 values, and exact profile/case totals. The original report decompresses
+byte-for-byte to the runner output.
 
 Compilation and configured CI jobs do not close the macOS/Windows runtime gate.
 The M8 reports retain their historical cleartext revision and do not establish
@@ -86,6 +120,12 @@ including immutable holdout enforcement, independent TLS fixture certificate
 and SNI behavior, retained unexpected outcomes, uncertainty shares, separate
 confidence counts, source-backed hostname/CPE metadata, and failure paths in
 the existing acceptance runner.
+
+The [TLS identification example](../../../../examples/documents/output-identify-tls-success.json)
+was captured from a successful original loopback fixture with a declared SNI
+name and validated against the output/v13 schema. It retains the presented
+certificate DER, negotiated TLS parameters, encrypted/application counters,
+and unauthenticated nginx claim with its reviewed CPE source.
 
 Run the complete bounded inventory with:
 

@@ -56,7 +56,6 @@ for remaining acceptance gates and revision-bound evidence.
 - Reviewed SMTP/FTP greeting probes in service corpus 1.1.0, supported hostname
   and static product CPE claims, and a precommitted held-out evaluation with
   separate unknown, ambiguous, confidence, and misleading-claim results.
-
 - `scan::followup` runs a scan's trace and reverse-DNS follow-ups under the
   scan's own budget, so library callers get what `scan --traceroute` and
   `--reverse-dns` do: `Client::scan_with_followups` for raw scans and

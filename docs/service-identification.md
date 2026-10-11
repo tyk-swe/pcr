@@ -101,6 +101,9 @@ Failed/refused handshakes have `tls_failed` endpoint outcomes and retained TLS
 counters and diagnostics. Application failures after successful negotiation keep
 their ordinary I/O outcomes and TLS evidence. `usage.tls` distinguishes wire
 traffic from buffered plaintext writes and decrypted response retention.
+Application `bytes_written` counts plaintext accepted by the TLS stream;
+`wire_bytes_sent` counts encrypted bytes completed by the underlying socket.
+If a later flush fails, accepted plaintext need not have reached the peer.
 
 ## Budgets and sensitive endpoints
 
@@ -168,6 +171,11 @@ and field values remain faithful to their octets; malformed and incomplete
 responses retain their evidence. Source errors remain available to library
 callers and as diagnostics in CLI output.
 
+The published [SMTP example](../examples/documents/output-identify-success.json)
+shows observed hostname and reviewed CPE sources. The
+[TLS example](../examples/documents/output-identify-tls-success.json) retains
+the original loopback fixture's presented certificate and separate byte counters.
+
 NDJSON emits one bounded envelope per endpoint. Before probing, the CLI checks
 a conservative size bound from selected probes, available attempt/read budgets,
 hex evidence, claims and both candidate copies against the 16 MiB record ceiling.
@@ -205,6 +213,10 @@ from a syntactically valid observed greeting domain. Device types require an
 explicit reviewed rule; the bundled corpus currently declares none. Static
 product CPE identifiers are supported only by reviewed match data with cited
 provenance, retain wildcard versions, and inherit unauthenticated confidence.
+The bundled SMTP rules require explicit `Postfix VERSION` or `Exim VERSION`
+claims; a greeting with a hidden version can remain unknown. FTP rules likewise
+recognize only their reviewed literal formats, without inferring a product from
+its port.
 
 The [M9 evaluation](roadmap/evidence/m09/README.md) fixes held-out service
 instances before new rules are authored and reports coverage, unknown and

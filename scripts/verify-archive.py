@@ -62,6 +62,8 @@ ASSETS = (
     'examples/documents/output-build-complete.json',
     'examples/documents/output-dns-tcp-success.json',
     'examples/documents/output-dns-tcp-complete.json',
+    'examples/documents/output-identify-success.json',
+    'examples/documents/output-identify-tls-success.json',
     'examples/documents/output-replay-bit-rate-success.json',
     'examples/documents/output-http2-success.json',
     'examples/documents/output-http2-issue-event.json',

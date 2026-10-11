@@ -45,7 +45,7 @@ Observed claims are
 unauthenticated, candidates cite matching evidence and corpus provenance, and
 unknown or ambiguous results never assert exact versions. See
 [identification controls](service-identification.md) and the
-[v12 contract](consumer-compatibility.md#output-family-v12).
+[current contract](consumer-compatibility.md#output-family-v13).
 
 ## Adaptive scheduling
 

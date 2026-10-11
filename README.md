@@ -81,8 +81,10 @@ digest.
 ### Build from source
 
 Install the toolchain in `rust-toolchain.toml`; the same supported version is
-declared in `Cargo.toml`. Builds with Layer 2 support on Linux also need libpcap
-development files such as `libpcap-dev`. Choose a profile, then build with
+declared in `Cargo.toml`. All profiles need a supported C compiler for the
+rustls/ring TLS transport; no system TLS library is required. Builds with Layer 2
+support on Linux also need libpcap development files such as `libpcap-dev`.
+Choose a profile, then build with
 `cargo build --locked --release -p packetcraftr-cli` plus its Cargo arguments:
 
 | Profile | Cargo arguments | Capability |

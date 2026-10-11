@@ -1,0 +1,144 @@
+{
+  "schema": "packetcraftr.output/v13",
+  "command": "identify",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "corpus": "project-service-probes",
+    "corpus_version": "1.1.0",
+    "exclusion_set": "project-sensitive-services",
+    "exclusion_version": "1.0.0",
+    "records": [
+      {
+        "endpoint": {
+          "address": "127.0.0.1:51715",
+          "transport": "tcp"
+        },
+        "outcome": "matched",
+        "probes": [
+          {
+            "probe": "http-head",
+            "attempt": 1,
+            "request_hex": "48454144202f20485454502f312e300d0a0d0a",
+            "response_hex": "485454502f312e3120323030204f4b0d0a5365727665723a206e67696e782f312e32362e320d0a0d0a",
+            "bytes_written": 19,
+            "io_outcome": "complete",
+            "observation": {
+              "protocol": "http",
+              "outcome": "complete",
+              "claims": [
+                {
+                  "field": "http_status",
+                  "value_hex": "323030",
+                  "unauthenticated": true
+                },
+                {
+                  "field": "http_server",
+                  "value_hex": "6e67696e782f312e32362e32",
+                  "unauthenticated": true
+                }
+              ],
+              "diagnostic": null
+            },
+            "identification": {
+              "outcome": "matched",
+              "candidates": [
+                {
+                  "product": "nginx",
+                  "version": "1.26.2",
+                  "confidence": "claim",
+                  "provenance": {
+                    "corpus": "project-service-probes",
+                    "version": "1.1.0",
+                    "probe": "http-head",
+                    "rule": "nginx-claim",
+                    "field_indices": [
+                      1
+                    ]
+                  },
+                  "cpe": {
+                    "value": "cpe:2.3:a:nginx:nginx:*:*:*:*:*:*:*:*",
+                    "source": {
+                      "kind": "match_rule",
+                      "reference": "https://nvd.nist.gov/products/cpe"
+                    }
+                  }
+                }
+              ]
+            },
+            "local_address": "127.0.0.1:60848",
+            "peer_address": "127.0.0.1:51715",
+            "elapsed": {
+              "secs": 0,
+              "nanos": 88747809
+            },
+            "started_at": {
+              "unix_seconds": 1791709287,
+              "nanoseconds": 49956666
+            },
+            "completed_at": {
+              "unix_seconds": 1791709287,
+              "nanoseconds": 138704381
+            },
+            "diagnostic": null,
+            "tls": {
+              "server_name": "fixture.example.test",
+              "handshake_complete": true,
+              "protocol_version": "TLSv1_3",
+              "cipher_suite": "TLS13_AES_256_GCM_SHA384",
+              "certificates_hex": [
+                "308203be308202a6a00302010202141fd18dad5e5cca2edd860edd04f5c13ffd4e2ef4300d06092a864886f70d01010b05003050311d301b06035504030c14666978747572652e6578616d706c652e74657374312f302d060355040a0c265061636b6574637261667452206f726967696e616c206c6f6f706261636b20666978747572653020170d3236313031313038343732335a180f32313236303931373038343732335a3050311d301b06035504030c14666978747572652e6578616d706c652e74657374312f302d060355040a0c265061636b6574637261667452206f726967696e616c206c6f6f706261636b206669787475726530820122300d06092a864886f70d01010105000382010f003082010a02820101008906ec53f7df676c418c12159a2eac57b1235d0b2e31ccccf86609e2119dc58df3dc2ce5eff3db0f732460704931114d5d61e5f481522b60f19e5d26c1fe21454036cdce696b3e7cc8708e82ca718cc14ed9ff6d5d5de4569eb64a285a737fb4441c930f28f003cf5208b8e30c311ec2ce340bed8aae5d39cb536b04c9a7cbdf3c5ba5486b33b15a6f676ec7fd05cc0eb542bcfa876d7b56b938cc56d83f3e5ac0c114a1253521c4c4ff9824f887600852f9432217bc8af65e76f8b918a05bcb9c36da48d770594569e390c0c3a449be20e5300ac36ce898a6553e63eda5c3dc18cd01c1d1162c4bb41fb4e6b99e5400afa97ef2cc094bf4a1bd92cc0f3cb4eb0203010001a3818d30818a301d0603551d0e04160414692f0a828e362740583d96489f82d85d6609d02b301f0603551d23041830168014692f0a828e362740583d96489f82d85d6609d02b300f0603551d130101ff040530030101ff30370603551d110430302e8214666978747572652e6578616d706c652e7465737487047f000001871000000000000000000000000000000001300d06092a864886f70d01010b05000382010100462f5a54b7d9681a3dea4826fe77175f1f1b91f0e9fe97f9663f9acdae9dbe3196d4826376b58cd3dd5f30ade5de78c0fbbd0682dbe5bb425b3f0921028e78e6abb039d83e8a6614f7fbd061adfc0853f93a173db71f6ada87eed39d0ea7a71a1b7729e6652bff4485d0c4ecaf04c5b28d6a03a36b8059cc82af7c89bd8afb6475c776532880ac029d692888b0277c3866e13b1d96070ef965b276d71c9aa5df8a99aaab45a0747e06bb26d7dc2e68ba4d266bbbdcf28ab7fc728f7b28a527c4d41636037d0a78a56edd958a3f40ede591b543236cf0925c496121a150a5f966742960dfaa385b548d9886f2cee56e474a5e9c4eda9575166958662c9c86bbd6"
+              ],
+              "certificates_truncated": false,
+              "wire_bytes_sent": 368,
+              "wire_bytes_read": 2205,
+              "steps": 12,
+              "unauthenticated": true
+            }
+          }
+        ],
+        "candidates": [
+          {
+            "product": "nginx",
+            "version": "1.26.2",
+            "confidence": "claim",
+            "provenance": {
+              "corpus": "project-service-probes",
+              "version": "1.1.0",
+              "probe": "http-head",
+              "rule": "nginx-claim",
+              "field_indices": [
+                1
+              ]
+            },
+            "cpe": {
+              "value": "cpe:2.3:a:nginx:nginx:*:*:*:*:*:*:*:*",
+              "source": {
+                "kind": "match_rule",
+                "reference": "https://nvd.nist.gov/products/cpe"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "usage": {
+      "attempts": 1,
+      "write_bytes": 19,
+      "read_bytes": 41,
+      "tls": {
+        "write_bytes": 368,
+        "read_bytes": 2205,
+        "certificate_bytes": 962,
+        "steps": 12
+      }
+    },
+    "elapsed": {
+      "secs": 0,
+      "nanos": 89066730
+    },
+    "complete": true,
+    "cancelled": false
+  },
+  "diagnostics": []
+}

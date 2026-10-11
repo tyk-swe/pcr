@@ -1,0 +1,29 @@
+{
+  "schema": "packetcraftr.service-identification-evidence-manifest/v1",
+  "source_revision": "9289960d21738edce6d48f5c808a3405fe83597b",
+  "source_worktree_dirty": false,
+  "recorded_at": "2026-10-11T09:01:55.738913+00:00",
+  "held_out_manifest": {
+    "path": "docs/roadmap/evidence/m09/held-out.v1.json",
+    "sha256": "399ae8d919fe3ca2ac32c62962eee37e54a811c5dee30b02f9226e45be94774c",
+    "fixed_before_rule_commit": "97267ae4"
+  },
+  "shipped_corpus_sha256": "4de286fda3b0ea67c5967e7e66ee84a011301a2c4ec87e8acca4b50a282ee81a",
+  "runtime": {
+    "platform": "Linux",
+    "architecture": "x86_64",
+    "python": "3.14.4",
+    "openssl": "OpenSSL 3.5.5 27 Jan 2026"
+  },
+  "reports": [
+    {
+      "path": "linux-x86_64.json.gz",
+      "sha256": "ae946639938c855628cbff8e27fd52f160df99c587c6143287bbfeeeda86ba04",
+      "uncompressed_sha256": "421256d7e42c70b51c9eb3cd60970d39c592b45dfcc569af1463d9f3322b7bb8",
+      "profile_count": 5,
+      "case_runs": 1000,
+      "failed_case_runs": 0
+    }
+  ],
+  "scope": "Local Linux x86_64 runtime. Does not establish macOS or Windows acceptance."
+}

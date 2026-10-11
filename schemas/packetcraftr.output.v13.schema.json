@@ -14180,13 +14180,63 @@
           "$ref": "#/$defs/identifyProvenance"
         },
         "hostname": {
-          "$ref": "#/$defs/identifySupportedValue"
+          "allOf": [
+            {
+              "$ref": "#/$defs/identifySupportedValue"
+            },
+            {
+              "properties": {
+                "source": {
+                  "properties": {
+                    "kind": {
+                      "const": "observed_field"
+                    }
+                  }
+                }
+              }
+            }
+          ]
         },
         "device_type": {
-          "$ref": "#/$defs/identifySupportedValue"
+          "allOf": [
+            {
+              "$ref": "#/$defs/identifySupportedValue"
+            },
+            {
+              "properties": {
+                "source": {
+                  "properties": {
+                    "kind": {
+                      "const": "match_rule"
+                    }
+                  }
+                }
+              }
+            }
+          ]
         },
         "cpe": {
-          "$ref": "#/$defs/identifySupportedValue"
+          "allOf": [
+            {
+              "$ref": "#/$defs/identifySupportedValue"
+            },
+            {
+              "properties": {
+                "source": {
+                  "properties": {
+                    "kind": {
+                      "const": "match_rule"
+                    }
+                  }
+                },
+                "value": {
+                  "type": "string",
+                  "maxLength": 512,
+                  "pattern": "^cpe:2\\.3:[aho]:(?:[A-Za-z0-9._-]{2,}|[A-Za-z0-9._]):(?:[A-Za-z0-9._-]{2,}|[A-Za-z0-9._]):\\*:(?:\\*|-|[A-Za-z0-9._-]+)(?::(?:\\*|-|[A-Za-z0-9._-]+)){6}$(?![\\s\\S])"
+                }
+              }
+            }
+          ]
         }
       },
       "required": [
@@ -14212,7 +14262,10 @@
             "properties": {
               "version": {
                 "type": "null"
-              }
+              },
+              "hostname": false,
+              "device_type": false,
+              "cpe": false
             }
           }
         }
@@ -14820,7 +14873,33 @@
         "steps",
         "unauthenticated"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "handshake_complete": {
+                "const": true
+              }
+            },
+            "required": [
+              "handshake_complete"
+            ]
+          },
+          "then": {
+            "properties": {
+              "protocol_version": {
+                "type": "string",
+                "minLength": 1
+              },
+              "cipher_suite": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
     },
     "identifyMetadataSource": {
       "oneOf": [

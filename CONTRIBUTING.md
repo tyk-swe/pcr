@@ -10,6 +10,8 @@ Install Rust with rustup; the repository selects its supported stable toolchain
 and rustfmt/Clippy components. Linux full-native builds require `libpcap-dev`;
 macOS uses system libpcap; Windows Layer 2 operations load Npcap at runtime.
 Cargo uses the platform's default compiler and linker.
+All profiles include rustls/ring for active TLS and require a supported C
+compiler. No OpenSSL development package or system TLS library is needed.
 
 While editing, run `cargo test --locked -p <affected-crate>` (doctests included)
 and the relevant integration test or feature profile. There is no required test
@@ -69,6 +71,10 @@ reclaim unneeded build outputs.
 ```
 
 ## Optional tools
+
+Native and service-identification acceptance tests require both IPv4 and IPv6
+loopback. Ensure `127.0.0.1` and `::1` are available before running them; an
+unavailable address family cannot count as completed runtime evidence.
 
 API documentation as CI builds it, with warnings denied:
 

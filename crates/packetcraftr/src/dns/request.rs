@@ -305,6 +305,16 @@ impl Request {
         self.validate()?;
         canonical_query_name(&self.query_name).map_err(Error::Query)
     }
+
+    /// Checks the UDP executor's capture requirements before a composed
+    /// workflow starts any earlier stage. TCP queries do not use capture.
+    pub(crate) fn validate_capture(&self) -> Result<(), Error> {
+        if self.transport != TransportMode::Tcp {
+            super::executor::validate_capture(&self.limits, &self.collection)
+                .map_err(|source| Error::Execution { attempt: 1, source })?;
+        }
+        Ok(())
+    }
 }
 
 impl From<MessageLimits> for packetcraftr_core::protocol::application::dns::Limits {

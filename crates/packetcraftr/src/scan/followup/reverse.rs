@@ -8,7 +8,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
-use packetcraftr_core::budget::Cancellation;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 
 use crate::clock::Clock;
@@ -145,20 +145,27 @@ impl Lookup {
     /// discovery did not run; a host discovery found silent is not looked
     /// up. Returns one entry per host plus the exchanges' statistics for
     /// the command's own accounting. A failed batch fails its questions
-    /// rather than the scan, whose evidence is already measured. The scan's
-    /// evidence byte limit bounds the names kept across every lookup.
+    /// rather than the scan, whose evidence is already measured. Cancellation
+    /// and pacing failures stop the operation with their typed errors. The
+    /// scan's evidence byte limit bounds the names kept across every lookup.
     pub(super) fn run<P, K>(
         &self,
         client: &Client<P, K>,
         hosts: &[Host],
         started: Instant,
         last_sent: Option<Instant>,
-    ) -> (Vec<Option<ReverseLookup>>, Stats)
+    ) -> Result<(Vec<Option<ReverseLookup>>, Stats), dns::Error>
     where
         P: PacketProviders + TargetProviders + TcpProviders,
         K: Clock,
     {
-        let deadline = started.checked_add(self.template.limits.max_duration);
+        let deadline = client.deadline(
+            self.template
+                .limits
+                .max_duration
+                .saturating_sub(client.now().saturating_duration_since(started)),
+        );
+        deadline.check_cancelled()?;
         // A batch paces its own questions; this pause keeps the scan's rate
         // between the last transmission before a batch, `last_sent` by the scan
         // or sent by an earlier batch, and the batch's first question.
@@ -180,16 +187,21 @@ impl Lookup {
             pause,
             self.batch_size(),
             last_sent,
-            deadline,
-            client.cancellation.as_ref(),
+            &deadline,
             self.template.limits.max_evidence_bytes,
             || client.now(),
             |waited| {
-                let _ = client.clock.sleep(waited, &client.deadline(waited));
+                client
+                    .clock
+                    .sleep(waited, &deadline)
+                    .map_err(|source| dns::Error::Clock {
+                        attempt: 1,
+                        source: Box::new(source),
+                    })
             },
             |addresses, remaining| match &authorized {
                 Ok(()) => self.lookup(client, addresses, remaining),
-                Err(error) => (
+                Err(error) => Ok((
                     addresses
                         .iter()
                         .map(|address| {
@@ -202,7 +214,7 @@ impl Lookup {
                         .collect(),
                     Stats::default(),
                     None,
-                ),
+                )),
             },
         )
     }
@@ -245,13 +257,13 @@ impl Lookup {
         client: &Client<P, K>,
         addresses: &[IpAddr],
         remaining: Duration,
-    ) -> (Vec<ReverseLookup>, Stats, Option<Instant>)
+    ) -> Result<(Vec<ReverseLookup>, Stats, Option<Instant>), dns::Error>
     where
         P: PacketProviders + TargetProviders + TcpProviders,
         K: Clock,
     {
         let ended = |status, error: Option<String>| {
-            (
+            Ok((
                 addresses
                     .iter()
                     .map(|address| {
@@ -260,7 +272,7 @@ impl Lookup {
                     .collect(),
                 Stats::default(),
                 None,
-            )
+            ))
         };
         if remaining.is_zero() {
             return ended(batch::QuestionStatus::Unattempted, None);
@@ -277,8 +289,15 @@ impl Lookup {
             .and_then(|report| collector.finish(report))
         {
             Ok(aggregate) => {
+                // Batches retain per-question failures, including a provider's
+                // cancellation. Follow-ups propagate that typed interruption.
+                for question in &aggregate.questions {
+                    if let Some(dns::Error::Cancelled(cancelled)) = &question.error {
+                        return Err((*cancelled).into());
+                    }
+                }
                 let sent = last_batch_send(&aggregate.questions, &aggregate.stats, client.now());
-                (
+                Ok((
                     aggregate
                         .questions
                         .into_iter()
@@ -286,13 +305,14 @@ impl Lookup {
                         .collect(),
                     aggregate.stats,
                     sent,
-                )
+                ))
             }
             // A window too short for one question's planned attempts sends
             // none of them.
             Err(dns::Error::DurationLimit { .. }) => {
                 ended(batch::QuestionStatus::Unattempted, None)
             }
+            Err(error @ dns::Error::Cancelled(_)) => Err(error),
             Err(error) => ended(batch::QuestionStatus::Failed, Some(error.to_string())),
         }
     }
@@ -353,22 +373,24 @@ impl Lookup {
 }
 
 /// Looks `hosts` up in batches spaced by `pause` until `deadline`, keeping
-/// their names within `name_budget` bytes. Once `cancellation` fires no batch
-/// waits or sends: each remaining question has no time left and is
-/// unattempted.
+/// their names within `name_budget` bytes. Cancellation and pacing failures
+/// stop the operation before any further question waits or sends.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn batched(
     hosts: &[Host],
     pause: Duration,
     batch_size: usize,
     last_sent: Option<Instant>,
-    deadline: Option<Instant>,
-    cancellation: Option<&Cancellation>,
+    deadline: &Deadline,
     mut name_budget: usize,
     now: impl Fn() -> Instant,
-    mut sleep: impl FnMut(Duration),
-    mut lookup: impl FnMut(&[IpAddr], Duration) -> (Vec<ReverseLookup>, Stats, Option<Instant>),
-) -> (Vec<Option<ReverseLookup>>, Stats) {
+    mut sleep: impl FnMut(Duration) -> Result<(), dns::Error>,
+    mut lookup: impl FnMut(
+        &[IpAddr],
+        Duration,
+    ) -> Result<(Vec<ReverseLookup>, Stats, Option<Instant>), dns::Error>,
+) -> Result<(Vec<Option<ReverseLookup>>, Stats), dns::Error> {
+    deadline.check_cancelled()?;
     let mut names: Vec<Option<ReverseLookup>> = hosts.iter().map(|_| None).collect();
     let mut statistics = Stats::default();
     let selected: Vec<usize> = hosts
@@ -377,28 +399,23 @@ pub(super) fn batched(
         .filter(|(_, host)| host.state != State::NoResponse)
         .map(|(index, _)| index)
         .collect();
-    let remaining = || {
-        if cancellation.is_some_and(Cancellation::is_cancelled) {
-            return Duration::ZERO;
-        }
-        deadline.map_or(Duration::ZERO, |deadline| {
-            deadline.saturating_duration_since(now())
-        })
-    };
     let mut last_sent = last_sent;
     for chunk in selected.chunks(batch_size) {
+        deadline.check_cancelled()?;
         // Only what remains of the pause since the last transmission is owed;
         // its replies' wait already spaced it from this batch.
         let owed = last_sent.map_or(Duration::ZERO, |sent| {
             pause.saturating_sub(now().saturating_duration_since(sent))
         });
-        let waited = owed.min(remaining());
+        let waited = owed.min(deadline.remaining().unwrap_or_default());
         if !waited.is_zero() {
-            sleep(waited);
+            sleep(waited)?;
             statistics.elapsed = statistics.elapsed.saturating_add(waited);
         }
+        deadline.check_cancelled()?;
         let addresses: Vec<IpAddr> = chunk.iter().map(|&index| hosts[index].address).collect();
-        let (lookups, stats, sent) = lookup(&addresses, remaining());
+        let (lookups, stats, sent) = lookup(&addresses, deadline.remaining().unwrap_or_default())?;
+        deadline.check_cancelled()?;
         // A TCP lookup counts no packets but still reports that it sent.
         if sent.is_some() || stats.packets_attempted > 0 {
             last_sent = Some(sent.unwrap_or_else(&now));
@@ -411,7 +428,7 @@ pub(super) fn batched(
         // cannot overflow these counters.
         let _ = statistics.checked_add_assign(&stats);
     }
-    (names, statistics)
+    Ok((names, statistics))
 }
 
 /// Keeps `lookup`'s names while what they occupy fits `budget`, marking the
@@ -442,17 +459,20 @@ pub(super) fn names<P, K>(
     hosts: &[Host],
     started: Instant,
     last_sent: Option<Instant>,
-) -> Option<ReverseLookups>
+) -> Result<Option<ReverseLookups>, dns::Error>
 where
     P: PacketProviders + TargetProviders + TcpProviders,
     K: Clock,
 {
-    let (lookups, stats) = lookup?.run(client, hosts, started, last_sent);
+    let Some(lookup) = lookup else {
+        return Ok(None);
+    };
+    let (lookups, stats) = lookup.run(client, hosts, started, last_sent)?;
     let looked_up = lookups.iter().any(Option::is_some);
-    Some(ReverseLookups {
+    Ok(Some(ReverseLookups {
         lookups,
         stats: looked_up.then_some(stats),
-    })
+    }))
 }
 
 /// When a batch last sent, observed at `now`. A failed question keeps no

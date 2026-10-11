@@ -4,7 +4,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use packetcraftr_core::budget::Cancellation;
+use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 
@@ -882,7 +882,9 @@ fn a_lookup_runs_in_the_allowance_the_scan_and_trace_left() {
     };
     let view = client.with_remaining_budget(&spent);
     assert_eq!(view.policy().max_packets_per_operation, 0);
-    let (records, stats) = lookup.run(&view, &responding(1), Instant::now(), None);
+    let (records, stats) = lookup
+        .run(&view, &responding(1), Instant::now(), None)
+        .unwrap();
     assert_eq!(records.len(), 1);
     let record = records[0].as_ref().expect("the host keeps a record");
     assert_eq!(record.status, batch::QuestionStatus::Failed, "{record:?}");
@@ -942,6 +944,7 @@ fn hosts_that_never_responded_report_no_lookup_statistics() {
         Instant::now(),
         Some(Instant::now()),
     )
+    .unwrap()
     .expect("a lookup was requested");
     assert_eq!(result.lookups, [None, None]);
     assert_eq!(result.stats, None, "no lookup ran, so none has statistics");
@@ -953,6 +956,7 @@ fn hosts_that_never_responded_report_no_lookup_statistics() {
         Instant::now(),
         Some(Instant::now()),
     )
+    .unwrap()
     .expect("a lookup was requested");
     assert!(result.lookups[0].is_some());
     assert!(result.stats.is_some());
@@ -964,12 +968,14 @@ fn refused_lookups_wait_for_no_batch() {
     lookup.template.queries_per_second = Some(1);
     // The policy refuses the lookups, so nothing is sent.
     let client = policy_client(packet_budget(1));
-    let (names, stats) = lookup.run(
-        &client,
-        &responding(batch::MAX_QUESTIONS + 1),
-        Instant::now(),
-        Some(Instant::now()),
-    );
+    let (names, stats) = lookup
+        .run(
+            &client,
+            &responding(batch::MAX_QUESTIONS + 1),
+            Instant::now(),
+            Some(Instant::now()),
+        )
+        .unwrap();
     assert!(
         names
             .iter()
@@ -1003,16 +1009,19 @@ fn a_batch_waits_only_what_remains_of_the_pause() {
             pause,
             batch::MAX_QUESTIONS,
             last_sent,
-            Instant::now().checked_add(hour),
-            Some(&Cancellation::default()),
+            &Deadline::new(hour),
             usize::MAX,
             Instant::now,
-            std::thread::sleep,
+            |waited| {
+                std::thread::sleep(waited);
+                Ok(())
+            },
             |addresses, _| {
                 let lookups = addresses.iter().map(|_| answered(&[])).collect();
-                (lookups, Stats::default(), None)
+                Ok((lookups, Stats::default(), None))
             },
-        );
+        )
+        .unwrap();
         stats.elapsed
     };
 
@@ -1037,17 +1046,20 @@ fn a_batch_counting_no_packets_still_spaces_the_next_from_its_sends() {
         pause,
         batch::MAX_QUESTIONS,
         None,
-        Instant::now().checked_add(Duration::from_secs(60)),
-        Some(&Cancellation::default()),
+        &Deadline::new(Duration::from_secs(60)),
         usize::MAX,
         Instant::now,
-        std::thread::sleep,
+        |waited| {
+            std::thread::sleep(waited);
+            Ok(())
+        },
         // A TCP lookup reports its send but no packets.
         |addresses, _| {
             let lookups = addresses.iter().map(|_| answered(&[])).collect();
-            (lookups, Stats::default(), Some(Instant::now()))
+            Ok((lookups, Stats::default(), Some(Instant::now())))
         },
-    );
+    )
+    .unwrap();
     assert!(
         stats.elapsed > Duration::ZERO,
         "the second batch waits for the first's send"
@@ -1059,7 +1071,9 @@ fn a_window_too_short_for_one_question_leaves_its_lookups_unattempted() {
     let lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
     let client = budget_client(batch::MAX_QUESTIONS, 1);
     let addresses = [IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))];
-    let (records, stats, sent) = lookup.lookup(&client, &addresses, Duration::from_millis(1));
+    let (records, stats, sent) = lookup
+        .lookup(&client, &addresses, Duration::from_millis(1))
+        .unwrap();
     assert_eq!(
         records[0].status,
         batch::QuestionStatus::Unattempted,
@@ -1118,41 +1132,40 @@ fn a_question_that_failed_after_sending_paces_from_the_batchs_end() {
 
 #[test]
 fn a_cancelled_scan_waits_for_and_sends_no_further_batch() {
-    let hosts = responding(batch::MAX_QUESTIONS + 1);
+    let hosts = responding(1);
     let hour = Duration::from_secs(3600);
-    let run = |cancellation: &Cancellation, pause| {
-        let mut windows = Vec::new();
-        let (names, _) = batched(
+    for cancelled_before in [false, true] {
+        let cancellation = Cancellation::default();
+        if cancelled_before {
+            cancellation.cancel();
+        }
+        // Inherited cancellation has the same priority as the client's own
+        // signal, even when it fires during the final batch.
+        let parent = Deadline::new(hour).with_cancellation(Some(cancellation.clone()));
+        let deadline = Deadline::new(hour).with_parent(Some(std::sync::Arc::new(parent)));
+        let mut calls = 0;
+        let result = batched(
             &hosts,
-            pause,
+            hour,
             batch::MAX_QUESTIONS,
-            Some(Instant::now()),
-            Instant::now().checked_add(hour),
-            Some(cancellation),
+            None,
+            &deadline,
             usize::MAX,
             Instant::now,
-            std::thread::sleep,
-            |addresses, remaining| {
-                windows.push(remaining);
+            |_| panic!("no batch should wait"),
+            |addresses, _| {
+                calls += 1;
+                cancellation.cancel();
                 let lookups = addresses.iter().map(|_| answered(&[])).collect();
-                (lookups, Stats::default(), None)
+                Ok((lookups, Stats::default(), None))
             },
         );
         assert!(
-            names.iter().all(Option::is_some),
-            "every host keeps a record"
+            matches!(result, Err(dns::Error::Cancelled(_))),
+            "{result:?}"
         );
-        windows
-    };
-
-    let live = run(&Cancellation::default(), Duration::ZERO);
-    assert_eq!(live.len(), 2);
-    assert!(live.iter().all(|remaining| !remaining.is_zero()));
-
-    // An hour's pause before the second batch would hold the test.
-    let cancelled = Cancellation::default();
-    cancelled.cancel();
-    assert_eq!(run(&cancelled, hour), [Duration::ZERO, Duration::ZERO]);
+        assert_eq!(calls, usize::from(!cancelled_before));
+    }
 }
 
 #[test]

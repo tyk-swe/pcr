@@ -3,11 +3,16 @@
 use crate::common;
 
 use std::collections::HashMap;
+use std::convert::Infallible;
+use std::io;
 use std::net::Ipv4Addr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use common::clock::VirtualClock;
 use common::responder::{Arrival, Io, Path, Routes, State};
+use packetcraftr::clock::{Clock, SystemClock};
 use packetcraftr::dns::{self, batch};
 use packetcraftr::policy::Policy;
 use packetcraftr::probe::{ProbeEndpoint, Transport};
@@ -16,6 +21,7 @@ use packetcraftr::scan::{self, discovery};
 use packetcraftr::target::{Family, Target};
 use packetcraftr::traceroute::hosts::{self, Strategy};
 use packetcraftr::{Client, Stats};
+use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_netio::link::Mode;
 
 type Providers = common::FakeProviders<Routes, Io>;
@@ -255,4 +261,145 @@ fn collected_events_agree_with_the_streamed_report() {
         names(aggregate.reverse_dns.as_ref().expect("lookups ran")),
         names(streamed.reverse_dns.as_ref().expect("lookups ran"))
     );
+}
+
+/// Advances once between the operation's first time sample and scan setup.
+#[derive(Clone)]
+struct SetupClock {
+    clock: VirtualClock,
+    advance: Arc<Mutex<Option<Duration>>>,
+}
+
+impl Clock for SetupClock {
+    type Error = Infallible;
+
+    fn now(&self) -> Instant {
+        let now = self.clock.now();
+        if let Some(advance) = self.advance.lock().unwrap().take() {
+            self.clock.advance(advance);
+        }
+        now
+    }
+
+    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error> {
+        self.clock.sleep(delay, deadline)
+    }
+}
+
+#[test]
+fn the_shared_deadline_counts_setup_on_the_clients_clock() {
+    let state = network(&[7]);
+    let request = Request {
+        trace: None,
+        reverse_dns: None,
+        ..request(&[7])
+    };
+    let clock = SetupClock {
+        clock: VirtualClock::default(),
+        advance: Arc::new(Mutex::new(Some(
+            request.scan.limits.max_duration + Duration::from_secs(1),
+        ))),
+    };
+    let error = client(&state, Policy::default())
+        .with_clock(clock)
+        .scan_with_followups(request, |_: Event| Ok(()))
+        .expect_err("setup consumed the shared duration");
+    assert!(
+        matches!(
+            error,
+            followup::Error::Scan(scan::Error::DurationLimit { .. })
+        ),
+        "{error:?}"
+    );
+    assert_eq!(state.lock().unwrap().sends, 0);
+}
+
+#[derive(Clone)]
+struct FollowupClock {
+    scan_finished: Arc<AtomicBool>,
+    cancel: Option<Cancellation>,
+}
+
+impl Clock for FollowupClock {
+    type Error = io::Error;
+
+    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error> {
+        if self.scan_finished.load(Ordering::SeqCst) {
+            if let Some(cancel) = &self.cancel {
+                cancel.cancel();
+                return Ok(());
+            }
+            return Err(io::Error::other("follow-up pacing failed"));
+        }
+        let Ok(()) = SystemClock.sleep(delay, deadline);
+        Ok(())
+    }
+}
+
+#[test]
+fn reverse_dns_pacing_failures_stop_raw_and_connect_followups() {
+    for connect in [false, true] {
+        for cancel in [false, true] {
+            let state = network(&[7]);
+            let cancellation = Cancellation::default();
+            let scan_finished = Arc::new(AtomicBool::new(false));
+            let clock = FollowupClock {
+                scan_finished: Arc::clone(&scan_finished),
+                cancel: cancel.then(|| cancellation.clone()),
+            };
+            let client = client(&state, Policy::default())
+                .with_clock(clock)
+                .with_cancellation(cancellation);
+            let mut scan = scan_request(&[7]);
+            scan.probes_per_second = Some(1);
+            let result = if connect {
+                scan.route = Default::default();
+                client
+                    .scan_connect_with_followups(
+                        followup::ConnectRequest {
+                            scan,
+                            reverse_dns: Some(reverse_dns()),
+                        },
+                        move |_: scan::connect::Event| {
+                            scan_finished.store(true, Ordering::SeqCst);
+                            Ok(())
+                        },
+                    )
+                    .map(|_| ())
+            } else {
+                client
+                    .scan_with_followups(
+                        Request {
+                            scan,
+                            trace: None,
+                            reverse_dns: Some(reverse_dns()),
+                        },
+                        move |event: Event| {
+                            if matches!(event, Event::Scan(scan::Event::Probe { .. })) {
+                                scan_finished.store(true, Ordering::SeqCst);
+                            }
+                            Ok(())
+                        },
+                    )
+                    .map(|_| ())
+            };
+            let error = result.expect_err("interrupted DNS pacing cannot report success");
+            if cancel {
+                assert!(
+                    matches!(error, followup::Error::Dns(dns::Error::Cancelled(_))),
+                    "connect={connect}: {error:?}"
+                );
+            } else if let followup::Error::Dns(dns::Error::Clock { source, .. }) = error {
+                assert_eq!(source.to_string(), "follow-up pacing failed");
+                assert!(source.downcast_ref::<io::Error>().is_some());
+            } else {
+                panic!("connect={connect}: {error:?}");
+            }
+            assert_eq!(
+                state.lock().unwrap().sends,
+                usize::from(!connect),
+                "no DNS query was sent"
+            );
+        }
+    }
 }

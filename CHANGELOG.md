@@ -106,6 +106,8 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Fixed
 
+- Scan follow-ups share the client's monotonic deadline and propagate reverse-DNS
+  cancellation and pacing-clock failures before sending further queries.
 - Preserve authorization before active discovery and validate every route-bearing
   address and final wire image. Reject malformed routing/VLAN state, invalid
   limits, unsupported socket route overrides, and impossible collection budgets

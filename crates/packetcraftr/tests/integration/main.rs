@@ -21,6 +21,7 @@ mod dns_batch_contracts;
 mod dns_cancellation_contracts;
 mod dns_wire_contracts;
 mod error_classification_contracts;
+mod evidence_limits_conformance;
 mod exchange_dns_contracts;
 mod exchange_failure_contracts;
 mod fuzz_cancellation_contracts;

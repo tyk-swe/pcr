@@ -6,7 +6,6 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use packetcraftr_core::template::DEFAULT_MAX_TEMPLATE_PACKETS;
-use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 use packetcraftr_netio::deadline::MAX_WAIT;
 
 use crate::execution::limits::{check_limits, check_rate, duration_violation};
@@ -20,14 +19,16 @@ use crate::scan::{
     DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS, MAX_IN_FLIGHT, MAX_PROBES,
 };
 
+mod limits_serde;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "limits_serde::Limits", into = "limits_serde::Limits")]
 pub struct Limits {
     pub max_prepared_bytes: usize,
     pub max_targets: usize,
     pub max_ports: usize,
     pub max_probes: usize,
     pub max_duration: Duration,
-    #[serde(flatten)]
     pub evidence: crate::evidence::Limits,
 }
 
@@ -59,29 +60,20 @@ impl Limits {
                 ("max_targets", self.max_targets, super::MAX_PROBES),
                 ("max_ports", self.max_ports, usize::from(u16::MAX) + 1),
                 ("max_probes", self.max_probes, MAX_PROBES),
-                (
-                    "max_evidence_frames",
-                    self.evidence.max_frames,
-                    MAX_CAPTURE_QUEUE_FRAMES,
-                ),
-                (
-                    "max_evidence_bytes",
-                    self.evidence.max_bytes,
-                    MAX_CAPTURE_QUEUE_BYTES,
-                ),
             ],
-            &[(
-                "max_undecoded",
-                self.evidence.max_undecoded,
-                self.evidence.max_frames,
-                "cannot exceed max_evidence_frames",
-            )],
+            &[],
             |field, value, reason| Error::InvalidLimit {
                 field,
                 value,
                 reason,
             },
         )?;
+        self.evidence
+            .validate(|field, value, reason| Error::InvalidLimit {
+                field,
+                value,
+                reason,
+            })?;
         if duration_violation(self.max_duration, MAX_WAIT) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,

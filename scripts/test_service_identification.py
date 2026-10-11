@@ -8,6 +8,7 @@ import errno
 import json
 from pathlib import Path
 import subprocess
+import ssl
 import sys
 import tempfile
 import unittest
@@ -49,6 +50,102 @@ class FakePeer:
 
 
 class AcceptanceContracts(unittest.TestCase):
+    def test_holdout_is_fixed_and_not_silently_replaced_after_rule_authorship(self):
+        scenarios = RUNNER.held_out_scenarios()
+        self.assertEqual(len(scenarios), 21)
+        self.assertTrue(all(case["split"] == "held_out" for case in scenarios))
+        self.assertEqual(len({case["name"] for case in scenarios}), len(scenarios))
+        with tempfile.TemporaryDirectory() as directory:
+            changed = Path(directory) / "changed.json"
+            changed.write_text(RUNNER.HELD_OUT_PATH.read_text() + "\n")
+            with patch.object(RUNNER, "HELD_OUT_PATH", changed), self.assertRaisesRegex(ValueError, "changed after"):
+                RUNNER.held_out_scenarios()
+
+    def test_quality_reports_unknown_ambiguity_and_confidence_without_identity_accuracy(self):
+        inventory = {case["name"]: case for case in RUNNER.held_out_scenarios()}
+
+        def case(name, outcome, candidates):
+            return {"scenario": name, "split": "held_out", "record": {"outcome": outcome, "candidates": candidates},
+                    "summary": {"corpus": "reviewed", "corpus_version": "1.1.0"}}
+
+        def candidate(name):
+            expected = inventory[name]
+            return {"product": expected["product"], "version": expected["version"],
+                    "confidence": expected.get("confidence", "claim")}
+
+        cases = [case("heldout-ssh", "unknown", []),
+                 case("heldout-dns-protocol-tcp", "matched", [candidate("heldout-dns-protocol-tcp")]),
+                 case("heldout-https-misleading", "matched", [candidate("heldout-https-misleading")]),
+                 case("heldout-https-ambiguous-versions", "ambiguous", [
+                     {"product": "nginx", "version": None, "confidence": "claim"},
+                     {"product": "nginx", "version": None, "confidence": "claim"}]),
+                 case("heldout-tls-handshake-refused", "tls_failed", [])]
+        quality = RUNNER.evaluate_held_out(cases)
+        self.assertEqual(quality["eligible_case_runs"], 4)
+        self.assertEqual(quality["coverage"], 0.5)
+        self.assertEqual(quality["unknown_share"], 0.25)
+        self.assertEqual(quality["ambiguous_share"], 0.25)
+        self.assertEqual(quality["outcomes"]["tls_failed"], 1)
+        self.assertEqual(quality["candidate_confidence_counts"], {"claim": 3, "protocol": 1})
+        self.assertEqual(quality["faithful_unambiguous_presented_token_counts"], {"claim": 1, "protocol": 1})
+        self.assertEqual(quality["misleading_claim_candidates"], 1)
+        self.assertIsNone(quality["identity_accuracy"])
+        self.assertEqual(quality["corpus_version"], "1.1.0")
+
+    def test_unexpected_observed_outcome_is_preserved_for_holdout_evaluation(self):
+        fixture = SimpleNamespace(address=("127.0.0.1", 12345), close=lambda: None,
+                                  thread=SimpleNamespace(is_alive=lambda: False))
+        record = {"outcome": "unknown", "candidates": []}
+        completed = subprocess.CompletedProcess(["fixture"], 0, "fixture output", "")
+        scenario = RUNNER.held_out_scenarios()[0]
+        with patch.object(RUNNER, "Fixture", return_value=fixture), \
+                patch.object(RUNNER, "fixture_documents", return_value=(Path("corpus"), None, {})), \
+                patch.object(RUNNER.subprocess, "run", return_value=completed), \
+                patch.object(RUNNER, "parse_output", return_value=(record, {})), \
+                patch.object(RUNNER, "verify_result", side_effect=ValueError("unexpected endpoint outcome")):
+            result = RUNNER.run_case(Path("fixture-binary"), "ipv4", scenario, "json")
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["record"], record)
+        self.assertEqual(RUNNER.evaluate_held_out([result])["unknown_case_runs"], 1)
+
+    def test_tls_fixture_records_original_certificate_numeric_and_declared_sni(self):
+        for server_name in (None, "fixture.example.test"):
+            with self.subTest(server_name=server_name):
+                fixture = RUNNER.Fixture(RUNNER.socket.AF_INET, {
+                    "probe": "http-head", "reply": RUNNER.HTTP, "tls": True})
+                try:
+                    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+                    with RUNNER.socket.create_connection(fixture.address, timeout=2) as raw:
+                        with context.wrap_socket(raw, server_hostname=server_name) as peer:
+                            expected = ssl.PEM_cert_to_DER_cert((RUNNER.FIXTURES / "loopback-cert.pem").read_text())
+                            self.assertEqual(peer.getpeercert(binary_form=True), expected)
+                            peer.sendall(RUNNER.HTTP_REQUEST)
+                            self.assertEqual(RUNNER.read_exact(peer, len(RUNNER.HTTP)), RUNNER.HTTP)
+                            peer.unwrap()
+                finally:
+                    fixture.close()
+                self.assertEqual(fixture.sni_names, [server_name])
+                self.assertEqual(fixture.connections, 1)
+                self.assertEqual(fixture.requests, [RUNNER.HTTP_REQUEST])
+
+    def test_supported_metadata_requires_original_observation_and_rule_source(self):
+        claims = [{"field": "smtp_hostname", "value_hex": b"mx.example.test".hex(), "unauthenticated": True}]
+        rule = {"hostname_field": "smtp_hostname", "cpe": "cpe:2.3:a:postfix:postfix:*:*:*:*:*:*:*:*",
+                "metadata": {"reference": "https://nvd.nist.gov/products/cpe"}}
+        candidate = {"hostname": {"value": "mx.example.test", "source": {
+            "kind": "observed_field", "field": "smtp_hostname", "index": 0}},
+            "cpe": {"value": rule["cpe"], "source": {"kind": "match_rule", "reference": rule["metadata"]["reference"]}}}
+        RUNNER.verify_supported_metadata(candidate, rule, claims)
+        candidate["hostname"]["value"] = "invented.example.test"
+        with self.assertRaisesRegex(ValueError, "hostname differs"):
+            RUNNER.verify_supported_metadata(candidate, rule, claims)
+        with self.assertRaisesRegex(ValueError, "unsupported hostname"):
+            RUNNER.verify_supported_metadata({"hostname": candidate["hostname"]}, {}, claims)
+        with self.assertRaisesRegex(ValueError, "device type"):
+            RUNNER.verify_supported_metadata({"device_type": {"value": "router"}}, {}, claims)
+
     def test_inventory_conditions_have_matching_runtime_expectations_and_wire_claims(self):
         inventory = {case["id"]: case for case in json.loads(
             (RUNNER.ROOT / "docs/scanner-corpus.v1.json").read_text()

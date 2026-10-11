@@ -8,7 +8,7 @@ require a new family even if an old schema would accept the JSON.
 
 A release archive freezes its exact schema snapshots. Keep the archive and its
 release checksum together. Resolve a schema's `$id` (for example that of the
-[output schema](../schemas/packetcraftr.output.v12.schema.json)) to the bundled
+[output schema](../schemas/packetcraftr.output.v13.schema.json)) to the bundled
 local file, not a moving branch or network fetch. The release packager copies
 every file under `schemas/`, and the verifier requires the output schema.
 Never modify an already published archive in place.
@@ -36,9 +36,37 @@ lists and omission counts. `fail` and `inconclusive` both produce CLI exit 1
 after a successfully published forwarding report. An error envelope is instead
 an execution failure. Neither process exit nor a partial list alone is a verdict.
 
+## Output family v13
+
+`packetcraftr.output/v13` is the current production family. It preserves v12
+behavior and adds explicit TLS wrapping and SMTP/FTP identification. Consumers
+must accept the `tls_failed` endpoint outcome and the new observed protocol and
+field values. A handshake failure retains TLS evidence and never falls back to
+cleartext. Passive TLS decoding and client fingerprints retain their existing
+analysis meaning.
+
+Each TLS probe carries `tls` evidence: the operator-declared `server_name` (null
+for a numeric target without SNI), `handshake_complete`, negotiated protocol and
+cipher suite, presented `certificates_hex` in DER order, a certificate truncation
+flag, and lifetime encrypted read/write bytes and I/O steps. `unauthenticated`
+is always true. Certificates are observations; neither their names nor a
+successful handshake authenticates the host. Application `request_hex`,
+`response_hex`, and byte counters describe decrypted application data. Writes
+accepted by the TLS plaintext buffer are charged as application writes even if
+its later flush fails; encrypted wire counters show the completed transmission.
+
+`usage.tls` reports encrypted `write_bytes`, `read_bytes`, retained
+`certificate_bytes`, and `steps` separately from application usage, including
+failed handshakes. Cleartext operations publish zero TLS usage. Optional candidate
+`hostname`, `device_type`, and `cpe` values each carry a `source`: an
+`observed_field` with its field/index, or a `match_rule` reference tied to the
+candidate's existing corpus/version/probe/rule provenance. Unsupported metadata
+is absent. A hostname is an unauthenticated greeting claim. Static product CPEs
+retain wildcard versions and make no vulnerability assertion.
+
 ## Output family v12
 
-`packetcraftr.output/v12` is the current production family. It preserves every
+`packetcraftr.output/v12` is frozen. It preserves every
 v11 meaning and adds the explicit `identify` command. Scans never start service
 identification implicitly. Aggregate JSON reports carry `records`; NDJSON emits
 one `identify_endpoint` record per selected numeric endpoint and one terminal
@@ -200,7 +228,7 @@ mapping.
 
 The frozen `packetcraftr.output/v6` and `packetcraftr.output/v7` families stay
 bundled for previously published evidence; new output never reuses their
-identities. The reference consumer accepts v6 through v12.
+identities. The reference consumer accepts v6 through v13.
 
 ## Streams and the reference consumer
 

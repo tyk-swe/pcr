@@ -135,6 +135,102 @@ fn oversized_ndjson_endpoint_plan_is_rejected_before_connecting() {
 }
 
 #[test]
+fn multiline_smtp_candidates_reject_oversized_ndjson_before_connecting() {
+    use packetcraftr_core::document::service_probes;
+
+    let directory = TempDir::new().unwrap();
+    let mut document = packetcraftr::identify::builtin_corpus()
+        .unwrap()
+        .as_ref()
+        .clone();
+    let probe = document
+        .probes
+        .iter()
+        .find(|probe| probe.id == "smtp-greeting")
+        .unwrap()
+        .clone();
+    let rule = document
+        .matches
+        .iter()
+        .find(|rule| rule.id == "postfix-claim")
+        .unwrap()
+        .clone();
+    document.probes.clear();
+    document.matches.clear();
+    // Each descriptive value stays within both its character and byte bounds.
+    // Multiple versions per greeting must be counted before contacting a peer.
+    let maximal_text = "🙂".repeat(service_probes::MAX_TEXT_CHARACTERS);
+    for probe_index in 0..8 {
+        let mut probe = probe.clone();
+        probe.id = format!("wide-smtp-{probe_index}");
+        for rule_index in 0..8 {
+            let mut rule = rule.clone();
+            rule.id = format!("wide-postfix-{probe_index}-{rule_index}");
+            rule.probe = probe.id.clone();
+            rule.product = maximal_text.clone();
+            rule.device_type = Some(maximal_text.clone());
+            rule.metadata.reference = maximal_text.clone();
+            document.matches.push(rule);
+        }
+        document.probes.push(probe);
+    }
+    let bytes = serde_json::to_vec(&document).unwrap();
+    service_probes::parse(&bytes).expect("bounded operator-authored corpus");
+    let path = directory.path().join("wide-smtp.json");
+    std::fs::write(&path, bytes).unwrap();
+
+    // Prove the fixture can produce an oversized record: each rule matches 32
+    // distinct greeting versions, and evidence and endpoint candidates are
+    // retained separately. Other endpoint fields only increase this size.
+    let reply: String = (0..service_probes::MAX_GREETING_LINES)
+        .map(|index| {
+            let separator = if index + 1 == service_probes::MAX_GREETING_LINES {
+                ' '
+            } else {
+                '-'
+            };
+            format!("220{separator}mail.example.test ESMTP Postfix 3.10.{index}\r\n")
+        })
+        .collect();
+    let probe = &document.probes[0];
+    let observed = service_probes::observe(probe, reply.as_bytes(), false);
+    let identified = document.identify(probe, &observed);
+    assert_eq!(
+        identified.candidates.len(),
+        8 * service_probes::MAX_GREETING_LINES
+    );
+    let retained_candidate_bytes =
+        2 * document.probes.len() * serde_json::to_vec(&identified.candidates).unwrap().len();
+    assert!(retained_candidate_bytes > 16 * 1024 * 1024);
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let result = run(&[
+        "--output",
+        "ndjson",
+        "identify",
+        &address,
+        "--corpus",
+        path_text(&path),
+        "--max-attempts",
+        "8",
+        "--host-max-attempts",
+        "8",
+    ]);
+    assert!(!result.status.success());
+    let records = parse_ndjson(&result);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["event"], "error");
+    assert_eq!(records[0]["error"]["code"], "cli.identify_record_limit");
+    assert_eq!(records[0]["error"]["kind"], "usage");
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+}
+
+#[test]
 fn json_preserves_an_endpoint_larger_than_the_ndjson_record_ceiling() {
     let directory = TempDir::new().unwrap();
     let corpus = repeated_http_corpus(&directory);
@@ -230,7 +326,7 @@ fn http_claims_and_matched_candidates_are_separate_with_exact_evidence() {
         path_text(&corpus),
     ]));
     assert_eq!(server.join().unwrap(), b"HEAD / HTTP/1.0\r\n\r\n");
-    assert_eq!(report["schema"], "packetcraftr.output/v12");
+    assert_eq!(report["schema"], "packetcraftr.output/v13");
     assert_eq!(report["command"], "identify");
     let record = &report["result"]["records"][0];
     assert_eq!(record["endpoint"]["address"], address);

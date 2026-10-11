@@ -49,6 +49,7 @@ impl super::Spec for Args {
             probe_max_write_bytes: Bytes @ Operation,
             probe_max_read_bytes: Bytes @ ResultRetention,
         ]);
+        self.tls.resources(settings);
         self.policy.resources(settings);
     }
 
@@ -95,6 +96,7 @@ impl super::Spec for Args {
             corpus,
             exclusions,
         );
+        request.tls = self.tls.settings();
         request.intensity = self.intensity;
         request.parent_deadline = crate::invocation::deadline();
         request.limits = library::Limits {

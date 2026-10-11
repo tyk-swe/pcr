@@ -15,4 +15,5 @@ mod capture_group_contracts;
 mod deadline_contracts;
 mod error_contracts;
 mod model_contracts;
+mod tls_contracts;
 mod transmit_contracts;

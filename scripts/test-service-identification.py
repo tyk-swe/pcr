@@ -13,11 +13,13 @@ import argparse
 import copy
 import datetime
 import errno
+import hashlib
 import json
 import os
 from pathlib import Path
 import platform
 import socket
+import ssl
 import struct
 import subprocess
 import tempfile
@@ -25,7 +27,10 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = "packetcraftr.output/v12"
+SCHEMA = "packetcraftr.output/v13"
+FIXTURES = ROOT / "scripts/fixtures/service-identification"
+HELD_OUT_PATH = ROOT / "docs/roadmap/evidence/m09/held-out.v1.json"
+HELD_OUT_SHA256 = "399ae8d919fe3ca2ac32c62962eee37e54a811c5dee30b02f9226e45be94774c"
 PROFILES = {
     "portable": ["--no-default-features"],
     "default": [],
@@ -91,6 +96,57 @@ def scenarios():
              "transport": transport, "dns": True, "txt": b"BIND 9.20.0",
              "outcome": "matched", "product": "BIND", "version": "9.20.0"},
         ]
+    cases += [
+        {"name": "known-smtp-postfix", "probe": "smtp-greeting",
+         "reply": b"220 mail.example.test ESMTP Postfix 3.10.1\r\n",
+         "outcome": "matched", "product": "Postfix", "version": "3.10.1"},
+        {"name": "known-tls-smtp-postfix", "probe": "smtp-greeting", "tls": True,
+         "reply": b"220 mail.example.test ESMTP Postfix 3.10.1\r\n",
+         "outcome": "matched", "product": "Postfix", "version": "3.10.1"},
+        {"name": "known-smtp-exim", "probe": "smtp-greeting",
+         "reply": b"220 relay.example.test ESMTP Exim 4.98\r\n",
+         "outcome": "matched", "product": "Exim", "version": "4.98"},
+        {"name": "known-ftp-vsftpd", "probe": "ftp-greeting",
+         "reply": b"220 (vsFTPd 3.0.5)\r\n",
+         "outcome": "matched", "product": "vsftpd", "version": "3.0.5"},
+        {"name": "known-ftp-proftpd", "probe": "ftp-greeting",
+         "reply": b"220 ProFTPD 1.3.8 Server ready\r\n",
+         "outcome": "matched", "product": "ProFTPD", "version": "1.3.8"},
+        {"name": "known-https", "probe": "http-head", "reply": HTTP,
+         "tls": True, "outcome": "matched", "product": "nginx", "version": "1.26.2"},
+        {"name": "https-declared-name", "probe": "http-head", "reply": HTTP,
+         "tls": True, "server_name": "fixture.example.test",
+         "outcome": "matched", "product": "nginx", "version": "1.26.2"},
+        {"name": "tls-handshake-refused", "probe": "http-head", "reply": b"",
+         "tls": True, "tls_failure": "refused", "outcome": "tls_failed"},
+        {"name": "tls-handshake-deadline", "probe": "http-head", "reply": b"",
+         "tls": True, "tls_failure": "timeout", "hold": True,
+         "outcome": "budget_exhausted"},
+        {"name": "tls-wire-read-limit", "probe": "http-head", "reply": b"",
+         "tls": True, "tls_failure": "wire_limit", "tls_read_limit": 64,
+         "outcome": "tls_failed"},
+        {"name": "tls-certificate-retention-limit", "probe": "http-head", "reply": HTTP,
+         "tls": True, "tls_certificate_limit": 16,
+         "outcome": "matched", "product": "nginx", "version": "1.26.2"},
+    ]
+    for case in cases:
+        case["split"] = "training_or_acceptance"
+    return cases
+
+
+def held_out_scenarios():
+    """Read the immutable service-instance holdout without adapting its expectations."""
+    content = HELD_OUT_PATH.read_bytes()
+    require(hashlib.sha256(content).hexdigest() == HELD_OUT_SHA256,
+            "held-out manifest changed after it was fixed before rule authorship")
+    manifest = json.loads(content)
+    require(manifest["schema"] == "packetcraftr.service-identification-held-out/v1",
+            "held-out schema changed")
+    cases = copy.deepcopy(manifest["scenarios"])
+    for case in cases:
+        case["reply"] = bytes.fromhex(case.pop("reply_hex"))
+        if "txt_hex" in case:
+            case["txt"] = bytes.fromhex(case.pop("txt_hex"))
     return cases
 
 
@@ -129,6 +185,14 @@ class Fixture:
         self.replies = []
         self.errors = []
         self.connections = 0
+        self.sni_names = []
+        self.handshake_failures = []
+        self.tls_context = None
+        if scenario.get("tls"):
+            self.tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            self.tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
+            self.tls_context.load_cert_chain(FIXTURES / "loopback-cert.pem", FIXTURES / "loopback-key.pem")
+            self.tls_context.set_servername_callback(self.observe_sni)
         kind = socket.SOCK_DGRAM if self.transport == "udp" else socket.SOCK_STREAM
         self.listener = socket.socket(family, kind)
         try:
@@ -152,6 +216,9 @@ class Fixture:
         require(not self.thread.is_alive(), "fixture worker failed to stop")
         require(not self.errors, "; ".join(self.errors))
 
+    def observe_sni(self, _peer, name, _context):
+        self.sni_names.append(name)
+
     def serve(self):
         try:
             while not self.stop.is_set():
@@ -167,7 +234,21 @@ class Fixture:
                         self.connections += 1
                         with peer:
                             peer.settimeout(2)
-                            self.serve_tcp(peer)
+                            if self.scenario.get("tls_failure") == "refused":
+                                peer.recv(4096)
+                                peer.sendall(b"This fixture does not speak TLS\r\n")
+                            elif self.scenario.get("tls_failure") == "timeout":
+                                self.stop.wait(2)
+                            elif self.tls_context:
+                                try:
+                                    with self.tls_context.wrap_socket(peer, server_side=True) as encrypted:
+                                        self.serve_tcp(encrypted)
+                                except (ssl.SSLError, ConnectionResetError) as error:
+                                    if self.scenario.get("tls_failure") != "wire_limit":
+                                        raise
+                                    self.handshake_failures.append(str(error))
+                            else:
+                                self.serve_tcp(peer)
                 except socket.timeout:
                     continue
         except Exception as error:
@@ -205,8 +286,14 @@ class Fixture:
         else:
             peer.sendall(response)
         try:
-            peer.shutdown(socket.SHUT_WR)
-            extra = peer.recv(256)
+            if scenario.get("tls"):
+                # SSLSocket.unwrap sends close_notify before waiting for the
+                # client's shutdown; app bytes are already retained above.
+                peer.unwrap()
+                extra = b""
+            else:
+                peer.shutdown(socket.SHUT_WR)
+                extra = peer.recv(256)
         except OSError as error:
             # Closing a bounded reader with unread reply bytes may reset TCP.
             disconnected = (
@@ -214,7 +301,8 @@ class Fixture:
                 or error.errno in PEER_DISCONNECT_WINERRORS
                 or getattr(error, "winerror", None) in PEER_DISCONNECT_WINERRORS
             )
-            if not scenario.get("read_limit") or not disconnected:
+            tls_close = scenario.get("tls") and (isinstance(error, ssl.SSLEOFError) or disconnected)
+            if not tls_close and (not scenario.get("read_limit") or not disconnected):
                 raise
             extra = b""
         require(not extra, "the client transmitted bytes after the reviewed probe")
@@ -222,8 +310,8 @@ class Fixture:
 
 def fixture_documents(directory, scenario, port):
     corpus = json.loads((ROOT / "crates/packetcraftr/data/service-probes.json").read_text())
-    corpus["name"] = "service-acceptance-" + scenario["name"]
-    corpus["version"] = "1.0.0"
+    # Restrict scheduling to the fixture's declared probe; matching rules and
+    # corpus identity stay exactly those of the shipped reviewed document.
     corpus["probes"] = [probe for probe in corpus["probes"] if probe["id"] == scenario["probe"]]
     require(len(corpus["probes"]) == 1, "scenario probe is missing from the shipped corpus")
     corpus["matches"] = [rule for rule in corpus["matches"] if rule["probe"] == scenario["probe"]]
@@ -277,15 +365,19 @@ def verify_result(record, summary, fixture, scenario, corpus):
     require(summary["usage"]["read_bytes"] == sum(len(bytes.fromhex(probe["response_hex"])) for probe in probes), "read accounting changed")
     require(summary["usage"]["write_bytes"] == sum(probe["bytes_written"] for probe in probes), "write accounting changed")
     expected_attempts = 0 if scenario.get("no_io") else 1
-    require(len(probes) == expected_attempts and len(fixture.requests) == expected_attempts, "intensity/exclusions/attempt cap did not bound I/O")
+    expected_exchanges = 0 if scenario.get("tls_failure") else expected_attempts
+    require(len(probes) == expected_attempts and len(fixture.requests) == expected_exchanges, "intensity/exclusions/attempt cap did not bound I/O")
     require(fixture.connections == (expected_attempts if fixture.transport == "tcp" else 0), "unexpected extra connection")
     candidates = record["candidates"]
-    if scenario["outcome"] in ("unknown", "malformed", "truncated", "excluded", "budget_exhausted"):
+    if scenario["outcome"] in ("unknown", "malformed", "truncated", "excluded", "budget_exhausted", "tls_failed"):
         require(candidates == [], "nonmatching result invented a candidate")
     elif scenario["outcome"] == "ambiguous":
         require(len(candidates) >= 2 and all(candidate["version"] is None for candidate in candidates), "ambiguous result published an exact version")
         if scenario.get("product"):
             require(all(candidate["product"] == scenario["product"] for candidate in candidates), "version ambiguity changed the product")
+        if scenario.get("products"):
+            require({candidate["product"] for candidate in candidates} == set(scenario["products"]),
+                    "held-out product ambiguity changed the declared claims")
         if scenario["name"] == "ambiguous-products":
             require({candidate["product"] for candidate in candidates} == {"nginx", "Apache HTTP Server"}, "declared product ambiguity was not exercised")
             require({tuple(candidate["provenance"]["field_indices"]) for candidate in candidates} == {(1,), (2,)}, "product ambiguity must cite separate Server fields")
@@ -299,6 +391,7 @@ def verify_result(record, summary, fixture, scenario, corpus):
         rule = next((rule for rule in corpus["matches"] if rule["id"] == provenance["rule"]), None)
         require(rule is not None and rule["product"] == candidate["product"], "candidate lost its declared match rule")
         claims = probes[0]["observation"]["claims"]
+        verify_supported_metadata(candidate, rule, claims)
         for field_index in provenance["field_indices"]:
             require(0 <= field_index < len(claims), "candidate refers to an absent response field")
             claim = claims[field_index]
@@ -307,6 +400,17 @@ def verify_result(record, summary, fixture, scenario, corpus):
         require(probe["probe"] == scenario["probe"] and probe["attempt"] == 1, "undeclared probe or retry occurred")
         request = bytes.fromhex(probe["request_hex"])
         response = bytes.fromhex(probe["response_hex"])
+        if scenario.get("tls"):
+            verify_tls(probe, summary, fixture, scenario)
+            if scenario.get("tls_failure"):
+                require(request == b"" and response == b"" and probe["bytes_written"] == 0,
+                        "failed TLS handshake performed application I/O")
+                require(probe["io_outcome"] == ("timed_out" if scenario.get("hold") else
+                        "truncated" if scenario.get("tls_read_limit") else "failed"),
+                        "TLS failure did not preserve its I/O outcome")
+                continue
+        else:
+            require(probe.get("tls") is None, "cleartext probe acquired TLS evidence")
         require(request == fixture.requests[index], "retained request bytes differ from transmitted bytes")
         require(probe["bytes_written"] == len(request), "request accounting differs from transmission")
         require(response == fixture.replies[index][:len(response)], "retained response bytes differ from received wire prefix")
@@ -328,8 +432,66 @@ def verify_result(record, summary, fixture, scenario, corpus):
             require(summary["exclusion_set"] == "operator-no-exclusions", "explicit exclusion override lost provenance")
 
 
+def verify_supported_metadata(candidate, rule, claims):
+    require("device_type" not in candidate, "fixture without device evidence invented a device type")
+    if rule.get("hostname_field"):
+        value = candidate.get("hostname")
+        require(isinstance(value, dict), "supported SMTP hostname was omitted")
+        source = value["source"]
+        require(source["kind"] == "observed_field" and source["field"] == rule["hostname_field"],
+                "hostname source lost the observed field")
+        require(0 <= source["index"] < len(claims), "hostname source refers to an absent field")
+        observed = claims[source["index"]]
+        require(observed["field"] == source["field"] and observed["unauthenticated"] is True
+                and value["value"].encode() == bytes.fromhex(observed["value_hex"]),
+                "hostname differs from its unauthenticated observation")
+    else:
+        require("hostname" not in candidate, "unsupported hostname was invented")
+    if rule.get("cpe"):
+        value = candidate.get("cpe")
+        require(isinstance(value, dict) and value["value"] == rule["cpe"], "CPE differs from the reviewed match document")
+        require(value["source"] == {"kind": "match_rule", "reference": rule["metadata"]["reference"]},
+                "CPE lost the declared data reference")
+        require(value["value"].split(":")[5] == "*", "product CPE acquired an unverified version")
+    else:
+        require("cpe" not in candidate, "unsupported CPE was invented")
+
+
+def verify_tls(probe, summary, fixture, scenario):
+    evidence = probe.get("tls")
+    require(isinstance(evidence, dict), "TLS probe omitted its handshake observation")
+    require(evidence["unauthenticated"] is True, "certificate observation was presented as authenticated")
+    require(evidence["server_name"] == scenario.get("server_name"), "TLS SNI provenance changed")
+    complete = not scenario.get("tls_failure")
+    require(evidence["handshake_complete"] is complete, "TLS handshake completion changed")
+    require(evidence["wire_bytes_sent"] > 0 and evidence["steps"] > 0, "TLS wire/handshake work was omitted")
+    require(evidence["wire_bytes_read"] >= 0 and evidence["steps"] <= 64, "TLS work exceeded its limit")
+    usage = summary["usage"]["tls"]
+    require(usage["write_bytes"] == evidence["wire_bytes_sent"] and usage["read_bytes"] == evidence["wire_bytes_read"]
+            and usage["steps"] == evidence["steps"], "TLS wire/step accounting changed")
+    certificates = [bytes.fromhex(value) for value in evidence["certificates_hex"]]
+    require(usage["certificate_bytes"] == sum(map(len, certificates)), "TLS certificate accounting changed")
+    if complete:
+        expected = ssl.PEM_cert_to_DER_cert((FIXTURES / "loopback-cert.pem").read_text())
+        if scenario.get("tls_certificate_limit"):
+            require(certificates == [] and evidence["certificates_truncated"] is True,
+                    "certificate retention cap did not omit the oversized whole certificate")
+            require(usage["certificate_bytes"] <= scenario["tls_certificate_limit"],
+                    "certificate retention accounting exceeded its limit")
+        else:
+            require(certificates == [expected] and evidence["certificates_truncated"] is False,
+                    "presented certificate observation differs from the original fixture")
+        require(evidence["protocol_version"] in ("TLSv1_2", "TLSv1_3", "TLS1.2", "TLS1.3", "TLSv1.2", "TLSv1.3"),
+                "TLS negotiated version was not retained")
+        require(isinstance(evidence["cipher_suite"], str) and evidence["cipher_suite"], "TLS cipher observation was omitted")
+        require(fixture.sni_names == [scenario.get("server_name")], "numeric/declared-name SNI policy changed")
+    if scenario.get("tls_read_limit"):
+        require(evidence["wire_bytes_read"] <= scenario["tls_read_limit"], "TLS encrypted read budget was exceeded")
+
+
 def run_case(binary, family_name, scenario, output_format):
-    result = {"scenario": scenario["name"], "family": family_name, "format": output_format, "status": "failed"}
+    result = {"scenario": scenario["name"], "split": scenario.get("split", "training_or_acceptance"),
+              "family": family_name, "format": output_format, "status": "failed"}
     fixture = None
     started = time.monotonic()
     try:
@@ -353,12 +515,23 @@ def run_case(binary, family_name, scenario, output_format):
                 for scope in ("host", "connection", "probe"):
                     command += [f"--{scope}-max-read-bytes", str(scenario["read_limit"])]
                 command += ["--max-read-bytes", str(scenario["read_limit"])]
+            if scenario.get("tls"):
+                command.append("--tls")
+            if scenario.get("server_name"):
+                command += ["--server-name", scenario["server_name"]]
+            if scenario.get("tls_read_limit"):
+                command += ["--tls-max-wire-read-bytes", str(scenario["tls_read_limit"])]
+            if scenario.get("tls_certificate_limit"):
+                command += ["--tls-max-certificate-bytes", str(scenario["tls_certificate_limit"])]
             result["command"] = command
             completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=15, check=False)
             result["exit_code"] = completed.returncode
             result["stderr"] = completed.stderr
             require(completed.returncode == 0, "CLI failed: " + completed.stderr + completed.stdout)
             record, summary = parse_output(completed.stdout, output_format)
+            # Preserve unexpected observed outcomes in the held-out report;
+            # assertions must not turn a mismatch into missing evidence.
+            result.update(record=record, summary=summary)
             fixture.close()
             verify_result(record, summary, fixture, scenario, corpus)
             result.update({"status": "passed", "record": record, "summary": summary,
@@ -391,15 +564,59 @@ def run_profile(name, build_timeout):
         binary = target / "debug" / ("packetcraftr.exe" if os.name == "nt" else "packetcraftr")
         require(binary.is_file(), "built CLI binary is missing")
         for family in ("ipv4", "ipv6"):
-            for scenario in scenarios():
+            for scenario in scenarios() + held_out_scenarios():
                 for output_format in ("json", "ndjson"):
                     case = run_case(binary, family, scenario, output_format)
                     result["cases"].append(case)
                     print(f"{name}/{family}/{scenario['name']}/{output_format}: {case['status']}", flush=True)
         result["status"] = "passed" if all(case["status"] == "passed" for case in result["cases"]) else "failed"
+        result["held_out_evaluation"] = evaluate_held_out(result["cases"])
     except Exception as error:
         result["error"] = str(error)
     return result
+
+
+def evaluate_held_out(cases):
+    """Report observed coverage and uncertainty, separating confidence categories."""
+    inventory = {case["name"]: case for case in held_out_scenarios()}
+    selected = [case for case in cases if case.get("split") == "held_out"]
+    eligible = [case for case in selected if inventory[case["scenario"]].get("quality_eligible", True)]
+    counts = {name: 0 for name in ("matched", "unknown", "ambiguous", "malformed", "truncated",
+                                  "tls_failed", "budget_exhausted", "missing_record")}
+    confidence = {"claim": 0, "protocol": 0}
+    faithfully_extracted = {"claim": 0, "protocol": 0}
+    misleading_claims = 0
+    for case in selected:
+        record = case.get("record")
+        if record is None:
+            counts["missing_record"] += 1
+            continue
+        counts[record["outcome"]] = counts.get(record["outcome"], 0) + 1
+        expected = inventory[case["scenario"]]
+        for candidate in record["candidates"]:
+            category = candidate["confidence"]
+            confidence[category] = confidence.get(category, 0) + 1
+            if record["outcome"] == "matched" and candidate["product"] == expected.get("product") and candidate["version"] == expected.get("version"):
+                faithfully_extracted[category] = faithfully_extracted.get(category, 0) + 1
+            if expected.get("misleading"):
+                misleading_claims += 1
+    matched = sum(case.get("record", {}).get("outcome") == "matched" for case in eligible)
+    unknown = sum(case.get("record", {}).get("outcome") == "unknown" for case in eligible)
+    ambiguous = sum(case.get("record", {}).get("outcome") == "ambiguous" for case in eligible)
+    denominator = len(eligible)
+    return {"manifest_version": "1.0.0", "manifest_sha256": HELD_OUT_SHA256,
+            "corpus": next((case["summary"]["corpus"] for case in selected if "corpus" in case.get("summary", {})), None),
+            "corpus_version": next((case["summary"]["corpus_version"] for case in selected if "corpus_version" in case.get("summary", {})), None),
+            "declared_service_instances": len(inventory), "attempted_case_runs": len(selected),
+            "eligible_case_runs": denominator, "matched_case_runs": matched,
+            "coverage": matched / denominator if denominator else None,
+            "unknown_case_runs": unknown, "unknown_share": unknown / denominator if denominator else None,
+            "ambiguous_case_runs": ambiguous, "ambiguous_share": ambiguous / denominator if denominator else None,
+            "outcomes": counts, "candidate_confidence_counts": confidence,
+            "faithful_unambiguous_presented_token_counts": faithfully_extracted,
+            "misleading_claim_candidates": misleading_claims,
+            "identity_accuracy": None,
+            "limits": "Repeated IPv4/IPv6 and JSON/NDJSON case-runs are not additional independent service instances. Claim fidelity measures presented tokens, not actual software identity. Handshake/malformed cases are reported outside eligible service coverage. No production prevalence or confidence calibration is inferred."}
 
 
 def main():
@@ -412,11 +629,14 @@ def main():
     require(args.build_timeout > 0, "build timeout must be positive")
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip())
-    report = {"schema": "packetcraftr.service-identification-acceptance/v1", "revision": revision,
+    report = {"schema": "packetcraftr.service-identification-acceptance/v2", "revision": revision,
               "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
               "worktree_dirty": dirty,
               "platform": platform.system(), "architecture": platform.machine(),
-              "python": platform.python_version(), "profiles": []}
+              "python": platform.python_version(), "tls_fixture_runtime": ssl.OPENSSL_VERSION,
+              "shipped_corpus_sha256": hashlib.sha256((ROOT / "crates/packetcraftr/data/service-probes.json").read_bytes()).hexdigest(),
+              "held_out_manifest": {"path": str(HELD_OUT_PATH.relative_to(ROOT)), "sha256": HELD_OUT_SHA256,
+                                    "fixed_before_rule_commit": "97267ae4"}, "profiles": []}
     if args.require_clean and dirty:
         report["error"] = "acceptance requires a clean worktree at the recorded revision"
         args.report.parent.mkdir(parents=True, exist_ok=True)

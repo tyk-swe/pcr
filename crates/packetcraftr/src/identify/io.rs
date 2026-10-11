@@ -9,9 +9,9 @@ use packetcraftr_core::document::service_probes::{self, Probe, Request};
 use packetcraftr_core::error::Source;
 use packetcraftr_netio::tcp::Stream as _;
 use packetcraftr_netio::udp::Provider as _;
-use packetcraftr_netio::{bounded, tcp, udp};
+use packetcraftr_netio::{bounded, tcp, tls, udp};
 
-use super::{Endpoint, Error, IoOutcome, Transport};
+use super::{Endpoint, Error, IoOutcome, TlsEvidence, TlsSettings, Transport};
 use crate::policy::{Operation, Policy, SocketLimits, SocketOperation};
 use crate::providers::{TcpProviders, UdpProviders};
 
@@ -23,6 +23,7 @@ pub(super) struct Reply {
     pub peer: Option<SocketAddr>,
     pub diagnostic: Option<String>,
     pub source: Option<Source>,
+    pub tls: Option<TlsEvidence>,
 }
 
 impl Reply {
@@ -35,6 +36,7 @@ impl Reply {
             peer: None,
             diagnostic: Some(source.to_string()),
             source: Some(Source::new(source)),
+            tls: None,
         }
     }
 
@@ -45,7 +47,22 @@ impl Reply {
             bounded::Outcome::Truncated => (IoOutcome::Truncated, None),
             bounded::Outcome::TimedOut => (IoOutcome::TimedOut, None),
             bounded::Outcome::Cancelled => (IoOutcome::Cancelled, None),
-            bounded::Outcome::Failed(source) => (IoOutcome::Failed, Some(Source::new(source))),
+            bounded::Outcome::Failed(source) => {
+                let outcome = match source
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<tls::Error>())
+                {
+                    Some(tls::Error::WireLimit { .. } | tls::Error::StepLimit { .. }) => {
+                        IoOutcome::Truncated
+                    }
+                    Some(tls::Error::Interrupted(
+                        packetcraftr_core::budget::Interrupted::Cancelled(_),
+                    )) => IoOutcome::Cancelled,
+                    Some(tls::Error::Interrupted(_)) => IoOutcome::TimedOut,
+                    _ => IoOutcome::Failed,
+                };
+                (outcome, Some(Source::new(source)))
+            }
         };
         Self {
             bytes: exchange.response.to_vec(),
@@ -55,6 +72,7 @@ impl Reply {
             peer: Some(peer),
             diagnostic: source.as_ref().map(ToString::to_string),
             source,
+            tls: None,
         }
     }
 
@@ -123,25 +141,30 @@ impl<P: TcpProviders> tcp::Provider for AuthorizedTcp<P> {
     }
 }
 
+pub(super) struct Exchange<'a> {
+    pub endpoint: Endpoint,
+    pub probe: &'a Probe,
+    pub request: &'a [u8],
+    pub max_response: usize,
+    pub deadline: &'a Deadline,
+    pub tls: Option<&'a TlsSettings>,
+}
+
 pub(super) fn exchange<P: TcpProviders + UdpProviders>(
     providers: &Arc<P>,
     policy: &Arc<Policy>,
-    endpoint: Endpoint,
-    probe: &Probe,
-    request: &[u8],
-    max_response: usize,
-    deadline: &Deadline,
+    exchange: Exchange<'_>,
 ) -> Result<Reply, Error> {
+    let Exchange {
+        endpoint,
+        probe: _,
+        request,
+        max_response,
+        deadline,
+        tls: _,
+    } = exchange;
     match endpoint.transport {
-        Transport::Tcp => tcp_exchange(
-            providers,
-            policy,
-            endpoint.address,
-            probe,
-            request,
-            max_response,
-            deadline,
-        ),
+        Transport::Tcp => tcp_exchange(providers, policy, exchange),
         Transport::Udp => {
             authorize_message(policy, endpoint.address, request.len())?;
             let reply =
@@ -173,12 +196,17 @@ fn authorize_message(policy: &Policy, endpoint: SocketAddr, bytes: usize) -> Res
 fn tcp_exchange<P: TcpProviders>(
     providers: &Arc<P>,
     policy: &Arc<Policy>,
-    endpoint: SocketAddr,
-    probe: &Probe,
-    request: &[u8],
-    max_response: usize,
-    deadline: &Deadline,
+    exchange: Exchange<'_>,
 ) -> Result<Reply, Error> {
+    let Exchange {
+        endpoint,
+        probe,
+        request,
+        max_response,
+        deadline,
+        tls,
+    } = exchange;
+    let endpoint = endpoint.address;
     policy.authorize_destination(endpoint.ip())?;
     let connector = Arc::new(AuthorizedTcp {
         providers: Arc::clone(providers),
@@ -221,6 +249,67 @@ fn tcp_exchange<P: TcpProviders>(
     if !request.is_empty() {
         authorize_message(policy, peer, request.len())?;
     }
+    if let Some(settings) = tls {
+        let name = settings.server_name.as_ref().map_or_else(
+            || tls::ServerName::Numeric(endpoint.ip()),
+            |name| tls::ServerName::Declared(name.clone()),
+        );
+        let policy = Arc::clone(policy);
+        let authorize = move |bytes: &[u8]| {
+            authorize_message(&policy, peer, bytes.len())
+                .map_err(|source| std::io::Error::new(std::io::ErrorKind::PermissionDenied, source))
+        };
+        let handshake = match tls::connect(stream, name, settings.connection, deadline, authorize) {
+            Ok(handshake) => handshake,
+            Err(source) => return Ok(Reply::failed(source)),
+        };
+        let mut stream = match handshake.result {
+            Ok(stream) => stream,
+            Err(source) => {
+                let outcome = match &source {
+                    tls::Error::Interrupted(packetcraftr_core::budget::Interrupted::Cancelled(
+                        _,
+                    )) => IoOutcome::Cancelled,
+                    tls::Error::Interrupted(_) => IoOutcome::TimedOut,
+                    tls::Error::Io(source)
+                        if matches!(
+                            source.kind(),
+                            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                        ) =>
+                    {
+                        IoOutcome::TimedOut
+                    }
+                    tls::Error::WireLimit { .. } | tls::Error::StepLimit { .. } => {
+                        IoOutcome::Truncated
+                    }
+                    _ => IoOutcome::Failed,
+                };
+                return Ok(Reply {
+                    local: Some(local),
+                    peer: Some(peer),
+                    outcome,
+                    tls: Some(TlsEvidence {
+                        server_name: settings.server_name.clone(),
+                        session: handshake.evidence,
+                    }),
+                    ..Reply::failed(source)
+                });
+            }
+        };
+        let exchange = tcp::exchange(&mut stream, request, max_response, deadline, |bytes| {
+            complete(probe, bytes)
+        });
+        let evidence = TlsEvidence {
+            server_name: settings.server_name.clone(),
+            session: stream.evidence(),
+        };
+        let mut reply = match exchange {
+            Ok(exchange) => Reply::exchanged(exchange, local, peer),
+            Err(source) => Reply::tcp_failed(source),
+        };
+        reply.tls = Some(evidence);
+        return Ok(reply);
+    }
     let exchange = match tcp::exchange(&mut stream, request, max_response, deadline, |bytes| {
         complete(probe, bytes)
     }) {
@@ -233,6 +322,8 @@ fn tcp_exchange<P: TcpProviders>(
 fn complete(probe: &Probe, bytes: &[u8]) -> bool {
     match probe.request {
         Request::Banner {} => service_probes::ssh_collection_complete(bytes),
+        Request::SmtpGreeting {} => service_probes::smtp_collection_complete(bytes),
+        Request::FtpGreeting {} => service_probes::ftp_collection_complete(bytes),
         Request::HttpHead {} => service_probes::http_collection_complete(bytes),
         Request::Dns { .. } => bytes.get(..2).is_some_and(|prefix| {
             bytes.len() >= 2 + usize::from(u16::from_be_bytes([prefix[0], prefix[1]]))

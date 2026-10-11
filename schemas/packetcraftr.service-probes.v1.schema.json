@@ -168,6 +168,30 @@
                     ]
                   }
                 }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "smtp_greeting"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "ftp_greeting"
+                  }
+                }
               }
             ]
           },
@@ -234,7 +258,10 @@
               "http_status",
               "http_server",
               "dns_rcode",
-              "dns_txt"
+              "dns_txt",
+              "smtp_greeting",
+              "smtp_software",
+              "ftp_greeting"
             ]
           },
           "prefix": {
@@ -276,6 +303,30 @@
           },
           "metadata": {
             "$ref": "#/$defs/metadata"
+          },
+          "hostname_field": {
+            "enum": [
+              "smtp_hostname",
+              null
+            ]
+          },
+          "device_type": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/text"
+              }
+            ]
+          },
+          "cpe": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 512,
+            "pattern": "^cpe:2\\.3:[aho]:[A-Za-z0-9._-]+:[A-Za-z0-9._-]+:\\*:(?:\\*|-|[A-Za-z0-9._-]+)(?::(?:\\*|-|[A-Za-z0-9._-]+)){6}$"
           }
         },
         "allOf": [
@@ -293,6 +344,12 @@
             "then": {
               "properties": {
                 "version": {
+                  "type": "null"
+                },
+                "cpe": {
+                  "type": "null"
+                },
+                "device_type": {
                   "type": "null"
                 }
               }
@@ -326,6 +383,28 @@
               "properties": {
                 "product": {
                   "const": "HTTP service"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "hostname_field"
+              ],
+              "properties": {
+                "hostname_field": {
+                  "const": "smtp_hostname"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "field": {
+                  "enum": [
+                    "smtp_greeting",
+                    "smtp_software"
+                  ]
                 }
               }
             }

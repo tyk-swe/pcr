@@ -18,8 +18,8 @@ for remaining acceptance gates and revision-bound evidence.
   { max_frames, max_bytes, max_undecoded }`; the existing Serde struct
   representation is preserved for both JSON and binary formats.
 - Current packet documents use `packetcraftr.packet/v2`; machine output uses
-  `packetcraftr.output/v12`. Consumers must explicitly support these families.
-  Output v6–v11 schemas and published evidence stay frozen; see
+  `packetcraftr.output/v13`. Consumers must explicitly support these families.
+  Output v6–v12 schemas and published evidence stay frozen; see
   [consumer compatibility](docs/consumer-compatibility.md).
 - Live workflows run through `Client<P, K>` with explicit providers, policy,
   clock, cancellation, and runtime. Requests and sinks replace free workflow
@@ -49,6 +49,13 @@ for remaining acceptance gates and revision-bound evidence.
   OS interface indexes. Scripts matching exact fields or enums must migrate.
 
 ### Added
+
+- Explicit `identify --tls` with bounded encrypted traffic, handshake deadlines,
+  cancellation, presented certificate observations, declared SNI, and separate
+  TLS failure evidence; output/v13 adds TLS counters and metadata provenance.
+- Reviewed SMTP/FTP greeting probes in service corpus 1.1.0, supported hostname
+  and static product CPE claims, and a precommitted held-out evaluation with
+  separate unknown, ambiguous, confidence, and misleading-claim results.
 
 - `scan::followup` runs a scan's trace and reverse-DNS follow-ups under the
   scan's own budget, so library callers get what `scan --traceroute` and

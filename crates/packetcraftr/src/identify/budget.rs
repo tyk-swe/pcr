@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use packetcraftr_core::budget::Deadline;
 
-use super::{Limit, Usage};
+use super::{Limit, TlsBudget, TlsUsage, Usage};
 
 pub(super) struct Scope {
     pub limit: Limit,
@@ -53,5 +53,33 @@ impl Scope {
         // Every call is bounded by the remaining allowances before I/O.
         self.usage.write_bytes += written;
         self.usage.read_bytes += read;
+    }
+
+    pub(super) fn tls_limits(
+        &self,
+        budget: TlsBudget,
+        mut limits: packetcraftr_netio::tls::Limits,
+    ) -> packetcraftr_netio::tls::Limits {
+        limits.max_wire_bytes_sent = limits.max_wire_bytes_sent.min(
+            budget
+                .write_bytes
+                .saturating_sub(self.usage.tls.write_bytes) as usize,
+        );
+        limits.max_wire_bytes_read = limits
+            .max_wire_bytes_read
+            .min(budget.read_bytes.saturating_sub(self.usage.tls.read_bytes) as usize);
+        limits.max_certificate_bytes = limits.max_certificate_bytes.min(
+            budget
+                .certificate_bytes
+                .saturating_sub(self.usage.tls.certificate_bytes) as usize,
+        );
+        limits
+    }
+
+    pub(super) fn tls_bytes(&mut self, usage: TlsUsage) {
+        self.usage.tls.write_bytes += usage.write_bytes;
+        self.usage.tls.read_bytes += usage.read_bytes;
+        self.usage.tls.certificate_bytes += usage.certificate_bytes;
+        self.usage.tls.steps += usage.steps;
     }
 }

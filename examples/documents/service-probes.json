@@ -1,7 +1,7 @@
 {
   "schema": "packetcraftr.service-probes/v1",
   "name": "project-service-probes",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "probes": [
     {
       "id": "ssh-banner",
@@ -154,6 +154,46 @@
         "reviewed": "2026-10-09",
         "statement": "Sends one nonrecursive version.bind CH TXT metadata question; no updates, transfer, credentials, or recursive resolution."
       }
+    },
+    {
+      "id": "smtp-greeting",
+      "transport": "tcp",
+      "intensity": 1,
+      "request": {
+        "type": "smtp_greeting"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored training fixture",
+        "reference": "https://www.rfc-editor.org/rfc/rfc5321#section-4.3.1",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-11"
+      },
+      "read_only_review": {
+        "reviewed_by": "tyk-swe",
+        "reviewed": "2026-10-11",
+        "statement": "Reads the server connection greeting only; sends no SMTP commands, mail, credentials, authentication, or TLS upgrade."
+      }
+    },
+    {
+      "id": "ftp-greeting",
+      "transport": "tcp",
+      "intensity": 1,
+      "request": {
+        "type": "ftp_greeting"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored training fixture",
+        "reference": "https://www.rfc-editor.org/rfc/rfc959#section-4.2",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-11"
+      },
+      "read_only_review": {
+        "reviewed_by": "tyk-swe",
+        "reviewed": "2026-10-11",
+        "statement": "Reads the server connection greeting only; sends no FTP commands, credentials, data-channel requests, file transfers, or TLS upgrade."
+      }
     }
   ],
   "matches": [
@@ -168,12 +208,13 @@
         "stop_at": " ;()"
       },
       "metadata": {
-        "source": "PacketcraftR project-authored fixture",
-        "reference": "docs/scanner-data-policy.md",
+        "source": "PacketcraftR project-authored fixture and reviewed factual CPE product name",
+        "reference": "https://nvd.nist.gov/products/cpe",
         "license": "AGPL-3.0-only",
         "maintainer": "tyk-swe",
-        "updated": "2026-10-09"
-      }
+        "updated": "2026-10-11"
+      },
+      "cpe": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*"
     },
     {
       "id": "nginx-claim",
@@ -186,12 +227,13 @@
         "stop_at": " ;()"
       },
       "metadata": {
-        "source": "PacketcraftR project-authored fixture",
-        "reference": "docs/scanner-data-policy.md",
+        "source": "PacketcraftR project-authored fixture and reviewed factual CPE product name",
+        "reference": "https://nvd.nist.gov/products/cpe",
         "license": "AGPL-3.0-only",
         "maintainer": "tyk-swe",
-        "updated": "2026-10-09"
-      }
+        "updated": "2026-10-11"
+      },
+      "cpe": "cpe:2.3:a:nginx:nginx:*:*:*:*:*:*:*:*"
     },
     {
       "id": "apache-claim",
@@ -204,12 +246,13 @@
         "stop_at": " ;()"
       },
       "metadata": {
-        "source": "PacketcraftR project-authored fixture",
-        "reference": "docs/scanner-data-policy.md",
+        "source": "PacketcraftR project-authored fixture and reviewed factual CPE product name",
+        "reference": "https://nvd.nist.gov/products/cpe",
         "license": "AGPL-3.0-only",
         "maintainer": "tyk-swe",
-        "updated": "2026-10-09"
-      }
+        "updated": "2026-10-11"
+      },
+      "cpe": "cpe:2.3:a:apache:http_server:*:*:*:*:*:*:*:*"
     },
     {
       "id": "dns-protocol-tcp",
@@ -252,12 +295,13 @@
         "stop_at": " ;()"
       },
       "metadata": {
-        "source": "PacketcraftR project-authored fixture",
-        "reference": "docs/scanner-data-policy.md",
+        "source": "PacketcraftR project-authored fixture and reviewed factual CPE product name",
+        "reference": "https://nvd.nist.gov/products/cpe",
         "license": "AGPL-3.0-only",
         "maintainer": "tyk-swe",
-        "updated": "2026-10-09"
-      }
+        "updated": "2026-10-11"
+      },
+      "cpe": "cpe:2.3:a:isc:bind:*:*:*:*:*:*:*:*"
     },
     {
       "id": "bind-claim-udp",
@@ -270,12 +314,91 @@
         "stop_at": " ;()"
       },
       "metadata": {
-        "source": "PacketcraftR project-authored fixture",
-        "reference": "docs/scanner-data-policy.md",
+        "source": "PacketcraftR project-authored fixture and reviewed factual CPE product name",
+        "reference": "https://nvd.nist.gov/products/cpe",
         "license": "AGPL-3.0-only",
         "maintainer": "tyk-swe",
-        "updated": "2026-10-09"
-      }
+        "updated": "2026-10-11"
+      },
+      "cpe": "cpe:2.3:a:isc:bind:*:*:*:*:*:*:*:*"
+    },
+    {
+      "id": "postfix-claim",
+      "probe": "smtp-greeting",
+      "field": "smtp_software",
+      "prefix": "Postfix ",
+      "product": "Postfix",
+      "version": {
+        "max_bytes": 64,
+        "stop_at": " ;()"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture and reviewed factual CPE product name",
+        "reference": "https://nvd.nist.gov/products/cpe",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-11"
+      },
+      "hostname_field": "smtp_hostname",
+      "cpe": "cpe:2.3:a:postfix:postfix:*:*:*:*:*:*:*:*"
+    },
+    {
+      "id": "exim-claim",
+      "probe": "smtp-greeting",
+      "field": "smtp_software",
+      "prefix": "Exim ",
+      "product": "Exim",
+      "version": {
+        "max_bytes": 64,
+        "stop_at": " ;()"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture and reviewed factual CPE product name",
+        "reference": "https://nvd.nist.gov/products/cpe",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-11"
+      },
+      "hostname_field": "smtp_hostname",
+      "cpe": "cpe:2.3:a:exim:exim:*:*:*:*:*:*:*:*"
+    },
+    {
+      "id": "vsftpd-claim",
+      "probe": "ftp-greeting",
+      "field": "ftp_greeting",
+      "prefix": "220 (vsFTPd ",
+      "product": "vsftpd",
+      "version": {
+        "max_bytes": 64,
+        "stop_at": " ;()"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture and reviewed factual CPE product name",
+        "reference": "https://nvd.nist.gov/products/cpe",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-11"
+      },
+      "cpe": "cpe:2.3:a:vsftpd_project:vsftpd:*:*:*:*:*:*:*:*"
+    },
+    {
+      "id": "proftpd-claim",
+      "probe": "ftp-greeting",
+      "field": "ftp_greeting",
+      "prefix": "220 ProFTPD ",
+      "product": "ProFTPD",
+      "version": {
+        "max_bytes": 64,
+        "stop_at": " ;()"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture and reviewed factual CPE product name",
+        "reference": "https://nvd.nist.gov/products/cpe",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-11"
+      },
+      "cpe": "cpe:2.3:a:proftpd:proftpd:*:*:*:*:*:*:*:*"
     }
   ]
 }

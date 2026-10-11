@@ -58,7 +58,7 @@ fn schema_accepts_based_source_reject_zero() {
         ),
         (
             schema_validator(),
-            packetcraftr_cli::output::contract::SCHEMA_V12,
+            packetcraftr_cli::output::contract::SCHEMA_V13,
         ),
     ] {
         let mut document = original.clone();
@@ -399,7 +399,7 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v12" => output_validator,
+            "packetcraftr.output/v13" => output_validator,
             "packetcraftr.output/v11" => &v11_validator,
             "packetcraftr.output/v10" => &v10_validator,
             "packetcraftr.output/v9" => &v9_validator,

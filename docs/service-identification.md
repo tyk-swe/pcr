@@ -15,7 +15,7 @@ packetcraftr identify 192.0.2.10:8080 --corpus examples/documents/service-probes
 ```
 
 Endpoint arguments are numeric socket addresses, including a numeric scope ID
-for link-local IPv6. Identification performs no name lookup, TLS negotiation,
+for link-local IPv6. Identification performs no name lookup,
 authentication, redirect following, DNS transfer, or mutable application request.
 Every connection and datagram reauthorizes its final numeric destination. The
 actual peer and the exact outgoing application bytes are checked before sending.
@@ -29,6 +29,7 @@ The bundled, independently versioned
 
 | Intensity | Probe | Request and interpretation |
 | --- | --- | --- |
+| 1 | SMTP and FTP, TCP | Receives a bounded 220 greeting without sending application bytes; parses reviewed product claims and SMTP greeting hostnames. |
 | 1 | SSH, TCP | Receives the server's identification line without transmitting SSH bytes. |
 | 2 | HTTP, TCP | Sends `HEAD / HTTP/1.0` and parses a bounded response head and `Server` fields. |
 | 2 | DNS, TCP and UDP | Sends a nonrecursive root IN A query; validates framing, transaction ID and echoed question. |
@@ -44,7 +45,7 @@ HTTP collection retains informational heads and waits for the final response;
 the final head, while preceding heads remain in the exact response evidence.
 
 The versioned [probe document schema](../schemas/packetcraftr.service-probes.v1.schema.json)
-accepts a closed request language: banner collection, HTTP HEAD, and the two
+accepts a closed request language: SSH/SMTP/FTP banner collection, HTTP HEAD, and the two
 nonrecursive DNS queries above. Operator documents cannot introduce arbitrary
 request bytes or methods. Matching uses anchored ASCII literals over parsed
 fields and bounded version-token extraction; no unbounded regular expressions
@@ -55,6 +56,51 @@ Shared descriptive text is limited to 512 Unicode characters and 2,048 UTF-8
 bytes per value, in addition to each document's enclosing byte-size limit.
 The schema rejects repeated objects; the runtime also checks unique IDs and
 probe/rule references, which require validation across document entries.
+
+## TLS-wrapped services
+
+TLS is explicit and applies to the selected TCP endpoints:
+
+```console
+packetcraftr --output json identify 127.0.0.1:8443 --tls
+packetcraftr identify 192.0.2.10:443 --tls --server-name inventory.example.test
+```
+
+The existing reviewed probes run inside TLS, starting with HTTPS. There is no
+STARTTLS upgrade, UDP TLS, automatic fallback to cleartext, or certificate trust
+decision. `--server-name` declares the name sent in SNI without resolving it;
+numeric targets send no SNI by default. A presented chain is retained as bounded
+DER evidence. Certificate names never become hostnames in service candidates.
+The transport verifies handshake signatures while treating the chain as an
+unauthenticated observation.
+
+TLS has independent lifetime encrypted byte, I/O-step and handshake-time limits
+per connection. Defaults are 131,072 bytes in each direction, 64 transfer/flush
+steps, a one-second handshake deadline within the connection deadline, and up to
+eight whole certificates totaling 65,536 retained DER bytes. Aggregate ceilings
+are 8 MiB per direction and 1 MiB certificate retention per operation; host
+ceilings are 1 MiB per direction and 128 KiB certificate retention. All counters
+include failed handshakes. Smaller enclosing ceilings reduce connection
+allowances before I/O. Certificate retention truncation omits whole certificates
+and does not pretend the retained chain is complete.
+
+Use `--tls-max-wire-write-bytes`, `--tls-max-wire-read-bytes`, `--tls-max-steps`,
+`--tls-handshake-timeout-ms`, `--tls-max-certificates`, and
+`--tls-max-certificate-bytes` for connection limits; `--tls-operation-max-wire-bytes`,
+`--tls-host-max-wire-bytes`, `--tls-operation-max-certificate-bytes` and
+`--tls-host-max-certificate-bytes` set aggregate ceilings. Ordinary write/read
+budgets still bound decrypted application data. A zero application write budget
+allows TLS-wrapped greeting collection because the explicitly authorized TLS
+wire budget covers the handshake. The policy declaration conservatively counts
+one connection plus the maximum encrypted I/O steps per admitted attempt, and
+bounds encrypted transmission bytes; every actual encrypted write rechecks the
+peer and offered byte count. Overall invocation, operation, host, probe and
+connection deadlines still apply.
+
+Failed/refused handshakes have `tls_failed` endpoint outcomes and retained TLS
+counters and diagnostics. Application failures after successful negotiation keep
+their ordinary I/O outcomes and TLS evidence. `usage.tls` distinguishes wire
+traffic from buffered plaintext writes and decrypted response retention.
 
 ## Budgets and sensitive endpoints
 
@@ -114,7 +160,7 @@ entry/port limits also bound directly constructed documents.
 ## Reading evidence
 
 JSON and NDJSON use the current
-[output contract](../schemas/packetcraftr.output.v12.schema.json). Each endpoint
+[output contract](../schemas/packetcraftr.output.v13.schema.json). Each endpoint
 record separates exact probe/response bytes, observed fields, candidate matches,
 ordinal confidence and match provenance. Request evidence records the planned
 bytes and the actual `bytes_written`, including partial writes. Response bytes
@@ -140,7 +186,7 @@ and truncated observations have explicit outcomes. Unknown and ambiguous
 outcomes expose no exact matched versions. Raw advertised strings remain in
 observed evidence so consumers can inspect the cause of uncertainty. The same
 corpus version and response evidence reproduce the same core match result.
-Output/v12 enforces empty candidates for nonmatching outcomes and erased versions
+Output/v13 enforces empty candidates for nonmatching outcomes and erased versions
 for ambiguous results, including probe evidence. An endpoint's ambiguity can
 come from different probes, each retaining only one conflicting candidate.
 Budget exhaustion can retain earlier matches and their exact evidence.
@@ -151,3 +197,18 @@ The [scanner data policy](scanner-data-policy.md) and the bundled
 manifests describe authorship, redistribution rationale, maintenance and fixture
 coverage. The corpus is deliberately small; it does not claim Nmap-equivalent
 product coverage.
+
+## Corpus quality and supported metadata
+
+Corpus 1.1.0 adds original SMTP/FTP fixtures and rules. SMTP hostnames come only
+from a syntactically valid observed greeting domain. Device types require an
+explicit reviewed rule; the bundled corpus currently declares none. Static
+product CPE identifiers are supported only by reviewed match data with cited
+provenance, retain wildcard versions, and inherit unauthenticated confidence.
+
+The [M9 evaluation](roadmap/evidence/m09/README.md) fixes held-out service
+instances before new rules are authored and reports coverage, unknown and
+ambiguous shares, and ordinal confidence separately. Literal claim extraction
+is evaluated separately from the actual provisioned identity, including
+misleading peer claims. These fixtures do not establish Internet-wide accuracy
+or calibrated confidence probabilities.

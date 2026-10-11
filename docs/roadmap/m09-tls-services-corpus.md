@@ -2,17 +2,13 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M8][m8] | Qualified service inventory |
+| In progress | [M8][m8] | Qualified service inventory |
 
-[M8][m8] identifies services that answer in cleartext, from a starter corpus of
-three protocols. Many services sit behind TLS, and PacketcraftR has no active
-TLS transport: its TLS support parses captured handshakes and computes client
-fingerprints, which says nothing about the application inside a session it did
-not open. A starter corpus also cannot support a coverage or confidence claim
-until it has been measured on services its rules were not written against.
-
-This milestone adds TLS-wrapped interrogation, grows the corpus under review,
-and evaluates what the corpus can honestly claim.
+M8 introduced cleartext identification for HTTP, SSH, and DNS. M9 adds bounded
+TLS wrapping and reviewed SMTP/FTP greeting rules, while keeping captured TLS
+handshakes and client fingerprints separate from active service evidence. Its
+fixed held-out fixtures measure coverage and uncertainty beyond the rule-authoring
+instances; they do not establish production prevalence or authenticated identity.
 
 ## Outcome
 
@@ -73,36 +69,44 @@ and evaluates what the corpus can honestly claim.
   only when an observation and the matching data support them.
 - Each value names its source. An unsupported field is absent, not guessed.
 
-## Decisions to settle
+## Settled decisions and implementation
 
-1. The TLS library (recommended: choose under the [`deny.toml`][deny] license
-   list and duplicate-version rule, preferring an implementation that needs no
-   system library, and record the review).
-2. Which crate owns the TLS transport (recommended: netio owns the bounded
-   stream and the workflow crate owns policy and budgets, keeping core free of
-   native I/O).
-3. How certificates are treated (recommended: make no trust decision; record
-   the presented chain as an observation).
-4. Which name, if any, is sent as SNI (recommended: the declared hostname when
-   the target was declared by name, none for a numeric target, and never a
-   name obtained by resolution the operator did not authorize).
-5. How the held-out set is chosen (recommended: by service instance, fixed
-   before rule writing begins, and recorded with the corpus version).
-6. The source of CPE data (recommended: settle under the
-   [M1 data policy][m1-data]; emit a CPE only where the match document carries
-   one with provenance).
+- `packetcraftr-netio::tls` owns the bounded active transport. rustls 0.23.45
+  with ring 0.17.14 provides TLS 1.2/1.3 without a system TLS library. The
+  [dependency review](../../THIRD_PARTY_NOTICES.md#active-tls-transport-dependency-review)
+  records exact licenses, duplicate exceptions, and maintenance rationale.
+- `identify::Request::tls` explicitly wraps selected TCP probes. The workflow
+  owns authorization, aggregate encrypted budgets, retained certificates, and
+  all application budget scopes. Core remains free of native I/O.
+- Numeric endpoints send no SNI. `--server-name` declares a DNS name without
+  lookup; no certificate trust or hostname decision is made. Presented DER
+  chains and negotiated parameters remain unauthenticated observations.
+- Corpus 1.1.0 adds original SMTP/FTP greeting probes and reviewed match rules.
+  New training fixtures and their source/read-only reviews are recorded in
+  the [manifest](../../crates/packetcraftr/data/service-probes.provenance.yaml).
+- The [21-instance held-out manifest](evidence/m09/held-out.v1.json) was fixed
+  in commit `97267ae4` before rule authorship. Coverage, unknown/ambiguous
+  outcomes, ordinal confidence, and misleading claims are measured separately.
+- Observed SMTP hostname claims carry field/index sources. Reviewed rule-backed
+  device and CPE values carry source references and existing corpus/rule
+  provenance. The bundled corpus emits static product CPEs with wildcard
+  versions, and no device types. NVD factual identifier review follows the
+  [scanner data policy](../scanner-data-policy.md).
+- Output/v13 freezes these additions; v12 remains published and immutable.
+  [User guidance](../service-identification.md) explains budgets and evidence,
+  and the [acceptance record](evidence/m09/README.md) owns runtime results.
 
 ## Exit criteria
 
 - [ ] Encrypted services have explicit fixture outcomes.
-- [ ] The TLS dependency has a recorded dependency and license review.
-- [ ] Passive TLS and JA3/JA4 observations are never presented as service
+- [x] The TLS dependency has a recorded dependency and license review.
+- [x] Passive TLS and JA3/JA4 observations are never presented as service
       identification.
 - [ ] Claimed coverage and confidence are evaluated against held-out fixtures,
       not only the examples used to write rules.
-- [ ] Hostname, device, and CPE metadata appear only when supported by an
+- [x] Hostname, device, and CPE metadata appear only when supported by an
       observation and the matching data.
-- [ ] Every corpus addition has a provenance record and a read-only review.
+- [x] Every corpus addition has a provenance record and a read-only review.
 - [ ] Applicable portable and native behavior passes on Linux, macOS, and
       Windows, and contract changes follow the
       [compatibility policy][compatibility].

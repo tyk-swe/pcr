@@ -280,11 +280,86 @@ fn endpoint(port: u16, transport: identify::Transport) -> identify::Endpoint {
 }
 
 fn request(endpoints: Vec<identify::Endpoint>) -> identify::Request {
+    // Established budget/retry fixtures declare the original three protocols;
+    // expanding the bundled corpus must not add unrelated fixture attempts.
+    let mut corpus = identify::builtin_corpus().expect("corpus");
+    let original = Arc::make_mut(&mut corpus);
+    original.probes.retain(|probe| {
+        matches!(
+            probe.id.as_str(),
+            "ssh-banner"
+                | "http-head"
+                | "dns-tcp"
+                | "dns-udp"
+                | "dns-version-tcp"
+                | "dns-version-udp"
+        )
+    });
+    original
+        .matches
+        .retain(|rule| original.probes.iter().any(|probe| probe.id == rule.probe));
     identify::Request::new(
         endpoints,
-        identify::builtin_corpus().expect("corpus"),
+        corpus,
         identify::builtin_exclusions().expect("exclusions"),
     )
+}
+
+#[test]
+fn passive_smtp_and_ftp_greetings_complete_while_the_peer_remains_open() {
+    for (probe_id, response, product, version, hostname) in [
+        (
+            "smtp-greeting",
+            b"220 mail.example.test ESMTP Postfix 3.10.1\r\n".as_slice(),
+            "Postfix",
+            "3.10.1",
+            Some("mail.example.test"),
+        ),
+        (
+            "ftp-greeting",
+            b"220 (vsFTPd 3.0.5)\r\n".as_slice(),
+            "vsftpd",
+            "3.0.5",
+            None,
+        ),
+    ] {
+        let mut request = identify::Request::new(
+            vec![endpoint(32225, identify::Transport::Tcp)],
+            identify::builtin_corpus().expect("corpus"),
+            identify::builtin_exclusions().expect("exclusions"),
+        );
+        corpus_with(&mut request, probe_id);
+        let tcp = FakeTcp {
+            timeout_after_response: true,
+            read_chunk: Some(1),
+            ..FakeTcp::replying([response.to_vec()])
+        };
+        let report = client(tcp.clone(), FakeUdp::default())
+            .identify(&request)
+            .unwrap();
+        assert!(report.complete);
+        assert_eq!(report.records[0].outcome, identify::Outcome::Matched);
+        assert_eq!(report.usage.attempts, 1);
+        assert_eq!(report.usage.write_bytes, 0);
+        assert_eq!(report.usage.read_bytes, response.len() as u64);
+        assert!(tcp.writes.lock().unwrap().is_empty());
+        let evidence = &report.records[0].probes[0];
+        assert_eq!(evidence.io_outcome, identify::IoOutcome::Complete);
+        assert_eq!(evidence.response, response);
+        let candidate = &report.records[0].candidates[0];
+        assert_eq!(candidate.product, product);
+        assert_eq!(candidate.version.as_deref(), Some(version));
+        assert_eq!(candidate.confidence, Confidence::Claim);
+        assert_eq!(
+            candidate
+                .hostname
+                .as_ref()
+                .map(|hostname| hostname.value.as_str()),
+            hostname
+        );
+        assert!(candidate.cpe.is_some());
+        assert!(candidate.device_type.is_none());
+    }
 }
 
 fn corpus_with(request: &mut identify::Request, probe: &str) {
@@ -1758,4 +1833,111 @@ fn real_loopback_tcp_http_and_udp_dns_use_the_public_operation() {
         ObservationOutcome::Complete
     );
     server.join().expect("DNS server");
+}
+
+#[test]
+fn invalid_tls_names_and_udp_wrapping_are_rejected_before_provider_io() {
+    let tcp = FakeTcp::default();
+    let udp = FakeUdp::default();
+    let client = client(tcp.clone(), udp);
+    let mut request = request(vec![endpoint(34443, identify::Transport::Tcp)]);
+    let mut settings = identify::TlsSettings {
+        server_name: Some("127.0.0.1".into()),
+        ..identify::TlsSettings::default()
+    };
+    request.tls = Some(settings.clone());
+    assert!(client.identify(&request).is_err());
+    settings.server_name = Some("inventory.example.test".into());
+    request.tls = Some(settings);
+    request.endpoints[0].transport = identify::Transport::Udp;
+    assert!(client.identify(&request).is_err());
+    assert!(tcp.endpoints.lock().unwrap().is_empty());
+}
+
+#[test]
+fn tls_peer_mismatch_is_rejected_before_any_handshake_write() {
+    let tcp = FakeTcp {
+        peer: Some("127.0.0.2:34443".parse().unwrap()),
+        ..FakeTcp::default()
+    };
+    let mut request = request(vec![endpoint(34443, identify::Transport::Tcp)]);
+    corpus_with(&mut request, "ssh-banner");
+    request.tls = Some(identify::TlsSettings::default());
+    assert!(
+        client(tcp.clone(), FakeUdp::default())
+            .identify(&request)
+            .is_err()
+    );
+    assert!(tcp.writes.lock().unwrap().is_empty());
+}
+
+#[test]
+fn tls_handshake_traffic_requires_authorization_with_zero_application_writes() {
+    let tcp = FakeTcp::default();
+    let client = Client::new(
+        builtin::registry(),
+        Policy {
+            max_bytes_per_operation: 0,
+            ..Policy::default()
+        },
+        ProviderSet::tcp((), ())
+            .with_udp(FakeUdp::default())
+            .with_tcp(tcp.clone())
+            .with_resolver(()),
+    );
+    let mut request = request(vec![endpoint(34443, identify::Transport::Tcp)]);
+    corpus_with(&mut request, "ssh-banner");
+    request.limits.operation.write_bytes = 0;
+    request.tls = Some(identify::TlsSettings::default());
+    assert!(client.identify(&request).is_err());
+    assert!(tcp.endpoints.lock().unwrap().is_empty());
+    assert!(tcp.writes.lock().unwrap().is_empty());
+}
+
+#[test]
+fn aggregate_tls_wire_budget_clips_handshake_and_prevents_further_admission() {
+    let tcp = FakeTcp::default();
+    let mut request = request(vec![
+        endpoint(34443, identify::Transport::Tcp),
+        endpoint(34444, identify::Transport::Tcp),
+    ]);
+    corpus_with(&mut request, "ssh-banner");
+    request.limits.operation.write_bytes = 0;
+    let mut settings = identify::TlsSettings::default();
+    settings.operation.write_bytes = 1;
+    request.tls = Some(settings);
+    let report = client(tcp.clone(), FakeUdp::default())
+        .identify(&request)
+        .unwrap();
+    assert_eq!(report.usage.attempts, 1);
+    assert_eq!(report.usage.write_bytes, 0);
+    assert_eq!(report.usage.tls.write_bytes, 1);
+    assert_eq!(report.records[0].outcome, identify::Outcome::TlsFailed);
+    assert_eq!(
+        report.records[0].probes[0].io_outcome,
+        identify::IoOutcome::Truncated
+    );
+    assert!(
+        !report.records[0].probes[0]
+            .tls
+            .as_ref()
+            .unwrap()
+            .session
+            .handshake_complete
+    );
+    assert_eq!(
+        report.records[1].outcome,
+        identify::Outcome::BudgetExhausted
+    );
+    assert!(!report.complete);
+    assert_eq!(tcp.endpoints.lock().unwrap().len(), 1);
+    assert_eq!(
+        tcp.writes
+            .lock()
+            .unwrap()
+            .iter()
+            .map(Vec::len)
+            .sum::<usize>(),
+        1
+    );
 }

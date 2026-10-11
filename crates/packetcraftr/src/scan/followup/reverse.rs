@@ -287,20 +287,26 @@ impl Lookup {
             .and_then(|report| collector.finish(report))
         {
             Ok(aggregate) => {
-                // Batches retain per-question failures, including a provider's
-                // cancellation. Follow-ups propagate that typed interruption.
-                for question in &aggregate.questions {
-                    if let Some(dns::Error::Cancelled(cancelled)) = &question.error {
-                        return Err((*cancelled).into());
-                    }
-                }
                 let sent = last_batch_send(&aggregate.questions, &aggregate.stats, client.now());
                 Ok((
                     aggregate
                         .questions
                         .into_iter()
-                        .map(ReverseLookup::from)
-                        .collect(),
+                        // DNS batches retain failures as question data. These
+                        // interruptions instead stop the follow-up operation,
+                        // preserving the clock's original error source.
+                        .map(|question| match question {
+                            batch::Question {
+                                error:
+                                    Some(
+                                        error @ (dns::Error::Cancelled(_)
+                                        | dns::Error::Clock { .. }),
+                                    ),
+                                ..
+                            } => Err(error),
+                            question => Ok(ReverseLookup::from(question)),
+                        })
+                        .collect::<Result<_, _>>()?,
                     aggregate.stats,
                     sent,
                 ))
@@ -310,7 +316,7 @@ impl Lookup {
             Err(dns::Error::DurationLimit { .. }) => {
                 ended(batch::QuestionStatus::Unattempted, None)
             }
-            Err(error @ dns::Error::Cancelled(_)) => Err(error),
+            Err(error @ (dns::Error::Cancelled(_) | dns::Error::Clock { .. })) => Err(error),
             Err(error) => ended(batch::QuestionStatus::Failed, Some(error.to_string())),
         }
     }
@@ -328,8 +334,23 @@ impl Lookup {
             .iter()
             .map(|address| {
                 self.question(*address, remaining).map(|mut question| {
-                    question.limits.evidence.max_frames /= share;
+                    let frames = (question.limits.evidence.max_frames / share)
+                        .min(question.collection.max_responses);
+                    question.limits.evidence.max_frames = frames;
                     question.limits.evidence.max_bytes /= share;
+                    question.limits.evidence.max_undecoded =
+                        (question.limits.evidence.max_undecoded / share).min(frames);
+                    // The synthesized question's capture configuration must
+                    // fit its share before the DNS executor admits any I/O.
+                    question.collection.capture.max_frames = frames;
+                    question.collection.capture.max_bytes = question
+                        .collection
+                        .capture
+                        .max_bytes
+                        .min(question.limits.evidence.max_bytes);
+                    question.collection.max_responses = frames;
+                    question.collection.max_unmatched_frames =
+                        question.collection.max_unmatched_frames.min(frames);
                     question
                 })
             })
@@ -407,13 +428,18 @@ pub(super) fn batched(
         });
         let waited = owed.min(deadline.remaining().unwrap_or_default());
         if !waited.is_zero() {
-            sleep(waited)?;
+            let slept = sleep(waited);
+            // As at other pacing boundaries, cancellation wins even if a
+            // fallible clock also reports a failure while being interrupted.
+            deadline.check_cancelled()?;
+            slept?;
             statistics.elapsed = statistics.elapsed.saturating_add(waited);
         }
         deadline.check_cancelled()?;
         let addresses: Vec<IpAddr> = chunk.iter().map(|&index| hosts[index].address).collect();
-        let (lookups, stats, sent) = lookup(&addresses, deadline.remaining().unwrap_or_default())?;
+        let looked_up = lookup(&addresses, deadline.remaining().unwrap_or_default());
         deadline.check_cancelled()?;
+        let (lookups, stats, sent) = looked_up?;
         // A TCP lookup counts no packets but still reports that it sent.
         if sent.is_some() || stats.packets_attempted > 0 {
             last_sent = Some(sent.unwrap_or_else(&now));

@@ -1156,11 +1156,13 @@ fn a_cancelled_scan_waits_for_and_sends_no_further_batch() {
             usize::MAX,
             Instant::now,
             |_| panic!("no batch should wait"),
-            |addresses, _| {
+            |_, _| {
                 calls += 1;
                 cancellation.cancel();
-                let lookups = addresses.iter().map(|_| answered(&[])).collect();
-                Ok((lookups, Stats::default(), None))
+                Err(dns::Error::Clock {
+                    attempt: 1,
+                    source: Box::new(std::io::Error::other("cancelled lookup")),
+                })
             },
         );
         assert!(

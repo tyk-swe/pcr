@@ -46,6 +46,10 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Added
 
+- `scan::followup` runs a scan's trace and reverse-DNS follow-ups under the
+  scan's own budget, so library callers get what `scan --traceroute` and
+  `--reverse-dns` do: `Client::scan_with_followups` for raw scans and
+  `Client::scan_connect_with_followups` for TCP connect scans.
 - Explicit bounded service identification for selected TCP/UDP endpoints:
   SSH banners, HTTP HEAD, and DNS probes on any permitted port; independently
   versioned probe/match data and sensitive-service exclusions; exact evidence
@@ -102,6 +106,13 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Fixed
 
+- Scan follow-ups share the client's monotonic deadline and propagate reverse-DNS
+  cancellation and pacing-clock failures before sending further queries.
+- Reverse-DNS batches narrow each question's capture settings to its share of
+  the evidence budget, so multi-host lookups retain valid capture limits.
+- Scan follow-ups preserve configured neighbor bounds and authorize DNS neighbor
+  discovery after connect scans. Invalid DNS capture settings and zero-capacity
+  trace runtimes fail before scanning.
 - Preserve authorization before active discovery and validate every route-bearing
   address and final wire image. Reject malformed routing/VLAN state, invalid
   limits, unsupported socket route overrides, and impossible collection budgets

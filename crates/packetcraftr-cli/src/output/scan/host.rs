@@ -9,9 +9,9 @@ use std::net::IpAddr;
 
 use serde::Serialize;
 
-use packetcraftr::dns;
 use packetcraftr::scan::Reply;
 use packetcraftr::scan::discovery;
+use packetcraftr::scan::followup;
 
 use super::Scope;
 use crate::output::contract::Error;
@@ -246,27 +246,16 @@ impl ReverseDns {
     }
 }
 
-impl From<dns::batch::Question<dns::Aggregate>> for ReverseDns {
-    fn from(question: dns::batch::Question<dns::Aggregate>) -> Self {
-        let result = question.result.as_ref();
+impl From<followup::ReverseLookup> for ReverseDns {
+    fn from(lookup: followup::ReverseLookup) -> Self {
         Self {
-            query_name: question.query_name,
-            status: question.status.into(),
-            outcome: result.map(|result| result.report().completion.outcome().into()),
-            response_code: result
-                .and_then(|result| result.report().completion.response())
-                .map(|metadata| metadata.response_code),
-            names: result
-                .and_then(dns::Aggregate::response)
-                .map(|response| {
-                    dns::ptr_names(&response.answers)
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            names_truncated: false,
-            error: question.error.as_ref().map(ToString::to_string),
+            query_name: lookup.query_name,
+            status: lookup.status.into(),
+            outcome: lookup.outcome.map(Into::into),
+            response_code: lookup.response_code,
+            names: lookup.names,
+            names_truncated: lookup.names_truncated,
+            error: lookup.error,
         }
     }
 }

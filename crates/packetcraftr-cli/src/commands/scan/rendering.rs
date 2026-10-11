@@ -3,6 +3,8 @@
 
 use crate::rendering::StreamEncoder;
 
+use packetcraftr::scan::followup;
+
 use crate::output;
 
 use crate::errors::CliError;
@@ -470,20 +472,20 @@ fn listed<T: std::fmt::Display>(values: &[T]) -> String {
     }
 }
 
-pub(super) fn emit_event(event: super::Event, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn emit_event(event: followup::Event, stream: &StreamEncoder) -> Result<(), CliError> {
     match event {
-        super::Event::Scan(event) => {
+        followup::Event::Scan(event) => {
             let published = output::envelope::Published::<output::scan::Event>::try_from(event)
                 .map_err(CliError::classified)?;
             Ok(stream.emit_published(published)?)
         }
-        super::Event::Trace(packetcraftr::traceroute::hosts::Event::Diagnostic(diagnostic)) => {
+        followup::Event::Trace(packetcraftr::traceroute::hosts::Event::Diagnostic(diagnostic)) => {
             Ok(stream.emit_published(output::envelope::Published::new(
                 output::scan::Event::Diagnostic {},
                 vec![diagnostic],
             ))?)
         }
-        super::Event::Trace(event) => {
+        followup::Event::Trace(event) => {
             let record = output::traceroute::hosts::Event::publish(event)
                 .map_err(CliError::classified)?
                 .expect("only diagnostics have no trace record");

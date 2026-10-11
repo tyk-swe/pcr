@@ -622,6 +622,21 @@ CLI raw-scan publication takes an optional trace report; its terminal conversion
 takes the optional trace summary. Trace packets/time contribute to scan totals,
 without turning reused hops into new probe observations.
 
+## Scan follow-ups
+
+The scan, trace, and reverse-DNS pipeline behind `scan --traceroute` and
+`--reverse-dns` is library behavior in `packetcraftr::scan::followup`.
+`Client::scan_with_followups(followup::Request, sink)` runs the scan, then a
+trace of every scanned host, then the PTR lookups, under one duration limit and
+the policy allowance each stage leaves the next. Events arrive as
+`followup::Event`; the returned `followup::Report` keeps each stage's report and
+adds the endpoint inferences, `reverse_dns` lookups, and the total `stats`.
+`followup::Collector::finish` rebuilds a `followup::Aggregate` from the events.
+`Client::scan_connect_with_followups` does the same for TCP connect scans with
+reverse DNS. `Trace::validate` and `ReverseDns::validate` reject an unusable
+stage before any probe. The CLI maps its arguments to these requests and keeps
+rendering.
+
 ## Send packet sets
 
 `send` expands `--axis` templates as `build` and `exchange` do, and repeats the

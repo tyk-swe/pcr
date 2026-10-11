@@ -12,6 +12,7 @@ mod error;
 mod verifier;
 mod wire;
 
+use std::cell::Cell;
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
@@ -118,13 +119,18 @@ pub struct Handshake<S, A> {
 /// A connected TLS stream retaining the underlying TCP admission permit.
 ///
 /// The original session deadline and lifetime ceilings cannot be extended by
-/// changing socket timeouts. Use [`crate::tcp::exchange`] to retain application
-/// bytes and partial write/read outcomes as well as [`Self::evidence`].
+/// changing socket timeouts. A configured timeout bounds one application call,
+/// including its native retries and flushes. Timeout exhaustion is retryable;
+/// lifetime interruption is terminal. Use [`crate::tcp::exchange`] to retain
+/// application bytes and partial write/read outcomes as well as [`Self::evidence`].
 pub struct Stream<S, A> {
     session: ClientConnection,
     wire: wire::Wire<S, A>,
     certificates: Arc<Mutex<verifier::Certificates>>,
     handshake_complete: bool,
+    flush_pending: bool,
+    read_timeout: Cell<Option<Duration>>,
+    write_timeout: Cell<Option<Duration>>,
 }
 
 /// Starts TLS over an already connected and authorized numeric peer.
@@ -167,6 +173,9 @@ where
         wire: wire::Wire::new(stream, limits, deadline.clone(), authorize_write),
         certificates,
         handshake_complete: false,
+        flush_pending: false,
+        read_timeout: Cell::new(None),
+        write_timeout: Cell::new(None),
     };
     let result = match deadline.for_wait(limits.handshake_timeout) {
         Ok(handshake_deadline) => {
@@ -217,31 +226,33 @@ where
 
     fn handshake(&mut self) -> Result<(), Error> {
         loop {
-            self.wire.deadline.enforce()?;
+            self.wire.enforce()?;
             self.flush_tls()?;
             if !self.session.is_handshaking() {
-                return self.wire.deadline.enforce().map_err(Error::from);
+                return self.wire.enforce();
             }
             self.read_tls()?;
         }
     }
 
     fn flush_tls(&mut self) -> Result<(), Error> {
-        let mut wrote = false;
         while self.session.wants_write() {
-            self.wire.deadline.enforce()?;
+            self.wire.enforce()?;
             match self.session.write_tls(&mut self.wire) {
                 Ok(0) => return Err(Error::Io(io::ErrorKind::WriteZero.into())),
-                Ok(_) => wrote = true,
+                Ok(_) => self.flush_pending = true,
                 Err(source) if crate::bounded::retryable(&source) => continue,
                 Err(source) => return Err(Error::from_io(source)),
             }
         }
-        if wrote {
+        if self.flush_pending {
             loop {
-                self.wire.deadline.enforce()?;
+                self.wire.enforce()?;
                 match self.wire.flush() {
-                    Ok(()) => break,
+                    Ok(()) => {
+                        self.flush_pending = false;
+                        break;
+                    }
                     Err(source) if crate::bounded::retryable(&source) => continue,
                     Err(source) => return Err(Error::from_io(source)),
                 }
@@ -252,7 +263,7 @@ where
 
     fn read_tls(&mut self) -> Result<(), Error> {
         loop {
-            self.wire.deadline.enforce()?;
+            self.wire.enforce()?;
             match self.session.read_tls(&mut self.wire) {
                 Ok(0) if self.session.is_handshaking() => {
                     return Err(Error::Io(io::ErrorKind::UnexpectedEof.into()));
@@ -277,14 +288,15 @@ where
         if bytes.is_empty() {
             return Ok(0);
         }
+        self.wire
+            .begin_io(self.read_timeout.get())
+            .map_err(Error::into_io)?;
         loop {
-            self.wire
-                .deadline
-                .enforce()
-                .map_err(Error::from)
-                .map_err(Error::into_io)?;
             match self.session.reader().read(bytes) {
                 Err(source) if source.kind() == io::ErrorKind::WouldBlock => {
+                    // Check before further wire I/O, while retaining plaintext
+                    // received by the preceding successful native read.
+                    self.wire.enforce().map_err(Error::into_io)?;
                     self.flush_tls().map_err(Error::into_io)?;
                     self.read_tls().map_err(Error::into_io)?;
                 }
@@ -304,13 +316,12 @@ where
             return Ok(0);
         }
         self.wire
-            .deadline
-            .enforce()
-            .map_err(Error::from)
+            .begin_io(self.write_timeout.get())
             .map_err(Error::into_io)?;
         if self.session.wants_write() {
             self.flush_tls().map_err(Error::into_io)?;
         }
+        self.wire.enforce().map_err(Error::into_io)?;
         // Accepted plaintext is reported before flush, as for any buffered
         // stream. Final evidence separately counts actual encrypted wire I/O.
         self.session.writer().write(bytes)
@@ -318,9 +329,7 @@ where
 
     fn flush(&mut self) -> io::Result<()> {
         self.wire
-            .deadline
-            .enforce()
-            .map_err(Error::from)
+            .begin_io(self.write_timeout.get())
             .map_err(Error::into_io)?;
         self.flush_tls().map_err(Error::into_io)
     }
@@ -338,10 +347,24 @@ where
         self.wire.inner.local_addr()
     }
     fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.wire.inner.set_read_timeout(timeout)
+        validate_timeout(timeout)?;
+        self.wire.inner.set_read_timeout(timeout)?;
+        self.read_timeout.set(timeout);
+        Ok(())
     }
     fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.wire.inner.set_write_timeout(timeout)
+        validate_timeout(timeout)?;
+        self.wire.inner.set_write_timeout(timeout)?;
+        self.write_timeout.set(timeout);
+        Ok(())
+    }
+}
+
+fn validate_timeout(timeout: Option<Duration>) -> io::Result<()> {
+    if timeout.is_some_and(|timeout| timeout.is_zero()) {
+        Err(io::ErrorKind::InvalidInput.into())
+    } else {
+        Ok(())
     }
 }
 

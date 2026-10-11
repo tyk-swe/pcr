@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::net::Ipv4Addr;
+use std::time::Instant;
 
 use packetcraftr_core::budget::{Cancellation, Interrupted};
 
@@ -328,6 +329,149 @@ fn application_exchange_retains_partial_write_and_read_failure_evidence() {
     assert_eq!(report.response.as_ref(), RESPONSE);
     assert!(
         matches!(report.outcome, crate::bounded::Outcome::Failed(source) if source.kind() == io::ErrorKind::ConnectionReset)
+    );
+}
+
+#[test]
+fn interruption_during_successful_read_retains_plaintext_without_more_wire_io() {
+    for version in [&rustls::version::TLS12, &rustls::version::TLS13] {
+        for cancelled in [true, false] {
+            let signal = Cancellation::default();
+            let now = Arc::new(Mutex::new(Instant::now()));
+            let time_source = Arc::clone(&now);
+            let deadline = Deadline::with_time_source(Duration::from_secs(1), move || {
+                *time_source.lock().unwrap()
+            })
+            .with_cancellation(Some(signal.clone()));
+            let peer = Peer::new(version, false);
+            let observed = Arc::clone(&peer.observed);
+            let handshake =
+                connect(peer, numeric(), Limits::default(), &deadline, |_| Ok(())).unwrap();
+            let mut stream = handshake.result.unwrap();
+            stream.wire.inner.on_response_read = Some(Box::new(move || {
+                if cancelled {
+                    signal.cancel();
+                } else {
+                    *now.lock().unwrap() += Duration::from_secs(2);
+                }
+            }));
+            let reads_before = observed.lock().unwrap().reads;
+            let writes_before = observed.lock().unwrap().writes;
+            let flushes_before = observed.lock().unwrap().flushes;
+            let wire_bytes_before = stream.evidence().wire_bytes_read;
+            let report = crate::tcp::exchange(&mut stream, b"request", 128, &deadline, |bytes| {
+                bytes == RESPONSE
+            })
+            .unwrap();
+            assert_eq!(report.response.as_ref(), RESPONSE);
+            assert_eq!(report.bytes_sent, 7);
+            assert!(matches!(
+                (cancelled, report.outcome),
+                (true, crate::bounded::Outcome::Cancelled)
+                    | (false, crate::bounded::Outcome::TimedOut)
+            ));
+            assert_eq!(observed.lock().unwrap().reads, reads_before + 1);
+            assert_eq!(observed.lock().unwrap().writes, writes_before + 1);
+            assert_eq!(observed.lock().unwrap().flushes, flushes_before + 1);
+            assert!(stream.evidence().wire_bytes_read > wire_bytes_before + RESPONSE.len());
+            assert_eq!(
+                stream.evidence().wire_bytes_read,
+                observed.lock().unwrap().bytes_read
+            );
+
+            let evidence = stream.evidence();
+            assert!(stream.read(&mut [0; 128]).is_err());
+            assert_eq!(stream.evidence(), evidence);
+            assert_eq!(observed.lock().unwrap().reads, reads_before + 1);
+        }
+    }
+}
+
+#[test]
+fn shorter_exchange_deadline_bounds_tls_read_write_and_flush_retries() {
+    for stalled_operation in ["read", "write", "flush"] {
+        let lifetime = Deadline::new(Duration::from_secs(2));
+        let peer = Peer::new(&rustls::version::TLS13, false);
+        let observed = Arc::clone(&peer.observed);
+        let handshake = connect(peer, numeric(), Limits::default(), &lifetime, |_| Ok(())).unwrap();
+        let mut stream = handshake.result.unwrap();
+        let sent_before = stream.evidence().wire_bytes_sent;
+        let reads_before = observed.lock().unwrap().reads;
+        match stalled_operation {
+            "read" => stream.wire.inner.stall_read = true,
+            "write" => stream.wire.inner.stall_after_write = Some(sent_before + 17),
+            "flush" => stream.wire.inner.stall_flush = true,
+            _ => unreachable!(),
+        }
+        let deadline = Deadline::new(Duration::from_millis(50));
+        let started = Instant::now();
+        let report =
+            crate::tcp::exchange(&mut stream, b"request", 128, &deadline, |_| false).unwrap();
+        assert!(matches!(report.outcome, crate::bounded::Outcome::TimedOut));
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(lifetime.enforce().is_ok());
+        assert_eq!(report.bytes_sent, 7);
+        assert!(report.response.is_empty());
+        if stalled_operation == "write" {
+            assert_eq!(stream.evidence().wire_bytes_sent, sent_before + 17);
+        }
+        if stalled_operation != "read" {
+            assert_eq!(observed.lock().unwrap().reads, reads_before);
+        }
+    }
+}
+
+#[test]
+fn application_timeouts_are_retryable_and_do_not_lose_pending_native_flush() {
+    use crate::tcp::Stream as _;
+
+    let lifetime = Deadline::new(Duration::from_secs(2));
+    let peer = Peer::new(&rustls::version::TLS13, false);
+    let observed = Arc::clone(&peer.observed);
+    let handshake = connect(peer, numeric(), Limits::default(), &lifetime, |_| Ok(())).unwrap();
+    let mut stream = handshake.result.unwrap();
+    let timeout = Some(Duration::from_millis(5));
+    stream.set_write_timeout(timeout).unwrap();
+    stream.write_all(b"request").unwrap();
+    stream.wire.inner.stall_flush = true;
+    assert_eq!(stream.flush().unwrap_err().kind(), io::ErrorKind::TimedOut);
+    let ciphertext = observed.lock().unwrap().ciphertext.clone();
+    let flushes = observed.lock().unwrap().flushes;
+    let sent = stream.evidence().wire_bytes_sent;
+
+    stream.wire.inner.stall_flush = false;
+    stream.flush().unwrap();
+    assert_eq!(observed.lock().unwrap().flushes, flushes + 1);
+    assert_eq!(observed.lock().unwrap().ciphertext, ciphertext);
+    assert_eq!(stream.evidence().wire_bytes_sent, sent);
+
+    stream.set_read_timeout(timeout).unwrap();
+    stream.wire.inner.stall_read = true;
+    assert_eq!(
+        stream.read(&mut [0; 128]).unwrap_err().kind(),
+        io::ErrorKind::TimedOut
+    );
+    stream.wire.inner.stall_read = false;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    let mut bytes = [0; 128];
+    let count = stream.read(&mut bytes).unwrap();
+    assert_eq!(&bytes[..count], RESPONSE);
+
+    assert_eq!(
+        stream
+            .set_read_timeout(Some(Duration::ZERO))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        stream
+            .set_write_timeout(Some(Duration::ZERO))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::InvalidInput
     );
 }
 

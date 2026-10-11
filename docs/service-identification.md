@@ -97,6 +97,12 @@ bounds encrypted transmission bytes; every actual encrypted write rechecks the
 peer and offered byte count. Overall invocation, operation, host, probe and
 connection deadlines still apply.
 
+Library callers can also use a shorter deadline for `tcp::exchange` than the
+TLS connection lifetime. Read and write timeouts bound each application call,
+including encrypted retries and flushes. A completed read retains its decrypted
+response bytes even if cancellation or deadline expiry occurs during that read;
+the exchange reports the interruption before attempting further I/O.
+
 Failed/refused handshakes have `tls_failed` endpoint outcomes and retained TLS
 counters and diagnostics. Application failures after successful negotiation keep
 their ordinary I/O outcomes and TLS evidence. `usage.tls` distinguishes wire

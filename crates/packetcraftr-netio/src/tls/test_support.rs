@@ -31,6 +31,7 @@ impl ResolvesServerCert for Certificate {
 pub(super) struct Observed {
     pub ciphertext: Vec<u8>,
     pub reads: usize,
+    pub bytes_read: usize,
     pub writes: usize,
     pub flushes: usize,
     pub server_name: Option<String>,
@@ -46,9 +47,15 @@ pub(super) struct Peer {
     pub fail_after_write: Option<usize>,
     pub fail_read: bool,
     pub fail_after_response: bool,
+    pub on_response_read: Option<Box<dyn FnMut() + Send>>,
+    pub stall_read: bool,
+    pub stall_after_write: Option<usize>,
+    pub stall_flush: bool,
     pub silent: bool,
     pub max_write: usize,
     timeout_calls: Cell<usize>,
+    read_timeout: Cell<Option<Duration>>,
+    write_timeout: Cell<Option<Duration>>,
 }
 
 impl Peer {
@@ -77,9 +84,24 @@ impl Peer {
             fail_after_write: None,
             fail_read: false,
             fail_after_response: false,
+            on_response_read: None,
+            stall_read: false,
+            stall_after_write: None,
+            stall_flush: false,
             silent: false,
             max_write: usize::MAX,
             timeout_calls: Cell::new(0),
+            read_timeout: Cell::new(None),
+            write_timeout: Cell::new(None),
+        }
+    }
+
+    fn configured_timeout(&self) {
+        self.timeout_calls.set(self.timeout_calls.get() + 1);
+        if let Some(signal) = &self.cancel_on_timeout
+            && self.timeout_calls.get() == self.cancel_at_timeout_call
+        {
+            signal.cancel();
         }
     }
 }
@@ -87,6 +109,10 @@ impl Peer {
 impl Read for Peer {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         self.observed.lock().unwrap().reads += 1;
+        if self.stall_read {
+            std::thread::sleep(self.read_timeout.get().expect("bounded native read"));
+            return Err(io::ErrorKind::TimedOut.into());
+        }
         if self.fail_read {
             return Err(io::ErrorKind::ConnectionReset.into());
         }
@@ -108,6 +134,12 @@ impl Read for Peer {
         if count == 0 {
             return Err(io::ErrorKind::TimedOut.into());
         }
+        self.observed.lock().unwrap().bytes_read += count;
+        if self.responded
+            && let Some(on_response_read) = &mut self.on_response_read
+        {
+            on_response_read();
+        }
         Ok(count)
     }
 }
@@ -117,13 +149,25 @@ impl Write for Peer {
         let mut observed = self.observed.lock().unwrap();
         observed.writes += 1;
         let sent = observed.ciphertext.len();
+        if self.stall_after_write.is_some_and(|limit| sent >= limit) {
+            drop(observed);
+            std::thread::sleep(self.write_timeout.get().expect("bounded native write"));
+            return Err(io::ErrorKind::TimedOut.into());
+        }
         if self.fail_after_write.is_some_and(|limit| sent >= limit) {
             return Err(io::ErrorKind::BrokenPipe.into());
         }
-        let count = bytes.len().min(self.max_write).min(
-            self.fail_after_write
-                .map_or(usize::MAX, |limit| limit - sent),
-        );
+        let count = bytes
+            .len()
+            .min(self.max_write)
+            .min(
+                self.fail_after_write
+                    .map_or(usize::MAX, |limit| limit - sent),
+            )
+            .min(
+                self.stall_after_write
+                    .map_or(usize::MAX, |limit| limit - sent),
+            );
         observed.ciphertext.extend_from_slice(&bytes[..count]);
         drop(observed);
         if !self.silent {
@@ -154,6 +198,10 @@ impl Write for Peer {
 
     fn flush(&mut self) -> io::Result<()> {
         self.observed.lock().unwrap().flushes += 1;
+        if self.stall_flush {
+            std::thread::sleep(self.write_timeout.get().expect("bounded native flush"));
+            return Err(io::ErrorKind::TimedOut.into());
+        }
         Ok(())
     }
 }
@@ -165,16 +213,14 @@ impl crate::tcp::Stream for Peer {
     fn local_addr(&self) -> io::Result<SocketAddr> {
         Ok("127.0.0.1:12345".parse().unwrap())
     }
-    fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
-        self.timeout_calls.set(self.timeout_calls.get() + 1);
-        if let Some(signal) = &self.cancel_on_timeout
-            && self.timeout_calls.get() == self.cancel_at_timeout_call
-        {
-            signal.cancel();
-        }
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        self.read_timeout.set(timeout);
+        self.configured_timeout();
         Ok(())
     }
     fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.set_read_timeout(timeout)
+        self.write_timeout.set(timeout);
+        self.configured_timeout();
+        Ok(())
     }
 }

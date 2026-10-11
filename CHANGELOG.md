@@ -116,6 +116,9 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Fixed
 
+- Active TLS exchanges honor application timeouts within the connection lifetime
+  and retain decrypted response bytes when cancellation or deadline expiry
+  follows a completed read.
 - Update the YAML parser to enforce typed-deserialization resource budgets
   (RUSTSEC-2026-0333), retaining the document layer's independent limits.
 - Scan follow-ups share the client's monotonic deadline and propagate reverse-DNS

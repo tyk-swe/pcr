@@ -1843,6 +1843,75 @@ fn real_loopback_tcp_http_and_udp_dns_use_the_public_operation() {
 }
 
 #[test]
+fn complete_http_heads_retain_coalesced_tls_failures_without_another_native_read() {
+    use crate::common::tls_peer::{RESPONSE, TlsTcp};
+
+    for version in [&rustls::version::TLS12, &rustls::version::TLS13] {
+        for (malformed, max_response) in [
+            (false, RESPONSE.len()),
+            (true, RESPONSE.len()),
+            (false, 16),
+            (true, 16),
+        ] {
+            let tcp = TlsTcp::new(version, malformed);
+            let client = Client::new(
+                builtin::registry(),
+                Policy::default(),
+                ProviderSet::tcp((), ())
+                    .with_tcp(tcp.clone())
+                    .with_udp(FakeUdp::default())
+                    .with_resolver(()),
+            );
+            let mut request = request(vec![endpoint(34443, identify::Transport::Tcp)]);
+            corpus_with(&mut request, "http-head");
+            request.tls = Some(identify::TlsSettings::default());
+            request.limits.probe.read_bytes = max_response as u64;
+            let report = client.identify(&request).unwrap();
+            let record = &report.records[0];
+            assert_eq!(record.probes.len(), 1);
+            let evidence = &record.probes[0];
+            assert_eq!(evidence.response, RESPONSE[..max_response]);
+            assert_eq!(evidence.bytes_written, evidence.request.len() as u64);
+            assert!(evidence.tls.as_ref().unwrap().session.handshake_complete);
+            let observed = tcp.observed.lock().unwrap();
+            assert_eq!(observed.application_request, evidence.request);
+            assert_eq!(observed.response_reads, 1);
+            if malformed {
+                assert_eq!(evidence.io_outcome, identify::IoOutcome::Failed);
+                assert_eq!(record.outcome, identify::Outcome::Truncated);
+                assert_eq!(evidence.observation.outcome, ObservationOutcome::Truncated);
+                assert!(record.candidates.is_empty());
+                let source = evidence.source.as_ref().unwrap();
+                let source = source.downcast_ref::<io::Error>().unwrap();
+                assert_eq!(source.kind(), io::ErrorKind::InvalidData);
+                assert!(matches!(
+                    source
+                        .get_ref()
+                        .and_then(|source| source.downcast_ref::<packetcraftr_netio::tls::Error>()),
+                    Some(packetcraftr_netio::tls::Error::Protocol(_))
+                ));
+                assert_eq!(
+                    evidence.diagnostic.as_deref(),
+                    Some(source.to_string().as_str())
+                );
+            } else {
+                if max_response == RESPONSE.len() {
+                    assert_eq!(evidence.io_outcome, identify::IoOutcome::Complete);
+                    assert_eq!(record.outcome, identify::Outcome::Matched);
+                    assert_eq!(record.candidates[0].version.as_deref(), Some("1.26.2"));
+                } else {
+                    assert_eq!(evidence.io_outcome, identify::IoOutcome::Truncated);
+                    assert_eq!(record.outcome, identify::Outcome::Truncated);
+                    assert!(record.candidates.is_empty());
+                }
+                assert!(evidence.diagnostic.is_none());
+                assert!(evidence.source.is_none());
+            }
+        }
+    }
+}
+
+#[test]
 fn invalid_tls_names_and_udp_wrapping_are_rejected_before_provider_io() {
     let tcp = FakeTcp::default();
     let udp = FakeUdp::default();

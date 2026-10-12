@@ -122,8 +122,10 @@ for remaining acceptance gates and revision-bound evidence.
   product markers at the start of a line. FTP markers are not inferred from
   hostname labels or explicit SMTP greetings.
 - Active TLS exchanges honor application timeouts within the connection lifetime
-  and retain decrypted response bytes when cancellation or deadline expiry
-  follows a completed read.
+  and retain decrypted response bytes when cancellation, deadline expiry, or a
+  subsequent TLS record error follows a completed read. Identification reports
+  retained fatal TLS errors even when the decrypted application reply is complete,
+  preserving response bytes and original diagnostics without another native read.
 - Update the YAML parser to enforce typed-deserialization resource budgets
   (RUSTSEC-2026-0333), retaining the document layer's independent limits.
 - Scan follow-ups share the client's monotonic deadline and propagate reverse-DNS

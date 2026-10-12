@@ -304,7 +304,18 @@ fn tcp_exchange<P: TcpProviders>(
             session: stream.evidence(),
         };
         let mut reply = match exchange {
-            Ok(exchange) => Reply::exchanged(exchange, local, peer),
+            Ok(mut exchange) => {
+                // Application completion or the response cap can stop before
+                // a read reports a fatal error following decrypted bytes.
+                if matches!(
+                    exchange.outcome,
+                    bounded::Outcome::Complete | bounded::Outcome::Truncated
+                ) && let Some(source) = stream.terminal_error()
+                {
+                    exchange.outcome = bounded::Outcome::Failed(source);
+                }
+                Reply::exchanged(exchange, local, peer)
+            }
             Err(source) => Reply::tcp_failed(source),
         };
         reply.tls = Some(evidence);

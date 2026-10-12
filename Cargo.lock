@@ -1081,6 +1081,7 @@ dependencies = [
  "packetcraftr-core",
  "packetcraftr-netio",
  "postcard",
+ "rustls",
  "serde",
  "serde_json",
  "thiserror",

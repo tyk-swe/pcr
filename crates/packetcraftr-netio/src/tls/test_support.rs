@@ -52,6 +52,8 @@ pub(super) struct Peer {
     pub stall_after_write: Option<usize>,
     pub stall_flush: bool,
     pub silent: bool,
+    pub response_suffix: Vec<u8>,
+    pub max_read: usize,
     pub max_write: usize,
     timeout_calls: Cell<usize>,
     read_timeout: Cell<Option<Duration>>,
@@ -89,6 +91,8 @@ impl Peer {
             stall_after_write: None,
             stall_flush: false,
             silent: false,
+            response_suffix: Vec::new(),
+            max_read: usize::MAX,
             max_write: usize::MAX,
             timeout_calls: Cell::new(0),
             read_timeout: Cell::new(None),
@@ -124,7 +128,10 @@ impl Read for Peer {
             self.session.write_tls(&mut output)?;
             self.incoming.extend(output);
         }
-        let count = bytes.len().min(self.incoming.len());
+        if self.responded {
+            self.incoming.extend(self.response_suffix.drain(..));
+        }
+        let count = bytes.len().min(self.incoming.len()).min(self.max_read);
         for byte in &mut bytes[..count] {
             *byte = self.incoming.pop_front().unwrap();
         }

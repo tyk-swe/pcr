@@ -333,6 +333,53 @@ fn application_exchange_retains_partial_write_and_read_failure_evidence() {
 }
 
 #[test]
+fn later_tls_record_errors_retain_decrypted_exchange_bytes_and_their_source() {
+    for version in [&rustls::version::TLS12, &rustls::version::TLS13] {
+        for max_read in [usize::MAX, 5] {
+            let deadline = Deadline::new(Duration::from_secs(1));
+            let peer = Peer::new(version, false);
+            let observed = Arc::clone(&peer.observed);
+            let handshake =
+                connect(peer, numeric(), Limits::default(), &deadline, |_| Ok(())).unwrap();
+            let mut stream = handshake.result.unwrap();
+            // A record with an invalid content type follows the valid response,
+            // either in the same native read or across fragmented reads.
+            assert!(stream.terminal_error().is_none());
+            stream.wire.inner.response_suffix = vec![0xff, 0x03, 0x03, 0, 1, 0];
+            stream.wire.inner.max_read = max_read;
+            let reads_before = observed.lock().unwrap().reads;
+            let report =
+                crate::tcp::exchange(&mut stream, b"request", 128, &deadline, |_| false).unwrap();
+            assert_eq!(report.response.as_ref(), RESPONSE);
+            assert_eq!(report.bytes_sent, 7);
+            let crate::bounded::Outcome::Failed(source) = report.outcome else {
+                panic!("the subsequent record must fail the exchange");
+            };
+            assert_eq!(source.kind(), io::ErrorKind::InvalidData);
+            assert!(matches!(
+                source
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<Error>()),
+                Some(Error::Protocol(_))
+            ));
+            if max_read == usize::MAX {
+                assert_eq!(observed.lock().unwrap().reads, reads_before + 1);
+            }
+            let evidence = stream.evidence();
+            let reads = observed.lock().unwrap().reads;
+            let retained = stream.terminal_error().unwrap();
+            assert_eq!(retained.kind(), source.kind());
+            assert_eq!(retained.to_string(), source.to_string());
+            let repeated = stream.read(&mut [0; 128]).unwrap_err();
+            assert_eq!(repeated.kind(), source.kind());
+            assert_eq!(repeated.to_string(), source.to_string());
+            assert_eq!(stream.evidence(), evidence);
+            assert_eq!(observed.lock().unwrap().reads, reads);
+        }
+    }
+}
+
+#[test]
 fn interruption_during_successful_read_retains_plaintext_without_more_wire_io() {
     for version in [&rustls::version::TLS12, &rustls::version::TLS13] {
         for cancelled in [true, false] {

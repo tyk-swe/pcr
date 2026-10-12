@@ -121,14 +121,19 @@ pub struct Handshake<S, A> {
 /// The original session deadline and lifetime ceilings cannot be extended by
 /// changing socket timeouts. A configured timeout bounds one application call,
 /// including its native retries and flushes. Timeout exhaustion is retryable;
-/// lifetime interruption is terminal. Use [`crate::tcp::exchange`] to retain
-/// application bytes and partial write/read outcomes as well as [`Self::evidence`].
+/// lifetime interruption is terminal. Fatal TLS record errors are reported after
+/// already-decrypted plaintext is drained, without further native reads.
+/// Use [`crate::tcp::exchange`] to retain application bytes and partial write/read
+/// outcomes as well as [`Self::evidence`]. When application completion stops an
+/// exchange before the next read, check [`Self::terminal_error`] for a retained
+/// record-processing failure.
 pub struct Stream<S, A> {
     session: ClientConnection,
     wire: wire::Wire<S, A>,
     certificates: Arc<Mutex<verifier::Certificates>>,
     handshake_complete: bool,
     flush_pending: bool,
+    read_error: Option<rustls::Error>,
     read_timeout: Cell<Option<Duration>>,
     write_timeout: Cell<Option<Duration>>,
 }
@@ -174,6 +179,7 @@ where
         certificates,
         handshake_complete: false,
         flush_pending: false,
+        read_error: None,
         read_timeout: Cell::new(None),
         write_timeout: Cell::new(None),
     };
@@ -201,6 +207,16 @@ where
     S: crate::tcp::Stream,
     A: FnMut(&[u8]) -> io::Result<()> + Send,
 {
+    /// Returns a fatal TLS record-processing error already observed by a read.
+    ///
+    /// The error remains available while preceding decrypted bytes are returned
+    /// and after a read reports it. This inspects retained state without I/O.
+    pub fn terminal_error(&self) -> Option<io::Error> {
+        self.read_error
+            .as_ref()
+            .map(|source| Error::Protocol(source.clone()).into_io())
+    }
+
     pub fn evidence(&self) -> Evidence {
         let certificates = self
             .certificates
@@ -292,13 +308,26 @@ where
             .begin_io(self.read_timeout.get())
             .map_err(Error::into_io)?;
         loop {
-            match self.session.reader().read(bytes) {
+            let plaintext = self.session.reader().read(bytes);
+            if matches!(&plaintext, Ok(count) if *count > 0) {
+                return plaintext;
+            }
+            if let Some(source) = &self.read_error {
+                return Err(Error::Protocol(source.clone()).into_io());
+            }
+            match plaintext {
                 Err(source) if source.kind() == io::ErrorKind::WouldBlock => {
                     // Check before further wire I/O, while retaining plaintext
                     // received by the preceding successful native read.
                     self.wire.enforce().map_err(Error::into_io)?;
                     self.flush_tls().map_err(Error::into_io)?;
-                    self.read_tls().map_err(Error::into_io)?;
+                    match self.read_tls() {
+                        // Rustls can decrypt a valid record before rejecting a
+                        // later one in the same read. Drain that plaintext on
+                        // the next loop, then report the original fatal error.
+                        Err(Error::Protocol(source)) => self.read_error = Some(source),
+                        result => result.map_err(Error::into_io)?,
+                    }
                 }
                 result => return result,
             }

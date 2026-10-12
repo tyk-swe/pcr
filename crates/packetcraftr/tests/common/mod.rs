@@ -497,3 +497,4 @@ impl capture::Session for IdleCapture {
     }
 }
 pub mod scanner_fixture;
+pub(crate) mod tls_peer;

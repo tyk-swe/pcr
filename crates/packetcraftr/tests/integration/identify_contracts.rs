@@ -316,6 +316,13 @@ fn passive_smtp_and_ftp_greetings_complete_while_the_peer_remains_open() {
             Some("mail.example.test"),
         ),
         (
+            "smtp-greeting",
+            b"220-mail.example.test ESMTP Postfix 3.10.1\r\n220\r\n".as_slice(),
+            "Postfix",
+            "3.10.1",
+            Some("mail.example.test"),
+        ),
+        (
             "ftp-greeting",
             b"220 (vsFTPd 3.0.5)\r\n".as_slice(),
             "vsftpd",

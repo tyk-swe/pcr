@@ -184,6 +184,41 @@ fn shared_numeric_greetings_and_unsupported_metadata_stay_unknown_or_absent() {
 }
 
 #[test]
+fn ftp_markers_do_not_come_from_hostname_labels_or_smtp_greetings() {
+    let corpus = corpus();
+    let probe = probe(&corpus, "ftp-greeting");
+    for wire in [
+        "220 ftp.example.test ESMTP Postfix 3.10.1\r\n",
+        "220 mail.ftp.example.test ESMTP Postfix 3.10.1\r\n",
+        "220 host-ftp.example.test ESMTP Postfix 3.10.1\r\n",
+        "220 vsftpd.example.test ESMTP Postfix 3.10.1\r\n",
+        "220 proftpd.example.test ESMTP Postfix 3.10.1\r\n",
+        "220 ftp ESMTP Postfix 3.10.1\r\n",
+        "220 vsftpd ESMTP Postfix 3.10.1\r\n",
+        "220 proftpd ESMTP Postfix 3.10.1\r\n",
+        "220 mail.example.test ESMTP vsFTPd 3.0.5\r\n",
+        "220 ftp.example.test ready\r\n",
+        "220 vsftpd.example.test ready\r\n",
+        "220 proftpd.example.test ready\r\n",
+        "220 host-ftp ready\r\n",
+    ] {
+        let observation = service_probes::observe(probe, wire.as_bytes(), false);
+        assert_eq!(observation.protocol, None, "{wire:?}");
+        assert_eq!(observation.outcome, ObservationOutcome::Unknown);
+        assert_eq!(observation.fields.len(), 1);
+        assert_eq!(observation.fields[0].field, Field::FtpGreeting);
+        assert_eq!(
+            observation.fields[0].value,
+            wire.strip_suffix("\r\n").unwrap().as_bytes()
+        );
+        let result = corpus.identify(probe, &observation);
+        assert_eq!(result.outcome, MatchOutcome::Unknown);
+        assert!(result.candidates.is_empty());
+        assert!(service_probes::ftp_collection_complete(wire.as_bytes()));
+    }
+}
+
+#[test]
 fn reviewed_metadata_requires_claim_fields_and_static_cpe_values() {
     let corpus = corpus();
     let original = serde_json::to_value(&corpus).unwrap();

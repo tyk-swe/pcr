@@ -87,12 +87,14 @@ fn progress(bytes: &[u8], protocol: Protocol) -> (Observation, bool) {
             );
         }
         let reply = &line[..line.len() - 2];
-        let coded = reply.starts_with(b"220 ") || reply.starts_with(b"220-");
+        // RFC 5321 §4.2 permits a terminal reply code without a text string.
+        let code_only = protocol == Protocol::Smtp && reply == b"220";
+        let coded = reply.starts_with(b"220 ") || reply.starts_with(b"220-") || code_only;
         if index == 0 {
             if !coded {
                 return (observation, true);
             }
-            multiline = reply[3] == b'-';
+            multiline = reply.starts_with(b"220-");
         } else if protocol == Protocol::Smtp && !coded {
             return stop(
                 observation,
@@ -112,20 +114,23 @@ fn progress(bytes: &[u8], protocol: Protocol) -> (Observation, bool) {
                 // an explicit FTP marker before describing it as FTP evidence.
                 // FTP continuation lines need not repeat the reply code.
                 let text = if coded { &reply[4..] } else { reply };
-                if text
-                    .split(|byte| !byte.is_ascii_alphanumeric())
-                    .any(|token| {
-                        token.eq_ignore_ascii_case(b"ftp")
-                            || token.eq_ignore_ascii_case(b"vsftpd")
-                            || token.eq_ignore_ascii_case(b"proftpd")
-                    })
+                if smtp_claim(text).is_none()
+                    && text
+                        // Hostname punctuation belongs to the token: an FTP
+                        // label inside a hostname is not a protocol marker.
+                        .split(|byte| !byte.is_ascii_alphanumeric() && !matches!(byte, b'.' | b'-'))
+                        .any(|token| {
+                            token.eq_ignore_ascii_case(b"ftp")
+                                || token.eq_ignore_ascii_case(b"vsftpd")
+                                || token.eq_ignore_ascii_case(b"proftpd")
+                        })
                 {
                     observation.protocol = Some(Protocol::Ftp);
                 }
             }
             _ => unreachable!("greeting parser has a closed protocol set"),
         }
-        if !multiline || reply.starts_with(b"220 ") {
+        if !multiline || reply.starts_with(b"220 ") || code_only {
             observation.outcome = if observation.protocol.is_some() {
                 ObservationOutcome::Complete
             } else {
@@ -151,19 +156,9 @@ fn smtp_fields(observation: &mut Observation, reply: &[u8]) {
         field: Field::SmtpGreeting,
         value: reply.to_vec(),
     });
-    let Some(text) = reply.get(4..) else {
+    let Some((hostname, software)) = reply.get(4..).and_then(smtp_claim) else {
         return;
     };
-    let Some(space) = text.iter().position(|byte| *byte == b' ') else {
-        return;
-    };
-    let (hostname, rest) = (&text[..space], &text[space + 1..]);
-    let Some(software) = rest.strip_prefix(b"ESMTP ") else {
-        return;
-    };
-    if !valid_hostname(hostname) || software.is_empty() {
-        return;
-    }
     observation.protocol = Some(Protocol::Smtp);
     observation.fields.push(ObservedField {
         field: Field::SmtpHostname,
@@ -173,6 +168,13 @@ fn smtp_fields(observation: &mut Observation, reply: &[u8]) {
         field: Field::SmtpSoftware,
         value: software.to_vec(),
     });
+}
+
+fn smtp_claim(text: &[u8]) -> Option<(&[u8], &[u8])> {
+    let space = text.iter().position(|byte| *byte == b' ')?;
+    let (hostname, rest) = (&text[..space], &text[space + 1..]);
+    let software = rest.strip_prefix(b"ESMTP ")?;
+    (valid_hostname(hostname) && !software.is_empty()).then_some((hostname, software))
 }
 
 pub(super) fn valid_hostname(value: &[u8]) -> bool {
@@ -275,6 +277,56 @@ mod tests {
         assert_eq!(candidate.product, "vsftpd");
         assert_eq!(candidate.version.as_deref(), Some("3.0.5"));
         assert_eq!(candidate.provenance.field_indices, [1]);
+    }
+
+    #[test]
+    fn smtp_reply_code_only_terminators_preserve_multiline_fields() {
+        let wire = b"220-mail.example.test ESMTP Postfix 3.10.1\r\n220\r\n";
+        for end in 0..wire.len() {
+            assert!(!smtp_collection_complete(&wire[..end]));
+            assert_ne!(
+                observe(&wire[..end], Protocol::Smtp).outcome,
+                ObservationOutcome::Malformed
+            );
+        }
+        assert!(smtp_collection_complete(wire));
+        let observation = observe(wire, Protocol::Smtp);
+        assert_eq!(observation.protocol, Some(Protocol::Smtp));
+        assert_eq!(observation.outcome, ObservationOutcome::Complete);
+        assert_eq!(observation.diagnostic, None);
+        assert_eq!(
+            observation.fields,
+            [
+                (
+                    Field::SmtpGreeting,
+                    "220-mail.example.test ESMTP Postfix 3.10.1"
+                ),
+                (Field::SmtpHostname, "mail.example.test"),
+                (Field::SmtpSoftware, "Postfix 3.10.1"),
+                (Field::SmtpGreeting, "220"),
+            ]
+            .map(|(field, value)| ObservedField {
+                field,
+                value: value.as_bytes().to_vec(),
+            })
+        );
+
+        let bare = b"220\r\n";
+        for end in 0..bare.len() {
+            assert!(!smtp_collection_complete(&bare[..end]));
+        }
+        assert!(smtp_collection_complete(bare));
+        let observation = observe(bare, Protocol::Smtp);
+        assert_eq!(observation.protocol, None);
+        assert_eq!(observation.outcome, ObservationOutcome::Unknown);
+        assert_eq!(
+            observation.fields,
+            [ObservedField {
+                field: Field::SmtpGreeting,
+                value: b"220".to_vec(),
+            }]
+        );
+        assert!(observe(bare, Protocol::Ftp).fields.is_empty());
     }
 
     #[test]

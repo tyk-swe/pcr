@@ -24,7 +24,6 @@ The [data policy](../scanner-data-policy.md) and
 [provenance template](../scanner-data-provenance-template.md) require source,
 license review, independent version, maintenance ownership, and fixture-based
 coverage claims. Nmap's NPSL is not assumed compatible with AGPL redistribution.
-Sources and packaging are reviewed per dataset at first import.
 
 ## Completion evidence
 

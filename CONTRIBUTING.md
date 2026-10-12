@@ -1,104 +1,106 @@
 # Contributing to PacketcraftR
 
-Report vulnerabilities through [SECURITY.md](SECURITY.md). The compact
-[repository guide](AGENTS.md) describes ownership, invariants, and the
-comprehensive checks.
+Report vulnerabilities through [SECURITY.md](SECURITY.md). Include a minimal
+reproduction, platform, feature profile, and sanitized diagnostics in ordinary
+bug reports; keep production captures and credentials private.
 
 ## Development
 
-Install Rust with rustup; the repository selects its supported stable toolchain
-and rustfmt/Clippy components. Linux full-native builds require `libpcap-dev`;
-macOS uses system libpcap; Windows Layer 2 operations load Npcap at runtime.
-Cargo uses the platform's default compiler and linker.
-All profiles include rustls/ring for active TLS and require a supported C
-compiler. No OpenSSL development package or system TLS library is needed.
+Rustup selects the supported toolchain and rustfmt/Clippy components from
+`rust-toolchain.toml`; `Cargo.toml` declares the same Rust version. Linux Layer 2
+builds need `libpcap-dev`, macOS uses system libpcap, and Windows loads Npcap at
+runtime. All profiles need a C compiler for rustls/ring, without OpenSSL.
 
-While editing, run `cargo test --locked -p <affected-crate>` (doctests included)
-and the relevant integration test or feature profile. There is no required test
-runner or command wrapper.
-
-The five feature profiles (portable, default, Layer 2 only, pcap-free, full
-native) are listed in the README's
-[Build from source](README.md#build-from-source). Their arguments apply to
-`-p packetcraftr-cli`; workspace-wide commands qualify the features as
-`packetcraftr-cli/native-layer2`, as below. Features belong to
-netio; workflow and CLI features select those capabilities. The explicitly
-selected standard-library TCP provider is independent of these packet-I/O
-feature flags; it remains available in the portable library profile.
-
-`.github/workflows/ci.yml` is the source of truth for what CI runs: Clippy with
-warnings denied for all five profiles on Linux, Intel macOS, Apple Silicon
-macOS, and Windows, runtime tests per platform, documentation, fixtures,
-the decoder oracle, and fuzz-target compilation. `fuzz.yml` runs the fuzz
-campaigns, and `release.yml` verifies packaged archives, linkage, checksums,
-and provenance. To reproduce the Clippy profiles locally:
+Run the affected crate's tests while editing, including relevant profiles and
+doctests. The comprehensive Linux check is:
 
 ```sh
-cargo clippy --locked --workspace --all-targets --no-default-features -- -D warnings
-cargo clippy --locked --workspace --all-targets -- -D warnings
-cargo clippy --locked --workspace --all-targets --no-default-features --features packetcraftr-cli/native-layer2 -- -D warnings
-cargo clippy --locked --workspace --all-targets --no-default-features --features packetcraftr-cli/native-layer3 -- -D warnings
+cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-features
 ```
 
-Use native macOS and Windows CI results when reviewing platform changes. A
-Windows GNU cross-check does not validate MSVC or the Npcap adapter at runtime.
+[Build profiles](README.md#build-from-source) own feature selection.
+Workspace commands qualify features as `packetcraftr-cli/native-layer2` or
+`packetcraftr-cli/native-layer3`. Ordinary TCP providers work independently of
+native packet-I/O features. CI's exact commands live in
+[ci.yml](.github/workflows/ci.yml): five-profile Clippy on Linux, macOS Intel/Arm64,
+and Windows, platform tests, Rust docs, fixtures, decoder comparisons, and fuzz
+compilation. Linux results and cross-compilation do not validate another OS's
+native runtime.
 
-The CLI's default features include `packetcraftr/default` so workspace and
-focused CLI builds select the same workflow features and reuse artifacts. After
-changing features, run `cargo build --locked --workspace` and then
-`cargo build --locked -p packetcraftr-cli -v` in the same target directory, and
-confirm that `packetcraftr` and `packetcraftr-cli` are reported `Fresh`. Keep
-full development debug information and release overflow checks in the repository
-and CI defaults. Each crate's integration tests link into one `integration`
-binary, so shared helpers compile and link once instead of once per file;
-measure clean, incremental and focused builds before splitting a test out. Run
-a narrow regression as `cargo test --locked -p CRATE --test integration MODULE::`.
+Keep development debug information and release overflow checks enabled by default.
+For a storage-constrained local run, temporary `CARGO_PROFILE_DEV_DEBUG=0`,
+`CARGO_PROFILE_TEST_DEBUG=0`, and `CARGO_INCREMENTAL=0` preserve assertions and
+checks while reducing debug detail. After feature changes, build the workspace
+then the CLI with `-v` in the same target directory and check artifact reuse.
 
-For storage-constrained local validation, temporarily omit debug information and
-incremental artifacts as below; use the same environment for the relevant Clippy
-commands above. Tests, debug assertions, and overflow checks remain enabled, but
-debugger/backtrace detail is reduced and incremental build reuse is disabled.
-These overrides do not remove old artifacts; if the disk is already full, first
-reclaim unneeded build outputs.
+## Repository boundaries
 
-```sh
-(
-  set -e
-  export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0
-  cargo test --locked --workspace --all-features
-)
-```
+| Crate | Owns |
+| --- | --- |
+| `packetcraftr-core` | Packets, codecs/reflection, bounded documents, capture formats, filters, offline analysis |
+| `packetcraftr-netio` | Provider contracts and native resources |
+| `packetcraftr` | Live workflows, policy, preparation, budgets, evidence |
+| `packetcraftr-cli` | Arguments, provider composition, rendering, machine output |
+
+Keep types, behavior, and tests with their domain owner. Core stays independent
+of native I/O and workflows. Split modules by responsibility; use `foo.rs` beside
+`foo/`, never `mod.rs`. Expose capabilities, keep assembly private, and avoid
+equivalent public paths.
+
+Netio's `platform/` contains native code grouped by capability then backend;
+shared backend plumbing belongs in `platform::common`. Checks needing no native
+call belong to the capability module. Platform selection stays in `build.rs` and
+`platform::dispatch`; code outside `platform/` uses emitted capability cfgs such
+as `native_route`, never direct `target_os` gates.
+
+Only `packetcraftr-netio/src/platform/` may contain unsafe code. Every unsafe block
+has a `SAFETY` comment explaining its specific invariant; other crate roots forbid
+unsafe. Prefer typed errors preserving their original sources.
+
+Preserve untrusted-input and resource checks, wire values, unknown/malformed
+bytes, capture scope, and timestamps. Live operations authorize before active
+discovery and check final endpoints and bytes before transmission. Use finite
+budgets; examples and tests use loopback, documentation addresses, or isolation.
+
+## Tests
+
+Unit tests live beside their owner in one inline `mod tests` or `<module>/tests.rs`;
+in-crate helpers use `test_support`. Public regressions live in
+`crates/*/tests/integration/`, declared by `main.rs` so each crate links one binary.
+Shared integration helpers belong in `tests/common/`.
+
+| Suffix | Purpose |
+| --- | --- |
+| `*_contracts.rs` | Public behavior and meaningful failure paths; default choice |
+| `*_conformance.rs` | Schema and wire formats |
+| `*_matrix.rs` | Exhaustive combinations |
+| `*_smoke.rs` | Shallow checks over real inputs, including fuzz corpora |
+
+Top-level test binaries are reserved for process/crate-root requirements:
+`native_isolated.rs`, process-wide counter suites, and `fuzz_smoke.rs` including
+fuzz-target sources. Avoid source-layout tests and duplicate verification. Run a
+focused regression with `cargo test --locked -p CRATE --test integration MODULE::`.
 
 ## Optional tools
 
-Native and service-identification acceptance tests require both IPv4 and IPv6
-loopback. Ensure `127.0.0.1` and `::1` are available before running them; an
-unavailable address family cannot count as completed runtime evidence.
-
-API documentation as CI builds it, with warnings denied:
+Build Rust docs with warnings denied for portable, pcap-free, and full-native
+profiles, as CI does:
 
 ```sh
-export RUSTDOCFLAGS="-D warnings"
-cargo doc --locked --workspace --no-default-features --no-deps --document-private-items
-cargo doc --locked --workspace --no-default-features --features packetcraftr-cli/native-layer3 --no-deps --document-private-items
-cargo doc --locked --workspace --all-features --no-deps --document-private-items
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --all-features --no-deps --document-private-items
 ```
 
-- `cargo bench -p packetcraftr-core` runs the benchmarks.
-- `cargo deny --locked check` and
-  `cargo deny --locked --manifest-path fuzz/Cargo.toml check advisories` apply
-  the dependency policy that `dependency-policy.yml` runs weekly, on dependency
-  changes, and again at release preflight.
-- YAML dependency upgrades must also pass
-  `cargo test --locked -p packetcraftr-core --lib document::parse`, which pins
-  the untyped end-of-stream error the parser relies on until the YAML dependency
-  provides a typed streaming end signal.
+- `cargo bench -p packetcraftr-core` runs core benchmarks.
+- `cargo deny --locked check` and `cargo deny --locked --manifest-path fuzz/Cargo.toml check advisories` enforce dependency policy.
+- `python3 -m unittest discover -s scripts -p 'test_*.py'` checks validation scripts;
+  `python3 scripts/check-architecture.py` checks dependency boundaries.
+- YAML dependency changes also run `cargo test --locked -p packetcraftr-core --lib document::parse`.
 
 Fuzzing has its own manifest and lockfile; update both dependency graphs when
-changing shared dependencies. `fuzz.yml` runs daily and on manual dispatch (30,
-300 or 900 seconds per target; a 30-second smoke pass is not a coverage claim).
-To run locally, use cargo-fuzz and the pinned nightly:
+shared dependencies change. The pinned nightly is shared by
+[ci.yml](.github/workflows/ci.yml) and [fuzz.yml](.github/workflows/fuzz.yml).
 
 ```sh
 cargo fmt --manifest-path fuzz/Cargo.toml -- --check
@@ -106,78 +108,48 @@ RUSTFLAGS="-D warnings" cargo +nightly-2026-08-28 check --locked --manifest-path
 (cd fuzz && cargo +nightly-2026-08-28 fuzz run --target x86_64-unknown-linux-gnu ip_reassembly corpora/ip_reassembly -- -max_total_time=30)
 ```
 
-Minimize fixed crashes with `cargo fuzz tmin` and check the tiny input into the
-owning crate's regression fixtures, not only CI artifacts. Update the nightly
-pin (in `ci.yml` and `fuzz.yml`) intentionally after a local smoke and record it
-with corpus changes.
-
-`python3 scripts/benchmark-scanner.py` measures the scanner corpus
-(`docs/scanner-corpus.v1.json`, schema
-`schemas/packetcraftr.scanner-corpus.v1.schema.json`): deterministic
-injected-provider cells run through `examples/scanner_fixture` on the real
-`Client` scan/traceroute paths (never native I/O), native connect cells run
-the real CLI on loopback, and an optional pinned Nmap executable is compared
-for agreement only. Each repetition executes all 88 conditions and the report
-(JSON) records per-case observations, exact retained evidence bytes, and
-peak process RSS measured with `wait4`; it never synthesizes accuracy values —
-absent tools are recorded as unavailable.
-
-`python3 scripts/check-decode-oracle.py --binary target/release/packetcraftr`
-compares curated IPv4/IPv6/extension/fragment/TCP-option/DNS fields and TLS JA3
-with TShark 4.6.4, accounting explicitly for opaque physical fragment children;
-no live traffic is involved. `--full` adds the larger generated corpus that the
-weekly CI run uses. `scripts/build-decode-oracle.sh` builds TShark 4.6.4 from
-checksum-pinned upstream source when the exact tool is absent.
+Minimize crashes with `cargo fuzz tmin` and retain regressions with their owner.
+A short smoke campaign is not a coverage claim. Update the nightly pin after a
+local smoke and record it with corpus changes.
 
 ## Validation evidence
 
-Isolated Linux native validation, its `sudo` and subordinate-ID setup, and the
-commit-bound `native-review.yml` workflow are described in
-[native validation](docs/native-validation.md#isolated-linux-setup).
+[Native validation](docs/native-validation.md) owns prerequisites, isolation,
+reviewed workflows, and platform limits. Native/service acceptance requires both
+IPv4 and IPv6 loopback. Missing prerequisites, failed isolation, skipped checks,
+and unavailable address families do not count as completed runtime evidence.
+Reports are retained on failure as well as success; release preflight requires
+successful, clean, exact-commit push-CI evidence.
 
-Validation reports are strict: missing prerequisites, failed namespace creation
-and skipped scenarios are failures, never passing native evidence, and
-Windows/macOS privileged runtime scenarios stay explicitly unexercised. Reports
-are archived on failure as well as success, and release preflight requires
-clean, exact-commit reports from a successful push CI run.
-`scripts/validation_evidence.py` defines the content contract (evidence version
-1) that producers check before publishing success; duplicate, skipped, missing
-or contradictory results fail it. Regenerate older reports rather than editing
-or relabeling them, and update the evidence version and shared inventory
-deliberately when changing required coverage. This is an internal
-validation-artifact contract, not a product output-schema change.
+`scripts/validation_evidence.py` owns validation-artifact version 1. Duplicate,
+missing, skipped, or contradictory required results fail validation. Regenerate
+older reports; change the version and inventory deliberately rather than relabeling
+history. This internal contract is separate from product output schemas.
+
+`python3 scripts/benchmark-scanner.py` exercises the independent
+[scanner corpus](docs/scanner-corpus.v1.json) through injected scan/traceroute
+providers and native loopback connect cells. Each repetition measures 88 conditions,
+work, elapsed time, exact retained evidence, and process peak RSS. Optional pinned
+Nmap comparisons measure agreement; missing tools remain unavailable.
+
+`python3 scripts/check-decode-oracle.py --binary target/release/packetcraftr`
+compares offline fields and TLS JA3 against TShark 4.6.4; `--full` adds the weekly
+corpus. `scripts/build-decode-oracle.sh` builds the checksum-pinned oracle.
+
+Forwarding changes run the [regression harness](docs/verification-contract.md#reproduction-bundle)
+and [external consumer](docs/consumer-compatibility.md#rust-api-adoption), plus
+relevant core/CLI integration modules. Keep schemas, examples, CLI tests, migration
+notes, and release assets synchronized when machine contracts change.
 
 ## Changes and reviews
 
-Include a minimal reproduction, platform, feature profile, and sanitized
-diagnostics in bug reports. Do not post production captures or credentials.
-Native changes should cover affected unavailable-backend, stale-interface,
-timeout, cancellation, partial-I/O, accounting, and cleanup behavior using
-fake providers or isolated loopback tests. Record unavailable platform checks
-as unavailable.
+Use `tyk/{branch-name}` for coding-agent branches and focused Conventional Commits
+without `packetcraftr-` in scopes. Record user-visible and breaking changes in
+`[Unreleased]`. PRs explain the problem, impact, linked issue when available, and
+exact validation results; request applicable [CODEOWNERS](.github/CODEOWNERS) review.
 
-Scanner changes keep host observations, port inference, attempt outcomes, and
-operational failures in the separate vocabularies
-[scanner-evidence.md](docs/scanner-evidence.md) defines. Any bundled port,
-service, OS, or vendor data requires a completed provenance manifest and
-per-source license review under
-[scanner-data-policy.md](docs/scanner-data-policy.md) before it is imported.
-
-## Verification and consumer changes
-
-Changes to forwarding semantics require the regression and external-consumer
-checks described in [verification-contract.md](docs/verification-contract.md)
-and [consumer-compatibility.md](docs/consumer-compatibility.md). Run:
-
-```sh
-python3 scripts/check-external-consumer.py
-python3 scripts/forwarding-regression.py --binary target/debug/packetcraftr
-cargo test --locked -p packetcraftr-core --test integration -- forwarding_verification_contracts:: invocation_deadline_contracts:: pipeline_limit_contracts::
-cargo test --locked -p packetcraftr-cli --test integration -- forwarding_verification_contracts:: aggregate_schema_conformance::
-cargo fmt --manifest-path fuzz/Cargo.toml -- --check
-```
-
-Native changes require applicable
-[reviewed native evidence](docs/native-validation.md); platform compilation is
-not substituted for runtime validation. Required environment reviewers and merge
-protections are administrator-owned configuration.
+Native changes cover unavailable backends, stale interfaces, timeouts, cancellation,
+partial I/O, accounting, and cleanup with fake providers or isolated fixtures.
+Scanner changes retain the separate [evidence vocabularies](docs/scanner-evidence.md).
+Bundled scanner data needs a completed [provenance review](docs/scanner-data-policy.md).
+Administrator-owned reviewers and merge protections govern privileged validation.

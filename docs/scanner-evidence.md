@@ -1,69 +1,21 @@
 # Scanner evidence and claims model
 
-This document is the [M1][m1] evidence model. It defines the four claim
-vocabularies scanner milestones use and assigns every field of the current
-scan output to exactly one of them, so later milestones extend a layer instead
-of overloading one. It describes behavior as of the reviewed revision; it adds
-no scanner capability and changes no output.
-
-The four vocabularies are:
-
-- **Attempt observations.** What one probe or socket operation observed: a
-  correlated reply, an ICMP error, silence within its window, a late or
-  unattributed frame, or a socket call's own result.
-- **Port inference.** A scan-method-dependent conclusion drawn from one
-  endpoint's attempts, together with the rule that produced it. Output/v8
-  publishes it as each endpoint's `inference` ([port inference](#port-inference)).
-  Conflicting attempts remain visible beside it.
-- **Host observations.** Evidence that a host answered, by which probe, and
-  whether the evidence is direct, a cached neighbor entry, or a possible proxy
-  reply. Output/v9 publishes one host record per target
-  ([host observations](#host-observations)).
-- **Operational failures.** A missing backend, a refused permission, a
-  policy limit, an exhausted budget, an operation deadline, or a
-  cancellation. These are never expressed as network observations.
-
-The scan's [traceroute stage](#traceroute-stage) adds no vocabulary: its probes
-are attempt observations, its host `status` and `completion` are host
-observations, and a reused hop is a claim kept apart from them.
-
-Everything else in the output is *metadata supporting a layer*, not a fifth
-claim vocabulary: coordinates that identify which attempt a record describes,
-timestamps and counters that bound the observation, routing and capture
-provenance, retained bytes, and accounting totals. The field tables below name
-each field's role explicitly.
+Four vocabularies stay distinct: **attempt observations**, **method-dependent
+port inference**, **host observations**, and **operational failures**. Coordinates,
+timing, routes, capture state, and accounting support them; none independently
+proves identity. This guide defines meanings; the [consumer policy](consumer-compatibility.md)
+owns versioned shapes and the [roadmap](roadmap/README.md) owns acceptance.
 
 ## Attempt observations
 
-One record per probe or socket attempt. The claim-bearing fields are the
-status/outcome, the classification, the reason, the responder, and any
-subordinate application check; everything else on the record is coordinate or
-provenance metadata for that observation.
-
 ### Packet scan attempts (`scan` events and `endpoints[].probes[]`)
 
-Published as the `probe` stream event and as `endpoints[].probes[]` in the
-aggregate `scan` result, from
-[`ProbeEvidence`][scan-report] via [`output::scan::Probe`][scan-output].
-
-| Field | Role |
-| --- | --- |
-| `sequence` | Metadata: operation-local coordinate identifying the attempt. |
-| `stage` | Metadata: `discovery` or `scan`; both stages share one sequence space. |
-| `protocol` | Metadata: derived from transport and address family (`tcp`, `udp`, `icmpv4`, `icmpv6`). |
-| `destination`, `destination_port` | Metadata: the addressed endpoint the attempt targeted. |
-| `attempt` | Metadata: retry ordinal for this endpoint. |
-| `status` | Attempt observation: `response` if a checksum-valid, protocol-consistent reply was attributed within the attempt's window, else `timeout`. |
-| `classification` | Attempt observation: the per-attempt value from the classification vocabulary below. |
-| `responder` | Attempt observation: the address that actually answered. It can differ from `destination` — an ICMP error reports the intermediate hop that sent it, and a next-hop neighbor answer is not the target answering. |
-| `sent_at`, `received_at`, `latency` | Metadata: submission-start timing of the attempt and ingress of its attributed reply; latency includes the submission interval, not precise wire transit. |
-| `frame` | Metadata: the retained captured reply bytes, when retained evidence kept them. |
-| `reason` | Attempt observation: the fixed correlation string behind the classification (see below), or `no checksum-valid, protocol-consistent response before the deadline` for silence. |
-| `application` | Attempt observation, subordinate: the UDP profile check outcome described below. |
-
-The per-attempt `classification` values are attempt observations with fixed
-meanings from [`classify_response`][scan-evidence] over
-[`correlation::observe`][correlation]:
+A probe records operation-local sequence, discovery/scan stage, endpoint/transport,
+retry ordinal, submission/ingress time, and optional retained frame/application
+check. Status response requires a checksum-valid protocol-consistent uniquely
+attributed reply in its window; otherwise timeout. Responder is the actual
+answering address, not necessarily destination. Reason/classification describe
+that attempt, not service identity or aggregate inference:
 
 | Correlated response | `classification` | `reason` |
 | --- | --- | --- |
@@ -78,216 +30,112 @@ meanings from [`classify_response`][scan-evidence] over
 | ICMP time exceeded before the endpoint | `filtered` | `ICMPv4 time exceeded before reaching the endpoint` / `ICMPv6 time exceeded before reaching the endpoint` |
 | No valid response inside the window | `timeout` | `no checksum-valid, protocol-consistent response before the deadline` |
 
-Responses carrying checksum-failure diagnostics produce no observation. A
-captured frame that fails to decode is retained as `undecoded` evidence; a
-decoded frame that matches no sent probe uniquely is `unsolicited` and is not
-published as probe evidence. Neither overrides a `timeout`: silence inside the
-window is itself the observation. A response arriving after its round's window
-is unattributed evidence, not a late `received`.
+Checksum failures produce no observation. Undecodable captures remain undecoded;
+unsolicited/nonunique, late, duplicate, and ambiguous replies cannot overwrite
+a timeout or count as an in-window received response.
 
 ### Connect scan attempts (`connect_probe` events and `endpoints[].probes[]`)
 
-Published as the `connect_probe` stream event and as `endpoints[].probes[]` in
-the `tcp_connect` aggregate, from [`connect::ProbeEvidence`][connect-report]
-via [`output::scan::connect::Probe`][connect-output].
+Connect evidence has numeric address/port, sequence/stage/attempt, attempted,
+connect_succeeded (null without timely result), timing, local socket, and optional
+error kind/OS code/message. `method` is tcp_connect, never wire capture.
+`attempted=false` creates no network claim.
 
-| Field | Role |
+| Outcome | Observation / legacy classification |
 | --- | --- |
-| `sequence` | Metadata: operation-local coordinate. |
-| `stage` | Metadata: `discovery` or `scan`, as for packet attempts. |
-| `address`, `port` | Metadata: the socket endpoint attempted. |
-| `attempt` | Metadata: retry ordinal. |
-| `attempted` | Attempt observation: whether the provider issued the socket call at all. `false` means no network claim exists for this record. |
-| `connect_succeeded` | Attempt observation: the socket call's result; `null` means no result was available by the deadline. |
-| `outcome` | Attempt observation: the connect outcome vocabulary below. |
-| `classification` | Attempt observation: `outcome` mapped onto the shared six-value classification vocabulary (`connected`→`open`, `refused`→`closed`, `timed_out`/`deadline_expired`→`timeout`, `unreachable`→`unreachable`, `local_error`→`unknown`). |
-| `scheduled_at`, `finished_at`, `elapsed` | Metadata: attempt timing. |
-| `local` | Metadata: the local socket address the kernel bound. |
-| `error` | Metadata: the failing socket call's `kind`, `os_code`, and `message`, when a socket error produced the outcome. |
-| `method` (on `connect_probe` events and the summary) | Metadata: constant `tcp_connect`. |
+| connected | Handshake completed with matching peer / open |
+| refused | ConnectionRefused / closed |
+| timed_out | Socket call TimedOut, including provider timeout / timeout |
+| unreachable | NetworkUnreachable or HostUnreachable / unreachable |
+| local_error | Other I/O error, including provider Interrupted / unknown |
+| deadline_expired | Attempt elapsed/cancelled without timely result, or returned too late / timeout |
 
-The connect `outcome` values are set in
-[`connect::engine`][connect-engine] and [`Outcome::classification`][connect-report]:
-
-| `outcome` | Meaning |
-| --- | --- |
-| `connected` | The TCP handshake completed; the returned peer endpoint matched the attempt. |
-| `refused` | The socket call failed with `ConnectionRefused`. |
-| `timed_out` | The socket call itself failed with `TimedOut` — a socket timeout observed by the connect operation, including the provider's own per-connect deadline converted to that kind. |
-| `unreachable` | The socket call failed with `NetworkUnreachable` or `HostUnreachable`. |
-| `local_error` | The socket call failed with any other I/O error, including provider cancellation converted to `Interrupted`. |
-| `deadline_expired` | The attempt's deadline elapsed: either the in-flight connect was cancelled when its timeout passed with no socket result, or the socket call returned but took longer than the attempt timeout. |
-
-`timed_out` and `deadline_expired` are deliberately distinct: the first is the
-socket call's own timeout result, the second is the operation's deadline
-ending the attempt. Neither is the operation-level deadline or cancellation,
-which are operational failures published as errors, not attempt outcomes.
+Socket timeout and attempt deadline are distinct. Operation deadline/cancellation
+are operational errors, not these outcomes.
 
 ### Application checks on attempts
 
-The `application` member carries a subordinate attempt observation from an
-operator-supplied [UDP profile document][udp-document]:
-
-| `status` | Meaning |
+| UDP profile status | Meaning |
 | --- | --- |
-| `not_observed` | The profile was configured but no UDP application reply was observed (or the reply's addressing did not reverse the request's outer IP/UDP tuple). |
-| `unchecked` | A UDP reply was observed and the profile configures no response checks. |
-| `confirmed` | The configured response checks (DNS header/question echo or bounded byte checks) matched the reply payload. |
-| `rejected` | The reply payload was observed and the configured checks did not match. |
+| not_observed | No correctly addressed UDP application reply |
+| unchecked | Reply observed; no configured response checks |
+| confirmed | Configured DNS/header/question or bounded byte checks matched |
+| rejected | Reply observed; configured checks did not match |
 
-`profile` names the operator document and `reason` carries the check's own
-string. `confirmed` means the configured checks matched — it is never an
-authentication or an identity claim, and a rejection is a failed check on that
-attempt, not a verdict on the service.
+Profile/reason identifies the check. Confirmation is not authentication or
+identification; rejection is not a service verdict.
 
 ## The endpoint aggregate is not port inference
 
-Each `endpoints[]` record groups the attempts for one
-`(address, transport, port)` (packet scan) or socket address (connect scan) under `address`, `transport`, `port`,
-and `probes` — all coordinate metadata — plus one `classification`.
-
-That endpoint `classification` is the **highest-ranked attempt outcome** the
-endpoint collected, under the fixed order
-`open > closed > filtered > unreachable > unknown > timeout`
-([`Classification::rank`][scan-report], applied by `promote`). It is a legacy
-convenience aggregate over attempt observations. It is **not** the port
-inference vocabulary: it has no scan-method semantics, carries no inference
-rule, and must not be read as one. Scan-dependent inferred states publish
-beside it as `inference` in output/v8, per the
-[consumer compatibility policy][compatibility].
-
-The `complete` stream event's `counts` (`open`, `closed`, `filtered`,
-`unreachable`, `unknown`, `timeout`) tally the winning classification per
-endpoint — the same highest-ranked outcome the endpoint aggregate reports —
-not every attempt ([`scan::engine`][scan-engine] iterates the per-endpoint
-winners). They are accounting metadata over the attempt vocabulary, not new
-claims.
+Endpoint identity is address/transport/port/resolved scope. Legacy classification
+chooses the highest-ranked attempt: open > closed > filtered > unreachable >
+unknown > timeout. Counts tally endpoint winners, not attempts. This deterministic
+summary must not be substituted for the separate method-dependent inference.
 
 ## Transmission and capture metadata
 
-These fields carry provenance for the layers above; none of them is a claim
-about the target:
+`probe_sent` confirms native acceptance of the exact reported frame and
+materialized route/neighbor evidence; it proves neither wire departure nor target
+receipt. Undecoded frames preserve timestamp/length/link/interface/direction/bytes;
+diagnostics qualify integrity. Times retain second/nanosecond pairs; durations
+and counters use documented nonnegative units without inferred clock sync.
 
-- `probe_sent` events (`Sent`): the confirmed transmission record — `frame`
-  (`bytes_hex`, `length`) is the actual wire bytes sent and `route` is the
-  materialized route plan and any neighbor-resolution evidence (`plan.route`,
-  `mode`, `lookup_destination`, `final_destination`, `visited_destinations`,
-  `packet_source`, `neighbor_source`, `neighbor_target`, `destination_mac`,
-  `source_mac`, `neighbor_vlan_tags`, `synthesized_ethernet`, and
-  `neighbor.mac_address`, `attempts`, `cache_hit`, `captured`,
-  `evidence_truncated`, `capture_statistics`). `udp_profile` names the
-  operator document that shaped the payload. A sent record proves the provider
-  committed the materialized bytes it reports — it does not prove a physical
-  packet left the host, much less that the target received one.
-- `undecoded` events and the aggregate `undecoded` list: retained captured
-  frames (`timestamp`, `captured_length`, `original_length`, `link_type`,
-  `interface`, `direction`, `bytes_hex`) that could not be decoded within
-  bounds — preserved wire evidence, not an observation.
-- `diagnostic` events and the envelope `diagnostics` list: decoder and
-  executor diagnostics (`code`, `severity`, `message`, `layer`, `field`) such
-  as checksum failures — integrity metadata about the evidence.
-- Timestamps (`sent_at`, `received_at`, `scheduled_at`, `finished_at`, and
-  frame `timestamp`) publish as `unix_seconds`/`nanoseconds` pairs; durations
-  (`latency`, `elapsed`, `planned_duration`) and `dropped`/`received` counters
-  are nonnegative values in their documented units.
-- `rtt` (`sent`, `received`, `lost`, `min`, `avg`, `max`): round-trip
-  accounting. `sent` counts confirmed transmissions, `received` replies
-  attributed inside their windows, and `lost` is `sent - received`, which
-  includes replies the capture backend dropped before delivery.
-- `stats` on the envelope (`packets_attempted`, `packets_completed`, `bytes`,
-  `elapsed`, `capture`): execution accounting. The nested `capture` counters
-  (`received_frames`, `received_bytes`, `dropped_frames`, `dropped_bytes`,
-  `overflow_events`, `receiver_dropped_frames`) bound how much evidence the
-  capture path delivered or lost.
-- `resolved_addresses`, `target`, `planned_duration`, `socket_stats`
-  (`connections_scheduled`, `connections_attempted`, `connections_succeeded`,
-  `elapsed`, `rtt`), a connect scan's `reverse_dns_stats` (the lookups'
-  execution accounting, which socket statistics cannot hold), and the
-  envelope fields `schema`, `command`, `mode`, `sequence`, `event`,
-  `resources`: operation metadata.
+RTT sent counts confirmed transmissions; received counts attributed in-window
+replies; lost=sent−received includes backend loss. Execution/capture counters report
+attempted/completed packets, bytes, queue/receiver drops, and overflow. Connect
+socket and PTR stats remain distinct. Unavailable/zero drop counters do not prove
+complete acquisition.
+
+### Successful native submission intervals
+
+`transmit::Timing::freshness_marker()` starts successful exact-byte native
+submission; `completed()` marks acceptance return. Socket setup precedes the
+start. Matching captures inside the interval are eligible subject to integrity,
+identity, ingress, and deadline checks. Missing monotonic ingress or older captures
+are ineligible. Neither marker proves exact wire time, causality, or host identity;
+latency includes submission time.
 
 ## Operational failures
 
-Policy refusals, missing backends, budget exhaustion, operation deadlines, and
-cancellation publish as the error envelope (`status: "error"` with `code`,
-`kind`, `message`, `causes`, `context`, `remediation`), never as attempt or
-host observations. In a stream the error is the terminal `error` event.
+Policy, capability, budget, operation-deadline, and cancellation failures use error
+envelopes/terminal errors, never network/host observations. `policy.*`/
+`capability.*`, `io.*`, and `internal.*` retain different classifications/sources.
+A socket TimedOut or attempt deadline is not policy.scan_duration_limit or
+io.cancelled.
 
-A failed packet scan attaches its partial evidence under `error.scan`
-([`Failure`][scan-output] from [`PipelineFailure`][scan-error]):
-
-| Field | Role |
-| --- | --- |
-| `stats` | Metadata: execution accounting up to the failure. |
-| `pending[].sent` | Metadata: each confirmed transmission still awaiting attribution (a `probe_sent`-shaped record). |
-| `pending[].response` | Metadata: a captured response for that probe that was not yet attributed, if one was retained. |
-| `failed_probe` | Metadata: the probe coordinates (`sequence`, `stage`, `destination`, `destination_port`, `transport`, `attempt`) at which execution failed. |
-| `capture_sources[]` | Metadata: per-source capture state — `interface` (`name`, `index`), `ready`, `shutdown_confirmed`, `statistics_valid`, `statistics` — recording how much evidence the failure preserved. |
-
-Error codes keep failure kinds distinct from observations: authorization and
-policy failures report `policy.*`/`capability.*` codes, backend and socket
-failures `io.*`, and incoherent evidence `internal.*`. A socket call that
-timed out (`timed_out`) or an attempt whose deadline expired
-(`deadline_expired`) stays an attempt outcome; the operation deadline
-(`policy.scan_duration_limit`) and cancellation (`io.cancelled`) are
-operational failures and are never written as `timeout` observations.
+Partial `error.scan` keeps execution stats, pending confirmed sends/possible
+responses, failed-probe coordinates/stage, and each capture source's readiness,
+shutdown confirmation, statistics validity/counters. Failure never erases prior
+accepted evidence or implies absent traffic.
 
 ## v7 scopes, target lists, and retention charges
 
-`packetcraftr.output/v7` carries every v6 meaning unchanged and adds two
-published shapes. A `scope` object (`zone` declaration text plus the resolved
-`interface` identity) can appear on scan and connect probes, endpoints, sent
-evidence, and `error.scan` failure records; it is part of target identity —
-the same address on different interfaces is a different target — not a fifth
-claim vocabulary. `retained_evidence_bytes` on the raw scan aggregate and
-`complete`, connect `socket_stats`, and the traceroute report is an
-accounting field: the exact retained wire-frame bytes (raw, traceroute) or
-per-probe struct plus error-string charge (connect), not classification
-evidence.
-
-`scan --list` publishes `method: "target_list"` records: aggregate results
-and `target` stream records carry each selected `address`, optional `scope`,
-and every `origins` entry (`index`, `source`, and manifest `line`), plus
-`duplicates` and `resolution_performed`. `resolution_performed: true` means
-DNS resolution ran during planning and may have sent traffic; it is
-operational metadata, not a port-state claim.
+Declared zone/resolved interface scope is target identity, not another claim
+vocabulary. Same address on different interfaces is distinct. Target-list records
+retain address/scope, every declaration origin/index/line, duplicates, and
+resolution_performed. Listing sends no target/neighbor packets; authorized hostname
+resolution is not network-free.
+Retained_evidence_bytes charges exact retained wire bytes for raw/trace and probe
+structures/error strings for connect, not classification, total allocation, or RSS.
+These v7 additions persist in current v13.
 
 ## v8 port planning and inference
 
-`packetcraftr.output/v8` ([M6][m6]) carries every v7 meaning unchanged and adds:
-
-| Field | Role |
-| --- | --- |
-| `plan.method` | Metadata: the `requested` and `selected` scan method, and the `reason` automatic selection chose it. An explicit method is never replaced. |
-| `plan.port_catalog` | Metadata: the catalog data set and version that names, presets, and hints came from. |
-| `plan.excluded_endpoints` | Metadata: scan endpoints removed by `--exclude-ports` after expansion and before planning. |
-| `plan.discovery.excluded_endpoints` | Metadata: discovery endpoints removed by `--exclude-ports` after expansion and before planning. |
-| `plan.curated_udp_payloads` | Metadata: the curated payload data set and version, and the UDP ports where it was `applied` or `overridden` by an operator profile. |
-| `endpoints[].port_hint` | Metadata: the catalog name for the endpoint's transport and port. It is a hint, not service identification. |
-| `endpoints[].inference` | Port inference: the [inferred state](#port-inference). |
-| `unattributed[]` | Attempt observation: a correlated frame no attempt outcome carries (`late`, `duplicate`, or `ambiguous`), with the probe `sequence` when one probe is implicated. |
-| `endpoint` / `connect_endpoint` events | Metadata: the endpoint aggregate and inference, naming its probe sequences instead of repeating the attempts. |
-| `ports` (target list) | Metadata: the exact expanded endpoints a scan of the selection would probe. |
-
-Unattributed frames share the `--max-undecoded` count and the evidence frame
-and byte budgets with undecodable frames; the first one omitted warns
-`scan.unattributed_limit`. A duplicate is the losing reply for a probe that
-also has a winning one, a late reply arrived after its probe's window or
-outcome, and an ambiguous reply correlates with more than one probe. None
-changes an attempt outcome or an inference.
+Plans publish requested/selected method, automatic reason, catalog/version,
+exclusions, and curated UDP applied/overridden ports. Port hints are names, not
+identification. Explicit raw/connect methods never fall back; automatic selection
+reads build capture/transmit capability, not runtime privilege. Typed mixed
+TCP/UDP endpoints share operation budgets and preserve transport identity.
+Late/duplicate/ambiguous frames are unattributed evidence. List mode may publish
+ports. These v8 additions persist in current v13.
 
 ## Port inference
 
-An inference concludes one endpoint's state from all of its attempts. It is
-published beside, never instead of, the attempts' own outcomes. Each attempt
-maps to one rule by the scan method; the highest-ranked rule decides the
-`state`, and the earliest attempt wins a tie, so delivery order never changes
-the conclusion. Every attempt's probe sequence then lands in exactly one list:
-
-- `supporting`: its own rule concludes the decided state;
-- `unanswered`: it was silent and silence concludes a different state;
-- `conflicting`: its reply concludes a different state; or
-- `failed`: an operational failure, which concludes no state.
+Inference uses all attempts beside their original outcomes. Highest-ranked rule
+wins; earliest attempt breaks a tie, independent of delivery order. Every sequence
+belongs to exactly one partition: supporting (same concluded state), unanswered
+(silence concluding another state), conflicting (reply concluding another state),
+or failed (operational, no state).
 
 | Rank | TCP SYN (raw TCP) | UDP (raw UDP) | TCP connect |
 | --- | --- | --- | --- |
@@ -299,215 +147,77 @@ the conclusion. Every attempt's probe sequence then lands in exactly one list:
 | 1 | `tcp_syn.silence` → `filtered` | `udp.silence` → `open_or_filtered` | `tcp_connect.timed_out` → `filtered` |
 | 0 | — | — | `local_error` or `deadline_expired` → no state, rule `operational_failure` |
 
-The rule is scan-dependent where the attempt vocabulary is not. An ICMP port
-unreachable is a `closed` attempt classification for both transports, but it
-infers `closed` only for UDP; for a TCP SYN it means a device refused on the
-port's behalf, so the inference is `filtered`. A silent UDP port stays
-`open_or_filtered` until a reply or ICMP error decides it, and a silent
-attempt beside a decisive reply is `unanswered`, not a conflict. ICMP echo
-endpoints are portless and carry no inference. When every attempt failed
-operationally, `state` is absent and the rule is `operational_failure`: a
-socket deadline or exhausted local capacity is never a port state. A
-connect scan retries a connection the socket provider has no capacity to admit
-instead of recording it.
+A port-unreachable classification is closed for both raw transports, but SYN
+inference is filtered while UDP inference is closed. Silent UDP infers
+open_or_filtered; beside a decisive reply, silence is unanswered, not conflict.
+Echo is portless with no inference. Operational-only attempts have absent state
+under operational_failure. Connect capacity backpressures, never invents a state.
 
-PacketcraftR's labels map to Nmap's for comparison only:
-
-| PacketcraftR | Nmap |
+| PacketcraftR | Nmap comparison only |
 | --- | --- |
-| `open`, `closed`, `filtered` | the same names |
-| `open_or_filtered` | `open\|filtered` |
-| `unknown` | no equivalent label |
-| state absent (`operational_failure`) | no equivalent label |
+| open / closed / filtered | Same names |
+| open_or_filtered | open\|filtered |
+| unknown / absent operational state | No equivalent |
 
-PacketcraftR has no `unfiltered` label, which needs an ACK or window scan
-([M12][m12]), and no `closed|filtered`, which is idle-scan specific.
+Unfiltered awaits [ACK/window diagnostics](roadmap/m12-tcp-diagnostic-scans.md);
+idle-specific closed|filtered is outside scope.
 
 ## Host observations
 
-[M5][m5] host discovery publishes one record per selected target, in selection
-order: `hosts[]` in raw scan results and connect reports, and a `host` stream
-record before `complete` ([library][discovery-host], [output][host-output]).
-Host records use their own fields instead of re-encoding the attempt
-`classification`, `responder`, or `reason` of the discovery probes they cite.
+Discovery publishes host-order hosts/host records separately from attempt fields.
 
-| Field | Role |
+| Field | Meaning |
 | --- | --- |
-| `discovery` | Host observation: `responded` when at least one reason exists, `no_response` when discovery ran and none does, `not_requested` when the request omitted discovery, and `skipped` when it skipped discovery explicitly. |
-| `scan` | Metadata: `scanned`, `skipped` (discovery found no response and the request left such hosts out), `incomplete` (the host's own deadline prevented or truncated intended adaptive work; never-sent attempts publish no outcome), or `not_requested` (discovery-only). |
-| `reasons[]` | Host observation: why the host counts as responded. |
-| `reasons[].kind` | The reply behind the reason: a discovery probe's typed reply (`icmp_echo_reply`, `tcp_syn_ack`, `tcp_reset`, `udp_payload`, `icmp_port_unreachable`, and the other attempt replies), `tcp_connected` or `tcp_refused` from an ordinary socket, or `neighbor_reply` or `neighbor_cache`. |
-| `reasons[].evidence` | `wire` for a captured reply, `socket` for an operating-system connect result, and `cache` for a neighbor cache entry. |
-| `reasons[].basis` | `direct` for the host's own answer, `cached` for a neighbor cache entry an earlier reply left, and `possible_proxy` for a link address that also answered for another address of the same family on the same interface, as a target or as a gateway. |
-| `reasons[].probe`, `link_address`, `observed_at` | Metadata: the discovery probe sequence or the neighbor link address the reason rests on, and when it was observed, absent for a reply whose capture carried no wall-clock time. |
-| `neighbor` | Host observation: the explicit ARP or NDP outcome (`resolved`, `silent`, `routed`, or `not_applicable`), the `interface` the host's route selected, the request `attempts`, when it was `observed_at` (absent for a reply whose capture carried no wall-clock time), the host's `link` when resolved, and the `next_hop` when routed. A link `entry` is `fresh` or `cached`. |
-| `reverse_dns` | Enrichment observation: the PTR question, its status and outcome, and the `names` the server answered. The scan's evidence byte limit bounds the names kept across every lookup; `names_truncated` marks an answer whose later names it dropped. |
-| `probes` | Metadata: the discovery probes, embedded in JSON and listed by sequence in `host` stream records. |
+| discovery | responded with a reason; uncertain no_response; not_requested; explicitly skipped |
+| scan | scanned, discovery-based skipped, adaptive incomplete, discovery-only not_requested |
+| reasons | Reply kind with wire/socket/cache evidence and direct/cached/possible_proxy basis |
+| probe / link_address / observed_at | Supporting sequence/link/time; unknown capture time stays absent |
+| neighbor | resolved/silent/routed/not_applicable, selected interface, attempts/time, fresh/cached link or gateway next_hop |
+| reverse_dns | PTR status/outcome/names, with names_truncated under shared evidence limit |
+| probes | Embedded discovery probes in JSON; their sequences in stream records |
 
-The record keeps these rules:
+Only target-sourced replies give host reasons. Routers' errors stay on probes;
+closed-port resets, refusals, and target port-unreachable can prove responsiveness.
+Silence is uncertain; not_requested/skipped are not measurements. Sockets expose
+endpoint results, not the answering device.
 
-- A reason needs a reply from the target itself. A discovery probe's reply
-  from another responder, such as a router's ICMP error, is kept on the probe
-  but gives the host no reason.
-- A TCP reset, an ICMP port unreachable from the host, and a refused
-  connection are host responsiveness even though the port is closed.
-- `no_response` means the host stayed silent to every selected discovery
-  probe within its budget. It is uncertain, never absent.
-- `not_requested` and `skipped` are labels, not measurements.
-- A routed target is sent no neighbor request. Its gateway appears under
-  `neighbor.next_hop`, with a link address only when the neighbor cache
-  already holds one, and never as the target's link or a reason. A probe to
-  a routed target still resolves the gateway before its stage sends any
-  probe, and that request is sent only when the policy authorizes the
-  gateway like any destination; it counts in `stats`. A target
-  whose own neighbor reply carries the same link address as another address
-  of the same family on the same interface, whether a target or a next hop,
-  is flagged `possible_proxy`; PacketcraftR does not assert a cause. A
-  dual-stack host answering for one IPv4 and one IPv6 address, or a gateway
-  that is itself a target, stays `direct`.
-- Ordinary-socket discovery (`--connect`) publishes `socket` evidence only.
-  The operating system reports the endpoint's own answer; which device sent it
-  is not observable through a socket.
-- Reverse names and link addresses are observations. They are never
-  authenticated identity, and no vendor label is published until a vendor
-  data set has a provenance record under the [data policy][data-policy].
-
+Routed targets send no target neighbor request. Cached gateway link is next_hop,
+not target identity/reason; any needed active gateway resolution is independently
+authorized and charged. Same-family addresses sharing a link/interface within
+one request may be possible_proxy; cause is unknown. IPv4+IPv6 on one host and
+a gateway also selected as target do not alone imply proxying. PTR/MAC observations
+are unauthenticated; no unreviewed vendor label is attached.
 
 ## Scheduling summary
 
-Every raw scan result, NDJSON `complete` record, and connect report carries a
-required `scheduling` object ([library][adaptive], [output][scheduling-output]).
-`mode` is `fixed` or `adaptive`; `fixed` is the default order and `adaptive` is
-the opt-in scheduler that interleaves hosts, estimates a bounded RTO per host,
-spaces retries with backoff, and grows or halves its admission window
-inside `min_window`..=`max_in_flight`.
+Required scheduling describes fixed/adaptive mode, effective config, peak pending
+window, actual retries, typed conditions, incomplete host identities, and connect
+operation/process ceilings. Configured/observed concurrency is not throughput.
+Unsent/omitted entries count neither as starts nor completions/network outcomes.
+Preparation, pacing, callbacks, and transmission spend adaptive host deadlines.
 
-| Field | Role |
-| --- | --- |
-| `mode` | `fixed` or `adaptive`. |
-| `adaptive` | Metadata: the effective adaptive configuration (`min_timeout`, `max_timeout`, `min_window`, `initial_window`, `host_timeout`, `retry_backoff`, `max_backoff`); absent in fixed mode. |
-| `observed_peak_window` | Metadata: the largest count of probes pending at once the operation actually held, not a throughput rate. |
-| `retries_started` | Metadata: additional probe starts after the first, in either mode. Omitted and never-sent entries count neither here nor as completions. |
-| `conditions[]` | Inferred observations; each is typed and names its caveat. `suspected_response_rate_limit` publishes `host`, `control_responder`, `completed`/`replies`/`losses` counts, and cited `control_sequences`/`loss_sequences`; filtering or ordinary loss remain alternative explanations. It never decides a port's classification. |
-| `incomplete[]` | Metadata: scoped host identities (`address`, optional `scope`) whose deadline prevented or truncated intended work, or whose admitted connect worker never called its provider. |
-| `operation_ceiling` | Metadata: the operation's own connect ceiling (`max_in_flight`), connect scans only. |
-| `process_ceiling` | Metadata: the process-wide connect worker ceiling, connect scans only. Neither ceiling claims achieved concurrency. |
-
-An adaptive per-host deadline bounds preparation, pacing, and transmission:
-preparation and a delay inside an output callback consume the host's
-allowance, and an entry whose deadline is spent before its frame transmits is
-omitted — it sends nothing and publishes no probe evidence; the host reports
-`scan: "incomplete"`.
-
-Every discovery probe carries `stage: "discovery"` and every scan probe
-`stage: "scan"` in one sequence space. Endpoints and their `counts` hold only
-scan-stage probes; discovery probes appear only in host records.
+Suspected_response_rate_limit cites host/responder/counts/control+loss sequences;
+filtering or ordinary loss remain alternatives and classifications never change.
+Discovery/scan share a sequence space; endpoints/counts cover scan only.
+[M7](roadmap/m07-adaptive-scheduling.md) owns controller constants and measurements.
 
 ## Traceroute stage
 
-[M11][m11] traces the scanned hosts after the scan, with `scan --traceroute`.
-The result is `traceroute` in scan results, with one record per scanned host
-in host order, and `traceroute_probe`, `traceroute_undecoded`, and
-`traceroute_host` stream records ([library][trace-hosts],
-[output][trace-output]). Trace probes keep the standalone traceroute's probe
-record and its `response_kind`, `responder`, and `reason`; they are attempt
-observations like the scan's own.
+Raw-only scan --traceroute traces host-order results after scan, before PTR, under
+remaining policy/duration/evidence budgets. Connect/list refuse upfront. Standalone
+trace keeps its shapes; trace probes remain attempt observations.
 
-| Field | Role |
-| --- | --- |
-| `status` | Host observation: `complete` when a probe reached the destination or drew an unreachable, `incomplete` when the hop bounds ran out first, and `not_traced` when no trace ran. |
-| `reason` | Metadata, `not_traced` only: `no_responsive_probe` (no scan observation and no fallback strategy) or `scoped_target` (a scoped address is never traced). |
-| `completion` | Host observation: `destination_reached`, `unreachable`, `maximum_hops`, or `timeout`, folded from this host's probes. |
-| `selection` | Metadata: the probe the trace used. Its `basis` is `observed` (the scan probe in `observation`) or `requested` (the fallback strategy). |
-| `selection.observation` | Metadata: the scan probe's `stage`, `sequence`, and `reply`, and when its reply was captured. |
-| `hops[]` | Attempt observations: only hops that this host's own probes observed. |
-| `reused_hops[]` | Claim, not observation: a hop an earlier host's trace observed, with its `source`, the source's `probes`, its `responders`, `observed_at`, and `age`. |
+Selection prefers target SYN/ACK, reset, then echo (lowest sequence tie). Router
+errors never select; UDP requires explicit strategy because ports change. Missing
+observation/fallback or scoped targets are not_traced, without invented probe.
+Status complete/incomplete and destination_reached/unreachable/maximum_hops/timeout
+summarize actual probes; silent hop is timeout, not absent or unreachable host.
 
-The record keeps these rules:
-
-- A probe is selected from a scan observation only when the host itself
-  replied: a TCP SYN/ACK, then a TCP reset, then an ICMP echo reply, and the
-  lowest scan sequence among equals. A router's ICMP error never selects a
-  probe, and a UDP reply never does because a UDP trace changes its
-  destination port on every probe.
-- A host with no observation and no strategy is not traced; a probe is never
-  guessed.
-- An intermediate router is never the destination: a destination reply counts
-  only when it comes from the destination itself.
-- A reused hop appears only in `reused_hops`, never as a probe, and its
-  `age` and `source` say whose observation it is and how old. It is fresh for
-  at most the requested `max_age` since its source batch was planned, within
-  one operation. On a reconvergent or equal-cost path it can name a router
-  that this host's own probes would not show.
-- A silent hop is a timeout probe, not an absent hop, and a host that ran out
-  of hops is `incomplete`, not unreachable.
-- The stage shares the scan's evidence budget: the response frames the scan
-  retained, its undecoded and unattributed frames, and
-  `retained_evidence_bytes` are deducted from the trace's evidence limits and
-  capture queues. A trace that cannot retain a hop's responses is refused with
-  a typed limit after the scan and before any trace probe; a plan in which no
-  host can be traced deducts nothing. The finalized trace collection is
-  validated before the scan sends.
-- The stage's TCP and UDP probes default to source port 49151, one below
-  the range the scan's generated UDP probes use, so a replayed scan reply
-  cannot match a trace probe's tuple.
-- A scan that sent traffic paces the trace's first batch by a full `--rate`
-  interval, and the trace marks its own sends for the lookups after it the
-  same way: pacing rides on monotonic markers, so a wall-clock `sent_at` stays
-  evidence and a clock adjustment can never collapse a wait.
-- On a link-layer route each probe may resolve a neighbor: the plan reserves
-  one request per probe inside `--traceroute-max-probes` and the operation's
-  packet and byte budgets, authorizes it like a probe, sends it once, paces
-  it on the trace's rate, and keeps its answer for the operation; the
-  requests sent count in the operation's `stats` (and `neighbor_stats` in the
-  library `Report`). Because that interval is spent inside each probe's
-  window, an automatic or link-layer trace whose `--timeout-ms` cannot
-  outlast the `--rate` interval is refused with `cli.traceroute_limit`
-  before any capture or send.
-- The trace stage numbers its probes one past the scan's last sequence
-  (`first_sequence`), so no trace identifier collides with a scan probe's,
-  and it hands the scan's exact resolved hosts over as `resolved_targets`
-  while `targets` keeps the compact declaration — a scan of more than 4096
-  hosts no longer expands to that many specs.
-- The command's absolute deadline parents every stage's own bound, so no
-  stage's setup can extend its expiry.
-- The trace and the lookups after it share the scan's policy packet and
-  byte budget: each stage runs in a `with_remaining_budget` view of the
-  allowance remaining after earlier traffic. An exhausted allowance
-  refuses tracing before capture or transmission; refused reverse lookups
-  retain failed enrichment records without sending. A trace plan in which
-  no host can be traced requires no additional allowance.
-
-[compatibility]: consumer-compatibility.md
-[connect-engine]: ../crates/packetcraftr/src/scan/connect/engine.rs
-[connect-output]: ../crates/packetcraftr-cli/src/output/scan/connect.rs
-[connect-report]: ../crates/packetcraftr/src/scan/connect/report.rs
-[correlation]: ../crates/packetcraftr/src/correlation.rs
-[data-policy]: scanner-data-policy.md
-[adaptive]: ../crates/packetcraftr/src/scan/adaptive.rs
-[discovery-host]: ../crates/packetcraftr/src/scan/discovery/host.rs
-[host-output]: ../crates/packetcraftr-cli/src/output/scan/host.rs
-[m1]: roadmap/m01-claims-evidence.md
-[m5]: roadmap/m05-host-discovery.md
-[m6]: roadmap/m06-port-planning-inference.md
-[m11]: roadmap/m11-scan-informed-traceroute.md
-[m12]: roadmap/m12-tcp-diagnostic-scans.md
-[scan-engine]: ../crates/packetcraftr/src/scan/engine.rs
-[scan-error]: ../crates/packetcraftr/src/scan/error.rs
-[scan-evidence]: ../crates/packetcraftr/src/scan/evidence.rs
-[scan-output]: ../crates/packetcraftr-cli/src/output/scan.rs
-[scan-report]: ../crates/packetcraftr/src/scan/report.rs
-[scheduling-output]: ../crates/packetcraftr-cli/src/output/scan.rs
-[trace-hosts]: ../crates/packetcraftr/src/traceroute/hosts.rs
-[trace-output]: ../crates/packetcraftr-cli/src/output/traceroute/hosts.rs
-[udp-document]: ../crates/packetcraftr-core/src/document/udp_profiles.rs
-
-### Successful native submission intervals
-
-`transmit::Timing::freshness_marker()` is the start of a successful exact-byte
-native send; `completed()` is when acceptance returned. Matching captures inside
-that interval are eligible, subject to integrity, identity, ingress, and deadline
-checks. Raw socket creation/configuration precedes the start marker. Missing
-monotonic ingress or captures older than that marker remain ineligible. Neither
-marker is an exact wire-departure timestamp, a causality guarantee, or host identity
-proof; reported latency is measured from submission start.
+Fresh hops are this host's observations. Reused_hops cite source host/probes/
+responders/time/age within operation/max_age, never a new probe. Reconvergence/
+ECMP can make reuse wrong. Stream host records follow their probes.
+Remaining response/undecoded/unattributed retention is deducted before trace I/O;
+insufficient limits may fail after scan. No traceable host deducts nothing.
+TCP/UDP trace defaults source 49151, separate from generated scan UDP ports.
+Finalized collection validates before scan; neighbour/pacing timing needs allowance.
+See [M11 limits and open acceptance](roadmap/m11-scan-informed-traceroute.md).

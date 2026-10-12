@@ -4,7 +4,7 @@
 `e7f3e2efa7b47ba2ffa7e2818dbcc4d53eaef9e3`, independently authored scanner
 corpus dataset 1.3.0, executable/source digests, actual privileged fresh
 namespaces, commands, bounded output, and independently checked observations.
-Documentation follows that implementation revision.
+These are revision-bound records, not a fresh run of current main.
 
 | Profile | Exercised cases | Actual typed capability refusals |
 | --- | ---: | ---: |
@@ -38,8 +38,7 @@ retains failed/unavailable results at the earlier implementation revision
 `2f7eaafbed809e2e5cae49b60176ec072a6f0897`; it does not close cross-platform
 acceptance. macOS ARM reported fixture contradictions; Windows completed with
 explicit unavailable raw paths; macOS Intel was cancelled. See
-[M5's remaining native acceptance](../../m05-host-discovery.md#remaining-native-acceptance).
+[M5's remaining native acceptance](../../m05-host-discovery.md#remaining-platform-gates).
 
-These records establish Linux discovery correctness in the controlled topology,
-not production-network accuracy, benchmark superiority, synchronized clocks,
-authenticated host identity, or broad platform parity.
+Controlled Linux topology only: no production accuracy, benchmark superiority,
+clock synchronization, authenticated identity, or platform parity.

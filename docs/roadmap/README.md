@@ -71,14 +71,14 @@ values from functional tests.
 | --- | --- | --- |
 | Initial, 2026-10-05 (`22c7d182d577`) | 9/36 (25%); 13 partial, 14 missing | No benchmark or runtime baseline claimed |
 | M4, 2026-10-07 (`8e010a0b9eac118aa13384f0b854111a73d47d76`) | 12/36 (33.3%); 12 partial, 12 missing | [264 matching corpus runs and 20 scoped native profile executions](evidence/m04/README.md); work, latency, retained bytes and peak memory recorded separately |
-| M8 baseline, 2026-10-09 (`928ad8d555fe8b34abd144083612b54ace0fef1f`) | 16/36 (44.4%); 12 partial, 8 missing | [Corrected acceptance](evidence/m08/README.md) at `99a9cf23216eb490892c0b6659e303d1a0b02c3d` on 2026-10-10: 1,440 passing cases, 20 profiles across Linux/macOS ARM+Intel/Windows; no new RSS/retained-state baseline; held-out quality remains M9 |
+| M8 baseline, 2026-10-09 (`928ad8d555fe8b34abd144083612b54ace0fef1f`) | 16/36 (44.4%); 12 partial, 8 missing | [Corrected acceptance](evidence/m08/README.md) at `99a9cf23216eb490892c0b6659e303d1a0b02c3d` on 2026-10-10: 1,440 passing cases, 20 profiles across Linux/macOS ARM+Intel/Windows; no new RSS/retained-state baseline; held-out quality was added in M9 |
 | M9, 2026-10-11 (`5e5a41470c0c63404ca3e581067fded136eda1ce`) | 17/34 (50%); 11 partial, 6 missing | [4,000 passing case-runs](evidence/m09/README.md), 20 profiles across Linux/macOS ARM+Intel/Windows; fixed 21-instance holdout, 18 eligible: 66.67% matched, 22.22% unknown, 11.11% ambiguous; no identity-accuracy, calibrated-confidence, or performance baseline |
 
 Earlier review records used 44 rows, including 3 deferred and 5 non-goals.
-The M9 review recounts 42 distinct classified capabilities in the current
-matrix, excluding its 3 deferred and 5 non-goals; duplicate legacy discovery
+The M9 review recounts 42 distinct classified capabilities in the reviewed
+matrix, excluding its 3 deferred and 5 non-goals; duplicate discovery
 descriptions do not add capabilities. Its denominator is therefore 34, and
-the gap percentages are not directly comparable with the earlier records.
+the percentages are not directly comparable with earlier records.
 These are revision-bound records, not measurements of the current checkout.
 
 [M5 Linux acceptance](evidence/m05/README.md) at
@@ -129,7 +129,7 @@ the implementation. Documentation cleanup itself establishes no new acceptance.
 [m12]: m12-tcp-diagnostic-scans.md
 [m13]: m13-sctp-ip-protocol.md
 [project-readme]: ../../README.md
-[repository-guide]: ../../AGENTS.md
+[repository-guide]: ../../CONTRIBUTING.md#repository-boundaries
 [contributing]: ../../CONTRIBUTING.md
 [compatibility]: ../consumer-compatibility.md
 [native-validation]: ../native-validation.md

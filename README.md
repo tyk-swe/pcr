@@ -1,22 +1,19 @@
 # PacketcraftR
 
-PacketcraftR is a Rust library and CLI for protocol development,
-interoperability testing, and authorized network diagnostics: exact packet
-construction, bounded dissection, capture-file I/O, offline analysis, and
-policy-gated live networking.
+PacketcraftR is a Rust library and CLI for packet construction, bounded dissection,
+capture-file processing, offline analysis, and authorized network diagnostics.
 
-Latest release: **0.5.0-beta.3**. This README describes `main`, which carries
-unreleased breaking changes. See the [changelog](CHANGELOG.md) and migration
-notes for [beta.3](docs/migration-beta.3.md) or
-[beta.3 → main](docs/migration-unreleased.md). The crates are not yet published;
-pin a reviewed revision for [library dependencies](docs/consumer-compatibility.md#rust-api-adoption).
+Latest release: **0.5.0-beta.3**. This guide describes `main`, including unreleased
+breaking changes. Read the [changelog](CHANGELOG.md) and migration notes for
+[beta.3](docs/migration-beta.3.md) or [beta.3 → main](docs/migration-unreleased.md).
+The crates are unpublished; [pin a reviewed revision](docs/consumer-compatibility.md#rust-api-adoption).
 
-> **Authorized use:** Test only systems and networks you own or are explicitly
-> authorized to test. Opt-in flags are technical controls, not permission.
+> Test only systems and networks you own or are explicitly authorized to test.
+> Opt-in flags are technical controls, not permission.
 
 ## Quick start
 
-These offline commands work in every build profile and send no traffic:
+These commands work in every profile and send no traffic:
 
 ```console
 packetcraftr protocols
@@ -28,140 +25,102 @@ packetcraftr tls examples/captures/tls-handshake.pcapng
 packetcraftr http2 examples/captures/http2-multiplexed.pcapng
 ```
 
-Put global options such as `--output` before the command. Use
-`packetcraftr <COMMAND> --help` for options and runnable examples,
-`packetcraftr protocols [PROTOCOL]` for supported packet fields, and
-`packetcraftr topics` for expressions, filters, formats, and exit codes.
+Put `--output` before the command. Use `packetcraftr <COMMAND> --help` for options
+and examples, `protocols [PROTOCOL]` for packet fields, and `topics` for expressions,
+filters, formats, and exit codes.
 
-| Task | Start here |
+| Task | Guide |
 | --- | --- |
-| Build a fixture or verify forwarding | [Task recipes](docs/tasks.md#1-build-a-fixture-and-test-one-property), [verification contract](docs/verification-contract.md) |
-| Investigate or transform a capture | [Capture recipes](docs/tasks.md#2-investigate-a-capture-without-losing-evidence), [analysis resources and evidence](docs/analysis-resources.md) |
-| Run an authorized live diagnostic | [Isolated lab recipe](docs/tasks.md#3-run-an-authorized-diagnostic-in-an-isolated-lab), [native validation](docs/native-validation.md) |
-| Interpret scan or service results | [Scanner evidence](docs/scanner-evidence.md), [service identification](docs/service-identification.md) |
-| Automate bounded processing | [Resource presets](docs/resource-presets.md), [consumer compatibility](docs/consumer-compatibility.md) |
-| Review scanner coverage and open work | [Roadmap](docs/roadmap/README.md), [Nmap gap matrix](docs/roadmap/nmap-gap-matrix.md) |
-
-| Area | Commands |
-| --- | --- |
-| Packets and captures | `build`, `dissect`, `protocols`, `read` |
-| Capture transformation | `fragment`, `merge`, `export`, `rewrite` |
-| Offline analysis | `expert`, `follow`, `stats`, `tls`, `dns-read`, `http`, `http2`, `verify-forwarding`, `fuzz` |
-| Native inspection and planning | `interfaces`, `routes`, `plan` |
-| Live workflows | `send`, `exchange`, `capture`, `replay`, `scan`, `identify`, `traceroute`, `dns`, `fuzz --live` |
-| References and shell integration | `topics`, `documentation` |
+| Build fixtures or test forwarding | [Task recipes](docs/tasks.md#1-build-a-fixture-and-test-one-property), [verification](docs/verification-contract.md) |
+| Investigate or transform captures | [Capture recipes](docs/tasks.md#2-investigate-a-capture-without-losing-evidence), [resources and evidence](docs/analysis-resources.md) |
+| Run live diagnostics | [Isolated lab recipe](docs/tasks.md#3-run-an-authorized-diagnostic-in-an-isolated-lab), [native validation](docs/native-validation.md) |
+| Interpret scans and services | [Scanner evidence](docs/scanner-evidence.md), [identification](docs/service-identification.md) |
+| Automate processing | [Resource presets](docs/resource-presets.md), [consumer compatibility](docs/consumer-compatibility.md) |
+| Review coverage and open work | [Roadmap](docs/roadmap/README.md), [Nmap comparison](docs/roadmap/nmap-gap-matrix.md) |
 
 ## Install
 
-[GitHub releases](https://github.com/tyk-swe/pcr/releases) provide Linux
-x86-64 and Arm64, macOS x86-64 and Arm64, and Windows x86-64 MSVC archives.
-Verify the matching archive with `SHA256SUMS`, then put `packetcraftr` or
-`packetcraftr.exe` on `PATH`.
-
-- `all-features` archives include routing, raw Layer 3, and Layer 2
-  capture/injection. They require libpcap on Linux and macOS or Npcap 1.88 on
-  Windows.
-- `pcap-free` archives include routing and raw Layer 3 without libpcap/Npcap.
-
-Release archives include GitHub Artifact Attestations signed with Sigstore:
+[Release archives](https://github.com/tyk-swe/pcr/releases) cover Linux x86-64/Arm64,
+macOS x86-64/Arm64, and Windows x86-64 MSVC. Verify `SHA256SUMS`, then put
+`packetcraftr` or `packetcraftr.exe` on `PATH`. Archives include completions, man
+pages, schemas, examples, and `BUILD-METADATA.json` with compiler, commit, target,
+feature variant, and executable digest. Verify the Sigstore attestation with:
 
 ```console
 gh attestation verify packetcraftr-v<version>-<target>-<variant>.<ext> --owner tyk-swe
 ```
 
-Release artifacts use these runtime baselines: Ubuntu 24.04 (glibc 2.39) on
-x86-64 and Arm64, macOS 14 on arm64, macOS 15 on x86_64, and Windows Server 2022
-on x86_64. Older systems are not a tested binary baseline; build from source for
-another environment. Full-native Linux needs the shared libpcap runtime (Ubuntu
-`libpcap0.8t64`); Windows capture/Layer 2 needs a working Npcap installation
-exporting the symbols required by the loader. `BUILD-METADATA.json` in each
-archive records compiler, commit, target, feature variant, and the executable
-digest.
+`all-features` archives include routing, raw Layer 3, and Layer 2 capture/injection;
+they need libpcap on Linux/macOS or Npcap 1.88 on Windows. `pcap-free` archives
+include routing and raw Layer 3 without libpcap/Npcap. Tested binary baselines are
+Ubuntu 24.04 (glibc 2.39), macOS 14 Arm64, macOS 15 x86-64, and Windows Server 2022.
+Full-native Ubuntu needs `libpcap0.8t64`; Windows Layer 2 needs a working Npcap
+loader. Build from source for other environments.
 
 ### Build from source
 
-Install the toolchain in `rust-toolchain.toml`; the same supported version is
-declared in `Cargo.toml`. All profiles need a supported C compiler for the
-rustls/ring TLS transport; no system TLS library is required. Builds with Layer 2
-support on Linux also need libpcap development files such as `libpcap-dev`.
-Choose a profile, then build with
-`cargo build --locked --release -p packetcraftr-cli` plus its Cargo arguments:
+Install the toolchain in `rust-toolchain.toml` (also declared in `Cargo.toml`).
+All profiles need a C compiler for rustls/ring; no system TLS library is needed.
+Linux Layer 2 builds also need `libpcap-dev`.
 
-| Profile | Cargo arguments | Capability |
+Run `cargo build --locked --release -p packetcraftr-cli` with the chosen arguments:
+
+| Profile | Cargo arguments | Capabilities |
 | --- | --- | --- |
-| Portable | `--no-default-features` | Offline construction and analysis, ordinary-socket `dns --tcp`, `scan --connect`, and `identify`; native packet and route providers report unavailable |
-| Default | none | Portable capabilities plus passive interface enumeration and route lookup |
-| Layer 2 only | `--no-default-features --features native-layer2` | Default capabilities and Layer 2 capture/injection |
-| Pcap-free | `--no-default-features --features native-layer3` | Default capabilities and raw Layer 3 `send`/`replay`, without libpcap |
-| Full native | `--all-features` | Every provider, including capture, Layer 2, and capture-ready exchanges |
+| Portable | `--no-default-features` | Offline tools, ordinary-socket `dns --tcp`, `scan --connect`, and `identify` |
+| Default | none | Portable plus passive interfaces and routes |
+| Layer 2 only | `--no-default-features --features native-layer2` | Default plus Layer 2 capture/injection |
+| Pcap-free | `--no-default-features --features native-layer3` | Default plus raw Layer 3 send/replay |
+| Full native | `--all-features` | All providers, including capture-backed exchanges/probes |
 
-Capture, `exchange`, and capture-backed probes need a profile with Layer 2
-capture. Verify a build with `./target/release/packetcraftr --version`, and see
-[Contributing](CONTRIBUTING.md) for the ordinary Cargo loop.
+Check `./target/release/packetcraftr --version`. Capture-backed operations require
+Layer 2 support; runtime backends and privileges still determine availability.
+See [Contributing](CONTRIBUTING.md) for development checks.
 
 ## Shell completions and man pages
 
-Release archives ship generated shell completions under `completions/` (Bash,
-Elvish, Fish, PowerShell, and Zsh) and man pages under `man/` (one per command).
-The binary itself regenerates both trees from the finalized command
-definitions:
-
-```console
-packetcraftr documentation --directory DIR
-```
-
-This writes `DIR/completions/` and `DIR/man/`, which can be copied into the
-shell completion and `man1` directories of the platform.
+Archives ship Bash, Elvish, Fish, PowerShell, and Zsh completions under
+`completions/` and one man page per command under `man/`. Regenerate them with
+`packetcraftr documentation --directory DIR`, then install them in your shell's
+completion directory and `man1` directory.
 
 ## Contracts
 
-Current producers use [packet/v2](schemas/packetcraftr.packet.v2.schema.json)
-and [output/v13](schemas/packetcraftr.output.v13.schema.json). Frozen output
-v6–v12 schemas remain available for previously published evidence; beta.3 used
-packet/v1 and output/v2. Do not silently reinterpret an older contract.
-
+Current producers use [packet/v2](schemas/packetcraftr.packet.v2.schema.json) and
+[output/v13](schemas/packetcraftr.output.v13.schema.json). Output v6–v12 schemas
+remain frozen for historical evidence; beta.3 used packet/v1 and output/v2.
 [Consumer compatibility](docs/consumer-compatibility.md) defines versioning,
-field tolerance, error semantics, and complete NDJSON streams. Always inspect
-the terminal `complete` or `error`; a killed process or broken output can leave
-an incomplete stream. Binary output refuses interactive stdout unless
-`--force-binary-stdout` is supplied.
+error semantics, and stream completion. Always inspect the terminal `complete`
+or `error`; interrupted output can be incomplete. Binary output to an interactive
+terminal requires `--force-binary-stdout`.
 
-Other documents have independent versions: [rewrite rules](schemas/packetcraftr.rewrite.v2.schema.json),
+[Rewrite rules](schemas/packetcraftr.rewrite.v2.schema.json),
 [UDP profiles](schemas/packetcraftr.udp-profiles.v1.schema.json),
 [service probes](schemas/packetcraftr.service-probes.v1.schema.json), and
-[service exclusions](schemas/packetcraftr.service-exclusions.v1.schema.json).
-See [examples](examples/documents) and the
-[scanner data policy](docs/scanner-data-policy.md) for fixtures and provenance.
+[service exclusions](schemas/packetcraftr.service-exclusions.v1.schema.json) have
+independent versions. See [document fixtures](examples/documents) and the
+[scanner data policy](docs/scanner-data-policy.md).
 
 ## Library
-
-Depend on the crate that owns the capability you need:
 
 | Crate | Responsibility |
 | --- | --- |
 | `packetcraftr-core` | Packets, codecs/reflection, bounded documents, capture files, filters, offline analysis |
-| `packetcraftr-netio` | Provider contracts, interfaces/routes, native capture/transmit and socket resources |
+| `packetcraftr-netio` | Provider contracts, native capture/transmit, interfaces/routes, socket resources |
 | `packetcraftr` | Policy-gated `Client` workflows, preparation, budgets, evidence |
-| `packetcraftr-cli` | Arguments, provider composition, rendering, versioned machine output |
+| `packetcraftr-cli` | Arguments, provider composition, rendering, machine output |
 
-Core is independent of native I/O. Compose a `Client` with a `ProviderSet`
-containing only the capabilities your workflow needs, or use `SystemProviders`.
-Live workflows authorize operations before active discovery and check final
-endpoints and bytes before transmission under finite resource budgets.
-
-Runnable examples use documentation addresses and in-memory fixtures:
+Compose a `Client` with the capabilities needed in a `ProviderSet`, or use
+`SystemProviders`. Core is independent of native I/O. Live workflows authorize
+before active discovery and check final endpoints and bytes under finite budgets.
 
 ```console
-cargo run -p packetcraftr-core --example build_decode_filter
-cargo run -p packetcraftr-core --example capture_analysis
-cargo run -p packetcraftr --example client_composition --no-default-features
+cargo run --locked -p packetcraftr-core --example build_decode_filter
+cargo run --locked -p packetcraftr-core --example capture_analysis
+cargo run --locked -p packetcraftr --example client_composition --no-default-features
 cargo doc --locked --workspace --all-features --no-deps --open
 ```
 
-## Contributing, security, and license
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development and validation. Report
-vulnerabilities privately via [SECURITY.md](SECURITY.md).
-
-PacketcraftR is licensed under the [GNU AGPL v3.0 only](LICENSE).
-Dependency attributions are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+See [Contributing](CONTRIBUTING.md) and report vulnerabilities through
+[Security](SECURITY.md). PacketcraftR uses [AGPL-3.0-only](LICENSE);
+[third-party notices](THIRD_PARTY_NOTICES.md) accompany binary distributions.

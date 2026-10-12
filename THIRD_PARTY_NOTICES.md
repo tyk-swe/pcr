@@ -1,7 +1,7 @@
 # Third-party notices
 
-The Zstd capture adapters use zstd 0.14.0, zstd-safe 8.0.0, and
-zstd-sys 2.1.0+zstd.1.5.7. The following notices accompany binary distributions.
+Required distribution notices are unabridged below; Cargo.lock pins dependencies.
+Zstd adapters use zstd 0.14.0, zstd-safe 8.0.0, and zstd-sys 2.1.0+zstd.1.5.7.
 
 ## Rust Zstd bindings
 

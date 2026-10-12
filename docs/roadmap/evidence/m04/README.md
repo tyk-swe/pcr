@@ -1,8 +1,8 @@
 # M4 acceptance records
 
-These records bind the clean implementation and fixture revision
+Historical acceptance binds clean implementation/fixtures
 `8e010a0b9eac118aa13384f0b854111a73d47d76` and independently authored scanner
-corpus dataset 1.1.0. Documentation-only closure follows that revision.
+corpus dataset 1.1.0, not the current checkout.
 
 | Record | Scope |
 | --- | --- |
@@ -12,12 +12,10 @@ corpus dataset 1.1.0. Documentation-only closure follows that revision.
 | [Benchmark summary](benchmark.json) | Three repetitions of 88 independently provisioned IPv4/IPv6 cases: per-case outcomes, work, latency, logical retained-state charge, and measured peak process memory. |
 
 The host records come from [reviewed-native run 37549075757](https://github.com/tyk-swe/pcr/actions/runs/37549075757).
-Its full build/process reports are retained as workflow artifacts. Each checked-in
-native record preserves executable digests, actual scenario commands, exit codes,
-stdout/stderr, scope-path markers, isolation, and corpus identity. Large compiler
-streams are replaced by their SHA-256 digests; `source_report_sha256` identifies
-the original report. The benchmark summary similarly retains output digests and
-metrics; it has its own summary schema rather than claiming to be the full report.
+Full build/process reports remain workflow artifacts. Native summaries preserve
+executable/stream digests, commands/results, scoped paths, isolation, corpus, and
+source_report_sha256. Benchmark summary retains output digests/metrics in its
+own schema; neither summary pretends to be the full process report.
 Windows checkout converts the corpus to CRLF. Its recorded byte digest therefore
 differs from the LF checkout digest; the clean Git revision and JSON expectations
 are identical. The recorded digest preserves the bytes actually consumed.

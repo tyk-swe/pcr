@@ -111,8 +111,10 @@ for remaining acceptance gates and revision-bound evidence.
 - Human output uses stable readable durations, addresses, outcomes, and causes.
   CLI output types remain independent of clap; command format validation and
   machine records share the command catalog.
-- README, migration notes, and roadmap pages now link to authoritative topic
-  guides instead of repeating option catalogs and implementation history.
+- Consolidate contributor/repository guidance in `CONTRIBUTING.md` and remove
+  `AGENTS.md`; assistant guidance now points to the contributor guide. Trim
+  duplicate documentation and update scanner implementation descriptions without
+  changing contracts, historical evidence, or open acceptance gates.
 
 ### Fixed
 

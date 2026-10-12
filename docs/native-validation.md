@@ -1,90 +1,62 @@
 # Capability and validation matrix
 
-These are validation routes and their scope. Listing a route is not evidence
-that a particular commit passed it; that evidence is the recorded CI,
-reviewed-native, or release report.
+Routes describe scope, not a passing commit. Only retained exact-revision reports
+establish execution; skipped/unavailable paths never prove parity.
 
-| Capability | Linux | Windows / macOS |
+| Capability | Linux | macOS / Windows |
 | --- | --- | --- |
-| Portable core / fake-provider contracts | CI | CI |
-| Native profiles compile / deterministic contracts | CI | Platform CI |
-| Privileged isolated native inventory | Disposable namespace lane | Manual reviewed-native route (`native-platform-review.yml`, disposable hosted runners, exact commit) |
-| Idle cancellation, queue loss, active native I/O | Isolated Linux tests | `native_loopback.rs` eight-scenario inventory, pending recorded runs |
-| Raw IPv4 delivery, Layer 3 | Isolated Linux tests (fixed `127.0.0.1` host route) | Host loopback `loopback_exchange` (no Layer 2 in `native-layer3`-only profiles; capture assertions are Layer 2–gated) |
-| Raw IPv6 | Link-local TCP SYN only, through the scoped-target scenario's namespace-local veth pair; other raw IPv6 paths are not covered | macOS complete-header raw IPv6 capability failure; Windows pcap-free/full-native scoped raw UDP delivery recorded; other raw IPv6 workflows remain unverified |
-| Scoped IPv6 targets | Isolated Linux `scoped_ipv6_targets`: list, connect, and raw scans resolve each `%zone` to its interface and reach the peer on that link only | `scoped_ipv6_targets`: real IPv6 interface enumeration, name/index or numeric index list aliases, scoped TCP peer, pinned raw route and local UDP delivery or explicit unsupported capability; [Five-profile scoped recordings](roadmap/evidence/m04/README.md) passed on macOS ARM/Intel and Windows; raw Layer 3 IPv6 remains unsupported on macOS |
-| Windows non-local UDP | Not claimed | Unchanged: no non-local UDP destinations on the host route |
+| Portable/fake providers, profile compilation | CI | Platform CI |
+| Privileged native inventory | Disposable loopback-only namespace lane | Reviewed host-local route; broader acceptance open |
+| Readiness, cancellation, queue loss, settings, filter errors, disappearance, exchange | Eight isolated scenarios, including scoped targets | Eight-scenario inventory; record each exercised/failed/unavailable path |
+| Raw IPv4 | Fixed loopback host-route delivery | loopback_exchange; Layer 3-only has no capture assertions |
+| Raw IPv6 | Scoped namespace-local link-local TCP SYN only | macOS complete-header send unsupported; Windows scoped UDP recorded; other paths unverified |
+| Scoped IPv6 | Same addresses on two isolated links; zone selects list/connect/raw peer | [M4 five-profile records](roadmap/evidence/m04/README.md): enumeration, aliases, sockets, pinned raw route, local UDP or explicit capability failure |
+| Windows non-local UDP | Not claimed | No external destination tested |
 
-`scripts/test-native-platform.py` is the launcher: it compiles the CLI and the
-`native_loopback` test binary under each feature profile, records both
-digests, admits a UUID token plus platform gate, and runs each of the eight
-scenarios once per profile. Compilation is never reported as native evidence;
-each scenario is `exercised`, `failed`, or `unavailable` with a precise
-`reason_code` (`unsupported_capability`, `backend_not_installed`,
-`privilege_not_granted`, `isolation_unavailable`, `runtime_evidence_missing`).
-Evidence uses the v3 host-local record validated by
-`scripts/native_platform_evidence.py`; the Linux netns v1 record remains its
-own release gate.
+`scripts/test-native-platform.py` builds CLI/test binaries per profile, retains
+digests, and runs eight scenarios behind UUID token/platform admission.
+Host-local evidence v3 (`native_platform_evidence.py`) is separate from Linux
+netns v1. Unavailable reason codes distinguish unsupported_capability,
+backend_not_installed, privilege_not_granted, isolation_unavailable, and
+runtime_evidence_missing. Compilation is never runtime evidence.
 
-The scoped scenario uses only addresses already assigned to the host (preferring
-macOS's loopback link-local address; Windows's IPv6 adapter identity). It never
-mutates an interface or addresses an external peer. When a Windows friendly
-name is outside the target token grammar (for example, contains spaces), it uses
-canonical/zero-padded IPv6 index aliases and retains the full resolved interface
-name in evidence, rather than substituting an IPv4 index. Its `scoped_paths` separately
-records selection, ordinary sockets, and raw transmission as `exercised` or
-`unsupported_capability`; a missing local IPv6 fixture is unavailable, not a
-successful capability test. `--scenario scoped_ipv6_targets` runs this scenario
-across every feature profile while keeping the rest of M3's inventory explicitly
-unexercised. The manual workflow exposes the same selector. Neither this focused
-run nor a successful M4 scoped test closes the broader M3 runtime gate.
+Scoped host fixtures use already assigned addresses, preferring loopback; no
+interface mutation/external peer. Windows names outside token grammar use IPv6
+index aliases while retaining full identity. Scoped_paths distinguishes selection,
+sockets, and raw transmission; missing IPv6 is unavailable, not a passing refusal.
+`--scenario scoped_ipv6_targets` leaves seven unrelated scenarios unexercised.
 
 ## Before merge
 
-The compact checksum-pinned decoder oracle runs on pull requests; the weekly run
-adds the larger generated corpus. Its corpus checks are independent decoder
-comparisons, not a verdict-semantic oracle.
+PRs run the compact checksum-pinned decoder oracle; weekly adds generated input.
+It compares decoded fields, not verdict semantics. Privileged Linux CI runs only
+after integration, weekly, or manually, not arbitrary PRs.
 
-Privileged review is intentionally **not** automatically enabled for arbitrary
-pull requests: the `ci.yml` isolated lane runs after integration, weekly, and on
-manual dispatch, never on a pull request. A maintainer reviews the source, then
-dispatches `Reviewed native validation` with its full 40-character commit. The
-job verifies the checkout matches that commit, does not persist checkout
-credentials, uses read-only repository permissions, and runs on a disposable
-hosted Linux runner.
+Review the source before dispatching Reviewed native validation or
+`native-platform-review.yml` with its full immutable commit. Jobs verify checkout,
+use read-only permissions/disposable runners, do not persist checkout credentials,
+and retain failures. Inspect evidence's actual commit: dispatch-ref status is not
+an unrelated PR-head check or a substitute for release exact-commit CI.
 
-Administrators must configure required reviewers on the `native-review`
-environment and decide the applicable merge protections. YAML cannot install
-those protections. Do not convert this workflow to `pull_request_target`, attach
-secrets to it, or run reviewed code on a persistent runner holding sensitive
-network access.
-
-The manual workflow's run is associated with the dispatch ref; inspect the
-requested commit and evidence's actual commit rather than assuming its check
-status attaches to an unrelated pull-request head. The release gate requires
-its own exact-commit CI evidence; this workflow does not bypass it.
+Administrators configure native-review required reviewers/merge protections.
+YAML cannot install them. Never use pull_request_target, secrets, or persistent
+runners with sensitive access for these routes.
 
 ## Isolated Linux setup
 
-The isolated lane needs libpcap development files, `iproute2`, `util-linux`, and
-`uidmap`. Build the full-native CLI and run the launcher:
+Install libpcap-dev, iproute2, util-linux, and uidmap on a disposable runner:
 
 ```sh
 cargo build --locked --release -p packetcraftr-cli --all-features
 python3 scripts/test-native-isolated.py --binary target/release/packetcraftr
 ```
 
-The launcher builds the ignored `native_isolated` test target (unless
-`--native-test-binary` names a prebuilt one) and re-executes itself in a fresh
-user/network namespace. It refuses to run any scenario unless that namespace
-differs from its parent and holds only loopback; no external destinations are
-used, the interface-disappearance scenario creates and deletes a
-namespace-local dummy interface, and the scoped-target scenario creates and
-deletes two namespace-local veth pairs. It writes its evidence to
-`target/native-isolated.json` (`--report`).
+The launcher builds native_isolated (or takes --native-test-binary), reexecutes
+in fresh user/network namespaces, and requires parent-distinct, loopback-only
+isolation before scenarios. Local dummy/veth interfaces are created/deleted;
+no external destination is used. Report defaults to target/native-isolated.json.
 
-On restricted hosts, prebuild the test executable and run the launcher under
-`sudo` with `--native-test-binary`, as `ci.yml` does:
+For restricted hosts, prebuild and launch under sudo, as CI does:
 
 ```sh
 cargo test --locked -p packetcraftr-netio --all-features --test native_isolated --no-run
@@ -92,75 +64,49 @@ sudo python3 scripts/test-native-isolated.py --binary target/release/packetcraft
   --native-test-binary PATH_TO_NATIVE_ISOLATED_EXECUTABLE
 ```
 
-`--no-run` prints the executable's path. For a `sudo` launch, the launcher maps
-namespace root to the invoking checkout owner's UID and GID; it does not relax
-host namespace policy or file permissions. On util-linux before 2.40 that mapping is applied by
-`newuidmap`/`newgidmap`, so authorize the owner's UID and GID for root in
-`/etc/subuid` and `/etc/subgid` (for example `root:1001:1`); newer util-linux
-writes the mapping directly and needs no subid entry. Do this on a disposable
-runner; do not broadly change permissions on a working checkout.
+Use the executable path printed by --no-run. Namespace root maps to the checkout
+owner, without relaxing host policy/permissions. util-linux<2.40 uses
+newuidmap/newgidmap: authorize that UID/GID for root in /etc/subuid and /etc/subgid
+(e.g. root:1001:1); newer versions map directly. Never broadly chmod the checkout.
 
-The inventory covers readiness/repeated cleanup, idle deadline and
-cancellation, real bounded-queue loss, settings applied before activation,
-native filter errors, interface disappearance, the controlled loopback
-exchange, and scoped IPv6 targets. The scoped scenario gives two veth links
-the same `fe80::1`/`fe80::2` pair, so only the zone decides which peer a
-probe reaches: a kernel listener answers connects on one link only, and a
-packet-socket responder answers raw SYNs to a static-neighbor `fe80::3`
-after a short delay, because a veth peer can otherwise reply before the send
-call returns and fall outside the correlation window. Do not infer
-Windows/macOS native behavior from a Linux result or compilation.
+The scoped scenario gives two links the same fe80::1/fe80::2 pair: only zone
+selects the peer. One link has a connect listener; packet-socket raw SYN response
+to static-neighbor fe80::3 uses a historical short delay. That fixture is not
+undelayed fast-reply acceptance; M5 provides the immediate-response inventory.
 
-For M4 alone, `scripts/test-target-planning-isolated.py` builds and preserves
-the CLI under all five profiles, then runs the scoped fixture in a separate
-fresh namespace for each profile. Portable builds must publish capability
-failures for list, connect, and raw operations; default and pcap-free profiles
-exercise list/connect and reject raw scans that need unavailable transmission
-or capture. Layer 2 explicitly selects `--link-mode layer2`; it and full-native
-must deliver and correlate the raw probes. It writes a v3
-profile inventory with commands, output, binary/driver digests, fixture details,
-and corpus provenance. The other seven M3 scenarios remain explicitly
-unexercised. Run from a clean checkout:
+For M4's five-profile scoped-only route:
 
 ```sh
 python3 scripts/test-target-planning-isolated.py
 ```
 
-On a restricted disposable host, use `sudo --preserve-env=PATH,RUSTUP_HOME,CARGO_HOME`
-and retain the invoking toolchain's `RUSTUP_HOME` and `CARGO_HOME` values, since
-this launcher builds each CLI profile before entering its namespaces.
-
-Capture drop counters, host offloading, acquisition location, and timestamp
-semantics remain contextual evidence. Zero or unavailable counters are not an
-automatic completeness guarantee. The comparator deliberately avoids inferring
-device loss or synchronized clocks from those observations.
+Start clean. Portable must refuse scoped capabilities; default/pcap-free exercise
+list/connect but refuse capture-backed raw scan. Layer 2 selects layer2; full
+native also delivers/correlates raw probes. Reports retain commands, outputs,
+binary/driver digests, fixtures, and provenance; seven M3 scenarios stay unexercised.
+On restricted disposable hosts preserve PATH/RUSTUP_HOME/CARGO_HOME through sudo
+because the launcher builds before entering namespaces.
 
 ## Host discovery
 
-M5 adds a separate `packetcraftr.discovery-native-evidence/v1` report; it does
-not change historical M3 v3 inventories. Both reviewed workflows accept
-`scenario=host_discovery` at an exact clean implementation commit. The launcher
-`scripts/test-host-discovery-native.py` builds the five feature profiles and
-retains source/corpus/executable digests, bounded commands/output, literal
-fixture targets, actual isolation and privilege, and per-case outcomes.
+`scripts/test-host-discovery-native.py` owns separate discovery-native-evidence/v1.
+Both reviewed workflows accept scenario=host_discovery at a clean exact commit.
+Five-profile reports retain source/corpus/binary identity, commands/output,
+fixture targets, actual privilege/isolation, and case outcomes.
 
-Linux uses a fresh namespace and a documentation-address veth pair, with an
-independent immediate Ethernet responder. Six dual-stack conditions cover
-responsive, closed-but-responsive, silent, router-blocked, routed, and
-shared-link-address hosts under discovery-only, responder-only follow-up, and
-scan-all follow-up. Router scenarios must retain the expected router-sourced
-ICMP error frames, not merely publish `no_response`. Native ordinary-socket
-acceptance/refusal is also tested in both families, with closed ports reserved
-rather than closed and rebound.
+Linux fresh namespaces use documentation-address veth links and independently
+encoded immediate replies. Six dual-stack conditions are responsive, closed,
+silent, router-blocked, routed, and shared-link, through discovery-only and both
+follow-up strategies. Router errors must be retained, not only no_response.
+Ordinary socket refusal uses reserved closed ports.
 
-macOS/Windows use admitted literal loopback fixtures without interface mutation,
-remote traffic, external DNS, or driver installation. Unavailable raw profiles,
-missing native dependencies, and unavailable routed/shared-link isolation stay
-explicitly unavailable, never exercised. `--require-complete` fails on missing
-required coverage; portable/default/pcap-free raw capability refusals count only when
-the actual typed admission failure and nonzero process result were retained.
-See [M5](roadmap/m05-host-discovery.md#independent-discovery-corpus-and-runtime-route) for commands and
-current acceptance limits. [Recorded Linux acceptance](roadmap/evidence/m05/README.md)
-retains all five profiles. Environment-dependent macOS/Windows checks were
-explicitly skipped by the user; failed or unavailable host-local results remain
-failed or unavailable, and broad platform acceptance remains open.
+Host-local macOS/Windows permits no interface mutation, remote traffic, external
+DNS, or driver installation. Missing dependencies/raw support/routed isolation
+remain unavailable. Require-complete fails missing coverage; disabled profiles
+count refusals only with actual typed nonzero results.
+[M5 commands/limits](roadmap/m05-host-discovery.md#independent-discovery-corpus-and-runtime-route)
+and [Linux acceptance](roadmap/evidence/m05/README.md) retain five profiles.
+Broader macOS/Windows acceptance remains open, including historical failures/skips.
+
+Drop counters, offloading, capture point, and timestamps remain contextual;
+zero/unknown drops do not establish completeness, device loss, or synchronized clocks.

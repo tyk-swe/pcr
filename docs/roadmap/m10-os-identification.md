@@ -2,109 +2,41 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M5][m5], [M7][m7] | Qualified OS inventory |
+| Planned | [M5](m05-host-discovery.md), [M7](m07-adaptive-scheduling.md) | Qualified remote stack observations |
 
-PacketcraftR can build and decode the packets a stack fingerprint needs, and it
-has nothing that collects one. There is no probe set, no fingerprint
-representation, no matching corpus, and no result that says which operating
-system a host is likely to run. The fingerprints it does compute, JA3 and JA4,
-describe a TLS client seen in a capture, not the stack of a remote host.
+No OS probe set, fingerprint representation, matching corpus, or result exists.
+Packet codecs and passive JA3/JA4 client fingerprints do not identify a remote OS.
 
-This milestone adds active stack-fingerprint collection for both IP families
-and matching against a reviewed corpus, with results that say plainly when the
-evidence is not good enough.
+## Intended behavior
 
-## Outcome
+- Define independent, finite IPv4/IPv6 probe sets before corpus/matcher design.
+  Record suitability, prerequisites such as responsive open/closed endpoints,
+  missing responses, and intermediary effects; unsuitable targets are inconclusive.
+- Bound probes, retries, bytes, response windows, retained evidence, and matching.
+  Reauthorize final endpoint/bytes; packet construction alone is not OS scanning.
+- Match a reviewed original/redistributable corpus with independent version,
+  provenance, maintenance, and coverage. No Nmap database import is presumed legal.
+- Publish observed fingerprint fields separately from ranked qualified candidates.
+  Missing/contradictory evidence remains visible, with supported granularity only.
+  NATs, firewalls, proxies, and stack customization may change observations.
+  No authenticated identity or probability follows from ordinal confidence.
 
-- A finite, explicit probe set collects a stack fingerprint over IPv4, and a
-  separately defined one over IPv6.
-- Fingerprints and the matching corpus are bounded documents, matched in core.
-- Suitability is checked before matching, and results are ranked candidates
-  with evaluated confidence, or explicitly unsupported or inconclusive.
-- The corpus is reviewed, versioned, and evaluated against held-out fixtures.
+## Decisions before implementation
 
-## Invariants
+Set the smallest explicit probe set and bounded representation for each family;
+choose suitability/refusal rules, supported output granularity, scoring/confidence,
+and corpus ownership/refresh. Set training/held-out partitions before rule tuning.
+A new machine family is required if existing meanings/shapes would change.
 
-- Service banners and passive TLS client fingerprints are not remote OS proof.
-- Missing suitability conditions or an ambiguous match never produce an exact
-  label.
-- A reply that may have come from a NAT device or another intermediary is not
-  attributed to the target's stack without evidence.
-- Fingerprint probes are authorized, finite, and checked at the final wire like
-  any other transmission.
+## Acceptance gates
 
-## Scope
+Independent fixtures must cover known, unknown, unsuitable, partial, conflicting,
+and intermediary-modified stacks in IPv4/IPv6. Report held-out coverage,
+uncertainty, and stated accuracy separately from observed-field fidelity and
+runtime/performance. Record exact-revision native runs on supported platforms
+under [M2](m02-ground-truth-benchmarks.md)/[M3](m03-native-validation.md).
 
-### M10.1 IPv4 fingerprint collection
-
-An explicit, finite IPv4 probe set, with the probe and evidence requirements
-written down: which probes are sent, what each response contributes, and what
-is needed before a fingerprint is usable.
-
-### M10.2 IPv6 fingerprint collection
-
-An explicit, finite IPv6 probe set with its own probe and evidence
-requirements. The IPv4 method is not assumed to transfer unchanged.
-
-### M10.3 Fingerprint documents and matching
-
-- A bounded fingerprint representation and a versioned corpus document format,
-  parsed in core.
-- Pure matching in core that returns ranked candidates, with no native I/O and
-  no live policy.
-
-### M10.4 Suitability and qualified results
-
-- Suitability checks run before matching and name each missing condition.
-- Results are ranked candidates with evaluated confidence.
-- Missing evidence yields an explicit unsupported or inconclusive result, never
-  a weaker-looking exact label.
-
-### M10.5 Corpus and held-out evaluation
-
-- A reviewed matching corpus, each entry with a provenance record under the
-  [M1 data policy][m1-data].
-- Known and held-out fixtures, with the held-out set fixed before entries are
-  tuned.
-- Confidence is evaluated on the held-out set and published with the corpus
-  version.
-
-## Decisions to settle
-
-1. The IPv4 and IPv6 probe sets (recommended: define each from the stack
-   behaviors it distinguishes and document that reasoning; do not copy another
-   tool's probe definitions or database).
-2. The suitability conditions for each family (recommended: declare them with
-   the probe set, and report every unmet condition as inconclusive).
-3. How reference fingerprints are obtained (recommended: collect them from
-   systems the project runs in isolated fixtures, each with provenance; import
-   a third-party database only if it passes the
-   [M1 license review][m1-data]).
-4. How confidence is expressed (recommended: the ordinal approach chosen in
-   [M8][m8], evaluated on the held-out set).
-5. What happens when a platform cannot send part of the probe set (recommended:
-   record capability per probe and report an incomplete set as inconclusive).
-6. Whether OS identification is a stage of `scan` or a separate command
-   (recommended: an explicit stage, consistent with [M8][m8]).
-
-## Exit criteria
-
-- [ ] IPv4 and IPv6 each have documented probe and evidence requirements.
-- [ ] Known and held-out OS fixtures cover exact, near, and unknown matches,
-      unavailable open or closed ports, filtered paths, NAT and intermediaries,
-      and malformed evidence.
-- [ ] Missing suitability conditions and ambiguous matches never produce an
-      exact label.
-- [ ] Service banners and passive TLS client fingerprints are never used as OS
-      proof.
-- [ ] The corpus has provenance records, and confidence is evaluated on the
-      held-out set.
-- [ ] The workflow preserves authorized scope, final-wire checks, timestamps,
-      cancellation, evidence ceilings, and platform capability failures.
-- [ ] Linux, macOS, and Windows support and runtime evidence are recorded
-      independently.
-
-[m1-data]: m01-claims-evidence.md#m12-scanner-data-policy
-[m5]: m05-host-discovery.md
-[m7]: m07-adaptive-scheduling.md
-[m8]: m08-service-identification.md
+Keep [evidence semantics](../scanner-evidence.md),
+[data review](../scanner-data-policy.md), and
+[consumer compatibility](../consumer-compatibility.md) synchronized. M10 remains
+**Planned**; no implementation or acceptance is claimed.

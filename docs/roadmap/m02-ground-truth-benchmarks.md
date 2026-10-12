@@ -2,151 +2,54 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| In progress | [M1][m1] | [M7][m7], and the ground-truth [close gate][close-gates] of every milestone that publishes scanner results |
+| In progress | [M1](m01-claims-evidence.md) | [M7](m07-adaptive-scheduling.md), scanner-result [close gates](README.md#close-gates) |
 
-Nothing in the repository today says what a scanner result *should* be for a
-given network condition, and nothing measures a live workflow end to end.
-Existing contracts exercise loopback socket outcomes and controlled-provider
-pipelines; the only benchmarks are core microbenchmarks. Without independent
-expected outcomes, agreement with Nmap would be the only available oracle, and
-an Nmap result is one tool's inference under its own defaults, not ground truth.
+The corpus and evaluator exist. M2 adds measurement, not scanner capability;
+Nmap agreement is never fixture truth.
 
-This milestone establishes the comparison corpus and the benchmark method that
-later milestones are judged against. It adds no scanner capability.
+## Implemented method
 
-## Outcome
+- The reviewed [inventory](../scanner-corpus.v1.json) uses the independent
+  [scanner-corpus/v1 schema](../../schemas/packetcraftr.scanner-corpus.v1.schema.json).
+  Scenarios declare expected outcomes before execution and cover responsive,
+  closed, blocked, silent, malformed, and unrelated replies in IPv4/IPv6.
+- `scanner_fixture` runs real `Client` scan/traceroute paths with deterministic
+  injected providers, never native I/O. Native loopback connect uses the CLI.
+- `scripts/benchmark-scanner.py` repeats 88 cells: 72 raw scan, 12 traceroute,
+  four native connect. It records accuracy, work, elapsed time, exact
+  `retained_evidence_bytes`, and child-process peak RSS using POSIX `wait4`.
+  Logical retention is not RSS; Windows peak under that method is unavailable.
+- Optional comparison uses an official Nmap 7.991 build, never vendored.
+  Retain acquisition URL/hash, configure flags, version, arguments, fixture truth,
+  acquisition conditions, and explained divergences with each run.
+- Benchmarks run on demand; record a fixed-behavior baseline before optimizing.
+  Native platform behavior requires the separate [M3](m03-native-validation.md) gate.
 
-- A versioned corpus of scenarios, each with a provisioned condition and an
-  independently stated expected outcome, in both IP families.
-- Comparison runs against a pinned Nmap build, with settings recorded and
-  expected differences explained.
-- Repeatable workflow benchmarks that report elapsed time, work sent, result
-  accuracy, retained-state charges, and peak process memory.
+## Recorded results and limits
 
-## Scope
+Early `target/validation/scanner-baseline*.json` snapshots are local history,
+not checked-in acceptance. `scanner-baseline-final.json` was incomplete: its
+injected cells matched expectations, but six IPv6 connect case-runs could not
+bind `::1`. IPv4 connect agreed with Nmap; no raw-versus-Nmap comparison was run.
+A closed-port-unreachable echo fixture remains `unreachable` because it has no
+port; do not alter expectations to match the classifier.
 
-### M2.1 Comparison corpus
+Later [M4 evidence](evidence/m04/README.md) at
+`8e010a0b9eac118aa13384f0b854111a73d47d76` records 264 passing case-runs
+(dataset 1.1.0, three repetitions), including IPv6 connect in an isolated
+namespace. This supersedes that environment gap for M4, not every M2 workflow.
+[M8](evidence/m08/README.md) and [M9](evidence/m09/README.md) close their declared
+identification inventories. [M7](m07-adaptive-scheduling.md) retains separate
+fixed/adaptive measurements. None establishes an Internet-wide accuracy claim.
 
-A versioned inventory of scenarios. Each scenario provisions a known condition
-and states its expected outcome in the [M1][m1-vocabulary] vocabularies,
-independently of any tool's output.
+## Remaining gates
 
-- Conditions cover responsive, closed, blocked, silent, malformed, and
-  unrelated responses.
-- Every condition exists for IPv4 and IPv6.
-- Scenarios use loopback, documentation addresses, or isolated fixtures. None
-  targets an uncontrolled reachable host.
-- The inventory is the place later milestones add their own scenarios; a
-  milestone's fixtures are not accepted until they are listed here.
+- Extend the independent inventory to mixed-port inference/contradictions and
+  shared/divergent/reconvergent/ECMP/silent paths for M6/M11.
+- Retain exact-version Nmap differential runs for supported native workflows,
+  explaining differences without treating one tool as ground truth.
+- Review workflow baselines and variance/performance targets across applicable
+  platforms; report unavailable methods explicitly.
 
-### M2.2 Nmap comparison runs
-
-A procedure for running a pinned Nmap build against corpus scenarios.
-
-- Each run records the Nmap version, build features, arguments, and acquisition
-  conditions.
-- Each scenario records where PacketcraftR is expected to differ from Nmap and
-  why. A difference without an explanation is a finding, not a failure of
-  either tool.
-- Matching Nmap alone never satisfies an exit criterion.
-
-### M2.3 Workflow benchmarks
-
-A repeatable benchmark for each live workflow, run against corpus scenarios.
-
-- Each run records elapsed time, probes or connections sent, result accuracy
-  against the expected outcome, retained-state charges, and peak process
-  memory.
-- Logical byte ceilings and peak process memory are reported separately; a
-  charged-bytes figure is not a claim about resident memory.
-- A baseline run at the current behavior is recorded before any optimization
-  in [M7][m7] is evaluated.
-
-## Decisions to settle
-
-1. Where the corpus inventory lives and in what format (recommended: a
-   versioned document in the repository, validated by a schema, so adding a
-   scenario is a reviewed change).
-2. How scenarios are provisioned on each platform (recommended: the isolated
-   namespace launcher on Linux, with [M3][m3] deciding the macOS and Windows
-   equivalents).
-3. How the Nmap build is pinned and obtained for comparison runs (recommended:
-   record the exact version and build features per run; do not vendor Nmap).
-4. Whether benchmarks run in CI or on demand (recommended: on demand with
-   recorded results, until run-to-run variance on hosted runners is measured).
-
-## Decisions made
-
-1. **The corpus inventory is a versioned document.** The authored inventory
-   lives at [`docs/scanner-corpus.v1.json`][corpus] under schema
-   [`packetcraftr.scanner-corpus/v1`][corpus-schema]; adding or changing a
-   scenario is a reviewed change to both.
-2. **Scenarios are provisioned by injected providers, not namespace
-   fixtures.** `examples/scanner_fixture` runs the real `Client` scan and
-   traceroute paths against deterministic in-process providers under
-   `tests/common/scanner_fixture/`, which never perform native I/O; every
-   platform receives identical inputs, and compilation alone is not claimed
-   as proof of identical native semantics. Native loopback TCP connect cells
-   run through the real CLI binary instead.
-3. **The comparison executable is a pinned official Nmap 7.991 build.**
-   Acquisition metadata (URL, SHA-256, configure flags, `--version` output)
-   is recorded under `target/validation/` per run; Nmap source and binaries
-   are never vendored.
-4. **Benchmarks run on demand.** `scripts/benchmark-scanner.py` repeats the
-   88-condition matrix (72 raw scan + 12 traceroute + 4 native connect) a
-   recorded number of times and measures exact-process peak RSS with the
-   `wait4` resource harness; retained-state charges are the workflows' own
-   `retained_evidence_bytes`, not estimates.
-
-## Exit criteria
-
-- [ ] The fixture inventory specifies, for every scenario, an independent
-      expected outcome, the comparison versions and settings, and known
-      divergences.
-- [ ] The inventory covers responsive, closed, blocked, silent, malformed, and
-      unrelated responses in IPv4 and IPv6.
-- [ ] No scenario uses agreement with Nmap as its expected outcome.
-- [ ] A baseline benchmark run for the current scan workflows records elapsed
-      time, work sent, accuracy, retained-state charges, and peak process
-      memory.
-- [ ] The benchmark methodology is reviewed before any dependent feature is
-      claimed complete.
-
-## Notes
-
-The frozen `target/validation/scanner-baseline.json` records the initial
-expectation mismatches and fixture-timing defect, and the post-review
-`scanner-baseline-reviewed.json` is likewise frozen history. The latest
-measured snapshot is `target/validation/scanner-baseline-final.json`
-(status `incomplete`, exit 1), which records three repetitions of all 88
-cells — 216 raw-scan and 36
-traceroute case-runs through the generated injected-provider fixture plus 12
-native loopback connect runs through the real CLI. Every exercised cell
-agrees with the corpus's independent expectations, including `closed` over
-`icmp`, which the corpus states as `unreachable` for an echo probe that
-carries no port — the corpus's per-transport expectation, not a classifier
-workaround. The six native IPv6 connect cells are unavailable in this
-environment (`Cannot assign requested address` on `::1` bind), an honest
-environment gap recorded as unavailable rather than product evidence; the
-six native IPv4 connect cells agree with Nmap.
-
-Coverage is deliberately asymmetric: raw-scan and traceroute truth comes
-from generated injected providers (deterministic, portable, never native
-I/O), while TCP connect coverage is the native loopback workflow — no full
-Nmap-versus-raw comparison is claimed. Peak process memory is exact-process
-peak RSS measured by the POSIX `wait4` resource harness over each child's
-lifetime; the Windows-equivalent peak is unavailable under that method and
-is not fabricated.
-
-Comparison is present and the corpus/evaluator review is done, but the
-unsupported-workflow limitations and native IPv6 connect gap remain open, so
-M2 stays **In progress**.
-
-[m1]: m01-claims-evidence.md
-[m1-vocabulary]: m01-claims-evidence.md#m11-evidence-vocabulary
-[m3]: m03-native-validation.md
-[m7]: m07-adaptive-scheduling.md
-[close-gates]: README.md#close-gates
-
-[corpus]: ../scanner-corpus.v1.json
-[corpus-schema]: ../../schemas/packetcraftr.scanner-corpus.v1.schema.json
+M2 remains **In progress**. Local snapshots, compilation, and repeated fixture
+instances cannot substitute for these gates.

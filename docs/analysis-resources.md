@@ -1,46 +1,28 @@
 # Analysis resource and evidence contracts
 
-Input selection (`analysis::Options::filter`; its rustdoc says what each kind
-of predicate preserves) occurs after capture-global IP reconstruction and
-conversation indexing, and before TCP dispatch and collectors. Filtered-out
-frames still consume physical-input, scope, and index budgets. Pre-filter the
-capture file itself when those costs must be reduced.
+Selection follows capture-global IP reconstruction/conversation indexing and
+precedes TCP dispatch/collectors. Filtered frames still charge input, scope,
+and index budgets; prefilter the file when those costs must shrink.
 
-A scoped tuple is a conversation, not a TCP connection epoch. TLS `session` is
-unique per emitted handshake. Follow `direction_generation` separates delivery
-state across reuse and eviction; it does not infer an unseen handshake. Scope
-metadata uses the reader's capture-wide interface numbering across sections;
-source-local section/interface identifiers remain on capture records. Endpoint,
-port and protocol tables are capture-wide aggregates; conversation rows identify
-their exact domains.
+Scoped tuples are conversations, not connection epochs. TLS sessions identify
+emitted handshakes; follow `direction_generation` distinguishes reuse/eviction without
+inventing handshakes. Capture-wide interface/scope IDs differ from source-local
+section/interface IDs. Endpoint/port/protocol aggregates are capture-wide.
 
-IP expiry follows every physical frame; TCP applies the same clock policy to
-selected frames. Thus a filter can hide a clock jump from TCP while it remains
-in the capture-global clock report. Capture time drives expiry in capture order,
-across interfaces. The first physical timestamp anchors the clock; subsequent
-offsets advance a high-water mark. A rollback cannot rewind it. A forward
-outlier can expire state immediately and pin expiry until later timestamps
-catch up. Clock reports include filtered input, rollback counts/magnitudes and
-the largest forward step with its frame. A forward step is evidence, not an
-assertion that a legitimate capture gap is malformed. Out-of-range instants
-fail with a typed timestamp error. I/O buckets use their separately reported
-first-observed matched `origin`; earlier timestamps are counted in
-`underflow_frames` and folded into bucket zero.
+IP expiry sees every physical timestamp; TCP sees selected frames. A filter may
+hide a clock jump from TCP, not the global report. Capture-order high-water time
+never rewinds on rollback; forward outliers can expire state/pin time until it
+catches up. Reports retain rollback magnitude/largest forward step/frame, not a
+malformation judgment. Out-of-range time fails typed. I/O bucket origin is first
+matched time; earlier frames increment `underflow_frames` and enter bucket zero.
 
 ## What the ceilings cover
 
-`--max-interfaces` counts interface descriptions per input PCAPNG section,
-including unused interfaces and interfaces whose frames are filtered out. The
-capture-wide input ceiling is `ReaderLimits::max_total_interfaces`. Under
-`read --normalize`, filtering can reduce the selected output interface count,
-never either input count. Non-normalizing reads and rewrites keep the
-per-section input semantics.
-
-`ReaderLimits::max_options_per_block` (default 1,024) bounds the options
-retained from one PCAPNG section, interface, or packet block. A four-byte
-empty option costs far more once decoded, so the block size ceiling alone does
-not bound decoded option memory; a block above the ceiling fails with
-`policy.capture_stream_limit` like the interface and metadata ceilings.
+Reader `max_interfaces` counts all descriptions per PCAPNG section, even unused/
+filtered ones; `ReaderLimits::max_total_interfaces` independently bounds the capture.
+Normalization may reduce output interfaces, never input costs. Options-per-block
+(default 1,024) limits decoded option allocations beyond encoded block size;
+excess fails `policy.capture_stream_limit`.
 
 | Retention | Bound and lifetime |
 | --- | --- |
@@ -55,69 +37,35 @@ not bound decoded option memory; a block above the ceiling fails with
 | Results | JSON retains selected rows/sessions/chunks according to command limits. TLS output retention is independent of active state. NDJSON holds one prepared line per encoder, at most 16 MiB including newline. |
 | Native/progress work | Offline analysis uses no native capture queue. Live capture can additionally retain its bounded native queue. A blocked output/callback worker retains its permit and captures until cleanup actually ends. `Runtime::snapshot()` exposes active, rejected, and retained capacity from timed-out or cancelled waits. |
 
-HTTP/2 analysis is cleartext-only (prior knowledge or h2c upgrade). TCP
-conversation selectors (`tcp:INDEX`) and HTTP/2 stream IDs are distinct.
-Frame/message evidence is emitted as observed; the final connection record
-reflects late gaps or retransmission conflicts, so earlier complete messages do
-not override a later connection failure. Likewise, a later GOAWAY can add a
-`goaway_unprocessed` issue that corrects the processing assessment of an earlier
-complete request without retracting that message event. `sources` names direct physical
-contributors; `compression_sources` also includes earlier HPACK dictionary
-contributors. Application retained-byte accounting is a conservative cumulative
-charge, not RSS. Decoded DATA bodies are counted and discarded; undecodable or
-truncated wire can be retained as bounded failure evidence. Normal capture EOF
-reports incomplete open connections, not TCP eviction. A later reuse of a
-cleanly closed tuple does not invalidate that earlier generation. Issues with
-wire evidence point to the last contributing physical frame; lifecycle-only
-issues point to the triggering frame or the capture EOF boundary.
+Cleartext HTTP/2 uses prior knowledge/h2c, not TLS decryption. TCP selectors and
+HTTP/2 stream IDs differ. Final connections/later issues can qualify earlier
+messages, including `goaway_unprocessed`. Sources are direct physical contributors;
+`compression_sources` also cites prior HPACK dictionary contributors. DATA bodies
+are counted/discarded. EOF-incomplete connections differ from eviction; clean
+closed tuple reuse does not invalidate an earlier generation.
+Incomplete/refused h2c keeps exact HTTP/1 bytes/sources without invented stream 1;
+captured 101 permits a real stream 1 request, even incomplete. Head/chunk/trailer
+scratch and retained failure evidence stay bounded.
 
-Unaccepted h2c requests survive termination as `incomplete_upgrade` issues
-with their exact HTTP/1 header bytes and physical sources, not fabricated
-stream-1 messages. A captured 101 acceptance permits the real request to be
-reported on stream 1, including an incomplete body. Partial response heads
-remain bounded undecoded-wire evidence. The accepted 101 and its sources
-remain on the connection record. The h2c adapter reserves bounded HTTP/1
-head-parsing scratch before parsing and a conservative chunk-line/trailer
-allowance for each live chunked body; it releases those reservations on
-completion or termination.
+Peak memory includes input/decode, indexed metadata, IP/TCP/TLS, collector,
+retained results, serialization, runtime/native stacks, transient copies, and
+allocator overhead. Default TLS's four major charges alone total 400 MiB:
+TCP 256 MiB, IP 64 MiB, TLS 64 MiB, and scope 16 MiB. This is neither reservation nor RSS cap; hex strings
+alone need about 2×payload bytes.
 
-A useful peak estimate is **input/decode + indexed metadata + IP + TCP + TLS +
-selected collector + retained results + serialization + runtime/native overhead**,
-including only the stages that the command enables. At default TLS settings the
-four principal state charges alone can total 400 MiB: TCP 256, IP 64, TLS 64 and
-scope 16. This is neither a reservation nor an RSS cap. Index tables, decoded
-layers, result ownership, thread stacks, allocator overhead and transient copies
-coexist. For a frame of B bytes, a hex output field alone needs about 2B string
-bytes before bounded NDJSON serialization begins. Raising JSON retention can
-increase memory even while active TLS state stays fixed.
+`max_bytes` counts frame payload, not headers/options. A bare `Reader` bounds records/
+interfaces/metadata while seeking frames; CLI `compression::Input` additionally
+bounds cumulative encoded/decoded bytes including metadata. Embedders needing
+those ceilings use the wrapper; hard I/O limits belong outside the reader.
+TLS hello completion is observed assembly, not authentication/complete negotiation
+validation; first ClientHello remains the retry fingerprint source.
 
-The `max_bytes` limit counts payload bytes, not container headers, options or
-metadata. A bare library `capture_file::Reader` bounds each record, interface
-set and metadata block (PCAPNG metadata limits apply while seeking the next
-frame, not to the whole input). The CLI wraps its source in
-`capture_file::compression::Input`, which enforces cumulative encoded and
-decoded bytes including metadata; library hosts that need that ceiling use the
-same wrapper. A hard I/O-work ceiling must be enforced outside the reader.
-Invocation and phase deadlines reach Reader metadata/EOF boundaries but remain
-cooperative around blocking I/O. TLS hello completion means assembly of the
-observed client/server hellos, not authentication or validation of every
-negotiation constraint; the first ClientHello remains the fingerprint source
-after a retry.
-
-There is no global allocator framework or process-RSS promise. The encoder
-prepares records atomically, but an OS writer can still fail halfway through
-`write_all` or at flush. It then fails closed and never acknowledges completion.
-Max-duration NDJSON commands also bind an encoder publisher to their remaining
-operation duration. Lock polling is cooperative (1 ms); serialization is checked
-on return, and writer waiting is clipped to the smaller remaining duration and
-per-write timeout. The original encoder owner can attempt a terminal error under
-a separate allowance (see `--output-timeout-ms` below). Direct arbitrary `Write`
-implementations are not preemptible. Capture/exchange response windows are not
-output deadlines. A caller's workflow deadline bounds its wait for callbacks; the
-callback itself, serialization and its destructor may finish later. Generic
-`Read` and providers must return before their next cooperative check. Capture
-polling and cancellable pacing check at intervals of at most 25 ms while
-scheduled, excluding provider overshoot and scheduler delays.
+No allocator-wide cap is promised. Encoders prepare bounded records atomically,
+but OS write/flush can fail partway; no completion is acknowledged. Invocation
+remaining time clips writer wait/lock polling (1 ms). Serialization checks on
+return; arbitrary `Read`/`Write`/providers/callbacks/destructors are not preemptible.
+Timeout can end a wait before actual cleanup. Scheduled capture/pacing checks
+are ≤25 ms, excluding native/scheduler overshoot.
 
 ## HTTP/2 limits
 
@@ -177,53 +125,33 @@ resource metadata adds no second loss taxonomy.
 
 ## Effective settings and resource ownership
 
-Use `--resource-diagnostics` with `--output json` or `--output ndjson` to add a
-`resources` member to the existing envelope. Settings report their resolved
-value, unit, stage, scope, whether the stage is enabled, and source (`default`,
-`preset:NAME`, `override`, `derived`, or `fixed`). They are read from the same
-argument definitions and parsed values that execute the command.
-The [stats resource example](../examples/documents/output-stats-resources.json)
-and [read resource example](../examples/documents/output-read-resources.json)
-were generated with the Linux full-native profile. A worker's `supported` field
-identifies its compiled resource owner, not device availability or permissions.
-NDJSON includes settings and worker samples on the first and terminal records,
-without inserting extra events. A failed writer cannot publish a trustworthy
-final snapshot or completion, even if it later finishes writing a partial line.
+--resource-diagnostics on JSON/NDJSON adds resolved settings (value/unit/stage/
+scope/enabled/source: default, preset, override, derived, fixed) from executing
+arguments. [Stats](../examples/documents/output-stats-resources.json) and
+[read](../examples/documents/output-read-resources.json) examples use full-native
+Linux. Worker supported means compiled owner, not available device/privilege.
+NDJSON samples first/terminal records; failed output promises no final snapshot.
 
-`--output-timeout-ms` (range and default in `--help`) bounds each NDJSON
-write/flush acknowledgment; the remaining operation deadline takes precedence.
-Terminal-error cleanup uses a separate fixed 1,000 ms allowance
-(`terminal_error_timeout_ms` in the diagnostics); it never retries an already
-failed output stream. One record remains in flight at a time. This option does
-not make synchronous serialization or an arbitrary writer preemptible.
+--output-timeout-ms bounds each write/flush acknowledgment, clipped by operation
+time. Terminal error cleanup has a separate fixed 1,000 ms allowance and never retries
+a failed stream. One record is in flight; serialization/arbitrary writers remain
+cooperative. Response windows are not output deadlines.
 
-Embedders can clone a `runtime::Runtime` and give it to multiple clients with
-`Client::with_runtime`; `Client::runtime` returns it and `Runtime::snapshot()`
-reports its retained capacity. `Client::new` creates an isolated runtime.
-Callbacks whose wait timed out or was cancelled, and their captured-resource
-destructors, keep their permits until cleanup ends.
-`packetcraftr_netio::resources::native_snapshot()` reports the process-wide
-native worker pool (`resources::WORKER_CAPACITY`, 16 slots shared by capture
-reads, route queries, and TCP connects): active reservations, rejected
-admissions and retained cleanup. `tcp_connect_snapshot()` reports the TCP
-connects' own admissions within the same pool. These counts describe admission
-reservations, not all OS threads, handles, or process memory.
+Client:: new has an isolated Runtime; with_runtime shares admission among clients.
+Snapshot tracks active/rejected/retained cleanup capacity. Timed-out/cancelled
+callbacks and captured destructors retain permits through cleanup.
+Netio `resources::native_snapshot` reports the shared 16-slot capture/route/TCP pool;
+`tcp_connect_snapshot` is nested connect admission. Neither counts all OS threads,
+handles, or RSS.
 
 ## TCP pending ranges
 
-Pending out-of-order ranges use separately charged 4 KiB payload pages and
-interval descriptors. A direction's sequence window bounds the number of pages;
-the aggregate memory ceiling includes page storage/slack and metadata, so sparse
-captures or tight aggregate limits can reject earlier than payload-only
-accounting would. Adjacent and reverse growth do not copy retained bytes:
-incoming pending payload is copied once, and delivery flattens an interval once
-(one output allocation, one copy of the retained interval). N adjacent 100-byte
-segments behind a missing first byte therefore hold
-`ceil((100 × N + 1) / 4096)` pages, and growth is linear in N. Admission
-accounts for old storage coexisting with prepared output/history. History keeps
-and charges its allocation while trimming its logical retained tail. These
-remain conservative charges, not RSS. Unit tests assert the copy and allocation
-counts separately from timings.
+Out-of-order ranges charge 4 KiB pages/slack and interval metadata under sequence
+and aggregate ceilings; sparse input can reject earlier than payload-only budgets.
+Incoming bytes copy once; delivery flattens once. N adjacent 100-byte segments after
+a missing byte hold `ceil((100N+1)/4096)` pages, linear growth. Admission includes
+old storage coexisting with output/history; trimmed history still charges its
+allocation. Tests assert copy/allocation counts independently. Charges are not RSS.
 
 ## Hosting untrusted captures with a hard stop
 

@@ -15,7 +15,7 @@ reauthorized before I/O.
 Probes are limited to read-only SSH banners, HTTP HEAD, and reviewed nonrecursive
 DNS questions on TCP/UDP, including nonstandard ports. No hidden resolution,
 redirect following, authentication, arbitrary request bytes, or regex engine is
-introduced. TLS-wrapped services remain M9 work. See the
+introduced. M9 subsequently added TLS, SMTP, and FTP. See the
 [user guide](../service-identification.md) for controls and limits.
 
 ### M8.3 Probe and match documents
@@ -52,5 +52,5 @@ checkout/tree identities and a separate later local-validation record; these are
 not new measurements of the current checkout.
 
 M8 closes its applicable ground-truth and ordinary-socket gates. Broader M2/M3/M5/M7
-native/performance acceptance and M9 held-out coverage/calibration remain open.
-No new retained-state or peak-RSS benchmark baseline is claimed.
+native/performance acceptance remains open. M9 subsequently closed its held-out
+coverage gate; neither milestone claims calibrated confidence or a new RSS baseline.

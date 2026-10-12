@@ -1,22 +1,15 @@
 # Versioned offline resource presets
 
-`--resource-preset ci-v1` and `--resource-preset workstation-v1` choose a named
-set of finite defaults for offline capture commands. The flag is global and
-works before or after the subcommand. Explicit individual flags always win.
-Unsupported/live commands reject presets rather than changing authorization
-or traffic limits. Without a preset, the documented defaults apply.
+Global `--resource-preset ci-v1` / `workstation-v1` sets finite offline defaults;
+explicit flags win. Unsupported/live commands reject presets. Unlisted options
+keep baseline defaults. Diagnostics report preset/default/override sources;
+incompatible limits still fail, never automatically clamp.
 
 ```sh
 packetcraftr --resource-preset ci-v1 --resource-diagnostics --output json \
   verify-forwarding before.pcap after.pcap --identity ipv4.identification \
   --preserve ipv4.ttl --max-flows 2048
 ```
-
-Resource diagnostics report each setting's resolved value and provenance (for
-example `preset:ci-v1`; see [effective settings](analysis-resources.md#effective-settings-and-resource-ownership)
-for the full list). Help without resolved diagnostics documents baseline
-defaults. A preset is not an RSS guarantee or an automatic clamp: incompatible
-explicit limits still fail validation.
 
 | Limit | ci-v1 | workstation-v1 |
 | --- | ---: | ---: |
@@ -47,20 +40,10 @@ explicit limits still fail validation.
 | Forwarding shared detail charge | 1 MiB | 4 MiB |
 | Forwarding comparison scratch charge | 16 MiB | 128 MiB |
 
-Only options present on a selected command are changed; options not named here
-keep their documented defaults, including other TLS retention ceilings and
-idle-expiry settings. The values are conservative starting configurations, not
-benchmark-derived capacity recommendations, and the limits are not a sum that
-guarantees all enabled stages fit in memory together.
-
-`http2` inherits the shared capture, TCP/IP, and application preset values.
-The versioned v1 presets do not override any `--max-http2-*` setting; these
-retain their baseline defaults unless explicitly supplied. Diagnostics report
-those settings as `default` or `override`, not `preset:ci-v1` or
-`preset:workstation-v1`. See [HTTP/2 limits](analysis-resources.md#http2-limits).
-
-Input limits count filtered-out frames, and encoded/decoded source limits
-include container metadata. See [analysis resource
-accounting](analysis-resources.md#what-the-ceilings-cover) for reader-level
-versus CLI-wrapper enforcement and the remaining state, allocation, and
-process-memory distinctions.
+These are conservative starting values, not benchmark-derived capacity or a sum
+guaranteeing RSS. Filtered input still counts; source bytes include metadata.
+HTTP/2 inherits shared capture/TCP/IP/application values but v1 presets never
+override `max-http2-*`; those sources remain default/override.
+See [accounting](analysis-resources.md#what-the-ceilings-cover),
+[diagnostics](analysis-resources.md#effective-settings-and-resource-ownership),
+and [HTTP/2 bounds](analysis-resources.md#http2-limits).

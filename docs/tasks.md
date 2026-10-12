@@ -1,8 +1,7 @@
 # Three starting tasks
 
-Commands below assume `packetcraftr` is on `PATH`; see
-[install or build](../README.md#install). For library use, see
-[revision-pinned consumers](consumer-compatibility.md).
+Commands assume `packetcraftr` on `PATH`; see [installation](../README.md#install).
+Library callers should [pin a reviewed revision](consumer-compatibility.md#rust-api-adoption).
 
 ## 1. Build a fixture and test one property
 
@@ -10,119 +9,79 @@ Commands below assume `packetcraftr` is on `PATH`; see
 packetcraftr --output hex build --packet 'raw(text=hello)'
 ```
 
-The bytes are `68656c6c6f`. For a structured IPv4/UDP packet, start with
-`examples/documents/packet-ipv4-udp.json` using `build --packet-file`.
-Unknown fields or invalid recipe values fail before transmission; these
-commands do not send traffic.
+This emits `68656c6c6f`, without traffic. For IPv4/UDP, use `build --packet-file`
+with [the structured fixture](../examples/documents/packet-ipv4-udp.json).
+Invalid fields/values fail before transmission.
 
-Then run the controlled [forwarding regression harness](verification-contract.md#reproduction-bundle).
-It generates checksummed captures, expected transformations, deliberate
-violations, missing-field evidence, and output-budget controls. Inspect both
-`observed_verdict` and `test_contract`: an intentional violation is expected to
-produce a forwarding fail and a successful regression test. Choose the case
-identity as [the contract](verification-contract.md#identity-is-not-the-property-under-test)
-describes: a stable identifier, independent of the property under test.
+Run the [forwarding harness](verification-contract.md#reproduction-bundle).
+It generates checksummed captures, expected transformations, intentional violations,
+missing evidence, and output-budget controls. Read observed_verdict and test_contract:
+a deliberate forwarding fail can be a passing regression. Choose a stable identity
+[independent of the tested property](verification-contract.md#identity-is-not-the-property-under-test).
 
 ## 2. Investigate a capture without losing evidence
 
 ```sh
-packetcraftr --resource-preset ci-v1 --resource-diagnostics \
-  --output ndjson http examples/captures/http-stream.pcap > http.ndjson
+packetcraftr --resource-preset ci-v1 --resource-diagnostics --output ndjson \
+  http examples/captures/http-stream.pcap > http.ndjson
 packetcraftr --output json stats examples/captures/http-stream.pcap
-```
-
-HTTP message records identify framing/status and physical source evidence.
-Read the terminal completion or error as well as individual messages. A parse,
-capture, or resource limit is not proof that an application message was absent.
-
-For cleartext HTTP/2, inspect the multiplexed and h2c examples with the separate
-`http2` command; `http` remains HTTP/1-only:
-
-```sh
 packetcraftr --resource-preset ci-v1 --resource-diagnostics --output ndjson \
   http2 examples/captures/http2-multiplexed.pcapng
 packetcraftr --output json http2 examples/captures/http2-upgrade.pcapng --stream tcp:0
 ```
 
-`--stream tcp:INDEX` selects a TCP conversation, not an HTTP/2 stream ID.
-Ports 80 and 8080 are inspected by default; repeat `--http2-port PORT` for
-other cleartext services. TLS application data is unsupported and is not
-decrypted. Read `http2_frame`, `http2_message`, `http2_issue`, and the final
-`http2_connection` assessment as well as the terminal completion/error.
-A complete message does not override later evidence. A later GOAWAY that
-excludes an already-emitted request produces a sourced `goaway_unprocessed`
-issue for that stream; consumers must apply it alongside the earlier message.
-An unaccepted h2c offer is preserved as `refused_upgrade` evidence when declined,
-or `incomplete_upgrade` at termination, without inventing an HTTP/2 stream.
-DATA bodies are counted and discarded.
+`http` is HTTP/1-only; `http2` handles cleartext prior knowledge/h2c, not TLS
+decryption. `tcp:INDEX` selects a conversation, not an HTTP/2 stream. Defaults
+inspect ports 80/8080; repeat `--http2-port` for others. DATA bodies are discarded.
+Read frames/messages/issues and final connections plus terminal complete/error.
+Later gaps or GOAWAY can qualify earlier complete messages. Refused/incomplete
+h2c preserves exact HTTP/1 evidence without invented streams.
 
-For an ordinary failure, lower `--max-frames` below the physical capture count.
-Filtered-out input still counts; adding a display filter does not bypass that
-limit. Inspect resource diagnostics, then raise the specific finite ceiling or
-select an appropriately bounded input. Do not blindly raise every limit.
-
-For two captures, use `verify-forwarding` with explicit identity and checks; the
-[machine consumer](consumer-compatibility.md) rejects incomplete streams.
+Lower `--max-frames` to inspect a controlled failure. Filtered input still counts;
+raise only the specific finite ceiling justified by diagnostics.
+Parse/resource failure does not prove message absence. Two captures can use
+`verify-forwarding`; [consumer rules](consumer-compatibility.md) reject incomplete streams.
 
 ### Selecting and saving evidence
 
-Use `read --filter`, `--frames`, `--every`, and epoch bounds to select physical
-frames; use `export --stream tcp:INDEX` for a whole scoped conversation,
-including its contributing fragments. Selection keeps source frame numbers;
-skipped input still spends the read budgets. Epoch bounds exclude untimestamped
-frames and never assume timestamp order.
+`read --filter`, `--frames`, `--every`, and inclusive epoch bounds select physical
+frames; `export --stream tcp:INDEX` keeps a scoped conversation and contributing
+fragments. Source frame numbers/budgets survive selection. Epoch bounds exclude
+untimestamped frames and assume no time order.
 
-Capture output in the source format preserves selected bytes, timestamps, and
-options. With no selection or normalization, `read` rewrites byte-for-byte.
-`--normalize` instead discards comments, unknown blocks/options, and section
-structure; it refuses declared frame check sequences and timestamps it cannot
-represent exactly. Classic PCAP also requires a nonempty, single-interface
-selection with one link type, no direction metadata, and compatible snapshot
-length and timestamp precision. Use PCAPNG when those constraints do not fit.
-An error can leave partial stdout; staged `export`, `merge`, and `rewrite` files
-publish only on success and never overwrite an existing destination.
+Unselected, unnormalized `read` rewrites capture bytes exactly. `--normalize`
+discards comments/unknown blocks/options/sections but rejects declared FCS and
+inexact timestamps. PCAP additionally needs a nonempty single-interface/link-type
+selection without direction metadata and with compatible snapshot/precision;
+otherwise use PCAPNG. Stdout may be partial on error. Staged export/merge/rewrite
+publishes only on success and never overwrites a destination.
 
-Capture readers accept redirected stdin (`-`) and detect gzip/Zstd by magic.
-`merge` and `verify-forwarding` allow stdin for only one input; live replay is
-file-based. Duration checks run between synchronous reads and cannot interrupt
-a pipe waiting for input. For untrusted captures, see the
-[process-level hard stop](analysis-resources.md#hosting-untrusted-captures-with-a-hard-stop).
+Readers accept stdin (`-`) and gzip/Zstd by magic. Merge/verification admit one
+stdin input; live replay is file-based. Cooperative duration checks cannot interrupt
+blocked reads: [isolate untrusted captures](analysis-resources.md#hosting-untrusted-captures-with-a-hard-stop).
 
 ## 3. Run an authorized diagnostic in an isolated lab
 
-Begin with passive `interfaces` and `routes` inspection. Live adapters depend on
-the selected native feature profile, installed backend, and privileges.
-Authorization comes from the system/network owner, not from a command-line flag.
+Start with passive interfaces/routes. Backend, profile, and privileges determine
+availability; owner authorization is required independently of flags.
+Finite budgets, final-wire policy, route/interface, and MTU checks apply.
+`--allow-destination ADDRESS[/PREFIX]` only narrows permission (canonical prefixes);
+public destinations still need separate opt-in. Read each command's help.
+Explicit `identify` claims are neither authentication nor vulnerabilities.
 
-Live operations require finite packet/byte/time budgets and enforce final-wire
-policy, route/interface and MTU checks. `--allow-destination ADDRESS[/PREFIX]`
-only narrows permission; public destinations still need their own opt-in.
-Prefixes must name canonical networks. Read the command's help rather than
-copying flags between workflows. `identify` is explicit, never an automatic
-scan side effect; its [service claims](service-identification.md) are not
-authenticated identities or vulnerability findings.
+Linux raw I/O usually needs root/CAP_NET_RAW; macOS Layer 2 needs BPF access and
+cannot send complete-header raw IPv6. Windows Layer 2 needs Npcap 1.88; raw I/O
+usually needs administrator rights and may reject non-local UDP sources.
+Containers need interfaces/routes/privileges in the same namespace.
 
-Linux raw I/O usually needs root or `CAP_NET_RAW`. macOS Layer 2 needs BPF
-access; complete-header raw IPv6 is unsupported on macOS. Windows Layer 2 needs
-Npcap 1.88, and raw sockets usually need administrator rights. Windows may
-reject raw UDP with a non-local source. Containers need interfaces, routes,
-and privileges in the same namespace.
-
-Workflow deadlines cannot interrupt arbitrary synchronous providers or callbacks.
-Timed-out or cancelled workers retain permits and resources until cleanup ends.
-Native BPF (`capture --capture-filter`) runs before capture queues and budgets;
-display filters (`--filter`) run after capture.
-
-On a disposable Linux runner, follow the setup in
-[native validation](native-validation.md#isolated-linux-setup), then run the
-isolated harness against a full-native build:
+After [isolated Linux setup](native-validation.md#isolated-linux-setup):
 
 ```sh
 python3 scripts/test-native-isolated.py --binary target/release/packetcraftr
 ```
 
-Do not point an active example at a production endpoint to obtain a green test.
-
-Retain input/output hashes, tool identity, capture point, settings, observation
-window, and acquisition unknowns with any real regression result. Review bundles
-before sharing: packet bytes can contain sensitive information.
+Never use production endpoints to make tests green. Worker permits survive
+timeout/cancellation through cleanup; arbitrary providers/callbacks are cooperative.
+Native BPF runs before capture queues/budgets, display filters after capture.
+Retain hashes, tool/settings, capture point/window, and acquisition unknowns;
+review payload-bearing bundles before sharing.

@@ -1,7 +1,8 @@
 # Migrating to 0.5.0-beta.3
 
-This note covers the changes between 0.5.0-beta.2 and 0.5.0-beta.3. No legacy
-reader or facade was restored; update call sites as described below.
+Historical beta.2→beta.3 changes; for current `main`, continue with the
+[unreleased migration](migration-unreleased.md). Versions/APIs below describe
+beta.3, not the current checkout.
 
 - Output envelopes use `packetcraftr.output/v2`. NDJSON discriminators live at
   the root: `jq 'select(.event == "session") | .result.client.ja4'`. One

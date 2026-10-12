@@ -2,240 +2,130 @@
 
 ## Versioning and immutable evidence
 
-A contract family identifies names, units, meanings, enum interpretations,
-ordering, and terminal semantics—not only JSON shape. Incompatible changes
-require a new family even if an old schema would accept the JSON.
+A contract family covers names, units, meanings, enums, ordering, and terminal
+semantics, not only JSON shape. Incompatible changes require a new family even
+if an old schema accepts their shape.
 
-A release archive freezes its exact schema snapshots. Keep the archive and its
-release checksum together. Resolve a schema's `$id` (for example that of the
-[output schema](../schemas/packetcraftr.output.v13.schema.json)) to the bundled
-local file, not a moving branch or network fetch. The release packager copies
-every file under `schemas/`, and the verifier requires the output schema.
-Never modify an already published archive in place.
-
-Consumers should tolerate unknown object members, but must not guess meanings
-for unknown verdicts, check kinds, evidence states, or contract families.
-Examples are fixtures, not a replacement for serializing actual Rust payloads;
-the CLI's `aggregate_schema_conformance` tests do that.
+Archives freeze schema snapshots/checksums. Resolve `$id` to the bundled local
+file, never moving `main` or a network fetch; do not alter published archives.
+Current producers emit [output/v13](../schemas/packetcraftr.output.v13.schema.json)
+and [packet/v2](../schemas/packetcraftr.packet.v2.schema.json). Beta.3 used output/v2
+and packet/v1; output v6–v12 remain frozen. Tolerate unknown object members, but
+never guess unknown families, verdicts, check kinds, or evidence states.
+Examples are fixtures; CLI conformance tests validate actual serializers.
 
 ## Fields, omission, and identifiers
 
-Numbers documented as counts or bytes are nonnegative integers, not booleans.
-Duration arguments use their documented units; timestamps retain seconds and
-nanoseconds without inferring clock synchronization. `frame` references are
-one-based and capture-local; envelope `sequence` is zero-based and output-local.
-Conversation numbers, when requested, are capture-global before selection.
+Counts/bytes are nonnegative integers, not booleans. Durations use documented
+units; second/nanosecond timestamps imply no clock synchronization. Frame references
+are one-based/capture-local, envelope sequences zero-based/output-local, and
+conversation numbers capture-global before selection.
 
-A missing optional metadata field means it was not provided. Null evidence
-state on an expectation means there is no ingress-side operand; an `absent`
-state is an explicit decoder-view observation. These are not interchangeable.
-A missing `source` in a library-constructed report is not a verified input hash.
-
-Summary counters cover all accepted evidence. Retention only changes detail
-lists and omission counts. `fail` and `inconclusive` both produce CLI exit 1
-after a successfully published forwarding report. An error envelope is instead
-an execution failure. Neither process exit nor a partial list alone is a verdict.
+Missing metadata, null ingress operand on an expectation, and explicit decoder
+`absent` are distinct. A missing source hash is not verified identity. Summary
+counters include accepted evidence regardless of retained detail/omissions.
+Forwarding fail/inconclusive returns exit 1 after publication; an error envelope
+is execution failure. Neither exit status nor a partial list alone is a verdict.
 
 ## Output family v13
 
-`packetcraftr.output/v13` is the current production family. It preserves v12
-behavior and adds explicit TLS wrapping and SMTP/FTP identification. Consumers
-must accept the `tls_failed` endpoint outcome and the new observed protocol and
-field values. A handshake failure retains TLS evidence and never falls back to
-cleartext. Passive TLS decoding and client fingerprints retain their existing
-analysis meaning.
+Current v13 preserves v12 and adds explicit TLS, SMTP/FTP fields, `tls_failed`,
+`usage.tls`, and supported candidate metadata. TLS failure retains evidence,
+never cleartext fallback. Passive TLS fingerprints keep their analysis meaning.
 
-Each TLS probe carries `tls` evidence: the operator-declared `server_name` (null
-for a numeric target without SNI), `handshake_complete`, negotiated protocol and
-cipher suite, presented `certificates_hex` in DER order, a certificate truncation
-flag, and lifetime encrypted read/write bytes and I/O steps. `unauthenticated`
-is always true. Certificates are observations; neither their names nor a
-successful handshake authenticates the host. Application `request_hex`,
-`response_hex`, and byte counters describe decrypted application data. Writes
-accepted by the TLS plaintext buffer are charged as application writes even if
-its later flush fails; encrypted wire counters show the completed transmission.
+Probe `tls` includes declared `server_name` (null without SNI),
+`handshake_complete`, negotiated protocol/cipher, ordered DER `certificates_hex`,
+truncation, encrypted lifetime read/write bytes/steps, and always
+`unauthenticated: true`. A handshake or certificate authenticates no host/name.
+Application request/response hex and counters describe plaintext: accepted writes
+are charged even if flush fails; encrypted counters measure completed socket work.
 
-`usage.tls` reports encrypted `write_bytes`, `read_bytes`, retained
-`certificate_bytes`, and `steps` separately from application usage, including
-failed handshakes. Cleartext operations publish zero TLS usage. Optional candidate
-`hostname`, `device_type`, and `cpe` values each carry a `source`: an
-`observed_field` with its field/index, or a `match_rule` reference tied to the
-candidate's existing corpus/version/probe/rule provenance. Unsupported metadata
-is absent. A hostname is an unauthenticated greeting claim. Static product CPEs
-retain wildcard versions and make no vulnerability assertion.
+`usage.tls` separately charges encrypted bytes, retained certificate bytes, and
+steps, including failed handshakes; cleartext usage is zero. Optional candidate
+hostname/device/CPE values have `observed_field` field/index or `match_rule`
+provenance tied to corpus/version/probe/rule. Unsupported values are absent;
+static CPE versions are wildcarded and assert no vulnerability.
 
 ## Output family v12
 
-`packetcraftr.output/v12` is frozen. It preserves every
-v11 meaning and adds the explicit `identify` command. Scans never start service
-identification implicitly. Aggregate JSON reports carry `records`; NDJSON emits
-one `identify_endpoint` record per selected numeric endpoint and one terminal
-`complete` record with endpoint count, corpus and exclusions versions, usage,
-elapsed time, and `complete`/`cancelled` state.
+Frozen v12 introduced explicit `identify`, never automatic scan identification.
+JSON `records` and NDJSON `identify_endpoint` records keep excluded/unknown/
+matched/ambiguous/malformed/truncated/budget_exhausted outcomes, exact request/
+response hex, numeric peers, I/O outcome, observed unauthenticated claims, and
+separate candidates. Candidates cite corpus/version/probe/rule/field indices.
+Ordinal `claim` is weaker than `protocol`, never a probability. Protocol matches
+supply no product version; unknown/ambiguous/malformed/truncated results supply
+no exact versions. No identification result is a vulnerability finding.
 
-Each endpoint distinguishes `excluded`, `unknown`, `matched`, `ambiguous`,
-`malformed`, `truncated`, and `budget_exhausted`. Probe evidence retains exact
-`request_hex` and `response_hex`, local and peer numeric addresses when available,
-I/O outcome, unauthenticated observed `claims`, and separate matched `candidates`.
-Candidate provenance identifies the corpus, version, probe, rule, and observed
-field indices. Confidence is ordinal: `claim` is weaker than `protocol`. A
-protocol match identifies a parsed protocol and never supports a product version;
-a claim match remains peer-supplied unauthenticated product/version evidence.
-Unknown, ambiguous, malformed, and truncated outcomes carry no exact versions.
-No identification result is a vulnerability finding.
-
-Identification budget exhaustion preserves retained evidence and marks the
-report `complete: false`. `--operation-timeout-ms` bounds identification;
-`--max-duration-ms` bounds preparation, identification, and publication together.
-Keep the overall duration greater than the operation timeout to leave time for
-publication. Cancellation or overall publication expiry produces the shared typed
-error terminal when the stream can still be written. An unwritable stream has no
-terminal guarantee and must be treated as incomplete.
+The terminal contains endpoint count, data versions, usage, elapsed time, and
+complete/cancelled state. Budget exhaustion preserves evidence with `complete=false`.
+Operation timeout excludes preparation/publication; keep overall max-duration
+larger to allow publication. Overall expiry/cancellation yields a typed error
+when writable; unwritable output has no terminal guarantee.
 
 ## Output family v11
 
-`packetcraftr.output/v11` is frozen. It preserves every
-v10 meaning and adds the scan trace stage requested with `scan --traceroute`:
+Frozen v11 introduced optional raw-scan `traceroute`, host-order results,
+traceroute_probe/undecoded/host events, and terminal plan/retention metadata.
+The plan declares hop/attempt/probe limits, fallback strategy, and optional reuse age.
 
-- an optional `traceroute` member on raw scan results, absent unless the stage
-  ran, with its `plan` (`first_hop`, `max_hops`, `attempts`, `max_probes`, the
-  optional fallback `strategy`, and the `reuse` `max_age` when reuse was
-  enabled), one record per scanned host in host order, `undecoded` frames with
-  the `destination` they belong to, and `retained_evidence_bytes`;
-- per host, a `status` (`complete`, `incomplete`, or `not_traced`). A
-  `not_traced` host has a `reason` (`no_responsive_probe` or `scoped_target`)
-  and no `completion` or `selection`; a traced host has a `completion`
-  (`destination_reached` or `unreachable` for `complete`; `maximum_hops` or
-  `timeout` for `incomplete`) and a `selection`;
-- a `selection` with the `strategy` and `destination_port` used and its
-  `basis`: `observed` carries an `observation` naming the scan probe it rests
-  on (`stage`, `sequence`, `reply`, and `observed_at`), and `requested` means
-  the request's fallback strategy;
-- `hops`, the hops this host's own probes observed, in the standalone
-  traceroute hop and probe encoding. A hop in `hops` is an observation;
-- `reused_hops`, hops copied from an earlier host's trace in the same
-  operation, each with the `source` host, the source's probe sequences
-  (`probes`), the `responders`, `observed_at`, and the `age` since the
-  source batch was planned. A reused hop is a claim from another host's path,
-  not an observation for this host, and has no probe record of its own;
-- `traceroute_probe`, `traceroute_undecoded`, and `traceroute_host` stream
-  records, published as the stage runs. `traceroute_probe` is the standalone
-  probe record, and `traceroute_host` is the host record without `hops` and
-  with the `probes` sequences it sent. A host's record follows its last probe;
-  and
-- an optional `traceroute` object (`plan` and `retained_evidence_bytes`) in the
-  `complete` record.
-
-The standalone `traceroute` command keeps its v10 result and stream shapes
-under the v11 identifier. [Scanner evidence](scanner-evidence.md#traceroute-stage)
-defines the vocabulary.
+Host status is complete/incomplete/not_traced; completion is reached/unreachable
+or maximum_hops/timeout respectively. Not-traced reasons are no_responsive_probe
+or scoped_target, without completion/selection. Observed selection cites the scan
+probe's stage/sequence/reply/time; requested selection uses explicit fallback.
+Fresh `hops` are observations. `reused_hops` cite source host/probes/responders/
+time/age and are claims, with no new probe record. Host stream records follow
+their probes and list sent sequences instead of aggregate hops. Standalone trace
+keeps its shapes. See [trace semantics](scanner-evidence.md#traceroute-stage).
 
 ## Output family v10
 
-`packetcraftr.output/v10` is frozen. It preserves every
-v9 meaning and adds opt-in adaptive scheduling:
-
-- a required `scheduling` object on raw scan results, NDJSON scan `complete`
-  records, and connect reports: `mode` (`fixed` or `adaptive`), the effective
-  `adaptive` configuration when enabled, `observed_peak_window`,
-  `retries_started`, typed `conditions`, `incomplete` host identities, and
-  `operation_ceiling`/`process_ceiling` on connect scans.
-  `observed_peak_window` is the largest pending count the operation actually
-  held, never an achieved-throughput measure;
-- a new host `scan` value `incomplete`, set when a host's own deadline
-  prevented or truncated intended adaptive work, or an admitted connect worker
-  never called its provider. Hosts report it only under
-  adaptive scheduling; consumers that exhaustively switch on `scan` must
-  handle it; and
-- `suspected_response_rate_limit` conditions with `host`,
-  `control_responder`, `completed`/`replies`/`losses` counts, and cited
-  `control_sequences`/`loss_sequences`. Conditions are inferred: filtering or
-  ordinary loss remain alternative explanations, and a condition never
-  changes a port's classification.
+Frozen v10 introduced required `scheduling` on scan/connect results and terminals:
+fixed/adaptive mode, effective config, observed_peak_window, retries_started,
+conditions, incomplete hosts, and connect operation/process ceilings.
+Peak pending count is not throughput. Adaptive `scan: incomplete` includes host
+deadline exhaustion and admitted workers never calling providers.
+Suspected rate limits cite responder, counts, and control/loss sequences; loss
+or filtering remain alternatives and classifications never change.
 
 ## Output family v9
 
-`packetcraftr.output/v9` is frozen. It preserves every
-v8 meaning and adds host discovery:
+Frozen v9 introduced required hosts, discovery plan, and discovery/scan stages
+on probes/sends/failures. Host discovery is not_requested/skipped/responded/
+no_response; scan is scanned/skipped/not_requested (v10 adds incomplete).
+Silence is uncertain; omitted/skipped work implies no reachability.
 
-- a required `hosts` list on raw scan results and connect reports, and one
-  `host` stream record per target before `complete`. Each host states whether
-  discovery ran (`discovery`: `not_requested`, `skipped`, `responded`, or
-  `no_response`) and whether the scan stage probed it (`scan`: `scanned`,
-  `skipped`, or `not_requested`). `no_response` is an uncertain observation,
-  never absence, and `not_requested` or `skipped` claims no reachability;
-- `reasons` for each responded host, each with a `kind`, the `evidence` behind
-  it (`wire`, `socket`, or `cache`), and its `basis` (`direct`, `cached`, or
-  `possible_proxy`). A `possible_proxy` basis flags a link address that also
-  answered for another address of the same family on the same interface, as
-  a target or a gateway; it does not assert a cause;
-- an optional `neighbor` outcome (`resolved`, `silent`, `routed`, or
-  `not_applicable`) with the `interface` the host's route selected. A routed
-  target's `next_hop` is its gateway, sent no request; its link address,
-  present only when already cached, is never the target's identity;
-- an optional `reverse_dns` lookup with the PTR `names` the server answered.
-  Names are observations, not authenticated identity;
-- a required `stage` (`discovery` or `scan`) on probe, `probe_sent`,
-  `connect_probe`, and failed-probe records. Endpoints and their `counts`
-  cover the scan stage only; and
-- a required `discovery` object in `plan`.
-
-[Scanner evidence](scanner-evidence.md#host-observations) defines the host
-vocabulary.
+Reasons carry wire/socket/cache evidence and direct/cached/possible_proxy basis.
+Proxy suspicion is shared link evidence, not cause. Neighbor resolved/silent/
+routed/not_applicable records selected interface; a cached gateway next_hop is
+not target identity. PTR names are unauthenticated observations.
+Endpoints/counts cover scan only. See [host semantics](scanner-evidence.md#host-observations).
 
 ## Output family v8
 
-`packetcraftr.output/v8` is frozen. It preserves every v7 meaning and adds
-scanner port planning and inference:
-
-- a required `plan` on raw scan results, NDJSON scan `complete`, and connect
-  summaries: the requested and selected scan `method` (with the reason when
-  automatic selection chose it), the `port_catalog` data set and version that
-  names and hints came from, the `excluded_endpoints` count, and, when curated
-  UDP payloads were requested, their data set and the `applied` and
-  `overridden` ports;
-- a `port_hint` on endpoints whose port has a catalog name. A hint is not
-  service identification;
-- an `inference` on endpoints: a PacketcraftR `state` (`open`, `closed`,
-  `filtered`, `open_or_filtered`, `unknown`, or absent when only operational
-  failures were observed), the `rule` that decided it, and every attempt
-  sequence in exactly one of `supporting`, `conflicting`, `unanswered`, or
-  `failed`. Attempt `classification` values and the endpoint `classification`
-  aggregate keep their v7 meaning; consumers must not substitute one for the
-  other;
-- a required `unattributed` list on raw scan results, and `unattributed` stream
-  records, for correlated `late`, `duplicate`, and `ambiguous` frames that no
-  attempt outcome carries;
-- one `endpoint` (raw) or `connect_endpoint` (connect) stream record per
-  endpoint before `complete`, naming the probe sequences it aggregates; and
-- an optional `ports` selection on `target_list` results and terminals.
-
-Inference states map to Nmap's for comparison only:
-[scanner evidence](scanner-evidence.md#port-inference) has the rule table and
-mapping.
+Frozen v8 introduced required scan/connect plans with requested/selected method,
+automatic-choice reason, catalog version, exclusion count, and curated UDP
+applied/overridden ports. Port hints are not identification.
+Inference publishes optional state, rule, and a complete disjoint partition of
+attempt sequences: supporting/conflicting/unanswered/failed. Operational-only
+failures imply no state; attempt classifications retain older meanings.
+Late/duplicate/ambiguous raw frames stay unattributed. Endpoint stream records
+cite aggregated probe sequences; target_list may include selected ports.
+[Inference](scanner-evidence.md#port-inference) defines comparison mappings.
 
 ## Output family v7
 
-`packetcraftr.output/v7` is frozen. It preserves every v6 meaning and adds:
-
-- the `target_list` branch of `scan` (`--list`), discriminated by
-  `method: "target_list"` in aggregate results, `target` stream records, and
-  the `complete` terminal; and
-- an optional `scope` object (`zone` text plus resolved `interface` identity)
-  on scoped targets in scan/connect probes, endpoints, sent evidence, and
-  failure records, plus the exact `retained_evidence_bytes` charge on scan,
-  connect, and traceroute summaries.
-
-The frozen `packetcraftr.output/v6` and `packetcraftr.output/v7` families stay
-bundled for previously published evidence; new output never reuses their
-identities. The reference consumer accepts v6 through v13.
+Frozen v7 introduced target_list (`method: target_list`, target events/terminal),
+optional declared zone/resolved interface scope on scan evidence/failures, and
+exact retained_evidence_bytes. Scope is identity, not another claim vocabulary.
+Raw/trace retention charges wire bytes; connect charges structures/error strings,
+not RSS. Historical families are never reused for new output.
 
 ## Streams and the reference consumer
 
-NDJSON requires contiguous sequences starting at zero, complete newline-ended
-records, and exactly one terminal `complete` or `error`. EOF without terminal,
-a sequence gap, duplicate JSON keys, or another record after terminal is rejected.
-Per-record and whole-stream bounds are separate.
+NDJSON requires contiguous zero-based sequences, newline-ended records, and
+exactly one complete/error terminal. EOF without terminal, gaps, duplicate JSON
+keys, or post-terminal records fail. Record/stream bounds are separate.
 
 ```sh
 set +e
@@ -246,37 +136,25 @@ set -e
 python3 examples/consumers/forwarding.py --format ndjson --exit-code "$status" < report.ndjson
 ```
 
-The consumer validates the subset of the output contract it interprets,
-including evidence states, counter relationships, omission totals,
-requested-check coverage, and verdict consistency. It does not claim to replace
-complete JSON Schema validation. Its own successful exit means the report was
-interpreted, not that forwarding passed. Read `execution` and `verdict`, or use
-the regression harness's explicit test contract.
-
-The frozen fixture under `examples/consumers/fixtures/` is the independent
-consumer example. The Rust CLI tests validate real serializers against the
-schema.
+The forwarding consumer accepts v6–v13 and validates its interpreted subset:
+states, counter/omission relationships, requested checks, and verdict coherence.
+It does not replace full JSON Schema validation. Its success means interpretation,
+not forwarding pass; inspect execution/verdict or the harness's test contract.
+Frozen consumer fixtures and real-serializer conformance remain separate checks.
 
 ## Rust API adoption
 
-The crates remain unpublished (`publish=false`). Public struct fields and enum
-variants are source-compatibility commitments: review additions/removals before
-a stable release rather than assuming JSON compatibility implies Rust compatibility.
-
-For a reproducible local Git dependency, first commit the reviewed source, then
-pin its exact revision (`git rev-parse HEAD`) from a separate project:
+Crates are unpublished (`publish=false`). Public struct/enum changes can break
+Rust callers despite compatible JSON. From a separate project, pin a full reviewed
+commit and commit the consumer lockfile; the workspace lockfile does not govern
+its resolution:
 
 ```toml
 [dependencies]
 packetcraftr-core = { git = "file:///path/to/checkout", rev = "FULL_COMMIT_SHA" }
 ```
 
-For shared projects, replace the local URL with the chosen repository URL and
-ensure the same full revision exists there. Do not substitute `main` for a pin.
-Commit the consumer's lockfile. Workspace lockfiles do not govern downstream
-resolution.
-
-`scripts/check-external-consumer.py` creates a temporary independent workspace,
-resolves cached dependencies offline, and tests the public policy-gated,
-injected-provider workflow without native features. It never imports internal
-test modules or accesses the network through those providers.
+Use a shared repository URL when collaborating, with the revision available there;
+never substitute `main` for a pin. `scripts/check-external-consumer.py` creates an
+independent workspace, resolves cached dependencies offline, and tests public
+policy-gated injected-provider workflows without native features/internal helpers.

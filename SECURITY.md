@@ -1,48 +1,39 @@
 # Security policy
 
-Treat malformed packet or capture input, privilege-boundary failures,
-traffic-policy bypasses, unsafe native code, resource exhaustion, and
-unintended network access as potentially security-sensitive.
+Malformed packet/capture input, privilege failures, traffic-policy bypasses,
+unsafe native code, resource exhaustion, and unintended network access may be
+security-sensitive.
 
 ## Supported versions
 
-Security fixes target `main` and the latest published release, currently the
-`0.5.0-beta.x` line. Older releases, stable or beta, are unsupported.
+Security fixes target `main` and the latest published release, currently
+**0.5.0-beta.3**. Older releases are unsupported.
 
 ## Dependency advisories
 
-An unresolved advisory fails `cargo deny check` in CI. `deny.toml` is the
-enforced policy and carries no advisory exceptions today; its duplicate-version
-skips each name the dependency that requires them. Do not add an `ignore` entry
-without a dated remediation plan in the pull request that adds it; the entry
-has no automatic expiry, so the date has to be policed by hand.
+`deny.toml` is the enforced dependency policy; unresolved advisories fail CI and
+there are no advisory exceptions. Any new `ignore` entry needs a dated remediation
+plan in its PR. Exceptions have no automatic expiry and must be reviewed manually.
+Duplicate-version skips name the dependencies requiring them.
 
 ## Reporting a vulnerability
 
-Do not open a public issue or pull request. Email `mail@mail.tyk.sh` with the
-subject `[PacketcraftR security] <short description>` and include:
+Email `mail@mail.tyk.sh` privately with subject
+`[PacketcraftR security] <short description>` and include:
 
-- the affected version or commit, feature profile, component, and command, plus
-  the operating system and architecture for native-networking issues;
-- the impact and required attacker capabilities;
-- minimal reproduction steps or a small synthetic proof of concept;
-- any existing public disclosure or deadline, and a safe contact method.
+- Version/commit, feature profile, component, and command; OS/architecture for native issues.
+- Impact, attacker requirements, and a minimal synthetic reproduction.
+- Any disclosure deadline and a safe contact method.
 
-Do not attach production captures, credentials, private addresses, or sensitive
-payloads to the initial report. Describe the material and request a secure
-transfer method if it is required for reproduction.
-
-Maintainers aim to acknowledge reports within three business days, provide
-initial triage within seven business days, and send weekly updates while work
-is active. Remediation timing depends on severity, platform coverage, and
-release risk.
+Keep production captures, credentials, private addresses, and sensitive payloads
+out of the initial report. Request a secure transfer method if reproduction needs
+them. Use public issues for ordinary correctness bugs; report privately when the
+security impact is uncertain.
 
 ## Response and disclosure
 
-Allow time to reproduce, patch, test supported profiles and platforms, and
-prepare release guidance. The project credits reporters who request it and
-does not publish exploit details before users have a reasonable opportunity to
-upgrade.
-
-Report ordinary correctness bugs publicly. When the security impact is
-uncertain, report privately first.
+Maintainers aim to acknowledge reports within three business days, triage within
+seven, and send weekly updates while work is active. Remediation depends on
+severity, platform coverage, and release risk. Allow time to reproduce, patch,
+test, and prepare upgrade guidance. Reporters may request credit; exploit details
+are withheld until users have a reasonable opportunity to upgrade.

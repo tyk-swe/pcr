@@ -1,10 +1,11 @@
-## Change
+## Problem and impact
 
-<!-- Explain the problem, resulting behavior, and material impact. Link an issue when available. -->
+<!-- Explain the concrete trigger, resulting behavior, and linked issue if available. -->
 
 ## Validation
 
-<!-- Exact commands and results. Name unavailable platform checks. -->
+<!-- List exact commands and results; identify unavailable platform checks. -->
 
-<!-- Record user-visible changes in Unreleased, synchronize affected contracts/examples,
-and request applicable CODEOWNERS review. -->
+## Compatibility
+
+<!-- For contract changes, link synchronized schemas, examples, migration notes, and Unreleased entries. For native/data changes, link reviewed evidence or provenance. Request applicable CODEOWNERS review. -->

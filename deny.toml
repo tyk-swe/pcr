@@ -41,11 +41,20 @@ name = "zstd-sys"
 version = "=2.1.0"
 allow = ["BSD-3-Clause"]
 
+# Rustls uses this exact constant-time primitives crate. Its BSD notice is
+# reproduced in THIRD_PARTY_NOTICES.md alongside the reviewed TLS dependencies.
+[[licenses.exceptions]]
+name = "subtle"
+version = "=2.6.1"
+allow = ["BSD-3-Clause"]
+
 [bans]
 multiple-versions = "deny"
 wildcards = "deny"
 highlight = "simplest-path"
 skip = [
+    # Ring 0.17.14 requires getrandom 0.2; direct randomness uses 0.4.
+    { name = "getrandom", version = "=0.2.17" },
     # rtnetlink 0.23 requires nix 0.30; ctrlc 3.5 uses 0.31 for portable signals.
     { name = "nix", version = "=0.30.1" },
     # pcap 2.5 pins these older runtime and build dependencies.

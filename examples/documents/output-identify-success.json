@@ -1,0 +1,151 @@
+{
+  "schema": "packetcraftr.output/v13",
+  "command": "identify",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "corpus": "project-service-probes",
+    "corpus_version": "1.1.0",
+    "exclusion_set": "project-sensitive-services",
+    "exclusion_version": "1.0.0",
+    "records": [
+      {
+        "endpoint": {
+          "address": "192.0.2.25:25",
+          "transport": "tcp"
+        },
+        "outcome": "matched",
+        "probes": [
+          {
+            "probe": "smtp-greeting",
+            "attempt": 1,
+            "request_hex": "",
+            "response_hex": "323230206d61696c2e6578616d706c652e746573742045534d545020506f737466697820332e31302e310d0a",
+            "bytes_written": 0,
+            "io_outcome": "complete",
+            "observation": {
+              "protocol": "smtp",
+              "outcome": "complete",
+              "claims": [
+                {
+                  "field": "smtp_greeting",
+                  "value_hex": "323230206d61696c2e6578616d706c652e746573742045534d545020506f737466697820332e31302e31",
+                  "unauthenticated": true
+                },
+                {
+                  "field": "smtp_hostname",
+                  "value_hex": "6d61696c2e6578616d706c652e74657374",
+                  "unauthenticated": true
+                },
+                {
+                  "field": "smtp_software",
+                  "value_hex": "506f737466697820332e31302e31",
+                  "unauthenticated": true
+                }
+              ],
+              "diagnostic": null
+            },
+            "identification": {
+              "outcome": "matched",
+              "candidates": [
+                {
+                  "product": "Postfix",
+                  "version": "3.10.1",
+                  "confidence": "claim",
+                  "provenance": {
+                    "corpus": "project-service-probes",
+                    "version": "1.1.0",
+                    "probe": "smtp-greeting",
+                    "rule": "postfix-claim",
+                    "field_indices": [
+                      2
+                    ]
+                  },
+                  "hostname": {
+                    "value": "mail.example.test",
+                    "source": {
+                      "kind": "observed_field",
+                      "field": "smtp_hostname",
+                      "index": 1
+                    }
+                  },
+                  "cpe": {
+                    "value": "cpe:2.3:a:postfix:postfix:*:*:*:*:*:*:*:*",
+                    "source": {
+                      "kind": "match_rule",
+                      "reference": "https://nvd.nist.gov/products/cpe"
+                    }
+                  }
+                }
+              ]
+            },
+            "local_address": "192.0.2.1:41000",
+            "peer_address": "192.0.2.25:25",
+            "elapsed": {
+              "secs": 0,
+              "nanos": 4000000
+            },
+            "started_at": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 0
+            },
+            "completed_at": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 4000000
+            },
+            "diagnostic": null
+          }
+        ],
+        "candidates": [
+          {
+            "product": "Postfix",
+            "version": "3.10.1",
+            "confidence": "claim",
+            "provenance": {
+              "corpus": "project-service-probes",
+              "version": "1.1.0",
+              "probe": "smtp-greeting",
+              "rule": "postfix-claim",
+              "field_indices": [
+                2
+              ]
+            },
+            "hostname": {
+              "value": "mail.example.test",
+              "source": {
+                "kind": "observed_field",
+                "field": "smtp_hostname",
+                "index": 1
+              }
+            },
+            "cpe": {
+              "value": "cpe:2.3:a:postfix:postfix:*:*:*:*:*:*:*:*",
+              "source": {
+                "kind": "match_rule",
+                "reference": "https://nvd.nist.gov/products/cpe"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "usage": {
+      "attempts": 1,
+      "write_bytes": 0,
+      "read_bytes": 44,
+      "tls": {
+        "write_bytes": 0,
+        "read_bytes": 0,
+        "certificate_bytes": 0,
+        "steps": 0
+      }
+    },
+    "elapsed": {
+      "secs": 0,
+      "nanos": 4000000
+    },
+    "complete": true,
+    "cancelled": false
+  },
+  "diagnostics": []
+}

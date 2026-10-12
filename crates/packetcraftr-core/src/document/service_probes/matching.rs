@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{
     Candidate, Confidence, Corpus, Field, Identification, MAX_CANDIDATES, MAX_FIELD_BYTES,
     MAX_OBSERVED_FIELDS, MAX_RESPONSE_BYTES, MatchOutcome, MatchProvenance, Observation,
-    ObservationOutcome, Probe, VersionExtraction,
+    ObservationOutcome, Probe, SupportedValue, ValueSource, VersionExtraction,
 };
 
 impl Corpus {
@@ -100,6 +100,21 @@ impl Corpus {
                         rule: rule.id.clone(),
                         field_indices: vec![index],
                     },
+                    hostname: rule
+                        .hostname_field
+                        .and_then(|field| hostname(observation, field)),
+                    device_type: rule.device_type.as_ref().map(|value| SupportedValue {
+                        value: value.clone(),
+                        source: ValueSource::MatchRule {
+                            reference: rule.metadata.reference.clone(),
+                        },
+                    }),
+                    cpe: rule.cpe.as_ref().map(|value| SupportedValue {
+                        value: value.clone(),
+                        source: ValueSource::MatchRule {
+                            reference: rule.metadata.reference.clone(),
+                        },
+                    }),
                 });
             }
         }
@@ -126,6 +141,27 @@ impl Corpus {
             candidates,
         }
     }
+}
+
+fn hostname(observation: &Observation, field: Field) -> Option<SupportedValue> {
+    let mut hostname: Option<(usize, &[u8])> = None;
+    for (index, observed) in observation.fields.iter().enumerate() {
+        if observed.field != field {
+            continue;
+        }
+        if !super::greeting::valid_hostname(&observed.value) {
+            return None;
+        }
+        match hostname {
+            Some((_, value)) if value != observed.value => return None,
+            Some(_) => {}
+            None => hostname = Some((index, &observed.value)),
+        }
+    }
+    hostname.map(|(index, value)| SupportedValue {
+        value: String::from_utf8(value.to_vec()).expect("validated ASCII hostname"),
+        source: ValueSource::ObservedField { field, index },
+    })
 }
 
 fn version(remainder: &[u8], extraction: &VersionExtraction) -> Option<String> {

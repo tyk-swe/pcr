@@ -111,6 +111,8 @@ pub struct Request {
     /// Probe intensity threshold, independent of conventional port numbers.
     pub intensity: u8,
     pub limits: Limits,
+    /// TLS is opt-in and wraps the existing reviewed TCP probes.
+    pub tls: Option<super::TlsSettings>,
     pub parent_deadline: Option<Arc<Deadline>>,
 }
 
@@ -126,6 +128,7 @@ impl Request {
             exclusions,
             intensity: 2,
             limits: Limits::default(),
+            tls: None,
             parent_deadline: None,
         }
     }
@@ -139,6 +142,16 @@ impl Request {
     pub(super) fn validate_plan(&self, policy: &Policy) -> Result<super::plan::Declaration, Error> {
         self.corpus.validate()?;
         self.exclusions.validate()?;
+        if let Some(tls) = &self.tls {
+            tls.validate()?;
+            if self
+                .endpoints
+                .iter()
+                .any(|endpoint| endpoint.transport != Transport::Tcp)
+            {
+                return Err(Error::request("TLS identification requires TCP endpoints"));
+            }
+        }
         if self.endpoints.is_empty() || self.endpoints.len() > MAX_ENDPOINTS {
             return Err(Error::request(format!(
                 "endpoint count must be 1..={MAX_ENDPOINTS}"

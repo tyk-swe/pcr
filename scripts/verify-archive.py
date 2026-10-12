@@ -21,12 +21,14 @@ ASSETS = (
     'schemas/packetcraftr.output.v10.schema.json',
     'schemas/packetcraftr.output.v11.schema.json',
     'schemas/packetcraftr.output.v12.schema.json',
+    'schemas/packetcraftr.output.v13.schema.json',
     'docs/verification-contract.md', 'docs/consumer-compatibility.md',
     'docs/resource-presets.md', 'docs/tasks.md', 'docs/native-validation.md',
     'examples/consumers/forwarding.py',
     'examples/consumers/fixtures/v6-forwarding.json',
     'examples/consumers/fixtures/v11-forwarding.json',
     'examples/consumers/fixtures/v12-forwarding.json',
+    'examples/consumers/fixtures/v13-forwarding.json',
     'schemas/packetcraftr.rewrite.v2.schema.json',
     'schemas/packetcraftr.udp-profiles.v1.schema.json',
     'schemas/packetcraftr.service-probes.v1.schema.json',
@@ -48,6 +50,7 @@ ASSETS = (
     'examples/documents/service-exclusions.json',
     'crates/packetcraftr/data/service-probes.json',
     'crates/packetcraftr/data/service-probes.provenance.yaml',
+    'crates/packetcraftr/data/service-probes.training.v1.json',
     'crates/packetcraftr/data/service-exclusions.json',
     'crates/packetcraftr/data/service-exclusions.provenance.yaml',
     'examples/documents/packet-ipv4-udp.json',
@@ -59,6 +62,8 @@ ASSETS = (
     'examples/documents/output-build-complete.json',
     'examples/documents/output-dns-tcp-success.json',
     'examples/documents/output-dns-tcp-complete.json',
+    'examples/documents/output-identify-success.json',
+    'examples/documents/output-identify-tls-success.json',
     'examples/documents/output-replay-bit-rate-success.json',
     'examples/documents/output-http2-success.json',
     'examples/documents/output-http2-issue-event.json',
@@ -117,7 +122,7 @@ def verify(root, version, commit, target, variant):
     if len(records) != expected_frames + 1:
         raise ValueError(f'packaged capture must produce {expected_frames} frames and one completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v12'
+        if (record.get('schema') != 'packetcraftr.output/v13'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):
@@ -139,8 +144,8 @@ def verify(root, version, commit, target, variant):
         expected = json.loads((root / 'examples/documents' / example).read_text(encoding='utf-8'))
         if expected.get('schema') != 'packetcraftr.output/v10':
             raise ValueError(f'{example} must preserve its released output/v10 family')
-        if actual.get('schema') != 'packetcraftr.output/v12':
-            raise ValueError(f'packaged stats output for {example} must use output/v12')
+        if actual.get('schema') != 'packetcraftr.output/v13':
+            raise ValueError(f'packaged stats output for {example} must use output/v13')
         # Preserve released examples and compare every other envelope/payload
         # field against the current producer without changing archived files.
         expected['schema'] = actual['schema']

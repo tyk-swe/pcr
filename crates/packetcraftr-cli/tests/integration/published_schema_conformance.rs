@@ -18,6 +18,196 @@ fn rewrite_v2_validator() -> jsonschema::Validator {
     ))
 }
 
+fn identify_example() -> Value {
+    serde_json::from_str(include_str!(
+        "../../../../examples/documents/output-identify-success.json"
+    ))
+    .expect("published identification example must be JSON")
+}
+
+#[test]
+fn identify_metadata_sources_follow_observations_and_reviewed_rules() {
+    let schema = schema_validator();
+    let mut original = identify_example();
+    schema.validate(&original).unwrap();
+
+    // An operator's reviewed rule may explicitly supply a device category.
+    // The bundled corpus makes no such claim.
+    for path in [
+        "/result/records/0/candidates/0",
+        "/result/records/0/probes/0/identification/candidates/0",
+    ] {
+        let candidate = original.pointer_mut(path).unwrap();
+        candidate["provenance"]["rule"] = "fixture-device-review".into();
+        candidate["cpe"]["source"]["reference"] = "project-authored metadata fixture".into();
+        candidate["device_type"] = json!({
+            "value": "reviewed fixture device",
+            "source": {
+                "kind": "match_rule",
+                "reference": "project-authored metadata fixture"
+            }
+        });
+    }
+    schema.validate(&original).unwrap();
+
+    for (field, source) in [
+        (
+            "hostname",
+            json!({"kind": "match_rule", "reference": "fixture"}),
+        ),
+        (
+            "device_type",
+            json!({"kind": "observed_field", "field": "smtp_hostname", "index": 1}),
+        ),
+        (
+            "cpe",
+            json!({"kind": "observed_field", "field": "smtp_hostname", "index": 1}),
+        ),
+    ] {
+        let mut document = original.clone();
+        document["result"]["records"][0]["candidates"][0][field]["source"] = source;
+        assert!(!schema.is_valid(&document), "incorrect source for {field}");
+    }
+
+    for field in ["hostname", "device_type", "cpe"] {
+        let mut document = original.clone();
+        let candidate = &mut document["result"]["records"][0]["candidates"][0];
+        candidate["confidence"] = "protocol".into();
+        candidate["version"] = Value::Null;
+        for other in ["hostname", "device_type", "cpe"] {
+            if other != field {
+                candidate.as_object_mut().unwrap().remove(other);
+            }
+        }
+        assert!(
+            !schema.is_valid(&document),
+            "protocol-only evidence cannot supply {field}"
+        );
+    }
+}
+
+#[test]
+fn service_cpe_names_agree_between_documents_and_published_claims() {
+    use packetcraftr_core::document::service_probes;
+
+    let input_schema = validator(include_str!(
+        "../../../../schemas/packetcraftr.service-probes.v1.schema.json"
+    ));
+    let corpus: Value = serde_json::from_str(include_str!(
+        "../../../packetcraftr/data/service-probes.json"
+    ))
+    .unwrap();
+    let rule_index = corpus["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|rule| rule["id"] == "postfix-claim")
+        .unwrap();
+    let original = identify_example();
+    for (value, accepted) in [
+        ("cpe:2.3:a:postfix:postfix:*:*:*:*:*:*:*:*", true),
+        (
+            "cpe:2.3:h:fixture_vendor:fixture_device:*:*:*:*:*:*:*:*",
+            true,
+        ),
+        ("cpe:2.3:a:--:--:*:*:*:*:*:*:*:*", true),
+        ("cpe:2.3:a:postfix:postfix:3.10.1:*:*:*:*:*:*:*", false),
+        ("cpe:2.3:a:-:postfix:*:*:*:*:*:*:*:*", false),
+        ("cpe:2.3:a:postfix:-:*:*:*:*:*:*:*:*", false),
+        ("cpe:2.3:a:*:postfix:*:*:*:*:*:*:*:*", false),
+        ("cpe:2.3:a:postfix:*:*:*:*:*:*:*:*:*", false),
+        ("cpe:2.3:a::postfix:*:*:*:*:*:*:*:*", false),
+        ("cpe:2.3:a:postfix:postfix:*:*:*:*:*:*:*", false),
+        ("cpe:2.3:x:postfix:postfix:*:*:*:*:*:*:*:*", false),
+        ("cpe:2.3:a:postfix:postfix:*:*:*:*:*:*:*:*\n", false),
+        ("not a CPE", false),
+    ] {
+        let mut input = corpus.clone();
+        input["matches"][rule_index]["cpe"] = value.into();
+        assert_eq!(
+            service_probes::parse(&serde_json::to_vec(&input).unwrap()).is_ok(),
+            accepted,
+            "runtime: {value}"
+        );
+        assert_eq!(input_schema.is_valid(&input), accepted, "input: {value}");
+
+        let mut output = original.clone();
+        output["result"]["records"][0]["candidates"][0]["cpe"]["value"] = value.into();
+        assert_eq!(
+            schema_validator().is_valid(&output),
+            accepted,
+            "output: {value}"
+        );
+    }
+}
+
+#[test]
+fn completed_identify_tls_handshakes_require_negotiated_values() {
+    let schema = schema_validator();
+    let mut completed = identify_example();
+    completed["result"]["records"][0]["probes"][0]["tls"] = json!({
+        "server_name": null,
+        "handshake_complete": true,
+        "protocol_version": "TLSv1_3",
+        "cipher_suite": "TLS13_AES_128_GCM_SHA256",
+        "certificates_hex": [],
+        "certificates_truncated": true,
+        "wire_bytes_sent": 1753,
+        "wire_bytes_read": 2289,
+        "steps": 6,
+        "unauthenticated": true
+    });
+    completed["result"]["usage"]["tls"] = json!({
+        "write_bytes": 1753,
+        "read_bytes": 2289,
+        "certificate_bytes": 0,
+        "steps": 6
+    });
+    schema.validate(&completed).unwrap();
+
+    for field in ["protocol_version", "cipher_suite"] {
+        for value in [Value::Null, json!("")] {
+            let mut document = completed.clone();
+            document["result"]["records"][0]["probes"][0]["tls"][field] = value;
+            assert!(!schema.is_valid(&document), "missing negotiated {field}");
+        }
+    }
+    let mut authenticated = completed.clone();
+    authenticated["result"]["records"][0]["probes"][0]["tls"]["unauthenticated"] = false.into();
+    assert!(!schema.is_valid(&authenticated));
+
+    // A failed handshake may already have selected parameters and presented
+    // certificate octets. Neither presentation nor completion authenticates it.
+    let mut failed = completed;
+    let record = &mut failed["result"]["records"][0];
+    record["outcome"] = "tls_failed".into();
+    record["candidates"] = json!([]);
+    let probe = &mut record["probes"][0];
+    probe["response_hex"] = "".into();
+    probe["io_outcome"] = "failed".into();
+    probe["observation"] = json!({
+        "protocol": null,
+        "outcome": "unknown",
+        "claims": [],
+        "diagnostic": null
+    });
+    probe["identification"] = json!({"outcome": "unknown", "candidates": []});
+    probe["diagnostic"] = "handshake failed before application data".into();
+    probe["tls"]["handshake_complete"] = false.into();
+    probe["tls"]["certificates_hex"] = json!(["3000"]);
+    probe["tls"]["certificates_truncated"] = false.into();
+    failed["result"]["usage"]["read_bytes"] = 0.into();
+    failed["result"]["usage"]["tls"]["certificate_bytes"] = 2.into();
+    schema.validate(&failed).unwrap();
+
+    let tls = &mut failed["result"]["records"][0]["probes"][0]["tls"];
+    tls["protocol_version"] = Value::Null;
+    tls["cipher_suite"] = Value::Null;
+    tls["certificates_hex"] = json!([]);
+    failed["result"]["usage"]["tls"]["certificate_bytes"] = 0.into();
+    schema.validate(&failed).unwrap();
+}
+
 #[test]
 fn scan_listing_accepts_port_zero_in_json_and_ndjson() {
     for format in ["json", "ndjson"] {
@@ -58,7 +248,7 @@ fn schema_accepts_based_source_reject_zero() {
         ),
         (
             schema_validator(),
-            packetcraftr_cli::output::contract::SCHEMA_V12,
+            packetcraftr_cli::output::contract::SCHEMA_V13,
         ),
     ] {
         let mut document = original.clone();
@@ -399,7 +589,7 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v12" => output_validator,
+            "packetcraftr.output/v13" => output_validator,
             "packetcraftr.output/v11" => &v11_validator,
             "packetcraftr.output/v10" => &v10_validator,
             "packetcraftr.output/v9" => &v9_validator,

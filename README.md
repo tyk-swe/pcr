@@ -81,8 +81,10 @@ digest.
 ### Build from source
 
 Install the toolchain in `rust-toolchain.toml`; the same supported version is
-declared in `Cargo.toml`. Builds with Layer 2 support on Linux also need libpcap
-development files such as `libpcap-dev`. Choose a profile, then build with
+declared in `Cargo.toml`. All profiles need a supported C compiler for the
+rustls/ring TLS transport; no system TLS library is required. Builds with Layer 2
+support on Linux also need libpcap development files such as `libpcap-dev`.
+Choose a profile, then build with
 `cargo build --locked --release -p packetcraftr-cli` plus its Cargo arguments:
 
 | Profile | Cargo arguments | Capability |
@@ -114,8 +116,8 @@ shell completion and `man1` directories of the platform.
 ## Contracts
 
 Current producers use [packet/v2](schemas/packetcraftr.packet.v2.schema.json)
-and [output/v12](schemas/packetcraftr.output.v12.schema.json). Frozen output
-v6–v11 schemas remain available for previously published evidence; beta.3 used
+and [output/v13](schemas/packetcraftr.output.v13.schema.json). Frozen output
+v6–v12 schemas remain available for previously published evidence; beta.3 used
 packet/v1 and output/v2. Do not silently reinterpret an older contract.
 
 [Consumer compatibility](docs/consumer-compatibility.md) defines versioning,

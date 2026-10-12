@@ -15,11 +15,13 @@ mod io;
 mod plan;
 mod record;
 mod request;
+mod tls;
 
 pub use error::Error;
 pub use packetcraftr_core::document::port_catalog::Transport;
-pub use record::{Evidence, IoOutcome, Outcome, Record, Report, Usage};
+pub use record::{Evidence, IoOutcome, Outcome, Record, Report, TlsEvidence, TlsUsage, Usage};
 pub use request::{Endpoint, Limit, Limits, Request, builtin_corpus, builtin_exclusions};
+pub use tls::{TlsBudget, TlsSettings};
 
 /// Hard allocation and work bounds, independent of caller-selected limits.
 pub const MAX_ENDPOINTS: usize = 1_024;

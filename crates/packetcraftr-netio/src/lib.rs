@@ -28,6 +28,8 @@ pub mod tcp;
 #[forbid(unsafe_code)]
 mod test_support;
 #[forbid(unsafe_code)]
+pub mod tls;
+#[forbid(unsafe_code)]
 pub mod transmit;
 #[forbid(unsafe_code)]
 pub mod udp;

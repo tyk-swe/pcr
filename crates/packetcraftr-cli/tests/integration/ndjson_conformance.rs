@@ -644,7 +644,7 @@ fn schema_reject_event_unknown_root_discs() {
             common::frozen_v10_schema_validator(),
             output::contract::SCHEMA_V10,
         ),
-        (schema_validator(), output::contract::SCHEMA_V12),
+        (schema_validator(), output::contract::SCHEMA_V13),
     ] {
         let mut document = original.clone();
         document["schema"] = family.into();

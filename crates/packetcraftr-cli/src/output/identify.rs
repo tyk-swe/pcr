@@ -27,6 +27,7 @@ published_enum! {
         Malformed => "malformed",
         Truncated => "truncated",
         BudgetExhausted => "budget_exhausted",
+        TlsFailed => "tls_failed",
     }
 }
 published_enum! {
@@ -44,6 +45,8 @@ published_enum! {
         Ssh => "ssh",
         Http => "http",
         Dns => "dns",
+        Smtp => "smtp",
+        Ftp => "ftp",
     }
 }
 published_enum! {
@@ -71,6 +74,10 @@ published_enum! {
         HttpServer => "http_server",
         DnsRcode => "dns_rcode",
         DnsTxt => "dns_txt",
+        SmtpGreeting => "smtp_greeting",
+        SmtpHostname => "smtp_hostname",
+        SmtpSoftware => "smtp_software",
+        FtpGreeting => "ftp_greeting",
     }
 }
 published_enum! {
@@ -117,6 +124,40 @@ pub struct Candidate {
     pub version: Option<String>,
     pub confidence: Confidence,
     pub provenance: Provenance,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<SupportedValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_type: Option<SupportedValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpe: Option<SupportedValue>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SupportedValue {
+    pub value: String,
+    pub source: ValueSource,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ValueSource {
+    ObservedField { field: Field, index: usize },
+    MatchRule { reference: String },
+}
+
+impl From<core::SupportedValue> for SupportedValue {
+    fn from(value: core::SupportedValue) -> Self {
+        Self {
+            value: value.value,
+            source: match value.source {
+                core::ValueSource::ObservedField { field, index } => ValueSource::ObservedField {
+                    field: field.into(),
+                    index,
+                },
+                core::ValueSource::MatchRule { reference } => ValueSource::MatchRule { reference },
+            },
+        }
+    }
 }
 
 impl From<core::Candidate> for Candidate {
@@ -125,6 +166,9 @@ impl From<core::Candidate> for Candidate {
             product: value.product,
             version: value.version,
             confidence: value.confidence.into(),
+            hostname: value.hostname.map(Into::into),
+            device_type: value.device_type.map(Into::into),
+            cpe: value.cpe.map(Into::into),
             provenance: Provenance {
                 corpus: value.provenance.corpus,
                 version: value.provenance.version,
@@ -158,6 +202,44 @@ pub struct Evidence {
     pub started_at: Timestamp,
     pub completed_at: Timestamp,
     pub diagnostic: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls: Option<TlsEvidence>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TlsEvidence {
+    pub server_name: Option<String>,
+    pub handshake_complete: bool,
+    pub protocol_version: Option<String>,
+    pub cipher_suite: Option<String>,
+    pub certificates_hex: Vec<String>,
+    pub certificates_truncated: bool,
+    pub wire_bytes_sent: usize,
+    pub wire_bytes_read: usize,
+    pub steps: usize,
+    pub unauthenticated: bool,
+}
+
+impl From<library::TlsEvidence> for TlsEvidence {
+    fn from(value: library::TlsEvidence) -> Self {
+        Self {
+            server_name: value.server_name,
+            handshake_complete: value.session.handshake_complete,
+            protocol_version: value.session.protocol_version,
+            cipher_suite: value.session.cipher_suite,
+            certificates_hex: value
+                .session
+                .certificates
+                .iter()
+                .map(|certificate| compact_hex(certificate))
+                .collect(),
+            certificates_truncated: value.session.certificates_truncated,
+            wire_bytes_sent: value.session.wire_bytes_sent,
+            wire_bytes_read: value.session.wire_bytes_read,
+            steps: value.session.steps,
+            unauthenticated: true,
+        }
+    }
 }
 
 impl TryFrom<library::Evidence> for Evidence {
@@ -201,6 +283,7 @@ impl TryFrom<library::Evidence> for Evidence {
             started_at: Timestamp::try_from(value.started_at)?,
             completed_at: Timestamp::try_from(value.completed_at)?,
             diagnostic: value.diagnostic,
+            tls: value.tls.map(Into::into),
         })
     }
 }
@@ -250,6 +333,7 @@ pub struct Usage {
     pub attempts: u64,
     pub write_bytes: u64,
     pub read_bytes: u64,
+    pub tls: library::TlsUsage,
 }
 
 #[derive(Debug, Serialize)]
@@ -283,6 +367,7 @@ impl TryFrom<library::Report> for Report {
                 attempts: value.usage.attempts,
                 write_bytes: value.usage.write_bytes,
                 read_bytes: value.usage.read_bytes,
+                tls: value.usage.tls,
             },
             elapsed: value.elapsed,
             complete: value.complete,

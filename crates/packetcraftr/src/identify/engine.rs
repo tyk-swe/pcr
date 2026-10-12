@@ -89,12 +89,23 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                         self.deadline(request.limits.connection.timeout)
                             .with_parent(Some(Arc::clone(&probe_scope.deadline))),
                     );
+                    let tls = request.tls.as_ref().map(|settings| {
+                        let mut settings = settings.clone();
+                        settings.connection =
+                            operation.tls_limits(settings.operation, settings.connection);
+                        settings.connection = host.tls_limits(settings.host, settings.connection);
+                        settings
+                    });
                     if cancelled
                         || candidate_budget_exhausted
                         || !operation.available(bytes.len() as u64)
                         || !host.available(bytes.len() as u64)
                         || !probe_scope.available(bytes.len() as u64)
                         || !connection.available(bytes.len() as u64)
+                        || tls.as_ref().is_some_and(|settings| {
+                            settings.connection.max_wire_bytes_sent == 0
+                                || settings.connection.max_wire_bytes_read == 0
+                        })
                     {
                         record.outcome = Outcome::BudgetExhausted;
                         complete = false;
@@ -123,11 +134,14 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                     let reply = super::io::exchange(
                         &self.providers,
                         &self.policy,
-                        *endpoint,
-                        probe,
-                        &bytes,
-                        max_response,
-                        &connection.deadline,
+                        super::io::Exchange {
+                            endpoint: *endpoint,
+                            probe,
+                            request: &bytes,
+                            max_response,
+                            deadline: &connection.deadline,
+                            tls: tls.as_ref(),
+                        },
                     )?;
                     if reply.written > bytes.len() as u64 || reply.bytes.len() > max_response {
                         return Err(Error::Provider {
@@ -139,6 +153,21 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                     host.bytes(reply.written, read_bytes);
                     probe_scope.bytes(reply.written, read_bytes);
                     connection.bytes(reply.written, read_bytes);
+                    if let Some(tls) = &reply.tls {
+                        let usage = super::TlsUsage {
+                            write_bytes: tls.session.wire_bytes_sent as u64,
+                            read_bytes: tls.session.wire_bytes_read as u64,
+                            certificate_bytes: tls
+                                .session
+                                .certificates
+                                .iter()
+                                .map(|certificate| certificate.len() as u64)
+                                .sum(),
+                            steps: tls.session.steps as u64,
+                        };
+                        operation.tls_bytes(usage);
+                        host.tls_bytes(usage);
+                    }
                     let observation =
                         observation(probe, *endpoint, &bytes, &reply.bytes, reply.outcome);
                     let mut identification = request.corpus.identify(probe, &observation);
@@ -179,6 +208,7 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                         source: reply.source,
                         started_at,
                         completed_at: SystemTime::now(),
+                        tls: reply.tls,
                     });
                     if cancelled
                         || candidate_budget_exhausted
@@ -340,6 +370,13 @@ fn finish_record(record: &mut Record) {
         Outcome::Ambiguous
     } else if !record.candidates.is_empty() {
         Outcome::Matched
+    } else if record.probes.iter().any(|evidence| {
+        evidence
+            .tls
+            .as_ref()
+            .is_some_and(|tls| !tls.session.handshake_complete)
+    }) {
+        Outcome::TlsFailed
     } else if record.probes.iter().any(|evidence| {
         evidence.observation.outcome == ObservationOutcome::Truncated
             || evidence.identification.outcome == MatchOutcome::Truncated

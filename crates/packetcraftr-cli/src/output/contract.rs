@@ -14,6 +14,7 @@ pub const SCHEMA_V9: &str = "packetcraftr.output/v9";
 pub const SCHEMA_V10: &str = "packetcraftr.output/v10";
 pub const SCHEMA_V11: &str = "packetcraftr.output/v11";
 pub const SCHEMA_V12: &str = "packetcraftr.output/v12";
+pub const SCHEMA_V13: &str = "packetcraftr.output/v13";
 
 pub use crate::commands::Command;
 

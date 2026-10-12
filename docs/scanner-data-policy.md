@@ -67,6 +67,7 @@ recorded in the manifest:
 | --- | --- |
 | Original project-authored fixtures and documents | **Acceptable.** Authored in this repository under AGPL-3.0-only. |
 | Factual protocol constants independently authored from standards documents (RFCs, IEEE publications) | **Acceptable with citation.** The manifest records the standard and section; constants are authored into our own format, not copied from another project's tables. |
+| Original factual product CPE mappings checked against the NIST NVD registry | **Acceptable with citation.** The service corpus manifest records the per-source review; original selections contain factual identifiers, no copied database or descriptions. Wildcard versions do not imply endorsement or a vulnerability finding. |
 | IANA assignment registries (port numbers, protocol numbers, enterprise numbers, OUI-adjacent assignments) | **Candidate.** The IANA distribution and licensing terms must be reviewed for the specific registry before import; the review outcome is recorded per data set. |
 | Nmap data or code (`nmap-services`, `nmap-service-probes`, `nmap-os-db`, `nmap-mac-prefixes`, or derivatives) | **Rejected.** The [NPSL][npsl] is not assumed AGPL-compatible, and no automatic compatibility is claimed; Nmap databases and probe/match content are not imported. |
 

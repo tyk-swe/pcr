@@ -587,6 +587,7 @@ fn duplicate_evidence_is_grouped_and_protocol_matches_do_not_compete_with_claims
     rule.prefix = "200".into();
     rule.product = "HTTP service".into();
     rule.version = None;
+    rule.cpe = None;
     corpus.matches.push(rule);
     let probe = probe(&corpus, "http-head");
     let observation = service_probes::observe(

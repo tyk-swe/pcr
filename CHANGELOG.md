@@ -18,8 +18,8 @@ for remaining acceptance gates and revision-bound evidence.
   { max_frames, max_bytes, max_undecoded }`; the existing Serde struct
   representation is preserved for both JSON and binary formats.
 - Current packet documents use `packetcraftr.packet/v2`; machine output uses
-  `packetcraftr.output/v12`. Consumers must explicitly support these families.
-  Output v6–v11 schemas and published evidence stay frozen; see
+  `packetcraftr.output/v13`. Consumers must explicitly support these families.
+  Output v6–v12 schemas and published evidence stay frozen; see
   [consumer compatibility](docs/consumer-compatibility.md).
 - Live workflows run through `Client<P, K>` with explicit providers, policy,
   clock, cancellation, and runtime. Requests and sinks replace free workflow
@@ -50,6 +50,12 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Added
 
+- Explicit `identify --tls` with bounded encrypted traffic, handshake deadlines,
+  cancellation, presented certificate observations, declared SNI, and separate
+  TLS failure evidence; output/v13 adds TLS counters and metadata provenance.
+- Reviewed SMTP/FTP greeting probes in service corpus 1.1.0, supported hostname
+  and static product CPE claims, and a precommitted held-out evaluation with
+  separate unknown, ambiguous, confidence, and misleading-claim results.
 - `scan::followup` runs a scan's trace and reverse-DNS follow-ups under the
   scan's own budget, so library callers get what `scan --traceroute` and
   `--reverse-dns` do: `Client::scan_with_followups` for raw scans and
@@ -110,6 +116,20 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Fixed
 
+- SMTP greetings accept reply-code-only terminal lines while retaining exact
+  preceding greeting and product claims.
+- SMTP and FTP greeting collection stops after the final permitted continuation
+  line, retaining truncated observations without waiting for the peer to close.
+- FTP multiline greeting detection retains uncoded continuation text, including
+  product markers at the start of a line. FTP markers are not inferred from
+  hostname labels or explicit SMTP greetings.
+- Active TLS exchanges honor application timeouts within the connection lifetime
+  and retain decrypted response bytes when cancellation, deadline expiry, or a
+  subsequent TLS record error follows a completed read. Identification reports
+  retained fatal TLS errors even when the decrypted application reply is complete,
+  preserving response bytes and original diagnostics without another native read.
+  Fatal TLS errors reject further application writes while permitting bounded
+  flushing of queued alerts.
 - Update the YAML parser to enforce typed-deserialization resource budgets
   (RUSTSEC-2026-0333), retaining the document layer's independent limits.
 - Scan follow-ups share the client's monotonic deadline and propagate reverse-DNS

@@ -15,6 +15,23 @@ pub struct Usage {
     pub attempts: u64,
     pub write_bytes: u64,
     pub read_bytes: u64,
+    pub tls: TlsUsage,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct TlsUsage {
+    pub write_bytes: u64,
+    pub read_bytes: u64,
+    pub certificate_bytes: u64,
+    pub steps: u64,
+}
+
+/// Presented certificates and negotiated parameters are observations, never
+/// authentication. Wire counters include both handshake and application I/O.
+#[derive(Clone, Debug, Serialize)]
+pub struct TlsEvidence {
+    pub server_name: Option<String>,
+    pub session: packetcraftr_netio::tls::Evidence,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -38,6 +55,7 @@ pub enum Outcome {
     Malformed,
     Truncated,
     BudgetExhausted,
+    TlsFailed,
 }
 
 /// Exact request and reply bytes, their interpretation, and the match provenance.
@@ -60,6 +78,8 @@ pub struct Evidence {
     /// Original provider errors remain available to library callers.
     #[serde(skip)]
     pub source: Option<Source>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls: Option<TlsEvidence>,
 }
 
 #[derive(Clone, Debug, Serialize)]

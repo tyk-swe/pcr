@@ -11,23 +11,41 @@ Rust replacements. Callers already tracking `main` should also read
 | Contract | beta.3 | Current main |
 | --- | --- | --- |
 | Packet JSON/YAML | `packetcraftr.packet/v1` | `packetcraftr.packet/v2` |
-| Command JSON/NDJSON | `packetcraftr.output/v2` | `packetcraftr.output/v12` |
+| Command JSON/NDJSON | `packetcraftr.output/v2` | `packetcraftr.output/v13` |
 
-Update consumers explicitly; older packet documents are rejected. Output v6–v11
+Update consumers explicitly; older packet documents are rejected. Output v6–v12
 schemas remain frozen for previously emitted evidence, not as current producer
-versions. Never relabel old evidence as v12. The [consumer policy](consumer-compatibility.md)
+versions. Never relabel old evidence as v13. The [consumer policy](consumer-compatibility.md)
 defines strict envelopes/enums, extensible result records, sequence/terminal rules,
 and each retained output family's additions. Keep schemas, examples, and release
 assets from the same revision.
 
+### TLS and identification corpus additions
+
+Output/v13 extends identification with SMTP/FTP protocol fields, the explicit
+`tls_failed` outcome, optional TLS probe evidence, and separate `usage.tls`
+counters. `identify --tls` wraps TCP probes; `--server-name` declares SNI without
+lookup. Library callers set `identify::Request::tls: Option<TlsSettings>`.
+`identify::Usage` and `Evidence` gain TLS fields, `Outcome` gains `TlsFailed`,
+and service probe `Request`, `Protocol`, and `Field` gain SMTP/FTP variants.
+Direct struct literals and exhaustive matches must be updated.
+
+`service_probes::MatchRule` gains optional `hostname_field`, `device_type`, and
+`cpe`; `Candidate` gains optional supported values with explicit source
+provenance. Serialized documents can omit these members. Bundled corpus 1.1.0
+adds two greeting probes, so callers needing an exact probe set should supply
+a bounded corpus rather than rely on the bundled probe count. Frozen output/v12
+evidence remains valid under its frozen schema; never relabel historical output.
+
 ## Service identification
 
 `identify` is an explicit operation; scans do not invoke it. Consumers gain the
-`identify` command and endpoint records in output/v12. Observed claims are
+`identify` command and endpoint records originally introduced in output/v12.
+Observed claims are
 unauthenticated, candidates cite matching evidence and corpus provenance, and
 unknown or ambiguous results never assert exact versions. See
 [identification controls](service-identification.md) and the
-[v12 contract](consumer-compatibility.md#output-family-v12).
+[current contract](consumer-compatibility.md#output-family-v13).
 
 ## Adaptive scheduling
 
@@ -38,7 +56,7 @@ use `None` to retain fixed scheduling. Raw/connect reports and aggregates gain
 when a host deadline prevents intended work; never-sent attempts carry no probe
 evidence. Netio `tcp::ConnectBudget` leases remain held until worker/socket cleanup.
 See the [scheduling contract](consumer-compatibility.md#output-family-v10),
-introduced in v10 and retained in current v12.
+introduced in v10 and retained in current v13.
 
 ## Forwarding verification
 
@@ -181,7 +199,7 @@ same order, so those after `next_header` change position. `read --field`
 selects the new fields as `ipv6_fragment.reserved` and
 `ipv6_fragment.reserved_bits`, where they failed with `cli.projection_field`.
 Consumers that pin the exact field set of an `ipv6_fragment` layer must accept
-the two additions; the `packetcraftr.packet/v2` and output/v12 shapes are
+the two additions; the `packetcraftr.packet/v2` and output/v13 shapes are
 unchanged.
 
 `packetcraftr_core::protocol::network::Fragment` gains `pub reserved: u8` (the
@@ -260,7 +278,7 @@ The CLI enables EDNS with `--edns-udp-payload-size SIZE`; `--dnssec-ok` requires
 that flag. DO requests DNSSEC data and performs no signature validation. The
 advertised receive size is independent of `--max-message-bytes`, which bounds
 response decoding. Existing output `edns` fields still describe the response;
-these request settings add no fields to the output/v12 or packet/v2 contracts.
+these request settings add no fields to the output/v13 or packet/v2 contracts.
 
 ## DNS question batches and reverse names
 
@@ -1440,7 +1458,7 @@ for a row are in the sections above.
 
 | 0.5.0-beta.3 | Current main |
 | --- | --- |
-| `output::contract::SCHEMA_V2` | `output::contract::SCHEMA_V12` |
+| `output::contract::SCHEMA_V2` | `output::contract::SCHEMA_V13` |
 | `Command::require_format(format) -> Result<(), Error>` | `require_format(format) -> Result<Format, Error>` |
 | `impl clap::ValueEnum` for `output::contract::Format` and `output::stats::Table` | removed; declare your own value enum and convert with `From` |
 | `try_from_*`, `from_*`, and `complete_from_*` constructors on output types | `From`/`TryFrom`, yielding `output::envelope::Published<T>` where diagnostics or stats travel with the result (see [Output field types](#output-field-types)) |
@@ -1449,7 +1467,7 @@ for a row are in the sections above.
 
 Items introduced and removed entirely after beta.3 have no released migration.
 Pin a reviewed revision rather than depending on intermediate names. This cleanup
-changes provider composition only; CLI behavior and output/v12 remain unchanged:
+changes provider composition only; CLI behavior and output/v13 remain unchanged:
 
 - `ProviderSet<R,N,C,T,P,H>` defaults UDP to `()`; full literals add `udp: ()`.
 - Replace `WithUdp<ProviderSet<R,N,C,T,P,H>,U>` with
@@ -1465,5 +1483,5 @@ changes provider composition only; CLI behavior and output/v12 remain unchanged:
 `completed()` for the acceptance-return marker. Replies captured during an exact
 successful native send can correlate; older or missing monotonic ingress cannot.
 `sent_at`/latency use submission start, not proven wire departure or causality.
-These semantics are retained in current output/v12; historical native evidence
+These semantics are retained in current output/v13; historical native evidence
 keeps its original schema identity. See [scanner timing](scanner-evidence.md).

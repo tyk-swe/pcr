@@ -355,7 +355,11 @@ fn trace_udp_port_ovf_precedes_duration_limit() {
         operations: Vec::new(),
     };
     let calls = Arc::new(AtomicUsize::new(0));
-    let error = run(
+    // Test plan validation priority without letting scheduler delays expire
+    // the operation's one-millisecond deadline before validation starts.
+    let now = std::time::Instant::now();
+    let mut deadline = Deadline::with_time_source(request.limits.max_duration, move || now);
+    let error = engine::run(
         &request,
         &mut authorizer,
         &packetcraftr_core::protocol::builtin::registry(),
@@ -363,6 +367,8 @@ fn trace_udp_port_ovf_precedes_duration_limit() {
             calls: Arc::clone(&calls),
         },
         &mut NoopClock,
+        &mut deadline,
+        |_, _| Ok(()),
     )
     .unwrap_err();
 

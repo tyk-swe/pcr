@@ -102,6 +102,26 @@ pub(super) fn declaration(request: &Request) -> Result<Declaration, Error> {
     // request can cost a second. Connection/message maxima are independent,
     // but their sum must also respect the shared host and operation attempts.
     let admitted_attempts = total.attempts.min(limits.operation.attempts);
+    if let Some(tls) = &request.tls {
+        let steps = tls.connection.max_steps as u64;
+        let write_bytes = hosts
+            .values()
+            .map(|host| {
+                (host.attempts.min(limits.host.attempts)
+                    * tls.connection.max_wire_bytes_sent as u64)
+                    .min(tls.host.write_bytes)
+            })
+            .sum::<u64>()
+            .min(tls.operation.write_bytes)
+            .min(admitted_attempts * tls.connection.max_wire_bytes_sent as u64);
+        let messages = admitted_attempts * steps;
+        return Ok(Declaration {
+            endpoints,
+            limits: SocketLimits::new(admitted_attempts, messages, write_bytes),
+            units: admitted_attempts + messages,
+            dns,
+        });
+    }
     let units = admitted_attempts + total.writing_connections.min(admitted_attempts);
     Ok(Declaration {
         endpoints,

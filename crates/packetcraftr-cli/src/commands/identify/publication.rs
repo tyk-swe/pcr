@@ -93,6 +93,8 @@ fn endpoint_bound(
         max_request = max_request.max(bytes);
         claim_count += match probe.request.protocol() {
             core::Protocol::Ssh => 2,
+            core::Protocol::Smtp => (3 * core::MAX_GREETING_LINES) as u64,
+            core::Protocol::Ftp => core::MAX_GREETING_LINES as u64,
             core::Protocol::Http => (packetcraftr_core::protocol::application::http::MAX_HEADERS
                 + 1)
             .min(core::MAX_OBSERVED_FIELDS) as u64,
@@ -113,6 +115,11 @@ fn endpoint_bound(
                     .min(packetcraftr_core::protocol::application::http::MAX_HEADERS as u64),
                 core::Field::DnsTxt => (response / rule.prefix.len() as u64)
                     .min((core::MAX_OBSERVED_FIELDS - 1) as u64),
+                core::Field::SmtpGreeting
+                | core::Field::SmtpSoftware
+                | core::Field::FtpGreeting => {
+                    (response / rule.prefix.len() as u64).min(core::MAX_GREETING_LINES as u64)
+                }
                 _ => 1,
             };
             if references == 0 {
@@ -130,6 +137,32 @@ fn endpoint_bound(
                     .as_ref()
                     .map(|version| "0".repeat(version.max_bytes)),
                 confidence: output::identify::Confidence::Protocol,
+                hostname: rule
+                    .hostname_field
+                    .map(|field| output::identify::SupportedValue {
+                        value: "x".repeat(254),
+                        source: output::identify::ValueSource::ObservedField {
+                            field: field.into(),
+                            index: core::MAX_OBSERVED_FIELDS - 1,
+                        },
+                    }),
+                device_type: rule.device_type.as_ref().map(|value| {
+                    output::identify::SupportedValue {
+                        value: value.clone(),
+                        source: output::identify::ValueSource::MatchRule {
+                            reference: rule.metadata.reference.clone(),
+                        },
+                    }
+                }),
+                cpe: rule
+                    .cpe
+                    .as_ref()
+                    .map(|value| output::identify::SupportedValue {
+                        value: value.clone(),
+                        source: output::identify::ValueSource::MatchRule {
+                            reference: rule.metadata.reference.clone(),
+                        },
+                    }),
                 provenance: output::identify::Provenance {
                     corpus: request.corpus.name.clone(),
                     version: request.corpus.version.clone(),
@@ -155,7 +188,13 @@ fn endpoint_bound(
     let candidates = candidate_bytes.min(identify::MAX_RESULT_CANDIDATES as u64 * max_candidate);
     // Response hex costs 2R. SSH's overlapping banner/software fields cost at
     // most another 4R in claim hex; DNS additionally retains its small RCODE.
+    let certificates = request.tls.as_ref().map_or(0, |tls| {
+        (attempt_count.min(attempts) * tls.connection.max_certificate_bytes as u64)
+            .min(tls.host.certificate_bytes)
+            .min(tls.operation.certificate_bytes)
+    });
     Ok(ENVELOPE_BYTES
+        + 2 * certificates
         + attempt_count.min(attempts) * (ATTEMPT_BYTES + 2 * max_request)
         + 6 * retained_read
         + 4 * probe_count

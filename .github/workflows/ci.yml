@@ -51,7 +51,7 @@ jobs:
           cargo doc --locked --workspace --no-default-features --no-deps --document-private-items
           cargo doc --locked --workspace --no-default-features --features packetcraftr-cli/native-layer3 --no-deps --document-private-items
           cargo doc --locked --workspace --all-features --no-deps --document-private-items
-      - name: Exercise service identification on IPv4 and IPv6 loopback
+      - name: Exercise cleartext, TLS, and held-out identification on IPv4 and IPv6 loopback
         run: python scripts/test-service-identification.py --require-clean --report target/service-identification/report.json
       - name: Preserve service identification evidence even on failure
         if: always()
@@ -125,7 +125,7 @@ jobs:
         run: cargo test --locked -p packetcraftr-netio -p packetcraftr-cli
       - name: Execute deterministic contracts with every native backend enabled
         run: cargo test --locked -p packetcraftr -p packetcraftr-netio -p packetcraftr-cli --all-features
-      - name: Exercise service identification on IPv4 and IPv6 loopback
+      - name: Exercise cleartext, TLS, and held-out identification on IPv4 and IPv6 loopback
         run: python scripts/test-service-identification.py --require-clean --report target/service-identification/report.json
       - name: Preserve service identification evidence even on failure
         if: always()

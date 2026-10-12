@@ -9,6 +9,8 @@ use packetcraftr::identify::Limits;
 
 use crate::command_options::{Bounded, IdentificationPolicyArgs};
 
+mod tls;
+
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr identify 127.0.0.1:8080 --transport tcp
   packetcraftr --output json identify 192.0.2.53:5353 --transport udp
@@ -17,7 +19,8 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
 
 Select numeric endpoints reported by a scan explicitly. A scan never starts
 identification. Requests are reviewed, bounded and read-only; no authentication,
-hostname resolution, redirects, or TLS negotiation is performed. Received fields
+hostname resolution or redirects is performed. --tls explicitly wraps TCP probes;
+--server-name declares an SNI name without lookup. Certificates and received fields
 are unauthenticated claims. Matched versions are not vulnerability findings.
 Sensitive-service exclusions apply before planning; --ignore-exclusions is an
 explicit override. JSON aggregates results; NDJSON emits one endpoint record per
@@ -46,6 +49,8 @@ pub(crate) struct Args {
     /// Transport of every selected endpoint; services may use any port.
     #[arg(long, value_enum, default_value = "tcp")]
     pub(crate) transport: Transport,
+    #[command(flatten)]
+    pub(crate) tls: tls::Args,
     /// Versioned, bounded JSON probe and match corpus; default is bundled data.
     #[arg(long, value_name = "PATH")]
     pub(crate) corpus: Option<PathBuf>,

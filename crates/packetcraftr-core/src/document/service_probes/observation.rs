@@ -24,6 +24,8 @@ pub fn observe(probe: &Probe, bytes: &[u8], truncated: bool) -> Observation {
         Request::Banner {} => ssh(bytes),
         Request::HttpHead {} => http(bytes),
         Request::Dns { payload } => dns(bytes, payload),
+        Request::SmtpGreeting {} => super::greeting::observe(bytes, Protocol::Smtp),
+        Request::FtpGreeting {} => super::greeting::observe(bytes, Protocol::Ftp),
     };
     if truncated || exceeded {
         observation.outcome = ObservationOutcome::Truncated;

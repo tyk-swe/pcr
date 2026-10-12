@@ -17,9 +17,11 @@ use crate::{
     protocol::application::dns::{Dns, Name, Question},
 };
 
+mod greeting;
 mod matching;
 mod observation;
 
+pub use greeting::{ftp_collection_complete, smtp_collection_complete};
 pub use observation::{http_collection_complete, observe, ssh_collection_complete};
 
 pub const SERVICE_PROBES_SCHEMA_V1: &str = "packetcraftr.service-probes/v1";
@@ -31,6 +33,7 @@ pub const MAX_FIELD_BYTES: usize = 1024;
 pub const MAX_OBSERVED_FIELDS: usize = 512;
 pub const MAX_CANDIDATES: usize = 512;
 pub const MAX_INTENSITY: u8 = 9;
+pub const MAX_GREETING_LINES: usize = 32;
 /// Unicode scalar-value limit corresponding to the schemas' `maxLength`.
 pub const MAX_TEXT_CHARACTERS: usize = 512;
 /// Separate worst-case UTF-8 byte cap for a bounded descriptive text value.
@@ -54,6 +57,10 @@ pub struct Metadata {
 pub enum Request {
     Banner {},
     HttpHead {},
+    /// Reads the connection greeting without sending SMTP commands.
+    SmtpGreeting {},
+    /// Reads the connection greeting without sending FTP commands.
+    FtpGreeting {},
     /// Reuses the UDP profile DNS payload representation and encoder inputs.
     /// Validation permits only root IN A and version.bind CH TXT queries.
     Dns {
@@ -66,6 +73,8 @@ impl Request {
         match self {
             Self::Banner {} => Protocol::Ssh,
             Self::HttpHead {} => Protocol::Http,
+            Self::SmtpGreeting {} => Protocol::Smtp,
+            Self::FtpGreeting {} => Protocol::Ftp,
             Self::Dns { .. } => Protocol::Dns,
         }
     }
@@ -97,7 +106,9 @@ impl Probe {
     pub fn request_bytes(&self, transaction_id: u16) -> Result<Vec<u8>, Error> {
         validate_probe(self)?;
         match &self.request {
-            Request::Banner {} => Ok(Vec::new()),
+            Request::Banner {} | Request::SmtpGreeting {} | Request::FtpGreeting {} => {
+                Ok(Vec::new())
+            }
             Request::HttpHead {} => Ok(b"HEAD / HTTP/1.0\r\n\r\n".to_vec()),
             Request::Dns {
                 payload:
@@ -137,6 +148,8 @@ pub enum Protocol {
     Ssh,
     Http,
     Dns,
+    Smtp,
+    Ftp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,6 +161,10 @@ pub enum Field {
     HttpServer,
     DnsRcode,
     DnsTxt,
+    SmtpGreeting,
+    SmtpHostname,
+    SmtpSoftware,
+    FtpGreeting,
 }
 
 impl Field {
@@ -156,6 +173,8 @@ impl Field {
             Self::SshBanner | Self::SshSoftware => Protocol::Ssh,
             Self::HttpStatus | Self::HttpServer => Protocol::Http,
             Self::DnsRcode | Self::DnsTxt => Protocol::Dns,
+            Self::SmtpGreeting | Self::SmtpHostname | Self::SmtpSoftware => Protocol::Smtp,
+            Self::FtpGreeting => Protocol::Ftp,
         }
     }
 }
@@ -179,6 +198,16 @@ pub struct MatchRule {
     pub prefix: String,
     pub product: String,
     pub version: Option<VersionExtraction>,
+    /// The sole supported hostname source is a parsed SMTP greeting domain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hostname_field: Option<Field>,
+    /// A reviewed literal supported by the matched product field, never a guess
+    /// based on a port number or the surrounding host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_type: Option<String>,
+    /// A reviewed, static CPE 2.3 product name. No version interpolation occurs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpe: Option<String>,
     pub metadata: Metadata,
 }
 
@@ -261,6 +290,35 @@ pub struct Candidate {
     pub version: Option<String>,
     pub confidence: Confidence,
     pub provenance: MatchProvenance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<SupportedValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_type: Option<SupportedValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpe: Option<SupportedValue>,
+}
+
+/// A claim supported by an exact observation or a reviewed match document.
+/// These values inherit the candidate's unauthenticated confidence; provenance
+/// locates evidence and never establishes the actual service or host identity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SupportedValue {
+    pub value: String,
+    pub source: ValueSource,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ValueSource {
+    ObservedField {
+        field: Field,
+        index: usize,
+    },
+    /// The candidate's provenance identifies the corpus, version, probe and rule.
+    MatchRule {
+        reference: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -314,6 +372,12 @@ fn validate(corpus: &Corpus) -> Result<(), Error> {
             ));
         }
         text("product", &rule.product)?;
+        if rule.field == Field::SmtpHostname {
+            return Err(invalid(
+                "match field",
+                "a hostname does not identify software",
+            ));
+        }
         if matches!(rule.field, Field::DnsRcode) && rule.product != "DNS service"
             || matches!(rule.field, Field::HttpStatus) && rule.product != "HTTP service"
         {
@@ -339,7 +403,58 @@ fn validate(corpus: &Corpus) -> Result<(), Error> {
                 "expected bounded claim-field extraction",
             ));
         }
+        if rule.hostname_field.is_some_and(|field| {
+            field != Field::SmtpHostname || field.protocol() != rule.field.protocol()
+        }) {
+            return Err(invalid(
+                "hostname field",
+                "expected a parsed SMTP hostname field",
+            ));
+        }
+        if let Some(device_type) = &rule.device_type {
+            text("device type", device_type)?;
+        }
+        if let Some(cpe) = &rule.cpe {
+            validate_cpe(cpe)?;
+        }
+        if matches!(
+            rule.field,
+            Field::DnsRcode | Field::HttpStatus | Field::SmtpHostname
+        ) && (rule.device_type.is_some() || rule.cpe.is_some())
+        {
+            return Err(invalid(
+                "match metadata",
+                "product metadata requires a software claim",
+            ));
+        }
         metadata(&rule.metadata)?;
+    }
+    Ok(())
+}
+
+fn validate_cpe(value: &str) -> Result<(), Error> {
+    // Keep the authored-data language deliberately smaller than the complete
+    // CPE grammar: static ASCII components, without escapes or pattern matching.
+    // No component is expanded from attacker-controlled version/hostname bytes.
+    text("CPE", value)?;
+    let parts: Vec<_> = value.split(':').collect();
+    if parts.len() != 13
+        || parts[0] != "cpe"
+        || parts[1] != "2.3"
+        || !matches!(parts[2], "a" | "o" | "h")
+        || parts[3..].iter().any(|part| {
+            part.is_empty()
+                || !(*part == "*"
+                    || *part == "-"
+                    || part
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte)))
+        })
+        || matches!(parts[3], "*" | "-")
+        || matches!(parts[4], "*" | "-")
+        || parts[5] != "*"
+    {
+        return Err(invalid("CPE", "expected a static CPE 2.3 product name"));
     }
     Ok(())
 }

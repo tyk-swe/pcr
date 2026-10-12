@@ -8,12 +8,13 @@ on:
         type: string
         required: true
       scenario:
-        description: Select the full inventory, M4 scoped targets, or M5 host discovery
+        description: Select the inventory, scoped targets, discovery, or OS identification
         type: choice
         options:
           - all
           - scoped_ipv6_targets
           - host_discovery
+          - os_identification
         default: all
 
 permissions:
@@ -57,12 +58,19 @@ jobs:
           if [[ "${{ inputs.scenario }}" == host_discovery ]]; then
             ${{ matrix.python }} scripts/test-host-discovery-native.py --emit-unavailable \
               --report target/validation/host-discovery.json
+          elif [[ "${{ inputs.scenario }}" == os_identification ]]; then
+            ${{ matrix.python }} scripts/test-os-identification-native.py --initialize-only \
+              --reviewed-commit "${{ inputs.commit }}" --output target/validation/os-native.json
           else
             ${{ matrix.python }} scripts/test-native-platform.py --emit-unavailable \
               --report target/validation/native-platform.json
           fi
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
+      - name: Build reviewed OS identification CLI
+        if: inputs.scenario == 'os_identification'
+        shell: bash
+        run: cargo build --locked -p packetcraftr-cli --all-features
       - name: Exercise reviewed macOS host-local scenarios
         if: runner.os == 'macOS'
         shell: bash
@@ -74,6 +82,12 @@ jobs:
             sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
               python3 scripts/test-host-discovery-native.py --reviewed-commit "$REVIEWED_COMMIT" \
               --report target/validation/host-discovery.json
+            exit
+          fi
+          if [[ "$SCENARIO" == os_identification ]]; then
+            sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
+              python3 scripts/test-os-identification-native.py --reviewed-commit "$REVIEWED_COMMIT" \
+              --output target/validation/os-native.json
             exit
           fi
           sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
@@ -90,6 +104,11 @@ jobs:
           if [[ "$SCENARIO" == host_discovery ]]; then
             python scripts/test-host-discovery-native.py --reviewed-commit "$REVIEWED_COMMIT" \
               --report target/validation/host-discovery.json
+            exit
+          fi
+          if [[ "$SCENARIO" == os_identification ]]; then
+            python scripts/test-os-identification-native.py --reviewed-commit "$REVIEWED_COMMIT" \
+              --output target/validation/os-native.json
             exit
           fi
           python scripts/test-native-platform.py --reviewed-commit "$REVIEWED_COMMIT" \

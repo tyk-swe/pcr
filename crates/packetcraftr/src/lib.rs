@@ -41,6 +41,7 @@ pub mod fuzz;
 pub mod identify;
 mod mtu;
 pub mod neighbor;
+pub mod os;
 mod planning;
 pub mod policy;
 mod preparation;

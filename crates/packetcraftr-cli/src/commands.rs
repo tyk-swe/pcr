@@ -32,6 +32,7 @@ mod fuzz;
 mod http;
 mod http2;
 mod identify;
+mod identify_os;
 mod interfaces;
 mod merge;
 mod offline_analysis;

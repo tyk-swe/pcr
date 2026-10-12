@@ -1,0 +1,75 @@
+{
+  "schema": "packetcraftr.output/v14",
+  "command": "identify-os",
+  "mode": "stream",
+  "sequence": 1,
+  "event": "os_probe",
+  "status": "success",
+  "result": {
+    "kind": "probe",
+    "sequence": 1,
+    "probe": "open_syn",
+    "attempt": 1,
+    "sent": {
+      "timestamp": {
+        "unix_seconds": 1791818036,
+        "nanoseconds": 338221545
+      },
+      "captured_length": 86,
+      "original_length": 86,
+      "link_type": 1,
+      "bytes_hex": "3a21346eaad356b8671cf7d886dd600000000020064020010db800000000000000000000000120010db8000000000000000000000002c470a87385ceacb6000000008002ffff75340000020405b40402010303070000"
+    },
+    "response": {
+      "timestamp": {
+        "unix_seconds": 1791818036,
+        "nanoseconds": 338285000
+      },
+      "captured_length": 86,
+      "original_length": 86,
+      "link_type": 1,
+      "interface": 3,
+      "bytes_hex": "56b8671cf7d83a21346eaad386dd600cb04e0020064020010db800000000000000000000000220010db8000000000000000000000001a873c4705f40749585ceacb78012fd20a33c0000020405a0010104020103030a"
+    },
+    "observation": {
+      "probe": "open_syn",
+      "address_family": "ipv6",
+      "tcp": {
+        "flags": 18,
+        "window": 64800,
+        "option_kinds": [
+          2,
+          1,
+          1,
+          4,
+          1,
+          3
+        ],
+        "mss": 1440,
+        "window_scale": 10,
+        "sack_permitted": true,
+        "timestamps": false
+      },
+      "icmp_type": null,
+      "icmp_code": null,
+      "observed_hop_limit": 64,
+      "ipv4_identification": null,
+      "ipv4_dont_fragment": null,
+      "sequence": 1598059669,
+      "acknowledgment": 2244914359,
+      "timestamp_value": null,
+      "timestamp_echo": null,
+      "suitable": true
+    },
+    "received_at": {
+      "unix_seconds": 1791818036,
+      "nanoseconds": 338285000
+    },
+    "latency": {
+      "secs": 0,
+      "nanos": 64071
+    },
+    "reason": "correlated TCP SYN/ACK"
+  },
+  "diagnostics": []
+}

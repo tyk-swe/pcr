@@ -11,7 +11,7 @@ its dataset and the feature's acceptance, regardless of utility.
 | --- | --- |
 | Port | Factual names/selections and creative payload bytes; original [M6](roadmap/m06-port-planning-inference.md) catalog/UDP profiles |
 | Service | Requests, literal matches, product/version metadata; original [M8](roadmap/m08-service-identification.md)/[M9](roadmap/m09-tls-services-corpus.md) corpus/exclusions |
-| OS | Fingerprints/rules; [M10](roadmap/m10-os-identification.md) planned |
+| OS | Original Linux Ethernet profiles in [OS provenance](../crates/packetcraftr/data/os-fingerprints.provenance.yaml); [M10](roadmap/m10-os-identification.md) in progress |
 | Vendor | Prefix assignments; none bundled, so discovery emits links without vendor labels |
 
 Current sources: [port catalog](../crates/packetcraftr/data/port-catalog.provenance.yaml),

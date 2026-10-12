@@ -65,6 +65,7 @@ pub mod identify;
 pub mod interfaces;
 pub mod merge;
 pub mod network;
+pub mod os;
 pub mod plan;
 pub mod projection;
 pub mod protocols;

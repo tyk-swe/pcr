@@ -11,12 +11,22 @@ Rust replacements. Callers already tracking `main` should also read
 | Contract | beta.3 | Current main |
 | --- | --- | --- |
 | Packet JSON/YAML | `packetcraftr.packet/v1` | `packetcraftr.packet/v2` |
-| Command JSON/NDJSON | `packetcraftr.output/v2` | `packetcraftr.output/v13` |
+| Command JSON/NDJSON | `packetcraftr.output/v2` | `packetcraftr.output/v14` |
 
 Older packet documents are rejected. Explicitly update output consumers; keep
-schemas, examples, and release assets from one revision. Output v6–v12 schemas
+schemas, examples, and release assets from one revision. Output v6–v13 schemas
 remain frozen for historical evidence; never relabel it. The
 [consumer policy](consumer-compatibility.md) owns meanings and completion rules.
+
+### OS identification
+
+Output/v14 adds `identify-os` and its OS evidence/terminal records. Adopt
+`output::contract::SCHEMA_V14`; v13 remains frozen. `packetcraftr::os::Request`
+requires a numeric target, distinct open/closed TCP ports, and a validated
+`os_fingerprints::Corpus`. `Client::identify_os` requires packet and target
+providers; `os::Collector` rebuilds the aggregate. See
+[OS identification](os-identification.md) and the
+[v14 contract](consumer-compatibility.md#output-family-v14).
 
 ### TLS and identification corpus additions
 
@@ -158,7 +168,7 @@ Live policy and matching still reject nonzero SRH flags.
 or `..Fragment::default()` to literals and `..` to patterns. Above-3 Res bits fail
 in either build mode. Reflection/layout gains these fields after `next_header`;
 update exact field sets/positions and use `ipv6_fragment.reserved[_bits]` for
-projection. The recursive packet/v2 and output/v13 shapes do not change.
+projection. The recursive packet/v2 and output/v14 shapes do not change.
 
 ## DNS transport selection
 
@@ -353,7 +363,7 @@ Every destination-bearing live command accepts repeated `--allow-destination`;
 ## Target planning and scoped IPv6
 
 Manifests/list mode share admission; listing sends no target/neighbor packets,
-but explicitly authorized hostname resolution is reported. v7 fields persist in v13.
+but explicitly authorized hostname resolution is reported. v7 fields persist in v14.
 `Request::target_sources` is empty or one bounded nonempty label/declaration.
 `Client::plan_targets` requires only `TargetProviders`.
 Handle `Target::ScopedAddress`; use `Authorized::selected()` for scope and owned
@@ -380,7 +390,7 @@ and reverse-DNS data. List reports accept optional expanded ports.
 ## Host discovery
 
 Discovery is opt-in (`before|only|skip`); silence remains uncertain. v9 hosts/stages
-persist in v13 and share authorization/budgets.
+persist in v14 and share authorization/budgets.
 Add `Request::discovery: discovery::Options`; default omits discovery and only
 `Mode::Only` permits no endpoints. Probes/evidence gain `stage`, reports gain
 `hosts`, aggregates keep discovery probes separately. Handle `InvalidDiscovery`/
@@ -391,7 +401,7 @@ Add `Request::discovery: discovery::Options`; default omits discovery and only
 
 Raw-only `scan --traceroute` runs before reverse DNS under remaining policy/time
 budgets. Connect/list reject it before work. Select a responsive TCP/ICMP observation
-or explicit fallback; reused hops are sourced claims. v11 fields persist in v13.
+or explicit fallback; reused hops are sourced claims. v11 fields persist in v14.
 `traceroute::hosts` / `Client::trace_hosts` add multi-host plans; standalone shapes
 stay unchanged. Handle `TargetSelection`, `InvalidObservation`, `Collection` sources.
 Resolved targets/sequence numbering can be reused after reauthorization.
@@ -782,7 +792,7 @@ for a row are in the sections above.
 
 | 0.5.0-beta.3 | Current main |
 | --- | --- |
-| `output::contract::SCHEMA_V2` | `output::contract::SCHEMA_V13` |
+| `output::contract::SCHEMA_V2` | `output::contract::SCHEMA_V14` |
 | `Command::require_format(format) -> Result<(), Error>` | `require_format(format) -> Result<Format, Error>` |
 | `impl clap::ValueEnum` for `output::contract::Format` and `output::stats::Table` | removed; declare your own value enum and convert with `From` |
 | `try_from_*`, `from_*`, and `complete_from_*` constructors on output types | `From`/`TryFrom`, yielding `output::envelope::Published<T>` where diagnostics or stats travel with the result (see [Output field types](#output-field-types)) |
@@ -791,7 +801,7 @@ for a row are in the sections above.
 
 Items introduced and removed entirely after beta.3 have no released migration.
 Pin a reviewed revision rather than depending on intermediate names. This cleanup
-changes provider composition only; CLI behavior and output/v13 remain unchanged:
+changes provider composition only; CLI behavior and output/v14 remain unchanged:
 
 - `ProviderSet<R,N,C,T,P,H>` defaults UDP to `()`; full literals add `udp: ()`.
 - Replace `WithUdp<ProviderSet<R,N,C,T,P,H>,U>` with
@@ -807,5 +817,5 @@ changes provider composition only; CLI behavior and output/v13 remain unchanged:
 `completed()` for the acceptance-return marker. Replies captured during an exact
 successful native send can correlate; older or missing monotonic ingress cannot.
 `sent_at`/latency use submission start, not proven wire departure or causality.
-These semantics are retained in current output/v13; historical native evidence
+These semantics are retained in current output/v14; historical native evidence
 keeps its original schema identity. See [scanner timing](scanner-evidence.md).

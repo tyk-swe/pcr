@@ -23,7 +23,7 @@ keeps its existing contract and shapes.
   freshness. Reused hops carry source/probe sequences, observed time, and age;
   they are claims, never new observations. Cache lifetime cannot exceed operation
   or maximum age. Default is no reuse.
-- Output/v11 introduced scan trace summaries/records; current v13 retains them
+- Output/v11 introduced scan trace summaries/records; current v14 retains them
   under [compatibility](../consumer-compatibility.md#output-family-v11).
 
 ## Recorded fixtures

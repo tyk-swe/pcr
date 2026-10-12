@@ -1,0 +1,271 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:packetcraftr:os-fingerprints:v1",
+  "title": "PacketcraftR OS fingerprint corpus v1",
+  "$comment": "Runtime validation additionally enforces byte limits, unique identifiers and per-probe fields, port prerequisites, and TCP/ICMP field compatibility.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "packetcraftr.os-fingerprints/v1"
+    },
+    "probe_set": {
+      "const": "packetcraftr.os-probes/v1"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "maintainer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "signatures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "family": {
+            "type": "string",
+            "enum": [
+              "linux",
+              "windows",
+              "macos"
+            ]
+          },
+          "address_family": {
+            "type": "string",
+            "enum": [
+              "ipv4",
+              "ipv6"
+            ]
+          },
+          "reference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "predicates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "probe": {
+                  "type": "string",
+                  "enum": [
+                    "open_syn",
+                    "closed_syn",
+                    "timestamp_syn",
+                    "echo"
+                  ]
+                },
+                "test": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "const": "flags"
+                        },
+                        "value": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 65535
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "const": "window"
+                        },
+                        "value": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 65535
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "const": "option_kinds"
+                        },
+                        "value": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 255
+                          },
+                          "maxItems": 40
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "const": "mss"
+                        },
+                        "value": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 65535
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "const": "window_scale"
+                        },
+                        "value": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 14
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "const": "sack_permitted"
+                        },
+                        "value": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "const": "timestamps"
+                        },
+                        "value": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "const": "icmp_type"
+                        },
+                        "value": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "const": "icmp_code"
+                        },
+                        "value": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "probe",
+                "test"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 64,
+            "minItems": 6
+          }
+        },
+        "required": [
+          "id",
+          "family",
+          "address_family",
+          "reference",
+          "predicates"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 512
+    }
+  },
+  "required": [
+    "schema",
+    "probe_set",
+    "name",
+    "version",
+    "maintainer",
+    "signatures"
+  ],
+  "additionalProperties": false
+}

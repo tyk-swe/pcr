@@ -1,0 +1,153 @@
+{
+  "schema": "packetcraftr.output/v14",
+  "command": "identify-os",
+  "mode": "stream",
+  "sequence": 15,
+  "event": "complete",
+  "status": "success",
+  "result": {
+    "kind": "complete",
+    "target": "2001:db8::2",
+    "probe_set": "packetcraftr.os-probes/v1",
+    "corpus": "project-os-fingerprints",
+    "corpus_version": "1.0.0",
+    "identification": {
+      "outcome": "matched",
+      "reason": "observed stack satisfies qualified family signatures",
+      "candidates": [
+        {
+          "family": "linux",
+          "signature": "linux-ethernet1500-ipv6",
+          "corpus": "project-os-fingerprints",
+          "corpus_version": "1.0.0",
+          "reference": "Original Linux 7.0.0-38-generic kernel captures; docs/roadmap/evidence/m10/training-kernel-7.0.0-38-generic.json.gz; 1500-byte veth MTU, default TCP settings",
+          "matched_predicates": 17,
+          "confidence": "qualified",
+          "observation_indices": [
+            0,
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    "observations": [
+      {
+        "probe": "open_syn",
+        "address_family": "ipv6",
+        "tcp": {
+          "flags": 18,
+          "window": 64800,
+          "option_kinds": [
+            2,
+            1,
+            1,
+            4,
+            1,
+            3
+          ],
+          "mss": 1440,
+          "window_scale": 10,
+          "sack_permitted": true,
+          "timestamps": false
+        },
+        "icmp_type": null,
+        "icmp_code": null,
+        "observed_hop_limit": 64,
+        "ipv4_identification": null,
+        "ipv4_dont_fragment": null,
+        "sequence": 1598059669,
+        "acknowledgment": 2244914359,
+        "timestamp_value": null,
+        "timestamp_echo": null,
+        "suitable": true
+      },
+      {
+        "probe": "closed_syn",
+        "address_family": "ipv6",
+        "tcp": {
+          "flags": 20,
+          "window": 0,
+          "option_kinds": [],
+          "mss": null,
+          "window_scale": null,
+          "sack_permitted": false,
+          "timestamps": false
+        },
+        "icmp_type": null,
+        "icmp_code": null,
+        "observed_hop_limit": 64,
+        "ipv4_identification": null,
+        "ipv4_dont_fragment": null,
+        "sequence": 0,
+        "acknowledgment": 2244914361,
+        "timestamp_value": null,
+        "timestamp_echo": null,
+        "suitable": true
+      },
+      {
+        "probe": "timestamp_syn",
+        "address_family": "ipv6",
+        "tcp": {
+          "flags": 18,
+          "window": 64260,
+          "option_kinds": [
+            2,
+            4,
+            8,
+            1,
+            3
+          ],
+          "mss": 1440,
+          "window_scale": 10,
+          "sack_permitted": true,
+          "timestamps": true
+        },
+        "icmp_type": null,
+        "icmp_code": null,
+        "observed_hop_limit": 64,
+        "ipv4_identification": null,
+        "ipv4_dont_fragment": null,
+        "sequence": 1612773012,
+        "acknowledgment": 2244914362,
+        "timestamp_value": 803896145,
+        "timestamp_echo": 2244914361,
+        "suitable": true
+      },
+      {
+        "probe": "echo",
+        "address_family": "ipv6",
+        "tcp": null,
+        "icmp_type": 129,
+        "icmp_code": 0,
+        "observed_hop_limit": 64,
+        "ipv4_identification": null,
+        "ipv4_dont_fragment": null,
+        "sequence": null,
+        "acknowledgment": null,
+        "timestamp_value": null,
+        "timestamp_echo": null,
+        "suitable": true
+      }
+    ],
+    "retained_evidence_bytes": 1108,
+    "complete": true
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 7,
+    "packets_completed": 7,
+    "bytes": 554,
+    "elapsed": {
+      "secs": 1,
+      "nanos": 892526605
+    },
+    "capture": {
+      "received_frames": 14,
+      "received_bytes": 1108,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

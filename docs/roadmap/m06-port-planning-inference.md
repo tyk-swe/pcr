@@ -33,7 +33,7 @@ gates remain open.
   Explicit methods never fall back. Automatic choice reads build capability and
   publishes its reason, not runtime privilege. Kernel socket evidence is not wire.
 - Output/v8 introduced plans, hints, inference, unattributed frames, endpoint
-  events, and list ports. Current v13 retains them under
+  events, and list ports. Frozen v13 retains them under
   [compatibility](../consumer-compatibility.md#output-family-v8).
 
 [Port inference](../scanner-evidence.md#port-inference) owns the rule tables.

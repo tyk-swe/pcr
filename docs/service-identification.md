@@ -101,7 +101,7 @@ nonzero ports, 64 KiB serialized bytes; overlaps preserve all reasons/provenance
 
 ## Reading evidence
 
-[v13](../schemas/packetcraftr.output.v13.schema.json) separates exact planned
+[v14](../schemas/packetcraftr.output.v14.schema.json) separates exact planned
 request/response hex, actual partial bytes written, numeric peers, observed claims,
 candidates, ordinal confidence, and corpus/probe/rule/field provenance.
 `claim` and `protocol` are not probabilities or authentication.

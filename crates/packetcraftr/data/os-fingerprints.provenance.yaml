@@ -1,0 +1,65 @@
+manifest_version: 1
+
+dataset:
+  name: "project-os-fingerprints"
+  kind: "os"
+  version: "1.0.0"
+  packaged_as: "bundled"
+  review_outcome: "accepted"
+
+source:
+  name: "Original isolated Linux kernel response captures and project-authored rules"
+  locator: "docs/roadmap/evidence/m10/"
+  retrieved: "2026-10-12"
+  upstream_version: "Linux 7.0.0-38-generic training; 7.0.0-34-generic held out"
+  license: "AGPL-3.0-only"
+  license_rationale: |
+    The project authored the finite probes, representation, selection and rules.
+    Retained protocol fields are factual observations from authorized isolated
+    stacks; no kernel code, third-party fingerprint selection, descriptions,
+    databases or match expressions are copied. Probe constants independently
+    implement RFC 9293 sections 3.1 and 3.4, RFC 7323 sections 2 and 3, RFC 2018
+    section 2, RFC 792 echo, and RFC 4443 section 4. Linux labels identify the
+    explicitly booted kernel, never identity inferred from a comparator. This
+    original document/selection is AGPL-3.0-only. No Nmap data or derivative is
+    imported. Target customization and intermediaries can imitate these fields.
+
+transforms:
+  - step: "collect"
+    detail: |
+      scripts/test-os-identification-native.py observes immediate real kernel
+      replies across a documentation-address 1500-byte veth pair in distinct
+      fresh source/peer network namespaces. Disable checksum offload; retain
+      exact command outputs, frames, source/binary hashes and kernel identity.
+  - step: "freeze"
+    detail: |
+      Before any rule authoring, boot independently installed kernel 7.0.0-34
+      in a network-disabled KVM guest and collect the same fixtures with an
+      empty corpus. Preserve held-out-freeze.v1.json and the complete captures.
+      Raw held-out SHA-256:
+      ff3d2282d46e4fa08e4d7fec167e27d86408ff1dd467b72883800a69c4188b37.
+      Rule authors inspected only kernel/status/count/hash metadata at freeze.
+  - step: "author"
+    detail: |
+      Read only 7.0.0-38 training observations. Select exact flags, windows,
+      ordered option kinds, MSS and SACK/timestamp presence for each required
+      probe. Window-scale values are configuration/memory dependent and stay
+      observations, not predicates. Preserve signatures-before-evaluation.v1.json.
+      Never use TTL, sequence, timestamp values or IP IDs as identity predicates.
+  - step: "evaluate"
+    detail: |
+      Run the frozen-independent-kernel core regression after freezing rules.
+      Four suitable family/format case-runs qualify Linux; eight unsuitable
+      cases remain inconclusive. No post-evaluation tuning. These twelve runs
+      represent one held-out kernel instance, not twelve independent stacks.
+
+maintenance:
+  maintainer: "tyk-swe"
+  refresh: "On reviewed stack/profile changes; freeze a new independent build partition before authoring"
+  re_review: "Every corpus/probe-set change and every added source or family"
+  coverage: |
+    Two Linux Ethernet MTU-1500 IPv4/IPv6 profiles, default recorded TCP settings,
+    open/closed suitability and original packet fidelity. Unknown configurations
+    stay unknown. No bundled Windows/macOS rules. Other-family false-positive
+    accuracy, broad Linux coverage, calibrated confidence, scoped-native parity,
+    and performance remain unmeasured. Hosted native acceptance remains open.

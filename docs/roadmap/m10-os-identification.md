@@ -2,41 +2,54 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M5](m05-host-discovery.md), [M7](m07-adaptive-scheduling.md) | Qualified remote stack observations |
+| In progress | [M5](m05-host-discovery.md), [M7](m07-adaptive-scheduling.md) | Qualified remote stack observations |
 
-No OS probe set, fingerprint representation, matching corpus, or result exists.
-Packet codecs and passive JA3/JA4 client fingerprints do not identify a remote OS.
+The first increment implements standalone `identify-os` and `Client::identify_os`,
+original bounded IPv4/IPv6 probes, prerequisite verification, explicit omissions
+and contradictions, pure fingerprint extraction/matching, and output/v14.
+See the [user/library guide](../os-identification.md).
 
-## Intended behavior
+## Implemented decisions
 
-- Define independent, finite IPv4/IPv6 probe sets before corpus/matcher design.
-  Record suitability, prerequisites such as responsive open/closed endpoints,
-  missing responses, and intermediary effects; unsuitable targets are inconclusive.
-- Bound probes, retries, bytes, response windows, retained evidence, and matching.
-  Reauthorize final endpoint/bytes; packet construction alone is not OS scanning.
-- Match a reviewed original/redistributable corpus with independent version,
-  provenance, maintenance, and coverage. No Nmap database import is presumed legal.
-- Publish observed fingerprint fields separately from ranked qualified candidates.
-  Missing/contradictory evidence remains visible, with supported granularity only.
-  NATs, firewalls, proxies, and stack customization may change observations.
-  No authenticated identity or probability follows from ordinal confidence.
+- One numeric unicast target; explicit distinct open/closed TCP ports. Required
+  open SYN/ACK and closed RST/ACK evidence is verified before additional probes.
+- Versioned four-probe set; random operation correlation identities, bounded
+  attempts, shared pacing/deadline/budgets, strict final-wire authorization,
+  bounded neighbor preparation, and exact RST cleanup.
+- Retained observations and candidates stay separate. Required evidence cannot
+  be supplied by late/unrelated/router replies or withheld capture bytes.
+  Missing, malformed, conflicting, and intermediary-modified evidence remains
+  unknown or inconclusive.
+- Fully satisfied stable predicates qualify Linux/Windows/macOS families.
+  Competing families remain ambiguous; confidence is ordinal. No release,
+  authenticated identity, inferred initial TTL, or probability is claimed.
+- Original independently versioned corpus, named maintainer, provenance and
+  pre-tuning training/hold-out split. No Nmap data or derived signatures.
 
-## Decisions before implementation
+## Evidence and remaining acceptance
 
-Set the smallest explicit probe set and bounded representation for each family;
-choose suitability/refusal rules, supported output granularity, scoring/confidence,
-and corpus ownership/refresh. Set training/held-out partitions before rule tuning.
-A new machine family is required if existing meanings/shapes would change.
+[Preserved evidence](evidence/m10/README.md) contains original Linux 7.0.0-38
+training captures and a frozen independent 7.0.0-34 kernel hold-out. The two
+bundled Linux Ethernet profiles qualify all four suitable dual-stack/format
+hold-out case-runs; all eight unsuitable cases remain inconclusive. These are
+repeated cases from one held-out build, not twelve independent OS instances.
+Other-family false-positive accuracy and broad Linux coverage remain unmeasured.
 
-## Acceptance gates
+Injected tests cover known/unknown/ambiguous, partial, contradictory, unsuitable,
+late, wrong-identity, and modified observations. Native tests exercise real
+immediate kernel replies and JSON/NDJSON over isolated documentation-address
+links. Capture loss, offload, retention, timing, source/binary identity, and
+unsupported profiles must remain explicit.
 
-Independent fixtures must cover known, unknown, unsuitable, partial, conflicting,
-and intermediary-modified stacks in IPv4/IPv6. Report held-out coverage,
-uncertainty, and stated accuracy separately from observed-field fidelity and
-runtime/performance. Record exact-revision native runs on supported platforms
-under [M2](m02-ground-truth-benchmarks.md)/[M3](m03-native-validation.md).
+M10 remains **In progress**. Required gates include independently labeled Windows
+and macOS stacks, broader configurations/intermediary coverage, scoped native
+coverage, cross-family held-out accuracy/uncertainty, agreed performance goals,
+and exact reviewed-revision execution on supported Linux/macOS/Windows profiles.
+Hosted loopback runs do not close routed/shared-link gates. Compilation, skips,
+and typed refusals do not establish native parity.
 
 Keep [evidence semantics](../scanner-evidence.md),
 [data review](../scanner-data-policy.md), and
-[consumer compatibility](../consumer-compatibility.md) synchronized. M10 remains
-**Planned**; no implementation or acceptance is claimed.
+[consumer compatibility](../consumer-compatibility.md) synchronized. Refreshing
+signatures requires a new independent frozen hold-out before tuning. Automatic
+scan integration remains deferred.

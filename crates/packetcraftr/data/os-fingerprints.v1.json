@@ -1,0 +1,289 @@
+{
+  "schema": "packetcraftr.os-fingerprints/v1",
+  "probe_set": "packetcraftr.os-probes/v1",
+  "name": "project-os-fingerprints",
+  "version": "1.0.0",
+  "maintainer": "tyk-swe",
+  "signatures": [
+    {
+      "id": "linux-ethernet1500-ipv4",
+      "family": "linux",
+      "address_family": "ipv4",
+      "reference": "Original Linux 7.0.0-38-generic kernel captures; docs/roadmap/evidence/m10/training-kernel-7.0.0-38-generic.json.gz; 1500-byte veth MTU, default TCP settings",
+      "predicates": [
+        {
+          "probe": "open_syn",
+          "test": {
+            "field": "flags",
+            "value": 18
+          }
+        },
+        {
+          "probe": "open_syn",
+          "test": {
+            "field": "window",
+            "value": 64240
+          }
+        },
+        {
+          "probe": "open_syn",
+          "test": {
+            "field": "option_kinds",
+            "value": [
+              2,
+              1,
+              1,
+              4,
+              1,
+              3
+            ]
+          }
+        },
+        {
+          "probe": "open_syn",
+          "test": {
+            "field": "mss",
+            "value": 1460
+          }
+        },
+        {
+          "probe": "open_syn",
+          "test": {
+            "field": "sack_permitted",
+            "value": true
+          }
+        },
+        {
+          "probe": "open_syn",
+          "test": {
+            "field": "timestamps",
+            "value": false
+          }
+        },
+        {
+          "probe": "closed_syn",
+          "test": {
+            "field": "flags",
+            "value": 20
+          }
+        },
+        {
+          "probe": "closed_syn",
+          "test": {
+            "field": "window",
+            "value": 0
+          }
+        },
+        {
+          "probe": "closed_syn",
+          "test": {
+            "field": "option_kinds",
+            "value": []
+          }
+        },
+        {
+          "probe": "closed_syn",
+          "test": {
+            "field": "sack_permitted",
+            "value": false
+          }
+        },
+        {
+          "probe": "closed_syn",
+          "test": {
+            "field": "timestamps",
+            "value": false
+          }
+        },
+        {
+          "probe": "timestamp_syn",
+          "test": {
+            "field": "flags",
+            "value": 18
+          }
+        },
+        {
+          "probe": "timestamp_syn",
+          "test": {
+            "field": "window",
+            "value": 65160
+          }
+        },
+        {
+          "probe": "timestamp_syn",
+          "test": {
+            "field": "option_kinds",
+            "value": [
+              2,
+              4,
+              8,
+              1,
+              3
+            ]
+          }
+        },
+        {
+          "probe": "timestamp_syn",
+          "test": {
+            "field": "mss",
+            "value": 1460
+          }
+        },
+        {
+          "probe": "timestamp_syn",
+          "test": {
+            "field": "sack_permitted",
+            "value": true
+          }
+        },
+        {
+          "probe": "timestamp_syn",
+          "test": {
+            "field": "timestamps",
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "linux-ethernet1500-ipv6",
+      "family": "linux",
+      "address_family": "ipv6",
+      "reference": "Original Linux 7.0.0-38-generic kernel captures; docs/roadmap/evidence/m10/training-kernel-7.0.0-38-generic.json.gz; 1500-byte veth MTU, default TCP settings",
+      "predicates": [
+        {
+          "probe": "open_syn",
+          "test": {
+            "field": "flags",
+            "value": 18
+          }
+        },
+        {
+          "probe": "open_syn",
+          "test": {
+            "field": "window",
+            "value": 64800
+          }
+        },
+        {
+          "probe": "open_syn",
+          "test": {
+            "field": "option_kinds",
+            "value": [
+              2,
+              1,
+              1,
+              4,
+              1,
+              3
+            ]
+          }
+        },
+        {
+          "probe": "open_syn",
+          "test": {
+            "field": "mss",
+            "value": 1440
+          }
+        },
+        {
+          "probe": "open_syn",
+          "test": {
+            "field": "sack_permitted",
+            "value": true
+          }
+        },
+        {
+          "probe": "open_syn",
+          "test": {
+            "field": "timestamps",
+            "value": false
+          }
+        },
+        {
+          "probe": "closed_syn",
+          "test": {
+            "field": "flags",
+            "value": 20
+          }
+        },
+        {
+          "probe": "closed_syn",
+          "test": {
+            "field": "window",
+            "value": 0
+          }
+        },
+        {
+          "probe": "closed_syn",
+          "test": {
+            "field": "option_kinds",
+            "value": []
+          }
+        },
+        {
+          "probe": "closed_syn",
+          "test": {
+            "field": "sack_permitted",
+            "value": false
+          }
+        },
+        {
+          "probe": "closed_syn",
+          "test": {
+            "field": "timestamps",
+            "value": false
+          }
+        },
+        {
+          "probe": "timestamp_syn",
+          "test": {
+            "field": "flags",
+            "value": 18
+          }
+        },
+        {
+          "probe": "timestamp_syn",
+          "test": {
+            "field": "window",
+            "value": 64260
+          }
+        },
+        {
+          "probe": "timestamp_syn",
+          "test": {
+            "field": "option_kinds",
+            "value": [
+              2,
+              4,
+              8,
+              1,
+              3
+            ]
+          }
+        },
+        {
+          "probe": "timestamp_syn",
+          "test": {
+            "field": "mss",
+            "value": 1440
+          }
+        },
+        {
+          "probe": "timestamp_syn",
+          "test": {
+            "field": "sack_permitted",
+            "value": true
+          }
+        },
+        {
+          "probe": "timestamp_syn",
+          "test": {
+            "field": "timestamps",
+            "value": true
+          }
+        }
+      ]
+    }
+  ]
+}

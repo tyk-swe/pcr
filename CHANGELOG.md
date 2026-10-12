@@ -126,6 +126,8 @@ for remaining acceptance gates and revision-bound evidence.
   subsequent TLS record error follows a completed read. Identification reports
   retained fatal TLS errors even when the decrypted application reply is complete,
   preserving response bytes and original diagnostics without another native read.
+  Fatal TLS errors reject further application writes while permitting bounded
+  flushing of queued alerts.
 - Update the YAML parser to enforce typed-deserialization resource budgets
   (RUSTSEC-2026-0333), retaining the document layer's independent limits.
 - Scan follow-ups share the client's monotonic deadline and propagate reverse-DNS

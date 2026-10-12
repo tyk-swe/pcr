@@ -380,6 +380,69 @@ fn later_tls_record_errors_retain_decrypted_exchange_bytes_and_their_source() {
 }
 
 #[test]
+fn fatal_tls_records_reject_application_writes_but_allow_alert_flushes() {
+    for version in [&rustls::version::TLS12, &rustls::version::TLS13] {
+        let deadline = Deadline::new(Duration::from_secs(1));
+        let peer = Peer::new(version, false);
+        let observed = Arc::clone(&peer.observed);
+        let handshake = connect(peer, numeric(), Limits::default(), &deadline, |_| Ok(())).unwrap();
+        let mut stream = handshake.result.unwrap();
+        stream.wire.inner.response_suffix = vec![0xff, 0x03, 0x03, 0, 1, 0];
+        stream.write_all(b"request").unwrap();
+        stream.flush().unwrap();
+
+        let mut prefix = [0; 4];
+        assert_eq!(stream.read(&mut prefix).unwrap(), prefix.len());
+        assert_eq!(prefix, RESPONSE[..prefix.len()]);
+        let source = stream.terminal_error().unwrap();
+        // A native socket can still accept bytes after receiving the bad
+        // record. Record writes without processing our alert in the peer.
+        stream.wire.inner.silent = true;
+        let evidence = stream.evidence();
+        let reads = observed.lock().unwrap().reads;
+        let writes = observed.lock().unwrap().writes;
+        let flushes = observed.lock().unwrap().flushes;
+        let refused = stream.write(b"another request").unwrap_err();
+        assert_eq!(refused.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(refused.to_string(), source.to_string());
+        assert!(matches!(
+            refused
+                .get_ref()
+                .and_then(|source| source.downcast_ref::<Error>()),
+            Some(Error::Protocol(_))
+        ));
+        assert_eq!(stream.write(&[]).unwrap(), 0);
+        assert_eq!(stream.evidence(), evidence);
+        assert_eq!(observed.lock().unwrap().reads, reads);
+        assert_eq!(observed.lock().unwrap().writes, writes);
+        assert_eq!(observed.lock().unwrap().flushes, flushes);
+
+        let mut bytes = [0; 128];
+        let count = stream.read(&mut bytes).unwrap();
+        assert_eq!(&bytes[..count], &RESPONSE[prefix.len()..]);
+        assert_eq!(
+            stream.read(&mut bytes).unwrap_err().to_string(),
+            source.to_string()
+        );
+        assert_eq!(stream.evidence(), evidence);
+
+        assert!(stream.session.wants_write());
+        stream.flush().unwrap();
+        assert!(stream.evidence().wire_bytes_sent > evidence.wire_bytes_sent);
+        assert_eq!(observed.lock().unwrap().reads, reads);
+        let flushed = stream.evidence();
+        assert_eq!(
+            stream
+                .write_all(b"another request")
+                .unwrap_err()
+                .to_string(),
+            source.to_string()
+        );
+        assert_eq!(stream.evidence(), flushed);
+    }
+}
+
+#[test]
 fn interruption_during_successful_read_retains_plaintext_without_more_wire_io() {
     for version in [&rustls::version::TLS12, &rustls::version::TLS13] {
         for cancelled in [true, false] {

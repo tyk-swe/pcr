@@ -121,8 +121,10 @@ pub struct Handshake<S, A> {
 /// The original session deadline and lifetime ceilings cannot be extended by
 /// changing socket timeouts. A configured timeout bounds one application call,
 /// including its native retries and flushes. Timeout exhaustion is retryable;
-/// lifetime interruption is terminal. Fatal TLS record errors are reported after
-/// already-decrypted plaintext is drained, without further native reads.
+/// lifetime interruption is terminal. Fatal TLS record errors reject further
+/// application writes. Reads return already-decrypted plaintext before the error,
+/// without further native reads. Explicit flushes can still send queued alerts
+/// within the remaining lifetime ceilings.
 /// Use [`crate::tcp::exchange`] to retain application bytes and partial write/read
 /// outcomes as well as [`Self::evidence`]. When application completion stops an
 /// exchange before the next read, check [`Self::terminal_error`] for a retained
@@ -347,6 +349,9 @@ where
         self.wire
             .begin_io(self.write_timeout.get())
             .map_err(Error::into_io)?;
+        if let Some(source) = self.terminal_error() {
+            return Err(source);
+        }
         if self.session.wants_write() {
             self.flush_tls().map_err(Error::into_io)?;
         }

@@ -118,6 +118,8 @@ for remaining acceptance gates and revision-bound evidence.
 
 - SMTP greetings accept reply-code-only terminal lines while retaining exact
   preceding greeting and product claims.
+- SMTP and FTP greeting collection stops after the final permitted continuation
+  line, retaining truncated observations without waiting for the peer to close.
 - FTP multiline greeting detection retains uncoded continuation text, including
   product markers at the start of a line. FTP markers are not inferred from
   hostname labels or explicit SMTP greetings.

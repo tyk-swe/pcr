@@ -388,6 +388,56 @@ fn client(tcp: FakeTcp, udp: FakeUdp) -> Client<FakeProviders> {
 }
 
 #[test]
+fn greeting_line_limits_finish_collection_while_the_peer_remains_open() {
+    for (probe_id, first, continuation) in [
+        (
+            "smtp-greeting",
+            "220-mail.example.test ESMTP Postfix 3.10.1\r\n",
+            "220-continuation\r\n",
+        ),
+        (
+            "ftp-greeting",
+            "220-FTP fixture\r\n",
+            "An isolated continuation\r\n",
+        ),
+    ] {
+        let response = format!(
+            "{first}{}",
+            continuation
+                .repeat(packetcraftr_core::document::service_probes::MAX_GREETING_LINES - 1)
+        )
+        .into_bytes();
+        for read_chunk in [None, Some(1)] {
+            let mut request = identify::Request::new(
+                vec![endpoint(32225, identify::Transport::Tcp)],
+                identify::builtin_corpus().unwrap(),
+                identify::builtin_exclusions().unwrap(),
+            );
+            corpus_with(&mut request, probe_id);
+            let tcp = FakeTcp {
+                timeout_after_response: true,
+                read_chunk,
+                ..FakeTcp::replying([response.clone()])
+            };
+            let report = client(tcp.clone(), FakeUdp::default())
+                .identify(&request)
+                .unwrap();
+            assert!(report.complete);
+            assert_eq!(report.records[0].outcome, identify::Outcome::Truncated);
+            assert!(report.records[0].candidates.is_empty());
+            let evidence = &report.records[0].probes[0];
+            assert_eq!(evidence.io_outcome, identify::IoOutcome::Complete);
+            assert_eq!(evidence.observation.outcome, ObservationOutcome::Truncated);
+            assert_eq!(evidence.response, response);
+            assert_eq!(report.usage.attempts, 1);
+            assert_eq!(report.usage.read_bytes, response.len() as u64);
+            assert_eq!(report.usage.write_bytes, 0);
+            assert!(tcp.writes.lock().unwrap().is_empty());
+        }
+    }
+}
+
+#[test]
 fn ssh_banner_on_nonstandard_port_is_only_a_claim_and_sends_no_bytes() {
     let tcp = FakeTcp::replying([b"notice\r\nSSH-2.0-OpenSSH_9.8p1 fixture\r\n".to_vec()]);
     let mut request = request(vec![endpoint(32222, identify::Transport::Tcp)]);

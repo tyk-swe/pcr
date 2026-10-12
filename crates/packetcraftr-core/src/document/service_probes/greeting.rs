@@ -138,6 +138,14 @@ fn progress(bytes: &[u8], protocol: Protocol) -> (Observation, bool) {
             };
             return (observation, true);
         }
+        if index + 1 == MAX_GREETING_LINES {
+            return stop(
+                observation,
+                ObservationOutcome::Truncated,
+                "multiline connection greeting reached its line-count limit",
+                true,
+            );
+        }
     }
     if multiline {
         stop(

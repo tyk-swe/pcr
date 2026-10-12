@@ -100,6 +100,65 @@ fn greeting_collection_preserves_fragmentation_and_multiline_boundaries() {
 }
 
 #[test]
+fn greeting_collection_stops_at_the_last_permitted_continuation() {
+    let corpus = corpus();
+    for (id, first, continuation, terminal, field, complete) in [
+        (
+            "smtp-greeting",
+            "220-mail.example.test ESMTP Postfix 3.10.1\r\n",
+            "220-continuation\r\n",
+            "220 Ready\r\n",
+            Field::SmtpGreeting,
+            service_probes::smtp_collection_complete as fn(&[u8]) -> bool,
+        ),
+        (
+            "ftp-greeting",
+            "220-FTP fixture\r\n",
+            "An isolated continuation\r\n",
+            "220 ProFTPD 1.3.8 Server ready\r\n",
+            Field::FtpGreeting,
+            service_probes::ftp_collection_complete as fn(&[u8]) -> bool,
+        ),
+    ] {
+        let probe = probe(&corpus, id);
+        let prefix = format!(
+            "{first}{}",
+            continuation.repeat(service_probes::MAX_GREETING_LINES - 2)
+        );
+        let wire = format!("{prefix}{continuation}");
+        for end in 0..wire.len() {
+            assert!(!complete(&wire.as_bytes()[..end]), "{id}: {end}");
+        }
+        assert!(complete(wire.as_bytes()), "{id}");
+        let observation = service_probes::observe(probe, wire.as_bytes(), false);
+        assert_eq!(observation.outcome, ObservationOutcome::Truncated);
+        assert!(observation.diagnostic.is_some());
+        assert_eq!(
+            observation
+                .fields
+                .iter()
+                .filter(|observed| observed.field == field)
+                .map(|observed| observed.value.as_slice())
+                .collect::<Vec<_>>(),
+            wire.lines().map(str::as_bytes).collect::<Vec<_>>()
+        );
+        let result = corpus.identify(probe, &observation);
+        assert_eq!(result.outcome, MatchOutcome::Truncated);
+        assert!(result.candidates.is_empty());
+
+        let terminated = format!("{prefix}{terminal}");
+        assert!(complete(terminated.as_bytes()));
+        let observation = service_probes::observe(probe, terminated.as_bytes(), false);
+        assert_eq!(observation.outcome, ObservationOutcome::Complete);
+        assert!(observation.diagnostic.is_none());
+        assert_eq!(
+            corpus.identify(probe, &observation).outcome,
+            MatchOutcome::Matched
+        );
+    }
+}
+
+#[test]
 fn greeting_syntax_and_resource_boundaries_never_yield_candidates() {
     let corpus = corpus();
     for (id, wire, outcome) in [

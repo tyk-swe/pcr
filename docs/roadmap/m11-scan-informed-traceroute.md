@@ -39,7 +39,7 @@ Injected paths compare actual fixture topology and send counts:
 A four-second age reuses only eligible hops and re-probes others. These controlled
 providers prove workflow behavior, not native parity or production efficiency.
 
-The checked-in corpus (dataset 1.5.0) adds `trace_path_scenarios` for a shared
+The checked-in corpus adds `trace_path_scenarios` (dataset 1.5.0) for a shared
 path, divergent paths, and a shared path with a silent hop. Each states its
 expected hop addresses, probe counts with and without reuse, and the hops the
 later hosts must reuse; `traceroute_hosts_contracts.rs` reproduces them through

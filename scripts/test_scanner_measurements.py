@@ -231,6 +231,31 @@ class ScannerMeasurements(unittest.TestCase):
             self.assertLessEqual(case["expected_probes_with_reuse"],
                                  case["expected_probes_without_reuse"])
 
+    def test_inference_inventory_states_each_authored_attempt_and_partition(self):
+        corpus, _ = benchmark.load_corpus(ROOT.parent / "docs/scanner-corpus.v1.json")
+        cases = {case["id"]: case for case in corpus["inference_scenarios"]}
+        self.assertEqual(set(cases), {"mixed-same-port", "silent-udp", "contradictory-udp"})
+        mixed = cases["mixed-same-port"]
+        self.assertEqual([(endpoint["transport"], endpoint["port"]) for endpoint in mixed["endpoints"]],
+                         [("tcp", 53), ("udp", 53)])
+        self.assertEqual([endpoint["expected"]["state"] for endpoint in mixed["endpoints"]],
+                         ["open", "closed"])
+        self.assertEqual([endpoint["expected"]["rule"] for endpoint in mixed["endpoints"]],
+                         ["tcp_syn.syn_ack", "udp.port_unreachable"])
+        silent = cases["silent-udp"]["endpoints"][0]
+        self.assertEqual((silent["script"], silent["expected"]["state"], silent["expected"]["rule"]),
+                         (["silence"], "open_or_filtered", "udp.silence"))
+        self.assertEqual(silent["expected"]["attempts"][0]["status"], "timeout")
+        contradictory = cases["contradictory-udp"]
+        self.assertEqual(contradictory["request"]["attempts"], 3)
+        self.assertEqual(contradictory["endpoints"][0]["script"],
+                         ["refusal", "direct_reply", "refusal"])
+        self.assertEqual(contradictory["endpoints"][0]["expected"]["rule"], "udp.reply")
+        self.assertEqual(contradictory["endpoints"][0]["expected"]["partitions"],
+                         {"supporting": [2], "conflicting": [1, 3], "unanswered": [], "failed": []})
+        for case in cases.values():
+            self.assertEqual(case["families"], ["ipv4", "ipv6"])
+
     def test_invalid_window_inventory_fails_before_reporting_complete_coverage(self):
         corpus, _ = benchmark.load_corpus(ROOT.parent / "docs/scanner-corpus.v1.json")
         with tempfile.TemporaryDirectory() as directory:

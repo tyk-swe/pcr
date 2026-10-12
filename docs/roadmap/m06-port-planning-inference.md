@@ -4,8 +4,9 @@
 | --- | --- | --- |
 | In progress | [M1](m01-claims-evidence.md) | [M7](m07-adaptive-scheduling.md), [M11](m11-scan-informed-traceroute.md), [M12](m12-tcp-diagnostic-scans.md), [M13](m13-sctp-ip-protocol.md) |
 
-Catalog selection, mixed plans, and inference are implemented; independent
-comparison-corpus and native-platform close gates remain open.
+Catalog selection, mixed plans, and inference are implemented; the independent
+inference inventory is checked in, while native-platform and Nmap comparison
+gates remain open.
 
 ## Behavior and decisions
 
@@ -48,6 +49,12 @@ frozen-schema conformance. See
 [selection matrix](../../crates/packetcraftr/tests/integration/port_selection_matrix.rs),
 and [CLI planning contracts](../../crates/packetcraftr-cli/tests/integration/port_planning_contracts.rs).
 
+The corpus `inference_scenarios` (dataset 1.6.0) authors mixed `tcp/53`+`udp/53`,
+silent-UDP, and contradictory-attempt expectations before execution and
+reproduces them in both IP families through `Client::scan` on the scripted
+fixture. Injected providers establish workflow behavior, not native-platform or
+Nmap comparison acceptance.
+
 One historical Linux veth run disabled checksum offload, selected mixed
 `tcp:18080-18082` and three UDP ports, excluded tcp/18081, and retained udp/18081
 separately. UDP echo inferred open; silent bound/closed UDP inferred
@@ -63,9 +70,10 @@ eligibility, without claiming wire departure or identity.
 
 ## Remaining gates
 
-- Add independently expected mixed-plan, silent-UDP, and contradictory-attempt
-  scenarios to [M2's corpus](m02-ground-truth-benchmarks.md); the injected scanner
-  matrix measures attempt classifications, not every new inference.
+- Retain the independently expected mixed-plan, silent-UDP, and
+  contradictory-attempt corpus scenarios as a workflow contract only: their
+  scripted injected providers establish neither native-platform inference nor
+  Nmap comparison agreement.
 - Retain M6-specific exact-revision native inference acceptance across supported
   platforms under [M3](m03-native-validation.md). M5 discovery evidence cannot
   substitute for it.

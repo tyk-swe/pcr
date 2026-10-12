@@ -12,7 +12,11 @@ Nmap agreement is never fixture truth.
 - The reviewed [inventory](../scanner-corpus.v1.json) uses the independent
   [scanner-corpus/v1 schema](../../schemas/packetcraftr.scanner-corpus.v1.schema.json).
   Scenarios declare expected outcomes before execution and cover responsive,
-  closed, blocked, silent, malformed, and unrelated replies in IPv4/IPv6.
+  closed, blocked, silent, malformed, and unrelated replies in IPv4/IPv6. The
+  `inference_scenarios` inventory additionally authors mixed same-port,
+  silent-UDP, and contradictory-attempt expectations with their scripted
+  responses, attempt outcomes, inferred states and rules, and evidence
+  partitions.
 - `scanner_fixture` runs real `Client` scan/traceroute paths with deterministic
   injected providers, never native I/O. Native loopback connect uses the CLI.
 - `scripts/benchmark-scanner.py` repeats 88 cells: 72 raw scan, 12 traceroute,
@@ -44,9 +48,10 @@ fixed/adaptive measurements. None establishes an Internet-wide accuracy claim.
 
 ## Remaining gates
 
-- Extend the independent inventory to mixed-port inference/contradictions and the
-  still-missing reconvergent/ECMP paths for M6/M11; shared, divergent, and
-  silent-hop paths are corpus `trace_path_scenarios` (dataset 1.5.0).
+- Mixed-port inference, silent UDP, and contradictory attempts are now corpus
+  `inference_scenarios` (dataset 1.6.0), executed through `Client::scan`. The
+  reconvergent/ECMP paths remain missing for M11, whose shared, divergent, and
+  silent-hop paths are corpus `trace_path_scenarios` (added in dataset 1.5.0).
 - Retain exact-version Nmap differential runs for supported native workflows,
   explaining differences without treating one tool as ground truth.
 - Review workflow baselines and variance/performance targets across applicable

@@ -18,6 +18,7 @@ use packetcraftr_netio::capture::Session as _;
 use packetcraftr::target::{Family, Selection, Specification, Target};
 use packetcraftr::{Client, scan, traceroute};
 
+use scanner_fixture::conditions::{ScriptedReply, Scripts};
 use scanner_fixture::providers::{Condition, FamilyAddresses, Io, Providers};
 
 const CORPUS: &str = include_str!("../../../../docs/scanner-corpus.v1.json");
@@ -34,6 +35,7 @@ struct Corpus {
     request: CorpusRequest,
     scenarios: Vec<Scenario>,
     traceroute_scenarios: Vec<TraceScenario>,
+    inference_scenarios: Vec<InferenceScenario>,
 }
 
 #[derive(serde::Deserialize)]
@@ -75,6 +77,60 @@ struct TraceScenario {
     expected_termination: String,
     expected_status: String,
     expected_attributed_response: bool,
+}
+
+/// One independently authored port-inference scenario. Only the fields the
+/// scan consumes are read: the schema owns the rest.
+#[derive(serde::Deserialize)]
+struct InferenceScenario {
+    id: String,
+    families: Vec<String>,
+    request: InferenceRequest,
+    endpoints: Vec<InferenceEndpoint>,
+}
+
+#[derive(serde::Deserialize)]
+struct InferenceRequest {
+    attempts: u32,
+    max_in_flight: usize,
+    timeout_ms: u64,
+    max_duration_ms: u64,
+    max_probes: usize,
+    max_evidence_bytes: usize,
+}
+
+#[derive(serde::Deserialize)]
+struct InferenceEndpoint {
+    transport: String,
+    port: u16,
+    script: Vec<String>,
+    expected: InferenceExpectation,
+}
+
+#[derive(serde::Deserialize)]
+struct InferenceExpectation {
+    attempts: Vec<InferenceAttempt>,
+    state: String,
+    rule: String,
+    partitions: InferencePartitions,
+}
+
+/// Attempt evidence is authored by ordinal: the runtime sequence number is an
+/// operation-local coordinate and is not part of the expectation.
+#[derive(serde::Deserialize)]
+struct InferenceAttempt {
+    ordinal: u32,
+    status: String,
+    classification: String,
+    reply: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct InferencePartitions {
+    supporting: Vec<u32>,
+    conflicting: Vec<u32>,
+    unanswered: Vec<u32>,
+    failed: Vec<u32>,
 }
 
 fn corpus() -> Corpus {
@@ -580,6 +636,289 @@ fn corpus_schema_declares_the_complete_cell_inventory() {
             "unrelated"
         ]
     );
+}
+
+fn scripted_reply(name: &str) -> ScriptedReply {
+    match name {
+        "direct_reply" => ScriptedReply::DirectReply,
+        "refusal" => ScriptedReply::Refusal,
+        "silence" => ScriptedReply::Silence,
+        other => panic!("corpus scripted reply {other}"),
+    }
+}
+
+fn authored_endpoint(endpoint: &InferenceEndpoint) -> ProbeEndpoint {
+    match endpoint.transport.as_str() {
+        "tcp" => ProbeEndpoint::Tcp {
+            port: endpoint.port,
+        },
+        "udp" => ProbeEndpoint::Udp {
+            port: endpoint.port,
+        },
+        other => panic!("corpus inference transport {other}"),
+    }
+}
+
+fn authored_reply(name: &str) -> scan::Reply {
+    match name {
+        "tcp_syn_ack" => scan::Reply::TcpSynAck,
+        "udp_payload" => scan::Reply::UdpPayload,
+        "icmp_port_unreachable" => scan::Reply::IcmpPortUnreachable,
+        other => panic!("corpus inference reply {other}"),
+    }
+}
+
+/// The corpus authors each scenario's scripted responses, attempt outcomes,
+/// inferred state and rule, and evidence partitions independently; the real
+/// `Client::scan` workflow must reproduce them on the scripted fixture.
+#[test]
+fn inference_scenarios_match_the_corpus_through_the_scan_workflow() {
+    let corpus = corpus();
+    let ids: Vec<_> = corpus
+        .inference_scenarios
+        .iter()
+        .map(|scenario| scenario.id.as_str())
+        .collect();
+    assert_eq!(ids, ["mixed-same-port", "silent-udp", "contradictory-udp"]);
+    let mut cells = 0;
+    for scenario in &corpus.inference_scenarios {
+        assert_eq!(scenario.families, ["ipv4", "ipv6"]);
+        for family in &scenario.families {
+            cells += 1;
+            assert_inference_scenario(scenario, family);
+        }
+    }
+    assert_eq!(cells, 6, "three scenarios across both address families");
+}
+
+fn assert_inference_scenario(scenario: &InferenceScenario, family: &str) {
+    let addresses = addresses(family);
+    let note = format!("{} {family}", scenario.id);
+    let io = Io::default();
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let scripts = Scripts::new(scenario.endpoints.iter().map(|endpoint| {
+        (
+            authored_endpoint(endpoint),
+            endpoint
+                .script
+                .iter()
+                .map(|reply| scripted_reply(reply))
+                .collect(),
+        )
+    }));
+    let providers = Providers::new(io.clone(), addresses, scripts.responder(addresses));
+    let client = Client::new(registry, packetcraftr::policy::Policy::default(), providers);
+    let route = packetcraftr::route::Options {
+        link_mode: packetcraftr_netio::link::Mode::Layer3,
+        ..packetcraftr::route::Options::default()
+    };
+    let collector = scan::Collector::default();
+    let aggregate = client
+        .scan(
+            scan::Request {
+                target_sources: Vec::new(),
+                targets: Selection {
+                    include: vec![Specification::Target(Target::Address(
+                        addresses.destination,
+                    ))],
+                    exclude: Vec::new(),
+                },
+                udp_payload: bytes::Bytes::new(),
+                udp_profiles: Default::default(),
+                address_family: family_of(addresses),
+                endpoints: scenario.endpoints.iter().map(authored_endpoint).collect(),
+                discovery: Default::default(),
+                // Fixed scheduling transmits every authorized attempt, so an
+                // early decisive reply cannot end the contradictory sequence.
+                attempts: scenario.request.attempts,
+                adaptive: None,
+                timeout: Duration::from_millis(scenario.request.timeout_ms),
+                probes_per_second: None,
+                max_in_flight: scenario.request.max_in_flight,
+                limits: scan::Limits {
+                    max_duration: Duration::from_millis(scenario.request.max_duration_ms),
+                    max_probes: scenario.request.max_probes,
+                    evidence: packetcraftr::evidence::Limits {
+                        max_bytes: scenario.request.max_evidence_bytes,
+                        ..Default::default()
+                    },
+                    ..scan::Limits::default()
+                },
+                route,
+                collection: collection(),
+            },
+            collector.clone(),
+        )
+        .and_then(|report| collector.finish(report))
+        .expect("the scripted inference scan aggregates");
+
+    let attempts = scenario.request.attempts;
+    let transmissions = scenario.endpoints.len() * attempts as usize;
+    let sent = io.sent();
+    let send_timings = io.send_timings();
+    assert_eq!(
+        sent.len(),
+        transmissions,
+        "{note}: every authorized attempt is transmitted once"
+    );
+    assert_eq!(
+        aggregate.stats.packets_attempted, transmissions as u64,
+        "{note}"
+    );
+    assert_eq!(
+        aggregate.stats.packets_completed, transmissions as u64,
+        "{note}"
+    );
+    assert_eq!(aggregate.rtt.sent, transmissions as u64, "{note}");
+    assert!(
+        transmissions <= scenario.request.max_probes,
+        "{note}: transmissions stay within the configured probe ceiling"
+    );
+    assert!(
+        aggregate.planned_duration <= Duration::from_millis(scenario.request.max_duration_ms),
+        "{note}: the planned duration stays within the configured ceiling"
+    );
+    assert!(
+        aggregate.retained_evidence_bytes <= scenario.request.max_evidence_bytes,
+        "{note}: retained evidence stays within the configured ceiling"
+    );
+    let (armed, readied, shutdowns) = io.counts();
+    assert_eq!(armed, readied, "{note}: capture armed and reported ready");
+    assert_eq!(shutdowns, armed, "{note}: capture shut down");
+    assert_eq!(
+        aggregate.endpoints.len(),
+        scenario.endpoints.len(),
+        "{note}: endpoint identity is never merged"
+    );
+    let mut sequences: Vec<u64> = aggregate
+        .endpoints
+        .iter()
+        .flat_map(|endpoint| endpoint.probes.iter().map(|probe| probe.sequence))
+        .collect();
+    sequences.sort_unstable();
+    assert_eq!(
+        sequences,
+        (0..transmissions as u64).collect::<Vec<_>>(),
+        "{note}: every probe occupies one operation sequence"
+    );
+
+    for authored in &scenario.endpoints {
+        let transport = transport(&authored.transport);
+        let endpoint = aggregate
+            .endpoints
+            .iter()
+            .find(|endpoint| {
+                endpoint.transport == transport && endpoint.port == Some(authored.port)
+            })
+            .unwrap_or_else(|| panic!("{note}: the {transport} endpoint is collected"));
+        let note = format!("{note}: {transport}/{}", authored.port);
+        assert_eq!(
+            endpoint
+                .probes
+                .iter()
+                .map(|probe| probe.attempt)
+                .collect::<Vec<_>>(),
+            (1..=attempts).collect::<Vec<_>>(),
+            "{note}: every attempt is probed once, in attempt order"
+        );
+        let inference = endpoint
+            .inference
+            .as_ref()
+            .expect("a port endpoint always infers");
+        assert_eq!(
+            inference.state.map(scan::State::as_str),
+            Some(authored.expected.state.as_str()),
+            "{note}: inferred state"
+        );
+        assert_eq!(inference.rule.as_str(), authored.expected.rule, "{note}");
+        for expected in &authored.expected.attempts {
+            let probe = endpoint
+                .probes
+                .iter()
+                .find(|probe| probe.attempt == expected.ordinal)
+                .expect("every authored ordinal names a probed attempt");
+            let attempt = format!("{note} attempt {}", expected.ordinal);
+            assert_eq!(probe.status.as_str(), expected.status, "{attempt}");
+            assert_eq!(
+                probe.classification.as_str(),
+                expected.classification,
+                "{attempt}"
+            );
+            assert_eq!(
+                probe.reply,
+                expected.reply.as_deref().map(authored_reply),
+                "{attempt}: the retained reply is the authored one"
+            );
+            assert_eq!(
+                probe.responder,
+                probe.reply.map(|_| addresses.destination),
+                "{attempt}: only a reply answers, and it answers from the endpoint"
+            );
+            // The plan numbers one target's batches from zero, so the probe's
+            // sequence indexes the transmissions in commit order.
+            let index = usize::try_from(probe.sequence).expect("a bounded sequence");
+            assert_eq!(
+                probe.sent_at,
+                send_timings[index].freshness_marker().wall_clock(),
+                "{attempt}: sent_at is that transmission's committed marker"
+            );
+        }
+
+        let ordinal = |sequence: u64| -> u32 {
+            endpoint
+                .probes
+                .iter()
+                .find(|probe| probe.sequence == sequence)
+                .expect("a partition sequence names one of the endpoint's attempts")
+                .attempt
+        };
+        let partition = |sequences: &[u64]| -> Vec<u32> {
+            let mut ordinals: Vec<u32> = sequences.iter().copied().map(ordinal).collect();
+            ordinals.sort_unstable();
+            ordinals
+        };
+        for (label, sequences, expected) in [
+            (
+                "supporting",
+                &inference.supporting,
+                &authored.expected.partitions.supporting,
+            ),
+            (
+                "conflicting",
+                &inference.conflicting,
+                &authored.expected.partitions.conflicting,
+            ),
+            (
+                "unanswered",
+                &inference.unanswered,
+                &authored.expected.partitions.unanswered,
+            ),
+            (
+                "failed",
+                &inference.failed,
+                &authored.expected.partitions.failed,
+            ),
+        ] {
+            assert_eq!(partition(sequences), *expected, "{note}: {label} attempts");
+        }
+        let mut accounted: Vec<u32> = [
+            inference.supporting.as_slice(),
+            inference.conflicting.as_slice(),
+            inference.unanswered.as_slice(),
+            inference.failed.as_slice(),
+        ]
+        .concat()
+        .iter()
+        .copied()
+        .map(ordinal)
+        .collect();
+        accounted.sort_unstable();
+        assert_eq!(
+            accounted,
+            (1..=attempts).collect::<Vec<_>>(),
+            "{note}: every attempt belongs to exactly one partition"
+        );
+    }
 }
 
 fn fixture_session() -> scanner_fixture::providers::Session {

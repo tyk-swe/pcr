@@ -90,6 +90,25 @@ def load_corpus(path):
         sources = {reuse["source"] for reuse in case["expected_reused_hops"]}
         if not cited | sources <= set(case["targets"]):
             raise ValueError("trace-path reuse must cite declared targets")
+    if [case["id"] for case in corpus.get("inference_scenarios", [])] != [
+            "mixed-same-port", "silent-udp", "contradictory-udp"]:
+        raise ValueError("corpus must contain the complete M6 inference inventory")
+    for case in corpus.get("inference_scenarios", []):
+        attempts = case["request"]["attempts"]
+        if case["families"] != ["ipv4", "ipv6"]:
+            raise ValueError("inference scenarios must cover both address families")
+        if case["request"]["max_probes"] != attempts * len(case["endpoints"]):
+            raise ValueError("an inference probe ceiling must admit every authorized attempt")
+        for endpoint in case["endpoints"]:
+            expected = endpoint["expected"]
+            ordinals = [attempt["ordinal"] for attempt in expected["attempts"]]
+            if len(endpoint["script"]) != attempts or ordinals != list(range(1, attempts + 1)):
+                raise ValueError("inference scenarios must script and author every attempt once")
+            partitions = expected["partitions"]
+            accounted = sorted(ordinal for label in (
+                "supporting", "conflicting", "unanswered", "failed") for ordinal in partitions[label])
+            if accounted != list(range(1, attempts + 1)):
+                raise ValueError("each inference attempt must belong to exactly one evidence partition")
     if [case["id"] for case in corpus.get("target_planning_scenarios", [])] != [
             "numeric-source-equivalence", "numeric-narrowing", "manifest-boundaries",
             "scoped-host-local", "scoped-isolated-links"]:

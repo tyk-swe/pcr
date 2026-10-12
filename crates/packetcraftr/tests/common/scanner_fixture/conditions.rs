@@ -3,9 +3,12 @@
 
 #![allow(unreachable_pub)]
 
+use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use packetcraftr::probe::ProbeEndpoint;
 use packetcraftr_core::build;
 use packetcraftr_core::codec;
 use packetcraftr_core::decode;
@@ -15,7 +18,7 @@ use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::{Icmpv4, Icmpv6, Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Tcp, Udp};
 
-use super::providers::{Condition, FamilyAddresses};
+use super::providers::{Condition, FamilyAddresses, Responder};
 
 pub fn respond(condition: Condition, addresses: FamilyAddresses, sent: &[u8]) -> Vec<Vec<u8>> {
     match condition {
@@ -36,6 +39,85 @@ pub fn respond(condition: Condition, addresses: FamilyAddresses, sent: &[u8]) ->
             .into_iter()
             .collect(),
     }
+}
+
+/// One authored response for the next transmission to an endpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScriptedReply {
+    /// A checksum-valid direct reply from the endpoint: a SYN/ACK for TCP, the
+    /// exact payload for UDP, or an echo reply for ICMP.
+    DirectReply,
+    /// The endpoint's refusal: a TCP reset, or a quoted ICMP port unreachable.
+    Refusal,
+    /// The endpoint accepts the transmission and answers nothing.
+    Silence,
+}
+
+/// Per-endpoint response scripts. The Nth transmission to one endpoint answers
+/// with that endpoint's Nth authored reply, selected by the endpoint the probe
+/// addressed and its attempt ordinal: a scan plan transmits one endpoint's
+/// attempts in attempt order, so a reply never depends on wall-clock timing.
+#[derive(Clone)]
+pub struct Scripts(Arc<Mutex<HashMap<ProbeEndpoint, VecDeque<ScriptedReply>>>>);
+
+impl Scripts {
+    /// One script per endpoint, each holding one reply per authorized attempt.
+    pub fn new(scripts: impl IntoIterator<Item = (ProbeEndpoint, Vec<ScriptedReply>)>) -> Self {
+        Self(Arc::new(Mutex::new(
+            scripts
+                .into_iter()
+                .map(|(endpoint, replies)| (endpoint, replies.into()))
+                .collect(),
+        )))
+    }
+
+    /// The responder for one family's addresses, for
+    /// [`super::providers::Providers::new`].
+    #[must_use]
+    pub fn responder(&self, addresses: FamilyAddresses) -> Responder {
+        let scripts = self.clone();
+        Arc::new(move |sent: &[u8]| scripts.respond(addresses, sent))
+    }
+
+    /// The next authored reply for the endpoint this probe was sent to.
+    fn respond(&self, addresses: FamilyAddresses, sent: &[u8]) -> Vec<Vec<u8>> {
+        let endpoint = sent_endpoint(sent).expect("the fixture scripts only decoded probes");
+        let reply = self
+            .0
+            .lock()
+            .expect("fixture scripts")
+            .get_mut(&endpoint)
+            .unwrap_or_else(|| panic!("no scripted response for {endpoint}"))
+            .pop_front()
+            .unwrap_or_else(|| panic!("{endpoint} was transmitted more attempts than it scripts"));
+        match reply {
+            ScriptedReply::DirectReply => direct_reply(sent, addresses, ReplyKind::Responsive)
+                .into_iter()
+                .collect(),
+            ScriptedReply::Refusal => direct_reply(sent, addresses, ReplyKind::Refused)
+                .into_iter()
+                .collect(),
+            ScriptedReply::Silence => Vec::new(),
+        }
+    }
+}
+
+/// The endpoint a transmitted scan probe addressed.
+fn sent_endpoint(sent: &[u8]) -> Option<ProbeEndpoint> {
+    let decoded = decode_frame(sent)?;
+    let packet = &decoded.packet;
+    if let Some(tcp) = packet.get::<Tcp>() {
+        return Some(ProbeEndpoint::Tcp {
+            port: tcp.destination_port,
+        });
+    }
+    if let Some(udp) = packet.get::<Udp>() {
+        return Some(ProbeEndpoint::Udp {
+            port: udp.destination_port,
+        });
+    }
+    (packet.get::<Icmpv4>().is_some() || packet.get::<Icmpv6>().is_some())
+        .then_some(ProbeEndpoint::Icmp)
 }
 
 enum ReplyKind {

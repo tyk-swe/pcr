@@ -44,6 +44,53 @@ fn the_corpus_inventory_is_unique_and_complete() {
 }
 
 #[test]
+fn trace_path_inventory_is_ordered_and_strict() {
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../docs/scanner-corpus.v1.json"))
+            .expect("corpus parses");
+    let cases = corpus["trace_path_scenarios"]
+        .as_array()
+        .expect("trace paths");
+    let ids: Vec<_> = cases
+        .iter()
+        .map(|case| case["id"].as_str().expect("id"))
+        .collect();
+    assert_eq!(ids, ["shared-path", "divergent-paths", "silent-hop"]);
+    for case in cases {
+        let targets: std::collections::BTreeSet<_> = case["targets"]
+            .as_array()
+            .expect("targets")
+            .iter()
+            .map(|target| target.as_str().expect("target"))
+            .collect();
+        let paths: std::collections::BTreeSet<_> = case["paths"]
+            .as_array()
+            .expect("paths")
+            .iter()
+            .map(|path| path["target"].as_str().expect("path target"))
+            .collect();
+        assert_eq!(targets, paths, "every declared target has one path");
+        let without = case["expected_probes_without_reuse"]
+            .as_u64()
+            .expect("count");
+        let with = case["expected_probes_with_reuse"].as_u64().expect("count");
+        assert!(with <= without, "reuse cannot send more probes");
+    }
+    let mut unknown = corpus.clone();
+    unknown["trace_path_scenarios"][0]["paths"][0]["unknown"] = true.into();
+    assert!(
+        corpus_schema().validate(&unknown).is_err(),
+        "trace-path paths stay strict"
+    );
+    let mut short = corpus;
+    short["trace_path_scenarios"].as_array_mut().unwrap().pop();
+    assert!(
+        corpus_schema().validate(&short).is_err(),
+        "the trace-path inventory stays complete"
+    );
+}
+
+#[test]
 fn discovery_corpus_conditions_are_unique_ordered_and_dual_stack() {
     let corpus: serde_json::Value =
         serde_json::from_str(include_str!("../../../../docs/scanner-corpus.v1.json")).unwrap();

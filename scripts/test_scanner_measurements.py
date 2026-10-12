@@ -214,6 +214,23 @@ class ScannerMeasurements(unittest.TestCase):
         self.assertTrue(all(case["families"] == ["ipv4", "ipv6"]
                             for case in corpus["adaptive_scheduling_scenarios"]))
 
+    def test_trace_path_inventory_states_shared_divergent_and_silent_expectations(self):
+        corpus, _ = benchmark.load_corpus(ROOT.parent / "docs/scanner-corpus.v1.json")
+        cases = {case["id"]: case for case in corpus["trace_path_scenarios"]}
+        self.assertEqual(set(cases), {"shared-path", "divergent-paths", "silent-hop"})
+        self.assertEqual((cases["shared-path"]["expected_probes_without_reuse"],
+                          cases["shared-path"]["expected_probes_with_reuse"]), (20, 11))
+        self.assertEqual((cases["divergent-paths"]["expected_probes_without_reuse"],
+                          cases["divergent-paths"]["expected_probes_with_reuse"]), (15, 14))
+        silent = cases["silent-hop"]
+        self.assertTrue(any(hop is None for path in silent["paths"] for hop in path["hops"]))
+        self.assertEqual(silent["expected_reused_hops"],
+                         [{"target": "192.0.2.12", "source": "192.0.2.11", "hop_limits": [1, 3]}])
+        for case in cases.values():
+            self.assertEqual({path["target"] for path in case["paths"]}, set(case["targets"]))
+            self.assertLessEqual(case["expected_probes_with_reuse"],
+                                 case["expected_probes_without_reuse"])
+
     def test_invalid_window_inventory_fails_before_reporting_complete_coverage(self):
         corpus, _ = benchmark.load_corpus(ROOT.parent / "docs/scanner-corpus.v1.json")
         with tempfile.TemporaryDirectory() as directory:

@@ -367,6 +367,168 @@ fn reuse_sends_fewer_probes_and_never_reports_a_wrong_hop() {
     }
 }
 
+const CORPUS: &str = include_str!("../../../../docs/scanner-corpus.v1.json");
+
+#[derive(serde::Deserialize)]
+struct Corpus {
+    trace_path_scenarios: Vec<PathScenario>,
+}
+
+#[derive(serde::Deserialize)]
+struct PathScenario {
+    id: String,
+    targets: Vec<Ipv4Addr>,
+    paths: Vec<ScenarioPath>,
+    expected_termination: String,
+    expected_probes_without_reuse: u64,
+    expected_probes_with_reuse: u64,
+    expected_reused_hops: Vec<ScenarioReuse>,
+}
+
+#[derive(serde::Deserialize)]
+struct ScenarioPath {
+    target: Ipv4Addr,
+    /// The answering router at `hops[hop_limit - 1]`, or `None` for a silent hop.
+    hops: Vec<Option<Ipv4Addr>>,
+    arrival: String,
+}
+
+#[derive(serde::Deserialize)]
+struct ScenarioReuse {
+    target: Ipv4Addr,
+    source: Ipv4Addr,
+    hop_limits: Vec<u8>,
+}
+
+fn scenario_arrival(name: &str) -> Arrival {
+    match name {
+        "reply" => Arrival::Reply,
+        "unreachable" => Arrival::Unreachable,
+        "silent" => Arrival::Silent,
+        other => panic!("corpus arrival {other}"),
+    }
+}
+
+fn scenario_network(scenario: &PathScenario) -> Arc<Mutex<State>> {
+    Arc::new(Mutex::new(State {
+        paths: scenario
+            .paths
+            .iter()
+            .map(|path| {
+                (
+                    path.target,
+                    Path {
+                        hops: path.hops.clone(),
+                        arrival: scenario_arrival(&path.arrival),
+                    },
+                )
+            })
+            .collect(),
+        ..State::default()
+    }))
+}
+
+/// The corpus authors each topology, probe count and reused hop independently;
+/// `Client::trace_hosts` must reproduce them on the shared path fixture.
+#[test]
+fn corpus_trace_path_scenarios_match_through_trace_hosts() {
+    let corpus: Corpus = serde_json::from_str(CORPUS).expect("the bundled corpus parses");
+    assert_eq!(
+        corpus
+            .trace_path_scenarios
+            .iter()
+            .map(|scenario| scenario.id.as_str())
+            .collect::<Vec<_>>(),
+        ["shared-path", "divergent-paths", "silent-hop"]
+    );
+    for scenario in &corpus.trace_path_scenarios {
+        let octets: Vec<u8> = scenario
+            .targets
+            .iter()
+            .map(|target| target.octets()[3])
+            .collect();
+
+        let state = scenario_network(scenario);
+        let aggregate = trace(&state, request(&octets)).expect("the no-reuse plan completes");
+        assert_eq!(
+            aggregate.stats.packets_attempted, scenario.expected_probes_without_reuse,
+            "{}: probes without reuse",
+            scenario.id
+        );
+        assert_eq!(
+            sends(&state),
+            usize::try_from(scenario.expected_probes_without_reuse).unwrap()
+        );
+        for trace in &aggregate.hosts {
+            assert_eq!(trace.host.state, HostState::Complete, "{}", scenario.id);
+            assert!(
+                trace.host.reused.is_empty(),
+                "{}: nothing is reused without a reuse request",
+                scenario.id
+            );
+            assert_eq!(
+                trace.host.termination.map(Termination::as_str),
+                Some(scenario.expected_termination.as_str()),
+                "{}",
+                scenario.id
+            );
+        }
+        assert_true_hops(&state, &aggregate);
+
+        let state = scenario_network(scenario);
+        let aggregate = trace(&state, reusing(&octets, Duration::from_secs(60)))
+            .expect("the reuse plan completes");
+        assert_eq!(
+            aggregate.stats.packets_attempted, scenario.expected_probes_with_reuse,
+            "{}: probes with reuse",
+            scenario.id
+        );
+        assert_eq!(
+            sends(&state),
+            usize::try_from(scenario.expected_probes_with_reuse).unwrap()
+        );
+        let declared: HashMap<Ipv4Addr, &ScenarioReuse> = scenario
+            .expected_reused_hops
+            .iter()
+            .map(|reuse| (reuse.target, reuse))
+            .collect();
+        let mut observed: HashMap<Ipv4Addr, Vec<u8>> = HashMap::new();
+        for trace in &aggregate.hosts {
+            let IpAddr::V4(address) = trace.host.address else {
+                unreachable!("the fixtures are IPv4");
+            };
+            assert_eq!(trace.host.state, HostState::Complete, "{}", scenario.id);
+            let mut limits: Vec<u8> = trace.host.reused.iter().map(|hop| hop.hop_limit).collect();
+            limits.sort_unstable();
+            observed.insert(address, limits);
+            if let Some(reuse) = declared.get(&address) {
+                for hop in &trace.host.reused {
+                    assert_eq!(
+                        hop.source,
+                        IpAddr::V4(reuse.source),
+                        "{}: reused hop {} source",
+                        scenario.id,
+                        hop.hop_limit
+                    );
+                }
+            }
+        }
+        for target in &scenario.targets {
+            let expected = declared
+                .get(target)
+                .map(|reuse| reuse.hop_limits.clone())
+                .unwrap_or_default();
+            assert_eq!(
+                observed.get(target).cloned().unwrap_or_default(),
+                expected,
+                "{}: reused hops of {target}",
+                scenario.id
+            );
+        }
+        assert_true_hops(&state, &aggregate);
+    }
+}
+
 #[test]
 fn expired_hops_are_observed_again() {
     let state = shared_prefix();

@@ -1,6 +1,6 @@
 {
   "schema": "packetcraftr.scanner-corpus/v1",
-  "dataset_version": "1.4.0",
+  "dataset_version": "1.5.0",
   "families": ["ipv4", "ipv6"],
   "transports": ["tcp", "udp", "icmp"],
   "fixture_addresses": {
@@ -103,6 +103,61 @@
       "expected_status": "timeout",
       "expected_attributed_response": false,
       "divergence": "Silence at a hop is an observation. It does not identify a router or prove a blocked destination."
+    }
+  ],
+  "trace_path_scenarios": [
+    {
+      "id": "shared-path",
+      "condition": "Four targets sit behind the same four routers, 198.51.100.1 through 198.51.100.4, and every target answers. Without reuse each host probes its whole path; with reuse the later hosts copy the shared prefix from the first host instead of probing it again.",
+      "targets": ["192.0.2.11", "192.0.2.12", "192.0.2.13", "192.0.2.14"],
+      "paths": [
+        {"target": "192.0.2.11", "hops": ["198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4"], "arrival": "reply"},
+        {"target": "192.0.2.12", "hops": ["198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4"], "arrival": "reply"},
+        {"target": "192.0.2.13", "hops": ["198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4"], "arrival": "reply"},
+        {"target": "192.0.2.14", "hops": ["198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4"], "arrival": "reply"}
+      ],
+      "expected_termination": "destination_reached",
+      "expected_probes_without_reuse": 20,
+      "expected_probes_with_reuse": 11,
+      "expected_reused_hops": [
+        {"target": "192.0.2.12", "source": "192.0.2.11", "hop_limits": [1, 2, 3]},
+        {"target": "192.0.2.13", "source": "192.0.2.11", "hop_limits": [1, 2, 3]},
+        {"target": "192.0.2.14", "source": "192.0.2.11", "hop_limits": [1, 2, 3]}
+      ],
+      "divergence": "Equal answering routers are fixture topology, not proof of a shared production prefix. The first host still probes every hop, the reused hops stay claims attributed to their source, and each destination hop is probed again."
+    },
+    {
+      "id": "divergent-paths",
+      "condition": "Three targets share only their first router, 198.51.100.1; after it their paths diverge, and every target answers. Without reuse each host probes its whole path; with reuse only the one hop whose responder matches is copied.",
+      "targets": ["192.0.2.11", "192.0.2.12", "192.0.2.13"],
+      "paths": [
+        {"target": "192.0.2.11", "hops": ["198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4"], "arrival": "reply"},
+        {"target": "192.0.2.12", "hops": ["198.51.100.1", "198.51.100.2", "198.51.100.13", "198.51.100.14"], "arrival": "reply"},
+        {"target": "192.0.2.13", "hops": ["198.51.100.1", "198.51.100.22", "198.51.100.23", "198.51.100.24"], "arrival": "reply"}
+      ],
+      "expected_termination": "destination_reached",
+      "expected_probes_without_reuse": 15,
+      "expected_probes_with_reuse": 14,
+      "expected_reused_hops": [
+        {"target": "192.0.2.12", "source": "192.0.2.11", "hop_limits": [1]}
+      ],
+      "divergence": "A shared hop never implies the hops after it are shared: each host descends through its own answering hops and reuses only the responder that matched. Reusing a divergent prefix would be a wrong hop."
+    },
+    {
+      "id": "silent-hop",
+      "condition": "Two targets share a four-router path whose second hop never answers; the destinations still answer. Without reuse each host probes its whole path; with reuse the responding hops are copied while the silent hop is probed again.",
+      "targets": ["192.0.2.11", "192.0.2.12"],
+      "paths": [
+        {"target": "192.0.2.11", "hops": ["198.51.100.1", null, "198.51.100.3", "198.51.100.4"], "arrival": "reply"},
+        {"target": "192.0.2.12", "hops": ["198.51.100.1", null, "198.51.100.3", "198.51.100.4"], "arrival": "reply"}
+      ],
+      "expected_termination": "destination_reached",
+      "expected_probes_without_reuse": 10,
+      "expected_probes_with_reuse": 8,
+      "expected_reused_hops": [
+        {"target": "192.0.2.12", "source": "192.0.2.11", "hop_limits": [1, 3]}
+      ],
+      "divergence": "A silent hop observed nothing, so it can never be reused; the second host re-probes it while the responding hops around it are copied. Silence at a hop stays an observation, not a router identity or a blocked destination. At least one hop address is null in every silent-hop path."
     }
   ],
   "target_planning_scenarios": [
@@ -554,7 +609,7 @@
     "license": "AGPL-3.0-only",
     "license_rationale": "Original project-authored fixture specifications distributed under the repository license.",
     "maintainer": "tyk-swe",
-    "refresh": "Review condition and expected outcome together; increment dataset_version; rerun both IP families and all declared transports and windows. Review identification conditions against the read-only probe corpus; rerun deterministic parsing, workflow budgets and applicable ordinary-socket loopback profiles.",
-    "coverage": "Six packet conditions across two IP families, three transports and two scheduling windows; native loopback connected/refused outcomes in both IP families; responsive/silent single-hop traceroutes for both IP families and all three transports; M4 numeric manifest/selection and native scoped host-local/two-link fixture conditions; eight M7 adaptive scheduling behavioral/resource contracts. M7 contracts are not relabeled as cross-platform native performance evidence. Ten M8 application identification conditions cover known nonstandard services, unknown, ambiguous products and versions, deliberately misleading claims, malformed and truncated evidence, and exclusions."
+    "refresh": "Review condition and expected outcome together; increment dataset_version; rerun both IP families and all declared transports and windows. Review identification conditions against the read-only probe corpus; rerun deterministic parsing, workflow budgets and applicable ordinary-socket loopback profiles. Re-exercise the multi-host trace-path scenarios through the path fixture when a topology, probe count or reused-hop expectation changes.",
+    "coverage": "Six packet conditions across two IP families, three transports and two scheduling windows; native loopback connected/refused outcomes in both IP families; responsive/silent single-hop traceroutes for both IP families and all three transports; M4 numeric manifest/selection and native scoped host-local/two-link fixture conditions; eight M7 adaptive scheduling behavioral/resource contracts. M7 contracts are not relabeled as cross-platform native performance evidence. Ten M8 application identification conditions cover known nonstandard services, unknown, ambiguous products and versions, deliberately misleading claims, malformed and truncated evidence, and exclusions. Three M11 multi-host trace-path scenarios state shared, divergent and silent-hop topologies with the probe counts and reused hops each run must report; ECMP and reconvergent paths stay out until a per-probe path choice is designed."
   }
 }

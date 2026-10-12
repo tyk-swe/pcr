@@ -120,6 +120,12 @@
         }
       }
     },
+    "trace_path_scenarios": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"$ref": "#/$defs/tracePathScenario"}
+    },
     "target_planning_scenarios": {
       "type": "array",
       "minItems": 5,
@@ -678,6 +684,69 @@
       }
     },
 
+    "tracePathScenario": {
+      "type": "object",
+      "required": ["id", "condition", "targets", "paths", "expected_termination", "expected_probes_without_reuse", "expected_probes_with_reuse", "expected_reused_hops", "divergence"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"enum": ["shared-path", "divergent-paths", "silent-hop"]},
+        "condition": {"$ref": "#/$defs/text"},
+        "targets": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 16,
+          "items": {"type": "string", "minLength": 1, "maxLength": 64}
+        },
+        "paths": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 16,
+          "items": {"$ref": "#/$defs/tracePath"}
+        },
+        "expected_termination": {"enum": ["destination_reached", "unreachable", "maximum_hops", "timeout"]},
+        "expected_probes_without_reuse": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "expected_probes_with_reuse": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "expected_reused_hops": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {"$ref": "#/$defs/reusedHops"}
+        },
+        "divergence": {"$ref": "#/$defs/text"}
+      }
+    },
+    "tracePath": {
+      "type": "object",
+      "required": ["target", "hops", "arrival"],
+      "additionalProperties": false,
+      "properties": {
+        "target": {"type": "string", "minLength": 1, "maxLength": 64},
+        "hops": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {"anyOf": [
+            {"type": "string", "minLength": 1, "maxLength": 64},
+            {"type": "null"}
+          ]}
+        },
+        "arrival": {"enum": ["reply", "unreachable", "silent"]}
+      }
+    },
+    "reusedHops": {
+      "type": "object",
+      "required": ["target", "source", "hop_limits"],
+      "additionalProperties": false,
+      "properties": {
+        "target": {"type": "string", "minLength": 1, "maxLength": 64},
+        "source": {"type": "string", "minLength": 1, "maxLength": 64},
+        "hop_limits": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {"type": "integer", "minimum": 1, "maximum": 255}
+        }
+      }
+    },
     "text": {"type": "string", "minLength": 1, "maxLength": 4096},
     "addresses": {
       "type": "object",

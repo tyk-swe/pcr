@@ -78,6 +78,18 @@ def load_corpus(path):
         raise ValueError("corpus must contain both native connect conditions")
     if [case["id"] for case in corpus["traceroute_scenarios"]] != ["responsive", "silent"]:
         raise ValueError("corpus must contain both first-hop traceroute conditions")
+    if [case["id"] for case in corpus.get("trace_path_scenarios", [])] != [
+            "shared-path", "divergent-paths", "silent-hop"]:
+        raise ValueError("corpus must contain the complete multi-host trace-path inventory")
+    for case in corpus.get("trace_path_scenarios", []):
+        if [path["target"] for path in case["paths"]] != case["targets"]:
+            raise ValueError("trace-path paths must name each target once, in order")
+        if case["expected_probes_with_reuse"] > case["expected_probes_without_reuse"]:
+            raise ValueError("trace-path reuse cannot probe more than the no-reuse plan")
+        cited = {reuse["target"] for reuse in case["expected_reused_hops"]}
+        sources = {reuse["source"] for reuse in case["expected_reused_hops"]}
+        if not cited | sources <= set(case["targets"]):
+            raise ValueError("trace-path reuse must cite declared targets")
     if [case["id"] for case in corpus.get("target_planning_scenarios", [])] != [
             "numeric-source-equivalence", "numeric-narrowing", "manifest-boundaries",
             "scoped-host-local", "scoped-isolated-links"]:

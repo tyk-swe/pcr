@@ -39,6 +39,13 @@ Injected paths compare actual fixture topology and send counts:
 A four-second age reuses only eligible hops and re-probes others. These controlled
 providers prove workflow behavior, not native parity or production efficiency.
 
+The checked-in corpus (dataset 1.5.0) adds `trace_path_scenarios` for a shared
+path, divergent paths, and a shared path with a silent hop. Each states its
+expected hop addresses, probe counts with and without reuse, and the hops the
+later hosts must reuse; `traceroute_hosts_contracts.rs` reproduces them through
+`Client::trace_hosts` on the path fixture. ECMP and reconvergent paths stay out
+until the fixture can choose a path per probe.
+
 One historical Linux namespace run on documentation addresses used disabled
 checksum offload and replies delayed 5 ms to avoid the then-completion-marker
 race. Two hosts shared two routers at three hops; a third used one router at two.
@@ -62,8 +69,9 @@ The run also checked streamed stage order and a two-probe postscan refusal.
 
 ## Remaining gates
 
-Provision independently expected shared, divergent, reconvergent, ECMP, and silent
-paths in [M2](m02-ground-truth-benchmarks.md). Repeat native Linux with immediate
+Provision independently expected reconvergent and ECMP paths in
+[M2](m02-ground-truth-benchmarks.md); shared, divergent, and silent-hop paths are
+now `trace_path_scenarios` there. Repeat native Linux with immediate
 replies after M5's submission-start fix, then retain applicable macOS/Windows
 runs under [M3](m03-native-validation.md). Preserve standalone contracts, exact
 bytes/timestamps, scope, cancellation, and failed evidence. M11 stays **In progress**.

@@ -70,7 +70,10 @@ for remaining acceptance gates and revision-bound evidence.
   unknown, conflicting, late, duplicate, and unattributed evidence.
 - Opt-in host discovery, reverse DNS, adaptive scheduling, and scan-informed
   traceroute with explicit path-reuse provenance. Portable TCP connect scans
-  and rolling raw-packet windows share finite operation budgets.
+  and rolling raw-packet windows share finite operation budgets. The scanner
+  corpus (dataset 1.5.0) states shared, divergent, and silent-hop multi-host
+  trace paths with their hop addresses, probe counts with and without reuse,
+  and reused hops, reproduced through `Client::trace_hosts`.
 - Multi-interface live capture, bounded PCAPNG rotation/retention, native buffer
   and timestamp controls, dissection/projection, and completion/file evidence.
 - DNS direct TCP, bounded question batches and reverse names, EDNS v0 requests,

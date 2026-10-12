@@ -44,8 +44,9 @@ fixed/adaptive measurements. None establishes an Internet-wide accuracy claim.
 
 ## Remaining gates
 
-- Extend the independent inventory to mixed-port inference/contradictions and
-  shared/divergent/reconvergent/ECMP/silent paths for M6/M11.
+- Extend the independent inventory to mixed-port inference/contradictions and the
+  still-missing reconvergent/ECMP paths for M6/M11; shared, divergent, and
+  silent-hop paths are corpus `trace_path_scenarios` (dataset 1.5.0).
 - Retain exact-version Nmap differential runs for supported native workflows,
   explaining differences without treating one tool as ground truth.
 - Review workflow baselines and variance/performance targets across applicable

@@ -99,6 +99,9 @@ remaining acceptance gates.
 
 ### Fixed
 
+- IP-protocol replies resolve IPv6 extension chains while retaining extension
+  protocol probes. Portless scans consume exclusions applied to their active
+  TCP, UDP, or SCTP discovery transports.
 - Composed IP discovery consumes shared protocol exclusions before selecting
   port-scan endpoints. M13 native acceptance builds and executes all Linux
   profiles in an isolated link fixture and rejects missing or duplicate evidence

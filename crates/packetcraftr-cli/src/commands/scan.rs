@@ -271,6 +271,32 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         max_ports,
     )?;
     let scanning = discovery.mode != discovery::Mode::Only;
+    let exclude_ports = if matches!(transports.as_slice(), [Transport::Ip] | [Transport::Icmp])
+        && discovery.runs()
+    {
+        exclude_ports
+            .into_iter()
+            .filter(|term| {
+                !discovery_probes
+                    .iter()
+                    .filter_map(|probe| match probe {
+                        arguments::DiscoveryProbe::Tcp | arguments::DiscoveryProbe::TcpAck => {
+                            Some(Transport::Tcp)
+                        }
+                        arguments::DiscoveryProbe::Udp => Some(Transport::Udp),
+                        arguments::DiscoveryProbe::Sctp => Some(Transport::Sctp),
+                        _ => None,
+                    })
+                    .any(|transport| {
+                        term.0
+                            .transport
+                            .is_none_or(|excluded| excluded == transport)
+                    })
+            })
+            .collect()
+    } else {
+        exclude_ports
+    };
     // Discovery has already consumed these shared exclusions. A port scan
     // must not reject exclusions that apply to its IP discovery stage.
     let exclude_ip_protocols = if transports != [Transport::Ip]

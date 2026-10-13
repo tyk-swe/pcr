@@ -159,6 +159,74 @@ fn discovery_ip_exclusions_are_consumed_before_port_scan_method_validation() {
 }
 
 #[test]
+fn discovery_port_exclusions_are_consumed_before_portless_scan_method_validation() {
+    for scan_transport in ["ip", "icmp"] {
+        for (probe, excluded_transport) in [
+            ("tcp", "tcp"),
+            ("tcp-ack", "tcp"),
+            ("udp", "udp"),
+            ("sctp", "sctp"),
+            ("tcp,udp", "tcp"),
+        ] {
+            for exclusion in ["80".to_owned(), format!("{excluded_transport}:80")] {
+                let discovery_ports = if probe == "tcp,udp" {
+                    "tcp:80,udp:443"
+                } else {
+                    "80,443"
+                };
+                let mut command = vec![
+                    "--output",
+                    "json",
+                    "scan",
+                    "127.0.0.1",
+                    "--connect",
+                    "--transport",
+                    scan_transport,
+                    "--discovery",
+                    "before",
+                    "--discovery-probes",
+                    probe,
+                    "--discovery-ports",
+                    discovery_ports,
+                    "--exclude-ports",
+                    &exclusion,
+                ];
+                if scan_transport == "ip" {
+                    command.extend_from_slice(&["--ip-protocols", "47"]);
+                }
+                let output = run(&command);
+                let error = parse_json(&output);
+                assert_eq!(
+                    error["error"]["code"], "cli.scan_method",
+                    "{command:?}: {error}"
+                );
+            }
+        }
+    }
+    for discovery in [false, true] {
+        let mut arguments = vec![
+            "--transport",
+            "ip",
+            "--ip-protocols",
+            "47",
+            "--exclude-ports",
+            "udp:53",
+        ];
+        if discovery {
+            arguments.extend_from_slice(&[
+                "--discovery",
+                "before",
+                "--discovery-probes",
+                "tcp",
+                "--discovery-ports",
+                "80,443",
+            ]);
+        }
+        usage(&arguments, "do not apply to portless IP-protocol scans");
+    }
+}
+
+#[test]
 fn invalid_sctp_ip_protocol_and_discovery_combinations_fail_before_network_io() {
     for (args, expected) in [
         (

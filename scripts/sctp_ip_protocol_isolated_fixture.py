@@ -82,7 +82,10 @@ def reply(wire):
         body = sctp(struct.pack('!HHII', endpoint, sport, tag, 0) + chunk)
         return [envelope + packet(source, target, 132, body)]
     if endpoint == 47:
-        return [envelope + packet(source, target, 47, b'')]
+        # Exercise a real IPv6 extension chain before the replying protocol.
+        options = bytes.fromhex('3c000000000000002f00000000000000')
+        return [envelope + packet(source, target, 47 if ip['version'] == 4 else 0,
+                                  b'' if ip['version'] == 4 else options)]
     if endpoint == 254:
         return []
     return [error({50: 'unsupported', 112: 'prohibited', 115: 'expired'}[endpoint])]

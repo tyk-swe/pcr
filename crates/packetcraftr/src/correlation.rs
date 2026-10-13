@@ -6,7 +6,7 @@
 use std::net::IpAddr;
 
 use bytes::Bytes;
-use packetcraftr_core::field::WireValue;
+use packetcraftr_core::field::{FieldValue, WireValue};
 use packetcraftr_core::protocol::{
     IcmpErrorKind, QuotedTransport, SctpResponseKind,
     network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
@@ -341,9 +341,22 @@ fn direct_ip_protocol_reply(request: &Packet, response: &Packet) -> Option<IpAdd
             matches!((&req.protocol, &resp.protocol), (WireValue::Exact(a), WireValue::Exact(b)) if a == b)
         }
         _ => match (request.get::<Ipv6>(), response.get::<Ipv6>()) {
-            (Some(req), Some(resp)) => {
-                matches!((&req.next_header, &resp.next_header), (WireValue::Exact(a), WireValue::Exact(b)) if a == b)
-            }
+            (Some(req), Some(resp)) => match req.next_header {
+                WireValue::Exact(protocol) => {
+                    matches!(resp.next_header, WireValue::Exact(value) if value == protocol)
+                        || semantics::outer_layers(response)
+                            .skip_while(|layer| !layer.is::<Ipv6>())
+                            .skip(1)
+                            .take_while(|layer| {
+                                BuiltinProtocol::of(*layer)
+                                    .is_some_and(BuiltinProtocol::is_ipv6_extension)
+                            })
+                            .any(|layer| {
+                                matches!(layer.field("next_header"), Some(FieldValue::Unsigned(value)) if value == u64::from(protocol))
+                            })
+                }
+                _ => false,
+            },
             _ => false,
         },
     };

@@ -147,7 +147,9 @@ class SctpIpProtocolEvidenceContracts(unittest.TestCase):
                             self.assertEqual(int.from_bytes(ip['body'][4:8], 'big'), tag)
                             self.assertEqual(ip['body'][12], {'init-ack': 2, 'abort': 6, 'other': 11}[row['condition']])
                         elif row['condition'] == 'reply':
-                            self.assertEqual((ip['proto'], ip['body']), (47, b''))
+                            self.assertEqual((ip['proto'], ip['body']),
+                                             (47, b'') if family == 'ipv4' else
+                                             (0, bytes.fromhex('3c000000000000002f00000000000000')))
                         else:
                             v4 = family == 'ipv4'
                             expected = {'prohibited': (3, 13) if v4 else (1, 1),

@@ -27,7 +27,10 @@ use packetcraftr_core::{
     packet::Packet,
     protocol::{
         builtin,
-        network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
+        network::{
+            DestinationOptions, Fragment, HopByHop, Icmpv4, Icmpv6, Ipv4, Ipv6,
+            SegmentRoutingHeader,
+        },
         transport::{Sctp, Tcp},
     },
 };
@@ -348,6 +351,24 @@ fn respond(sent: &Packet, wire: &Bytes) -> Vec<Frame> {
         return Vec::new();
     };
     match protocol {
+        0 | 43 | 44 | 47 | 60 | 99 if ipv6 => {
+            let IpAddr::V6(final_destination) = source else {
+                unreachable!()
+            };
+            let mut reply = ip_envelope(destination, source, None);
+            reply.push(HopByHop::default());
+            reply.push(SegmentRoutingHeader {
+                segments_left: WireValue::Exact(0),
+                segments: vec![final_destination],
+                ..SegmentRoutingHeader::default()
+            });
+            reply.push(Fragment::default());
+            reply.push(DestinationOptions {
+                next_header: WireValue::Exact(47),
+                ..DestinationOptions::default()
+            });
+            vec![frame(reply)]
+        }
         47 => vec![frame(ip_envelope(destination, source, Some(47)))],
         50 => vec![frame(icmp_error(
             ipv6,
@@ -582,6 +603,48 @@ fn sctp_abort_outranks_router_icmp_and_ignores_wrong_tag_while_retaining_superse
         assert_eq!(
             aggregate.unattributed[0].attribution,
             scan::Attribution::Duplicate
+        );
+    }
+}
+
+#[test]
+fn ipv6_ip_protocol_replies_match_extension_chains_and_extension_numbers() {
+    let protocols = [47, 0, 60, 44, 43, 99];
+    let mut request = base_request(
+        true,
+        protocols
+            .into_iter()
+            .map(|protocol| ProbeEndpoint::Ip { protocol })
+            .collect(),
+        Schedule::Serial,
+    );
+    request.timeout = Duration::from_millis(200);
+    let (client, _) = client();
+    let collector = scan::Collector::default();
+    let report = client.scan(request, collector.clone()).unwrap();
+    let aggregate = collector.finish(report).unwrap();
+    assert_eq!(aggregate.endpoints.len(), protocols.len());
+    for endpoint in &aggregate.endpoints {
+        let matched = endpoint.ip_protocol != Some(99);
+        assert_eq!(
+            endpoint.probes[0].status,
+            if matched {
+                ProbeStatus::Response
+            } else {
+                ProbeStatus::Timeout
+            }
+        );
+        assert_eq!(
+            endpoint.inference.as_ref().unwrap().state,
+            Some(if matched {
+                State::Open
+            } else {
+                State::OpenOrFiltered
+            })
+        );
+        assert_eq!(
+            endpoint.probes[0].reply,
+            matched.then_some(scan::Reply::IpProtocolPayload)
         );
     }
 }

@@ -124,6 +124,9 @@ pub fn select(
 
 /// The first probe kind an ordinary TCP connection cannot send.
 pub(super) fn unconnectable(request: &Request) -> Option<&'static str> {
+    if !request.tcp_scan.is_syn() {
+        return Some("non-SYN TCP diagnostic");
+    }
     let discovery = &request.discovery;
     let probes = if discovery.runs() {
         discovery.probes.as_slice()

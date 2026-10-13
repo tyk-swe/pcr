@@ -129,6 +129,7 @@ mod tests {
 
     fn scan_request() -> packetcraftr::scan::Request {
         packetcraftr::scan::Request {
+            tcp_scan: Default::default(),
             max_in_flight: 1,
             targets: Target::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))).into(),
             target_sources: Vec::new(),

@@ -53,6 +53,7 @@ fn run(scenario: &str, family: &str, mode: &str) -> Result<Value, String> {
         providers,
     );
     let request = scan::Request {
+        tcp_scan: Default::default(),
         target_sources: Vec::new(),
         targets: Selection {
             include: vec![Specification::Target(Target::Address(

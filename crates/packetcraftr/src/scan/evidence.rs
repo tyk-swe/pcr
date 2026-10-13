@@ -8,13 +8,14 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::{
-    decode::DecodedPacket, diagnostic::Diagnostic, frame::Frame, packet::Packet, registry::Registry,
+    decode::DecodedPacket, diagnostic::Diagnostic, frame::Frame, packet::Packet,
+    protocol::transport::Tcp, registry::Registry,
 };
 
 use super::plan::packet::sent_probe_matches;
 use super::profile;
 use super::report::RttAccumulator;
-use super::{Classification, Event, Probe, ProbeEvidence, Reply, Stage};
+use super::{Classification, Event, Probe, ProbeEvidence, Reply, Stage, TcpScan};
 use crate::correlation::{Correlation, Transport};
 use crate::evidence::SentPacket;
 use crate::probe::ProbeStatus;
@@ -56,9 +57,47 @@ pub fn classify_response(
     })
 }
 
+/// Diagnostic segments never claim a port open, and only the reset-based
+/// FIN-family modes claim it closed; every other reply is uninterpreted.
+fn diagnostic_classification(
+    mode: TcpScan,
+    reply: Reply,
+    classified: Classification,
+) -> Classification {
+    match reply {
+        Reply::TcpReset => match mode {
+            TcpScan::Fin | TcpScan::Null | TcpScan::Xmas | TcpScan::Maimon => {
+                Classification::Closed
+            }
+            _ => Classification::Unknown,
+        },
+        Reply::TcpSynAck | Reply::TcpOther => Classification::Unknown,
+        Reply::IcmpPortUnreachable => Classification::Unreachable,
+        _ => classified,
+    }
+}
+
+/// A reset from the endpoint outranks router evidence, which outranks an
+/// uninterpreted segment, whatever the attempt classification says.
+const fn diagnostic_rank(reply: Reply) -> u8 {
+    match reply {
+        Reply::TcpReset => 5,
+        Reply::IcmpPortUnreachable
+        | Reply::IcmpAdministrativelyProhibited
+        | Reply::IcmpDestinationUnreachable => 4,
+        Reply::IcmpTimeExceeded => 3,
+        _ => 2,
+    }
+}
+
 pub(super) struct Observation {
     pub(super) response: CorrelatedResponse,
+    pub(super) tcp_window: Option<u16>,
     pub(super) application: Option<profile::Evidence>,
+    /// Transport response priority among replies to one probe (the
+    /// application tie-break applies within it), independent of the attempt
+    /// classification.
+    transport_rank: u8,
 }
 
 impl Observation {
@@ -68,19 +107,44 @@ impl Observation {
         sent: &Packet,
         response: &DecodedPacket,
     ) -> Option<Self> {
-        let classified = classify_response(registry, probe.endpoint.transport(), sent, response)?;
+        let mut classified =
+            classify_response(registry, probe.endpoint.transport(), sent, response)?;
+        let diagnostic = probe.endpoint.transport() == Transport::Tcp
+            && probe.stage == Stage::Scan
+            && !probe.tcp_scan.is_syn();
+        let tcp_window = if matches!(
+            classified.reply,
+            Reply::TcpSynAck | Reply::TcpReset | Reply::TcpOther
+        ) {
+            response.packet.get::<Tcp>().map(|tcp| tcp.window)
+        } else {
+            None
+        };
+        let transport_rank = if diagnostic {
+            diagnostic_rank(classified.reply)
+        } else {
+            classified.classification.rank()
+        };
+        if diagnostic {
+            classified.classification = diagnostic_classification(
+                probe.tcp_scan,
+                classified.reply,
+                classified.classification,
+            );
+        }
         Some(Self {
             response: classified,
+            tcp_window,
+            transport_rank,
             application: profile::evidence(probe, sent, response),
         })
     }
 
-    /// The transport classification decides first; application evidence
-    /// breaks ties inside one classification, and an unprofiled response
+    /// Transport response priority decides first; application evidence
+    /// breaks ties within that priority, and an unprofiled response
     /// ranks between failed and confirmed application evidence.
     pub(super) fn rank(&self) -> u8 {
-        self.response.classification.rank() * 4
-            + self.application.as_ref().map_or(2, profile::Evidence::rank)
+        self.transport_rank * 4 + self.application.as_ref().map_or(2, profile::Evidence::rank)
     }
 }
 
@@ -153,6 +217,8 @@ impl Classifier for ProbeClassifier<'_> {
             scope: probe.scope.clone(),
             transport: probe.endpoint.transport(),
             port: probe.endpoint.port(),
+            tcp_scan: (probe.endpoint.transport() == Transport::Tcp).then_some(probe.tcp_scan),
+            tcp_window: None,
             attempt: probe.attempt,
             status: ProbeStatus::Timeout,
             classification: Classification::Timeout,
@@ -192,6 +258,7 @@ impl Classifier for ProbeClassifier<'_> {
             evidence.response = reply.frame;
             evidence.reason = reply.observation.response.reason.to_owned();
             evidence.application = reply.observation.application;
+            evidence.tcp_window = reply.observation.tcp_window;
         }
         match probe.stage {
             Stage::Scan => self

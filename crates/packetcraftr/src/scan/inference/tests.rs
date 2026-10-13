@@ -7,10 +7,20 @@ use crate::scan::Reply::{
     self, IcmpAdministrativelyProhibited, IcmpDestinationUnreachable, IcmpEchoReply,
     IcmpPortUnreachable, IcmpTimeExceeded, TcpOther, TcpReset, TcpSynAck, UdpPayload,
 };
+use crate::scan::TcpScan;
 use crate::scan::connect::Outcome;
 
 fn inferred(transport: Transport, attempts: &[(u64, Option<Reply>)]) -> Inference {
-    raw(transport, attempts.iter().copied()).expect("port transports infer")
+    raw(
+        transport,
+        attempts.iter().map(|&(sequence, reply)| super::Attempt {
+            sequence,
+            reply,
+            tcp_scan: None,
+            tcp_window: None,
+        }),
+    )
+    .expect("port transports infer")
 }
 
 #[test]
@@ -102,7 +112,18 @@ fn rules_conclude_the_documented_states() {
 
 #[test]
 fn icmp_echo_infers_no_port_state() {
-    assert_eq!(raw(Transport::Icmp, [(0, Some(IcmpEchoReply))]), None);
+    assert_eq!(
+        raw(
+            Transport::Icmp,
+            [super::Attempt {
+                sequence: 0,
+                reply: Some(IcmpEchoReply),
+                tcp_scan: None,
+                tcp_window: None,
+            }]
+        ),
+        None
+    );
 }
 
 #[test]
@@ -257,4 +278,206 @@ fn connect_outcomes_follow_the_socket_rule_table() {
         (late.state, late.supporting, late.unanswered),
         (Some(State::Open), vec![1], vec![0])
     );
+}
+
+fn diagnostic(mode: TcpScan, attempts: &[(u64, Option<Reply>, Option<u16>)]) -> Inference {
+    raw(
+        Transport::Tcp,
+        attempts
+            .iter()
+            .map(|&(sequence, reply, window)| super::Attempt {
+                sequence,
+                reply,
+                tcp_scan: Some(mode),
+                tcp_window: window,
+            }),
+    )
+    .expect("TCP diagnostics infer")
+}
+
+fn single(
+    mode: TcpScan,
+    reply: Option<Reply>,
+    window: Option<u16>,
+) -> (Option<State>, &'static str) {
+    let inference = diagnostic(mode, &[(1, reply, window)]);
+    (inference.state, inference.rule.as_str())
+}
+
+#[test]
+fn diagnostic_modes_follow_their_exact_rule_and_state_tables() {
+    use State::{Closed, Filtered, Open, OpenOrFiltered, Unfiltered, Unknown};
+    let replies = [
+        None,
+        Some(TcpReset),
+        Some(TcpSynAck),
+        Some(TcpOther),
+        Some(UdpPayload),
+        Some(IcmpEchoReply),
+        Some(IcmpPortUnreachable),
+        Some(IcmpAdministrativelyProhibited),
+        Some(IcmpDestinationUnreachable),
+        Some(IcmpTimeExceeded),
+    ];
+    // silence, reset, three other direct replies, three unreachable, time exceeded
+    let others = |unreachable: &'static str, other: &'static str| {
+        [
+            (None, "silence"),
+            (Some(TcpReset), "reset"),
+            (Some(TcpSynAck), other),
+            (Some(TcpOther), other),
+            (Some(UdpPayload), other),
+            (Some(IcmpEchoReply), other),
+            (Some(IcmpPortUnreachable), unreachable),
+            (Some(IcmpAdministrativelyProhibited), unreachable),
+            (Some(IcmpDestinationUnreachable), unreachable),
+            (Some(IcmpTimeExceeded), "time_exceeded"),
+        ]
+    };
+    assert_eq!(replies.len(), others("x", "y").len());
+    let ack = [
+        Filtered, Unfiltered, Unknown, Unknown, Unknown, Unknown, Filtered, Filtered, Filtered,
+        Unknown,
+    ];
+    for ((reply, suffix), state) in others("icmp_unreachable", "unclassified_reply")
+        .into_iter()
+        .zip(ack)
+    {
+        let (actual, rule) = single(TcpScan::Ack, reply, Some(0));
+        assert_eq!(
+            (actual, rule),
+            (Some(state), format!("tcp_ack.{suffix}").as_str())
+        );
+    }
+    let family = [
+        OpenOrFiltered,
+        Closed,
+        Unknown,
+        Unknown,
+        Unknown,
+        Unknown,
+        Filtered,
+        Filtered,
+        Filtered,
+        Unknown,
+    ];
+    for (mode, prefix) in [
+        (TcpScan::Fin, "tcp_fin"),
+        (TcpScan::Null, "tcp_null"),
+        (TcpScan::Xmas, "tcp_xmas"),
+        (TcpScan::Maimon, "tcp_maimon"),
+    ] {
+        for ((reply, suffix), state) in others("icmp_unreachable", "unclassified_reply")
+            .into_iter()
+            .zip(family)
+        {
+            let (actual, rule) = single(mode, reply, Some(0));
+            assert_eq!(
+                (actual, rule),
+                (Some(state), format!("{prefix}.{suffix}").as_str())
+            );
+        }
+    }
+    let window = [
+        Filtered, Open, Unknown, Unknown, Unknown, Unknown, Filtered, Filtered, Filtered, Unknown,
+    ];
+    for ((reply, suffix), state) in others("icmp_unreachable", "unclassified_reply")
+        .into_iter()
+        .zip(window)
+    {
+        let suffix = if suffix == "reset" {
+            "reset_nonzero"
+        } else {
+            suffix
+        };
+        let (actual, rule) = single(TcpScan::Window, reply, Some(9));
+        assert_eq!(
+            (actual, rule),
+            (Some(state), format!("tcp_window.{suffix}").as_str())
+        );
+    }
+    for reply in replies {
+        let (state, rule) = single(TcpScan::Custom { flags: 0x002 }, reply, Some(9));
+        let expected = if reply.is_none() {
+            "tcp_custom.silence"
+        } else {
+            "tcp_custom.reply"
+        };
+        assert_eq!((state, rule), (Some(Unknown), expected), "{reply:?}");
+    }
+}
+
+#[test]
+fn window_inference_reads_the_retained_reset_window_only() {
+    assert_eq!(
+        single(TcpScan::Window, Some(TcpReset), Some(0)),
+        (Some(State::Closed), "tcp_window.reset_zero")
+    );
+    assert_eq!(
+        single(TcpScan::Window, Some(TcpReset), Some(1)),
+        (Some(State::Open), "tcp_window.reset_nonzero")
+    );
+    assert_eq!(
+        single(TcpScan::Window, Some(TcpReset), None),
+        (Some(State::Unknown), "tcp_window.unclassified_reply")
+    );
+    assert_eq!(
+        single(TcpScan::Window, Some(TcpOther), Some(0)),
+        (Some(State::Unknown), "tcp_window.unclassified_reply")
+    );
+}
+
+#[test]
+fn contradictory_windows_keep_the_earliest_and_report_the_conflict_in_any_order() {
+    let attempts = [
+        (4, Some(TcpReset), Some(512)),
+        (2, Some(TcpReset), Some(0)),
+        (3, None, None),
+    ];
+    let forward = diagnostic(TcpScan::Window, &attempts);
+    let mut reversed = attempts;
+    reversed.reverse();
+    assert_eq!(forward, diagnostic(TcpScan::Window, &reversed));
+    assert_eq!(forward.rule.as_str(), "tcp_window.reset_zero");
+    assert_eq!(forward.state, Some(State::Closed));
+    assert_eq!(forward.supporting, vec![2]);
+    assert_eq!(forward.conflicting, vec![4]);
+    assert_eq!(forward.unanswered, vec![3]);
+}
+
+#[test]
+fn replies_outrank_icmp_and_silence_under_diagnostics() {
+    let inference = diagnostic(
+        TcpScan::Fin,
+        &[
+            (1, None, None),
+            (2, Some(IcmpAdministrativelyProhibited), None),
+            (3, Some(TcpReset), Some(0)),
+            (4, Some(IcmpTimeExceeded), None),
+        ],
+    );
+    assert_eq!(inference.state, Some(State::Closed));
+    assert_eq!(inference.rule.as_str(), "tcp_fin.reset");
+    assert_eq!(inference.supporting, vec![3]);
+    assert_eq!(inference.conflicting, vec![2, 4]);
+    assert_eq!(inference.unanswered, vec![1]);
+}
+
+#[test]
+fn custom_replies_never_make_silent_attempts_support_them() {
+    let inference = diagnostic(
+        TcpScan::Custom { flags: 0x001 },
+        &[(1, None, None), (2, Some(TcpReset), Some(0))],
+    );
+    assert_eq!(inference.rule.as_str(), "tcp_custom.reply");
+    assert_eq!(inference.state, Some(State::Unknown));
+    assert_eq!(
+        (inference.supporting, inference.unanswered),
+        (vec![2], vec![1])
+    );
+}
+
+#[test]
+fn diagnostic_state_names_the_unfiltered_conclusion() {
+    assert_eq!(State::Unfiltered.as_str(), "unfiltered");
 }

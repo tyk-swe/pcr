@@ -239,6 +239,7 @@ fn run_scan(
     let aggregate = client
         .scan(
             scan::Request {
+                tcp_scan: Default::default(),
                 target_sources: Vec::new(),
                 targets: Selection {
                     include: vec![Specification::Target(Target::Address(
@@ -516,6 +517,7 @@ fn window_two_publishes_sent_before_the_probe_event() {
     client
         .scan(
             scan::Request {
+                tcp_scan: Default::default(),
                 target_sources: Vec::new(),
                 targets: Selection {
                     include: vec![Specification::Target(Target::Address(
@@ -716,6 +718,7 @@ fn assert_inference_scenario(scenario: &InferenceScenario, family: &str) {
     let aggregate = client
         .scan(
             scan::Request {
+                tcp_scan: Default::default(),
                 target_sources: Vec::new(),
                 targets: Selection {
                     include: vec![Specification::Target(Target::Address(

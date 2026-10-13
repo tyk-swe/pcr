@@ -144,6 +144,9 @@ pub(super) fn render_plan_text(plan: &output::scan::plan::Plan) -> Result<(), Cl
         plan.port_catalog.version,
         plan.excluded_endpoints,
     ))?;
+    if let Some(tcp_scan) = plan.tcp_scan {
+        write_stdout_line(format_args!("{}", tcp_scan_text(tcp_scan)))?;
+    }
     let discovery = &plan.discovery;
     write_stdout_line(format_args!(
         "discovery={} probes={} neighbor={} unresponsive={} reverse-dns={}",
@@ -177,6 +180,20 @@ pub(super) fn render_plan_text(plan: &output::scan::plan::Plan) -> Result<(), Cl
     Ok(())
 }
 
+/// The effective TCP segment, with the heuristic caveat for non-SYN modes.
+pub(super) fn tcp_scan_text(tcp_scan: output::scan::plan::TcpScan) -> String {
+    let line = format!("tcp-scan={} flags={:#05x}", tcp_scan.mode, tcp_scan.flags);
+    match tcp_scan.mode {
+        "syn" => line,
+        "custom" => {
+            format!("{line} (observation-only: replies are reported, no port state is inferred)")
+        }
+        _ => format!(
+            "{line} (stack-dependent heuristic: conclusions are inferences, never authenticated identity or proof of a listening service)"
+        ),
+    }
+}
+
 /// A raw probe's evidence line after `lead`, with any application and frame
 /// lines beneath it.
 fn render_probe_text(lead: &str, evidence: &output::scan::Probe) -> Result<(), CliError> {
@@ -193,6 +210,14 @@ fn render_probe_text(lead: &str, evidence: &output::scan::Probe) -> Result<(), C
         evidence.reason,
     ))?;
     let nested = " ".repeat(lead.len() + 2);
+    if let Some(tcp_scan) = evidence.tcp_scan.filter(|scan| scan.mode != "syn") {
+        write_stdout_line(format_args!(
+            "{nested}tcp-scan={} flags={:#05x} tcp-window={}",
+            tcp_scan.mode,
+            tcp_scan.flags,
+            optional_display(evidence.tcp_window),
+        ))?;
+    }
     if let Some(application) = &evidence.application {
         write_stdout_line(format_args!(
             "{nested}profile={} validation={}: {}",

@@ -117,7 +117,7 @@ resolution_performed. Listing sends no target/neighbor packets; authorized hostn
 resolution is not network-free.
 Retained_evidence_bytes charges exact retained wire bytes for raw/trace and probe
 structures/error strings for connect, not classification, total allocation, or RSS.
-These v7 additions persist in current v14.
+These v7 additions persist in current v15.
 
 ## v8 port planning and inference
 
@@ -127,7 +127,7 @@ identification. Explicit raw/connect methods never fall back; automatic selectio
 reads build capture/transmit capability, not runtime privilege. Typed mixed
 TCP/UDP endpoints share operation budgets and preserve transport identity.
 Late/duplicate/ambiguous frames are unattributed evidence. List mode may publish
-ports. These v8 additions persist in current v14.
+ports. These v8 additions persist in current v15.
 
 ## Port inference
 
@@ -147,7 +147,34 @@ or failed (operational, no state).
 | 1 | `tcp_syn.silence` → `filtered` | `udp.silence` → `open_or_filtered` | `tcp_connect.timed_out` → `filtered` |
 | 0 | — | — | `local_error` or `deadline_expired` → no state, rule `operational_failure` |
 
-A port-unreachable classification is closed for both raw transports, but SYN
+TCP diagnostic modes (v15) use the same ranks (reset 5, ICMP unreachable 4, time
+exceeded 3, other reply 2, silence 1) and the same partitions. Rule IDs are
+`tcp_<mode>.<reason>`; every state is a stack-dependent heuristic:
+
+| Mode | reset | ICMP unreachable | time exceeded / other reply | silence |
+| --- | --- | --- | --- | --- |
+| `tcp_ack` | `unfiltered` | `filtered` | `unknown` | `filtered` |
+| `tcp_window` | `reset_nonzero` → `open`; `reset_zero` → `closed`; no window → `unknown` | `filtered` | `unknown` | `filtered` |
+| `tcp_fin`, `tcp_null`, `tcp_xmas`, `tcp_maimon` | `closed` | `filtered` | `unknown` | `open_or_filtered` |
+| `tcp_custom` | `tcp_custom.reply` → `unknown` for any TCP or ICMP reply | | | `tcp_custom.silence` → `unknown` |
+
+Which response decides among replies to one probe is ranked separately from the
+attempt classification: reset 5, correlated ICMP unreachable 4, time exceeded 3,
+other direct segment 2, so a valid reset is never displaced by router evidence
+received in the same window. Attempt classification stays separate: a direct TCP
+reply to an ACK, window, or custom probe (reset, SYN/ACK, or other segment), and
+any SYN/ACK or other TCP segment answering a diagnostic probe, is `unknown`; a
+FIN-family reset is `closed`; correlated ICMP keeps its classification
+(administratively prohibited `filtered`, other destination unreachable
+`unreachable`, time exceeded `filtered`) except that port-unreachable is
+`unreachable` for every diagnostic mode; silence is `timeout`. A custom probe's
+`unknown` for any reply is an inference, not an attempt classification.
+Contradictory windows across attempts keep the earliest, rank-tied attempt and
+report the other as conflicting. Operational failures never imply a state. Window
+and FIN-family conclusions differ by operating system and middlebox and are not
+reliable open/closed detection.
+
+For the original SYN and UDP probes, a port-unreachable classification is closed, but SYN
 inference is filtered while UDP inference is closed. Silent UDP infers
 open_or_filtered; beside a decisive reply, silence is unanswered, not conflict.
 Echo is portless with no inference. Operational-only attempts have absent state
@@ -159,8 +186,10 @@ under operational_failure. Connect capacity backpressures, never invents a state
 | open_or_filtered | open\|filtered |
 | unknown / absent operational state | No equivalent |
 
-Unfiltered awaits [ACK/window diagnostics](roadmap/m12-tcp-diagnostic-scans.md);
-idle-specific closed|filtered is outside scope.
+`unfiltered` is the ACK-scan conclusion (a correlated reset); it is never open.
+See [TCP diagnostics](tcp-diagnostics.md) and
+[M12](roadmap/m12-tcp-diagnostic-scans.md); idle-specific closed|filtered is
+outside scope.
 
 ## Host observations
 
@@ -224,8 +253,8 @@ See [M11 limits and open acceptance](roadmap/m11-scan-informed-traceroute.md).
 
 ## OS fingerprint evidence
 
-Standalone `identify-os` emits output/v14 observations separately from qualified
-OS-family candidates. Open/closed prerequisites, omitted responses, contradictions,
+Standalone `identify-os`, introduced in output/v14 and retained in current v15,
+emits observations separately from qualified OS-family candidates. Open/closed prerequisites, omitted responses, contradictions,
 late/unrelated captures, and evidence exhaustion remain explicit. Router errors
 cannot establish target identity. Candidate provenance cites the independently
 versioned original corpus/signature and supporting observation indices.

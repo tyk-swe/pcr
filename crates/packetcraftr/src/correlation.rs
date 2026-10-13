@@ -193,10 +193,19 @@ pub(crate) fn observe(
                     Observation::new(responder, Correlation::TcpReset, "correlated TCP reset")
                 } else if flags & (Tcp::SYN | Tcp::ACK) == (Tcp::SYN | Tcp::ACK) {
                     let request_tcp = request.get::<Tcp>()?;
-                    if tcp.acknowledgment != request_tcp.sequence.wrapping_add(1) {
-                        return None;
+                    if request_tcp.flags & Tcp::SYN == 0 {
+                        Observation::new(
+                            responder,
+                            Correlation::TcpOther,
+                            "correlated TCP SYN/ACK to a probe without SYN",
+                        )
+                    } else {
+                        Observation::new(
+                            responder,
+                            Correlation::TcpSynAck,
+                            "correlated TCP SYN/ACK",
+                        )
                     }
-                    Observation::new(responder, Correlation::TcpSynAck, "correlated TCP SYN/ACK")
                 } else {
                     Observation::new(
                         responder,

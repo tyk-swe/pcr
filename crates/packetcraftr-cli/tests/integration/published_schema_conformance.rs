@@ -248,7 +248,7 @@ fn schema_accepts_based_source_reject_zero() {
         ),
         (
             schema_validator(),
-            packetcraftr_cli::output::contract::SCHEMA_V14,
+            packetcraftr_cli::output::contract::SCHEMA_V15,
         ),
     ] {
         let mut document = original.clone();
@@ -565,6 +565,7 @@ fn every_published_declared_schema() {
     let v11_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.output.v11.schema.json"
     ));
+    let v14_validator = common::frozen_v14_schema_validator();
 
     let directory = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/documents");
     let mut paths: Vec<_> = std::fs::read_dir(directory)
@@ -592,7 +593,8 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v14" => output_validator,
+            "packetcraftr.output/v15" => output_validator,
+            "packetcraftr.output/v14" => v14_validator,
             "packetcraftr.output/v11" => &v11_validator,
             "packetcraftr.output/v10" => &v10_validator,
             "packetcraftr.output/v9" => &v9_validator,
@@ -636,4 +638,20 @@ fn frozen_v10_schema_validates_its_published_fixture() {
     v10_validator
         .validate(&document)
         .expect("the frozen v10 fixture must match the frozen v10 schema");
+}
+
+#[test]
+fn frozen_v14_schema_validates_its_published_fixture() {
+    let document: Value = serde_json::from_str(include_str!(
+        "../../../../examples/consumers/fixtures/v14-forwarding.json"
+    ))
+    .expect("frozen v14 fixture must be JSON");
+    assert_eq!(document["schema"], "packetcraftr.output/v14");
+    common::frozen_v14_schema_validator()
+        .validate(&document)
+        .expect("the frozen v14 fixture must match the frozen v14 schema");
+    assert!(
+        !schema_validator().is_valid(&document),
+        "the current schema must not accept the frozen family marker"
+    );
 }

@@ -134,6 +134,12 @@ fn render_text(
         ))?;
     }
     if let Some(ports) = ports {
+        if let Some(tcp_scan) = ports.tcp_scan {
+            write_stdout_line(format_args!(
+                "{}",
+                super::rendering::tcp_scan_text(tcp_scan)
+            ))?;
+        }
         for endpoint in &ports.endpoints {
             write_stdout_line(format_args!(
                 "port {}/{} port-hint={}",

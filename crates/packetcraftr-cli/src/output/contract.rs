@@ -15,8 +15,10 @@ pub const SCHEMA_V10: &str = "packetcraftr.output/v10";
 pub const SCHEMA_V11: &str = "packetcraftr.output/v11";
 pub const SCHEMA_V12: &str = "packetcraftr.output/v12";
 pub const SCHEMA_V13: &str = "packetcraftr.output/v13";
-/// Current family: standalone OS fingerprint observations and qualified candidates.
 pub const SCHEMA_V14: &str = "packetcraftr.output/v14";
+/// Current family: TCP diagnostic scan modes, retained response windows, and the
+/// unfiltered state.
+pub const SCHEMA_V15: &str = "packetcraftr.output/v15";
 
 pub use crate::commands::Command;
 

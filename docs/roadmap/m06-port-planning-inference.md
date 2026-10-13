@@ -28,7 +28,8 @@ gates remain open.
 - Inferred states are `open`, `closed`, `filtered`, `open_or_filtered`, `unknown`.
   UDP silence remains timeout evidence and can infer `open_or_filtered`.
   Socket capacity/deadline/local failures infer no port state. `unfiltered`
-  awaits M12; idle-specific `closed|filtered` is outside scope.
+  is implemented by M12 as ACK-scan inference, with acceptance pending;
+  idle-specific `closed|filtered` is outside scope.
 - `--method raw|tcp-connect|auto` defaults raw; `--connect` aliases connect.
   Explicit methods never fall back. Automatic choice reads build capability and
   publishes its reason, not runtime privilege. Kernel socket evidence is not wire.

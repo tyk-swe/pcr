@@ -30,6 +30,7 @@ pub struct Probe {
     pub address: IpAddr,
     pub scope: Option<crate::target::ResolvedZone>,
     pub endpoint: ProbeEndpoint,
+    pub tcp_scan: super::TcpScan,
     pub attempt: u32,
     pub udp_payload: bytes::Bytes,
     pub udp_profile: Option<std::sync::Arc<super::profile::UdpProfile>>,
@@ -133,12 +134,17 @@ pub(super) fn planned_probe(
         }
         ProbeEndpoint::Tcp { .. } | ProbeEndpoint::Icmp => (None, bytes::Bytes::new()),
     };
+    let tcp_scan = match (stage, endpoint) {
+        (Stage::Scan, ProbeEndpoint::Tcp { .. }) => request.tcp_scan,
+        _ => super::TcpScan::default(),
+    };
     Probe {
         sequence,
         stage,
         address: target.address,
         scope: target.scope.clone(),
         endpoint,
+        tcp_scan,
         attempt,
         udp_profile,
         udp_payload,
@@ -244,6 +250,7 @@ mod tests {
             adaptive: None,
             timeout: Duration::from_millis(1),
             probes_per_second: Some(3),
+            tcp_scan: Default::default(),
             udp_payload: bytes::Bytes::new(),
             udp_profiles: Default::default(),
             limits: crate::scan::Limits::default(),

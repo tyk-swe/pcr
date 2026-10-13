@@ -17,6 +17,7 @@ use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
 use super::Error;
+use super::inference;
 
 /// What a correlated reply was, beside the classification it earned. Port
 /// inference reads this rather than the classification, because one
@@ -107,6 +108,9 @@ pub struct ProbeEvidence {
     pub scope: Option<crate::target::ResolvedZone>,
     pub transport: Transport,
     pub port: Option<u16>,
+    /// The TCP segment mode a raw TCP probe carried; `None` for other
+    /// transports.
+    pub tcp_scan: Option<super::TcpScan>,
     pub attempt: u32,
     pub status: ProbeStatus,
     pub classification: Classification,
@@ -119,6 +123,9 @@ pub struct ProbeEvidence {
     pub response: Option<Frame>,
     pub reason: String,
     pub application: Option<super::profile::Evidence>,
+    /// The advertised window of the correlated TCP response, retained as
+    /// observed; `None` for ICMP errors and silence.
+    pub tcp_window: Option<u16>,
 }
 
 #[derive(Clone, Debug)]
@@ -408,10 +415,12 @@ impl Collector {
             endpoint.probes.sort_by_key(|probe| probe.sequence);
             endpoint.inference = super::inference::raw(
                 endpoint.transport,
-                endpoint
-                    .probes
-                    .iter()
-                    .map(|probe| (probe.sequence, probe.reply)),
+                endpoint.probes.iter().map(|probe| inference::Attempt {
+                    sequence: probe.sequence,
+                    reply: probe.reply,
+                    tcp_scan: probe.tcp_scan,
+                    tcp_window: probe.tcp_window,
+                }),
             );
         }
         endpoints.sort_by_key(|endpoint| endpoint.probes.first().map(|probe| probe.sequence));

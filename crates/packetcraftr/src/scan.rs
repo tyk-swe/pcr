@@ -37,13 +37,14 @@ pub mod profile;
 mod report;
 mod request;
 mod selection;
+mod tcp;
 #[cfg(test)]
 mod tests;
 
 pub use adaptive::{Adaptive, Condition, ConditionKind, HostIdentity, Scheduling, SchedulingMode};
 pub use error::{Error, PipelineFailure};
 pub use evidence::{CorrelatedResponse, classify_response};
-pub use inference::{Inference, Rule, State};
+pub use inference::{DiagnosticMethod, DiagnosticRule, Inference, Rule, State};
 pub use plan::{Probe, Stage};
 pub use report::{
     Aggregate, Attribution, Classification, ClassificationCounts, Collector, Endpoint, Event,
@@ -51,6 +52,7 @@ pub use report::{
 };
 pub use request::{Limits, PortSpec, Request, select_ports};
 pub use selection::{MAX_PORT_TERMS, PortSelection, Selected, Selector, Term, select_endpoints};
+pub use tcp::TcpScan;
 
 pub(crate) use executor::NeighborBounds;
 

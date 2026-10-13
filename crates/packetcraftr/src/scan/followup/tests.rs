@@ -21,6 +21,7 @@ use crate::{Client, Stats, scan};
 
 fn scan_request() -> scan::Request {
     scan::Request {
+        tcp_scan: Default::default(),
         max_in_flight: 1,
         targets: Target::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))).into(),
         target_sources: Vec::new(),
@@ -91,6 +92,8 @@ fn probe_evidence(
         _ => (Transport::Tcp, Some(80)),
     };
     scan::ProbeEvidence {
+        tcp_scan: None,
+        tcp_window: None,
         sequence,
         stage: scan::Stage::Scan,
         address,

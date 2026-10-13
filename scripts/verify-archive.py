@@ -23,6 +23,7 @@ ASSETS = (
     'schemas/packetcraftr.output.v12.schema.json',
     'schemas/packetcraftr.output.v13.schema.json',
     'schemas/packetcraftr.output.v14.schema.json',
+    'schemas/packetcraftr.output.v15.schema.json',
     'schemas/packetcraftr.os-fingerprints.v1.schema.json',
     'docs/verification-contract.md', 'docs/consumer-compatibility.md',
     'docs/resource-presets.md', 'docs/tasks.md', 'docs/native-validation.md',
@@ -32,6 +33,10 @@ ASSETS = (
     'examples/consumers/fixtures/v12-forwarding.json',
     'examples/consumers/fixtures/v13-forwarding.json',
     'examples/consumers/fixtures/v14-forwarding.json',
+    'examples/consumers/fixtures/v15-forwarding.json',
+    'docs/tcp-diagnostics.md',
+    'examples/documents/output-scan-tcp-diagnostic.json',
+    'examples/documents/output-scan-tcp-diagnostic-event.json',
     'crates/packetcraftr/data/os-fingerprints.v1.json',
     'crates/packetcraftr/data/os-fingerprints.provenance.yaml',
     'docs/os-identification.md',
@@ -132,7 +137,7 @@ def verify(root, version, commit, target, variant):
     if len(records) != expected_frames + 1:
         raise ValueError(f'packaged capture must produce {expected_frames} frames and one completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v14'
+        if (record.get('schema') != 'packetcraftr.output/v15'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):
@@ -154,8 +159,8 @@ def verify(root, version, commit, target, variant):
         expected = json.loads((root / 'examples/documents' / example).read_text(encoding='utf-8'))
         if expected.get('schema') != 'packetcraftr.output/v10':
             raise ValueError(f'{example} must preserve its released output/v10 family')
-        if actual.get('schema') != 'packetcraftr.output/v14':
-            raise ValueError(f'packaged stats output for {example} must use output/v14')
+        if actual.get('schema') != 'packetcraftr.output/v15':
+            raise ValueError(f'packaged stats output for {example} must use output/v15')
         # Preserve released examples and compare every other envelope/payload
         # field against the current producer without changing archived files.
         expected['schema'] = actual['schema']

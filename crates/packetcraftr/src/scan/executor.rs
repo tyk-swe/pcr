@@ -375,6 +375,7 @@ fn route_probe(target: &SelectedAddress) -> Probe {
         address: target.address,
         scope: target.scope.clone(),
         endpoint: crate::probe::ProbeEndpoint::Icmp,
+        tcp_scan: super::TcpScan::default(),
         attempt: 1,
         udp_payload: bytes::Bytes::new(),
         udp_profile: None,
@@ -655,6 +656,7 @@ mod tests {
     fn a_batch_without_exactly_one_probe_is_rejected_before_any_provider_call() {
         let (client, providers) = fake_client();
         let request = Request {
+            tcp_scan: Default::default(),
             target_sources: Vec::new(),
             max_in_flight: 1,
             targets: Target::Address("192.0.2.2".parse().unwrap()).into(),

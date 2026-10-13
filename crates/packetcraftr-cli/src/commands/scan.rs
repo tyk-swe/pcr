@@ -82,6 +82,8 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         exclusions,
         max_targets,
         transport,
+        tcp_scan,
+        tcp_flags,
         udp_payload_hex,
         udp_payload_file,
         udp_profiles,
@@ -121,6 +123,8 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         method.into()
     };
     let transports = transports(&transport)?;
+    let tcp_scan = tcp_scan.resolve(tcp_flags)?;
+    tcp_scan.validate().map_err(CliError::classified)?;
     let stdin_consumers = targets_file
         .iter()
         .chain(exclude_file.iter())
@@ -153,12 +157,30 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         }
         // Listing needs no ports, but publishes the selection when given one
         // so the reviewed scope is exactly what a scan would probe.
+        let diagnostic = !tcp_scan.is_syn();
+        if diagnostic && requested == method::Requested::Connect {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--tcp-scan other than syn needs the raw method; drop --connect and --method tcp-connect",
+            ));
+        }
         let ports = if ports.is_empty() && exclude_ports.is_empty() {
             None
         } else {
             let selected = select_endpoints(&transports, ports, exclude_ports, max_ports)?;
-            Some(output::scan::plan::Ports::from(&selected))
+            let ports = output::scan::plan::Ports::from(&selected);
+            Some(if requested == method::Requested::Connect {
+                ports
+            } else {
+                ports.with_tcp_scan(tcp_scan)
+            })
         };
+        if diagnostic && ports.as_ref().is_none_or(|ports| ports.tcp_scan.is_none()) {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--tcp-scan other than syn requires at least one TCP port endpoint",
+            ));
+        }
         return list::run(
             targets,
             list::Options {
@@ -243,6 +265,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         udp_profiles,
         address_family: family.into(),
         endpoints: selected.endpoints,
+        tcp_scan,
         discovery,
         attempts,
         adaptive: adaptive.into_adaptive(timeout.timeout(), duration.max_duration(), max_in_flight),
@@ -255,6 +278,9 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         },
         collection: crate::system::exchange::collection(timeout.timeout(), queue_limits)?,
     };
+    if !tcp_scan.is_syn() {
+        request.validate().map_err(CliError::classified)?;
+    }
     let trace_stage = traceroute
         .then(|| {
             traceroute::Stage::new(
@@ -288,6 +314,12 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         ));
     }
     let plan = output::scan::plan::Plan {
+        tcp_scan: (selected_method == method::Method::Raw
+            && request
+                .endpoints
+                .iter()
+                .any(|endpoint| endpoint.transport() == Transport::Tcp))
+        .then(|| output::scan::plan::TcpScan::from(request.tcp_scan)),
         method: selection.into(),
         port_catalog: packetcraftr::scan::catalog::data_set().into(),
         excluded_endpoints: selected.excluded,

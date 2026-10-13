@@ -57,7 +57,7 @@ building are not scanner workflows.
 | Common/named-port presets and exclusions | [port selection][nmap-ports] | Original catalog 1.0.0: 73 RFC-cited names/six topical presets; exclusions precede budgets and bind discovery. No frequency-ranked top ports. Implemented; M6 close gates open. | Partial | [M1][m1], [M6][m6], [M6][m6] |
 | Mixed-protocol scan plans | [scan techniques][nmap-techniques], [port selection][nmap-ports] | Typed TCP/UDP endpoints share policy/work/evidence/duration budgets without merging equal ports. Implemented; M6 independent/native gates open. SCTP remains M13. | Partial | [M6][m6], [M13][m13] |
 | Capability-aware method choice | [scan techniques][nmap-techniques] | --method auto selects raw with build capture/transmit support, otherwise all-TCP connect, publishing reason. Default raw and explicit methods never fall back. Runtime privilege is not predicted; M6 acceptance open. | Partial | [M6][m6] |
-| Scan-dependent ambiguous states | [state meanings][nmap-states] | Separate [inference][evidence-inference] partitions supporting/conflicting/unanswered/failed sequences beside unchanged attempts. Silent UDP→open_or_filtered; local failures→no state. M6 close gates open; extra modes remain M12/M13. | Partial | [M1][m1], [M6][m6], [M12][m12], [M13][m13] |
+| Scan-dependent ambiguous states | [state meanings][nmap-states] | Separate [inference][evidence-inference] partitions supporting/conflicting/unanswered/failed sequences beside unchanged attempts. Silent UDP→open_or_filtered; local failures→no state. M6 close gates open; TCP diagnostic modes are M12 (implemented, acceptance pending); SCTP/IP-protocol modes remain M13. | Partial | [M1][m1], [M6][m6], [M12][m12], [M13][m13] |
 | Reasons, timing, and raw evidence | [output][nmap-output] | Per-probe reasons, submission/ingress timing, RTT, capture/source evidence, rolling probe_sent, and partial errors. Kernel connects are not packet tracing. | Present with constraints | [M1][m1], [M6][m6] |
 
 ## Identification, data, and traceroute
@@ -83,13 +83,13 @@ building are not scanner workflows.
 | Existing resource and failure evidence | [performance][nmap-performance], [output][nmap-output] | Finite preparation/evidence, pending confirmed transmissions, capture-source validity, omissions, and typed partial failures. Logical charges differ from RSS and acquisition completeness. | Present with constraints | [M1][m1], [M7][m7] |
 | IPv4/IPv6 and native platform coverage | [options][nmap-options], [downloads][nmap-download] | Five profiles on Linux/macOS/Windows; macOS complete-header IPv6 and Windows raw-source limits explicit. Capture-backed work needs Layer 2. Broad native parity remains open. | Partial | [M3][m3] |
 | Privileged native runtime evidence | [scan techniques][nmap-techniques], [downloads][nmap-download] | Isolated Linux and reviewed host-local routes; M4 scoped and M8/M9 ordinary-socket recordings retained. Broader native inventory/isolation/admin protections remain M3 gates. | Partial | [M3][m3] |
-| Versioned machine output | [output][nmap-output] | Text/JSON/NDJSON output/v14 with terminal/error semantics. v6–v13 remain frozen; [compatibility][compatibility] distinguishes shapes and meanings. Not an XML/syntax clone. | Present with constraints | [M4][m4] |
+| Versioned machine output | [output][nmap-output] | Text/JSON/NDJSON output/v15 with terminal/error semantics. v6–v14 remain frozen; [compatibility][compatibility] distinguishes shapes and meanings. Not an XML/syntax clone. | Present with constraints | [M4][m4] |
 
 ## Broader diagnostic scan coverage
 
 | Capability | Nmap behavior/reference | Current behavior and remaining gate | Status | Roadmap |
 | --- | --- | --- | --- | --- |
-| TCP ACK/window and flag-based diagnostics | [scan techniques][nmap-techniques] | No scanner mode beyond SYN; generic custom packets are not a diagnostic engine. Need separate flag/rule selection, correlation, and qualified inference. | Missing | [M12][m12] |
+| TCP ACK/window and flag-based diagnostics | [scan techniques][nmap-techniques] | ACK, window, FIN, NULL, Xmas, Maimon, and observation-only custom modes keep probe flags separate from stack-dependent inference rules (`unfiltered`, window open/closed, `open_or_filtered`). Native cross-platform and independent ground-truth acceptance are pending ([TCP diagnostics](../tcp-diagnostics.md)). | Partial | [M12][m12] |
 | SCTP INIT/COOKIE-ECHO diagnostics | [scan techniques][nmap-techniques] | SCTP codec/tag helpers only, no scanner transport. Need bounded chunks, workflow correlation, and ambiguity-preserving results. | Partial | [M13][m13], [M13][m13] |
 | IP-protocol inventory | [scan techniques][nmap-techniques] | No selected protocol-number scan plan. Must be typed separately from transport ports with correlated positive/negative/ambiguous evidence. | Missing | [M13][m13] |
 

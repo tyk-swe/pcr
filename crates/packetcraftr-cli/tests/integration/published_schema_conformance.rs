@@ -248,7 +248,7 @@ fn schema_accepts_based_source_reject_zero() {
         ),
         (
             schema_validator(),
-            packetcraftr_cli::output::contract::SCHEMA_V13,
+            packetcraftr_cli::output::contract::SCHEMA_V14,
         ),
     ] {
         let mut document = original.clone();
@@ -542,6 +542,9 @@ fn every_published_declared_schema() {
     let service_exclusions_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.service-exclusions.v1.schema.json"
     ));
+    let os_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.os-fingerprints.v1.schema.json"
+    ));
     let output_validator = schema_validator();
     let v6_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.output.v6.schema.json"
@@ -589,7 +592,7 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v13" => output_validator,
+            "packetcraftr.output/v14" => output_validator,
             "packetcraftr.output/v11" => &v11_validator,
             "packetcraftr.output/v10" => &v10_validator,
             "packetcraftr.output/v9" => &v9_validator,
@@ -601,6 +604,7 @@ fn every_published_declared_schema() {
             "packetcraftr.udp-profiles/v1" => &udp_profiles_validator,
             "packetcraftr.service-probes/v1" => &service_probes_validator,
             "packetcraftr.service-exclusions/v1" => &service_exclusions_validator,
+            "packetcraftr.os-fingerprints/v1" => &os_validator,
             other => panic!("{name} declares an unknown schema {other}"),
         };
         if let Err(error) = validator.validate(&document) {

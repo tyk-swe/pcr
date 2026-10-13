@@ -26,14 +26,15 @@ def consume_stream(document: Path) -> dict:
 
 
 class Family(unittest.TestCase):
-    def test_declares_v13_and_frozen_earlier_families(self):
+    def test_declares_v14_and_frozen_earlier_families(self):
+        self.assertIn("packetcraftr.output/v14", CONSUMER.SCHEMAS)
         self.assertIn("packetcraftr.output/v13", CONSUMER.SCHEMAS)
         self.assertIn("packetcraftr.output/v12", CONSUMER.SCHEMAS)
         for family in ("v6", "v7", "v8", "v9", "v10", "v11"):
             self.assertIn(f"packetcraftr.output/{family}", CONSUMER.SCHEMAS)
 
     def test_accepts_current_and_frozen_v11_forwarding(self):
-        for family in ("v11", "v12", "v13"):
+        for family in ("v11", "v12", "v13", "v14"):
             with self.subTest(family=family):
                 self.assertTrue(consume_stream(ROOT / f"examples/consumers/fixtures/{family}-forwarding.json"))
 

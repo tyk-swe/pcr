@@ -3,6 +3,7 @@
 
 mod convert;
 mod error;
+pub mod os_fingerprints;
 mod parse;
 pub mod payload;
 pub mod port_catalog;

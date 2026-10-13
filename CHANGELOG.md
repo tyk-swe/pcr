@@ -18,8 +18,8 @@ for remaining acceptance gates and revision-bound evidence.
   { max_frames, max_bytes, max_undecoded }`; the existing Serde struct
   representation is preserved for both JSON and binary formats.
 - Current packet documents use `packetcraftr.packet/v2`; machine output uses
-  `packetcraftr.output/v13`. Consumers must explicitly support these families.
-  Output v6–v12 schemas and published evidence stay frozen; see
+  `packetcraftr.output/v14`. Consumers must explicitly support these families.
+  Output v6–v13 schemas and published evidence stay frozen; see
   [consumer compatibility](docs/consumer-compatibility.md).
 - Live workflows run through `Client<P, K>` with explicit providers, policy,
   clock, cancellation, and runtime. Requests and sinks replace free workflow
@@ -50,9 +50,18 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Added
 
+- Standalone `identify-os` / `Client::identify_os` with bounded dual-stack
+  probes, verified open/closed prerequisites, exact retained wire evidence,
+  conservative OS-family candidates, and explicit inconclusive results.
+  Its CLI deadline includes corpus loading, setup, and live probing in every
+  output format.
+  Output/v14 and the independently versioned OS document contract preserve
+  observations and candidate provenance; broader M10 native acceptance remains
+  open. See [OS identification](docs/os-identification.md).
+
 - Explicit `identify --tls` with bounded encrypted traffic, handshake deadlines,
   cancellation, presented certificate observations, declared SNI, and separate
-  TLS failure evidence; output/v13 adds TLS counters and metadata provenance.
+  TLS failure evidence; output/v13 introduced TLS counters and metadata provenance.
 - Reviewed SMTP/FTP greeting probes in service corpus 1.1.0, supported hostname
   and static product CPE claims, and a precommitted held-out evaluation with
   separate unknown, ambiguous, confidence, and misleading-claim results.

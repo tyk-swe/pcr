@@ -17,7 +17,7 @@
   both declared zone and resolved interface. Name/index aliases coalesce only
   when they identify the same interface; ambiguity fails before active work.
 - Scope remains part of raw route, socket, endpoint, and correlation identity.
-  Output first gained scope/list records in v7; current v13 retains them under
+  Output first gained scope/list records in v7; current v14 retains them under
   the [consumer policy](../consumer-compatibility.md#output-family-v7).
 - Octet ranges, hostname/CIDR shorthand, and random/unbounded generation remain
   outside this milestone. M6 owns list-mode port selection.

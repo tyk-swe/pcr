@@ -25,6 +25,7 @@ use crate::execution::evidence::EvidenceDiagnosticDescriptor;
 pub(crate) enum Workflow {
     Scan,
     Traceroute,
+    Os,
 }
 
 impl Workflow {
@@ -32,6 +33,7 @@ impl Workflow {
         match self {
             Self::Scan => "scan",
             Self::Traceroute => "traceroute",
+            Self::Os => "os",
         }
     }
 
@@ -49,6 +51,12 @@ impl Workflow {
                 "traceroute.unattributed_limit",
                 "traceroute",
             ),
+            Self::Os => EvidenceDiagnosticDescriptor::new(
+                "os.evidence_limit",
+                "os.undecoded_limit",
+                "os.unattributed_limit",
+                "os",
+            ),
         }
     }
 
@@ -56,6 +64,7 @@ impl Workflow {
         match self {
             Self::Scan => "batch",
             Self::Traceroute => "hop batch",
+            Self::Os => "probe batch",
         }
     }
 

@@ -117,7 +117,7 @@ resolution_performed. Listing sends no target/neighbor packets; authorized hostn
 resolution is not network-free.
 Retained_evidence_bytes charges exact retained wire bytes for raw/trace and probe
 structures/error strings for connect, not classification, total allocation, or RSS.
-These v7 additions persist in current v13.
+These v7 additions persist in current v14.
 
 ## v8 port planning and inference
 
@@ -127,7 +127,7 @@ identification. Explicit raw/connect methods never fall back; automatic selectio
 reads build capture/transmit capability, not runtime privilege. Typed mixed
 TCP/UDP endpoints share operation budgets and preserve transport identity.
 Late/duplicate/ambiguous frames are unattributed evidence. List mode may publish
-ports. These v8 additions persist in current v13.
+ports. These v8 additions persist in current v14.
 
 ## Port inference
 
@@ -221,3 +221,16 @@ insufficient limits may fail after scan. No traceable host deducts nothing.
 TCP/UDP trace defaults source 49151, separate from generated scan UDP ports.
 Finalized collection validates before scan; neighbour/pacing timing needs allowance.
 See [M11 limits and open acceptance](roadmap/m11-scan-informed-traceroute.md).
+
+## OS fingerprint evidence
+
+Standalone `identify-os` emits output/v14 observations separately from qualified
+OS-family candidates. Open/closed prerequisites, omitted responses, contradictions,
+late/unrelated captures, and evidence exhaustion remain explicit. Router errors
+cannot establish target identity. Candidate provenance cites the independently
+versioned original corpus/signature and supporting observation indices.
+`qualified` is ordinal; release identity, authenticated identity, probability,
+and inferred initial TTL are not supported. `complete` describes execution and
+retention; inconclusive suitability can be complete. See
+[OS identification](os-identification.md) and
+[preserved M10 evidence](roadmap/evidence/m10/README.md).

@@ -9,7 +9,7 @@ capability comparison, and each milestone owns its decisions and remaining gates
 
 The initial review used `22c7d182d577` (2026-10-05) and the official
 [Nmap reference guide][nmap-guide], whose download page then listed 7.991.
-The matrix records later reviewed revisions. Current `main` emits output/v13;
+The matrix records later reviewed revisions. Current `main` emits output/v14;
 beta.3 emits v2. Consult [migration guidance][project-readme], not an old roadmap
 baseline, for the producer contract. Comparison runs must record actual Nmap
 versions/build features; database size and advertised throughput are not targets.
@@ -43,7 +43,7 @@ addition to these dependencies.
 | M7 | [Adaptive scheduling and bounded performance][m7] | RTT-driven timeouts, selective retries, rate-limit handling, per-host fairness, adaptive windows, and redesigned connect scheduling under hard ceilings. | M2, M6 | In progress |
 | M8 | [Service and version identification][m8] | A read-only identification workflow with banner and protocol-aware probes, match documents, and separate claim/candidate/confidence records. | M7 | Complete |
 | M9 | [TLS services and identification corpus][m9] | TLS-wrapped interrogation over a bounded transport, an expanded reviewed corpus, and held-out evaluation of coverage and confidence. | M8 | Complete |
-| M10 | [OS identification][m10] | Finite IPv4 and IPv6 stack-fingerprint collection, matching against a reviewed corpus, and qualified or explicitly inconclusive results. | M5, M7 | Planned |
+| M10 | [OS identification][m10] | Finite IPv4 and IPv6 stack-fingerprint collection, matching against a reviewed corpus, and qualified or explicitly inconclusive results. | M5, M7 | In progress |
 | M11 | [Scan-informed traceroute][m11] | Traceroute that selects an observed responsive probe, traces several authorized hosts under one plan, and reuses paths with explicit provenance. | M5, M6 | In progress |
 | M12 | [TCP diagnostic scans][m12] | ACK/window and FIN/NULL/Xmas/Maimon scan families with probe flags kept separate from inference rules. | M6 | Planned |
 | M13 | [SCTP and IP-protocol inventory][m13] | SCTP INIT/COOKIE-ECHO scanning, typed IP-protocol inventory, and the remaining discovery probe families. | M5, M6 | Planned |

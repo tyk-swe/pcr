@@ -90,7 +90,7 @@ pub(crate) struct Reply<O> {
 
 pub(crate) struct BatchEvidence<K, F, G> {
     errors: G,
-    limits: EvidenceLimits,
+    validation_limits: EvidenceLimits,
     state: EvidenceState,
     classifier: K,
     emit: F,
@@ -104,10 +104,23 @@ impl<K, F, G: Copy> BatchEvidence<K, F, G> {
         classifier: K,
         emit: F,
     ) -> Self {
+        Self::new_with_retention_limits(workflow, errors, limits, limits, classifier, emit)
+    }
+
+    /// Valid executor captures keep their per-exchange ceilings even when earlier
+    /// preparation has consumed part (or all) of the operation retention budget.
+    pub(crate) fn new_with_retention_limits(
+        workflow: Workflow,
+        errors: G,
+        validation_limits: EvidenceLimits,
+        retention_limits: EvidenceLimits,
+        classifier: K,
+        emit: F,
+    ) -> Self {
         Self {
             errors,
-            limits,
-            state: EvidenceState::new(limits, workflow.evidence_diagnostics()),
+            validation_limits,
+            state: EvidenceState::new(retention_limits, workflow.evidence_diagnostics()),
             classifier,
             emit,
         }
@@ -154,7 +167,7 @@ where
             &batch.probes,
             batch.timeout,
             execution,
-            self.limits,
+            self.validation_limits,
             |probe, sent| self.classifier.sent_matches(probe, sent),
         )
     }

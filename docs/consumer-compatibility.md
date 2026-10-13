@@ -8,9 +8,9 @@ if an old schema accepts their shape.
 
 Archives freeze schema snapshots/checksums. Resolve `$id` to the bundled local
 file, never moving `main` or a network fetch; do not alter published archives.
-Current producers emit [output/v13](../schemas/packetcraftr.output.v13.schema.json)
+Current producers emit [output/v14](../schemas/packetcraftr.output.v14.schema.json)
 and [packet/v2](../schemas/packetcraftr.packet.v2.schema.json). Beta.3 used output/v2
-and packet/v1; output v6–v12 remain frozen. Tolerate unknown object members, but
+and packet/v1; output v6–v13 remain frozen. Tolerate unknown object members, but
 never guess unknown families, verdicts, check kinds, or evidence states.
 Examples are fixtures; CLI conformance tests validate actual serializers.
 
@@ -27,9 +27,28 @@ counters include accepted evidence regardless of retained detail/omissions.
 Forwarding fail/inconclusive returns exit 1 after publication; an error envelope
 is execution failure. Neither exit status nor a partial list alone is a verdict.
 
+## Output family v14
+
+V14 adds standalone `identify-os`. Aggregate results and `os_preparation`,
+`os_probe`, `os_additional`, `os_undecoded`, `diagnostic`, and `complete` stream
+records separate exact evidence, suitability, observations, and qualified
+family candidates. Outcomes are `matched`, `ambiguous`, `unknown`, or
+`inconclusive`; competing families remain ambiguous. `qualified` confidence is
+ordinal, never a probability or authenticated identity.
+
+Candidate provenance names the corpus/version, signature, reference, and
+supporting observation indices. The independently versioned
+`packetcraftr.os-fingerprints/v1` document names `packetcraftr.os-probes/v1`.
+Unknown or missing evidence does not qualify a signature. `complete` concerns
+execution and retained evidence; an unsuitable target can complete with an
+inconclusive identification. Expiry/cancellation follows existing typed-error
+and stream terminal semantics. See [OS identification](os-identification.md).
+
+V13 and earlier families remain immutable; consumers must explicitly adopt v14.
+
 ## Output family v13
 
-Current v13 preserves v12 and adds explicit TLS, SMTP/FTP fields, `tls_failed`,
+Frozen v13 preserves v12 and adds explicit TLS, SMTP/FTP fields, `tls_failed`,
 `usage.tls`, and supported candidate metadata. TLS failure retains evidence,
 never cleartext fallback. Passive TLS fingerprints keep their analysis meaning.
 
@@ -136,7 +155,7 @@ set -e
 python3 examples/consumers/forwarding.py --format ndjson --exit-code "$status" < report.ndjson
 ```
 
-The forwarding consumer accepts v6–v13 and validates its interpreted subset:
+The forwarding consumer accepts v6–v14 and validates its interpreted subset:
 states, counter/omission relationships, requested checks, and verdict coherence.
 It does not replace full JSON Schema validation. Its success means interpretation,
 not forwarding pass; inspect execution/verdict or the harness's test contract.

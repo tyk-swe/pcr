@@ -110,3 +110,20 @@ Broader macOS/Windows acceptance remains open, including historical failures/ski
 
 Drop counters, offloading, capture point, and timestamps remain contextual;
 zero/unknown drops do not establish completeness, device loss, or synchronized clocks.
+
+## OS identification
+
+Build the all-feature CLI, then run
+`sudo python3 scripts/test-os-identification-native.py --require-complete`.
+Linux requires `ip`, `unshare`, `nsenter`, and `ethtool`; the runner enters a fresh
+parent-distinct network namespace and a separate peer namespace, creates only a
+documentation-address veth pair, and disables checksum offload. It preserves
+source/binary/corpus identity and actual JSON/NDJSON outputs for dual-stack
+suitable and missing-prerequisite cases. No remote targets or DNS are used.
+
+The reviewed macOS/Windows workflow exposes `os_identification`. Its host-local
+loopback cases install no drivers and change no interfaces. Unsupported,
+unavailable, and failed paths remain explicit; loopback execution does not close
+isolated routed/shared-link acceptance. Original training and independent-kernel
+hold-out evidence are described in [M10 evidence](roadmap/evidence/m10/README.md).
+Broader M10 exact reviewed-revision/platform acceptance remains open.

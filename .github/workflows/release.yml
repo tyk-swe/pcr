@@ -259,6 +259,10 @@ jobs:
               "examples/documents/output-build-complete.json",
               "examples/documents/output-dns-tcp-success.json",
               "examples/documents/output-dns-tcp-complete.json",
+              "examples/documents/os-fingerprints.json",
+              "examples/documents/output-os.json",
+              "examples/documents/output-os-probe.json",
+              "examples/documents/output-os-complete.json",
               "examples/documents/output-identify-success.json",
               "examples/documents/output-identify-tls-success.json",
               "examples/documents/output-replay-bit-rate-success.json",
@@ -270,6 +274,9 @@ jobs:
               "examples/consumers/fixtures/v11-forwarding.json",
               "examples/consumers/fixtures/v12-forwarding.json",
               "examples/consumers/fixtures/v13-forwarding.json",
+              "examples/consumers/fixtures/v14-forwarding.json",
+              "crates/packetcraftr/data/os-fingerprints.v1.json",
+              "crates/packetcraftr/data/os-fingerprints.provenance.yaml",
           )
           for source in map(pathlib.Path, assets):
               destination = staging / source

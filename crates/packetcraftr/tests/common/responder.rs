@@ -50,6 +50,8 @@ pub(crate) struct State {
     pub(crate) hops: Option<u8>,
     pub(crate) ttls: Vec<u8>,
     pub(crate) sent_wires: Vec<Bytes>,
+    /// Explicit OS-workflow ports; cleanup RSTs never draw a reply.
+    pub(crate) os_ports: Option<(u16, u16)>,
     /// Per-destination path topology; when non-empty it decides every reply,
     /// and a destination without a path never answers.
     pub(crate) paths: HashMap<Ipv4Addr, Path>,
@@ -265,6 +267,18 @@ impl transmit::Provider for Io {
                         frame(response)
                     })
                     .collect()
+            }
+            _ if state.os_ports.is_some() && tcp.is_some_and(|tcp| tcp.flags & Tcp::RST != 0) => {
+                Vec::new()
+            }
+            _ if let (Some((open, closed)), Some(tcp)) = (state.os_ports, tcp) => {
+                if tcp.destination_port == open {
+                    vec![reply(0, Tcp::SYN | Tcp::ACK)]
+                } else if tcp.destination_port == closed {
+                    vec![reply(0, Tcp::RST | Tcp::ACK)]
+                } else {
+                    Vec::new()
+                }
             }
             // Every UDP port on the fixture host is closed.
             _ if tcp.is_none() => vec![icmp_error(ip.destination, 3, 3)],

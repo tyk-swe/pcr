@@ -113,7 +113,7 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
         interface::SystemProvider,
         sender.clone(),
         sender,
-    );
+    ).with_resolver(packetcraftr::target::SystemResolver);
     let client = Client::new(builtin::registry(), policy, providers);
 
     let options = send::Options {
@@ -144,6 +144,16 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
         Err(error) => println!("denied outside the allowlist: {error}"),
         Ok(_) => unreachable!("the allowlist must reject other destinations"),
     }
+    assert_eq!(recorded.lock().expect("sent lock").len(), 1);
+    // Public OS requests validate and authorize before any provider activity.
+    let mut os_request = packetcraftr::os::Request::new(
+        packetcraftr::target::Target::Address(Ipv4Addr::new(198, 51, 100, 1).into()),
+        80, 81, packetcraftr::os::builtin_corpus()?,
+    );
+    os_request.attempts = 1;
+    os_request.limits.max_probes = 7;
+    assert!(matches!(client.identify_os(os_request, packetcraftr::os::Collector::default()),
+        Err(packetcraftr::os::Error::Authorization(_))));
     assert_eq!(recorded.lock().expect("sent lock").len(), 1);
     Ok(())
 }

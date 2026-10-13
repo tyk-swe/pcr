@@ -1,0 +1,688 @@
+{
+  "schema": "packetcraftr.output/v14",
+  "command": "identify-os",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "target": "192.0.2.2",
+    "probe_set": "packetcraftr.os-probes/v1",
+    "corpus": "project-os-fingerprints",
+    "corpus_version": "1.0.0",
+    "identification": {
+      "outcome": "matched",
+      "reason": "observed stack satisfies qualified family signatures",
+      "candidates": [
+        {
+          "family": "linux",
+          "signature": "linux-ethernet1500-ipv4",
+          "corpus": "project-os-fingerprints",
+          "corpus_version": "1.0.0",
+          "reference": "Original Linux 7.0.0-38-generic kernel captures; docs/roadmap/evidence/m10/training-kernel-7.0.0-38-generic.json.gz; 1500-byte veth MTU, default TCP settings",
+          "matched_predicates": 17,
+          "confidence": "qualified",
+          "observation_indices": [
+            0,
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    "observations": [
+      {
+        "probe": "open_syn",
+        "address_family": "ipv4",
+        "tcp": {
+          "flags": 18,
+          "window": 64240,
+          "option_kinds": [
+            2,
+            1,
+            1,
+            4,
+            1,
+            3
+          ],
+          "mss": 1460,
+          "window_scale": 10,
+          "sack_permitted": true,
+          "timestamps": false
+        },
+        "icmp_type": null,
+        "icmp_code": null,
+        "observed_hop_limit": 64,
+        "ipv4_identification": 0,
+        "ipv4_dont_fragment": true,
+        "sequence": 1545222594,
+        "acknowledgment": 3020429373,
+        "timestamp_value": null,
+        "timestamp_echo": null,
+        "suitable": true
+      },
+      {
+        "probe": "closed_syn",
+        "address_family": "ipv4",
+        "tcp": {
+          "flags": 20,
+          "window": 0,
+          "option_kinds": [],
+          "mss": null,
+          "window_scale": null,
+          "sack_permitted": false,
+          "timestamps": false
+        },
+        "icmp_type": null,
+        "icmp_code": null,
+        "observed_hop_limit": 64,
+        "ipv4_identification": 0,
+        "ipv4_dont_fragment": true,
+        "sequence": 0,
+        "acknowledgment": 3020429375,
+        "timestamp_value": null,
+        "timestamp_echo": null,
+        "suitable": true
+      },
+      {
+        "probe": "timestamp_syn",
+        "address_family": "ipv4",
+        "tcp": {
+          "flags": 18,
+          "window": 65160,
+          "option_kinds": [
+            2,
+            4,
+            8,
+            1,
+            3
+          ],
+          "mss": 1460,
+          "window_scale": 10,
+          "sack_permitted": true,
+          "timestamps": true
+        },
+        "icmp_type": null,
+        "icmp_code": null,
+        "observed_hop_limit": 64,
+        "ipv4_identification": 0,
+        "ipv4_dont_fragment": true,
+        "sequence": 1559862763,
+        "acknowledgment": 3020429376,
+        "timestamp_value": 369335195,
+        "timestamp_echo": 3020429375,
+        "suitable": true
+      },
+      {
+        "probe": "echo",
+        "address_family": "ipv4",
+        "tcp": null,
+        "icmp_type": 0,
+        "icmp_code": 0,
+        "observed_hop_limit": 64,
+        "ipv4_identification": 25669,
+        "ipv4_dont_fragment": false,
+        "sequence": null,
+        "acknowledgment": null,
+        "timestamp_value": null,
+        "timestamp_echo": null,
+        "suitable": true
+      }
+    ],
+    "retained_evidence_bytes": 1164,
+    "complete": true,
+    "evidence": [
+      {
+        "kind": "preparation",
+        "interface": "os-source",
+        "target": "192.0.2.2",
+        "request_hex": "ffffffffffff56b8671cf7d80806000108000604000156b8671cf7d8c0000201000000000000c0000202000000000000000000000000000000000000",
+        "packets_attempted": 1,
+        "bytes": 60,
+        "captured": [
+          {
+            "timestamp": {
+              "unix_seconds": 1791818025,
+              "nanoseconds": 941270000
+            },
+            "captured_length": 60,
+            "original_length": 60,
+            "link_type": 1,
+            "interface": 3,
+            "bytes_hex": "ffffffffffff56b8671cf7d80806000108000604000156b8671cf7d8c0000201000000000000c0000202000000000000000000000000000000000000"
+          },
+          {
+            "timestamp": {
+              "unix_seconds": 1791818025,
+              "nanoseconds": 941332000
+            },
+            "captured_length": 42,
+            "original_length": 42,
+            "link_type": 1,
+            "interface": 3,
+            "bytes_hex": "56b8671cf7d83a21346eaad3080600010800060400023a21346eaad3c000020256b8671cf7d8c0000201"
+          }
+        ]
+      },
+      {
+        "kind": "probe",
+        "sequence": 1,
+        "probe": "open_syn",
+        "attempt": 1,
+        "sent": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 42185829
+          },
+          "captured_length": 66,
+          "original_length": 66,
+          "link_type": 1,
+          "bytes_hex": "3a21346eaad356b8671cf7d8080045000034cc4540004006ea7ac0000201c0000202e5aba873b408183c000000008002ffff91aa0000020405b40402010303070000"
+        },
+        "response": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 42276000
+          },
+          "captured_length": 66,
+          "original_length": 66,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "56b8671cf7d83a21346eaad3080045000034000040004006b6c0c0000202c0000201a873e5ab5c1a39c2b408183d8012faf0ffc70000020405b4010104020103030a"
+        },
+        "observation": {
+          "probe": "open_syn",
+          "address_family": "ipv4",
+          "tcp": {
+            "flags": 18,
+            "window": 64240,
+            "option_kinds": [
+              2,
+              1,
+              1,
+              4,
+              1,
+              3
+            ],
+            "mss": 1460,
+            "window_scale": 10,
+            "sack_permitted": true,
+            "timestamps": false
+          },
+          "icmp_type": null,
+          "icmp_code": null,
+          "observed_hop_limit": 64,
+          "ipv4_identification": 0,
+          "ipv4_dont_fragment": true,
+          "sequence": 1545222594,
+          "acknowledgment": 3020429373,
+          "timestamp_value": null,
+          "timestamp_echo": null,
+          "suitable": true
+        },
+        "received_at": {
+          "unix_seconds": 1791818026,
+          "nanoseconds": 42276000
+        },
+        "latency": {
+          "secs": 0,
+          "nanos": 90787
+        },
+        "reason": "correlated TCP SYN/ACK"
+      },
+      {
+        "kind": "additional",
+        "sequence": 1,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 42211000
+          },
+          "captured_length": 66,
+          "original_length": 66,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "3a21346eaad356b8671cf7d8080045000034cc4540004006ea7ac0000201c0000202e5aba873b408183c000000008002ffff91aa0000020405b40402010303070000"
+        },
+        "reason": "unrelated capture"
+      },
+      {
+        "kind": "additional",
+        "sequence": 1,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 42292000
+          },
+          "captured_length": 42,
+          "original_length": 42,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "ffffffffffff56b8671cf7d80806000108000604000156b8671cf7d8c0000201000000000000c0000202"
+        },
+        "reason": "unrelated capture"
+      },
+      {
+        "kind": "additional",
+        "sequence": 1,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 42297000
+          },
+          "captured_length": 42,
+          "original_length": 42,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "56b8671cf7d83a21346eaad3080600010800060400023a21346eaad3c000020256b8671cf7d8c0000201"
+        },
+        "reason": "unrelated capture"
+      },
+      {
+        "kind": "additional",
+        "sequence": 1,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 42303000
+          },
+          "captured_length": 54,
+          "original_length": 54,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "3a21346eaad356b8671cf7d8080045000028000040004006b6ccc0000201c0000202e5aba873b408183d0000000050040000d1770000"
+        },
+        "reason": "unrelated capture"
+      },
+      {
+        "kind": "additional",
+        "sequence": 1,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 51987000
+          },
+          "captured_length": 110,
+          "original_length": 110,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "33330000001656b8671cf7d886dd600000000038000100000000000000000000000000000000ff0200000000000000000000000000163a000502000001008f00757a0000000204000000ff0200000000000000000001ff1cf7d804000000ff0200000000000000000001ff000001"
+        },
+        "reason": "unrelated capture"
+      },
+      {
+        "kind": "additional",
+        "sequence": 1,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 188002000
+          },
+          "captured_length": 86,
+          "original_length": 86,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "3333ff6eaad33a21346eaad386dd6000000000203aff00000000000000000000000000000000ff0200000000000000000001ff6eaad3870018c400000000fe80000000000000382134fffe6eaad30e01de1af893bd06"
+        },
+        "reason": "unrelated capture"
+      },
+      {
+        "kind": "probe",
+        "sequence": 2,
+        "probe": null,
+        "attempt": 1,
+        "sent": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 354312995
+          },
+          "captured_length": 54,
+          "original_length": 54,
+          "link_type": 1,
+          "bytes_hex": "3a21346eaad356b8671cf7d8080045000028cc4640004006ea85c0000201c0000202e5aba873b408183d5c1a39c3501400003b8a0000"
+        },
+        "response": null,
+        "observation": null,
+        "received_at": null,
+        "latency": null,
+        "reason": "RST cleanup transmitted"
+      },
+      {
+        "kind": "additional",
+        "sequence": 2,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 354330000
+          },
+          "captured_length": 54,
+          "original_length": 54,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "3a21346eaad356b8671cf7d8080045000028cc4640004006ea85c0000201c0000202e5aba873b408183d5c1a39c3501400003b8a0000"
+        },
+        "reason": "unrelated capture"
+      },
+      {
+        "kind": "probe",
+        "sequence": 3,
+        "probe": "closed_syn",
+        "attempt": 1,
+        "sent": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 669124992
+          },
+          "captured_length": 54,
+          "original_length": 54,
+          "link_type": 1,
+          "bytes_hex": "3a21346eaad356b8671cf7d8080045000028cc4740004006ea84c0000201c0000202e5aba875b408183e000000005002ffffd1760000"
+        },
+        "response": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 669175000
+          },
+          "captured_length": 54,
+          "original_length": 54,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "56b8671cf7d83a21346eaad3080045000028000040004006b6ccc0000202c0000201a875e5ab00000000b408183f50140000d1630000"
+        },
+        "observation": {
+          "probe": "closed_syn",
+          "address_family": "ipv4",
+          "tcp": {
+            "flags": 20,
+            "window": 0,
+            "option_kinds": [],
+            "mss": null,
+            "window_scale": null,
+            "sack_permitted": false,
+            "timestamps": false
+          },
+          "icmp_type": null,
+          "icmp_code": null,
+          "observed_hop_limit": 64,
+          "ipv4_identification": 0,
+          "ipv4_dont_fragment": true,
+          "sequence": 0,
+          "acknowledgment": 3020429375,
+          "timestamp_value": null,
+          "timestamp_echo": null,
+          "suitable": true
+        },
+        "received_at": {
+          "unix_seconds": 1791818026,
+          "nanoseconds": 669175000
+        },
+        "latency": {
+          "secs": 0,
+          "nanos": 50328
+        },
+        "reason": "correlated TCP reset"
+      },
+      {
+        "kind": "additional",
+        "sequence": 3,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 669136000
+          },
+          "captured_length": 54,
+          "original_length": 54,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "3a21346eaad356b8671cf7d8080045000028cc4740004006ea84c0000201c0000202e5aba875b408183e000000005002ffffd1760000"
+        },
+        "reason": "unrelated capture"
+      },
+      {
+        "kind": "additional",
+        "sequence": 3,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 804000000
+          },
+          "captured_length": 86,
+          "original_length": 86,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "3333ff1cf7d856b8671cf7d886dd6000000000203aff00000000000000000000000000000000ff0200000000000000000001ff1cf7d887005ea900000000fe8000000000000054b867fffe1cf7d80e01fcfd33d533ff"
+        },
+        "reason": "unrelated capture"
+      },
+      {
+        "kind": "probe",
+        "sequence": 4,
+        "probe": "timestamp_syn",
+        "attempt": 1,
+        "sent": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 979180321
+          },
+          "captured_length": 74,
+          "original_length": 74,
+          "link_type": 1,
+          "bytes_hex": "3a21346eaad356b8671cf7d808004500003ccc4840004006ea6fc0000201c0000202e5aba873b408183f00000000a002ffff9d4d0000020405b4040201030307080ab408183f00000000"
+        },
+        "response": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 979247000
+          },
+          "captured_length": 74,
+          "original_length": 74,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "56b8671cf7d83a21346eaad308004500003c000040004006b6b8c0000202c0000201a873e5ab5cf99debb4081840a012fe88f22c0000020405b40402080a16039b9bb408183f0103030a"
+        },
+        "observation": {
+          "probe": "timestamp_syn",
+          "address_family": "ipv4",
+          "tcp": {
+            "flags": 18,
+            "window": 65160,
+            "option_kinds": [
+              2,
+              4,
+              8,
+              1,
+              3
+            ],
+            "mss": 1460,
+            "window_scale": 10,
+            "sack_permitted": true,
+            "timestamps": true
+          },
+          "icmp_type": null,
+          "icmp_code": null,
+          "observed_hop_limit": 64,
+          "ipv4_identification": 0,
+          "ipv4_dont_fragment": true,
+          "sequence": 1559862763,
+          "acknowledgment": 3020429376,
+          "timestamp_value": 369335195,
+          "timestamp_echo": 3020429375,
+          "suitable": true
+        },
+        "received_at": {
+          "unix_seconds": 1791818026,
+          "nanoseconds": 979247000
+        },
+        "latency": {
+          "secs": 0,
+          "nanos": 67042
+        },
+        "reason": "correlated TCP SYN/ACK"
+      },
+      {
+        "kind": "additional",
+        "sequence": 4,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 979194000
+          },
+          "captured_length": 74,
+          "original_length": 74,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "3a21346eaad356b8671cf7d808004500003ccc4840004006ea6fc0000201c0000202e5aba873b408183f00000000a002ffff9d4d0000020405b4040201030307080ab408183f00000000"
+        },
+        "reason": "unrelated capture"
+      },
+      {
+        "kind": "additional",
+        "sequence": 4,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818026,
+            "nanoseconds": 979266000
+          },
+          "captured_length": 54,
+          "original_length": 54,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "3a21346eaad356b8671cf7d8080045000028000040004006b6ccc0000201c0000202e5aba873b40818400000000050040000d1740000"
+        },
+        "reason": "unrelated capture"
+      },
+      {
+        "kind": "probe",
+        "sequence": 5,
+        "probe": null,
+        "attempt": 1,
+        "sent": {
+          "timestamp": {
+            "unix_seconds": 1791818027,
+            "nanoseconds": 292182529
+          },
+          "captured_length": 54,
+          "original_length": 54,
+          "link_type": 1,
+          "bytes_hex": "3a21346eaad356b8671cf7d8080045000028cc4940004006ea82c0000201c0000202e5aba873b40818405cf99dec50140000d67e0000"
+        },
+        "response": null,
+        "observation": null,
+        "received_at": null,
+        "latency": null,
+        "reason": "RST cleanup transmitted"
+      },
+      {
+        "kind": "additional",
+        "sequence": 5,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818027,
+            "nanoseconds": 292197000
+          },
+          "captured_length": 54,
+          "original_length": 54,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "3a21346eaad356b8671cf7d8080045000028cc4940004006ea82c0000201c0000202e5aba873b40818405cf99dec50140000d67e0000"
+        },
+        "reason": "unrelated capture"
+      },
+      {
+        "kind": "probe",
+        "sequence": 6,
+        "probe": "echo",
+        "attempt": 1,
+        "sent": {
+          "timestamp": {
+            "unix_seconds": 1791818027,
+            "nanoseconds": 613128241
+          },
+          "captured_length": 46,
+          "original_length": 46,
+          "link_type": 1,
+          "bytes_hex": "3a21346eaad356b8671cf7d8080045000020cc4a40004001ea8ec0000201c00002020800c325504f1841b4081841"
+        },
+        "response": {
+          "timestamp": {
+            "unix_seconds": 1791818027,
+            "nanoseconds": 613182000
+          },
+          "captured_length": 46,
+          "original_length": 46,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "56b8671cf7d83a21346eaad30800450000206445000040019294c0000202c00002010000cb25504f1841b4081841"
+        },
+        "observation": {
+          "probe": "echo",
+          "address_family": "ipv4",
+          "tcp": null,
+          "icmp_type": 0,
+          "icmp_code": 0,
+          "observed_hop_limit": 64,
+          "ipv4_identification": 25669,
+          "ipv4_dont_fragment": false,
+          "sequence": null,
+          "acknowledgment": null,
+          "timestamp_value": null,
+          "timestamp_echo": null,
+          "suitable": true
+        },
+        "received_at": {
+          "unix_seconds": 1791818027,
+          "nanoseconds": 613182000
+        },
+        "latency": {
+          "secs": 0,
+          "nanos": 54119
+        },
+        "reason": "correlated ICMP echo reply"
+      },
+      {
+        "kind": "additional",
+        "sequence": 6,
+        "observation": null,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1791818027,
+            "nanoseconds": 613141000
+          },
+          "captured_length": 46,
+          "original_length": 46,
+          "link_type": 1,
+          "interface": 3,
+          "bytes_hex": "3a21346eaad356b8671cf7d8080045000020cc4a40004001ea8ec0000201c00002020800c325504f1841b4081841"
+        },
+        "reason": "unrelated capture"
+      }
+    ]
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 7,
+    "packets_completed": 7,
+    "bytes": 408,
+    "elapsed": {
+      "secs": 1,
+      "nanos": 895267010
+    },
+    "capture": {
+      "received_frames": 19,
+      "received_bytes": 1164,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

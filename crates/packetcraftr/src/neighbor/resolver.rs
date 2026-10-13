@@ -65,6 +65,16 @@ pub(crate) struct State {
 }
 
 impl State {
+    /// Pin answers used by this operation without changing capture bounds.
+    /// Cached answers need no discovery capture or capture-limit validation.
+    pub(crate) fn for_operation(&self, max_neighbors: usize) -> Self {
+        Self {
+            operation: Some(self.operation.clone().unwrap_or_default()),
+            operation_entries: max_neighbors.max(self.operation_entries),
+            ..self.clone()
+        }
+    }
+
     /// Fresh caches under the same validated resolver configuration.
     pub(crate) fn fresh(&self) -> Self {
         Self {

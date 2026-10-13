@@ -129,6 +129,8 @@ def load_corpus(path):
         for case in corpus["discovery_scenarios"]:
             if case["families"] != ["ipv4", "ipv6"]:
                 raise ValueError("discovery conditions must cover both address families")
+    from tcp_diagnostic_corpus import validate as validate_tcp_diagnostics
+    validate_tcp_diagnostics(corpus)
     return corpus, hashlib.sha256(raw).hexdigest()
 
 

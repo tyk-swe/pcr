@@ -284,3 +284,71 @@ fn inference_inventory_is_ordered_dual_stack_and_references_its_own_attempts() {
         "the inference inventory stays complete"
     );
 }
+
+#[test]
+fn tcp_diagnostic_inventory_is_complete_and_attempt_local() {
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../docs/scanner-corpus.v1.json")).unwrap();
+    let cases = corpus["tcp_diagnostic_scenarios"].as_array().unwrap();
+    assert_eq!(
+        cases
+            .iter()
+            .map(|case| case["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "reset-zero",
+            "reset-positive",
+            "silent",
+            "prohibited",
+            "unexpected",
+            "reset-and-prohibited",
+            "port-unreachable",
+            "time-exceeded"
+        ]
+    );
+    for (index, case) in cases.iter().enumerate() {
+        assert_eq!(case["port"], 1000 + index);
+        assert_eq!(case["families"], serde_json::json!(["ipv4", "ipv6"]));
+        let rows = case["expected"].as_array().unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|row| row["mode"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["ack", "window", "fin", "null", "xmas", "maimon", "custom"]
+        );
+        for (row, flags) in rows.iter().zip([16, 16, 1, 0, 41, 17, 1]) {
+            assert_eq!(row["flags"], flags);
+            assert_eq!(
+                row["partitions"],
+                serde_json::json!({"supporting": [1], "conflicting": [], "unanswered": [], "failed": []})
+            );
+        }
+    }
+    for field in ["missing", "short", "unknown", "ordinal", "flags"] {
+        let mut bad = corpus.clone();
+        match field {
+            "missing" => {
+                bad.as_object_mut()
+                    .unwrap()
+                    .remove("tcp_diagnostic_scenarios");
+            }
+            "short" => {
+                bad["tcp_diagnostic_scenarios"]
+                    .as_array_mut()
+                    .unwrap()
+                    .pop();
+            }
+            "unknown" => {
+                bad["tcp_diagnostic_scenarios"][0]["unexpected"] = true.into();
+            }
+            "ordinal" => {
+                bad["tcp_diagnostic_scenarios"][0]["expected"][0]["partitions"]["supporting"] =
+                    serde_json::json!([2]);
+            }
+            _ => {
+                bad["tcp_diagnostic_scenarios"][0]["expected"][0]["flags"] = 512.into();
+            }
+        }
+        assert!(corpus_schema().validate(&bad).is_err(), "{field}");
+    }
+}

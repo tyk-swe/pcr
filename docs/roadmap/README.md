@@ -48,6 +48,11 @@ addition to these dependencies.
 | M12 | [TCP diagnostic scans][m12] | ACK/window and FIN/NULL/Xmas/Maimon scan families with probe flags kept separate from inference rules. | M6 | In progress |
 | M13 | [SCTP and IP-protocol inventory][m13] | SCTP INIT/COOKIE-ECHO scanning, typed IP-protocol inventory, and the remaining discovery probe families. | M5, M6 | Planned |
 
+M12 now has dataset 1.7.0 diagnostic expectations and a reviewed independent-peer/
+kernel native route (`tcp_diagnostics`). This is acceptance infrastructure;
+exact-revision cross-platform recordings and broader socket/heuristic truth remain
+open. See [M12][m12] for retained evidence requirements.
+
 ### Close gates
 
 - **Ground truth ([M2][m2]):** scanner-result milestones require independently

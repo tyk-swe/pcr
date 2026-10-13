@@ -40,6 +40,7 @@ pub(crate) struct State {
     pub(crate) idle_clock: Option<VirtualClock>,
     pub(crate) bad_ingress: Option<Option<Instant>>,
     pub(crate) release_replies_after_timeout: bool,
+    pub(crate) release_replies_after: Option<Instant>,
     pub(crate) late_ingress: Option<Option<Instant>>,
     pub(crate) suppress_replies: bool,
     pub(crate) hold_replies_until: usize,
@@ -329,6 +330,16 @@ impl capture::Session for Capture {
         let mut state = self.state.lock().unwrap();
         if state.sends < state.hold_replies_until || state.suppress_replies {
             return Ok(None);
+        }
+        if let Some(after) = state.release_replies_after.filter(|_| state.sends > 0) {
+            use packetcraftr::clock::Clock as _;
+            let clock = state
+                .idle_clock
+                .as_ref()
+                .expect("timed fixture uses virtual clock");
+            if clock.now() <= after {
+                clock.advance(after.duration_since(clock.now()) + Duration::from_micros(1));
+            }
         }
         if state.release_replies_after_timeout {
             if !deadline.limit().is_zero() {

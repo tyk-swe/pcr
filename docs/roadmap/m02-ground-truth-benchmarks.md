@@ -16,7 +16,10 @@ Nmap agreement is never fixture truth.
   `inference_scenarios` inventory additionally authors mixed same-port,
   silent-UDP, and contradictory-attempt expectations with their scripted
   responses, attempt outcomes, inferred states and rules, and evidence
-  partitions.
+  partitions. Dataset 1.7.0 adds eight independently authored TCP diagnostic
+  conditions and seven mode/flag expectation rows. The dedicated M12 workflow
+  matrix and revision-bound native route are separate from the 88-cell benchmark;
+  native socket truth never comes from scanner output.
 - `scanner_fixture` runs real `Client` scan/traceroute paths with deterministic
   injected providers, never native I/O. Native loopback connect uses the CLI.
 - `scripts/benchmark-scanner.py` repeats 88 cells: 72 raw scan, 12 traceroute,

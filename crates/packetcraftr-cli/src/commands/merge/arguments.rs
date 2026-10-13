@@ -7,14 +7,15 @@ use packetcraftr_core::capture_file::{self, MAX_REORDER_FRAMES};
 
 use crate::command_options::{CompressionArgs, OfflineCaptureLimitsArgs};
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Captures merge in timestamp order, and each input must already be ordered by timestamp unless --max-reorder-frames repairs small inversions; frames with equal timestamps keep the order the captures were named in. --order append instead writes every frame of the first capture, then the second, and so on, keeping each timestamp verbatim, so the output may be non-monotonic and is never checked for clock regression. Every input interface becomes its own interface in the one PCAPNG section written, and the destination is published only after every frame was written.
+pub(crate) const AFTER_LONG_HELP: &str = r"Merge captures into one PCAPNG section in chronological timestamp order (with
+optional --max-reorder-frames look-ahead) or verbatim argument order (--order
+append). Published atomically only after all frames succeed.
 
 Examples:
   packetcraftr merge --write merged.pcapng first.pcapng second.pcap
   packetcraftr merge --write merged.pcapng.zst --compression zstd first.pcapng - < second.pcapng
   packetcraftr merge --write combined.pcapng --order append first.pcapng second.pcapng
-  packetcraftr merge --write sorted.pcapng --max-reorder-frames 64 queue0.pcapng queue1.pcapng
-  packetcraftr merge --write sorted.pcapng --max-reorder-frames 64 single.pcapng";
+  packetcraftr merge --write sorted.pcapng --max-reorder-frames 64 queue0.pcapng queue1.pcapng";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

@@ -9,9 +9,9 @@ use crate::command_options::{
     ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, Selector, stream_selector,
 };
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Cleartext HTTP/2 connections are inspected offline over reassembled TCP streams on ports 80 and 8080 and every --http2-port, including prior-knowledge and h2c upgrade startups; TLS is not decrypted, so encrypted connections report unsupported. Decoded DATA bodies are counted and discarded; undecodable or truncated wire can be retained as bounded failure evidence.
-
---stream keeps one TCP conversation, as tcp:INDEX. Text prints per-frame and per-message summaries with all captured strings escaped; JSON and NDJSON keep exact bytes as hex.
+pub(crate) const AFTER_LONG_HELP: &str = r"Offline cleartext HTTP/2 (prior-knowledge and h2c) inspection over reassembled
+TCP streams on ports 80, 8080, and each --http2-port (TLS is not decrypted).
+DATA bodies are counted and discarded.
 
 Examples:
   packetcraftr http2 capture.pcapng

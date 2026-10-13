@@ -13,24 +13,13 @@ use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 // The `--max-tls-buffer-bytes` help text below spells out the floor.
 const _: () = assert!(MAX_DIRECTION_BUFFER == 135_168);
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"Session assembly is computed offline over dissected frames; no live capture or transmission is involved.
+pub(crate) const AFTER_LONG_HELP: &str = r#"Offline TLS handshake assembly across all TCP streams (independent of --tls-port,
+which only configures per-frame `tls` layer bindings). Selectors (--stream,
+--sni, --server-port, --status) filter assembled sessions rather than raw frames;
+JSON is bounded by --max-output-sessions while text and NDJSON stream all
+selected sessions.
 
-Session assembly reads every TCP stream, so a handshake on a non-standard port is assembled with no flag at all. --tls-port does not change what this command assembles. It changes the per-frame 'tls' layer, which binds TCP ports 443, 465, 636, 853, 993, 995 and 8443 by default, and it changes the port list printed when no session was assembled. The flag repeats, adds to the defaults, and 'read' and 'dissect' take the same flag, so their per-frame view agrees with this one.
-
-Statuses:
-  complete     a ClientHello and its matching ServerHello were both assembled
-  client_only  the connection ended before any ServerHello
-  retry        a HelloRetryRequest arrived and the real ServerHello never did
-  alert        a fatal alert in the clear ended the handshake
-  malformed    handshake bytes could not be parsed, or a buffer ceiling was hit
-  gap          handshake bytes were missing, or the capture started mid-handshake
-  truncated    the capture ended while the handshake was still in flight
-
-Selectors run on assembled sessions, not on frames, so there is deliberately no --filter: a frame filter such as 'tls.sni == "x"' would drop the ServerHello frames and turn every session into client_only. --stream is the one exception, applied as 'tcp.stream == N', which is stream-preserving. --sni matches case-insensitively and takes '*' as a leading or trailing wildcard; --status repeats and matches any of the listed statuses.
-
-The per-frame 'tls' layer is a different view: read --filter 'tls.sni contains "x"' sees only the hellos that fit in a single segment, and 'tls.incomplete' filters the frames whose record continues into the next one. Use this command for the assembled answer.
-
-Text prints each selected session as it is assembled and leaves none out. JSON holds every selected session in memory to emit one document, bounded by --max-output-sessions, and reports what that bound left out as sessions_omitted. NDJSON streams each session as it completes and is the format for large captures.
+Statuses: complete, client_only, retry, alert, malformed, gap, truncated.
 
 Examples:
   packetcraftr tls examples/captures/tls-handshake.pcapng

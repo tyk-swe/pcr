@@ -15,7 +15,12 @@ use crate::command_options::{
 };
 use crate::errors::CliError;
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Header edits (--source-mac, --destination-ip, --vlan, and the rest) and field assignments (--set) apply to every frame --filter matches, or to every frame; a --rules-file holds ordered rules instead. --map-ip and --map-mac remap addresses many-to-many instead of setting one fixed address: each frame's outer source and destination are looked up independently, equal-length CIDR prefixes keep the host bits, and unmatched addresses and frames pass through. Header edits recompute lengths and transport checksums; field assignments repair covering checksums unless --checksum-mode preserve keeps checksum bytes exactly. The destination is published only when every frame rewrote cleanly; --dry-run reports the field changes without writing it.
+pub(crate) const AFTER_LONG_HELP: &str = r"Apply header edits, CIDR/MAC mappings (--map-ip, --map-mac), fixed-width field
+assignments (--set), or ordered rules (--rules-file) to frames matching --filter
+(or all frames). Header edits and mappings repair checksums; field assignments
+repair covering checksums unless --checksum-mode preserve is set.
+The destination is published only when all frames succeed; --dry-run reports
+field changes without writing.
 
 Examples:
   packetcraftr rewrite capture.pcapng --write rewritten.pcapng --destination-ip 192.0.2.10

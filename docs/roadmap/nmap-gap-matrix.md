@@ -1,120 +1,98 @@
 # Nmap core-scanner gap matrix
 
 Comparison of authorized scanner capabilities, not the full Nmap suite.
-The initial review used `22c7d182d577` on 2026-10-05 and the official Nmap guide
-(download listing 7.991). Rows now describe current implementation; open
-acceptance remains explicit. This documentation refresh establishes no new run
-or revision-wide coverage score.
+Initial review: `22c7d182d577` (2026-10-05) against the Nmap 7.991 guide.
+Rows describe current implementation; open acceptance stays explicit.
 
-Revision-bound acceptance: [M4](evidence/m04/README.md) targets/scopes at
-`8e010a0b9eac118aa13384f0b854111a73d47d76`; [M5](evidence/m05/README.md)
-Linux discovery at `e7f3e2efa7b47ba2ffa7e2818dbcc4d53eaef9e3`;
-[M8](evidence/m08/README.md) identification at
-`99a9cf23216eb490892c0b6659e303d1a0b02c3d`;
-[M9](evidence/m09/README.md) TLS/held-out quality at
-`5e5a41470c0c63404ca3e581067fded136eda1ce`.
-The [roadmap scorecard](README.md#gap-gate-and-scorecard) preserves historical
-counts rather than measuring this checkout. No new live Nmap comparison is claimed;
-differential runs must pin version/build/settings, independent truth, and acquisition.
+Revision-bound acceptance: [M4](evidence/m04/README.md) (`8e010a0b`),
+[M5](evidence/m05/README.md) Linux discovery (`e7f3e2ef`),
+[M8](evidence/m08/README.md) identification (`99a9cf23`), and
+[M9](evidence/m09/README.md) TLS/held-out quality (`5e5a4147`).
+See the [roadmap scorecard](README.md#gap-gate-and-scorecard).
 
 ## Status legend
 
 | Status | Meaning |
 | --- | --- |
-| Present with constraints | The capability exists; the listed profile, method, resource, and evidence limits still apply. This is not complete equivalence to every Nmap default or option. |
-| Partial | Related behavior/building blocks exist, but the compared workflow or coverage is incomplete. |
-| Missing | No corresponding scanner capability is exposed in the reviewed workflow/CLI surface. |
-| Deferred | A recorded gap outside the committed milestones of this roadmap. |
-| Non-goal | A deliberate product/scope difference; no parity commitment. |
-
-Milestone links identify ownership, not completion. Partial includes implemented
-behavior with open independent/native acceptance. Codecs and generic packet
-building are not scanner workflows.
+| Present with constraints | Capability exists under listed profile, method, resource, and evidence limits; not equivalence to every Nmap default/option. |
+| Partial | Building blocks or implementation exist, with open independent or native acceptance. |
+| Missing | No corresponding scanner capability in the workflow/CLI surface. |
+| Deferred | Recorded gap outside M1–M13. |
+| Non-goal | Deliberate product/scope difference. |
 
 ## Targets, discovery, and host inventory
 
-| Capability | Nmap behavior/reference | Current behavior and remaining gate | Status | Roadmap |
+| Capability | Nmap reference | Current behavior and remaining gate | Status | Roadmap |
 | --- | --- | --- | --- | --- |
-| Explicit targets, CIDRs, exclusions, and families | [targets][nmap-targets] | [Admission][target-admission] bounds expansion/deduplication/numeric exclusions/families for arguments and manifests. Hostnames require opt-in; all authorized selected answers count, not Nmap first-answer defaults. | Present with constraints | [M4][m4] |
-| Target/exclusion files and stdin | [targets][nmap-targets] | Line-oriented --targets-file/--exclude-file share 1 MiB/4,096 physical lines/512 bytes per declaration and one stdin consumer. Source/line provenance survives admission; malformed input fails before providers. | Present with constraints | [M4][m4] |
-| Nmap-specific target grammar | [targets][nmap-targets] | Numeric CIDRs/individual IPs/hostnames and bounded manifests; no octet-range or hostname/CIDR shorthand clone. | Non-goal | [M4][m4] |
-| Scoped IPv6 targets | [targets][nmap-targets] | Unicast fe80::/10 zones resolve to one interface; address/interface identity merges aliases. [M4 records](evidence/m04/README.md) cover list/connect/raw or typed refusals across five profiles. Missing enumeration refuses; trace/packet-route/DNS TCP reject scope. | Present with constraints | [M4][m4], [M4][m4], [M3][m3] |
-| Bulk list/scan planning | [discovery][nmap-discovery] | scan --list uses [plan_targets][target-plan], preserving scope/origins/ports without target/neighbor packets. Numeric unscoped selections use no providers; scoped ones enumerate passively. Authorized DNS is reported, not network-free. | Present with constraints | [M4][m4] |
-| Scanner DNS enrichment and controls | [targets][nmap-targets] | Bounded synchronous target resolution and explicit authorized-server PTR follow-up under remaining duration. Names are observations; broader native acceptance stays M5/M7 work. | Partial | [M5][m5], [M7][m7] |
-| Dedicated/composed host discovery | [discovery][nmap-discovery] | Opt-in before/only/skip over echo/SYN/UDP/explicit TCP sockets; responders-only or scan-all follow-up. Independent dual-stack/Linux results recorded; broader native acceptance open. | Partial | [M5][m5], [M5][m5] |
-| Local ARP/NDP discovery | [discovery][nmap-discovery] | Bounded explicit neighbors with direct/cache/possible-proxy/silent/routed evidence. Gateway link is not target identity. Linux recorded; broader native acceptance open. | Partial | [M5][m5] |
-| Additional discovery probe families | [discovery][nmap-discovery] | No ACK/timestamp/netmask/SCTP/IP-protocol discovery; requires explicit mode-specific construction/correlation, never hidden extra probes. | Missing | [M5][m5], [M13][m13] |
-| Host identity/context metadata | [guide][nmap-guide], [discovery][nmap-discovery] | Ordered host reasons, timestamps, explicit PTR, and local link observations with wire/socket/cache provenance. No vendor database or authenticated identity; broader acceptance open. | Partial | [M5][m5], [M5][m5] |
+| Explicit targets, CIDRs, exclusions, and families | [targets][nmap-targets] | [Admission][target-admission] bounds expansion, deduplication, numeric exclusions, and families; hostnames require opt-in and retain all selected answers. | Present with constraints | [M4][m4] |
+| Target/exclusion files and stdin | [targets][nmap-targets] | `--targets-file`/`--exclude-file` share 1 MiB, 4,096 lines, 512 bytes/line, and one stdin consumer with source/line provenance. | Present with constraints | [M4][m4] |
+| Nmap-specific target grammar | [targets][nmap-targets] | Numeric CIDRs, IPs, hostnames, and manifests only; no octet-range shorthand. | Non-goal | [M4][m4] |
+| Scoped IPv6 targets | [targets][nmap-targets] | Unicast `fe80::/10` zones resolve to one interface and merge aliases ([M4 records](evidence/m04/README.md)); trace/packet-route/DNS TCP reject scope. | Present with constraints | [M3][m3], [M4][m4] |
+| Bulk list/scan planning | [discovery][nmap-discovery] | `scan --list` uses [plan_targets][target-plan] without target/neighbor packets; authorized DNS is reported. | Present with constraints | [M4][m4] |
+| Scanner DNS enrichment and controls | [targets][nmap-targets] | Bounded target resolution and explicit PTR follow-up under remaining duration; broader native acceptance open. | Partial | [M5][m5], [M7][m7] |
+| Dedicated/composed host discovery | [discovery][nmap-discovery] | Opt-in `before`/`only`/`skip` over echo/SYN/UDP/TCP connect; Linux recorded, macOS/Windows native acceptance open. | Partial | [M5][m5] |
+| Local ARP/NDP discovery | [discovery][nmap-discovery] | Bounded neighbors with direct/cache/possible-proxy/silent/routed evidence; Linux recorded, macOS/Windows open. | Partial | [M5][m5] |
+| Additional discovery probe families | [discovery][nmap-discovery] | No ACK/timestamp/netmask/SCTP/IP-protocol discovery. | Missing | [M5][m5], [M13][m13] |
+| Host identity/context metadata | [guide][nmap-guide], [discovery][nmap-discovery] | Ordered host reasons, timestamps, PTR, and link observations with provenance; no vendor DB; broader acceptance open. | Partial | [M5][m5] |
 
 ## Mainstream scanning and port-state evidence
 
-| Capability | Nmap behavior/reference | Current behavior and remaining gate | Status | Roadmap |
+| Capability | Nmap reference | Current behavior and remaining gate | Status | Roadmap |
 | --- | --- | --- | --- | --- |
-| TCP SYN scanning | [scan techniques][nmap-techniques] | SYN probes/correlation exist. Responses need Layer 2 capture; pcap-free transmission alone is not a capture-backed scan. | Present with constraints | [M6][m6], [M7][m7] |
-| Ordinary TCP connect scanning | [scan techniques][nmap-techniques] | Kernel results work without raw privileges. Shared native pool caps starts at 16; route overrides fail. Adaptive admission may backpressure larger operation windows. No wire transcript. | Present with constraints | [M7][m7] |
-| UDP scanning | [scan techniques][nmap-techniques] | Empty/explicit/curated/operator payloads, configured checks, captured replies/errors. Silent attempts stay timeout; separate inference can be open_or_filtered. Confirmation is not identification. | Present with constraints | [M6][m6], [M6][m6], [M8][m8] |
-| Numeric port lists and ranges | [port selection][nmap-ports] | Inclusive ranges, first-seen deduplication, transport identity, and finite selection. TCP/UDP require explicit ports; no default set. | Present with constraints | [M6][m6] |
-| Common/named-port presets and exclusions | [port selection][nmap-ports] | Original catalog 1.0.0: 73 RFC-cited names/six topical presets; exclusions precede budgets and bind discovery. No frequency-ranked top ports. Implemented; M6 close gates open. | Partial | [M1][m1], [M6][m6], [M6][m6] |
-| Mixed-protocol scan plans | [scan techniques][nmap-techniques], [port selection][nmap-ports] | Typed TCP/UDP endpoints share policy/work/evidence/duration budgets without merging equal ports. Implemented; M6 independent/native gates open. SCTP remains M13. | Partial | [M6][m6], [M13][m13] |
-| Capability-aware method choice | [scan techniques][nmap-techniques] | --method auto selects raw with build capture/transmit support, otherwise all-TCP connect, publishing reason. Default raw and explicit methods never fall back. Runtime privilege is not predicted; M6 acceptance open. | Partial | [M6][m6] |
-| Scan-dependent ambiguous states | [state meanings][nmap-states] | Separate [inference][evidence-inference] partitions supporting/conflicting/unanswered/failed sequences beside unchanged attempts. Silent UDP→open_or_filtered; local failures→no state. M6 close gates open; TCP diagnostic modes are M12 (implemented, acceptance pending); SCTP/IP-protocol modes remain M13. | Partial | [M1][m1], [M6][m6], [M12][m12], [M13][m13] |
-| Reasons, timing, and raw evidence | [output][nmap-output] | Per-probe reasons, submission/ingress timing, RTT, capture/source evidence, rolling probe_sent, and partial errors. Kernel connects are not packet tracing. | Present with constraints | [M1][m1], [M6][m6] |
+| TCP SYN scanning | [scan techniques][nmap-techniques] | SYN probes/correlation; responses require Layer 2 capture. | Present with constraints | [M6][m6], [M7][m7] |
+| Ordinary TCP connect scanning | [scan techniques][nmap-techniques] | Kernel sockets without raw privileges; shared 16-worker pool caps concurrent starts, queueing larger windows. | Present with constraints | [M7][m7] |
+| UDP scanning | [scan techniques][nmap-techniques] | Empty/explicit/curated/operator payloads and response checks; silent attempts infer `open_or_filtered`. | Present with constraints | [M6][m6], [M8][m8] |
+| Numeric port lists and ranges | [port selection][nmap-ports] | Inclusive ranges, first-seen deduplication, transport identity, explicit selection required. | Present with constraints | [M6][m6] |
+| Common/named-port presets and exclusions | [port selection][nmap-ports] | Catalog 1.0.0 (73 RFC-cited names, six presets); exclusions precede budgets; M6 close gates open. | Partial | [M1][m1], [M6][m6] |
+| Mixed-protocol scan plans | [scan techniques][nmap-techniques], [port selection][nmap-ports] | Typed TCP/UDP endpoints share budgets without merging equal ports; M6 native/comparison gates open; SCTP is M13. | Partial | [M6][m6], [M13][m13] |
+| Capability-aware method choice | [scan techniques][nmap-techniques] | `--method auto` selects raw when build supports capture+transmit, else TCP connect; M6 acceptance open. | Partial | [M6][m6] |
+| Scan-dependent ambiguous states | [state meanings][nmap-states] | [Inference][evidence-inference] partitions supporting/conflicting/unanswered/failed attempts; M6/M12 close gates open; SCTP/IP-proto in M13. | Partial | [M1][m1], [M6][m6], [M12][m12], [M13][m13] |
+| Reasons, timing, and raw evidence | [output][nmap-output] | Per-probe reasons, submission/ingress timing, RTT, capture/source evidence, `probe_sent`, and partial errors. | Present with constraints | [M1][m1], [M6][m6] |
 
 ## Identification, data, and traceroute
 
-| Capability | Nmap behavior/reference | Current behavior and remaining gate | Status | Roadmap |
+| Capability | Nmap reference | Current behavior and remaining gate | Status | Roadmap |
 | --- | --- | --- | --- | --- |
-| Application protocol/product/version identification | [version detection][nmap-version] | Explicit bounded SSH/HTTP/DNS/SMTP/FTP numeric-endpoint probes with reviewed corpus, separate untrusted claims/candidates/ordinal confidence/provenance. UDP checks retain their old meaning. | Present with constraints | [M8][m8] |
-| TLS-wrapped service identification | [version detection][nmap-version] | Explicit TLS 1.2/1.3 TCP wrapping with encrypted/step/time/certificate limits and declared SNI; unauthenticated DER evidence. M9 five-profile/four-platform acceptance. No STARTTLS/automatic fallback. | Present with constraints | [M9][m9], [M9][m9] |
-| Identification intensity and sensitive-service exclusions | [version detection][nmap-version] | Intensity 1–9 under operation/host/connection/probe ceilings; independent exclusions before planning, explicit override that never bypasses policy. | Present with constraints | [M8][m8] |
-| Service metadata and qualified inventory | [version detection][nmap-version] | Observed fields and supported hostname/static CPE values carry sources. Unknown/ambiguous evidence asserts no exact version; no bundled device types. Held-out token fidelity is not software identity accuracy. | Present with constraints | [M8][m8], [M9][m9], [M10][m10] |
-| Active OS fingerprinting and matching | [OS detection][nmap-os] | Standalone bounded dual-stack probes, verified prerequisites, preserved observations, qualified family matching, and original Linux Ethernet corpus. Broader corpus and native acceptance remain open. | Present with constraints | [M10][m10] |
-| Scanner data provenance and maintenance | [port selection][nmap-ports], [version detection][nmap-version], [OS detection][nmap-os], [licensing][nmap-license] | Independent original catalog/UDP/probes/exclusions with reviewed sources, owner/refresh/fixture coverage. Original narrowly validated Linux OS signatures; vendor datasets remain unimplemented; no copied Nmap data. | Present with constraints | [M1][m1], [M6][m6], [M8][m8], [M10][m10] |
-| Standalone traceroute strategies | [discovery/traceroute][nmap-discovery] | Bounded UDP/TCP SYN/ICMP, hops, shaping, and evidence. Single-target standalone shapes preserved; scan trace is separate. | Present with constraints | [M11][m11] |
-| Scan-informed multi-host traceroute | [discovery/traceroute][nmap-discovery] | Select target SYN/ACK/reset/echo or explicit fallback; no evidence→not_traced. Optional source/age-qualified reuse is a claim. Sequential hosts; reconvergence/ECMP risk. Historical delayed Linux run only; M11 close gate open. | Present with constraints | [M3][m3], [M2][m2], [M7][m7], [M11][m11] |
+| Application protocol/product/version identification | [version detection][nmap-version] | Explicit bounded SSH/HTTP/DNS/SMTP/FTP probes over numeric endpoints with separate claims, candidates, and provenance. | Present with constraints | [M8][m8] |
+| TLS-wrapped service identification | [version detection][nmap-version] | Explicit TLS 1.2/1.3 wrapping with byte/step/time/cert limits and declared SNI ([M9 acceptance](evidence/m09/README.md)); no STARTTLS. | Present with constraints | [M9][m9] |
+| Identification intensity and exclusions | [version detection][nmap-version] | Intensity 1–9 under four-scope budgets; sensitive-service exclusions before planning (`--ignore-exclusions` overrides data only). | Present with constraints | [M8][m8] |
+| Service metadata and qualified inventory | [version detection][nmap-version] | Sourced hostnames and static wildcard-version CPEs; unknown/ambiguous results assert no exact version. | Present with constraints | [M8][m8], [M9][m9], [M10][m10] |
+| Active OS fingerprinting and matching | [OS detection][nmap-os] | Standalone `identify-os` with dual-stack probes, prerequisite checks, and Linux Ethernet signatures; broader corpus/native gates open. | Present with constraints | [M10][m10] |
+| Scanner data provenance and maintenance | [licensing][nmap-license] | Original catalog, UDP profiles, service probes/exclusions, and Linux OS signatures with provenance manifests; no Nmap data. | Present with constraints | [M1][m1], [M6][m6], [M8][m8], [M10][m10] |
+| Standalone traceroute strategies | [discovery/traceroute][nmap-discovery] | Bounded UDP/TCP SYN/ICMP hops, shaping, and evidence. | Present with constraints | [M11][m11] |
+| Scan-informed multi-host traceroute | [discovery/traceroute][nmap-discovery] | Responsive SYN/ACK, reset, or echo selection with optional sourced hop reuse; M11 close gates open. | Present with constraints | [M2][m2], [M3][m3], [M7][m7], [M11][m11] |
 
 ## Timing, resources, platforms, and machine output
 
-| Capability | Nmap behavior/reference | Current behavior and remaining gate | Status | Roadmap |
+| Capability | Nmap reference | Current behavior and remaining gate | Status | Roadmap |
 | --- | --- | --- | --- | --- |
-| Adaptive RTT and retries | [performance][nmap-performance] | Opt-in bounded first-attempt RTT estimator, selective capped retries/backoff, AIMD windows, qualified rate-limit suspicion. Fixed default. Implemented; agreed/native performance acceptance open. | Partial | [M7][m7], [M7][m7], [M7][m7] |
-| Per-host fairness, deadlines, and ordering | [performance][nmap-performance], [port selection][nmap-ports] | Adaptive deterministic host turns and absolute per-host deadlines include preparation/pacing/callback delays. Never-sent work has no outcome and marks host incomplete. M7 acceptance open. | Partial | [M7][m7] |
-| Scalable bounded work admission | [performance][nmap-performance] | Bounded adaptive preparation waves/retention and connect admission beneath shared pool 16. Cleanup leases survive cancellation. No accepted native throughput/capacity increase. | Partial | [M7][m7], [M7][m7] |
-| Existing resource and failure evidence | [performance][nmap-performance], [output][nmap-output] | Finite preparation/evidence, pending confirmed transmissions, capture-source validity, omissions, and typed partial failures. Logical charges differ from RSS and acquisition completeness. | Present with constraints | [M1][m1], [M7][m7] |
-| IPv4/IPv6 and native platform coverage | [options][nmap-options], [downloads][nmap-download] | Five profiles on Linux/macOS/Windows; macOS complete-header IPv6 and Windows raw-source limits explicit. Capture-backed work needs Layer 2. Broad native parity remains open. | Partial | [M3][m3] |
-| Privileged native runtime evidence | [scan techniques][nmap-techniques], [downloads][nmap-download] | Isolated Linux and reviewed host-local routes; M4 scoped and M8/M9 ordinary-socket recordings retained. Broader native inventory/isolation/admin protections remain M3 gates. | Partial | [M3][m3] |
-| Versioned machine output | [output][nmap-output] | Text/JSON/NDJSON output/v15 with terminal/error semantics. v6–v14 remain frozen; [compatibility][compatibility] distinguishes shapes and meanings. Not an XML/syntax clone. | Present with constraints | [M4][m4] |
+| Adaptive RTT and retries | [performance][nmap-performance] | Opt-in first-attempt RTT estimator, capped backoff retries, AIMD windows, and rate-limit suspicion; M7 acceptance open. | Partial | [M7][m7] |
+| Per-host fairness, deadlines, and ordering | [performance][nmap-performance], [port selection][nmap-ports] | Deterministic host turns and per-host deadlines marking uncompleted hosts `incomplete`; M7 acceptance open. | Partial | [M7][m7] |
+| Scalable bounded work admission | [performance][nmap-performance] | Bounded preparation waves and connect admission beneath the 16-worker pool; M7 acceptance open. | Partial | [M7][m7] |
+| Existing resource and failure evidence | [performance][nmap-performance], [output][nmap-output] | Finite preparation/evidence, pending confirmed sends, capture-source validity, omissions, and typed partial errors. | Present with constraints | [M1][m1], [M7][m7] |
+| IPv4/IPv6 and native platform coverage | [options][nmap-options], [downloads][nmap-download] | Five profiles on Linux/macOS/Windows with explicit platform capability limits; broad native parity open. | Partial | [M3][m3] |
+| Privileged native runtime evidence | [scan techniques][nmap-techniques], [downloads][nmap-download] | Isolated Linux and reviewed host-local routes; broader macOS/Windows inventory and admin gates remain in M3. | Partial | [M3][m3] |
+| Versioned machine output | [output][nmap-output] | Text/JSON/NDJSON output/v15 with terminal/error semantics; v6–v14 remain frozen ([compatibility][compatibility]). | Present with constraints | [M4][m4] |
 
 ## Broader diagnostic scan coverage
 
-| Capability | Nmap behavior/reference | Current behavior and remaining gate | Status | Roadmap |
+| Capability | Nmap reference | Current behavior and remaining gate | Status | Roadmap |
 | --- | --- | --- | --- | --- |
-| TCP ACK/window and flag-based diagnostics | [scan techniques][nmap-techniques] | ACK, window, FIN, NULL, Xmas, Maimon, and observation-only custom modes keep probe flags separate from stack-dependent inference rules (`unfiltered`, window open/closed, `open_or_filtered`). Dataset 1.7.0 authors eight dual-stack response conditions; reviewed independent-peer/kernel acceptance routes exist. Exact-revision cross-platform recordings and broader stack truth remain pending ([TCP diagnostics](../tcp-diagnostics.md)). | Partial | [M12][m12] |
-| SCTP INIT/COOKIE-ECHO diagnostics | [scan techniques][nmap-techniques] | SCTP codec/tag helpers only, no scanner transport. Need bounded chunks, workflow correlation, and ambiguity-preserving results. | Partial | [M13][m13], [M13][m13] |
-| IP-protocol inventory | [scan techniques][nmap-techniques] | No selected protocol-number scan plan. Must be typed separately from transport ports with correlated positive/negative/ambiguous evidence. | Missing | [M13][m13] |
+| TCP ACK/window and flag-based diagnostics | [scan techniques][nmap-techniques] | ACK, window, FIN, NULL, Xmas, Maimon, and custom modes with dataset 1.7.0 and `tcp_diagnostics` native runner; cross-platform recordings and OS truth open ([TCP diagnostics](../tcp-diagnostics.md)). | Partial | [M12][m12] |
+| SCTP INIT/COOKIE-ECHO diagnostics | [scan techniques][nmap-techniques] | SCTP codec/tag helpers only; no scanner workflow. | Partial | [M13][m13] |
+| IP-protocol inventory | [scan techniques][nmap-techniques] | No protocol-number scan plan. | Missing | [M13][m13] |
 
 ## Deferred capabilities and deliberate differences
 
-These entries prevent recorded gaps from becoming accidental commitments.
-
-| Area | Nmap comparison/reference | Roadmap decision | Status |
+| Area | Nmap reference | Roadmap decision | Status |
 | --- | --- | --- | --- |
-| Scripting/NSE | [Scripting engine][nmap-nse] and script ecosystems. | Deferred by scope choice; no Lua/NSE compatibility or general extension runtime is planned in M1-M13. Built-in protocol identification is not a scripting engine. | Deferred |
-| Scan resume/checkpointing | Resume interrupted scans from saved output; see [output][nmap-output]. | Record the gap, but do not add persistent/resumable execution before the core scanner/evidence foundations. Current streamed partial evidence is not a checkpoint. | Deferred |
-| Nmap XML interoperability | XML output and downstream consumers; see [output][nmap-output]. | Retain PacketcraftR's JSON/NDJSON contracts. A reviewed exporter may be a later integration project, not a prerequisite for core capability parity. | Deferred |
-| Exact CLI grammar and legacy output formats | Nmap-specific flags, shorthand selection syntax, and legacy formats; see [options][nmap-options] and [output][nmap-output]. | Preserve native, explicit PacketcraftR interfaces rather than promise a drop-in Nmap executable or byte-identical output. | Non-goal |
-| Evasion/decoys, idle/bounce, exploit/brute-force workflows | The [options][nmap-options] and [scan techniques][nmap-techniques] document additional techniques outside the selected inventory/diagnostic scope. | No parity commitment for these workflows. Existing packet-development controls do not change this roadmap's scope. | Non-goal |
-| Random public targets or unbounded scans | Random/unbounded target options appear in [target specification][nmap-targets]. | Keep explicit authorized targets and finite resource budgets. | Non-goal |
-| Nmap companion application suite | The [download page][nmap-download] also distributes companion applications. | No Zenmap/Ncat/Nping/Ndiff clone commitment; PacketcraftR's construction/capture/offline-analysis capabilities remain their own product strengths. | Non-goal |
-
-
-## Evidence and acceptance
-
-Source/contract tests establish exposed behavior, not another OS's raw runtime.
-[M2 ground truth][m2] and [M3 native evidence][m3] gate applicable milestones;
-Nmap agreement alone is insufficient. Preserve exact revisions, failures,
-unavailable paths, source links, and known limits when updating rows. Silence,
-configured-check matches, and skipped checks must never imply unsupported claims.
+| Scripting/NSE | [Scripting engine][nmap-nse] | Deferred outside M1–M13; built-in identification is not a scripting runtime. | Deferred |
+| Scan resume/checkpointing | [output][nmap-output] | Deferred; streamed partial evidence is not a resumable checkpoint. | Deferred |
+| Nmap XML interoperability | [output][nmap-output] | Deferred; PacketcraftR uses versioned JSON/NDJSON contracts. | Deferred |
+| Exact CLI grammar and legacy output | [options][nmap-options], [output][nmap-output] | Preserve explicit PacketcraftR CLI/output rather than drop-in Nmap syntax. | Non-goal |
+| Evasion/decoys, idle/bounce, exploit/brute-force | [options][nmap-options], [scan techniques][nmap-techniques] | Outside authorized inventory/diagnostic scope. | Non-goal |
+| Random public targets or unbounded scans | [target specification][nmap-targets] | Require explicit authorized targets and finite budgets. | Non-goal |
+| Nmap companion application suite | [downloads][nmap-download] | No Zenmap/Ncat/Nping/Ndiff clone commitment. | Non-goal |
 
 [m1]: m01-claims-evidence.md
 [m2]: m02-ground-truth-benchmarks.md

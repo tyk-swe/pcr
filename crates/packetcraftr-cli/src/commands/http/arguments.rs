@@ -9,9 +9,8 @@ use crate::command_options::{
     ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, Selector, stream_selector,
 };
 
-pub(crate) const AFTER_LONG_HELP: &str = r"HTTP/1 messages are read offline from reassembled TCP streams on ports 80 and 8080 and every --http-port; nothing is transmitted. Bodies are counted against --max-http-body-bytes and discarded, and each response names the request it answers when both were captured.
-
---stream keeps one TCP conversation, as tcp:INDEX. Text prints start lines and header fields escaped; JSON and NDJSON keep their exact bytes as hex.
+pub(crate) const AFTER_LONG_HELP: &str = r"Offline HTTP/1 inspection over reassembled TCP streams on ports 80, 8080, and
+each --http-port. Bodies are counted against --max-http-body-bytes and discarded.
 
 Examples:
   packetcraftr http capture.pcapng

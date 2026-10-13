@@ -15,9 +15,7 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr dns 192.0.2.53 example.test other.test --reverse 192.0.2.1 --reverse 2001:db8::1
   packetcraftr dns 192.0.2.53 example.test --udp-only";
 
-pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated DNS queries. By default, each attempt starts over UDP and one validated matching truncated response may continue over TCP to the same reauthorized numeric server. --tcp queries directly over ordinary TCP sockets without raw capture. Both modes retain the --timeout-ms attempt window and bounded retries. --udp-only disables fallback and supports packet-oriented route overrides that kernel TCP cannot preserve. Text, JSON, and NDJSON identify each attempted phase and the accepted response transport; direct TCP reports fallback_attempted=false.
-
-Several NAMEs plus repeatable --reverse ADDRESS (PTR under in-addr.arpa/ip6.arpa) form one bounded batch of at most 256 questions sharing the explicit server, transport selection, and --max-duration-ms deadline. Each question reports completed/failed/unattempted in input order; a question's own attempts keep --timeout-ms and --attempts.";
+pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated DNS queries over UDP with TCP fallback on validated truncation (default), direct TCP (--tcp), or UDP-only (--udp-only). Multiple NAMEs and repeatable --reverse ADDRESS form a batch of up to 256 questions sharing the server, transport, and --max-duration-ms deadline.";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

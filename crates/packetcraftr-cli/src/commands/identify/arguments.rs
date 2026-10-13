@@ -17,14 +17,11 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr --output ndjson identify '[::1]:2222' --intensity 1
   packetcraftr identify 192.0.2.1:8080 --corpus service-probes.json
 
-Select numeric endpoints reported by a scan explicitly. A scan never starts
-identification. Requests are reviewed, bounded and read-only; no authentication,
-hostname resolution or redirects is performed. --tls explicitly wraps TCP probes;
---server-name declares an SNI name without lookup. Certificates and received fields
-are unauthenticated claims. Matched versions are not vulnerability findings.
-Sensitive-service exclusions apply before planning; --ignore-exclusions is an
-explicit override. JSON aggregates results; NDJSON emits one endpoint record per
-selected endpoint followed by exactly one complete or error terminal record.";
+Explicit read-only service identification over numeric endpoints (never started
+automatically by `scan`). `--tls` wraps TCP probes (--server-name sets SNI
+without lookup). Received banners, certificates, and matched versions are
+unauthenticated claims, not vulnerability findings. Sensitive-service exclusions
+apply before planning (--ignore-exclusions overrides data only).";
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub(crate) enum Transport {

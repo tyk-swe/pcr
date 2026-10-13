@@ -39,12 +39,12 @@ const TOPICS: &[Topic] = &[
     Topic {
         name: "expressions",
         summary: "Packet expression grammar, value forms, and field selectors.",
-        body: || printable(text::EXPRESSIONS),
+        body: || String::from(text::EXPRESSIONS),
     },
     Topic {
         name: "filters",
         summary: "Display-filter operators, literals, paths, and reserved fields.",
-        body: || printable(text::FILTERS),
+        body: || String::from(text::FILTERS),
     },
     Topic {
         name: "formats",
@@ -107,27 +107,6 @@ fn listing() -> String {
     }
     listing.push_str("\nRun `packetcraftr topics NAME` to print one.\n");
     listing
-}
-
-/// Shows a topic's example lines as plain indented text, without their drift-test tags.
-fn printable(source: &str) -> String {
-    let mut text = String::with_capacity(source.len());
-    for line in source.lines() {
-        match example(line) {
-            Some((_, example)) => {
-                text.push_str("    ");
-                text.push_str(example);
-            }
-            None => text.push_str(line),
-        }
-        text.push('\n');
-    }
-    text
-}
-
-/// The kind and text of a `  @KIND EXAMPLE` line.
-fn example(line: &str) -> Option<(&str, &str)> {
-    line.strip_prefix("  @")?.split_once(' ')
 }
 
 fn formats() -> String {

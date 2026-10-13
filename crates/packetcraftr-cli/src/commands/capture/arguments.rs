@@ -9,56 +9,15 @@ use packetcraftr_netio::capture::{TimestampPrecision, TimestampSource};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Live capture may require native features, dependencies, and privileges.
 
---capture-filter <BPF> uses the stable resolver-free core of libpcap/Npcap BPF syntax and narrows what reaches PacketcraftR. Frames it rejects never enter PacketcraftR's capture queue and do not consume queue capacity or operation frame and byte budgets.
+--capture-filter <BPF> runs resolver-free numeric libpcap/Npcap BPF before the
+capture queue and budgets; --filter <EXPR> runs the display filter after capture
+(rejected frames still spend queue and operation budgets).
 
-Use core BPF keywords and numeric address, network, port, and protocol operands. Other symbolic tokens are rejected before native compilation so capture filters cannot perform hidden hostname or name-database resolution.
-
---filter <EXPR> uses PacketcraftR's display-filter language after capture. Frames it rejects have already occupied PacketcraftR's capture queue and passed the native BPF filter, so they still consume operation frame and byte budgets.
-
-The two filters use different languages and may be combined.
-
-Repeat --interface for an explicit set. Queue frame/byte limits are shared across
-sources, and each source must have room for one full snapshot. All sources pass
-readiness before delivery; shutdown and loss are reported per interface. Output
-frame.interface values are zero-based capture IDs in selected-interface order;
-the completion report maps them to native names/indexes. Frames retain capture
-timestamps and fair delivery order; cross-interface timestamp ordering is not promised.
-
---capture-buffer-bytes sizes the kernel/driver capture buffer per interface,
-which is separate from the PacketcraftR queue that --max-queue-frames and
---max-captured-bytes bound. --timestamp-source selects a timestamp type the
-interface advertises (`interfaces --timestamp-types` lists them); only types
-synchronized with the system clock are selectable. --timestamp-precision asks
-for microsecond or nanosecond timestamp fractions. Every explicit setting is
-applied before the backend activates or the capture fails with a typed error;
-reports distinguish requested, applied, and confirmed-effective values.
-
---write saves PCAPNG while text/JSON/NDJSON report progress and completion. JSON
-requires --write. --rotate-bytes counts uncompressed capture bytes including all
-headers; frames never split across files. --rotate-interval-ms rotates between
-frames using elapsed monotonic time. --rotate-files bounds retained files (1..=64).
-The default --retention stop ends at that bound. Explicit --retention ring reuses
-only handles for files created by this operation. Existing paths are preserved.
-All files receive complete metadata and compression finalization. Failure output
-includes partial capture/file evidence. A boundary can consume one matched frame
-without writing it when no next file is permitted; source counters expose this.
-Operation frame/byte/time limits remain shared across every source and file.
-
-Text and NDJSON frame records use the one-based post-BPF source frame position.
-Display-filter rejection does not renumber later source_frame values; NDJSON envelope
-sequence remains the zero-based emitted-record position.
-
---dissect decodes each emitted frame once and publishes its layer stack and
-decode diagnostics: NDJSON frame records gain a decoded object while text
-prints the layer list beside the frame. --field selects registered field paths
-per matched frame instead of frame records; rows stream as NDJSON fields
-events or text columns bounded by --max-projection-bytes. Both share the
---filter/--decode-as registry and decode a frame at most once per selection
-and emission; decoded state never accumulates across frames.
-
---tree, with --dissect and text output, prints each frame's header line, then
-every layer and its fields as an indented tree. See `dissect --help` for the
-tree format; its lines count against --max-tree-bytes across all frames.
+Repeat --interface to capture multiple sources under shared queue/operation
+bounds; frame.interface is the zero-based selected-interface ID. --write saves
+PCAPNG (required for --output json) with optional --rotate-bytes,
+--rotate-interval-ms, --rotate-files (1..=64), and --retention stop|ring.
+--dissect, --tree, and --field decode matched frames on emission.
 
 Examples:
   packetcraftr capture --interface 1 --timeout-ms 1000

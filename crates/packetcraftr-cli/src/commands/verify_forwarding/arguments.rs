@@ -8,11 +8,13 @@ use packetcraftr_core::analysis::forwarding;
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Two captures are analyzed independently: each side's filter selects only its own frames, and identity, preservation, and expectation rules name packet fields. The verdict is evidence, not device attribution — an unmatched ingress observation is not proof of loss, an unmatched egress observation is not proof of duplication, and timestamp differences between captures are not latency. An empty selection is always inconclusive, never a pass.
-
-Value preservation requires readable values on both sides; two absent fields are unevaluable. Use --preserve-presence or --expect-absent only for explicit assertions about the declared decoder view.
-
-Identity matching is exact equality of the declared field values. Groups that are not one-to-one stay ambiguous and are never paired by position or timestamp. Exit status is 0 for verdict pass, 1 for fail or inconclusive; the verdict field distinguishes them.
+pub(crate) const AFTER_LONG_HELP: &str = r"Compare ingress and egress captures under explicit identity, preservation, and
+expectation rules. Identity matching requires exact 1:1 equality of declared
+field values. An attributable violation produces fail; without one, non-unique
+groups, missing counterparts, and empty selections are inconclusive.
+Value preservation requires readable values on both sides (use
+--preserve-presence or --expect-absent for decoder-view presence checks). Exit 0
+on pass, 1 on fail or inconclusive.
 
 Examples:
   packetcraftr verify-forwarding pre.pcap post.pcap --identity ipv4.identification --identity udp.source_port

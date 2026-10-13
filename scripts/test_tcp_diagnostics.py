@@ -550,7 +550,8 @@ class EvidenceContracts(unittest.TestCase):
                 calls.append(args)
                 if fail_setup and args[:4] == ('ip', 'link', 'set', kernel_fixture.PEER):
                     raise RuntimeError('injected peer setup failure')
-                return dict(command=list(args), exit_code=0, stdout='', stderr='')
+                stdout = json.dumps([dict(address='02:00:00:00:00:02')]) if args == ('ip', '-j', 'link', 'show', kernel_fixture.PEER) else ''
+                return dict(command=list(args), exit_code=0, stdout=stdout, stderr='')
             def stat(path):
                 return SimpleNamespace(st_ino=1 if path == '/proc/self/ns/net' else 2)
             with patch.object(kernel_fixture.subprocess, 'Popen', return_value=Process()), patch.object(kernel_fixture.select, 'select', return_value=([True], [], [])), patch.object(kernel_fixture.os, 'stat', side_effect=stat), patch.object(kernel_fixture, 'command', side_effect=command):
@@ -561,7 +562,9 @@ class EvidenceContracts(unittest.TestCase):
                             self.fail('failed setup must not yield')
                 else:
                     with kernel_fixture.provision(profile):
-                        pass
+                        for prefix, target in (([], kernel_fixture.TARGETS[0]), (['-6'], kernel_fixture.TARGETS[1])):
+                            self.assertIn(tuple(['ip', *prefix, 'neigh', 'replace', target, 'lladdr',
+                                '02:00:00:00:00:02', 'dev', kernel_fixture.SCANNER, 'nud', 'permanent']), calls)
             self.assertLess(calls.index(('ip', 'link', 'delete', kernel_fixture.SCANNER)), calls.index('terminate'))
             self.assertEqual(profile['kernel_cleanup'], 'sockets_closed')
 

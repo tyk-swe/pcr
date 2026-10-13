@@ -62,6 +62,9 @@ def provision(profile):
             raise ValueError('kernel peer namespace identity mismatch')
         fixture['setup'].append(command('ip', 'link', 'add', SCANNER, 'type', 'veth', 'peer', 'name', PEER))
         created = True
+        link = command('ip', '-j', 'link', 'show', PEER)
+        fixture['setup'].append(link)
+        peer_mac = json.loads(link['stdout'])[0]['address']
         fixture['setup'].append(command('ip', 'link', 'set', PEER, 'netns', str(process.pid)))
         for prefix, device, targets in (([], SCANNER, SOURCES),
                                         (['nsenter', '-t', str(process.pid), '-n'], PEER, TARGETS)):
@@ -71,6 +74,11 @@ def provision(profile):
             fixture['setup'].append(command(*prefix, 'ip', '-6', 'addr', 'add', targets[1] + '/64', 'dev', device, 'nodad'))
             fixture['setup'].append(command(*prefix, 'ethtool', '-K', device, 'tx', 'off', 'rx', 'off', 'tso', 'off', 'gso', 'off', 'gro', 'off'))
             fixture['setup'].append(command(*prefix, 'ethtool', '-k', device))
+        # The CLI still performs its own layer-2 neighbor preparation. Keep
+        # automatic kernel resets from sending indistinguishable ARP/NDP too.
+        for prefix, target in (([], TARGETS[0]), (['-6'], TARGETS[1])):
+            fixture['setup'].append(command('ip', *prefix, 'neigh', 'replace', target,
+                'lladdr', peer_mac, 'dev', SCANNER, 'nud', 'permanent'))
         profile['kernel_fixture'] = {family: dict(target=target, listening_port=43123,
             reserved_non_listening_port=43125, syn_control_required=True) for family, target in zip(('ipv4', 'ipv6'), TARGETS)}
         yield profile['kernel_fixture']

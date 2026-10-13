@@ -110,16 +110,13 @@ fn with_neighbor_requests(
     // A multicast or limited-broadcast server's link address follows from its
     // own, so no request precedes a query to it.
     if let crate::target::Target::Address(address) = &question.server
-        && (address.is_multicast()
-            || *address == std::net::IpAddr::from(std::net::Ipv4Addr::BROADCAST))
+        && !crate::neighbor::needs_resolution(*address)
     {
         return Ok(limits);
     }
     // A server of unknown family is charged the larger solicitation.
     let request_bytes = match &question.server {
-        crate::target::Target::Address(std::net::IpAddr::V4(_)) => {
-            crate::neighbor::IPV4_REQUEST_BYTES
-        }
+        crate::target::Target::Address(address) => crate::neighbor::request_wire_bytes(*address),
         _ => crate::neighbor::IPV6_REQUEST_BYTES,
     };
     let udp = limits.udp();

@@ -160,16 +160,9 @@ pub(super) fn check_prepared_descriptions(
 ) -> Result<(), Error> {
     let probes_per_target = endpoints.len().saturating_mul(request.attempts as usize);
     let batch_bytes = targets.iter().fold(0usize, |bytes, target| {
-        let scope_bytes = target.scope.as_ref().map_or(0, |scope| {
-            scope
-                .zone
-                .as_str()
-                .len()
-                .saturating_add(scope.interface.name.len())
-        });
         bytes.saturating_add(
             (std::mem::size_of::<Batch<Probe>>() + std::mem::size_of::<Probe>())
-                .saturating_add(scope_bytes)
+                .saturating_add(target.scope_bytes())
                 .saturating_mul(probes_per_target),
         )
     });

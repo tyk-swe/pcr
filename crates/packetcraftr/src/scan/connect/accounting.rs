@@ -32,11 +32,12 @@ pub(super) fn record(
         .evidence_bytes
         .checked_add(std::mem::size_of::<ProbeEvidence>())
         .and_then(|bytes| {
-            probe.scope.as_ref().map_or(Some(bytes), |scope| {
-                bytes
-                    .checked_add(scope.zone.as_str().len())
-                    .and_then(|bytes| bytes.checked_add(scope.interface.name.len()))
-            })
+            bytes.checked_add(
+                probe
+                    .scope
+                    .as_ref()
+                    .map_or(0, crate::target::ResolvedZone::retained_bytes),
+            )
         })
         .and_then(|bytes| {
             bytes.checked_add(

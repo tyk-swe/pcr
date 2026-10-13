@@ -16,6 +16,51 @@ use crate::scan::discovery::{self, Composer};
 use crate::scan::error::Probes;
 use crate::scan::executor::Pipelined;
 
+/// Marks `host` started and returns `None` when it has already expired.
+fn start_host(
+    controller: &mut Option<&mut crate::scan::adaptive::Controller>,
+    target: &SelectedAddress,
+    now: std::time::Instant,
+) -> Result<Option<usize>, ()> {
+    let host = controller.as_deref_mut().map(|c| c.host_index(target));
+    if let (Some(c), Some(h)) = (controller.as_deref_mut(), host) {
+        c.host_started(h, now);
+    }
+    if host_expired(controller, host, now) {
+        return Err(());
+    }
+    Ok(host)
+}
+
+fn host_expired(
+    controller: &mut Option<&mut crate::scan::adaptive::Controller>,
+    host: Option<usize>,
+    now: std::time::Instant,
+) -> bool {
+    if let (Some(c), Some(h)) = (controller.as_deref_mut(), host)
+        && c.host_expired(h, now)
+    {
+        c.mark_incomplete(h);
+        return true;
+    }
+    false
+}
+
+fn host_deadline(
+    controller: &Option<&mut crate::scan::adaptive::Controller>,
+    host: Option<usize>,
+    deadline: &Deadline,
+    now: std::time::Instant,
+) -> Result<Option<Deadline>, Error> {
+    match (controller, host) {
+        (Some(c), Some(h)) => deadline
+            .for_wait(c.host_remaining(h, now))
+            .map(Some)
+            .map_err(Error::from),
+        _ => Ok(None),
+    }
+}
+
 /// Resolves each target's link address in selection order. Each request is
 /// paced like a probe, and a silent neighbor is asked again until the
 /// request's attempts are spent.
@@ -37,22 +82,14 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
     let mut sendable = vec![true; targets.len()];
     let mut controller = controller;
     for (index, target) in targets.iter().enumerate() {
-        let host = controller.as_deref_mut().map(|c| c.host_index(target));
-        if let (Some(c), Some(h)) = (&mut controller, host) {
-            c.host_started(h, clock.now());
-            if c.host_expired(h, clock.now()) {
-                c.mark_incomplete(h);
-                sendable[index] = false;
-                continue;
-            }
-        }
+        let Ok(host) = start_host(&mut controller, target, clock.now()) else {
+            sendable[index] = false;
+            continue;
+        };
         let mut attempts = 0;
         let mut last: Option<discovery::Neighbor> = None;
         let neighbor = loop {
-            if let (Some(c), Some(h)) = (&mut controller, host)
-                && c.host_expired(h, clock.now())
-            {
-                c.mark_incomplete(h);
+            if host_expired(&mut controller, host, clock.now()) {
                 break last;
             }
             // A pause owed by an earlier request is waited out only before
@@ -61,10 +98,7 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
                 settle(request, clock, deadline, owed, stats)?;
             }
             enforce_deadline(&Probes, deadline)?;
-            if let (Some(c), Some(h)) = (&mut controller, host)
-                && c.host_expired(h, clock.now())
-            {
-                c.mark_incomplete(h);
+            if host_expired(&mut controller, host, clock.now()) {
                 break last;
             }
             let timeout = host.map_or(request.timeout, |h| {
@@ -76,10 +110,7 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
             let (neighbor, exchange) = match executor.resolve_neighbor(target, timeout, deadline) {
                 Ok(resolved) => resolved,
                 Err(source) => {
-                    if let (Some(c), Some(h)) = (&mut controller, host)
-                        && c.host_expired(h, clock.now())
-                    {
-                        c.mark_incomplete(h);
+                    if host_expired(&mut controller, host, clock.now()) {
                         break last;
                     }
                     return Err(Error::Neighbor {
@@ -105,11 +136,7 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
             owed.owe(usize::from(sent), Some(began));
             attempts += neighbor.attempts;
             let silent = matches!(neighbor.outcome, discovery::NeighborOutcome::Silent);
-            if silent
-                && let (Some(c), Some(h)) = (&mut controller, host)
-                && c.host_expired(h, clock.now())
-            {
-                c.mark_incomplete(h);
+            if silent && host_expired(&mut controller, host, clock.now()) {
                 break last;
             }
             let neighbor = discovery::Neighbor {
@@ -168,51 +195,25 @@ pub(super) fn reach_next_hop<E: Pipelined, C: Clock>(
     sequence: u64,
     mut controller: Option<&mut crate::scan::adaptive::Controller>,
 ) -> Result<ReachOutcome, Error> {
-    let host = controller.as_deref_mut().map(|c| c.host_index(target));
-    if let (Some(c), Some(h)) = (&mut controller, host) {
-        c.host_started(h, clock.now());
-        if c.host_expired(h, clock.now()) {
-            c.mark_incomplete(h);
-            return Ok(ReachOutcome::HostExpired);
-        }
-    }
-    let needs_request = match (&controller, host) {
-        (Some(c), Some(h)) => {
-            let scoped = deadline
-                .for_wait(c.host_remaining(h, clock.now()))
-                .map_err(Error::from)?;
-            requests_neighbor(executor, target, false, &scoped)?
-        }
-        _ => requests_neighbor(executor, target, false, deadline)?,
+    let Ok(host) = start_host(&mut controller, target, clock.now()) else {
+        return Ok(ReachOutcome::HostExpired);
     };
+    let scoped = host_deadline(&controller, host, deadline, clock.now())?;
+    let needs_request =
+        requests_neighbor(executor, target, false, scoped.as_ref().unwrap_or(deadline))?;
     if needs_request {
         settle(request, clock, deadline, owed, stats)?;
     }
     enforce_deadline(&Probes, deadline)?;
-    if let (Some(c), Some(h)) = (&mut controller, host)
-        && c.host_expired(h, clock.now())
-    {
-        c.mark_incomplete(h);
+    if host_expired(&mut controller, host, clock.now()) {
         return Ok(ReachOutcome::HostExpired);
     }
     let began = clock.now();
-    let scoped;
-    let effective: &Deadline = match (&controller, host) {
-        (Some(c), Some(h)) => {
-            scoped = deadline
-                .for_wait(c.host_remaining(h, clock.now()))
-                .map_err(Error::from)?;
-            &scoped
-        }
-        _ => deadline,
-    };
-    let resolved = match executor.resolve_next_hop(target, effective) {
+    let scoped = host_deadline(&controller, host, deadline, began)?;
+    let resolved = match executor.resolve_next_hop(target, scoped.as_ref().unwrap_or(deadline)) {
         Ok(resolved) => resolved,
         Err(source) => {
-            if let (Some(c), Some(h)) = (&mut controller, host)
-                && c.host_expired(h, clock.now())
-            {
-                c.mark_incomplete(h);
+            if host_expired(&mut controller, host, clock.now()) {
                 return Ok(ReachOutcome::HostExpired);
             }
             return Err(Error::Neighbor {
@@ -231,10 +232,7 @@ pub(super) fn reach_next_hop<E: Pipelined, C: Clock>(
     owed.owe(requests, Some(began));
     Ok(match resolved.silence {
         Some(source) => {
-            if let (Some(c), Some(h)) = (&mut controller, host)
-                && c.host_expired(h, clock.now())
-            {
-                c.mark_incomplete(h);
+            if host_expired(&mut controller, host, clock.now()) {
                 return Ok(ReachOutcome::HostExpired);
             }
             ReachOutcome::Silent(source)

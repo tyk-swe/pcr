@@ -185,11 +185,7 @@ where
             if selection.excludes(record.address) {
                 continue;
             }
-            let key = (
-                record.address,
-                record.scope.as_ref().map(|scope| scope.interface.clone()),
-            );
-            if seen.insert(key) {
+            if seen.insert(record.key()) {
                 if selected.len() >= max_targets {
                     return Err(invalid(SelectionError::Limit {
                         field: "max_targets",
@@ -301,11 +297,7 @@ where
                 if selection.excludes(record.address) {
                     continue;
                 }
-                let key = (
-                    record.address,
-                    record.scope.as_ref().map(|scope| scope.interface.clone()),
-                );
-                let target = match seen.entry(key) {
+                let target = match seen.entry(record.key()) {
                     Entry::Occupied(entry) => *entry.get(),
                     Entry::Vacant(entry) => {
                         if selected.len() >= max_targets {

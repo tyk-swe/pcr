@@ -191,6 +191,13 @@ pub(crate) fn unix_floor(time: SystemTime) -> (i128, u32) {
     }
 }
 
+pub(crate) fn checked_slice(bytes: &Bytes, start: usize, end: usize) -> Option<Bytes> {
+    if start > end || end > bytes.len() {
+        return None;
+    }
+    Some(bytes.slice(start..end))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TimeBounds {
     start: Option<SystemTime>,
@@ -273,5 +280,13 @@ mod tests {
         assert_eq!(before(2, 0), (-2, 0));
         assert_eq!(before(0, 1), (-1, 999_999_999));
         assert_eq!(before(1, 250_000_000), (-2, 750_000_000));
+    }
+
+    #[test]
+    fn malformed_ranges_are_rejected_without_panicking() {
+        let bytes = Bytes::from_static(b"abcd");
+        assert_eq!(checked_slice(&bytes, 1, 3).unwrap().as_ref(), b"bc");
+        assert!(checked_slice(&bytes, 3, 2).is_none());
+        assert!(checked_slice(&bytes, 0, 5).is_none());
     }
 }

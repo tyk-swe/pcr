@@ -263,16 +263,12 @@ fn plan_hosts(request: &Request, targets: &[SelectedAddress]) -> Result<Plan, Er
                 }
                 traced += 1;
                 if request.route.link_mode != packetcraftr_netio::link::Mode::Layer3
-                    && !target.address.is_multicast()
-                    && target.address != IpAddr::V4(std::net::Ipv4Addr::BROADCAST)
+                    && crate::neighbor::needs_resolution(target.address)
                 {
                     neighbor_requests = neighbor_requests
                         .checked_add(host_probes)
                         .ok_or_else(|| overflow("probes"))?;
-                    let request_bytes = match target.address {
-                        IpAddr::V4(_) => crate::neighbor::IPV4_REQUEST_BYTES,
-                        IpAddr::V6(_) => crate::neighbor::IPV6_REQUEST_BYTES,
-                    };
+                    let request_bytes = crate::neighbor::request_wire_bytes(target.address);
                     neighbor_bytes = neighbor_bytes
                         .checked_add(
                             u64::try_from(host_probes)

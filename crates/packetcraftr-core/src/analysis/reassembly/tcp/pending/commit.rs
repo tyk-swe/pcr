@@ -34,7 +34,7 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
     let direct_payload = plan
         .direct_payload
         .as_ref()
-        .and_then(|range| crate::byte_slice::checked_slice(&payload, range.start, range.end));
+        .and_then(|range| crate::frame::checked_slice(&payload, range.start, range.end));
     let (replacement, mut events) = if changes_generation {
         let mut state = TcpFlowState::new(first_payload_sequence, last_update, deadline);
         let events = commit_flow_push(

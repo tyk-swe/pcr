@@ -19,7 +19,16 @@ use crate::scan::{
     DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS, MAX_IN_FLIGHT, MAX_PROBES,
 };
 
-mod limits_serde;
+crate::evidence::limits_serde!(
+    before: {
+        max_prepared_bytes: usize,
+        max_targets: usize,
+        max_ports: usize,
+        max_probes: usize,
+        max_duration: std::time::Duration,
+    },
+    after: {}
+);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "limits_serde::Limits", into = "limits_serde::Limits")]

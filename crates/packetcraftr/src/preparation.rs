@@ -434,15 +434,8 @@ fn unanswered(error: &route::Error, request: Option<&crate::neighbor::Request>) 
         return crate::Stats::default();
     };
     let (attempts, capture) = requests_sent(neighbor);
-    let attempts = u64::from(attempts);
-    let frame_bytes = crate::neighbor::request_frame(request).map_or(0, |frame| frame.len() as u64);
-    crate::Stats {
-        packets_attempted: attempts,
-        packets_completed: attempts,
-        bytes: attempts.saturating_mul(frame_bytes),
-        capture,
-        ..crate::Stats::default()
-    }
+    let frame_bytes = crate::neighbor::request_frame(request).map_or(0, |frame| frame.len());
+    crate::neighbor::stats(attempts, frame_bytes, std::time::Duration::ZERO, capture)
 }
 
 /// The requests a failed resolution sent, with its capture's counters when

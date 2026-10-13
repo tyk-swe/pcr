@@ -76,6 +76,17 @@ pub(crate) fn timeout(deadline: &Deadline) -> Result<std::time::Duration, Outcom
         .map_err(Outcome::interrupted)
 }
 
+/// Arms the socket's transfer timeout for one bounded slice and enforces the
+/// deadline again after the timeout call returns.
+pub(crate) fn prepare_transfer(
+    deadline: &Deadline,
+    set_timeout: impl FnOnce(Option<std::time::Duration>) -> io::Result<()>,
+) -> Result<(), Outcome> {
+    let wait = timeout(deadline)?;
+    set_timeout(Some(wait)).map_err(Outcome::Failed)?;
+    deadline.enforce().map_err(Outcome::interrupted)
+}
+
 pub(crate) fn retryable(source: &io::Error) -> bool {
     matches!(
         source.kind(),

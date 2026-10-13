@@ -133,11 +133,11 @@ commands! {
     #[command(after_long_help = read::arguments::AFTER_LONG_HELP)]
     Read(read::arguments::Args) = "read",
     /// Enumerate local interfaces.
-    #[command(after_long_help = interfaces::arguments::AFTER_LONG_HELP)]
-    Interfaces(interfaces::arguments::Args) = "interfaces",
+    #[command(after_long_help = interfaces::AFTER_LONG_HELP)]
+    Interfaces(interfaces::Args) = "interfaces",
     /// Passively select route, source, MTU, and link mode.
-    #[command(after_long_help = plan::arguments::AFTER_LONG_HELP)]
-    Plan(plan::arguments::Args) = "plan",
+    #[command(after_long_help = plan::AFTER_LONG_HELP)]
+    Plan(plan::Args) = "plan",
     /// Transmit a packet under traffic policy.
     #[command(after_long_help = send::arguments::AFTER_LONG_HELP)]
     Send(send::arguments::Args) = "send",

@@ -333,7 +333,7 @@ fn slice_value(value: &FieldValue, slice: ByteSlice) -> Option<FieldValue> {
     match value {
         FieldValue::Bytes(bytes) => {
             let (start, end) = slice_range(bytes.len(), slice)?;
-            crate::byte_slice::checked_slice(bytes, start, end).map(FieldValue::Bytes)
+            crate::frame::checked_slice(bytes, start, end).map(FieldValue::Bytes)
         }
         FieldValue::Mac(mac) => sliced_bytes(mac, slice),
         FieldValue::Text(text) => sliced_bytes(text.as_bytes(), slice),

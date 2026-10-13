@@ -105,13 +105,12 @@ impl<P: PacketProviders, K: Clock> OsExecutor for Native<'_, P, K> {
         if resolution.evidence_truncated {
             return Err(FAULT.internal("neighbor evidence was truncated"));
         }
-        let stats = Stats {
-            packets_attempted: u64::from(resolution.attempts),
-            packets_completed: u64::from(resolution.attempts),
-            bytes: u64::from(resolution.attempts) * bytes.len() as u64,
-            elapsed: self.client.now().saturating_duration_since(started),
-            capture: resolution.capture_statistics,
-        };
+        let stats = crate::neighbor::stats(
+            resolution.attempts,
+            bytes.len(),
+            self.client.now().saturating_duration_since(started),
+            resolution.capture_statistics,
+        );
         self.spent.checked_add_assign(&stats).map_err(failure)?;
         Ok(Preparation {
             stats,

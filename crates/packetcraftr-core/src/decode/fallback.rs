@@ -88,7 +88,7 @@ fn bytes_layer_layout(
 pub(super) fn slice_original(original: &Bytes, offset: usize, length: usize) -> Bytes {
     offset
         .checked_add(length)
-        .and_then(|end| crate::byte_slice::checked_slice(original, offset, end))
+        .and_then(|end| crate::frame::checked_slice(original, offset, end))
         .unwrap_or_default()
 }
 

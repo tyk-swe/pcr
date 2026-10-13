@@ -1,12 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod rendering;
-
+use std::io;
 use std::path::{Path, PathBuf};
 
+use clap::{CommandFactory, ValueEnum};
+use clap_complete::{Generator, Shell};
 use packetcraftr_core::error::{Classification, Kind};
 
+use crate::cli::Cli;
 use crate::errors::{CliError, source_causes};
 use crate::output::contract::Format;
 
@@ -29,8 +31,22 @@ fn run(arguments: &Args) -> Result<(), CliError> {
     for directory in [&completions, &man] {
         std::fs::create_dir_all(directory).map_err(|error| io_error(directory, error))?;
     }
-    rendering::write_completions(&completions).map_err(|error| io_error(&completions, error))?;
-    rendering::write_man_pages(&man).map_err(|error| io_error(&man, error))?;
+    write_completions(&completions).map_err(|error| io_error(&completions, error))?;
+    clap_mangen::generate_to(Cli::command(), &man).map_err(|error| io_error(&man, error))?;
+    Ok(())
+}
+
+fn write_completions(directory: &Path) -> io::Result<()> {
+    for shell in Shell::value_variants() {
+        let mut command = Cli::command();
+        command.set_bin_name("packetcraftr");
+        command.build();
+        // Some shell generators panic on write errors even through try_generate.
+        // Render the fixed command tree in memory, then propagate filesystem errors.
+        let mut completion = Vec::new();
+        shell.try_generate(&command, &mut completion)?;
+        std::fs::write(directory.join(shell.file_name("packetcraftr")), completion)?;
+    }
     Ok(())
 }
 

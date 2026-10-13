@@ -66,7 +66,7 @@ impl<C: Session> Transaction<C> {
     where
         F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
-        let queued = crate::deadline::immediate(self.cancellation.clone());
+        let queued = packetcraftr_core::budget::Deadline::immediate(self.cancellation.clone());
         for _ in 0..self.collection.capture.max_frames {
             if policy.is_enforced() && self.window.expired() {
                 return Err(drain_deadline_error().into());

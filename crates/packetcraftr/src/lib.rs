@@ -31,7 +31,10 @@ pub mod capture;
 mod client;
 pub mod clock;
 mod correlation;
-pub mod deadline;
+pub mod deadline {
+    /// Allowance for a passive route or interface lookup whose operation has no deadline.
+    pub const PASSIVE_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+}
 pub mod dns;
 mod error;
 pub mod evidence;

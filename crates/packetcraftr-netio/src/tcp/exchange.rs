@@ -4,7 +4,7 @@
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
 
-use crate::bounded::{Exchange, Outcome, retryable, timeout};
+use crate::bounded::{Exchange, Outcome, prepare_transfer, retryable, timeout};
 
 use super::{Error, Stream};
 
@@ -29,15 +29,9 @@ pub fn exchange(
     let mut bytes_read = 0;
     let outcome = 'exchange: {
         while bytes_sent < request.len() {
-            let wait = match timeout(deadline) {
-                Ok(wait) => wait,
-                Err(outcome) => break 'exchange outcome,
-            };
-            if let Err(source) = stream.set_write_timeout(Some(wait)) {
-                break 'exchange Outcome::Failed(source);
-            }
-            if let Err(source) = deadline.enforce() {
-                break 'exchange Outcome::interrupted(source);
+            if let Err(outcome) = prepare_transfer(deadline, |wait| stream.set_write_timeout(wait))
+            {
+                break 'exchange outcome;
             }
             match stream.write(&request[bytes_sent..]) {
                 Ok(0) => {
@@ -55,15 +49,10 @@ pub fn exchange(
         }
         if !request.is_empty() {
             loop {
-                let wait = match timeout(deadline) {
-                    Ok(wait) => wait,
-                    Err(outcome) => break 'exchange outcome,
-                };
-                if let Err(source) = stream.set_write_timeout(Some(wait)) {
-                    break 'exchange Outcome::Failed(source);
-                }
-                if let Err(source) = deadline.enforce() {
-                    break 'exchange Outcome::interrupted(source);
+                if let Err(outcome) =
+                    prepare_transfer(deadline, |wait| stream.set_write_timeout(wait))
+                {
+                    break 'exchange outcome;
                 }
                 match stream.flush() {
                     Ok(()) => break,

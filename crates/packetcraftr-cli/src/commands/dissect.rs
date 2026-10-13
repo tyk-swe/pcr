@@ -6,12 +6,12 @@ use crate::output::contract::Format;
 use packetcraftr_core::error::Kind;
 
 pub(super) mod arguments;
-mod rendering;
 
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use packetcraftr_core as core;
+use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::frame::Frame;
 
 use crate::output;
@@ -22,7 +22,10 @@ use crate::filtering::{self, Capabilities};
 use crate::input::{
     InputKind, hex_text_limit, missing_input_error, read_bounded_file, read_stdin_bounded,
 };
-use crate::rendering::{FieldTree, emit_published, emit_stderr_message, write_hex_line, write_raw};
+use crate::rendering::{
+    FieldTree, emit_published, emit_stderr_message, render_diagnostics_text, render_dns_records,
+    write_hex_line, write_raw, write_stdout_line, write_summary_line,
+};
 
 impl super::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[
@@ -131,7 +134,7 @@ pub(super) fn run(
         return emit_stderr_message("frame did not match the filter");
     }
     match format {
-        Format::Text => rendering::render_text(&decoded, tree.as_mut()),
+        Format::Text => render_text(&decoded, tree.as_mut()),
         Format::Hex => write_hex_line(decoded.frame.bytes()),
         Format::Raw => write_raw(decoded.frame.bytes()),
         Format::Json => emit_published(
@@ -144,6 +147,27 @@ pub(super) fn run(
         )),
         other => other.unreachable(),
     }
+}
+
+fn render_text(decoded: &DecodedPacket, tree: Option<&mut FieldTree>) -> Result<(), CliError> {
+    write_summary_line(format_args!(
+        "decoded {} bytes into {} layer(s)",
+        decoded.frame.bytes().len(),
+        decoded.packet.len()
+    ))?;
+    let packet = core::document::Packet::from_packet(&decoded.packet);
+    match tree {
+        Some(tree) => {
+            tree.render_layers(&packet, |index, protocol| format!("{index}: {protocol}"))?;
+        }
+        None => {
+            for (index, layer) in decoded.packet.iter().enumerate() {
+                write_stdout_line(format_args!("{index}: {}", layer.protocol_id()))?;
+            }
+            render_dns_records(&packet)?;
+        }
+    }
+    render_diagnostics_text(&decoded.diagnostics)
 }
 
 fn parse_hex_text(text: &str) -> Result<bytes::Bytes, CliError> {

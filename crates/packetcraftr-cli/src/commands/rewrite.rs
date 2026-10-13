@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
-mod rendering;
 
 use self::arguments::Args;
 use crate::output::{
@@ -13,7 +12,7 @@ use crate::output::{
 use crate::{
     errors::CliError,
     filtering,
-    rendering::{Retained, StreamEncoder, emit_aggregate},
+    rendering::{Retained, StreamEncoder, emit_aggregate, write_summary_line},
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -206,8 +205,30 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     match format {
         Format::Json => emit_aggregate(Command::Rewrite, report, Vec::new()),
         Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        Format::Text => rendering::render_text(&report),
+        Format::Text => render_text(&report),
         other => other.unreachable(),
+    }
+}
+
+fn render_text(report: &output::rewrite::Report) -> Result<(), CliError> {
+    if report.dry_run {
+        write_summary_line(format_args!(
+            "dry-run: {} of {} frames would change across {} interfaces; \
+             {} changes reported, {} omitted",
+            report.capture.frames_changed,
+            report.capture.frames_read,
+            report.capture.interfaces,
+            report.changes.len(),
+            report.changes_omitted
+        ))
+    } else {
+        write_summary_line(format_args!(
+            "rewrote {} of {} frames across {} interfaces into {}",
+            report.capture.frames_changed,
+            report.capture.frames_read,
+            report.capture.interfaces,
+            report.path
+        ))
     }
 }
 

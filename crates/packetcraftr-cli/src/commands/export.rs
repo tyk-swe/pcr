@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
-mod rendering;
 
 use self::arguments::Args;
 use crate::output::{
@@ -11,7 +10,7 @@ use crate::output::{
 };
 use crate::{
     errors::CliError,
-    rendering::{StreamEncoder, emit_aggregate},
+    rendering::{StreamEncoder, emit_aggregate, write_summary_line},
 };
 use packetcraftr_core::{analysis, capture_file};
 
@@ -95,7 +94,16 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     match format {
         Format::Json => emit_aggregate(Command::Export, report, Vec::new()),
         Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        Format::Text => rendering::render_text(&report),
+        Format::Text => write_summary_line(format_args!(
+            "exported {} of {} physical frames to {}; {} complete and {} incomplete datagrams, {} unmatched stream selectors, {} unmatched datagram selectors",
+            report.capture.frames_selected,
+            report.capture.frames_read,
+            report.path,
+            report.selected_complete_datagrams,
+            report.selected_incomplete_datagrams.len(),
+            report.unmatched_streams.len(),
+            report.unmatched_datagram_frames.len()
+        )),
         other => other.unreachable(),
     }
 }

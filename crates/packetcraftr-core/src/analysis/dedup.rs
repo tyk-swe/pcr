@@ -102,7 +102,7 @@ impl Deduplicator {
                     return None;
                 } else {
                     let start = usize::try_from(overlap).unwrap_or(bytes.len());
-                    crate::byte_slice::checked_slice(bytes, start, bytes.len())?
+                    crate::frame::checked_slice(bytes, start, bytes.len())?
                 }
             }
             None => bytes.clone(),

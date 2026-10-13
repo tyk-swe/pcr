@@ -40,6 +40,19 @@ impl Deadline {
         Self::with_time_source(limit, Instant::now)
     }
 
+    /// A spent deadline that accepts only work already queued, while preserving cancellation.
+    #[must_use]
+    pub fn immediate(cancellation: Option<Cancellation>) -> Self {
+        Self::new(Duration::ZERO).with_cancellation(cancellation)
+    }
+
+    /// A deadline for the time remaining before `deadline`, preserving cancellation.
+    #[must_use]
+    pub fn until(deadline: Instant, cancellation: Option<Cancellation>) -> Self {
+        Self::new(deadline.saturating_duration_since(Instant::now()))
+            .with_cancellation(cancellation)
+    }
+
     /// The source must never move backward.
     #[must_use]
     pub fn with_time_source(

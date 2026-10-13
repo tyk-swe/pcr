@@ -20,7 +20,6 @@ macro_rules! display_via_as_str {
 pub mod analysis;
 pub mod budget;
 pub mod build;
-mod byte_slice;
 pub mod capture_file;
 pub mod codec;
 pub mod conversation;

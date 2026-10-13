@@ -48,11 +48,7 @@ where
     let mut seen = HashSet::<(IpAddr, Option<InterfaceId>)>::with_capacity(resolved.selected.len());
     for record in resolved.selected {
         check()?;
-        let key = (
-            record.address,
-            record.scope.as_ref().map(|scope| scope.interface.clone()),
-        );
-        if family.accepts(record.address) && seen.insert(key) {
+        if family.accepts(record.address) && seen.insert(record.key()) {
             targets.push(record);
         }
     }

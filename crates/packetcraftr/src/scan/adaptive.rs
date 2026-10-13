@@ -314,10 +314,7 @@ impl Controller {
     }
 
     fn host(&mut self, target: &SelectedAddress) -> usize {
-        let key = (
-            target.address,
-            target.scope.as_ref().map(|scope| scope.interface.clone()),
-        );
+        let key = target.key();
         if let Some(index) = self.indices.get(&key) {
             return *index;
         }
@@ -364,12 +361,7 @@ impl Controller {
     }
 
     pub(super) fn find(&self, target: &SelectedAddress) -> Option<usize> {
-        self.indices
-            .get(&(
-                target.address,
-                target.scope.as_ref().map(|scope| scope.interface.clone()),
-            ))
-            .copied()
+        self.indices.get(&target.key()).copied()
     }
 
     pub(super) fn is_incomplete(&self, host: usize) -> bool {
@@ -851,13 +843,7 @@ pub(super) fn state_charge(
 
 pub(super) fn scoped_bytes(targets: &[SelectedAddress]) -> usize {
     targets.iter().fold(0usize, |bytes, target| {
-        bytes.saturating_add(target.scope.as_ref().map_or(0, |scope| {
-            scope
-                .zone
-                .as_str()
-                .len()
-                .saturating_add(scope.interface.name.len())
-        }))
+        bytes.saturating_add(target.scope_bytes())
     })
 }
 

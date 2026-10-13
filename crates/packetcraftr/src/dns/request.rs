@@ -5,7 +5,10 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-mod limits_serde;
+crate::evidence::limits_serde!(
+    before: { message: super::MessageLimits },
+    after: { max_duration: std::time::Duration }
+);
 
 use packetcraftr_netio::deadline::MAX_WAIT;
 

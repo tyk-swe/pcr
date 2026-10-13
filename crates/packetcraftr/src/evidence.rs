@@ -61,6 +61,55 @@ impl Limits {
     }
 }
 
+/// Preserves flat field-order Serde representation for workflow `Limits`
+/// structs that embed [`Limits`], including non-self-describing binary formats.
+macro_rules! limits_serde {
+    (
+        before: { $($before_field:ident : $before_ty:ty),* $(,)? },
+        after: { $($after_field:ident : $after_ty:ty),* $(,)? }
+    ) => {
+        mod limits_serde {
+            use serde::{Deserialize, Serialize};
+
+            #[derive(Serialize, Deserialize)]
+            pub(super) struct Limits {
+                $($before_field: $before_ty,)*
+                max_evidence_frames: usize,
+                max_evidence_bytes: usize,
+                max_undecoded: usize,
+                $($after_field: $after_ty,)*
+            }
+
+            impl From<super::Limits> for Limits {
+                fn from(value: super::Limits) -> Self {
+                    Self {
+                        $($before_field: value.$before_field,)*
+                        max_evidence_frames: value.evidence.max_frames,
+                        max_evidence_bytes: value.evidence.max_bytes,
+                        max_undecoded: value.evidence.max_undecoded,
+                        $($after_field: value.$after_field,)*
+                    }
+                }
+            }
+
+            impl From<Limits> for super::Limits {
+                fn from(value: Limits) -> Self {
+                    Self {
+                        $($before_field: value.$before_field,)*
+                        evidence: $crate::evidence::Limits {
+                            max_frames: value.max_evidence_frames,
+                            max_bytes: value.max_evidence_bytes,
+                            max_undecoded: value.max_undecoded,
+                        },
+                        $($after_field: value.$after_field,)*
+                    }
+                }
+            }
+        }
+    };
+}
+pub(crate) use limits_serde;
+
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {

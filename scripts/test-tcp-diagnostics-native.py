@@ -223,6 +223,14 @@ def run_profile(profile, args, report, corpus, measurement):
                 write(args.report, report)
     if digest(binary) != profile['binary_digest_sha256']:
         raise ValueError('native executable changed during execution')
+    for case in profile['cases']:
+        if case['status'] == 'exercised':
+            run = case['run']
+            try:
+                evidence.validate_output(run, case, corpus, evidence.preparation_frames(profile, case, run))
+            except ValueError as error:
+                run['error'] = dict(code='fixture.contradiction', message=str(error))
+                classify(case, run, profile['profile'])
     profile['status'] = status_of(profile['cases'])
 
 

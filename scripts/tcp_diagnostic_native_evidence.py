@@ -7,7 +7,7 @@ from pathlib import Path
 from tcp_diagnostic_wire import network, tcp
 from native_platform_evidence import PROFILES, PLATFORMS, UNAVAILABLE_REASONS, hexadecimal, status_of
 from tcp_diagnostic_corpus import MODES, expectation, validate as validate_corpus
-from tcp_diagnostic_wire import outgoing, response
+from tcp_diagnostic_wire import outgoing, response, neighbor_request
 
 SCHEMA = 'packetcraftr.tcp-diagnostic-native-evidence/v1'
 SOURCES = ('192.0.2.1', '2001:db8::1')
@@ -134,7 +134,19 @@ def observed_expectation(corpus, mode, reply, window):
     return row
 
 
-def validate_output(run, case, corpus):
+def preparation_frames(profile, case, run):
+    if run.get('link_mode') != 'layer2':
+        return []
+    frames = (profile.get('independent_peer', {}).get('neighbor_requests', []) if case['provision'] == 'scripted'
+              else profile.get('kernel_capture', {}).get('frames', []))
+    target = (SCRIPTED_TARGETS if case['provision'] == 'scripted' else kernel_targets(run['platform']))[case['family'] == 'ipv6']
+    source = (SOURCES if case['provision'] == 'scripted' else ('198.51.100.1', '2001:db8:1::1'))[case['family'] == 'ipv6']
+    return [bytes.fromhex(frame['bytes_hex']) for frame in frames
+            if run['started_unix_ns'] <= frame.get('unix_ns', 0) <= run['finished_unix_ns']
+            and neighbor_request(bytes.fromhex(frame['bytes_hex']), frame['link_type'], target, source)]
+
+
+def validate_output(run, case, corpus, preparation=None):
     ports = list(range(1000, 1008)) if case['provision'] == 'scripted' else [43123, 43125]
     target = (SCRIPTED_TARGETS if case['provision'] == 'scripted' else kernel_targets(run.get('platform')))[case['family'] == 'ipv6']
     if run.get('command') != command(run.get('command', [''])[0], case, target, ports, run.get('link_mode')) or run.get('limits') != LIMITS:
@@ -170,8 +182,17 @@ def validate_output(run, case, corpus):
         raise ValueError('native endpoint/attempt inventory mismatch')
     stats = docs[-1].get('stats', {})
     probe_bytes = (40 if case['family'] == 'ipv4' else 60) + (14 if run.get('link_mode') == 'layer2' else 0)
-    if stats.get('bytes') != len(ports) * probe_bytes or stats.get('packets_attempted') != len(ports) or stats.get('packets_completed') != len(ports):
-        raise ValueError('native packet accounting mismatch')
+    if run.get('link_mode') == 'layer2' and preparation is None:
+        # Live capture drains fully on fixture cleanup. Check the ceiling here;
+        # final validation binds every preparation packet to independent bytes.
+        packets = stats.get('packets_attempted')
+        if type(packets) is not int or not len(ports) <= packets <= LIMITS['max_probes'] or stats.get('packets_completed') != packets or type(stats.get('bytes')) is not int or stats['bytes'] < len(ports) * probe_bytes:
+            raise ValueError('native packet accounting mismatch')
+    else:
+        preparation = preparation or []
+        packets = len(ports) + len(preparation)
+        if packets > LIMITS['max_probes'] or stats.get('bytes') != len(ports) * probe_bytes + sum(map(len, preparation)) or stats.get('packets_attempted') != packets or stats.get('packets_completed') != packets:
+            raise ValueError('native packet accounting mismatch')
     if result.get('retained_evidence_bytes', -1) not in range(0, 1048577):
         raise ValueError('native evidence budget exceeded')
     capture = stats.get('capture', {})
@@ -326,7 +347,7 @@ def validate(report, corpus, expected_commit=None, require_complete=False, expec
                     raise ValueError('missing absolute executable command')
                 if run.get('platform') != report['platform'] or run.get('link_mode') != ('layer2' if profile['profile'] == 'layer2' else 'layer3'):
                     raise ValueError('native run changed platform/link mode')
-                if run.get('observation') != validate_output(run, case, corpus):
+                if run.get('observation') != validate_output(run, case, corpus, preparation_frames(profile, case, run)):
                     raise ValueError('retained observation/heuristic divergences were altered')
                 if case['provision'] == 'kernel':
                     validate_kernel_capture(profile, case, run)
@@ -370,9 +391,10 @@ def retained_frames(run, case):
 def validate_peer(profile, case, run):
     peer = profile.get('independent_peer', {})
     requests = peer.get('requests', [])
-    if not isinstance(requests, list) or len(requests) > 4096 or not peer.get('setup') or peer.get('cleanup', {}).get('exit_code') != 0:
+    neighbors = peer.get('neighbor_requests', [])
+    if not isinstance(requests, list) or not isinstance(neighbors, list) or len(requests) + len(neighbors) > 4096 or not peer.get('setup') or peer.get('cleanup', {}).get('exit_code') != 0:
         raise ValueError('independent peer lacks bounded provisioning/cleanup evidence')
-    if sum(len(request.get('bytes_hex', '')) // 2 + sum(len(answer.get('bytes_hex', '')) // 2 for answer in request.get('replies', [])) for request in requests) > 1048576:
+    if sum(len(request.get('bytes_hex', '')) // 2 + sum(len(answer.get('bytes_hex', '')) // 2 for answer in request.get('replies', [])) for request in [*requests, *neighbors]) > 1048576:
         raise ValueError('independent peer exceeded its byte ceiling')
     identities = {item['sequence']: item['port'] for item in run['observation']['observations']}
     matched = {}
@@ -437,6 +459,8 @@ def validate_kernel_capture(profile, case, run):
         if not run['started_unix_ns'] <= frame.get('unix_ns', 0) <= run['finished_unix_ns']:
             continue
         raw = bytes.fromhex(frame['bytes_hex'])
+        if frame['link_type'] == 1 and raw[12:14] == b'\x08\x06':
+            continue  # ARP preparation is accounted independently of TCP.
         ip = network(raw, frame['link_type'])
         if ip['target'] != target or ip['proto'] != 6:
             continue
@@ -459,6 +483,8 @@ def validate_kernel_capture(profile, case, run):
             if not sent_ns <= stamp <= min(run['finished_unix_ns'], sent_ns + LIMITS['timeout_ms'] * 1000000):
                 continue
             raw = bytes.fromhex(frame['bytes_hex'])
+            if frame['link_type'] == 1 and raw[12:14] == b'\x08\x06':
+                continue
             ip = network(raw, frame['link_type'])
             if ip['source'] != target or ip['target'] != sent_ip['source']:
                 continue

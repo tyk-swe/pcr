@@ -86,32 +86,33 @@ def fixture_run(family='ipv4', mode='window', output='json'):
     return case, run, dict(requests=requests, setup=[dict(exit_code=0)], cleanup=dict(exit_code=0))
 
 
-def kernel_run():
-    case, run, _ = fixture_run()
-    case = next(item for item in evidence.inventory() if item['id'] == 'kernel/ipv4/window/1/json')
+def kernel_run(family='ipv4'):
+    case, run, _ = fixture_run(family)
+    case = next(item for item in evidence.inventory() if item['id'] == f'kernel/{family}/window/1/json')
+    source, target = ('198.51.100.1', '198.51.100.2') if family == 'ipv4' else ('2001:db8:1::1', '2001:db8:1::2')
+    ether_type = b'\x08\x00' if family == 'ipv4' else b'\x86\xdd'
     doc = json.loads(run['stdout'])
-    doc['result']['target'] = '198.51.100.2'
-    doc['result']['resolved_addresses'] = ['198.51.100.2']
+    doc['result']['target'] = target
+    doc['result']['resolved_addresses'] = [target]
     doc['result']['endpoints'] = [copy.deepcopy(doc['result']['endpoints'][0]) for _ in range(2)]
     capture = dict(cleanup_complete=True, backend_version='synthetic-only', filter='synthetic fixture filter',
                    frames=[], statistics=dict(received=2, dropped=0, interface_dropped=0))
     for identity, endpoint in enumerate(doc['result']['endpoints']):
         port = 43123 if identity == 0 else 43125
-        source, target = '198.51.100.1', '198.51.100.2'
         segment = struct.pack('!HHIIHHHH', 50000, port, identity, identity + 0x50435201, 0x5010, 0, 0, 0)
-        raw = bytes.fromhex('00112233445566778899aabb0800') + packet(source, target, 6, transport(source, target, 6, segment, 16))
+        raw = bytes.fromhex('00112233445566778899aabb') + ether_type + packet(source, target, 6, transport(source, target, 6, segment, 16))
         capture['frames'].append(dict(bytes_hex=raw.hex(), link_type=1, unix_ns=1000000000, monotonic_ingress_ns=20))
         reset = struct.pack('!HHIIHHHH', port, 50000, identity + 0x50435201, 0, 0x5004, 0, 0, 0)
-        answer = bytes.fromhex('66778899aabb0011223344550800') + packet(target, source, 6, transport(target, source, 6, reset, 16))
+        answer = bytes.fromhex('66778899aabb001122334455') + ether_type + packet(target, source, 6, transport(target, source, 6, reset, 16))
         endpoint.update(address=target, port=port)
         endpoint['inference']['supporting'] = [identity]
         probe = endpoint['probes'][0]
         probe.update(sequence=identity, destination=target, destination_port=port)
         probe['frame'].update(bytes_hex=answer.hex(), captured_length=len(answer), original_length=len(answer))
         capture['frames'].append(dict(bytes_hex=answer.hex(), link_type=1, unix_ns=1000000001, monotonic_ingress_ns=21))
-    doc['result']['retained_evidence_bytes'] = 108
-    doc['stats'].update(packets_attempted=2, packets_completed=2, bytes=80)
-    run.update(stdout=json.dumps(doc), command=evidence.command('/synthetic/packetcraftr', case, '198.51.100.2', [43123, 43125]))
+    doc['result']['retained_evidence_bytes'] = 2 * len(answer)
+    doc['stats'].update(packets_attempted=2, packets_completed=2, bytes=80 if family == 'ipv4' else 120)
+    run.update(stdout=json.dumps(doc), command=evidence.command('/synthetic/packetcraftr', case, target, [43123, 43125]))
     run['observation'] = evidence.validate_output(run, case, CORPUS)
     return case, run, capture
 
@@ -180,6 +181,57 @@ class IndependentWireContracts(unittest.TestCase):
 
 
 class EvidenceContracts(unittest.TestCase):
+    def test_layer2_accounts_only_independently_verified_preparation(self):
+        mac = bytes.fromhex('66778899aabb')
+        def neighbor(source, target):
+            if ':' not in target:
+                return (b'\xff' * 6 + mac + bytes.fromhex('08060001080006040001') + mac
+                        + ipaddress.ip_address(source).packed + b'\x00' * 6 + ipaddress.ip_address(target).packed).ljust(60, b'\x00')
+            multicast = 'ff02::1:ff00:2'
+            body = struct.pack('!BBHI', 135, 0, 0, 0) + ipaddress.ip_address(target).packed + b'\x01\x01' + mac
+            return bytes.fromhex('3333ff000002') + mac + b'\x86\xdd' + packet(source, multicast, 58, transport(source, multicast, 58, body, 2))
+        for family in ('ipv4', 'ipv6'):
+            for provision in ('scripted', 'kernel'):
+                for output in (('json', 'ndjson') if provision == 'scripted' else ('json',)):
+                    with self.subTest(family=family, provision=provision, output=output):
+                        if provision == 'scripted':
+                            case, run, peer = fixture_run(family, output=output)
+                            profile = dict(independent_peer=peer)
+                            source, target = (evidence.SOURCES[family == 'ipv6'], evidence.SCRIPTED_TARGETS[family == 'ipv6'])
+                            frames = peer.setdefault('neighbor_requests', [])
+                        else:
+                            case, run, capture = kernel_run(family)
+                            profile = dict(kernel_capture=capture)
+                            source, target = ('198.51.100.1', '198.51.100.2') if family == 'ipv4' else ('2001:db8:1::1', '2001:db8:1::2')
+                            frames = capture['frames']
+                        prep = neighbor(source, target)
+                        frames.extend([dict(bytes_hex=prep.hex(), link_type=1, unix_ns=1000000000),
+                                       dict(bytes_hex=prep.hex(), link_type=1, unix_ns=999999998),
+                                       dict(bytes_hex=neighbor(source, target[:-1] + '3').hex(), link_type=1, unix_ns=1000000000)])
+                        run['link_mode'] = 'layer2'
+                        ports = list(range(1000, 1008)) if provision == 'scripted' else [43123, 43125]
+                        run['command'] = evidence.command('/synthetic/packetcraftr', case, target, ports, 'layer2')
+                        docs = evidence.documents(run, output)
+                        stats = docs[-1]['stats']
+                        stats.update(packets_attempted=len(ports) + 1, packets_completed=len(ports) + 1,
+                                     bytes=len(ports) * (54 if family == 'ipv4' else 74) + len(prep))
+                        def encode():
+                            return json.dumps(docs[0]) if output == 'json' else '\n'.join(map(json.dumps, docs)) + '\n'
+                        run['stdout'] = encode()
+                        preparation = evidence.preparation_frames(profile, case, run)
+                        self.assertEqual(preparation, [prep])
+                        self.assertEqual(evidence.validate_output(run, case, CORPUS, preparation), run['observation'])
+                        if provision == 'scripted':
+                            evidence.validate_peer(profile, case, run)
+                        else:
+                            evidence.validate_kernel_capture(profile, case, run)
+                        with self.assertRaisesRegex(ValueError, 'accounting'):
+                            evidence.validate_output(run, case, CORPUS, [])
+                        stats['bytes'] += 1
+                        run['stdout'] = encode()
+                        with self.assertRaisesRegex(ValueError, 'accounting'):
+                            evidence.validate_output(run, case, CORPUS, preparation)
+
     def test_both_formats_and_families(self):
         for family in ('ipv4', 'ipv6'):
             for output in ('json', 'ndjson'):

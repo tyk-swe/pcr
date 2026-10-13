@@ -60,6 +60,24 @@ def tcp(ip):
                 flags=offset_flags & 0x1ff, window=window, size=size, length=len(body))
 
 
+def neighbor_request(raw, link, target, source):
+    """Recognize only this fixture's outbound Ethernet ARP/NDP preparation."""
+    if link != 1 or len(raw) < 14:
+        return False
+    address = ipaddress.ip_address(target)
+    if address.version == 4:
+        return (len(raw) >= 42 and raw[12:22] == bytes.fromhex('08060001080006040001')
+                and raw[22:28] == raw[6:12] and raw[28:32] == ipaddress.ip_address(source).packed
+                and raw[38:42] == address.packed)
+    if raw[12:14] != b'\x86\xdd':
+        return False
+    ip = network(raw, link)
+    body = ip['body']
+    return (ip['source'] == source and ip['proto'] == 58 and ip['wire'][7] == 255
+            and len(body) >= 24 and body[:2] == b'\x87\x00' and body[8:24] == address.packed
+            and checksum(pseudo(ip, len(body)) + body) == 0)
+
+
 def outgoing(raw, link, mode, flags, sequence, target, port):
     ip = network(raw, link)
     segment = tcp(ip)

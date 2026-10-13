@@ -83,6 +83,7 @@ def command(*args):
 def provision(evidence=None):
     if evidence is None:
         evidence = dict(requests=[], setup=[])
+    evidence.setdefault('neighbor_requests', [])
     stop, ready = threading.Event(), threading.Event()
     errors, worker = [], None
     created = False
@@ -123,8 +124,10 @@ def provision(evidence=None):
                         neighbor = neighbor_reply(wire, bytes.fromhex(mac.replace(':', '')))
                         if neighbor is not None:
                             charged += len(wire) + len(neighbor)
-                            if charged > 1048576:
+                            if charged > 1048576 or len(evidence['neighbor_requests']) + len(evidence['requests']) >= 4096:
                                 raise ValueError('independent peer exceeded its byte ceiling')
+                            evidence['neighbor_requests'].append(dict(bytes_hex=wire.hex(), link_type=1,
+                                unix_ns=time.time_ns(), monotonic_ns=time.monotonic_ns()))
                             channel.send(neighbor)
                             continue
                         if wire[12:14] not in (b'\x08\x00', b'\x86\xdd'):
@@ -138,7 +141,7 @@ def provision(evidence=None):
                         charged += len(wire) + sum(map(len, answers))
                         if len(wire) > 2048 or any(len(answer) > 2048 for answer in answers) or charged > 1048576:
                             raise ValueError('independent scripted peer exceeded its byte/snap ceiling')
-                        if len(evidence['requests']) >= 4096:
+                        if len(evidence['requests']) + len(evidence['neighbor_requests']) >= 4096:
                             raise ValueError('independent peer request ceiling exceeded')
                         entry = dict(bytes_hex=wire.hex(), link_type=1, unix_ns=time.time_ns(),
                                      monotonic_ns=time.monotonic_ns(), replies=[])

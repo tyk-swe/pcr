@@ -2,11 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use packetcraftr_core::{
-    budget::Deadline, document::os_fingerprints as core, error::BoundaryError, registry::Registry,
-};
+use packetcraftr_core::{budget::Deadline, document::os_fingerprints as core, registry::Registry};
 
 use super::{
     Collector, Error, Event, Match, Outcome, Probe, Report, Request,
@@ -41,21 +38,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         let mut clock = self.clock.clone();
         let mut authorizer = self.admission();
         let mut client = self.with_parent_deadline(deadline.clone());
-        // Keep the single preparation answer for this whole operation and never
-        // silently send another neighbor request inside a later exchange.
-        client.neighbors = self
-            .neighbors
-            .one_attempt(
-                request.timeout,
-                request.collection.capture.max_frames,
-                request.collection.capture.max_bytes,
-                request.collection.capture.snap_length,
-                1,
-            )
-            .map_err(|source| Error::Execution {
-                sequence: 0,
-                source: BoundaryError::from_error(source),
-            })?;
+        client.neighbors = self.neighbors.for_operation(1);
         client.neighbors_resolved_ahead = true;
         let mut policy = (*client.policy).clone();
         policy.max_packets_per_operation = policy
@@ -66,14 +49,14 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             .min(request.limits.max_probes as u64 * super::MAX_WIRE_BYTES);
         client.policy = Arc::new(policy);
         let mut executor = Native {
-            client: &client,
+            client: &mut client,
+            preparation_timeout: request.timeout,
             send: crate::send::Options {
                 plan: request.route.clone(),
                 ..Default::default()
             },
             collection: request.collection.clone(),
             spent: Stats::default(),
-            spacing: Duration::from_secs(1) / request.probes_per_second,
         };
         run(
             &request,
@@ -144,12 +127,18 @@ where
         kind: Some(Probe::OpenSyn),
         cleanup_ack: 0,
     };
-    let preparation = executor
-        .prepare(&base, deadline)
-        .map_err(|source| Error::Execution {
-            sequence: 0,
-            source,
-        })?;
+    let preparation = executor.prepare(&base, deadline);
+    // Expiry/cancellation observed during preparation outranks its timeout or
+    // provider error, just as it does during a planned probe exchange.
+    deadline.enforce()?;
+    let preparation = preparation.map_err(|source| Error::Execution {
+        sequence: 0,
+        source,
+    })?;
+    // Resolution elapsed time includes pre-send setup. Without its send
+    // timestamp, conservatively owe a full rate interval from completion;
+    // run_planned accounts for the shared deadline before sleeping.
+    let paced_after = (preparation.stats.packets_completed > 0).then(|| clock.now());
     let preparation_frames = preparation.captured.len();
     let preparation_bytes = preparation
         .captured
@@ -174,11 +163,15 @@ where
     limits.max_frames -= preparation_frames;
     limits.max_bytes -= preparation_bytes;
     let state = internal.clone();
-    let mut evidence = BatchEvidence::new(
+    let mut evidence = BatchEvidence::new_with_retention_limits(
         Workflow::Os,
         Probes,
+        request.limits.evidence,
         limits,
-        Fingerprints { registry },
+        Fingerprints {
+            registry,
+            pending_cleanup: None,
+        },
         |event: Event, deadline: &Deadline| {
             internal.publish(event.clone()).map_err(Error::Output)?;
             publish(event, deadline)
@@ -187,41 +180,18 @@ where
     let mut phase = 0_usize;
     let mut attempt = 1_u32;
     let mut sequence = 0_u64;
-    let mut cleaned = 0_u64;
     let kinds = [
         Probe::OpenSyn,
         Probe::ClosedSyn,
         Probe::TimestampSyn,
         Probe::Echo,
     ];
-    let mut planned = |_: &mut BatchEvidence<_, _, _>, _: std::time::Instant, _: &Deadline| {
-        if let Some(latest) = state.latest()
-            && latest.sequence > cleaned
-            && matches!(
-                latest.probe,
-                Some(Probe::OpenSyn | Probe::ClosedSyn | Probe::TimestampSyn)
-            )
-            && let Some(observation) = &latest.observation
-            && observation
-                .tcp
-                .as_ref()
-                .is_some_and(|tcp| tcp.flags == 0x12)
-        {
-            cleaned = latest.sequence;
+    let mut planned = |evidence: &mut BatchEvidence<Fingerprints<'_>, _, _>,
+                       _: std::time::Instant,
+                       _: &Deadline| {
+        if let Some(mut cleanup) = evidence.classifier_mut().pending_cleanup.take() {
             sequence += 1;
-            let cleanup = PlannedProbe {
-                sequence,
-                attempt: latest.attempt,
-                kind: None,
-                port: if latest.probe == Some(Probe::ClosedSyn) {
-                    request.closed_port
-                } else {
-                    request.open_port
-                },
-                identity: observation.acknowledgment.unwrap_or(0),
-                cleanup_ack: observation.sequence.unwrap_or(0).wrapping_add(1),
-                ..base.clone()
-            };
+            cleanup.sequence = sequence;
             return Ok(Some(Batch {
                 probes: vec![cleanup],
                 timeout: request.timeout,
@@ -283,7 +253,7 @@ where
     let mut stats = run_planned(
         &mut planned,
         Some(request.probes_per_second),
-        None,
+        paced_after,
         deadline,
         clock,
         executor,

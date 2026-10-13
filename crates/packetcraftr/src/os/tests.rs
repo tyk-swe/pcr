@@ -27,7 +27,7 @@ use crate::{
     policy::{Authorizer, Operation},
     probe::{Batch, Evidence},
     target::{Authorized, ResolveTarget, ResolvedZone, SelectedAddress, Target},
-    test_support::{NoopClock, decoded_packet, sent_packet},
+    test_support::{NoopClock, RecordingClock, decoded_packet, sent_packet},
 };
 
 struct Approval {
@@ -78,6 +78,8 @@ impl ResolveTarget for Approval {
 struct Fixture {
     executed: Vec<PlannedProbe>,
     prepared: bool,
+    preparation: Preparation,
+    preparation_clock: Option<RecordingClock>,
     silent: bool,
     conflict: bool,
     corrupt: bool,
@@ -89,7 +91,10 @@ struct Fixture {
 impl OsExecutor for Fixture {
     fn prepare(&mut self, _: &PlannedProbe, _: &Deadline) -> Result<Preparation, BoundaryError> {
         self.prepared = true;
-        Ok(Preparation::default())
+        if let Some(clock) = &self.preparation_clock {
+            clock.advance(self.preparation.stats.elapsed);
+        }
+        Ok(self.preparation.clone())
     }
 }
 impl Executor<Batch<PlannedProbe>> for Fixture {
@@ -248,20 +253,29 @@ fn execute_target(
     fixture: &mut Fixture,
     denied: bool,
 ) -> Result<super::Aggregate, Error> {
-    let address = match &target {
+    let mut request = Request::new(target, 80, 81, super::builtin_corpus().unwrap());
+    request.attempts = 1;
+    request.limits.max_probes = 7;
+    request.timeout = Duration::from_millis(20);
+    execute_request(&request, fixture, denied)
+}
+
+fn execute_request(
+    request: &Request,
+    fixture: &mut Fixture,
+    denied: bool,
+) -> Result<super::Aggregate, Error> {
+    let target = &request.target;
+    let address = match target {
         Target::Address(address) => *address,
         Target::ScopedAddress(scoped) => IpAddr::V6(scoped.address()),
         _ => unreachable!("numeric test target"),
     };
     let registry = packetcraftr_core::protocol::builtin::registry();
-    let mut request = Request::new(target, 80, 81, super::builtin_corpus().unwrap());
-    request.attempts = 1;
-    request.limits.max_probes = 7;
-    request.timeout = Duration::from_millis(20);
     let collector = Collector::default();
     let mut sink = collector.clone();
     let report = engine::run(
-        &request,
+        request,
         &registry,
         &mut Deadline::new(Duration::from_secs(10)),
         &mut NoopClock,
@@ -273,6 +287,145 @@ fn execute_target(
         |event, _| sink.publish(event).map_err(Error::Output),
     )?;
     collector.finish(report)
+}
+
+#[test]
+fn preparation_shares_retention_without_reducing_valid_exchange_ceilings() {
+    use packetcraftr_core::frame::{Frame, LinkType};
+
+    for (max_frames, max_bytes, retained_replies) in
+        [(2, 4096, 1), (10, 128, 1), (1, 4096, 0), (10, 80, 0)]
+    {
+        let mut request = Request::new(
+            Target::Address("192.0.2.2".parse().unwrap()),
+            80,
+            81,
+            super::builtin_corpus().unwrap(),
+        );
+        request.attempts = 1;
+        request.limits.evidence.max_frames = max_frames;
+        request.limits.evidence.max_bytes = max_bytes;
+        request.limits.evidence.max_undecoded = max_frames;
+        request.collection.capture.max_frames = max_frames;
+        request.collection.capture.max_bytes = max_bytes;
+        request.collection.capture.snap_length = max_bytes.min(super::MAX_FRAME_BYTES);
+        request.collection.max_responses = max_frames;
+        request.collection.max_unmatched_frames = max_frames;
+        let mut fixture = Fixture {
+            // Zero remaining retention still accepts a valid single-frame exchange.
+            conflict: max_frames > 1 && max_bytes > 80,
+            preparation: Preparation {
+                captured: vec![Frame::without_timestamp(LinkType(1), vec![0; 80]).unwrap()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let aggregate = execute_request(&request, &mut fixture, false).unwrap();
+        assert_eq!(
+            aggregate.report.identification.outcome,
+            Outcome::Inconclusive
+        );
+        assert!(!aggregate.report.complete);
+        assert_eq!(aggregate.report.observations.len(), retained_replies);
+        assert!(aggregate.report.retained_evidence_bytes <= max_bytes);
+        let open = fixture.executed.first().unwrap();
+        let cleanup = fixture
+            .executed
+            .iter()
+            .find(|probe| probe.kind.is_none())
+            .unwrap();
+        assert_eq!(cleanup.port, open.port);
+        assert_eq!(cleanup.identity, open.identity.wrapping_add(1));
+        assert_eq!(cleanup.cleanup_ack, 12346);
+    }
+}
+
+#[test]
+fn layer3_small_snapshots_do_not_require_neighbor_capture_minima() {
+    let (client, providers) = crate::test_support::fake_client();
+    let mut request = Request::new(
+        Target::Address("192.0.2.2".parse().unwrap()),
+        80,
+        81,
+        super::builtin_corpus().unwrap(),
+    );
+    request.attempts = 1;
+    request.timeout = Duration::from_secs(1);
+    request.route.link_mode = packetcraftr_netio::link::Mode::Layer3;
+    request.collection.capture.snap_length = 64;
+    let report = client
+        .with_clock(NoopClock)
+        .identify_os(request, Collector::default())
+        .unwrap();
+    assert!(matches!(
+        report.identification.outcome,
+        Outcome::Inconclusive
+    ));
+    assert_eq!(
+        providers
+            .calls()
+            .iter()
+            .filter(|call| matches!(call, crate::test_support::Call::Transmit(_)))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn preparation_pacing_ignores_pre_send_setup_and_respects_the_deadline() {
+    for short_deadline in [false, true] {
+        let mut request = Request::new(
+            Target::Address("192.0.2.2".parse().unwrap()),
+            80,
+            81,
+            super::builtin_corpus().unwrap(),
+        );
+        request.attempts = 1;
+        request.probes_per_second = 1;
+        let mut clock = RecordingClock::default();
+        let mut deadline = clock.deadline(if short_deadline {
+            Duration::from_millis(2100)
+        } else {
+            Duration::from_secs(30)
+        });
+        let mut fixture = Fixture {
+            preparation_clock: Some(clock.clone()),
+            preparation: Preparation {
+                stats: Stats {
+                    packets_attempted: 1,
+                    packets_completed: 1,
+                    bytes: 42,
+                    // Setup can take longer than a rate interval before sending.
+                    elapsed: Duration::from_secs(2),
+                    ..Default::default()
+                },
+                request_bytes: Some(vec![0; 42].into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let result = engine::run(
+            &request,
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut deadline,
+            &mut clock,
+            &mut Approval {
+                address: "192.0.2.2".parse().unwrap(),
+                deny: false,
+            },
+            &mut fixture,
+            |_, _| Ok(()),
+        );
+        if short_deadline {
+            assert!(matches!(result, Err(Error::Deadline(_))));
+            assert!(clock.delays().is_empty());
+            assert!(fixture.executed.is_empty());
+        } else {
+            result.unwrap();
+            assert_eq!(clock.delays().first(), Some(&Duration::from_secs(1)));
+            assert!(!fixture.executed.is_empty());
+        }
+    }
 }
 
 #[test]

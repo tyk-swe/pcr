@@ -79,21 +79,23 @@ def run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
                           timeout=30, **kwargs)
 
 
-def listeners() -> list[socket.socket]:
+def listeners(*, isolated: bool = False) -> list[socket.socket]:
     sockets = []
     for family in (socket.AF_INET, socket.AF_INET6):
         for port in (OPEN_PORT, OTHER_OPEN_PORT):
             listener = socket.socket(family)
             if family == socket.AF_INET6:
                 listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-            listener.bind(("0.0.0.0" if family == socket.AF_INET else "::", port))
+            address = (("0.0.0.0" if isolated else "127.0.0.1") if family == socket.AF_INET
+                       else ("::" if isolated else "::1"))
+            listener.bind((address, port))
             listener.listen(32)
             sockets.append(listener)
     return sockets
 
 
 def peer() -> None:
-    sockets = listeners()
+    sockets = listeners(isolated=True)
     print("ready", flush=True)
     try:
         while True:
@@ -205,7 +207,8 @@ def cases(binary: Path, corpus: Path | None, isolated: bool, expected_family: st
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", type=Path, default=ROOT / "target/debug/packetcraftr")
+    filename = "packetcraftr.exe" if platform.system() == "Windows" else "packetcraftr"
+    parser.add_argument("--binary", type=Path, default=ROOT / "target/debug" / filename)
     parser.add_argument("--output", type=Path, default=ROOT / "target/os-native.json")
     parser.add_argument("--corpus", type=Path)
     parser.add_argument("--expect-family", choices=("linux", "windows", "macos"))

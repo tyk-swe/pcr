@@ -101,15 +101,6 @@ impl Collector {
         })
     }
 
-    pub(super) fn latest(&self) -> Option<ProbeEvidence> {
-        self.0.update(|events| {
-            events.iter().rev().find_map(|event| match event {
-                Event::Probe(probe) => Some(probe.clone()),
-                _ => None,
-            })
-        })
-    }
-
     pub(super) fn incomplete(&self) -> bool {
         self.0.update(|events| {
             events.iter().any(|event| match event {

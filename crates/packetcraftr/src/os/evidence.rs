@@ -79,6 +79,7 @@ pub(super) fn classify(
 
 pub(super) struct Fingerprints<'a> {
     pub registry: &'a Arc<Registry>,
+    pub pending_cleanup: Option<PlannedProbe>,
 }
 
 impl Classifier for Fingerprints<'_> {
@@ -126,6 +127,21 @@ impl Classifier for Fingerprints<'_> {
             .into(),
         };
         if let Outcome::Reply(reply) = outcome {
+            // Cleanup is wire state, not fingerprint evidence: a correlated
+            // SYN/ACK needs a reset even if its supporting frame cannot be kept.
+            if let Some(observation) = &reply.observation.observation
+                && observation
+                    .tcp
+                    .as_ref()
+                    .is_some_and(|tcp| tcp.flags == 0x12)
+            {
+                self.pending_cleanup = Some(PlannedProbe {
+                    kind: None,
+                    identity: observation.acknowledgment.unwrap_or(0),
+                    cleanup_ack: observation.sequence.unwrap_or(0).wrapping_add(1),
+                    ..probe.clone()
+                });
+            }
             record.response = reply.frame;
             // Fields cannot qualify a match after their supporting frame was refused.
             record.observation = record.response.as_ref().and(reply.observation.observation);

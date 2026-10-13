@@ -630,9 +630,7 @@ fn an_operation_keeps_a_shared_answer_it_relied_on() {
     brief
         .remember(link, NeighborCacheKey::from(&request()))
         .expect("cache insert");
-    let operation = brief
-        .one_attempt(Duration::from_millis(100), 4, 512, 512, 1)
-        .expect("valid narrowed options");
+    let operation = brief.for_operation(1);
     assert_eq!(operation.cached(&request()).expect("lookup"), Some(link));
 
     std::thread::sleep(Duration::from_millis(40));

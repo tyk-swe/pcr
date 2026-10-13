@@ -3,6 +3,8 @@ import importlib.util
 import json
 import pathlib
 import subprocess
+import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -11,6 +13,43 @@ import native_platform_evidence as evidence
 spec = importlib.util.spec_from_file_location("native_launcher", pathlib.Path(__file__).with_name("test-native-platform.py"))
 launcher = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(launcher)
+
+os_spec = importlib.util.spec_from_file_location("os_native_launcher", pathlib.Path(__file__).with_name("test-os-identification-native.py"))
+os_launcher = importlib.util.module_from_spec(os_spec)
+os_spec.loader.exec_module(os_launcher)
+
+
+class OsNativeExecutable(unittest.TestCase):
+    def test_listeners_are_loopback_only_unless_isolated(self):
+        for isolated, addresses in ((False, ("127.0.0.1", "::1")), (True, ("0.0.0.0", "::"))):
+            with self.subTest(isolated=isolated):
+                sockets = [mock.Mock() for _ in range(4)]
+                with mock.patch.object(os_launcher.socket, "socket", side_effect=sockets):
+                    if isolated:
+                        result = os_launcher.listeners(isolated=True)
+                    else:
+                        result = os_launcher.listeners()
+                self.assertEqual(result, sockets)
+                for listener, address, port in zip(sockets, (addresses[0], addresses[0], addresses[1], addresses[1]),
+                                                   (os_launcher.OPEN_PORT, os_launcher.OTHER_OPEN_PORT) * 2):
+                    listener.bind.assert_called_once_with((address, port))
+                    listener.listen.assert_called_once_with(32)
+
+    def test_default_binary_uses_the_platform_executable_suffix(self):
+        for system, filename in (("Windows", "packetcraftr.exe"), ("Linux", "packetcraftr"),
+                                 ("Darwin", "packetcraftr")):
+            with self.subTest(system=system), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                binary = root / "target/debug" / filename
+                binary.parent.mkdir(parents=True)
+                binary.write_bytes(b"fixture executable")
+                output = root / "report.json"
+                with mock.patch.object(os_launcher, "ROOT", root), \
+                        mock.patch.object(os_launcher.platform, "system", return_value=system), \
+                        mock.patch.object(os_launcher, "source_identity", return_value={}), \
+                        mock.patch.object(sys, "argv", ["os-native", "--initialize-only", "--output", str(output)]):
+                    self.assertEqual(os_launcher.main(), 0)
+                self.assertEqual(json.loads(output.read_text())["binary_sha256"], os_launcher.sha256(binary))
 
 
 class NativeScenarioEvidence(unittest.TestCase):

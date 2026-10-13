@@ -38,11 +38,11 @@ pub(super) trait OsExecutor: Executor<Batch<PlannedProbe>> {
 }
 
 pub(super) struct Native<'a, P, K> {
-    pub client: &'a Client<P, K>,
+    pub client: &'a mut Client<P, K>,
+    pub preparation_timeout: Duration,
     pub send: crate::send::Options,
     pub collection: crate::exchange::Collection,
     pub spent: Stats,
-    pub spacing: Duration,
 }
 
 impl<P: PacketProviders, K: Clock> OsExecutor for Native<'_, P, K> {
@@ -76,6 +76,19 @@ impl<P: PacketProviders, K: Clock> OsExecutor for Native<'_, P, K> {
         {
             return Ok(Preparation::default());
         }
+        // Apply neighbor-specific capture minima only to routes that need
+        // resolution, retaining the one answer for all later exchanges.
+        self.client.neighbors = self
+            .client
+            .neighbors
+            .one_attempt(
+                self.preparation_timeout,
+                self.collection.capture.max_frames,
+                self.collection.capture.max_bytes,
+                self.collection.capture.snap_length,
+                1,
+            )
+            .map_err(BoundaryError::from_error)?;
         crate::preparation::authorize_neighbor_request(&self.client.policy, &request, plan)
             .map_err(BoundaryError::from_error)?;
         let bytes = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
@@ -100,11 +113,6 @@ impl<P: PacketProviders, K: Clock> OsExecutor for Native<'_, P, K> {
             capture: resolution.capture_statistics,
         };
         self.spent.checked_add_assign(&stats).map_err(failure)?;
-        // Space the first OS probe from any request that preparation just sent.
-        let pause = self.spacing.saturating_sub(stats.elapsed);
-        if resolution.attempts > 0 && !pause.is_zero() {
-            self.client.clock.sleep(pause, deadline).map_err(failure)?;
-        }
         Ok(Preparation {
             stats,
             captured: resolution.captured,

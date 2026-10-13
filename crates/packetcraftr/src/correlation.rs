@@ -320,13 +320,18 @@ fn direct_ip_protocol_reply(request: &Packet, response: &Packet) -> Option<IpAdd
     }) {
         return None;
     }
-    if response
-        .get::<Icmpv4>()
-        .is_some_and(|icmp| matches!(icmp.icmp_type, 3 | 4 | 5 | 11 | 12))
-        || response
-            .get::<Icmpv6>()
-            .is_some_and(|icmp| icmp.icmp_type < 128)
-    {
+    let outer_payload = semantics::outer_layers(response)
+        .skip_while(|layer| !BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ip))
+        .skip(1)
+        .find(|layer| !BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ipv6_extension));
+    if outer_payload.is_some_and(|layer| {
+        layer
+            .downcast_ref::<Icmpv4>()
+            .is_some_and(|icmp| matches!(icmp.icmp_type, 3 | 4 | 5 | 11 | 12))
+            || layer
+                .downcast_ref::<Icmpv6>()
+                .is_some_and(|icmp| icmp.icmp_type < 128)
+    }) {
         return None;
     }
     let request_path = semantics::outer_ip_path(request).ok()??;

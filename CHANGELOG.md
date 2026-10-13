@@ -99,6 +99,9 @@ remaining acceptance gates.
 
 ### Fixed
 
+- Strict IPv6 extension builds still require their declared child headers;
+  IP-in-IP replies retain positive evidence when an inner packet contains an
+  ICMP error.
 - IP-protocol replies resolve IPv6 extension chains while retaining extension
   protocol probes. Portless scans consume exclusions applied to their active
   TCP, UDP, or SCTP discovery transports.

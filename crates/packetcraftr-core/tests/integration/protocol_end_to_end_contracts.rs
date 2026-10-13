@@ -14,11 +14,14 @@ use packetcraftr_core::diagnostic::{
     CHECKSUM_FAILURE_CODES, GRE_CHECKSUM, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM, IGMP_CHECKSUM,
     IPV4_CHECKSUM, SCTP_CHECKSUM, TCP_CHECKSUM, UDP_CHECKSUM, VRRP_CHECKSUM,
 };
+use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::layer::{Layer, Malformed, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
 use packetcraftr_core::protocol::link::{Arp, Ethernet};
-use packetcraftr_core::protocol::network::{Icmpv4, Icmpv6, Igmp, Ipv4, Ipv6, Vrrp};
+use packetcraftr_core::protocol::network::{
+    DestinationOptions, HopByHop, Icmpv4, Icmpv6, Igmp, Ipv4, Ipv6, SegmentRoutingHeader, Vrrp,
+};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::Gre;
 use packetcraftr_core::registry::Registry;
@@ -59,6 +62,49 @@ fn known_tcp() -> Tcp {
         sequence: 1,
         window: 0xfaf0,
         ..Tcp::default()
+    }
+}
+
+#[test]
+fn ipv6_empty_protocol_probes_do_not_exempt_extension_child_validation() {
+    let builder = build::Builder::new(registry());
+    let mut base = Packet::new();
+    base.push(ipv6("2001:db8::1", "2001:db8::2"));
+    let mut probe = base.clone();
+    probe.get_mut::<Ipv6>().unwrap().next_header = WireValue::Exact(6);
+    builder
+        .build(probe, codec::Context::default(), build::Options::default())
+        .expect("header-only IPv6 protocol probe");
+    for extension in [
+        Box::new(HopByHop {
+            next_header: WireValue::Exact(6),
+            ..HopByHop::default()
+        }) as Box<dyn Layer>,
+        Box::new(DestinationOptions {
+            next_header: WireValue::Exact(6),
+            ..DestinationOptions::default()
+        }),
+        Box::new(SegmentRoutingHeader {
+            next_header: WireValue::Exact(6),
+            segments_left: WireValue::Exact(0),
+            segments: vec!["2001:db8::2".parse().unwrap()],
+            ..SegmentRoutingHeader::default()
+        }),
+    ] {
+        let mut packet = base.clone();
+        packet.push_boxed(extension);
+        let error = builder
+            .build(packet, codec::Context::default(), build::Options::default())
+            .expect_err("extension headers must include the declared TCP child");
+        let build::Error::Codec { source, .. } = error else {
+            panic!("{error}")
+        };
+        assert!(
+            source
+                .to_string()
+                .contains("selects registered layer tcp, but that layer is absent"),
+            "{source}"
+        );
     }
 }
 

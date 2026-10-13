@@ -219,7 +219,8 @@ fn resolve_next_header(
         context.mode,
         diagnostics,
     )?;
-    let empty_protocol_probe = matches!(value, WireValue::Exact(_))
+    let empty_protocol_probe = name == NAME
+        && matches!(value, WireValue::Exact(_))
         && context
             .child
             .is_none_or(|child| BuiltinProtocol::Padding.identifies(child));

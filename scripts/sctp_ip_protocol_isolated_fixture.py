@@ -83,7 +83,7 @@ def reply(wire):
         return [envelope + packet(source, target, 132, body)]
     if endpoint == 47:
         # Exercise a real IPv6 extension chain before the replying protocol.
-        options = bytes.fromhex('3c000000000000002f00000000000000')
+        options = bytes.fromhex('3c000000000000002f00000000000000000088b5')
         return [envelope + packet(source, target, 47 if ip['version'] == 4 else 0,
                                   b'' if ip['version'] == 4 else options)]
     if endpoint == 254:

@@ -32,6 +32,7 @@ use packetcraftr_core::{
             SegmentRoutingHeader,
         },
         transport::{Sctp, Tcp},
+        tunnel::Gre,
     },
 };
 use packetcraftr_netio::{self as net, capture, link::Mode, route, transmit};
@@ -194,6 +195,7 @@ fn icmp_error(
     body.extend_from_slice(quoted);
     let mut packet = ip_envelope(router, destination, None);
     if ipv6 {
+        packet.push(HopByHop::default());
         packet.push(Icmpv6 {
             icmp_type: v6.0,
             code: v6.1,
@@ -351,6 +353,44 @@ fn respond(sent: &Packet, wire: &Bytes) -> Vec<Frame> {
         return Vec::new();
     };
     match protocol {
+        4 | 41 => {
+            let inner_ipv6 = protocol == 41;
+            let (inner_source, inner_destination): (IpAddr, IpAddr) = if inner_ipv6 {
+                (
+                    "2001:db8:1::1".parse().unwrap(),
+                    "2001:db8:1::2".parse().unwrap(),
+                )
+            } else {
+                (
+                    "198.51.100.1".parse().unwrap(),
+                    "198.51.100.2".parse().unwrap(),
+                )
+            };
+            let quote = encode(ip_envelope(inner_destination, inner_source, Some(47)));
+            let mut inner = icmp_error(
+                inner_ipv6,
+                inner_source,
+                inner_destination,
+                (3, 2),
+                (1, 4),
+                0,
+                &quote,
+            );
+            let mut reply = ip_envelope(destination, source, None);
+            if ipv6 {
+                reply.push(HopByHop::default());
+            }
+            while !inner.is_empty() {
+                reply.push_boxed(inner.remove(0).unwrap());
+            }
+            let parsed = decode(&encode(reply.clone()));
+            assert!(if inner_ipv6 {
+                parsed.get::<Icmpv6>().is_some()
+            } else {
+                parsed.get::<Icmpv4>().is_some()
+            });
+            vec![frame(reply)]
+        }
         0 | 43 | 44 | 47 | 60 | 99 if ipv6 => {
             let IpAddr::V6(final_destination) = source else {
                 unreachable!()
@@ -366,6 +406,10 @@ fn respond(sent: &Packet, wire: &Bytes) -> Vec<Frame> {
             reply.push(DestinationOptions {
                 next_header: WireValue::Exact(47),
                 ..DestinationOptions::default()
+            });
+            reply.push(Gre {
+                protocol_type: WireValue::Exact(0x88b5),
+                ..Gre::default()
             });
             vec![frame(reply)]
         }
@@ -646,6 +690,37 @@ fn ipv6_ip_protocol_replies_match_extension_chains_and_extension_numbers() {
             endpoint.probes[0].reply,
             matched.then_some(scan::Reply::IpProtocolPayload)
         );
+    }
+}
+
+#[test]
+fn ip_in_ip_replies_retain_positive_evidence_with_inner_icmp_errors() {
+    for ipv6 in [false, true] {
+        let mut request = base_request(
+            ipv6,
+            vec![
+                ProbeEndpoint::Ip { protocol: 4 },
+                ProbeEndpoint::Ip { protocol: 41 },
+            ],
+            Schedule::Serial,
+        );
+        request.timeout = Duration::from_millis(200);
+        let (client, _) = client();
+        let collector = scan::Collector::default();
+        let report = client.scan(request, collector.clone()).unwrap();
+        let aggregate = collector.finish(report).unwrap();
+        assert_eq!(aggregate.endpoints.len(), 2);
+        for endpoint in &aggregate.endpoints {
+            assert_eq!(endpoint.probes[0].status, ProbeStatus::Response);
+            assert_eq!(
+                endpoint.probes[0].reply,
+                Some(scan::Reply::IpProtocolPayload)
+            );
+            assert_eq!(
+                endpoint.inference.as_ref().unwrap().state,
+                Some(State::Open)
+            );
+        }
     }
 }
 

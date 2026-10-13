@@ -53,6 +53,8 @@ for remaining acceptance gates and revision-bound evidence.
 - Standalone `identify-os` / `Client::identify_os` with bounded dual-stack
   probes, verified open/closed prerequisites, exact retained wire evidence,
   conservative OS-family candidates, and explicit inconclusive results.
+  Its CLI deadline includes corpus loading, setup, and live probing in every
+  output format.
   Output/v14 and the independently versioned OS document contract preserve
   observations and candidate provenance; broader M10 native acceptance remains
   open. See [OS identification](docs/os-identification.md).

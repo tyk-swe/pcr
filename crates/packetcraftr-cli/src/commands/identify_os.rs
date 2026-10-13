@@ -129,7 +129,10 @@ impl super::Spec for Args {
             request.timeout,
             request.collection.capture,
         )?;
-        let client = workflow.client(Runtime::Workflow);
+        let mut client = workflow.client(Runtime::Workflow);
+        if let Some(deadline) = crate::invocation::deadline() {
+            client = client.with_parent_deadline((*deadline).clone());
+        }
         request.route = workflow.route;
         // Preserve explicit evidence ceilings; preparation supplies native decoding options.
         request.collection.decode = workflow.collection.decode;
@@ -197,4 +200,62 @@ fn render(report: library::Report) -> Result<(), CliError> {
         report.stats.bytes,
         report.complete
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{commands::Spec, test_support::stream};
+    use clap::Parser as _;
+    use packetcraftr_core::budget::Deadline;
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Instant,
+    };
+
+    #[test]
+    fn preparation_cannot_restart_the_invocation_deadline() {
+        for format in [Format::Json, Format::Text, Format::Ndjson] {
+            let started = Instant::now();
+            let readings = AtomicUsize::new(0);
+            let parent = Deadline::with_time_source(Duration::from_millis(500), move || {
+                match readings.fetch_add(1, Ordering::SeqCst) {
+                    0 => started,
+                    // Corpus loading used half the invocation budget at the CLI gate.
+                    1 => started + Duration::from_millis(250),
+                    // Setup and workflow startup consume the remainder.
+                    _ => started + Duration::from_millis(550),
+                }
+            });
+            let _invocation = crate::invocation::enter_deadline(Some(Arc::new(parent)));
+            let crate::commands::CommandLine::IdentifyOs(args) = crate::cli::Cli::parse_from([
+                "packetcraftr",
+                "identify-os",
+                "192.0.2.2",
+                "--open-port",
+                "80",
+                "--closed-port",
+                "81",
+                "--max-duration-ms",
+                "500",
+                // An unbound client would fail policy admission before native I/O.
+                "--allow-destination",
+                "198.51.100.0/24",
+            ])
+            .command
+            else {
+                panic!("expected OS identification command");
+            };
+            let (stream, output) = stream(output::contract::Command::IdentifyOs);
+            let Err(error) = args.run(format, &stream) else {
+                panic!("invocation deadline must expire");
+            };
+            assert_eq!(
+                error.classification.code, "policy.duration_limit",
+                "{format:?}: {error:?}"
+            );
+            assert_eq!(error.message, "OS identification deadline exceeded");
+            assert!(output.records().is_empty());
+        }
+    }
 }

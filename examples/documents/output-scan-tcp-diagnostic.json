@@ -1,0 +1,175 @@
+{
+  "schema": "packetcraftr.output/v15",
+  "command": "scan",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "target": "192.168.56.10",
+    "resolved_addresses": [
+      "192.168.56.10"
+    ],
+    "plan": {
+      "method": {
+        "requested": "raw",
+        "selected": "raw"
+      },
+      "port_catalog": {
+        "name": "port-catalog",
+        "version": "1.0.0"
+      },
+      "excluded_endpoints": 0,
+      "discovery": {
+        "mode": "omitted",
+        "probes": [],
+        "neighbor": false,
+        "excluded_endpoints": 0,
+        "unresponsive": "skip"
+      },
+      "tcp_scan": {
+        "mode": "ack",
+        "flags": 16
+      }
+    },
+    "hosts": [
+      {
+        "address": "192.168.56.10",
+        "discovery": "not_requested",
+        "scan": "scanned",
+        "reasons": [],
+        "probes": []
+      }
+    ],
+    "endpoints": [
+      {
+        "address": "192.168.56.10",
+        "transport": "tcp",
+        "port": 80,
+        "classification": "unknown",
+        "port_hint": "http",
+        "inference": {
+          "state": "unfiltered",
+          "rule": "tcp_ack.reset",
+          "supporting": [
+            70000
+          ],
+          "conflicting": [],
+          "unanswered": [],
+          "failed": []
+        },
+        "probes": [
+          {
+            "sequence": 70000,
+            "stage": "scan",
+            "protocol": "tcp",
+            "destination": "192.168.56.10",
+            "destination_port": 80,
+            "tcp_scan": {
+              "mode": "ack",
+              "flags": 16
+            },
+            "attempt": 1,
+            "sent_at": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 0
+            },
+            "status": "response",
+            "classification": "unknown",
+            "responder": "192.168.56.10",
+            "received_at": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 3000000
+            },
+            "latency": {
+              "secs": 0,
+              "nanos": 3000000
+            },
+            "reason": "correlated TCP reset",
+            "tcp_window": 0
+          }
+        ]
+      },
+      {
+        "address": "192.168.56.10",
+        "transport": "tcp",
+        "port": 443,
+        "classification": "timeout",
+        "port_hint": "https",
+        "inference": {
+          "state": "filtered",
+          "rule": "tcp_ack.silence",
+          "supporting": [
+            70001
+          ],
+          "conflicting": [],
+          "unanswered": [],
+          "failed": []
+        },
+        "probes": [
+          {
+            "sequence": 70001,
+            "stage": "scan",
+            "protocol": "tcp",
+            "destination": "192.168.56.10",
+            "destination_port": 443,
+            "tcp_scan": {
+              "mode": "ack",
+              "flags": 16
+            },
+            "attempt": 1,
+            "sent_at": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 0
+            },
+            "status": "timeout",
+            "classification": "timeout",
+            "reason": "no checksum-valid, protocol-consistent response before the deadline"
+          }
+        ]
+      }
+    ],
+    "undecoded": [],
+    "unattributed": [],
+    "retained_evidence_bytes": 0,
+    "rtt": {
+      "sent": 2,
+      "received": 1,
+      "lost": 1,
+      "min": {
+        "secs": 0,
+        "nanos": 3000000
+      },
+      "avg": {
+        "secs": 0,
+        "nanos": 3000000
+      },
+      "max": {
+        "secs": 0,
+        "nanos": 3000000
+      }
+    },
+    "scheduling": {
+      "mode": "fixed",
+      "observed_peak_window": 1,
+      "retries_started": 0,
+      "conditions": [],
+      "incomplete": []
+    }
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 2,
+    "packets_completed": 2,
+    "bytes": 80,
+    "elapsed": {
+      "secs": 1,
+      "nanos": 0
+    },
+    "capture": {
+      "received_frames": 0,
+      "received_bytes": 0,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

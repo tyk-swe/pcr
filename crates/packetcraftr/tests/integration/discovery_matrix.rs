@@ -227,6 +227,7 @@ fn request(target: IpAddr, probe: ProbeEndpoint, then: Then) -> Request {
         Then::Nothing => (Mode::Only, Unresponsive::Skip, Vec::new()),
     };
     Request {
+        tcp_scan: Default::default(),
         max_in_flight: 1,
         targets: Selection {
             include: vec![Specification::Target(Target::Address(target))],

@@ -27,7 +27,8 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = "packetcraftr.output/v14"
+SCHEMA = "packetcraftr.output/v15"
+SCHEMAS = ("packetcraftr.output/v14", SCHEMA)
 FIXTURES = ROOT / "scripts/fixtures/service-identification"
 HELD_OUT_PATH = ROOT / "docs/roadmap/evidence/m09/held-out.v1.json"
 HELD_OUT_SHA256 = "399ae8d919fe3ca2ac32c62962eee37e54a811c5dee30b02f9226e45be94774c"
@@ -346,7 +347,7 @@ def parse_output(stdout, output_format):
         require(summary["endpoints"] == 1, "NDJSON endpoint summary disagrees")
     require(len(records) == 1, "scenario must produce exactly one endpoint record")
     for envelope in envelopes:
-        require(envelope.get("schema") == SCHEMA, "machine schema family changed")
+        require(envelope.get("schema") in SCHEMAS, "machine schema family changed")
         require(envelope.get("command") == "identify", "machine command changed")
         require(envelope.get("status") == "success", "identification did not publish a successful terminal record")
         require(isinstance(envelope.get("diagnostics"), list), "diagnostics must be explicit")

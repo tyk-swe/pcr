@@ -18,8 +18,8 @@ for remaining acceptance gates and revision-bound evidence.
   { max_frames, max_bytes, max_undecoded }`; the existing Serde struct
   representation is preserved for both JSON and binary formats.
 - Current packet documents use `packetcraftr.packet/v2`; machine output uses
-  `packetcraftr.output/v14`. Consumers must explicitly support these families.
-  Output v6–v13 schemas and published evidence stay frozen; see
+  `packetcraftr.output/v15`. Consumers must explicitly support these families.
+  Output v6–v14 schemas and published evidence stay frozen; see
   [consumer compatibility](docs/consumer-compatibility.md).
 - Live workflows run through `Client<P, K>` with explicit providers, policy,
   clock, cancellation, and runtime. Requests and sinks replace free workflow
@@ -49,6 +49,15 @@ for remaining acceptance gates and revision-bound evidence.
   OS interface indexes. Scripts matching exact fields or enums must migrate.
 
 ### Added
+
+- Raw TCP diagnostic scans: `scan::TcpScan` (`Syn`, `Ack`, `Window`, `Fin`, `Null`,
+  `Xmas`, `Maimon`, and observation-only `Custom`) selected by `Request::tcp_scan`
+  and `--tcp-scan`/`--tcp-flags`, with exact flag and per-sequence acknowledgment
+  checks, mode-specific stack-dependent inference including `unfiltered`, and the
+  retained response window. Output/v15 publishes the effective mode and flags,
+  `tcp_window`, and the diagnostic rule vocabulary. Native cross-platform and
+  independent ground-truth acceptance (M12) remain open. See
+  [TCP diagnostics](docs/tcp-diagnostics.md).
 
 - Standalone `identify-os` / `Client::identify_os` with bounded dual-stack
   probes, verified open/closed prerequisites, exact retained wire evidence,

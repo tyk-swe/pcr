@@ -1,0 +1,41 @@
+{
+  "schema": "packetcraftr.output/v15",
+  "command": "scan",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "success",
+  "result": {
+    "target": "192.168.56.10",
+    "probe": {
+      "sequence": 70000,
+      "stage": "scan",
+      "protocol": "tcp",
+      "destination": "192.168.56.10",
+      "destination_port": 80,
+      "tcp_scan": {
+        "mode": "ack",
+        "flags": 16
+      },
+      "attempt": 1,
+      "sent_at": {
+        "unix_seconds": 1770000000,
+        "nanoseconds": 0
+      },
+      "status": "response",
+      "classification": "unknown",
+      "responder": "192.168.56.10",
+      "received_at": {
+        "unix_seconds": 1770000000,
+        "nanoseconds": 3000000
+      },
+      "latency": {
+        "secs": 0,
+        "nanos": 3000000
+      },
+      "reason": "correlated TCP reset",
+      "tcp_window": 0
+    }
+  },
+  "diagnostics": [],
+  "event": "probe"
+}

@@ -4,7 +4,7 @@
 use serde_json::Value;
 use tempfile::TempDir;
 
-use crate::common::{parse_json, parse_ndjson, path_text, run, schema_validator};
+use crate::common::{self, parse_json, parse_ndjson, path_text, run, schema_validator};
 
 #[test]
 fn malformed_window_scale_remains_a_bounded_wire_observation() {
@@ -102,7 +102,7 @@ fn os_result_contract_rejects_unknown_semantics_and_unqualified_candidates() {
 fn actual_native_ndjson_obeys_schema_sequence_and_terminal_contracts() {
     let records: Vec<Value> =
         serde_json::from_str(include_str!("../fixtures/os-native-stream.json")).unwrap();
-    let validator = schema_validator();
+    let validator = common::frozen_v14_schema_validator();
     for (sequence, record) in records.iter().enumerate() {
         assert_eq!(record["sequence"], sequence);
         assert_eq!(record["command"], "identify-os");

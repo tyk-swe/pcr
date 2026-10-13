@@ -60,6 +60,8 @@ pub(in crate::scan) fn probe_packet(probe: &Probe) -> Packet {
         ProbeEndpoint::Tcp { port } => packet.push(Tcp {
             destination_port: port,
             sequence: probe.sequence as u32,
+            acknowledgment: probe.tcp_scan.acknowledgment(probe.sequence),
+            flags: probe.tcp_scan.flags(),
             ..Tcp::default()
         }),
         ProbeEndpoint::Udp { port } => {
@@ -335,7 +337,9 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
         ProbeEndpoint::Tcp { port } => sent.get::<Tcp>().is_some_and(|tcp| {
             tcp.destination_port == port
                 && tcp.sequence == probe.sequence as u32
-                && tcp.flags == Tcp::SYN
+                && tcp.flags == probe.tcp_scan.flags()
+                && tcp.acknowledgment == probe.tcp_scan.acknowledgment(probe.sequence)
+                && tcp.options.is_empty()
         }),
         ProbeEndpoint::Udp { port } => sent.get::<Udp>().is_some_and(|udp| {
             udp.source_port == scan_udp_source_port(probe.attempt) && udp.destination_port == port

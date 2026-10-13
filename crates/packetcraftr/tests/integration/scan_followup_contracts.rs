@@ -53,6 +53,7 @@ fn scan_request(octets: &[u8]) -> scan::Request {
     let mut collection = packetcraftr::exchange::Collection::default();
     collection.capture.snap_length = 1500;
     scan::Request {
+        tcp_scan: Default::default(),
         target_sources: Vec::new(),
         max_in_flight: 1,
         targets: packetcraftr::target::Selection {

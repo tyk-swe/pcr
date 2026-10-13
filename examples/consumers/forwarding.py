@@ -4,8 +4,8 @@
 """Bounded reference consumer for the forwarding contract.
 
 This validates the protocol and forwarding invariants it uses, not the complete
-JSON Schema. It accepts the current v14 family and the frozen v6, v7, v8,
-v9, v10, v11, v12, and v13 families without reinterpreting any of them. Additive fields
+JSON Schema. It accepts the current v15 family and the frozen v6, v7, v8,
+v9, v10, v11, v12, v13, and v14 families without reinterpreting any of them. Additive fields
 are accepted; unknown semantic enums are rejected. An error envelope is an execution failure, not a forwarding verdict.
 """
 from __future__ import annotations
@@ -26,6 +26,7 @@ SCHEMAS = {
     "packetcraftr.output/v12",
     "packetcraftr.output/v13",
     "packetcraftr.output/v14",
+    "packetcraftr.output/v15",
 }
 MAX_RECORD = 16 * 1024 * 1024
 MAX_STREAM = 64 * 1024 * 1024

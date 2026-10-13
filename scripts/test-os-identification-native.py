@@ -163,7 +163,7 @@ def cases(binary: Path, corpus: Path | None, isolated: bool, expected_family: st
                 try:
                     records = ([json.loads(completed.stdout)] if format_name == "json" else
                                [json.loads(line) for line in completed.stdout.splitlines()])
-                    if not records or any(record["schema"] != "packetcraftr.output/v14" for record in records):
+                    if not records or any(record["schema"] not in ("packetcraftr.output/v14", "packetcraftr.output/v15") for record in records):
                         raise ValueError("missing or incompatible output family")
                     if format_name == "ndjson":
                         if [record["sequence"] for record in records] != list(range(len(records))):

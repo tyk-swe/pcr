@@ -84,6 +84,7 @@ fn listing_publishes_the_exact_endpoints_a_scan_would_probe() {
         json!({
             "port_catalog": {"name": "port-catalog", "version": "1.0.0"},
             "excluded_endpoints": 1,
+            "tcp_scan": {"mode": "syn", "flags": 2},
             "endpoints": [
                 {"transport": "tcp", "port": 53, "port_hint": "dns"},
                 {"transport": "tcp", "port": 853, "port_hint": "dns-over-tls"},

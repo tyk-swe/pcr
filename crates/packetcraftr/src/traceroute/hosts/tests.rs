@@ -586,6 +586,8 @@ fn scan_probe(
     responder: Option<IpAddr>,
 ) -> scan::ProbeEvidence {
     scan::ProbeEvidence {
+        tcp_scan: None,
+        tcp_window: None,
         sequence,
         stage: if sequence < 10 {
             Stage::Discovery
@@ -1775,6 +1777,7 @@ fn a_link_layer_rate_that_outlasts_the_timeout_is_rejected() {
 
 fn udp_scan_probe(target: IpAddr, attempt: u32) -> scan::Probe {
     scan::Probe {
+        tcp_scan: Default::default(),
         sequence: 0,
         stage: Stage::Scan,
         address: target,

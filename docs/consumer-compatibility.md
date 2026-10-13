@@ -8,9 +8,9 @@ if an old schema accepts their shape.
 
 Archives freeze schema snapshots/checksums. Resolve `$id` to the bundled local
 file, never moving `main` or a network fetch; do not alter published archives.
-Current producers emit [output/v14](../schemas/packetcraftr.output.v14.schema.json)
+Current producers emit [output/v15](../schemas/packetcraftr.output.v15.schema.json)
 and [packet/v2](../schemas/packetcraftr.packet.v2.schema.json). Beta.3 used output/v2
-and packet/v1; output v6–v13 remain frozen. Tolerate unknown object members, but
+and packet/v1; output v6–v14 remain frozen. Tolerate unknown object members, but
 never guess unknown families, verdicts, check kinds, or evidence states.
 Examples are fixtures; CLI conformance tests validate actual serializers.
 
@@ -26,6 +26,33 @@ Missing metadata, null ingress operand on an expectation, and explicit decoder
 counters include accepted evidence regardless of retained detail/omissions.
 Forwarding fail/inconclusive returns exit 1 after publication; an error envelope
 is execution failure. Neither exit status nor a partial list alone is a verdict.
+
+## Output family v15
+
+V15 adds TCP diagnostic scans. Raw scans with TCP scan endpoints publish the
+effective `plan.tcp_scan` `{mode, flags}`; each raw scan-stage TCP probe and
+`probe_sent` record carries the same object. Discovery TCP probes always carry
+`{mode: syn, flags: 2}`, independent of the scan plan. A correlated direct TCP
+response (not an ICMP error or silence) carries its
+advertised `tcp_window` (0..=65535, as observed; never an identity). Packet-free
+`--list` publishes `ports.tcp_scan` when a TCP endpoint is listed. Connect and
+non-TCP records omit them. Modes are `syn`, `ack`, `window`, `fin`, `null`, `xmas`,
+`maimon`, and `custom`; flags must equal the mode's fixed value, except custom
+(0..=511). The inference `state` gains `unfiltered` and the `rule` vocabulary
+gains `tcp_ack.*`, `tcp_window.*` (`reset_nonzero`, `reset_zero`), `tcp_fin.*`,
+`tcp_null.*`, `tcp_xmas.*`, `tcp_maimon.*` (each `reset`, `icmp_unreachable`,
+`time_exceeded`, `unclassified_reply`, `silence`), and `tcp_custom.reply`/`silence`.
+The schema ties each rule to its state and to the probes' mode.
+
+Meanings differ from v14: `unfiltered` (an ACK reset) never means open; window
+`open`/`closed` and FIN-family `open_or_filtered`/`closed` are stack-dependent
+heuristics; custom infers `unknown` regardless of its flags. Direct TCP
+responses to diagnostic probes are attempt-classified `unknown` or (FIN-family
+reset) `closed`, never `open`; ICMP errors keep their own classification, with
+port-unreachable `unreachable`. Consumers must not treat an inferred state as
+authenticated identity or reliable port detection. See [TCP diagnostics](tcp-diagnostics.md).
+
+V14 and earlier families remain immutable; consumers must explicitly adopt v15.
 
 ## Output family v14
 
@@ -155,7 +182,7 @@ set -e
 python3 examples/consumers/forwarding.py --format ndjson --exit-code "$status" < report.ndjson
 ```
 
-The forwarding consumer accepts v6–v14 and validates its interpreted subset:
+The forwarding consumer accepts v6–v15 and validates its interpreted subset:
 states, counter/omission relationships, requested checks, and verdict coherence.
 It does not replace full JSON Schema validation. Its success means interpretation,
 not forwarding pass; inspect execution/verdict or the harness's test contract.

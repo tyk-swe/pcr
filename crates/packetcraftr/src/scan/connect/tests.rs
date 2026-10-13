@@ -157,6 +157,7 @@ impl Provider for Faulty {
 
 fn scan_with_fault(fault: Fault) -> (Result<Aggregate, Error>, usize) {
     let request = Request {
+        tcp_scan: Default::default(),
         target_sources: Vec::new(),
         targets: crate::target::Target::Address("127.0.0.1".parse().unwrap()).into(),
         udp_payload: bytes::Bytes::new(),
@@ -251,6 +252,7 @@ fn connect_reaches_the_provider_with_the_scoped_socket() {
     };
     let client = client(recorded.clone());
     let request = Request {
+        tcp_scan: Default::default(),
         target_sources: Vec::new(),
         targets: crate::target::Selection {
             include: vec![crate::target::Specification::Target(
@@ -297,6 +299,7 @@ fn connect_reaches_the_provider_with_the_scoped_socket() {
 
 fn adaptive_request(endpoints: Vec<u16>, attempts: u32, host_timeout: Duration) -> Request {
     Request {
+        tcp_scan: Default::default(),
         target_sources: Vec::new(),
         targets: crate::target::Target::Address("127.0.0.1".parse().unwrap()).into(),
         udp_payload: bytes::Bytes::new(),

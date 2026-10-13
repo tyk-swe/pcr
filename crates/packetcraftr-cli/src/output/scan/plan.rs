@@ -134,9 +134,28 @@ impl Discovery {
     }
 }
 
+/// The effective TCP segment a raw scan sends to TCP scan endpoints.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct TcpScan {
+    pub mode: &'static str,
+    pub flags: u16,
+}
+
+impl From<library::TcpScan> for TcpScan {
+    fn from(mode: library::TcpScan) -> Self {
+        Self {
+            mode: mode.as_str(),
+            flags: mode.flags(),
+        }
+    }
+}
+
 /// Published once per scan, beside its results.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Plan {
+    /// Present for the raw method with TCP scan endpoints.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_scan: Option<TcpScan>,
     pub method: Method,
     /// The catalog behind port names, presets, and `port_hint`s.
     pub port_catalog: DataSet,
@@ -153,7 +172,22 @@ pub struct Plan {
 pub struct Ports {
     pub port_catalog: DataSet,
     pub excluded_endpoints: usize,
+    /// Present when an endpoint is TCP and the raw method would probe it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_scan: Option<TcpScan>,
     pub endpoints: Vec<PortEndpoint>,
+}
+
+impl Ports {
+    #[must_use]
+    pub fn with_tcp_scan(mut self, mode: library::TcpScan) -> Self {
+        let tcp = self
+            .endpoints
+            .iter()
+            .any(|endpoint| endpoint.transport == Transport::Tcp);
+        self.tcp_scan = tcp.then(|| TcpScan::from(mode));
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -169,6 +203,7 @@ impl From<&library::Selected> for Ports {
         Self {
             port_catalog: library::catalog::data_set().into(),
             excluded_endpoints: selected.excluded,
+            tcp_scan: None,
             endpoints: selected
                 .endpoints
                 .iter()

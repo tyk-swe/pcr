@@ -135,6 +135,9 @@ pub struct Request {
     /// share a port and never merge. ICMP echo is portless and stands alone.
     /// Empty only for discovery-only requests.
     pub endpoints: Vec<ProbeEndpoint>,
+    /// The segment sent to each TCP scan endpoint; discovery, UDP, and ICMP
+    /// probes ignore it.
+    pub tcp_scan: super::TcpScan,
     pub discovery: super::discovery::Options,
     /// Exact bytes appended to each UDP probe; empty preserves an empty datagram.
     pub udp_payload: bytes::Bytes,
@@ -237,7 +240,8 @@ impl Request {
         }
         check_rate(&Probes, "probes_per_second", self.probes_per_second)?;
         self.discovery.validate(&self.route, &self.limits)?;
-        self.validate_endpoints()
+        self.validate_endpoints()?;
+        self.validate_tcp_scan()
     }
 
     /// Whether any scan endpoint or discovery probe uses `transport`.
@@ -251,6 +255,26 @@ impl Request {
             .iter()
             .chain(discovery)
             .any(|endpoint| endpoint.transport() == transport)
+    }
+
+    fn validate_tcp_scan(&self) -> Result<(), Error> {
+        self.tcp_scan.validate()?;
+        if !self.tcp_scan.is_syn()
+            && !self
+                .endpoints
+                .iter()
+                .any(|endpoint| endpoint.transport() == Transport::Tcp)
+        {
+            return Err(Error::InvalidLimit {
+                field: "tcp_scan",
+                value: u64::from(self.tcp_scan.flags()),
+                reason: format!(
+                    "{} scans require at least one TCP scan endpoint",
+                    self.tcp_scan.as_str()
+                ),
+            });
+        }
+        Ok(())
     }
 
     fn validate_endpoints(&self) -> Result<(), Error> {

@@ -15,6 +15,8 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
   packetcraftr scan 192.0.2.10 --transport udp --ports 53,8000-8100
   packetcraftr scan 192.0.2.10 --ports 1-1024 --max-in-flight 32
+  packetcraftr scan 192.0.2.10 --tcp-scan ack --ports 22,80,443
+  packetcraftr scan 192.0.2.10 --tcp-scan custom --tcp-flags 0x029 --ports 80
   packetcraftr scan 192.0.2.10 --transport udp --ports 53,9000 \
     --udp-profiles examples/documents/udp-profiles.json --max-in-flight 8
   packetcraftr --output ndjson scan 198.51.100.10 --transport icmp
@@ -64,8 +66,18 @@ when the build can, and otherwise tcp-connect when every scan and discovery
 probe is TCP and no packet route override is set; results publish the method
 and why auto chose it.
 
+--tcp-scan selects the segment sent to raw TCP scan endpoints: syn (default),
+ack, window, fin, null, xmas, maimon, or custom with --tcp-flags (decimal or
+0x hexadecimal, 0..=0x1ff). Diagnostic modes need the raw method and at least
+one TCP scan endpoint; discovery, traceroute, and connect probes are unaffected.
+ack reports unfiltered (a reset), never open. window reads the reset window
+(nonzero open, zero closed) and fin, null, xmas, and maimon read silence as
+open_or_filtered and a reset as closed. All are stack-dependent heuristics, not
+reliable detection or authenticated identity. custom is observation-only: it
+reports replies and infers no port state.
+
 Each port endpoint reports an inferred state (open, closed, filtered,
-open_or_filtered, or unknown) with the rule that produced it and the attempts
+unfiltered, open_or_filtered, or unknown) with the rule that produced it and the attempts
 that support, conflict with, or did not answer it, beside every attempt
 outcome. A silent UDP port is open_or_filtered. Socket deadlines and local
 errors are operational failures, never port states. Late, duplicate, and
@@ -269,6 +281,64 @@ impl From<Method> for packetcraftr::scan::method::Requested {
     }
 }
 
+/// The TCP segment each raw scan probe sends to a TCP scan endpoint.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub(crate) enum TcpScan {
+    #[default]
+    Syn,
+    Ack,
+    Window,
+    Fin,
+    Null,
+    Xmas,
+    Maimon,
+    Custom,
+}
+
+const MAX_TCP_FLAGS: u16 = 0x1ff;
+
+/// Decimal or `0x` hexadecimal TCP flag bits within the nine defined bits.
+fn parse_tcp_flags(token: &str) -> Result<u16, String> {
+    let parsed = match token
+        .strip_prefix("0x")
+        .or_else(|| token.strip_prefix("0X"))
+    {
+        Some(hex) => u16::from_str_radix(hex, 16),
+        None => token.parse::<u16>(),
+    };
+    match parsed {
+        Ok(flags) if flags <= MAX_TCP_FLAGS => Ok(flags),
+        _ => Err(format!(
+            "invalid TCP flags `{token}`: expected a decimal or 0x hexadecimal value within 0..={MAX_TCP_FLAGS:#x}"
+        )),
+    }
+}
+
+impl TcpScan {
+    /// The library mode; custom needs `--tcp-flags` and nothing else accepts it.
+    pub(crate) fn resolve(
+        self,
+        flags: Option<u16>,
+    ) -> Result<packetcraftr::scan::TcpScan, crate::errors::CliError> {
+        use packetcraftr::scan::TcpScan as Mode;
+        let usage = |message: &str| {
+            crate::errors::CliError::new(packetcraftr_core::error::Kind::Usage, message)
+        };
+        match (self, flags) {
+            (Self::Custom, Some(flags)) => Ok(Mode::Custom { flags }),
+            (Self::Custom, None) => Err(usage("--tcp-scan custom requires --tcp-flags")),
+            (_, Some(_)) => Err(usage("--tcp-flags requires --tcp-scan custom")),
+            (Self::Syn, None) => Ok(Mode::Syn),
+            (Self::Ack, None) => Ok(Mode::Ack),
+            (Self::Window, None) => Ok(Mode::Window),
+            (Self::Fin, None) => Ok(Mode::Fin),
+            (Self::Null, None) => Ok(Mode::Null),
+            (Self::Xmas, None) => Ok(Mode::Xmas),
+            (Self::Maimon, None) => Ok(Mode::Maimon),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub(crate) enum Discovery {
     /// Discover hosts, then scan the ones that answered.
@@ -437,6 +507,15 @@ pub(crate) struct Args {
         default_value = "tcp"
     )]
     pub(crate) transport: Vec<Transport>,
+    /// TCP segment sent to each raw TCP scan endpoint: syn (default), ack,
+    /// window, fin, null, xmas, maimon, or custom with --tcp-flags. Diagnostic
+    /// modes are stack-dependent inferences; discovery stays SYN.
+    #[arg(long, value_enum, default_value_t = TcpScan::Syn)]
+    pub(crate) tcp_scan: TcpScan,
+    /// TCP flag bits for --tcp-scan custom, decimal or 0x hexadecimal within
+    /// 0..=0x1ff; custom probes are observation-only and infer no port state.
+    #[arg(long, value_name = "FLAGS", value_parser = parse_tcp_flags)]
+    pub(crate) tcp_flags: Option<u16>,
     /// Exact UDP probe payload in hex, with optional whitespace, colon, or dash separators.
     #[arg(long, value_name = "HEX", conflicts_with = "udp_payload_file")]
     pub(crate) udp_payload_hex: Option<String>,

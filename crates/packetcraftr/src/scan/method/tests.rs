@@ -17,6 +17,7 @@ const MIXED: &[ProbeEndpoint] = &[
 
 fn request(endpoints: &[ProbeEndpoint]) -> Request {
     Request {
+        tcp_scan: Default::default(),
         max_in_flight: 1,
         targets: Target::Address("192.0.2.1".parse().unwrap()).into(),
         target_sources: Vec::new(),
@@ -161,4 +162,37 @@ fn discovery_probes_take_part_in_the_selection() {
     let tcp = discovering(&[ProbeEndpoint::Tcp { port: 80 }], false);
     let selected = select(Requested::Automatic, &tcp, capabilities(false, false)).unwrap();
     assert_eq!(selected.method, Method::Connect);
+}
+
+#[test]
+fn diagnostic_modes_are_raw_only_and_never_silently_connect() {
+    let diagnostic = Request {
+        tcp_scan: crate::scan::TcpScan::Ack,
+        ..request(TCP)
+    };
+    assert!(matches!(
+        select(Requested::Connect, &diagnostic, capabilities(true, false)),
+        Err(Error::MethodProbe {
+            method: "tcp_connect",
+            ..
+        })
+    ));
+    let automatic = select(
+        Requested::Automatic,
+        &diagnostic,
+        capabilities(false, false),
+    )
+    .unwrap();
+    assert_eq!(automatic.method, Method::Raw);
+    assert!(automatic.reason.unwrap().contains("non-SYN TCP diagnostic"));
+    assert_eq!(
+        select(
+            Requested::Automatic,
+            &request(TCP),
+            capabilities(false, false)
+        )
+        .unwrap()
+        .method,
+        Method::Connect
+    );
 }

@@ -7,8 +7,8 @@
 //! attempts that disagree, and the attempts that observed nothing about the
 //! port because the operation itself failed.
 
-use super::Reply;
 use super::connect::Outcome;
+use super::{Reply, TcpScan};
 use crate::probe::Transport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -16,8 +16,12 @@ pub enum State {
     Open,
     Closed,
     Filtered,
-    /// Silence a UDP service and a filter both explain.
+    /// Silence that either an open service or a filter explains: a silent UDP
+    /// port, or a silent FIN, NULL, Xmas, or Maimon probe.
     OpenOrFiltered,
+    /// An ACK probe's reset: packets reach the port, which says nothing about
+    /// whether a service listens.
+    Unfiltered,
     /// A reply arrived that the method's rules do not interpret.
     Unknown,
 }
@@ -29,6 +33,7 @@ impl State {
             Self::Closed => "closed",
             Self::Filtered => "filtered",
             Self::OpenOrFiltered => "open_or_filtered",
+            Self::Unfiltered => "unfiltered",
             Self::Unknown => "unknown",
         }
     }
@@ -55,6 +60,8 @@ pub enum Rule {
     ConnectRefused,
     ConnectUnreachable,
     ConnectTimedOut,
+    /// A stack-dependent TCP diagnostic conclusion.
+    TcpDiagnostic(DiagnosticRule),
     /// No attempt observed the port: every attempt failed locally or at the
     /// operation deadline. Not a port state.
     OperationalFailure,
@@ -79,6 +86,7 @@ impl Rule {
             Self::ConnectRefused => "tcp_connect.refused",
             Self::ConnectUnreachable => "tcp_connect.unreachable",
             Self::ConnectTimedOut => "tcp_connect.timed_out",
+            Self::TcpDiagnostic(rule) => rule.as_str(),
             Self::OperationalFailure => "operational_failure",
         }
     }
@@ -97,6 +105,7 @@ impl Rule {
             | Self::ConnectTimedOut => State::Filtered,
             Self::SynUnclassifiedReply | Self::UdpUnclassifiedReply => State::Unknown,
             Self::UdpSilence => State::OpenOrFiltered,
+            Self::TcpDiagnostic(rule) => rule.state(),
             Self::OperationalFailure => return None,
         })
     }
@@ -106,12 +115,13 @@ impl Rule {
         matches!(
             self,
             Self::SynSilence | Self::UdpSilence | Self::ConnectTimedOut
-        )
+        ) || matches!(self, Self::TcpDiagnostic(rule) if matches!(rule.outcome, Observed::Silence))
     }
 
     /// Which attempt decides: a reply from the endpoint outranks an ICMP
     /// error from the path, which outranks an uninterpreted reply, which
-    /// outranks silence. The order mirrors the attempt classification ranks.
+    /// outranks silence. Diagnostic rules use the same order, ranking resets above ICMP
+    /// errors even where the attempt classification does not.
     const fn rank(self) -> u8 {
         match self {
             Self::SynAck | Self::UdpReply | Self::ConnectConnected => 6,
@@ -120,7 +130,126 @@ impl Rule {
             Self::SynTimeExceeded | Self::UdpTimeExceeded => 3,
             Self::SynUnclassifiedReply | Self::UdpUnclassifiedReply => 2,
             Self::SynSilence | Self::UdpSilence | Self::ConnectTimedOut => 1,
+            Self::TcpDiagnostic(rule) => rule.outcome.rank(),
             Self::OperationalFailure => 0,
+        }
+    }
+
+    const fn is_custom_silence(self) -> bool {
+        matches!(
+            self,
+            Self::TcpDiagnostic(DiagnosticRule {
+                method: DiagnosticMethod::Custom,
+                outcome: Observed::Silence,
+            })
+        )
+    }
+}
+
+/// The TCP diagnostic mode a rule interprets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DiagnosticMethod {
+    Ack,
+    Window,
+    Fin,
+    Null,
+    Xmas,
+    Maimon,
+    Custom,
+}
+
+impl DiagnosticMethod {
+    /// `None` for SYN, whose rules are the original `tcp_syn.*` set.
+    const fn of(mode: TcpScan) -> Option<Self> {
+        Some(match mode {
+            TcpScan::Syn => return None,
+            TcpScan::Ack => Self::Ack,
+            TcpScan::Window => Self::Window,
+            TcpScan::Fin => Self::Fin,
+            TcpScan::Null => Self::Null,
+            TcpScan::Xmas => Self::Xmas,
+            TcpScan::Maimon => Self::Maimon,
+            TcpScan::Custom { .. } => Self::Custom,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Observed {
+    Reset,
+    ResetNonzeroWindow,
+    ResetZeroWindow,
+    IcmpUnreachable,
+    TimeExceeded,
+    UnclassifiedReply,
+    Silence,
+    Reply,
+}
+
+impl Observed {
+    const fn rank(self) -> u8 {
+        match self {
+            Self::Reset | Self::ResetNonzeroWindow | Self::ResetZeroWindow | Self::Reply => 5,
+            Self::IcmpUnreachable => 4,
+            Self::TimeExceeded => 3,
+            Self::UnclassifiedReply => 2,
+            Self::Silence => 1,
+        }
+    }
+}
+
+/// One TCP diagnostic conclusion: the mode's interpretation of what one
+/// attempt observed. Construction stays inside this module so only
+/// combinations a mode can conclude exist.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DiagnosticRule {
+    method: DiagnosticMethod,
+    outcome: Observed,
+}
+
+macro_rules! rule_id {
+    ($prefix:literal, $outcome:expr) => {
+        match $outcome {
+            Observed::Reset => concat!($prefix, ".reset"),
+            Observed::ResetNonzeroWindow => concat!($prefix, ".reset_nonzero"),
+            Observed::ResetZeroWindow => concat!($prefix, ".reset_zero"),
+            Observed::IcmpUnreachable => concat!($prefix, ".icmp_unreachable"),
+            Observed::TimeExceeded => concat!($prefix, ".time_exceeded"),
+            Observed::UnclassifiedReply => concat!($prefix, ".unclassified_reply"),
+            Observed::Silence => concat!($prefix, ".silence"),
+            Observed::Reply => concat!($prefix, ".reply"),
+        }
+    };
+}
+
+impl DiagnosticRule {
+    pub const fn method(self) -> DiagnosticMethod {
+        self.method
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self.method {
+            DiagnosticMethod::Ack => rule_id!("tcp_ack", self.outcome),
+            DiagnosticMethod::Window => rule_id!("tcp_window", self.outcome),
+            DiagnosticMethod::Fin => rule_id!("tcp_fin", self.outcome),
+            DiagnosticMethod::Null => rule_id!("tcp_null", self.outcome),
+            DiagnosticMethod::Xmas => rule_id!("tcp_xmas", self.outcome),
+            DiagnosticMethod::Maimon => rule_id!("tcp_maimon", self.outcome),
+            DiagnosticMethod::Custom => rule_id!("tcp_custom", self.outcome),
+        }
+    }
+
+    const fn state(self) -> State {
+        match (self.method, self.outcome) {
+            (DiagnosticMethod::Custom, _)
+            | (_, Observed::UnclassifiedReply | Observed::TimeExceeded) => State::Unknown,
+            (DiagnosticMethod::Ack, Observed::Reset) => State::Unfiltered,
+            (DiagnosticMethod::Window, Observed::ResetNonzeroWindow) => State::Open,
+            (DiagnosticMethod::Window, Observed::ResetZeroWindow) => State::Closed,
+            (_, Observed::IcmpUnreachable)
+            | (DiagnosticMethod::Ack | DiagnosticMethod::Window, _) => State::Filtered,
+            (_, Observed::Reset) => State::Closed,
+            (_, _) => State::OpenOrFiltered,
         }
     }
 }
@@ -142,22 +271,59 @@ pub struct Inference {
     pub failed: Vec<u64>,
 }
 
-/// Raw packet attempts, each with its correlated reply or `None` for
-/// silence. ICMP echo is a host observation and infers no port state.
+/// One raw attempt: its correlated reply or `None` for silence, the TCP mode
+/// it sent, and the window the correlated TCP response advertised.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Attempt {
+    pub(crate) sequence: u64,
+    pub(crate) reply: Option<Reply>,
+    pub(crate) tcp_scan: Option<TcpScan>,
+    pub(crate) tcp_window: Option<u16>,
+}
+
+/// Raw packet attempts. ICMP echo is a host observation and infers no port
+/// state.
 pub(crate) fn raw(
     transport: Transport,
-    attempts: impl IntoIterator<Item = (u64, Option<Reply>)>,
+    attempts: impl IntoIterator<Item = Attempt>,
 ) -> Option<Inference> {
-    let rule = match transport {
-        Transport::Tcp => syn_rule,
-        Transport::Udp => udp_rule,
-        Transport::Icmp => return None,
+    if transport == Transport::Icmp {
+        return None;
+    }
+    Some(conclude(attempts.into_iter().map(|attempt| {
+        let rule = match transport {
+            Transport::Tcp => match attempt.tcp_scan.and_then(DiagnosticMethod::of) {
+                Some(method) => diagnostic_rule(method, attempt.reply, attempt.tcp_window),
+                None => syn_rule(attempt.reply),
+            },
+            _ => udp_rule(attempt.reply),
+        };
+        (attempt.sequence, Some(rule))
+    })))
+}
+
+fn diagnostic_rule(method: DiagnosticMethod, reply: Option<Reply>, window: Option<u16>) -> Rule {
+    let outcome = match (method, reply) {
+        (_, None) => Observed::Silence,
+        (DiagnosticMethod::Custom, Some(_)) => Observed::Reply,
+        (
+            _,
+            Some(
+                Reply::IcmpPortUnreachable
+                | Reply::IcmpAdministrativelyProhibited
+                | Reply::IcmpDestinationUnreachable,
+            ),
+        ) => Observed::IcmpUnreachable,
+        (_, Some(Reply::IcmpTimeExceeded)) => Observed::TimeExceeded,
+        (DiagnosticMethod::Window, Some(Reply::TcpReset)) => match window {
+            Some(0) => Observed::ResetZeroWindow,
+            Some(_) => Observed::ResetNonzeroWindow,
+            None => Observed::UnclassifiedReply,
+        },
+        (_, Some(Reply::TcpReset)) => Observed::Reset,
+        (_, Some(_)) => Observed::UnclassifiedReply,
     };
-    Some(conclude(
-        attempts
-            .into_iter()
-            .map(|(sequence, reply)| (sequence, Some(rule(reply)))),
-    ))
+    Rule::TcpDiagnostic(DiagnosticRule { method, outcome })
 }
 
 const fn syn_rule(reply: Option<Reply>) -> Rule {
@@ -233,6 +399,9 @@ fn conclude(attempts: impl Iterator<Item = (u64, Option<Rule>)>) -> Inference {
     for (sequence, rule) in attempts {
         let bucket = match rule {
             None => &mut inference.failed,
+            Some(rule) if rule.is_custom_silence() && !decisive.is_some_and(Rule::is_silence) => {
+                &mut inference.unanswered
+            }
             Some(rule) if rule.state() == state => &mut inference.supporting,
             Some(rule) if rule.is_silence() => &mut inference.unanswered,
             Some(_) => &mut inference.conflicting,

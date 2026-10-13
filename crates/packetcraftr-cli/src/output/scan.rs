@@ -158,6 +158,9 @@ pub struct Probe {
     pub scope: Option<Scope>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
+    /// The TCP segment a raw TCP probe sent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_scan: Option<plan::TcpScan>,
     pub attempt: u32,
     pub status: ProbeStatus,
     pub classification: Classification,
@@ -173,6 +176,9 @@ pub struct Probe {
     pub reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub application: Option<ApplicationEvidence>,
+    /// The window the correlated TCP response advertised, as observed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_window: Option<u16>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -426,6 +432,8 @@ pub struct Sent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
     pub destination_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_scan: Option<plan::TcpScan>,
     pub attempt: u32,
     pub sent_at: Timestamp,
     pub udp_profile: Option<String>,
@@ -449,6 +457,8 @@ impl TryFrom<library::SentProbe> for Sent {
             destination: probe.address,
             scope: probe.scope.as_ref().map(Scope::from),
             destination_port: probe.endpoint.port(),
+            tcp_scan: (probe.endpoint.transport() == Transport::Tcp)
+                .then(|| plan::TcpScan::from(probe.tcp_scan)),
             attempt: probe.attempt,
             sent_at: Timestamp::try_from(sent.timing().freshness_marker().wall_clock())?,
             frame: sent.wire_bytes().clone().into(),
@@ -610,6 +620,7 @@ impl TryFrom<library::ProbeEvidence> for Probe {
             destination: evidence.address,
             scope: evidence.scope.as_ref().map(Scope::from),
             destination_port: evidence.port,
+            tcp_scan: evidence.tcp_scan.map(plan::TcpScan::from),
             attempt: evidence.attempt,
             status: evidence.status,
             classification: evidence.classification.into(),
@@ -620,6 +631,7 @@ impl TryFrom<library::ProbeEvidence> for Probe {
             frame: evidence.response.map(Captured::try_from).transpose()?,
             reason: evidence.reason,
             application: evidence.application.map(Into::into),
+            tcp_window: evidence.tcp_window,
         })
     }
 }

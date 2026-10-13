@@ -11,7 +11,7 @@ applicable native runtime acceptance remain open. Fixed scheduling is default.
 
 `scan::Adaptive` / `Request::adaptive` / `--adaptive` enables one shared raw/connect
 controller. Output/v10 introduced configuration, observed peak, retries,
-conditions, and incomplete hosts; [current v14](../consumer-compatibility.md#output-family-v10)
+conditions, and incomplete hosts; [current v15](../consumer-compatibility.md#output-family-v10)
 retains them. No configured window is a throughput claim.
 
 | Setting | Default |

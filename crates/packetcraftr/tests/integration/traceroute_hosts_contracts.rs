@@ -179,6 +179,8 @@ fn scan_observations_choose_each_hosts_probe() {
         resolved_addresses: Vec::new(),
         hosts: Vec::new(),
         discovery: vec![scan::ProbeEvidence {
+            tcp_scan: None,
+            tcp_window: None,
             sequence: 0,
             stage: scan::Stage::Discovery,
             address: IpAddr::V4(host(11)),
@@ -552,6 +554,7 @@ fn a_real_scan_selects_the_probe_its_host_answered() {
     let mut collection = packetcraftr::exchange::Collection::default();
     collection.capture.snap_length = 1500;
     let scan_request = scan::Request {
+        tcp_scan: Default::default(),
         target_sources: Vec::new(),
         max_in_flight: 1,
         targets: packetcraftr::target::Target::Address(IpAddr::V4(host(11))).into(),
@@ -725,6 +728,7 @@ fn an_adaptive_scan_still_selects_the_probe_its_host_answered() {
     let mut collection = packetcraftr::exchange::Collection::default();
     collection.capture.snap_length = 1500;
     let scan_request = scan::Request {
+        tcp_scan: Default::default(),
         target_sources: Vec::new(),
         max_in_flight: 4,
         targets: packetcraftr::target::Target::Address(IpAddr::V4(host(11))).into(),
@@ -933,6 +937,7 @@ fn a_trace_spends_only_what_the_scan_left_of_the_policy() {
     let mut collection = packetcraftr::exchange::Collection::default();
     collection.capture.snap_length = 1500;
     let scan_request = scan::Request {
+        tcp_scan: Default::default(),
         target_sources: Vec::new(),
         max_in_flight: 1,
         targets: packetcraftr::target::Target::Address(IpAddr::V4(host(11))).into(),

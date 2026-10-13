@@ -198,6 +198,7 @@ where
 
 fn tcp_scan_request(target: Target) -> Request {
     Request {
+        tcp_scan: Default::default(),
         target_sources: Vec::new(),
         max_in_flight: 1,
         targets: target.into(),
@@ -400,6 +401,7 @@ fn unsolicited_duplicate_requires_a_winner_and_active_correlation() {
     let local = Ipv4Addr::new(192, 0, 2, 1);
     let remote = Ipv4Addr::new(192, 0, 2, 2);
     let probe = Probe {
+        tcp_scan: Default::default(),
         sequence: 0,
         stage: super::Stage::Scan,
         address: remote.into(),
@@ -658,6 +660,7 @@ fn scoped_v6_route(
 
 fn scoped_request(targets: crate::target::Selection, max_in_flight: usize) -> Request {
     Request {
+        tcp_scan: Default::default(),
         target_sources: Vec::new(),
         targets,
         udp_payload: bytes::Bytes::new(),

@@ -87,15 +87,19 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         transport,
         tcp_scan,
         tcp_flags,
+        sctp_scan,
         udp_payload_hex,
         udp_payload_file,
         udp_profiles,
         family,
         ports,
         exclude_ports,
+        ip_protocols,
+        exclude_ip_protocols,
         discovery,
         discovery_probes,
         discovery_ports,
+        discovery_ip_protocols,
         unresponsive_hosts,
         reverse_dns,
         reverse_dns_port,
@@ -128,6 +132,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let transports = transports(&transport)?;
     let tcp_scan = tcp_scan.resolve(tcp_flags)?;
     tcp_scan.validate().map_err(CliError::classified)?;
+    let sctp_scan: packetcraftr::scan::SctpScan = sctp_scan.into();
     let stdin_consumers = targets_file
         .iter()
         .chain(exclude_file.iter())
@@ -167,16 +172,66 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 "--tcp-scan other than syn needs the raw method; drop --connect and --method tcp-connect",
             ));
         }
-        let ports = if ports.is_empty() && exclude_ports.is_empty() {
-            None
-        } else {
-            let selected = select_endpoints(&transports, ports, exclude_ports, max_ports)?;
-            let ports = output::scan::plan::Ports::from(&selected);
-            Some(if requested == method::Requested::Connect {
-                ports
+        let sctp_diagnostic = !sctp_scan.is_init();
+        if sctp_diagnostic && requested == method::Requested::Connect {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--sctp-scan other than init needs the raw method; drop --connect and --method tcp-connect",
+            ));
+        }
+        if transports == [Transport::Ip] && requested == method::Requested::Connect {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--transport ip needs the raw method; drop --connect and --method tcp-connect",
+            ));
+        }
+        let (ports, ip_protocols) = if transports == [Transport::Ip] {
+            if !ports.is_empty() || !exclude_ports.is_empty() {
+                return Err(CliError::new(
+                    Kind::Usage,
+                    "--ports and --exclude-ports do not apply to portless IP-protocol scans; use --ip-protocols",
+                ));
+            }
+            let ip_protocols = if ip_protocols.is_empty() && exclude_ip_protocols.is_empty() {
+                None
             } else {
-                ports.with_tcp_scan(tcp_scan)
-            })
+                let selected = select_endpoints(
+                    &transports,
+                    ports,
+                    exclude_ports,
+                    ip_protocols,
+                    exclude_ip_protocols,
+                    max_ports,
+                )?;
+                Some(output::scan::plan::IpProtocols::from(&selected))
+            };
+            (None, ip_protocols)
+        } else {
+            if !ip_protocols.is_empty() || !exclude_ip_protocols.is_empty() {
+                return Err(CliError::new(
+                    Kind::Usage,
+                    "--ip-protocols and --exclude-ip-protocols require --transport ip",
+                ));
+            }
+            let ports = if ports.is_empty() && exclude_ports.is_empty() {
+                None
+            } else {
+                let selected = select_endpoints(
+                    &transports,
+                    ports,
+                    exclude_ports,
+                    ip_protocols,
+                    exclude_ip_protocols,
+                    max_ports,
+                )?;
+                let ports = output::scan::plan::Ports::from(&selected);
+                Some(if requested == method::Requested::Connect {
+                    ports
+                } else {
+                    ports.with_tcp_scan(tcp_scan).with_sctp_scan(sctp_scan)
+                })
+            };
+            (ports, None)
         };
         if diagnostic && ports.as_ref().is_none_or(|ports| ports.tcp_scan.is_none()) {
             return Err(CliError::new(
@@ -184,11 +239,18 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 "--tcp-scan other than syn requires at least one TCP port endpoint",
             ));
         }
+        if sctp_diagnostic && ports.as_ref().is_none_or(|ports| ports.sctp_scan.is_none()) {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--sctp-scan other than init requires at least one SCTP port endpoint",
+            ));
+        }
         return list::run(
             targets,
             list::Options {
                 origins: selection.origins,
                 ports,
+                ip_protocols,
                 family,
                 max_targets,
                 max_duration: duration.max_duration(),
@@ -203,6 +265,8 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         &discovery_probes,
         discovery_ports,
         &exclude_ports,
+        discovery_ip_protocols,
+        &exclude_ip_protocols,
         unresponsive_hosts,
         max_ports,
     )?;
@@ -236,11 +300,18 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     };
     scan_limits.validate().map_err(CliError::classified)?;
     let selected = if scanning {
-        select_endpoints(&transports, ports, exclude_ports, max_ports)?
-    } else if !ports.is_empty() {
+        select_endpoints(
+            &transports,
+            ports,
+            exclude_ports,
+            ip_protocols,
+            exclude_ip_protocols,
+            max_ports,
+        )?
+    } else if !ports.is_empty() || !ip_protocols.is_empty() {
         return Err(CliError::new(
             Kind::Usage,
-            "--discovery only probes no scan port; remove --ports",
+            "--discovery only probes no scan port; remove --ports and --ip-protocols",
         ));
     } else {
         packetcraftr::scan::Selected {
@@ -270,6 +341,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         address_family: family.into(),
         endpoints: selected.endpoints,
         tcp_scan,
+        sctp_scan,
         discovery,
         attempts,
         adaptive: adaptive.into_adaptive(timeout.timeout(), duration.max_duration(), max_in_flight),
@@ -282,7 +354,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         },
         collection: collection(timeout.timeout(), queue_limits)?,
     };
-    if !tcp_scan.is_syn() {
+    if !tcp_scan.is_syn() || !sctp_scan.is_init() {
         request.validate().map_err(CliError::classified)?;
     }
     let trace_stage = traceroute
@@ -324,6 +396,12 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 .iter()
                 .any(|endpoint| endpoint.transport() == Transport::Tcp))
         .then(|| output::scan::plan::TcpScan::from(request.tcp_scan)),
+        sctp_scan: (selected_method == method::Method::Raw
+            && request
+                .endpoints
+                .iter()
+                .any(|endpoint| endpoint.transport() == Transport::Sctp))
+        .then(|| output::scan::plan::SctpScan::from(request.sctp_scan)),
         method: selection.into(),
         port_catalog: packetcraftr::scan::catalog::data_set().into(),
         excluded_endpoints: selected.excluded,

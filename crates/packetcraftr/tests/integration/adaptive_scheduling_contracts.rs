@@ -192,6 +192,7 @@ fn real_io() -> responder::Io {
 fn request(targets: Vec<IpAddr>, ports: &[u16], attempts: u32) -> Request {
     Request {
         tcp_scan: Default::default(),
+        sctp_scan: Default::default(),
         target_sources: Vec::new(),
         targets: Selection {
             include: targets

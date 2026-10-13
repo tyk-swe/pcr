@@ -19,6 +19,7 @@ use packetcraftr_core::error::{BoundaryError, Classified as _};
 fn request() -> Request {
     Request {
         tcp_scan: Default::default(),
+        sctp_scan: Default::default(),
         target_sources: Vec::new(),
         max_in_flight: 4,
         targets: crate::target::Target::Address("192.0.2.2".parse().unwrap()).into(),
@@ -41,6 +42,7 @@ fn batch(address: u8, sequence: u64) -> Batch<Probe> {
     Batch {
         probes: vec![Probe {
             tcp_scan: Default::default(),
+            sctp_scan: Default::default(),
             sequence,
             stage: Stage::Scan,
             address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, address)),

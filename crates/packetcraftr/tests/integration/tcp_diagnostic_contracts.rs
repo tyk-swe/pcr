@@ -459,6 +459,7 @@ fn address(ipv6: bool) -> IpAddr {
 fn request(ipv6: bool, mode: TcpScan, schedule: Schedule) -> Request {
     Request {
         tcp_scan: mode,
+        sctp_scan: Default::default(),
         target_sources: Vec::new(),
         max_in_flight: if schedule == Schedule::Serial { 1 } else { 4 },
         targets: Selection {

@@ -22,6 +22,7 @@ pub(crate) use dns::DnsMatcher;
 pub(crate) use echo::EchoMatcher;
 pub use quoted_icmp::{IcmpErrorKind, QuotedTransport, quoted_icmp_error};
 pub(crate) use reverse_flow::ReverseFlowMatcher;
+pub use sctp::{SctpResponseKind, sctp_response_kind};
 
 struct ReversedProtocolLayers<'request, 'response> {
     request_index: usize,

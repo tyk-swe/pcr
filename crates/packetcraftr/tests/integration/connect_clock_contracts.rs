@@ -40,6 +40,7 @@ fn attempt_expires_clock_before_operation_dl() {
     let timeout = Duration::from_millis(20);
     let request = scan::Request {
         tcp_scan: Default::default(),
+        sctp_scan: Default::default(),
         target_sources: Vec::new(),
         targets: Target::Address("192.0.2.10".parse().unwrap()).into(),
         udp_payload: bytes::Bytes::new(),

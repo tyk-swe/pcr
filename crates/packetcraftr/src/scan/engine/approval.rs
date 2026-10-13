@@ -89,6 +89,22 @@ pub(super) fn approve_scan<A: Authorizer + ResolveTarget>(
             reason: "scoped targets cannot combine with an explicit --interface".to_owned(),
         });
     }
+    if request.discovery.runs()
+        && request.discovery.probes.iter().any(|probe| {
+            matches!(
+                probe,
+                ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask
+            )
+        })
+        && selected
+            .targets
+            .iter()
+            .any(|target| target.address.is_ipv6())
+    {
+        return Err(Error::InvalidDiscovery {
+            message: "ICMP timestamp and netmask discovery probes are IPv4-only and cannot be used with IPv6 targets".to_owned(),
+        });
+    }
 
     Ok(ApprovedScan {
         planned_duration: plan.worst_case,
@@ -219,8 +235,8 @@ pub(super) fn plan_scan(
             })
         })
         .ok_or_else(overflow)?;
-    let maximum_bytes = maximum_wire_bytes(targets, probes, request)?
-        .checked_add(maximum_wire_bytes(targets, endpoints, request)?)
+    let maximum_bytes = maximum_wire_bytes(targets, probes, request, false)?
+        .checked_add(maximum_wire_bytes(targets, endpoints, request, true)?)
         .and_then(|bytes| bytes.checked_add(neighbor_bytes))
         .ok_or_else(overflow)?;
     let too_long = || Error::DurationLimit {
@@ -283,30 +299,36 @@ pub(super) fn maximum_wire_bytes(
     targets: &[SelectedAddress],
     endpoints: &[ProbeEndpoint],
     request: &Request,
+    scan_stage: bool,
 ) -> Result<u64, Error> {
     let overflow = || Error::InvalidLimit {
         field: "wire_bytes",
         value: u64::MAX,
         reason: "scan payload accounting overflowed".to_owned(),
     };
-    let payload = endpoints
-        .iter()
-        .filter_map(|endpoint| match endpoint {
-            ProbeEndpoint::Udp { port } => Some(port),
-            ProbeEndpoint::Tcp { .. } | ProbeEndpoint::Icmp => None,
-        })
-        .try_fold(0u64, |total, port| {
-            total
-                .checked_add(
-                    request
-                        .udp_profiles
-                        .get(port)
-                        .map_or(request.udp_payload.len(), |profile| {
-                            profile.payload_length()
-                        }) as u64,
-                )
-                .ok_or_else(overflow)
-        })?;
+    let sctp_init_extra = if !scan_stage || request.sctp_scan.is_init() {
+        12_u64
+    } else {
+        0_u64
+    };
+    let payload = endpoints.iter().try_fold(0u64, |total, endpoint| {
+        let extra = match endpoint {
+            ProbeEndpoint::Udp { port } => request
+                .udp_profiles
+                .get(port)
+                .map_or(request.udp_payload.len(), |profile| {
+                    profile.payload_length()
+                }) as u64,
+            ProbeEndpoint::Sctp { .. } => sctp_init_extra,
+            ProbeEndpoint::Tcp { .. }
+            | ProbeEndpoint::TcpAck { .. }
+            | ProbeEndpoint::Icmp
+            | ProbeEndpoint::IcmpTimestamp
+            | ProbeEndpoint::IcmpNetmask
+            | ProbeEndpoint::Ip { .. } => 0,
+        };
+        total.checked_add(extra).ok_or_else(overflow)
+    })?;
     let endpoints = endpoints.len() as u64;
     targets.iter().try_fold(0u64, |total, target| {
         let header = if target.address.is_ipv4() {

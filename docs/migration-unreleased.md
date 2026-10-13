@@ -10,13 +10,23 @@ track `main`.
 | Contract | beta.3 | Current main |
 | --- | --- | --- |
 | Packet JSON/YAML | `packetcraftr.packet/v1` | `packetcraftr.packet/v2` |
-| Command JSON/NDJSON | `packetcraftr.output/v2` | `packetcraftr.output/v15` |
+| Command JSON/NDJSON | `packetcraftr.output/v2` | `packetcraftr.output/v16` |
 
-Older packet documents are rejected. Output v6–v14 schemas stay frozen for
+Older packet documents are rejected. Output v6–v15 schemas stay frozen for
 historical evidence; see the [consumer policy](consumer-compatibility.md).
 
 ## Scanner, identification, and live workflows
 
+- **SCTP and IP-protocol inventory (v16):** Adopt `output::contract::SCHEMA_V16`.
+  `scan::Request` and `scan::Probe` gain `sctp_scan: scan::SctpScan` (default `Init`);
+  `scan::ProbeEvidence` gains `ip_protocol: Option<u8>`, `icmp_request: Option<&'static str>`,
+  and `sctp_scan: Option<SctpScan>`; `scan::Endpoint` gains `ip_protocol: Option<u8>`;
+  `probe::Transport` gains `Sctp` and `Ip`; `probe::ProbeEndpoint` gains `Sctp`, `Ip`,
+  `TcpAck`, `IcmpTimestamp`, and `IcmpNetmask`; `scan::Reply` and `scan::Rule` gain
+  SCTP, IP-protocol, and ICMP timestamp/netmask/protocol-unreachable variants.
+  CLI adds `--transport sctp|ip`, `--sctp-scan`, `--ip-protocols`,
+  `--exclude-ip-protocols`, `--discovery-ip-protocols`, `sctp:` port prefixes, and
+  `--discovery-probes tcp-ack,icmp-timestamp,icmp-netmask,sctp,ip`.
 - **TCP diagnostic scans (v15):** Adopt `output::contract::SCHEMA_V15`.
   `scan::Request` and `scan::Probe` gain `tcp_scan: scan::TcpScan` (default `Syn`);
   `scan::ProbeEvidence` gains `tcp_scan: Option<TcpScan>` and `tcp_window: Option<u16>`;

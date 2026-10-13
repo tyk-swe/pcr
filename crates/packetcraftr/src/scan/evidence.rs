@@ -15,7 +15,7 @@ use packetcraftr_core::{
 use super::plan::packet::sent_probe_matches;
 use super::profile;
 use super::report::RttAccumulator;
-use super::{Classification, Event, Probe, ProbeEvidence, Reply, Stage, TcpScan};
+use super::{Classification, Event, Probe, ProbeEvidence, Reply, SctpScan, Stage, TcpScan};
 use crate::correlation::{Correlation, Transport};
 use crate::evidence::SentPacket;
 use crate::probe::ProbeStatus;
@@ -39,11 +39,18 @@ pub fn classify_response(
 ) -> Option<CorrelatedResponse> {
     let observation = crate::correlation::observe(registry, transport, request, response)?;
     let classification = match observation.correlation {
-        Correlation::TcpReset | Correlation::PortUnreachable => Classification::Closed,
-        Correlation::TcpSynAck | Correlation::UdpReply | Correlation::IcmpReply => {
-            Classification::Open
-        }
-        Correlation::TcpOther => Classification::Unknown,
+        Correlation::TcpReset
+        | Correlation::SctpAbort
+        | Correlation::PortUnreachable
+        | Correlation::ProtocolUnreachable => Classification::Closed,
+        Correlation::TcpSynAck
+        | Correlation::UdpReply
+        | Correlation::SctpInitAck
+        | Correlation::IcmpReply
+        | Correlation::IcmpTimestampReply
+        | Correlation::IcmpNetmaskReply
+        | Correlation::IpProtocolReply => Classification::Open,
+        Correlation::TcpOther | Correlation::SctpOther => Classification::Unknown,
         Correlation::TimeExceeded | Correlation::AdministrativelyProhibited => {
             Classification::Filtered
         }
@@ -77,12 +84,22 @@ fn diagnostic_classification(
     }
 }
 
-/// A reset from the endpoint outranks router evidence, which outranks an
-/// uninterpreted segment, whatever the attempt classification says.
+fn sctp_cookie_echo_classification(reply: Reply, classified: Classification) -> Classification {
+    match reply {
+        Reply::SctpAbort => Classification::Closed,
+        Reply::SctpInitAck | Reply::SctpOther => Classification::Unknown,
+        Reply::IcmpPortUnreachable | Reply::IcmpProtocolUnreachable => Classification::Unreachable,
+        _ => classified,
+    }
+}
+
+/// A reset or abort from the endpoint outranks router evidence, which outranks
+/// an uninterpreted segment, whatever the attempt classification says.
 const fn diagnostic_rank(reply: Reply) -> u8 {
     match reply {
-        Reply::TcpReset => 5,
+        Reply::TcpReset | Reply::SctpAbort => 5,
         Reply::IcmpPortUnreachable
+        | Reply::IcmpProtocolUnreachable
         | Reply::IcmpAdministrativelyProhibited
         | Reply::IcmpDestinationUnreachable => 4,
         Reply::IcmpTimeExceeded => 3,
@@ -109,9 +126,12 @@ impl Observation {
     ) -> Option<Self> {
         let mut classified =
             classify_response(registry, probe.endpoint.transport(), sent, response)?;
-        let diagnostic = probe.endpoint.transport() == Transport::Tcp
+        let tcp_diagnostic = probe.endpoint.transport() == Transport::Tcp
             && probe.stage == Stage::Scan
             && !probe.tcp_scan.is_syn();
+        let sctp_cookie_echo = probe.endpoint.transport() == Transport::Sctp
+            && probe.stage == Stage::Scan
+            && probe.sctp_scan == SctpScan::CookieEcho;
         let tcp_window = if matches!(
             classified.reply,
             Reply::TcpSynAck | Reply::TcpReset | Reply::TcpOther
@@ -120,17 +140,20 @@ impl Observation {
         } else {
             None
         };
-        let transport_rank = if diagnostic {
+        let transport_rank = if tcp_diagnostic || sctp_cookie_echo {
             diagnostic_rank(classified.reply)
         } else {
             classified.classification.rank()
         };
-        if diagnostic {
+        if tcp_diagnostic {
             classified.classification = diagnostic_classification(
                 probe.tcp_scan,
                 classified.reply,
                 classified.classification,
             );
+        } else if sctp_cookie_echo {
+            classified.classification =
+                sctp_cookie_echo_classification(classified.reply, classified.classification);
         }
         Some(Self {
             response: classified,
@@ -217,7 +240,10 @@ impl Classifier for ProbeClassifier<'_> {
             scope: probe.scope.clone(),
             transport: probe.endpoint.transport(),
             port: probe.endpoint.port(),
+            ip_protocol: probe.endpoint.ip_protocol(),
+            icmp_request: probe.endpoint.icmp_request_kind(),
             tcp_scan: (probe.endpoint.transport() == Transport::Tcp).then_some(probe.tcp_scan),
+            sctp_scan: (probe.endpoint.transport() == Transport::Sctp).then_some(probe.sctp_scan),
             tcp_window: None,
             attempt: probe.attempt,
             status: ProbeStatus::Timeout,
@@ -267,6 +293,7 @@ impl Classifier for ProbeClassifier<'_> {
                     evidence.address,
                     evidence.transport,
                     evidence.port,
+                    evidence.ip_protocol,
                     evidence.scope.as_ref().map(|scope| scope.interface.clone()),
                 ))
                 .or_insert(Classification::Timeout)

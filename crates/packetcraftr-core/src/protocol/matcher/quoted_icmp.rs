@@ -13,13 +13,17 @@ use crate::{
     protocol::transport::{Sctp, Tcp},
 };
 
-use super::{IcmpMessage, sctp::sctp_initiate_tag};
+use super::{
+    IcmpMessage,
+    sctp::{sctp_cookie_echo, sctp_initiate_tag},
+};
 use crate::protocol::headers::{Ipv4Header, Ipv6Header};
-use crate::protocol::network::ip_protocol;
+use crate::protocol::network::{Ipv4, Ipv6, ip_protocol};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IcmpErrorKind {
     PortUnreachable,
+    ProtocolUnreachable,
     AdministrativelyProhibited,
     DestinationUnreachable,
     TimeExceeded,
@@ -31,6 +35,7 @@ pub enum QuotedTransport {
     Udp,
     Sctp,
     Icmp,
+    Ip,
 }
 
 impl QuotedTransport {
@@ -53,15 +58,23 @@ pub fn quoted_icmp_error(
 ) -> Option<IcmpErrorKind> {
     let transport = request
         .iter()
-        .find_map(|layer| BuiltinProtocol::of(layer).and_then(QuotedTransport::of))?;
+        .find_map(|layer| BuiltinProtocol::of(layer).and_then(QuotedTransport::of))
+        .or_else(|| {
+            request
+                .iter()
+                .any(|layer| BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_ip))
+                .then_some(QuotedTransport::Ip)
+        })?;
     if transport != expected_transport {
         return None;
     }
     let (icmp_protocol, layer) = directly_received_icmp(response)?;
     let icmp = IcmpMessage::of(layer)?;
     let (icmp_type, code) = (icmp.icmp_type, icmp.code);
+    let body = icmp.body;
     let kind = match icmp_protocol {
         BuiltinProtocol::Icmpv4 if icmp_type == 3 => match code {
+            2 if transport == QuotedTransport::Ip => IcmpErrorKind::ProtocolUnreachable,
             3 if transport == QuotedTransport::Udp => IcmpErrorKind::PortUnreachable,
             9 | 10 | 13 => IcmpErrorKind::AdministrativelyProhibited,
             _ => IcmpErrorKind::DestinationUnreachable,
@@ -73,9 +86,20 @@ pub fn quoted_icmp_error(
             _ => IcmpErrorKind::DestinationUnreachable,
         },
         BuiltinProtocol::Icmpv6 if icmp_type == 3 => IcmpErrorKind::TimeExceeded,
+        BuiltinProtocol::Icmpv6
+            if icmp_type == 4
+                && code == 1
+                && matches!(transport, QuotedTransport::Ip | QuotedTransport::Sctp)
+                && ipv6_unrecognized_next_header_pointer_matches(body) =>
+        {
+            if transport == QuotedTransport::Ip {
+                IcmpErrorKind::ProtocolUnreachable
+            } else {
+                IcmpErrorKind::DestinationUnreachable
+            }
+        }
         _ => return None,
     };
-    let body = icmp.body;
     let request_network = outer_network_envelope(request)?;
     let response_destination = outer_network_envelope(response)?.destination;
     if request_network.source != response_destination {
@@ -126,13 +150,37 @@ fn directly_received_icmp(response: &Packet) -> Option<(BuiltinProtocol, &dyn La
     Some((icmp_protocol, layer))
 }
 
+fn ipv6_unrecognized_next_header_pointer_matches(body: &[u8]) -> bool {
+    let Some(pointer_bytes) = body.first_chunk::<4>() else {
+        return false;
+    };
+    let pointer = usize::try_from(u32::from_be_bytes(*pointer_bytes)).ok();
+    let Some(quote) = body.get(4..) else {
+        return false;
+    };
+    if quote.len() == Ipv6Header::LENGTH
+        && quote.first().is_some_and(|byte| byte >> 4 == 6)
+        && quote.get(4..6) == Some(&[0, 0])
+    {
+        return pointer == Some(6);
+    }
+    let Ok(header) = Ipv6Header::walk_prefix(quote) else {
+        return false;
+    };
+    let expected_offset = header
+        .extensions()
+        .last()
+        .map_or(6, |extension| extension.range().start);
+    pointer == Some(expected_offset)
+}
+
 fn quoted_probe_matches(
     transport: QuotedTransport,
     request: &Packet,
     network: NetworkEnvelope,
     quote: &[u8],
 ) -> bool {
-    let Some(quoted) = parse_quoted_probe(quote) else {
+    let Some(quoted) = parse_quoted_probe(quote, transport != QuotedTransport::Ip) else {
         return false;
     };
     if quoted.source != network.source || quoted.destination != network.destination {
@@ -159,9 +207,10 @@ fn quoted_probe_matches(
                 return false;
             };
             quoted.payload.get(4..8) == Some(&sctp.verification_tag.to_be_bytes()[..])
-                && quoted_sctp_init_matches(sctp, request, index, quoted.payload)
+                && quoted_sctp_matches(sctp, request, index, quoted.payload)
         }
         QuotedTransport::Icmp => quoted_icmp_matches(request, network, &quoted),
+        QuotedTransport::Ip => quoted_ip_matches(request, &quoted),
     }
 }
 
@@ -226,39 +275,79 @@ fn quoted_icmp_matches(
     quoted_echo[0] == icmp_type && quoted_echo[1] == code && quoted_echo[4..8] == body_identity[..]
 }
 
-fn quoted_sctp_init_matches(
-    sctp: &Sctp,
-    request: &Packet,
-    sctp_index: usize,
-    payload: &[u8],
-) -> bool {
-    let Some((_, chunk)) = sctp_initiate_tag(request, sctp_index, 1) else {
+fn quoted_sctp_matches(sctp: &Sctp, request: &Packet, sctp_index: usize, payload: &[u8]) -> bool {
+    let Some(checksum_bytes) = sctp_checksum_bytes(sctp) else {
         return false;
     };
-    let checksum_bytes = match &sctp.checksum {
-        WireValue::Exact(value) => value.to_le_bytes(),
-        WireValue::Raw(value) => {
-            let Ok(value) = <[u8; 4]>::try_from(value.as_ref()) else {
+    if sctp.verification_tag == 0 {
+        let Some((_, chunk)) = sctp_initiate_tag(request, sctp_index, 1) else {
+            return false;
+        };
+        payload.get(8..12) == Some(&checksum_bytes[..]) && payload.get(12..20) == chunk.get(..8)
+    } else {
+        let Some(chunk) = sctp_cookie_echo(request, sctp_index) else {
+            return false;
+        };
+        if let Some(quoted_checksum) = payload.get(8..12) {
+            if quoted_checksum != checksum_bytes {
                 return false;
-            };
-            value
+            }
+        } else if payload.len() != MIN_QUOTED_TRANSPORT_LEN {
+            return false;
         }
-        WireValue::Auto => return false,
-    };
-    payload.get(8..12) == Some(&checksum_bytes[..]) && payload.get(12..20) == chunk.get(..8)
+        if let Some(quoted_chunk) = payload.get(12..)
+            && !quoted_chunk.is_empty()
+        {
+            chunk.get(..quoted_chunk.len()) == Some(quoted_chunk)
+        } else {
+            true
+        }
+    }
+}
+
+fn sctp_checksum_bytes(sctp: &Sctp) -> Option<[u8; 4]> {
+    match &sctp.checksum {
+        WireValue::Exact(value) => Some(value.to_le_bytes()),
+        WireValue::Raw(value) => <[u8; 4]>::try_from(value.as_ref()).ok(),
+        WireValue::Auto => None,
+    }
+}
+
+fn quoted_ip_matches(request: &Packet, quoted: &QuotedProbe<'_>) -> bool {
+    if !quoted.payload.is_empty() || quoted.declared_payload_len != 0 {
+        return false;
+    }
+    match quoted.source {
+        IpAddr::V4(_) => request.get::<Ipv4>().is_some_and(|ipv4| {
+            ipv4.protocol == WireValue::Exact(quoted.protocol)
+                && quoted.ipv4_identification == Some(ipv4.identification)
+        }),
+        IpAddr::V6(_) => request.get::<Ipv6>().is_some_and(|ipv6| {
+            ipv6.next_header == WireValue::Exact(quoted.protocol)
+                && quoted.ipv6_flow_label == Some(ipv6.flow_label)
+        }),
+    }
 }
 
 struct QuotedProbe<'a> {
     source: IpAddr,
     destination: IpAddr,
     protocol: u8,
+    ipv4_identification: Option<u16>,
+    ipv6_flow_label: Option<u32>,
+    declared_payload_len: usize,
     payload: &'a [u8],
 }
 
 const MIN_QUOTED_TRANSPORT_LEN: usize = 8;
 const MAX_QUOTED_IPV6_EXTENSION_HEADERS: usize = 16;
 
-fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
+fn parse_quoted_probe(bytes: &[u8], require_transport: bool) -> Option<QuotedProbe<'_>> {
+    let min_payload = if require_transport {
+        MIN_QUOTED_TRANSPORT_LEN
+    } else {
+        0
+    };
     match bytes.first()? >> 4 {
         4 => {
             let header = Ipv4Header::walk_prefix(bytes).ok()?;
@@ -266,11 +355,12 @@ fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
             // Only atomic and first fragments can quote a transport key at
             // the start of this payload.
             if header.flags_and_offset() & 0x1fff != 0
-                || bytes.len() < header_len + MIN_QUOTED_TRANSPORT_LEN
-                || header.total_length() < header_len + MIN_QUOTED_TRANSPORT_LEN
+                || bytes.len() < header_len + min_payload
+                || header.total_length() < header_len + min_payload
             {
                 return None;
             }
+            let identification = u16::from_be_bytes([*bytes.get(4)?, *bytes.get(5)?]);
             Some(QuotedProbe {
                 source: IpAddr::V4(Ipv4Addr::from(
                     <[u8; 4]>::try_from(&bytes[Ipv4Header::SOURCE]).ok()?,
@@ -279,10 +369,32 @@ fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
                     <[u8; 4]>::try_from(&bytes[Ipv4Header::DESTINATION]).ok()?,
                 )),
                 protocol: header.protocol(),
+                ipv4_identification: Some(identification),
+                ipv6_flow_label: None,
+                declared_payload_len: header.total_length().saturating_sub(header_len),
                 payload: bytes.get(header_len..header.total_length().min(bytes.len()))?,
             })
         }
         6 => {
+            if !require_transport
+                && bytes.len() == Ipv6Header::LENGTH
+                && bytes.get(4..6) == Some(&[0, 0])
+            {
+                let first = u32::from_be_bytes(<[u8; 4]>::try_from(bytes.get(..4)?).ok()?);
+                return Some(QuotedProbe {
+                    source: IpAddr::V6(Ipv6Addr::from(
+                        <[u8; 16]>::try_from(&bytes[Ipv6Header::SOURCE]).ok()?,
+                    )),
+                    destination: IpAddr::V6(Ipv6Addr::from(
+                        <[u8; 16]>::try_from(&bytes[Ipv6Header::DESTINATION]).ok()?,
+                    )),
+                    protocol: *bytes.get(6)?,
+                    ipv4_identification: None,
+                    ipv6_flow_label: Some(first & 0x000f_ffff),
+                    declared_payload_len: 0,
+                    payload: &[],
+                });
+            }
             let header = Ipv6Header::walk_prefix(bytes).ok()?;
             let end = header.datagram_length().min(bytes.len());
             // Only atomic and first fragments can quote a transport key at
@@ -297,9 +409,13 @@ fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
                 return None;
             }
             let (protocol, offset) = header.upper_layer();
-            if end - offset < MIN_QUOTED_TRANSPORT_LEN {
+            if end < offset
+                || end - offset < min_payload
+                || header.datagram_length() < offset + min_payload
+            {
                 return None;
             }
+            let first = u32::from_be_bytes(<[u8; 4]>::try_from(bytes.get(..4)?).ok()?);
             Some(QuotedProbe {
                 source: IpAddr::V6(Ipv6Addr::from(
                     <[u8; 16]>::try_from(&bytes[Ipv6Header::SOURCE]).ok()?,
@@ -308,6 +424,9 @@ fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
                     <[u8; 16]>::try_from(&bytes[Ipv6Header::DESTINATION]).ok()?,
                 )),
                 protocol,
+                ipv4_identification: None,
+                ipv6_flow_label: Some(first & 0x000f_ffff),
+                declared_payload_len: header.datagram_length().saturating_sub(offset),
                 payload: bytes.get(offset..end)?,
             })
         }

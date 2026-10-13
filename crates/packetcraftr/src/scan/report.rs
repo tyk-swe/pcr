@@ -29,8 +29,15 @@ pub enum Reply {
     /// A correlated TCP segment that is neither SYN/ACK nor a reset.
     TcpOther,
     UdpPayload,
+    SctpInitAck,
+    SctpAbort,
+    SctpOther,
     IcmpEchoReply,
+    IcmpTimestampReply,
+    IcmpNetmaskReply,
+    IpProtocolPayload,
     IcmpPortUnreachable,
+    IcmpProtocolUnreachable,
     IcmpAdministrativelyProhibited,
     /// Destination unreachable other than port unreachable or prohibition.
     IcmpDestinationUnreachable,
@@ -44,8 +51,15 @@ impl Reply {
             Correlation::TcpReset => Self::TcpReset,
             Correlation::TcpOther => Self::TcpOther,
             Correlation::UdpReply => Self::UdpPayload,
+            Correlation::SctpInitAck => Self::SctpInitAck,
+            Correlation::SctpAbort => Self::SctpAbort,
+            Correlation::SctpOther => Self::SctpOther,
             Correlation::IcmpReply => Self::IcmpEchoReply,
+            Correlation::IcmpTimestampReply => Self::IcmpTimestampReply,
+            Correlation::IcmpNetmaskReply => Self::IcmpNetmaskReply,
+            Correlation::IpProtocolReply => Self::IpProtocolPayload,
             Correlation::PortUnreachable => Self::IcmpPortUnreachable,
+            Correlation::ProtocolUnreachable => Self::IcmpProtocolUnreachable,
             Correlation::AdministrativelyProhibited => Self::IcmpAdministrativelyProhibited,
             Correlation::DestinationUnreachable => Self::IcmpDestinationUnreachable,
             Correlation::TimeExceeded => Self::IcmpTimeExceeded,
@@ -108,9 +122,18 @@ pub struct ProbeEvidence {
     pub scope: Option<crate::target::ResolvedZone>,
     pub transport: Transport,
     pub port: Option<u16>,
+    /// Selected IP protocol number (`0..=255`) for IP-protocol probes; `None`
+    /// for other transports.
+    pub ip_protocol: Option<u8>,
+    /// ICMP request kind (`"echo"`, `"timestamp"`, or `"netmask"`) for ICMP
+    /// probes; `None` for other transports.
+    pub icmp_request: Option<&'static str>,
     /// The TCP segment mode a raw TCP probe carried; `None` for other
     /// transports.
     pub tcp_scan: Option<super::TcpScan>,
+    /// The SCTP chunk mode a raw SCTP probe carried; `None` for other
+    /// transports.
+    pub sctp_scan: Option<super::SctpScan>,
     pub attempt: u32,
     pub status: ProbeStatus,
     pub classification: Classification,
@@ -134,6 +157,7 @@ pub struct Endpoint {
     pub scope: Option<crate::target::ResolvedZone>,
     pub transport: Transport,
     pub port: Option<u16>,
+    pub ip_protocol: Option<u8>,
     /// The highest-ranked attempt observation.
     pub classification: Classification,
     /// The bundled catalog's name for this transport and port: a hint about
@@ -264,6 +288,7 @@ pub struct PendingEvidence {
     pub response: Option<Frame>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum Event {
     Sent(SentProbe),
@@ -322,11 +347,12 @@ impl ClassificationCounts {
 #[derive(Clone, Default)]
 pub struct Collector(Shared<Collected>);
 
-/// Endpoint identity: TCP and UDP on one address and port never merge.
+/// Endpoint identity: TCP, UDP, SCTP, and IP protocol numbers on one address never merge.
 pub(in crate::scan) type EndpointKey = (
     IpAddr,
     Transport,
     Option<u16>,
+    Option<u8>,
     Option<packetcraftr_netio::interface::Id>,
 );
 
@@ -370,17 +396,19 @@ impl Collected {
         let address = evidence.address;
         let transport = evidence.transport;
         let port = evidence.port;
+        let ip_protocol = evidence.ip_protocol;
         let scope = evidence.scope.clone();
         let interface = scope.as_ref().map(|scope| scope.interface.clone());
         let endpoint = index_or_push(
             &mut self.endpoints,
             &mut self.endpoint_indices,
-            (address, transport, port, interface),
+            (address, transport, port, ip_protocol, interface),
             || Endpoint {
                 address,
                 scope,
                 transport,
                 port,
+                ip_protocol,
                 classification: Classification::Timeout,
                 port_hint: port.and_then(|port| super::catalog::hint(transport, port)),
                 inference: None,
@@ -419,6 +447,7 @@ impl Collector {
                     sequence: probe.sequence,
                     reply: probe.reply,
                     tcp_scan: probe.tcp_scan,
+                    sctp_scan: probe.sctp_scan,
                     tcp_window: probe.tcp_window,
                 }),
             );

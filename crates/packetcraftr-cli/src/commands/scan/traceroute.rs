@@ -54,7 +54,7 @@ impl Stage {
                     Transport::Tcp => {
                         Some(port.unwrap_or(packetcraftr::traceroute::DEFAULT_TCP_PORT))
                     }
-                    Transport::Icmp => {
+                    Transport::Icmp | Transport::Sctp | Transport::Ip => {
                         if port.is_some() {
                             return Err(CliError::new(
                                 Kind::Usage,
@@ -130,6 +130,7 @@ mod tests {
     fn scan_request() -> packetcraftr::scan::Request {
         packetcraftr::scan::Request {
             tcp_scan: Default::default(),
+            sctp_scan: Default::default(),
             max_in_flight: 1,
             targets: Target::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))).into(),
             target_sources: Vec::new(),

@@ -183,7 +183,11 @@ impl LayerCodec for Ipv6Codec {
             }),
             consumed: IPV6_LEN,
             payload_len: payload_length,
-            next: vec![Discriminator(u64::from(next))],
+            next: if payload_length == 0 {
+                Vec::new()
+            } else {
+                vec![Discriminator(u64::from(next))]
+            },
             fields: ipv6_layout(),
             diagnostics: Vec::new(),
             stop: payload_length == 0,
@@ -215,7 +219,13 @@ fn resolve_next_header(
         context.mode,
         diagnostics,
     )?;
-    validate_raw_child_discriminator(name, u64::from(next), context, diagnostics)?;
+    let empty_protocol_probe = matches!(value, WireValue::Exact(_))
+        && context
+            .child
+            .is_none_or(|child| BuiltinProtocol::Padding.identifies(child));
+    if !empty_protocol_probe {
+        validate_raw_child_discriminator(name, u64::from(next), context, diagnostics)?;
+    }
     validate_ipv6_routing_child(name, next, context, diagnostics)?;
     Ok((next, materialized))
 }

@@ -8,7 +8,7 @@
 //! port because the operation itself failed.
 
 use super::connect::Outcome;
-use super::{Reply, TcpScan};
+use super::{Reply, SctpScan, TcpScan};
 use crate::probe::Transport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -56,6 +56,23 @@ pub enum Rule {
     UdpTimeExceeded,
     UdpUnclassifiedReply,
     UdpSilence,
+    SctpInitAck,
+    SctpInitAbort,
+    SctpInitIcmpUnreachable,
+    SctpInitTimeExceeded,
+    SctpInitUnclassifiedReply,
+    SctpInitSilence,
+    SctpCookieEchoAbort,
+    SctpCookieEchoIcmpUnreachable,
+    SctpCookieEchoTimeExceeded,
+    SctpCookieEchoUnclassifiedReply,
+    SctpCookieEchoSilence,
+    IpProtocolReply,
+    IpProtocolUnreachable,
+    IpProtocolIcmpUnreachable,
+    IpProtocolTimeExceeded,
+    IpProtocolUnclassifiedReply,
+    IpProtocolSilence,
     ConnectConnected,
     ConnectRefused,
     ConnectUnreachable,
@@ -82,6 +99,23 @@ impl Rule {
             Self::UdpTimeExceeded => "udp.time_exceeded",
             Self::UdpUnclassifiedReply => "udp.unclassified_reply",
             Self::UdpSilence => "udp.silence",
+            Self::SctpInitAck => "sctp_init.init_ack",
+            Self::SctpInitAbort => "sctp_init.abort",
+            Self::SctpInitIcmpUnreachable => "sctp_init.icmp_unreachable",
+            Self::SctpInitTimeExceeded => "sctp_init.time_exceeded",
+            Self::SctpInitUnclassifiedReply => "sctp_init.unclassified_reply",
+            Self::SctpInitSilence => "sctp_init.silence",
+            Self::SctpCookieEchoAbort => "sctp_cookie_echo.abort",
+            Self::SctpCookieEchoIcmpUnreachable => "sctp_cookie_echo.icmp_unreachable",
+            Self::SctpCookieEchoTimeExceeded => "sctp_cookie_echo.time_exceeded",
+            Self::SctpCookieEchoUnclassifiedReply => "sctp_cookie_echo.unclassified_reply",
+            Self::SctpCookieEchoSilence => "sctp_cookie_echo.silence",
+            Self::IpProtocolReply => "ip_protocol.reply",
+            Self::IpProtocolUnreachable => "ip_protocol.protocol_unreachable",
+            Self::IpProtocolIcmpUnreachable => "ip_protocol.icmp_unreachable",
+            Self::IpProtocolTimeExceeded => "ip_protocol.time_exceeded",
+            Self::IpProtocolUnclassifiedReply => "ip_protocol.unclassified_reply",
+            Self::IpProtocolSilence => "ip_protocol.silence",
             Self::ConnectConnected => "tcp_connect.connected",
             Self::ConnectRefused => "tcp_connect.refused",
             Self::ConnectUnreachable => "tcp_connect.unreachable",
@@ -94,17 +128,39 @@ impl Rule {
     /// The state the rule concludes; `None` only for operational failure.
     pub const fn state(self) -> Option<State> {
         Some(match self {
-            Self::SynAck | Self::UdpReply | Self::ConnectConnected => State::Open,
-            Self::SynReset | Self::UdpPortUnreachable | Self::ConnectRefused => State::Closed,
+            Self::SynAck
+            | Self::UdpReply
+            | Self::SctpInitAck
+            | Self::IpProtocolReply
+            | Self::ConnectConnected => State::Open,
+            Self::SynReset
+            | Self::UdpPortUnreachable
+            | Self::SctpInitAbort
+            | Self::SctpCookieEchoAbort
+            | Self::IpProtocolUnreachable
+            | Self::ConnectRefused => State::Closed,
             Self::SynIcmpUnreachable
             | Self::SynTimeExceeded
             | Self::SynSilence
             | Self::UdpIcmpUnreachable
             | Self::UdpTimeExceeded
+            | Self::SctpInitIcmpUnreachable
+            | Self::SctpInitTimeExceeded
+            | Self::SctpInitSilence
+            | Self::SctpCookieEchoIcmpUnreachable
+            | Self::IpProtocolIcmpUnreachable
+            | Self::IpProtocolTimeExceeded
             | Self::ConnectUnreachable
             | Self::ConnectTimedOut => State::Filtered,
-            Self::SynUnclassifiedReply | Self::UdpUnclassifiedReply => State::Unknown,
-            Self::UdpSilence => State::OpenOrFiltered,
+            Self::SynUnclassifiedReply
+            | Self::UdpUnclassifiedReply
+            | Self::SctpInitUnclassifiedReply
+            | Self::SctpCookieEchoTimeExceeded
+            | Self::SctpCookieEchoUnclassifiedReply
+            | Self::IpProtocolUnclassifiedReply => State::Unknown,
+            Self::UdpSilence | Self::SctpCookieEchoSilence | Self::IpProtocolSilence => {
+                State::OpenOrFiltered
+            }
             Self::TcpDiagnostic(rule) => rule.state(),
             Self::OperationalFailure => return None,
         })
@@ -114,7 +170,12 @@ impl Rule {
     const fn is_silence(self) -> bool {
         matches!(
             self,
-            Self::SynSilence | Self::UdpSilence | Self::ConnectTimedOut
+            Self::SynSilence
+                | Self::UdpSilence
+                | Self::SctpInitSilence
+                | Self::SctpCookieEchoSilence
+                | Self::IpProtocolSilence
+                | Self::ConnectTimedOut
         ) || matches!(self, Self::TcpDiagnostic(rule) if matches!(rule.outcome, Observed::Silence))
     }
 
@@ -124,12 +185,39 @@ impl Rule {
     /// errors even where the attempt classification does not.
     const fn rank(self) -> u8 {
         match self {
-            Self::SynAck | Self::UdpReply | Self::ConnectConnected => 6,
-            Self::SynReset | Self::UdpPortUnreachable | Self::ConnectRefused => 5,
-            Self::SynIcmpUnreachable | Self::UdpIcmpUnreachable | Self::ConnectUnreachable => 4,
-            Self::SynTimeExceeded | Self::UdpTimeExceeded => 3,
-            Self::SynUnclassifiedReply | Self::UdpUnclassifiedReply => 2,
-            Self::SynSilence | Self::UdpSilence | Self::ConnectTimedOut => 1,
+            Self::SynAck
+            | Self::UdpReply
+            | Self::SctpInitAck
+            | Self::IpProtocolReply
+            | Self::ConnectConnected => 6,
+            Self::SynReset
+            | Self::UdpPortUnreachable
+            | Self::SctpInitAbort
+            | Self::SctpCookieEchoAbort
+            | Self::IpProtocolUnreachable
+            | Self::ConnectRefused => 5,
+            Self::SynIcmpUnreachable
+            | Self::UdpIcmpUnreachable
+            | Self::SctpInitIcmpUnreachable
+            | Self::SctpCookieEchoIcmpUnreachable
+            | Self::IpProtocolIcmpUnreachable
+            | Self::ConnectUnreachable => 4,
+            Self::SynTimeExceeded
+            | Self::UdpTimeExceeded
+            | Self::SctpInitTimeExceeded
+            | Self::SctpCookieEchoTimeExceeded
+            | Self::IpProtocolTimeExceeded => 3,
+            Self::SynUnclassifiedReply
+            | Self::UdpUnclassifiedReply
+            | Self::SctpInitUnclassifiedReply
+            | Self::SctpCookieEchoUnclassifiedReply
+            | Self::IpProtocolUnclassifiedReply => 2,
+            Self::SynSilence
+            | Self::UdpSilence
+            | Self::SctpInitSilence
+            | Self::SctpCookieEchoSilence
+            | Self::IpProtocolSilence
+            | Self::ConnectTimedOut => 1,
             Self::TcpDiagnostic(rule) => rule.outcome.rank(),
             Self::OperationalFailure => 0,
         }
@@ -278,6 +366,7 @@ pub(crate) struct Attempt {
     pub(crate) sequence: u64,
     pub(crate) reply: Option<Reply>,
     pub(crate) tcp_scan: Option<TcpScan>,
+    pub(crate) sctp_scan: Option<SctpScan>,
     pub(crate) tcp_window: Option<u16>,
 }
 
@@ -296,7 +385,10 @@ pub(crate) fn raw(
                 Some(method) => diagnostic_rule(method, attempt.reply, attempt.tcp_window),
                 None => syn_rule(attempt.reply),
             },
-            _ => udp_rule(attempt.reply),
+            Transport::Udp => udp_rule(attempt.reply),
+            Transport::Sctp => sctp_rule(attempt.sctp_scan.unwrap_or_default(), attempt.reply),
+            Transport::Ip => ip_protocol_rule(attempt.reply),
+            Transport::Icmp => unreachable!("ICMP echo is filtered above"),
         };
         (attempt.sequence, Some(rule))
     })))
@@ -332,13 +424,12 @@ const fn syn_rule(reply: Option<Reply>) -> Rule {
         Some(Reply::TcpReset) => Rule::SynReset,
         Some(
             Reply::IcmpPortUnreachable
+            | Reply::IcmpProtocolUnreachable
             | Reply::IcmpAdministrativelyProhibited
             | Reply::IcmpDestinationUnreachable,
         ) => Rule::SynIcmpUnreachable,
         Some(Reply::IcmpTimeExceeded) => Rule::SynTimeExceeded,
-        Some(Reply::TcpOther | Reply::UdpPayload | Reply::IcmpEchoReply) => {
-            Rule::SynUnclassifiedReply
-        }
+        Some(_) => Rule::SynUnclassifiedReply,
         None => Rule::SynSilence,
     }
 }
@@ -347,14 +438,61 @@ const fn udp_rule(reply: Option<Reply>) -> Rule {
     match reply {
         Some(Reply::UdpPayload) => Rule::UdpReply,
         Some(Reply::IcmpPortUnreachable) => Rule::UdpPortUnreachable,
-        Some(Reply::IcmpAdministrativelyProhibited | Reply::IcmpDestinationUnreachable) => {
-            Rule::UdpIcmpUnreachable
-        }
+        Some(
+            Reply::IcmpProtocolUnreachable
+            | Reply::IcmpAdministrativelyProhibited
+            | Reply::IcmpDestinationUnreachable,
+        ) => Rule::UdpIcmpUnreachable,
         Some(Reply::IcmpTimeExceeded) => Rule::UdpTimeExceeded,
-        Some(Reply::TcpSynAck | Reply::TcpReset | Reply::TcpOther | Reply::IcmpEchoReply) => {
-            Rule::UdpUnclassifiedReply
-        }
+        Some(_) => Rule::UdpUnclassifiedReply,
         None => Rule::UdpSilence,
+    }
+}
+
+const fn sctp_rule(mode: SctpScan, reply: Option<Reply>) -> Rule {
+    match (mode, reply) {
+        (SctpScan::Init, Some(Reply::SctpInitAck)) => Rule::SctpInitAck,
+        (SctpScan::Init, Some(Reply::SctpAbort)) => Rule::SctpInitAbort,
+        (
+            SctpScan::Init,
+            Some(
+                Reply::IcmpPortUnreachable
+                | Reply::IcmpProtocolUnreachable
+                | Reply::IcmpAdministrativelyProhibited
+                | Reply::IcmpDestinationUnreachable,
+            ),
+        ) => Rule::SctpInitIcmpUnreachable,
+        (SctpScan::Init, Some(Reply::IcmpTimeExceeded)) => Rule::SctpInitTimeExceeded,
+        (SctpScan::Init, Some(_)) => Rule::SctpInitUnclassifiedReply,
+        (SctpScan::Init, None) => Rule::SctpInitSilence,
+        (SctpScan::CookieEcho, Some(Reply::SctpAbort)) => Rule::SctpCookieEchoAbort,
+        (
+            SctpScan::CookieEcho,
+            Some(
+                Reply::IcmpPortUnreachable
+                | Reply::IcmpProtocolUnreachable
+                | Reply::IcmpAdministrativelyProhibited
+                | Reply::IcmpDestinationUnreachable,
+            ),
+        ) => Rule::SctpCookieEchoIcmpUnreachable,
+        (SctpScan::CookieEcho, Some(Reply::IcmpTimeExceeded)) => Rule::SctpCookieEchoTimeExceeded,
+        (SctpScan::CookieEcho, Some(_)) => Rule::SctpCookieEchoUnclassifiedReply,
+        (SctpScan::CookieEcho, None) => Rule::SctpCookieEchoSilence,
+    }
+}
+
+const fn ip_protocol_rule(reply: Option<Reply>) -> Rule {
+    match reply {
+        Some(Reply::IpProtocolPayload) => Rule::IpProtocolReply,
+        Some(Reply::IcmpProtocolUnreachable) => Rule::IpProtocolUnreachable,
+        Some(
+            Reply::IcmpPortUnreachable
+            | Reply::IcmpAdministrativelyProhibited
+            | Reply::IcmpDestinationUnreachable,
+        ) => Rule::IpProtocolIcmpUnreachable,
+        Some(Reply::IcmpTimeExceeded) => Rule::IpProtocolTimeExceeded,
+        Some(_) => Rule::IpProtocolUnclassifiedReply,
+        None => Rule::IpProtocolSilence,
     }
 }
 

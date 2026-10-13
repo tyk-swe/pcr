@@ -14,37 +14,44 @@ use crate::command_options::{
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
   packetcraftr scan 192.0.2.10 --transport udp --ports 53,8000-8100
+  packetcraftr scan 192.0.2.10 --transport sctp --ports 80,9899
+  packetcraftr scan 192.0.2.10 --transport sctp --sctp-scan cookie-echo --ports 80
+  packetcraftr scan 192.0.2.10 --transport ip --ip-protocols 1,6,17,47,132
   packetcraftr scan 192.0.2.10 --ports 1-1024 --max-in-flight 32
   packetcraftr scan 192.0.2.10 --tcp-scan ack --ports 22,80,443
   packetcraftr scan 192.0.2.10 --tcp-scan custom --tcp-flags 0x029 --ports 80
   packetcraftr scan 192.0.2.10 --transport udp --ports 53,9000 \
     --udp-profiles examples/documents/udp-profiles.json --max-in-flight 8
   packetcraftr --output ndjson scan 198.51.100.10 --transport icmp
-  packetcraftr scan 192.0.2.10 --transport tcp,udp --ports @name-services,udp:ntp
+  packetcraftr scan 192.0.2.10 --transport tcp,udp,sctp --ports @name-services,udp:ntp,sctp:9899
   packetcraftr scan 192.0.2.10 --ports @all --exclude-ports ssh,8000-8100
   packetcraftr scan 192.0.2.10 --transport udp --ports @infrastructure --curated-udp-payloads
   packetcraftr scan 192.0.2.0/28 --discovery only --discovery-probes icmp,neighbor
-  packetcraftr scan 192.0.2.0/28 --discovery before --discovery-probes icmp,tcp \
+  packetcraftr scan 192.0.2.0/28 --discovery before --discovery-probes icmp,tcp,tcp-ack,sctp \
     --discovery-ports 22,443 --ports @web --reverse-dns 192.0.2.53
 
-Ports and methods:
+Ports, IP protocols, and methods:
   --ports and --exclude-ports accept u16 ports, START-END ranges, catalog names,
   and @presets (@web, @mail, @name-services, @infrastructure, @legacy-services,
-  @all), optionally prefixed tcp: or udp:. Exclusions apply before budgets.
+  @all), optionally prefixed tcp:, udp:, or sctp:. --transport ip selects
+  standalone IP-protocol inventory via --ip-protocols and --exclude-ip-protocols
+  (0..=255 or START-END ranges). Exclusions apply before budgets.
   --method selects raw (default), tcp-connect (--connect), or auto; explicit
   methods never fall back. --tcp-scan selects syn (default), ack, window, fin,
   null, xmas, maimon, or observation-only custom (--tcp-flags 0..=0x1ff) for raw
-  TCP scan endpoints. Each endpoint publishes an inferred state and supporting,
+  TCP scan endpoints; --sctp-scan selects init (default) or cookie-echo for raw
+  SCTP scan endpoints. Each endpoint publishes an inferred state and supporting,
   conflicting, unanswered, or failed attempt sequences beside attempt outcomes.
 
 Targets, discovery, scheduling, and follow-ups:
   Targets accept IPs, hostnames (with --allow-hostname-resolution), scoped
   fe80::/10%zone addresses, CIDRs, and --targets-file/--exclude-file manifests.
-  --list publishes the target/port plan without sending probes.
-  --discovery before|only|skip runs ICMP, neighbor (ARP/NDP), TCP, or UDP probes
-  sharing the scan's budgets. --adaptive enables per-host RTT timeouts, AIMD
-  windows, backoff retries, and host deadlines. --traceroute (raw only) traces
-  scanned hosts before --reverse-dns PTR lookups under remaining budgets.";
+  --list publishes the target/port/IP-protocol plan without sending probes.
+  --discovery before|only|skip runs icmp, icmp-timestamp, icmp-netmask, neighbor
+  (ARP/NDP), tcp, tcp-ack, udp, sctp, or ip probes sharing the scan's budgets.
+  --adaptive enables per-host RTT timeouts, AIMD windows, backoff retries, and
+  host deadlines. --traceroute (raw only) traces scanned hosts before
+  --reverse-dns PTR lookups under remaining budgets.";
 
 /// One `--ports` or `--exclude-ports` term.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,9 +64,10 @@ impl FromStr for PortTerm {
         let (transport, selector) = match token.split_once(':') {
             Some(("tcp", selector)) => (Some(packetcraftr::probe::Transport::Tcp), selector),
             Some(("udp", selector)) => (Some(packetcraftr::probe::Transport::Udp), selector),
+            Some(("sctp", selector)) => (Some(packetcraftr::probe::Transport::Sctp), selector),
             Some((prefix, _)) => {
                 return Err(format!(
-                    "invalid port term `{token}`: transport prefix `{prefix}` is not tcp or udp"
+                    "invalid port term `{token}`: transport prefix `{prefix}` is not tcp or udp (or sctp)"
                 ));
             }
             None => (None, token),
@@ -132,12 +140,54 @@ fn parse_port(token: &str) -> Result<u16, String> {
         .map_err(|_| format!("invalid port spec `{token}`: expected a u16 port or START-END range"))
 }
 
+/// One `--ip-protocols`, `--exclude-ip-protocols`, or `--discovery-ip-protocols` term.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct IpProtocolTerm(pub(crate) packetcraftr::scan::IpProtocolSpec);
+
+impl FromStr for IpProtocolTerm {
+    type Err = String;
+
+    fn from_str(token: &str) -> Result<Self, Self::Err> {
+        let Some((start_part, end_part)) = token.split_once('-') else {
+            return Ok(Self(packetcraftr::scan::IpProtocolSpec::Single(
+                parse_ip_protocol(token)?,
+            )));
+        };
+        if start_part.is_empty() || end_part.is_empty() {
+            return Err(format!(
+                "invalid IP protocol spec `{token}`: inclusive ranges need the form START-END with both endpoints present"
+            ));
+        }
+        let start = parse_ip_protocol(start_part)?;
+        let end = parse_ip_protocol(end_part)?;
+        if end < start {
+            return Err(format!(
+                "invalid IP protocol spec `{token}`: range end {end} precedes start {start}"
+            ));
+        }
+        Ok(Self(packetcraftr::scan::IpProtocolSpec::RangeInclusive {
+            start,
+            end,
+        }))
+    }
+}
+
+fn parse_ip_protocol(token: &str) -> Result<u8, String> {
+    token.parse::<u8>().map_err(|_| {
+        format!(
+            "invalid IP protocol spec `{token}`: expected a u8 protocol number (0..=255) or START-END range"
+        )
+    })
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub(crate) enum Transport {
     #[default]
     Tcp,
     Udp,
+    Sctp,
     Icmp,
+    Ip,
 }
 
 impl From<Transport> for packetcraftr::probe::Transport {
@@ -145,7 +195,9 @@ impl From<Transport> for packetcraftr::probe::Transport {
         match value {
             Transport::Tcp => Self::Tcp,
             Transport::Udp => Self::Udp,
+            Transport::Sctp => Self::Sctp,
             Transport::Icmp => Self::Icmp,
+            Transport::Ip => Self::Ip,
         }
     }
 }
@@ -226,6 +278,23 @@ impl TcpScan {
     }
 }
 
+/// The SCTP chunk each raw scan probe sends to an SCTP scan endpoint.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub(crate) enum SctpScan {
+    #[default]
+    Init,
+    CookieEcho,
+}
+
+impl From<SctpScan> for packetcraftr::scan::SctpScan {
+    fn from(value: SctpScan) -> Self {
+        match value {
+            SctpScan::Init => Self::Init,
+            SctpScan::CookieEcho => Self::CookieEcho,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub(crate) enum Discovery {
     /// Discover hosts, then scan the ones that answered.
@@ -250,12 +319,22 @@ impl From<Discovery> for packetcraftr::scan::discovery::Mode {
 pub(crate) enum DiscoveryProbe {
     /// ICMP or ICMPv6 echo.
     Icmp,
+    /// IPv4 ICMP timestamp request (type 13).
+    IcmpTimestamp,
+    /// IPv4 ICMP address mask request (type 17).
+    IcmpNetmask,
     /// ARP or NDP for an on-link target; a routed target reports its next hop.
     Neighbor,
     /// TCP SYN, or a connection with `--connect`, to each discovery port.
     Tcp,
+    /// Raw TCP ACK to each discovery port.
+    TcpAck,
     /// UDP to each discovery port.
     Udp,
+    /// SCTP INIT to each discovery port.
+    Sctp,
+    /// Empty-payload IP-protocol probe to each `--discovery-ip-protocols` number.
+    Ip,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -384,8 +463,9 @@ pub(crate) struct Args {
     /// Maximum distinct selected addresses across all targets.
     #[arg(long, default_value_t = packetcraftr::scan::Limits::default().max_targets)]
     pub(crate) max_targets: usize,
-    /// TCP SYN, UDP, or ICMP echo probes; TCP and UDP combine in one plan
-    /// (`tcp,udp`), while ICMP echo stands alone.
+    /// TCP, UDP, SCTP, ICMP echo, or IP-protocol probes; TCP, UDP, and SCTP
+    /// combine in one plan (`tcp,udp,sctp`), while ICMP echo and IP-protocol
+    /// inventory stand alone.
     #[arg(
         long,
         value_enum,
@@ -396,13 +476,18 @@ pub(crate) struct Args {
     pub(crate) transport: Vec<Transport>,
     /// TCP segment sent to each raw TCP scan endpoint: syn (default), ack,
     /// window, fin, null, xmas, maimon, or custom with --tcp-flags. Diagnostic
-    /// modes are stack-dependent inferences; discovery stays SYN.
+    /// modes are stack-dependent inferences; discovery stays SYN unless
+    /// tcp-ack is explicitly selected.
     #[arg(long, value_enum, default_value_t = TcpScan::Syn)]
     pub(crate) tcp_scan: TcpScan,
     /// TCP flag bits for --tcp-scan custom, decimal or 0x hexadecimal within
     /// 0..=0x1ff; custom probes are observation-only and infer no port state.
     #[arg(long, value_name = "FLAGS", value_parser = parse_tcp_flags)]
     pub(crate) tcp_flags: Option<u16>,
+    /// SCTP chunk sent to each raw SCTP scan endpoint: init (default) or
+    /// cookie-echo. Discovery SCTP probes always send INIT.
+    #[arg(long, value_enum, default_value_t = SctpScan::Init)]
+    pub(crate) sctp_scan: SctpScan,
     /// Exact UDP probe payload in hex, with optional whitespace, colon, or dash separators.
     #[arg(long, value_name = "HEX", conflicts_with = "udp_payload_file")]
     pub(crate) udp_payload_hex: Option<String>,
@@ -413,17 +498,25 @@ pub(crate) struct Args {
     #[arg(long, value_enum, default_value_t = AddressFamily::Any)]
     pub(crate) family: AddressFamily,
     /// Comma-separated ports, START-END ranges, catalog names, or @presets,
-    /// optionally prefixed `tcp:` or `udp:`; omitted for ICMP.
+    /// optionally prefixed `tcp:`, `udp:`, or `sctp:`; omitted for ICMP and IP.
     #[arg(long, value_name = "TERMS", value_delimiter = ',', num_args = 1..)]
     pub(crate) ports: Vec<PortTerm>,
-    /// Terms removed from the expanded selection before planning.
+    /// Terms removed from the expanded port selection before planning.
     #[arg(long, value_name = "TERMS", value_delimiter = ',', num_args = 1..)]
     pub(crate) exclude_ports: Vec<PortTerm>,
+    /// Comma-separated IP protocol numbers (0..=255) or START-END ranges for
+    /// `--transport ip`.
+    #[arg(long, value_name = "TERMS", value_delimiter = ',', num_args = 1..)]
+    pub(crate) ip_protocols: Vec<IpProtocolTerm>,
+    /// IP protocol numbers or START-END ranges removed before planning.
+    #[arg(long, value_name = "TERMS", value_delimiter = ',', num_args = 1..)]
+    pub(crate) exclude_ip_protocols: Vec<IpProtocolTerm>,
     /// Discover hosts `before` the scan or `only`, or `skip` discovery and
     /// say so; without it, hosts are scanned and labeled not discovered.
     #[arg(long, value_enum)]
     pub(crate) discovery: Option<Discovery>,
-    /// Discovery probes: icmp, neighbor, tcp, and udp (default icmp).
+    /// Discovery probes: icmp, icmp-timestamp, icmp-netmask, neighbor, tcp,
+    /// tcp-ack, udp, sctp, and ip (default icmp).
     #[arg(
         long,
         value_enum,
@@ -432,8 +525,8 @@ pub(crate) struct Args {
         requires = "discovery"
     )]
     pub(crate) discovery_probes: Vec<DiscoveryProbe>,
-    /// Port terms for tcp and udp discovery probes, in --ports syntax;
-    /// --exclude-ports applies to them too.
+    /// Port terms for tcp, tcp-ack, udp, and sctp discovery probes, in --ports
+    /// syntax; --exclude-ports applies to them too.
     #[arg(
         long,
         value_name = "TERMS",
@@ -442,6 +535,16 @@ pub(crate) struct Args {
         requires = "discovery"
     )]
     pub(crate) discovery_ports: Vec<PortTerm>,
+    /// IP protocol numbers or START-END ranges for `ip` discovery probes;
+    /// --exclude-ip-protocols applies to them too.
+    #[arg(
+        long,
+        value_name = "TERMS",
+        value_delimiter = ',',
+        num_args = 1..,
+        requires = "discovery"
+    )]
+    pub(crate) discovery_ip_protocols: Vec<IpProtocolTerm>,
     /// Whether `--discovery before` skips (default) or scans hosts that did
     /// not answer.
     #[arg(long, value_enum, requires = "discovery")]

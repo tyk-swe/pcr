@@ -115,6 +115,10 @@ pub(super) fn probe_target(request: &Request, sequence: u64) -> Result<ProbeEndp
             port: declared_port()?,
         }),
         Transport::Icmp => Ok(ProbeEndpoint::Icmp),
+        Transport::Sctp | Transport::Ip => Err(Error::InvalidProbeOption {
+            option: "strategy",
+            reason: "traceroute supports UDP, TCP, and ICMP strategies".to_owned(),
+        }),
     }
 }
 

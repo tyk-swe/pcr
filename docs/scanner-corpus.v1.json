@@ -1,6 +1,6 @@
 {
   "schema": "packetcraftr.scanner-corpus/v1",
-  "dataset_version": "1.7.0",
+  "dataset_version": "1.8.0",
   "families": [
     "ipv4",
     "ipv6"
@@ -1011,7 +1011,7 @@
     "license": "AGPL-3.0-only",
     "license_rationale": "Original project-authored fixture specifications distributed under the repository license.",
     "maintainer": "tyk-swe",
-    "refresh": "Review condition and expected outcome together; increment dataset_version; rerun both IP families and all declared transports and windows. Review identification conditions against the read-only probe corpus; rerun deterministic parsing, workflow budgets and applicable ordinary-socket loopback profiles. Re-exercise the multi-host trace-path scenarios through the path fixture when a topology, probe count or reused-hop expectation changes. Re-exercise the inference scenarios through the scripted scan fixture whenever an authored response, attempt limit, or inference rule changes. Review M12 diagnostic wire identities and independent response scripts together; rerun all seven modes, both families and three scheduling engines plus the revision-bound native route.",
+    "refresh": "Review condition and expected outcome together; increment dataset_version; rerun both IP families and all declared transports and windows. Review identification conditions against the read-only probe corpus; rerun deterministic parsing, workflow budgets and applicable ordinary-socket loopback profiles. Re-exercise the multi-host trace-path scenarios through the path fixture when a topology, probe count or reused-hop expectation changes. Re-exercise the inference scenarios through the scripted scan fixture whenever an authored response, attempt limit, or inference rule changes. Review M12 diagnostic wire identities and independent response scripts together; rerun all seven modes, both families and three scheduling engines plus the revision-bound native route. Review M13 SCTP, IP-protocol, and extra discovery scenarios together; rerun both IP families and all scheduling engines.",
     "coverage": "Six packet conditions across two IP families, three transports and two scheduling windows; native loopback connected/refused outcomes in both IP families; responsive/silent single-hop traceroutes for both IP families and all three transports; M4 numeric manifest/selection and native scoped host-local/two-link fixture conditions; eight M7 adaptive scheduling behavioral/resource contracts. M7 contracts are not relabeled as cross-platform native performance evidence. Ten M8 application identification conditions cover known nonstandard services, unknown, ambiguous products and versions, deliberately misleading claims, malformed and truncated evidence, and exclusions. Three M11 multi-host trace-path scenarios state shared, divergent and silent-hop topologies with the probe counts and reused hops each run must report; ECMP and reconvergent paths stay out until a per-probe path choice is designed. Three M6 inference scenarios state a mixed TCP/53+UDP/53 plan, silent UDP, and contradictory UDP attempts with their scripted responses, attempt outcomes, inferred states and rules, and supporting/conflicting/unanswered/failed partitions; they run through injected providers only and establish no native-platform or Nmap comparison acceptance. Eight M12 TCP diagnostic response conditions cover seven non-SYN modes, exact flags, windows, attempt-local classifications, inference rules and partitions. Deterministic variants cover bad identities/checksums, reordering, duplicates and late responses; injected results establish no operating-system compatibility. Native scripted peer truth and separately provisioned real listening/non-listening sockets remain distinct. TCP ICMP port-unreachable codes retain the core matcher's generic destination-unreachable reply identity (the UDP-specific port identity is unchanged)."
   },
   "tcp_diagnostic_scenarios": [
@@ -2252,6 +2252,195 @@
             "unanswered": [],
             "failed": []
           }
+        }
+      ]
+    }
+  ],
+  "sctp_ip_protocol_scenarios": [
+    {
+      "id": "sctp-init",
+      "kind": "sctp",
+      "mode": "init",
+      "chunk_type": 1,
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "endpoints": [
+        {
+          "port": 2000,
+          "condition": "init-ack",
+          "status": "response",
+          "classification": "open",
+          "reply": "sctp_init_ack",
+          "state": "open",
+          "rule": "sctp_init.init_ack"
+        },
+        {
+          "port": 2001,
+          "condition": "abort",
+          "status": "response",
+          "classification": "closed",
+          "reply": "sctp_abort",
+          "state": "closed",
+          "rule": "sctp_init.abort"
+        },
+        {
+          "port": 2002,
+          "condition": "other",
+          "status": "response",
+          "classification": "unknown",
+          "reply": "sctp_other",
+          "state": "unknown",
+          "rule": "sctp_init.unclassified_reply"
+        },
+        {
+          "port": 2003,
+          "condition": "prohibited",
+          "status": "response",
+          "classification": "filtered",
+          "reply": "icmp_administratively_prohibited",
+          "state": "filtered",
+          "rule": "sctp_init.icmp_unreachable"
+        },
+        {
+          "port": 2004,
+          "condition": "time-exceeded",
+          "status": "response",
+          "classification": "filtered",
+          "reply": "icmp_time_exceeded",
+          "state": "filtered",
+          "rule": "sctp_init.time_exceeded"
+        },
+        {
+          "port": 2005,
+          "condition": "silent",
+          "status": "timeout",
+          "classification": "timeout",
+          "reply": null,
+          "state": "filtered",
+          "rule": "sctp_init.silence"
+        }
+      ]
+    },
+    {
+      "id": "sctp-cookie-echo",
+      "kind": "sctp",
+      "mode": "cookie_echo",
+      "chunk_type": 10,
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "endpoints": [
+        {
+          "port": 2000,
+          "condition": "init-ack",
+          "status": "response",
+          "classification": "unknown",
+          "reply": "sctp_other",
+          "state": "unknown",
+          "rule": "sctp_cookie_echo.unclassified_reply"
+        },
+        {
+          "port": 2001,
+          "condition": "abort",
+          "status": "response",
+          "classification": "closed",
+          "reply": "sctp_abort",
+          "state": "closed",
+          "rule": "sctp_cookie_echo.abort"
+        },
+        {
+          "port": 2002,
+          "condition": "other",
+          "status": "response",
+          "classification": "unknown",
+          "reply": "sctp_other",
+          "state": "unknown",
+          "rule": "sctp_cookie_echo.unclassified_reply"
+        },
+        {
+          "port": 2003,
+          "condition": "prohibited",
+          "status": "response",
+          "classification": "filtered",
+          "reply": "icmp_administratively_prohibited",
+          "state": "filtered",
+          "rule": "sctp_cookie_echo.icmp_unreachable"
+        },
+        {
+          "port": 2004,
+          "condition": "time-exceeded",
+          "status": "response",
+          "classification": "filtered",
+          "reply": "icmp_time_exceeded",
+          "state": "unknown",
+          "rule": "sctp_cookie_echo.time_exceeded"
+        },
+        {
+          "port": 2005,
+          "condition": "silent",
+          "status": "timeout",
+          "classification": "timeout",
+          "reply": null,
+          "state": "open_or_filtered",
+          "rule": "sctp_cookie_echo.silence"
+        }
+      ]
+    },
+    {
+      "id": "ip-protocol",
+      "kind": "ip_protocol",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "endpoints": [
+        {
+          "ip_protocol": 47,
+          "condition": "reply",
+          "status": "response",
+          "classification": "open",
+          "reply": "ip_protocol_payload",
+          "state": "open",
+          "rule": "ip_protocol.reply"
+        },
+        {
+          "ip_protocol": 50,
+          "condition": "protocol-unreachable",
+          "status": "response",
+          "classification": "closed",
+          "reply": "icmp_protocol_unreachable",
+          "state": "closed",
+          "rule": "ip_protocol.protocol_unreachable"
+        },
+        {
+          "ip_protocol": 112,
+          "condition": "prohibited",
+          "status": "response",
+          "classification": "filtered",
+          "reply": "icmp_administratively_prohibited",
+          "state": "filtered",
+          "rule": "ip_protocol.icmp_unreachable"
+        },
+        {
+          "ip_protocol": 115,
+          "condition": "time-exceeded",
+          "status": "response",
+          "classification": "filtered",
+          "reply": "icmp_time_exceeded",
+          "state": "filtered",
+          "rule": "ip_protocol.time_exceeded"
+        },
+        {
+          "ip_protocol": 254,
+          "condition": "silent",
+          "status": "timeout",
+          "classification": "timeout",
+          "reply": null,
+          "state": "open_or_filtered",
+          "rule": "ip_protocol.silence"
         }
       ]
     }

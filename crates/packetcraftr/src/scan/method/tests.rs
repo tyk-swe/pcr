@@ -18,6 +18,7 @@ const MIXED: &[ProbeEndpoint] = &[
 fn request(endpoints: &[ProbeEndpoint]) -> Request {
     Request {
         tcp_scan: Default::default(),
+        sctp_scan: Default::default(),
         max_in_flight: 1,
         targets: Target::Address("192.0.2.1".parse().unwrap()).into(),
         target_sources: Vec::new(),
@@ -149,6 +150,26 @@ fn discovery_probes_take_part_in_the_selection() {
     // scan endpoints do; neighbor discovery needs crafted frames.
     for (request, probe) in [
         (discovering(&[ProbeEndpoint::Icmp], false), "icmp"),
+        (
+            discovering(&[ProbeEndpoint::IcmpTimestamp], false),
+            "icmp-timestamp",
+        ),
+        (
+            discovering(&[ProbeEndpoint::IcmpNetmask], false),
+            "icmp-netmask",
+        ),
+        (
+            discovering(&[ProbeEndpoint::TcpAck { port: 80 }], false),
+            "tcp-ack",
+        ),
+        (
+            discovering(&[ProbeEndpoint::Sctp { port: 80 }], false),
+            "sctp",
+        ),
+        (
+            discovering(&[ProbeEndpoint::Ip { protocol: 47 }], false),
+            "ip",
+        ),
         (discovering(TCP, true), "neighbor"),
     ] {
         assert!(matches!(

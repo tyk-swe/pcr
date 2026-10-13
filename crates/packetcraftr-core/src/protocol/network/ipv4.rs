@@ -135,7 +135,12 @@ impl LayerCodec for Ipv4Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        if layer.fragment_offset == 0 && !layer.more_fragments {
+        let empty_protocol_probe = covered_payload_len == 0
+            && matches!(layer.protocol, WireValue::Exact(_))
+            && context
+                .child
+                .is_none_or(|child| BuiltinProtocol::Padding.identifies(child));
+        if layer.fragment_offset == 0 && !layer.more_fragments && !empty_protocol_probe {
             validate_raw_child_discriminator(
                 NAME,
                 u64::from(next_protocol),
@@ -266,7 +271,9 @@ impl LayerCodec for Ipv4Codec {
             }),
             consumed: header_len,
             payload_len,
-            next: if fragment_offset == 0 && (flags_offset & 0x2000) == 0 {
+            next: if payload_len == 0 {
+                Vec::new()
+            } else if fragment_offset == 0 && (flags_offset & 0x2000) == 0 {
                 vec![Discriminator(u64::from(next))]
             } else {
                 vec![Discriminator(255)]

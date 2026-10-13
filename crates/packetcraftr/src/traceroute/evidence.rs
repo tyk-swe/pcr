@@ -62,6 +62,7 @@ fn packet_destination(packet: &Packet, strategy: Transport) -> Option<IpAddr> {
         Transport::Tcp => Some(BuiltinProtocol::Tcp),
         Transport::Udp => Some(BuiltinProtocol::Udp),
         Transport::Icmp => None,
+        Transport::Sctp | Transport::Ip => return None,
     };
     let transport_index = packet.iter().position(|layer| match transport {
         Some(transport) => BuiltinProtocol::of(layer) == Some(transport),

@@ -77,3 +77,11 @@ sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
 bounds probes (`≤ 32`), response window (`500 ms`), operation/process duration
 (`10 s`/`15 s`), and stream/capture retention (`1 MiB`), separating socket truth,
 observed replies/windows, inferred states/rules, and heuristic divergences.
+
+## M13 SCTP and IP-protocol acceptance
+
+Both reviewed workflows also accept `scenario=sctp_ip_protocol` via
+`scripts/test-sctp-ip-protocol-native.py`
+(`packetcraftr.sctp-ip-protocol-native-evidence/v1`), tracking five-profile
+SCTP `init`/`cookie-echo` and IP-protocol inventory execution and typed
+capability refusals.

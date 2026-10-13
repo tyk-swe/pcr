@@ -37,7 +37,16 @@ pub(super) fn render_text(
     for endpoint in &result.endpoints {
         let endpoint_name = match endpoint.transport {
             packetcraftr::probe::Transport::Icmp => endpoint.transport.to_string(),
-            packetcraftr::probe::Transport::Tcp | packetcraftr::probe::Transport::Udp => {
+            packetcraftr::probe::Transport::Ip => {
+                format!(
+                    "{}/{}",
+                    endpoint.transport,
+                    optional_display(endpoint.ip_protocol)
+                )
+            }
+            packetcraftr::probe::Transport::Tcp
+            | packetcraftr::probe::Transport::Udp
+            | packetcraftr::probe::Transport::Sctp => {
                 format!("{}/{}", endpoint.transport, optional_display(endpoint.port))
             }
         };
@@ -147,6 +156,9 @@ pub(super) fn render_plan_text(plan: &output::scan::plan::Plan) -> Result<(), Cl
     if let Some(tcp_scan) = plan.tcp_scan {
         write_stdout_line(format_args!("{}", tcp_scan_text(tcp_scan)))?;
     }
+    if let Some(sctp_scan) = plan.sctp_scan {
+        write_stdout_line(format_args!("{}", sctp_scan_text(sctp_scan)))?;
+    }
     let discovery = &plan.discovery;
     write_stdout_line(format_args!(
         "discovery={} probes={} neighbor={} unresponsive={} reverse-dns={}",
@@ -155,9 +167,20 @@ pub(super) fn render_plan_text(plan: &output::scan::plan::Plan) -> Result<(), Cl
             &discovery
                 .probes
                 .iter()
-                .map(|probe| match probe.port {
-                    Some(port) => format!("{}/{port}", probe.transport),
-                    None => probe.transport.to_string(),
+                .map(|probe| {
+                    if let Some(port) = probe.port {
+                        if probe.tcp_scan.is_some_and(|scan| scan.mode == "ack") {
+                            format!("tcp-ack/{port}")
+                        } else {
+                            format!("{}/{port}", probe.transport)
+                        }
+                    } else if let Some(protocol) = probe.ip_protocol {
+                        format!("ip/{protocol}")
+                    } else if let Some(kind) = probe.icmp_request {
+                        format!("icmp-{kind}")
+                    } else {
+                        probe.transport.to_string()
+                    }
                 })
                 .collect::<Vec<_>>()
         ),
@@ -194,6 +217,20 @@ pub(super) fn tcp_scan_text(tcp_scan: output::scan::plan::TcpScan) -> String {
     }
 }
 
+/// The effective SCTP chunk, with the heuristic caveat for COOKIE-ECHO.
+pub(super) fn sctp_scan_text(sctp_scan: output::scan::plan::SctpScan) -> String {
+    let line = format!(
+        "sctp-scan={} chunk-type={}",
+        sctp_scan.mode, sctp_scan.chunk_type
+    );
+    match sctp_scan.mode {
+        "init" => line,
+        _ => format!(
+            "{line} (stack-dependent heuristic: conclusions are inferences, never authenticated identity or proof of a listening service)"
+        ),
+    }
+}
+
 /// A raw probe's evidence line after `lead`, with any application and frame
 /// lines beneath it.
 fn render_probe_text(lead: &str, evidence: &output::scan::Probe) -> Result<(), CliError> {
@@ -216,6 +253,12 @@ fn render_probe_text(lead: &str, evidence: &output::scan::Probe) -> Result<(), C
             tcp_scan.mode,
             tcp_scan.flags,
             optional_display(evidence.tcp_window),
+        ))?;
+    }
+    if let Some(sctp_scan) = evidence.sctp_scan.filter(|scan| scan.mode != "init") {
+        write_stdout_line(format_args!(
+            "{nested}sctp-scan={} chunk-type={}",
+            sctp_scan.mode, sctp_scan.chunk_type,
         ))?;
     }
     if let Some(application) = &evidence.application {

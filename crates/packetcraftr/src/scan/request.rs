@@ -140,13 +140,16 @@ pub struct Request {
     /// `stdin:3`. Empty uses declaration ordinals; otherwise supply one label
     /// per included specification, each nonempty and at most 4096 bytes.
     pub target_sources: Vec<String>,
-    /// Probed on every scanned target, in order; TCP and UDP endpoints may
-    /// share a port and never merge. ICMP echo is portless and stands alone.
-    /// Empty only for discovery-only requests.
+    /// Probed on every scanned target, in order; TCP, UDP, and SCTP endpoints
+    /// may share a port and never merge. ICMP echo and IP-protocol scans are
+    /// portless and stand alone. Empty only for discovery-only requests.
     pub endpoints: Vec<ProbeEndpoint>,
-    /// The segment sent to each TCP scan endpoint; discovery, UDP, and ICMP
-    /// probes ignore it.
+    /// The segment sent to each TCP scan endpoint; discovery, UDP, SCTP, ICMP,
+    /// and IP-protocol probes ignore it.
     pub tcp_scan: super::TcpScan,
+    /// The chunk sent to each SCTP scan endpoint; discovery SCTP probes always
+    /// send `INIT`.
+    pub sctp_scan: super::SctpScan,
     pub discovery: super::discovery::Options,
     /// Exact bytes appended to each UDP probe; empty preserves an empty datagram.
     pub udp_payload: bytes::Bytes,
@@ -248,9 +251,11 @@ impl Request {
             adaptive.validate(self)?;
         }
         check_rate(&Probes, "probes_per_second", self.probes_per_second)?;
-        self.discovery.validate(&self.route, &self.limits)?;
+        self.discovery
+            .validate(&self.route, &self.limits, self.address_family)?;
         self.validate_endpoints()?;
-        self.validate_tcp_scan()
+        self.validate_tcp_scan()?;
+        self.validate_sctp_scan()
     }
 
     /// Whether any scan endpoint or discovery probe uses `transport`.
@@ -286,6 +291,25 @@ impl Request {
         Ok(())
     }
 
+    fn validate_sctp_scan(&self) -> Result<(), Error> {
+        if !self.sctp_scan.is_init()
+            && !self
+                .endpoints
+                .iter()
+                .any(|endpoint| endpoint.transport() == Transport::Sctp)
+        {
+            return Err(Error::InvalidLimit {
+                field: "sctp_scan",
+                value: u64::from(self.sctp_scan.chunk_type()),
+                reason: format!(
+                    "{} scans require at least one SCTP scan endpoint",
+                    self.sctp_scan.as_str()
+                ),
+            });
+        }
+        Ok(())
+    }
+
     fn validate_endpoints(&self) -> Result<(), Error> {
         let invalid = |message: String| Err(Error::InvalidPort { message });
         if self.discovery.mode == super::discovery::Mode::Only {
@@ -297,13 +321,46 @@ impl Request {
             });
         }
         if self.endpoints.is_empty() {
-            return invalid("TCP and UDP scans require at least one destination port".to_owned());
+            return invalid(
+                "TCP and UDP scans require at least one destination port; SCTP and IP-protocol scans also require at least one destination endpoint"
+                    .to_owned(),
+            );
+        }
+        if let Some(endpoint) = self.endpoints.iter().find(|endpoint| {
+            matches!(
+                endpoint,
+                ProbeEndpoint::TcpAck { .. }
+                    | ProbeEndpoint::IcmpTimestamp
+                    | ProbeEndpoint::IcmpNetmask
+            )
+        }) {
+            return Err(Error::InvalidDiscovery {
+                message: format!("{endpoint} is a host-discovery probe, not a scan endpoint"),
+            });
+        }
+        if self.endpoints.contains(&ProbeEndpoint::Sctp { port: 0 }) {
+            return invalid("SCTP scans require a non-zero destination port".to_owned());
         }
         // Discovery may pair ICMP echo with port probes; only the scan's
         // portless ICMP endpoint stands alone.
         if self.endpoints.contains(&ProbeEndpoint::Icmp) && self.endpoints.len() > 1 {
             return invalid(
                 "ICMP scans are portless and do not accept destination ports".to_owned(),
+            );
+        }
+        let has_ip_protocol = self
+            .endpoints
+            .iter()
+            .any(|endpoint| matches!(endpoint, ProbeEndpoint::Ip { .. }));
+        if has_ip_protocol
+            && self
+                .endpoints
+                .iter()
+                .any(|endpoint| !matches!(endpoint, ProbeEndpoint::Ip { .. }))
+        {
+            return invalid(
+                "IP-protocol scans are portless and cannot combine with port or ICMP endpoints"
+                    .to_owned(),
             );
         }
         if self.endpoints.len() > self.limits.max_ports {

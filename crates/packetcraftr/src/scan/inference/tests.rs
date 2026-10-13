@@ -17,6 +17,7 @@ fn inferred(transport: Transport, attempts: &[(u64, Option<Reply>)]) -> Inferenc
             sequence,
             reply,
             tcp_scan: None,
+            sctp_scan: None,
             tcp_window: None,
         }),
     )
@@ -119,6 +120,7 @@ fn icmp_echo_infers_no_port_state() {
                 sequence: 0,
                 reply: Some(IcmpEchoReply),
                 tcp_scan: None,
+                sctp_scan: None,
                 tcp_window: None,
             }]
         ),
@@ -289,6 +291,7 @@ fn diagnostic(mode: TcpScan, attempts: &[(u64, Option<Reply>, Option<u16>)]) -> 
                 sequence,
                 reply,
                 tcp_scan: Some(mode),
+                sctp_scan: None,
                 tcp_window: window,
             }),
     )
@@ -480,4 +483,127 @@ fn custom_replies_never_make_silent_attempts_support_them() {
 #[test]
 fn diagnostic_state_names_the_unfiltered_conclusion() {
     assert_eq!(State::Unfiltered.as_str(), "unfiltered");
+}
+
+#[test]
+fn sctp_init_cookie_echo_and_ip_protocol_rules_follow_their_state_tables() {
+    use crate::scan::SctpScan;
+    use Reply::{IcmpProtocolUnreachable, IpProtocolPayload, SctpAbort, SctpInitAck, SctpOther};
+
+    let sctp = |mode: SctpScan, reply: Option<Reply>| {
+        raw(
+            Transport::Sctp,
+            [super::Attempt {
+                sequence: 1,
+                reply,
+                tcp_scan: None,
+                sctp_scan: Some(mode),
+                tcp_window: None,
+            }],
+        )
+        .expect("SCTP infers")
+    };
+    assert_eq!(
+        (
+            sctp(SctpScan::Init, Some(SctpInitAck)).state,
+            sctp(SctpScan::Init, Some(SctpInitAck)).rule.as_str()
+        ),
+        (Some(State::Open), "sctp_init.init_ack")
+    );
+    assert_eq!(
+        (
+            sctp(SctpScan::Init, Some(SctpAbort)).state,
+            sctp(SctpScan::Init, Some(SctpAbort)).rule.as_str()
+        ),
+        (Some(State::Closed), "sctp_init.abort")
+    );
+    assert_eq!(
+        (
+            sctp(SctpScan::Init, Some(SctpOther)).state,
+            sctp(SctpScan::Init, Some(SctpOther)).rule.as_str()
+        ),
+        (Some(State::Unknown), "sctp_init.unclassified_reply")
+    );
+    assert_eq!(
+        (
+            sctp(SctpScan::Init, Some(IcmpAdministrativelyProhibited)).state,
+            sctp(SctpScan::Init, Some(IcmpAdministrativelyProhibited))
+                .rule
+                .as_str()
+        ),
+        (Some(State::Filtered), "sctp_init.icmp_unreachable")
+    );
+    assert_eq!(
+        (
+            sctp(SctpScan::Init, None).state,
+            sctp(SctpScan::Init, None).rule.as_str()
+        ),
+        (Some(State::Filtered), "sctp_init.silence")
+    );
+
+    assert_eq!(
+        (
+            sctp(SctpScan::CookieEcho, Some(SctpAbort)).state,
+            sctp(SctpScan::CookieEcho, Some(SctpAbort)).rule.as_str()
+        ),
+        (Some(State::Closed), "sctp_cookie_echo.abort")
+    );
+    assert_eq!(
+        (
+            sctp(SctpScan::CookieEcho, Some(SctpInitAck)).state,
+            sctp(SctpScan::CookieEcho, Some(SctpInitAck)).rule.as_str()
+        ),
+        (Some(State::Unknown), "sctp_cookie_echo.unclassified_reply")
+    );
+    assert_eq!(
+        (
+            sctp(SctpScan::CookieEcho, Some(IcmpTimeExceeded)).state,
+            sctp(SctpScan::CookieEcho, Some(IcmpTimeExceeded))
+                .rule
+                .as_str()
+        ),
+        (Some(State::Unknown), "sctp_cookie_echo.time_exceeded")
+    );
+    assert_eq!(
+        (
+            sctp(SctpScan::CookieEcho, None).state,
+            sctp(SctpScan::CookieEcho, None).rule.as_str()
+        ),
+        (Some(State::OpenOrFiltered), "sctp_cookie_echo.silence")
+    );
+
+    assert_eq!(
+        (
+            inferred(Transport::Ip, &[(1, Some(IpProtocolPayload))]).state,
+            inferred(Transport::Ip, &[(1, Some(IpProtocolPayload))])
+                .rule
+                .as_str()
+        ),
+        (Some(State::Open), "ip_protocol.reply")
+    );
+    assert_eq!(
+        (
+            inferred(Transport::Ip, &[(1, Some(IcmpProtocolUnreachable))]).state,
+            inferred(Transport::Ip, &[(1, Some(IcmpProtocolUnreachable))])
+                .rule
+                .as_str()
+        ),
+        (Some(State::Closed), "ip_protocol.protocol_unreachable")
+    );
+    assert_eq!(
+        (
+            inferred(Transport::Ip, &[(1, Some(IcmpDestinationUnreachable))]).state,
+            inferred(Transport::Ip, &[(1, Some(IcmpDestinationUnreachable))])
+                .rule
+                .as_str()
+        ),
+        (Some(State::Filtered), "ip_protocol.icmp_unreachable")
+    );
+    assert_eq!(
+        (
+            inferred(Transport::Ip, &[(1, None)]).state,
+            inferred(Transport::Ip, &[(1, None)]).rule.as_str()
+        ),
+        (Some(State::OpenOrFiltered), "ip_protocol.silence")
+    );
 }

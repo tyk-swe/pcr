@@ -313,8 +313,10 @@ where
                     control: matches!(
                         feedback.reply,
                         crate::scan::Reply::IcmpPortUnreachable
+                            | crate::scan::Reply::IcmpProtocolUnreachable
                             | crate::scan::Reply::IcmpDestinationUnreachable
                             | crate::scan::Reply::TcpReset
+                            | crate::scan::Reply::SctpAbort
                     ),
                 },
                 None => crate::scan::adaptive::Outcome::Silent,

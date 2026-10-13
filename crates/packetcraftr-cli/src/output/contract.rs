@@ -16,9 +16,10 @@ pub const SCHEMA_V11: &str = "packetcraftr.output/v11";
 pub const SCHEMA_V12: &str = "packetcraftr.output/v12";
 pub const SCHEMA_V13: &str = "packetcraftr.output/v13";
 pub const SCHEMA_V14: &str = "packetcraftr.output/v14";
-/// Current family: TCP diagnostic scan modes, retained response windows, and the
-/// unfiltered state.
 pub const SCHEMA_V15: &str = "packetcraftr.output/v15";
+/// Current family: SCTP INIT/COOKIE-ECHO scanning, IP-protocol inventory, and
+/// extra host-discovery probe families.
+pub const SCHEMA_V16: &str = "packetcraftr.output/v16";
 
 pub use crate::commands::Command;
 

@@ -31,6 +31,7 @@ pub struct Probe {
     pub scope: Option<crate::target::ResolvedZone>,
     pub endpoint: ProbeEndpoint,
     pub tcp_scan: super::TcpScan,
+    pub sctp_scan: super::SctpScan,
     pub attempt: u32,
     pub udp_payload: bytes::Bytes,
     pub udp_profile: Option<std::sync::Arc<super::profile::UdpProfile>>,
@@ -132,11 +133,22 @@ pub(super) fn planned_probe(
             );
             (profile.cloned(), payload)
         }
-        ProbeEndpoint::Tcp { .. } | ProbeEndpoint::Icmp => (None, bytes::Bytes::new()),
+        ProbeEndpoint::Tcp { .. }
+        | ProbeEndpoint::TcpAck { .. }
+        | ProbeEndpoint::Sctp { .. }
+        | ProbeEndpoint::Icmp
+        | ProbeEndpoint::IcmpTimestamp
+        | ProbeEndpoint::IcmpNetmask
+        | ProbeEndpoint::Ip { .. } => (None, bytes::Bytes::new()),
     };
     let tcp_scan = match (stage, endpoint) {
         (Stage::Scan, ProbeEndpoint::Tcp { .. }) => request.tcp_scan,
+        (Stage::Discovery, ProbeEndpoint::TcpAck { .. }) => super::TcpScan::Ack,
         _ => super::TcpScan::default(),
+    };
+    let sctp_scan = match (stage, endpoint) {
+        (Stage::Scan, ProbeEndpoint::Sctp { .. }) => request.sctp_scan,
+        _ => super::SctpScan::default(),
     };
     Probe {
         sequence,
@@ -145,6 +157,7 @@ pub(super) fn planned_probe(
         scope: target.scope.clone(),
         endpoint,
         tcp_scan,
+        sctp_scan,
         attempt,
         udp_profile,
         udp_payload,
@@ -251,6 +264,7 @@ mod tests {
             timeout: Duration::from_millis(1),
             probes_per_second: Some(3),
             tcp_scan: Default::default(),
+            sctp_scan: Default::default(),
             udp_payload: bytes::Bytes::new(),
             udp_profiles: Default::default(),
             limits: crate::scan::Limits::default(),

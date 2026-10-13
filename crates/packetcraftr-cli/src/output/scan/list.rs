@@ -4,7 +4,10 @@
 use serde::Serialize;
 use std::net::IpAddr;
 
-use super::{Scope, plan::Ports};
+use super::{
+    Scope,
+    plan::{IpProtocols, Ports},
+};
 use crate::input::manifest::Declaration;
 use crate::output::stream::StreamRecord;
 use packetcraftr::target::plan;
@@ -69,6 +72,10 @@ pub struct Report {
     /// targets would probe.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ports: Option<Ports>,
+    /// Present when IP-protocol terms were given: the IP protocol numbers a
+    /// scan of these targets would probe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_protocols: Option<IpProtocols>,
 }
 
 impl Report {
@@ -76,6 +83,7 @@ impl Report {
         report: plan::Report,
         declarations: &[Declaration],
         ports: Option<Ports>,
+        ip_protocols: Option<IpProtocols>,
     ) -> Self {
         Self {
             method: METHOD,
@@ -109,6 +117,7 @@ impl Report {
                 })
                 .collect(),
             ports,
+            ip_protocols,
         }
     }
 }
@@ -122,6 +131,8 @@ pub struct Complete {
     pub duplicates: Vec<Origin>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ports: Option<Ports>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_protocols: Option<IpProtocols>,
 }
 
 impl From<Report> for Complete {
@@ -133,6 +144,7 @@ impl From<Report> for Complete {
             count: report.targets.len(),
             duplicates: report.duplicates,
             ports: report.ports,
+            ip_protocols: report.ip_protocols,
         }
     }
 }

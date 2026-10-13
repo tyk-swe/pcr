@@ -959,6 +959,7 @@ fn scan_endpoint_selection_requires_open_tcp_or_open_or_filtered_udp_and_retains
         scope: None,
         transport: packetcraftr::probe::Transport::Tcp,
         port: Some(32222),
+        ip_protocol: None,
         classification: packetcraftr::scan::Classification::Open,
         port_hint: None,
         inference: Some(Inference {

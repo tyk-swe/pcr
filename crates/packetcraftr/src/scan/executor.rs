@@ -368,6 +368,7 @@ fn route_probe(target: &SelectedAddress) -> Probe {
         scope: target.scope.clone(),
         endpoint: crate::probe::ProbeEndpoint::Icmp,
         tcp_scan: super::TcpScan::default(),
+        sctp_scan: super::SctpScan::default(),
         attempt: 1,
         udp_payload: bytes::Bytes::new(),
         udp_profile: None,
@@ -637,6 +638,7 @@ mod tests {
         let (client, providers) = fake_client();
         let request = Request {
             tcp_scan: Default::default(),
+            sctp_scan: Default::default(),
             target_sources: Vec::new(),
             max_in_flight: 1,
             targets: Target::Address("192.0.2.2".parse().unwrap()).into(),

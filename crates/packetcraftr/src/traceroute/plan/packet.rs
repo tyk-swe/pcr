@@ -79,6 +79,11 @@ pub(in crate::traceroute) fn probe_packet(probe: &Probe) -> Packet {
                 });
             }
         },
+        ProbeEndpoint::TcpAck { .. }
+        | ProbeEndpoint::Sctp { .. }
+        | ProbeEndpoint::IcmpTimestamp
+        | ProbeEndpoint::IcmpNetmask
+        | ProbeEndpoint::Ip { .. } => {}
     }
     packet
 }
@@ -116,6 +121,11 @@ pub(in crate::traceroute) fn sent_probe_matches(probe: &Probe, sent: &Packet) ->
         ProbeEndpoint::Udp { .. } => BuiltinProtocol::Udp,
         ProbeEndpoint::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
         ProbeEndpoint::Icmp => BuiltinProtocol::Icmpv6,
+        ProbeEndpoint::TcpAck { .. }
+        | ProbeEndpoint::Sctp { .. }
+        | ProbeEndpoint::IcmpTimestamp
+        | ProbeEndpoint::IcmpNetmask
+        | ProbeEndpoint::Ip { .. } => return false,
     };
     let expected = [network_protocol, transport_protocol];
     let udp_payload = matches!(probe.target, ProbeEndpoint::Udp { .. }) && probe.payload_size > 0;
@@ -188,5 +198,10 @@ pub(in crate::traceroute) fn sent_probe_matches(probe: &Probe, sent: &Packet) ->
                 icmp.icmp_type == 128 && icmp.code == 0 && icmp.body == icmp_body(probe)
             }),
         },
+        ProbeEndpoint::TcpAck { .. }
+        | ProbeEndpoint::Sctp { .. }
+        | ProbeEndpoint::IcmpTimestamp
+        | ProbeEndpoint::IcmpNetmask
+        | ProbeEndpoint::Ip { .. } => false,
     }
 }

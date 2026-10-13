@@ -50,6 +50,7 @@ fn scoped_evidence_is_charged_before_publication() {
     ] {
         let request = scan::Request {
             tcp_scan: Default::default(),
+            sctp_scan: Default::default(),
             target_sources: Vec::new(),
             targets: target.clone().into(),
             udp_payload: bytes::Bytes::new(),

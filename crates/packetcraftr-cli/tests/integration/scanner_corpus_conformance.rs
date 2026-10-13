@@ -352,3 +352,30 @@ fn tcp_diagnostic_inventory_is_complete_and_attempt_local() {
         assert!(corpus_schema().validate(&bad).is_err(), "{field}");
     }
 }
+
+#[test]
+fn sctp_ip_protocol_inventory_is_complete_and_strict() {
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../docs/scanner-corpus.v1.json")).unwrap();
+    assert_eq!(corpus["dataset_version"], "1.8.0");
+    let cases = corpus["sctp_ip_protocol_scenarios"].as_array().unwrap();
+    assert_eq!(
+        cases
+            .iter()
+            .map(|case| case["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["sctp-init", "sctp-cookie-echo", "ip-protocol"]
+    );
+    for case in cases {
+        assert_eq!(case["families"], serde_json::json!(["ipv4", "ipv6"]));
+    }
+    let mut bad = corpus.clone();
+    bad["sctp_ip_protocol_scenarios"][0]["unknown"] = true.into();
+    assert!(corpus_schema().validate(&bad).is_err());
+    let mut short = corpus;
+    short["sctp_ip_protocol_scenarios"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
+    assert!(corpus_schema().validate(&short).is_err());
+}

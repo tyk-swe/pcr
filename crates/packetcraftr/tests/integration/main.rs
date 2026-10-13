@@ -37,6 +37,7 @@ mod route_contracts;
 mod scan_followup_contracts;
 mod scan_pipeline_contracts;
 mod scanner_corpus_contracts;
+mod sctp_ip_protocol_contracts;
 mod send_set_contracts;
 mod staged_preparation_contracts;
 mod tcp_diagnostic_contracts;

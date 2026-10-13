@@ -45,14 +45,19 @@ impl ResponseMatcher for EchoMatcher {
         for layers in &layers {
             let request = IcmpMessage::of(layers.request)?;
             let response = IcmpMessage::of(layers.response)?;
-            if request.icmp_type != self.request_type
-                || response.icmp_type != self.reply_type
-                || request.code != 0
-                || response.code != 0
-            {
+            if request.code != 0 || response.code != 0 {
                 return None;
             }
-            if request.body.get(..4)? != response.body.get(..4)? {
+            let min_body_len = match (self.protocol, request.icmp_type, response.icmp_type) {
+                (_, req, resp) if req == self.request_type && resp == self.reply_type => 4,
+                (BuiltinProtocol::Icmpv4, 13, 14) => 16,
+                (BuiltinProtocol::Icmpv4, 17, 18) => 8,
+                _ => return None,
+            };
+            if request.body.len() < min_body_len
+                || response.body.len() < min_body_len
+                || request.body.get(..4)? != response.body.get(..4)?
+            {
                 return None;
             }
         }

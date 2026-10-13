@@ -22,6 +22,7 @@ use crate::{Client, Stats, scan};
 fn scan_request() -> scan::Request {
     scan::Request {
         tcp_scan: Default::default(),
+        sctp_scan: Default::default(),
         max_in_flight: 1,
         targets: Target::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))).into(),
         target_sources: Vec::new(),
@@ -92,7 +93,10 @@ fn probe_evidence(
         _ => (Transport::Tcp, Some(80)),
     };
     scan::ProbeEvidence {
+        ip_protocol: None,
+        icmp_request: (transport == Transport::Icmp).then_some("echo"),
         tcp_scan: None,
+        sctp_scan: None,
         tcp_window: None,
         sequence,
         stage: scan::Stage::Scan,
@@ -124,6 +128,7 @@ fn endpoint(address: IpAddr, probes: Vec<scan::ProbeEvidence>) -> scan::Endpoint
         scope: None,
         transport: Transport::Tcp,
         port: Some(80),
+        ip_protocol: None,
         classification: scan::Classification::Open,
         port_hint: None,
         inference: None,

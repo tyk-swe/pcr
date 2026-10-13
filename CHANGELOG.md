@@ -16,7 +16,7 @@ remaining acceptance gates.
   under `evidence: packetcraftr::evidence::Limits { max_frames, max_bytes, max_undecoded }`,
   preserving JSON and binary Serde representations.
 - Packet documents use `packetcraftr.packet/v2`; machine output uses
-  `packetcraftr.output/v15` (output v6–v14 remain frozen; see
+  `packetcraftr.output/v16` (output v6–v15 remain frozen; see
   [consumer compatibility](docs/consumer-compatibility.md)).
 - Live workflows run through `Client<P, K>` with explicit providers, policy,
   clock, cancellation, and runtime, taking `(request, sink)` and returning
@@ -38,6 +38,13 @@ remaining acceptance gates.
 
 ### Added
 
+- Raw SCTP `INIT` and `COOKIE-ECHO` scans (`scan::SctpScan`, `--transport sctp`,
+  `--sctp-scan`, `sctp:` port prefixes), standalone IP-protocol (`0..=255`)
+  inventory (`scan::select_ip_protocols`, `--transport ip`, `--ip-protocols`,
+  `--exclude-ip-protocols`), extra host-discovery probe families (`tcp-ack`,
+  `icmp-timestamp`, `icmp-netmask`, `sctp`, `ip`), output/v16, dataset 1.8.0
+  `sctp_ip_protocol_scenarios`, and the `sctp_ip_protocol` native validation
+  runner ([M13](docs/roadmap/m13-sctp-ip-protocol.md)).
 - Raw TCP diagnostic scans (`scan::TcpScan`: `Syn`, `Ack`, `Window`, `Fin`,
   `Null`, `Xmas`, `Maimon`, and observation-only `Custom`, via `--tcp-scan` and
   `--tcp-flags`) with mode-specific inference (`unfiltered`, `tcp_<mode>.*`),
@@ -57,7 +64,7 @@ remaining acceptance gates.
   opt-in host discovery, reverse DNS, adaptive scheduling, and scan-informed
   traceroute with sourced hop reuse (`Client::scan_with_followups`,
   `Client::scan_connect_with_followups`, `Client::trace_hosts`), backed by
-  scanner corpus datasets 1.1.0–1.7.0.
+  scanner corpus datasets 1.1.0–1.8.0.
 - Multi-interface live capture with bounded PCAPNG rotation/retention, native
   buffer and timestamp controls, and opt-in dissection/projection.
 - DNS direct TCP (`--tcp`), bounded question batches, `--reverse` PTR queries,

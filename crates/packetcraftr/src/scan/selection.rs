@@ -56,8 +56,13 @@ pub fn select_endpoints(
         include,
         exclude,
     } = selection;
-    if transports.is_empty() || transports.contains(&Transport::Icmp) {
-        return Err(invalid("port selections need TCP and/or UDP transports"));
+    if transports.is_empty()
+        || transports.contains(&Transport::Icmp)
+        || transports.contains(&Transport::Ip)
+    {
+        return Err(invalid(
+            "port selections need TCP and/or UDP (or SCTP) transports",
+        ));
     }
     let terms = include.len().saturating_add(exclude.len());
     if terms > MAX_PORT_TERMS {
@@ -132,6 +137,9 @@ fn expand(
             if start > end {
                 return Err(invalid(format!("port range {start}-{end} is descending")));
             }
+            if start == 0 && applies.contains(&Transport::Sctp) {
+                return Err(invalid("SCTP scans require a non-zero destination port"));
+            }
             for port in start..=end {
                 for transport in &applies {
                     visit(endpoint(*transport, port));
@@ -195,7 +203,10 @@ fn endpoint(transport: Transport, port: u16) -> ProbeEndpoint {
     match transport {
         Transport::Tcp => ProbeEndpoint::Tcp { port },
         Transport::Udp => ProbeEndpoint::Udp { port },
-        Transport::Icmp => unreachable!("port selections are validated to TCP and UDP"),
+        Transport::Sctp => ProbeEndpoint::Sctp { port },
+        Transport::Icmp | Transport::Ip => {
+            unreachable!("port selections are validated to TCP, UDP, and SCTP")
+        }
     }
 }
 
@@ -214,20 +225,30 @@ fn invalid(message: impl Into<String>) -> Error {
 }
 
 /// One bit per (transport, port), so expansion memory stays fixed.
-struct Seen([Box<[u64; 1024]>; 2]);
+struct Seen([Box<[u64; 1024]>; 3]);
 
 impl Default for Seen {
     fn default() -> Self {
-        Self([Box::new([0; 1024]), Box::new([0; 1024])])
+        Self([
+            Box::new([0; 1024]),
+            Box::new([0; 1024]),
+            Box::new([0; 1024]),
+        ])
     }
 }
 
 impl Seen {
     fn slot(endpoint: ProbeEndpoint) -> (usize, usize, u64) {
         let (table, port) = match endpoint {
-            ProbeEndpoint::Tcp { port } => (0, port),
+            ProbeEndpoint::Tcp { port } | ProbeEndpoint::TcpAck { port } => (0, port),
             ProbeEndpoint::Udp { port } => (1, port),
-            ProbeEndpoint::Icmp => unreachable!("port selections expand only TCP and UDP"),
+            ProbeEndpoint::Sctp { port } => (2, port),
+            ProbeEndpoint::Icmp
+            | ProbeEndpoint::IcmpTimestamp
+            | ProbeEndpoint::IcmpNetmask
+            | ProbeEndpoint::Ip { .. } => {
+                unreachable!("port selections expand only TCP, UDP, and SCTP")
+            }
         };
         let port = usize::from(port);
         (table, port / 64, 1 << (port % 64))

@@ -216,7 +216,10 @@ fn evidence(
         scope: None,
         transport: Transport::Tcp,
         port: Some(port),
+        ip_protocol: None,
+        icmp_request: None,
         tcp_scan: Some(mode),
+        sctp_scan: None,
         attempt: 1,
         status: if answered {
             ProbeStatus::Response
@@ -342,6 +345,7 @@ fn cases() -> Vec<Case> {
 fn plan(mode: TcpScan) -> output::scan::plan::Plan {
     output::scan::plan::Plan {
         tcp_scan: Some(output::scan::plan::TcpScan::from(mode)),
+        sctp_scan: None,
         method: output::scan::plan::Method {
             requested: "raw",
             selected: "raw",

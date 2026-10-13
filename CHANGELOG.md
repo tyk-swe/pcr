@@ -6,209 +6,107 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
-This section describes the net changes since 0.5.0-beta.3, not intermediate
-changes on `main`. See [migration guidance](docs/migration-unreleased.md) for
-replacement APIs and behavior changes, and the [scanner roadmap](docs/roadmap/README.md)
-for remaining acceptance gates and revision-bound evidence.
+Net changes since 0.5.0-beta.3. See [migration guidance](docs/migration-unreleased.md)
+for replacement APIs and the [scanner roadmap](docs/roadmap/README.md) for
+remaining acceptance gates.
 
 ### Breaking
 
-- The evidence ceilings of `scan::Limits`, `traceroute::Limits`, and
-  `dns::Limits` now live in `evidence: packetcraftr::evidence::Limits
-  { max_frames, max_bytes, max_undecoded }`; the existing Serde struct
-  representation is preserved for both JSON and binary formats.
-- Current packet documents use `packetcraftr.packet/v2`; machine output uses
-  `packetcraftr.output/v15`. Consumers must explicitly support these families.
-  Output v6–v14 schemas and published evidence stay frozen; see
-  [consumer compatibility](docs/consumer-compatibility.md).
+- `scan::Limits`, `traceroute::Limits`, and `dns::Limits` nest evidence bounds
+  under `evidence: packetcraftr::evidence::Limits { max_frames, max_bytes, max_undecoded }`,
+  preserving JSON and binary Serde representations.
+- Packet documents use `packetcraftr.packet/v2`; machine output uses
+  `packetcraftr.output/v15` (output v6–v14 remain frozen; see
+  [consumer compatibility](docs/consumer-compatibility.md)).
 - Live workflows run through `Client<P, K>` with explicit providers, policy,
-  clock, cancellation, and runtime. Requests and sinks replace free workflow
-  runners, executor seams, and caller-supplied authorizers. Terminal results
-  are `Report`; collectors rebuild `Aggregate`.
-- Provider contracts take shared deadlines and retain typed error sources.
-  Native contracts/resources remain in netio; route planning, neighbor
-  discovery, and live policy belong to the workflow crate. Equivalent public
-  aliases and superseded entry points are removed; the migration tables list
-  their replacements.
-- `ProviderSet` now contains UDP directly as its seventh defaulted type
-  parameter and `udp` field. `WithUdp` and the broad `Providers` marker are
-  removed. Callers tracking `main` add `udp: ()` to complete literals or use
-  partial constructors, and bound workflows by their specific capabilities.
+  clock, cancellation, and runtime, taking `(request, sink)` and returning
+  `Report` (`Collector::finish` rebuilds `Aggregate`). `ProviderSet` includes
+  `udp` as its seventh defaulted field; `WithUdp` and the broad `Providers`
+  marker are removed.
+- Provider contracts take `&budget::Deadline` and retain typed error sources.
+  Route planning, neighbor discovery, and live policy belong to `packetcraftr`.
 - Packet fields support named objects, DNS questions/records are structured,
-  TCP options are typed, and DNS query types serialize as numeric `u16` values.
-  Templates accumulate Cartesian axes and validate expansion before iteration.
+  TCP options are typed, DNS query types serialize as numeric `u16`, and
+  templates accumulate Cartesian axes.
 - Core APIs use module-owned errors, typed frame lengths and link types,
-  refcounted codec inputs, and nested validated limits. Invalid configuration
-  fails rather than silently lowering a requested ceiling.
-- Error sources appear in `causes`, not duplicated inside `message`.
-  `Kind::Cli` becomes `Kind::Usage` (`"usage"`); frozen `cli.*` codes retain
-  their spelling. Specific error-code changes are listed in the migration guide.
-- Scan output distinguishes attempt observations, port inference, host
-  discovery, scheduling, and optional traceroute provenance. Send results use
-  a per-frame list; multi-interface capture IDs are capture-local rather than
-  OS interface indexes. Scripts matching exact fields or enums must migrate.
+  refcounted codec inputs, and nested validated limits. Error sources appear in
+  `causes` rather than duplicated inside `message`, and `Kind::Cli` is renamed
+  `Kind::Usage` (`"usage"`).
+- Scan output separates attempt observations, port inference, host discovery,
+  scheduling, and optional traceroute provenance; `send` reports a per-frame
+  list; `capture` uses capture-local interface IDs.
 
 ### Added
 
-- M12 acceptance infrastructure: original scanner corpus dataset 1.7.0 adds
-  eight dual-stack TCP diagnostic conditions and seven mode/flag expectation rows;
-  workflow checks cover serial, pipelined, adaptive, noise, duplicate, reordered,
-  and late delivery. A revision-bound five-profile native runner provisions
-  independent Linux reply/kernel peers and hosted macOS/Windows loopback routes,
-  retaining exact wire evidence, socket truth, heuristic divergences, and precise
-  failures/unavailability. Both reviewed native workflows expose `tcp_diagnostics`.
-  Cross-platform acceptance remains open; scan APIs and output/v15 are unchanged.
-
-- Raw TCP diagnostic scans: `scan::TcpScan` (`Syn`, `Ack`, `Window`, `Fin`, `Null`,
-  `Xmas`, `Maimon`, and observation-only `Custom`) selected by `Request::tcp_scan`
-  and `--tcp-scan`/`--tcp-flags`, with exact flag and per-sequence acknowledgment
-  checks, mode-specific stack-dependent inference including `unfiltered`, and the
-  retained response window. Output/v15 publishes the effective mode and flags,
-  `tcp_window`, and the diagnostic rule vocabulary. Native cross-platform and
-  independent ground-truth acceptance (M12) remain open. See
-  [TCP diagnostics](docs/tcp-diagnostics.md).
-
-- Standalone `identify-os` / `Client::identify_os` with bounded dual-stack
-  probes, verified open/closed prerequisites, exact retained wire evidence,
-  conservative OS-family candidates, and explicit inconclusive results.
-  Its CLI deadline includes corpus loading, setup, and live probing in every
-  output format.
-  Output/v14 and the independently versioned OS document contract preserve
-  observations and candidate provenance; broader M10 native acceptance remains
-  open. See [OS identification](docs/os-identification.md).
-
-- Explicit `identify --tls` with bounded encrypted traffic, handshake deadlines,
-  cancellation, presented certificate observations, declared SNI, and separate
-  TLS failure evidence; output/v13 introduced TLS counters and metadata provenance.
-- Reviewed SMTP/FTP greeting probes in service corpus 1.1.0, supported hostname
-  and static product CPE claims, and a precommitted held-out evaluation with
-  separate unknown, ambiguous, confidence, and misleading-claim results.
-- `scan::followup` runs a scan's trace and reverse-DNS follow-ups under the
-  scan's own budget, so library callers get what `scan --traceroute` and
-  `--reverse-dns` do: `Client::scan_with_followups` for raw scans and
-  `Client::scan_connect_with_followups` for TCP connect scans.
-- Explicit bounded service identification for selected TCP/UDP endpoints:
-  SSH banners, HTTP HEAD, and DNS probes on any permitted port; independently
-  versioned probe/match data and sensitive-service exclusions; exact evidence
-  and provenance separate from unauthenticated product/version claims.
-- Bounded target manifests, exclusions, packet-free scan list mode, and scoped
-  IPv6 selection. Port names/presets, mixed TCP/UDP plans, reviewed catalogs,
-  curated or operator UDP profiles, and scan-dependent inference preserve
-  unknown, conflicting, late, duplicate, and unattributed evidence.
-- Opt-in host discovery, reverse DNS, adaptive scheduling, and scan-informed
-  traceroute with explicit path-reuse provenance. Portable TCP connect scans
-  and rolling raw-packet windows share finite operation budgets. The scanner
-  corpus (dataset 1.6.0) states shared, divergent, and silent-hop multi-host
-  trace paths with their hop addresses, probe counts with and without reuse,
-  and reused hops, reproduced through `Client::trace_hosts`; it also states
-  mixed same-port, silent-UDP, and contradictory-attempt port-inference
-  scenarios with their scripted responses, attempt outcomes, inferred states
-  and rules, and evidence partitions, reproduced through `Client::scan`.
-- Multi-interface live capture, bounded PCAPNG rotation/retention, native buffer
-  and timestamp controls, dissection/projection, and completion/file evidence.
-- DNS direct TCP, bounded question batches and reverse names, EDNS v0 requests,
-  numeric query types, and explicit TCP providers. Replay gains interface/filter
-  routing, repetition, bit-rate pacing, and a bounded inter-frame gap.
-- Offline HTTP/1, cleartext HTTP/2 and h2c, and DNS-over-TCP analysis with source
-  provenance; TCP expert findings, capture summaries, and scoped stream export.
-  TLS decryption and HTTP/3 remain unsupported.
-- Forwarding verification with explicit identity/check rules, evidence states,
-  independent detail/scratch budgets, and a strict reference consumer.
-- Bounded fragmentation, capture merging/reordering, header/address rewriting,
-  conditional field edits and checksum repair, gzip/Zstd capture I/O, frame
-  selection, epoch bounds, and checked PCAP/PCAPNG normalization.
-- Packet sets and deterministic TCP/UDP fixture conversations, named layer
-  selectors, byte generators, nested reflection/filter paths, field trees,
-  projection, and decode-as bindings. DNS/DHCP/TLS fixture construction and
-  NTP, STP, LLDP, EAPOL, VRRP, EtherIP, GTP-U, TFTP, and syslog codecs expand
-  protocol coverage; multicast helpers preserve typed and unknown wire values.
-- Versioned resource presets, effective resource diagnostics, library examples,
-  built-in CLI topics, generated completions/man pages, and Linux Arm64 release
-  archives alongside the existing supported platforms.
-- Independent decoder comparisons, scanner ground-truth fixtures, reviewed
-  isolated/host-local native validation, memory benchmarks, and detached
-  public-API consumer checks. Compilation or a typed unsupported result does
-  not establish native feature parity.
+- Raw TCP diagnostic scans (`scan::TcpScan`: `Syn`, `Ack`, `Window`, `Fin`,
+  `Null`, `Xmas`, `Maimon`, and observation-only `Custom`, via `--tcp-scan` and
+  `--tcp-flags`) with mode-specific inference (`unfiltered`, `tcp_<mode>.*`),
+  retained `tcp_window` in output/v15, dataset 1.7.0 diagnostic scenarios, and
+  the `tcp_diagnostics` native validation runner ([TCP diagnostics](docs/tcp-diagnostics.md)).
+- Standalone `identify-os` / `Client::identify_os` with dual-stack probes,
+  verified open/closed prerequisites, exact wire evidence, qualified OS-family
+  candidates, and output/v14 ([OS identification](docs/os-identification.md)).
+- Explicit service identification (`identify` / `Client::identify`) over
+  selected TCP/UDP endpoints with SSH, HTTP HEAD, DNS, SMTP, and FTP probes,
+  optional `--tls` wrapping (TLS 1.2/1.3, declared SNI, DER certificate
+  observations, `usage.tls`), sensitive-service exclusions, sourced hostnames
+  and wildcard-version CPEs, and held-out evaluation
+  ([service identification](docs/service-identification.md)).
+- Bounded target manifests/exclusions, `scan --list`, scoped IPv6 selection,
+  port catalog/presets, curated and operator UDP profiles, mixed TCP/UDP plans,
+  opt-in host discovery, reverse DNS, adaptive scheduling, and scan-informed
+  traceroute with sourced hop reuse (`Client::scan_with_followups`,
+  `Client::scan_connect_with_followups`, `Client::trace_hosts`), backed by
+  scanner corpus datasets 1.1.0–1.7.0.
+- Multi-interface live capture with bounded PCAPNG rotation/retention, native
+  buffer and timestamp controls, and opt-in dissection/projection.
+- DNS direct TCP (`--tcp`), bounded question batches, `--reverse` PTR queries,
+  and EDNS v0 requests. Replay interface/filter routing, repetition, bit-rate
+  pacing (`--bps`), and `--max-gap-ms`.
+- Offline HTTP/1, cleartext HTTP/2 and h2c (`http2`), and DNS-over-TCP analysis
+  with source provenance; TCP expert findings, capture summaries, and dependency-aware
+  stream/datagram `export`.
+- Forwarding verification (`verify-forwarding`) with identity/preservation/expectation
+  rules, evidence states, detail/scratch budgets, and a reference consumer.
+- Capture `fragment`, `merge` (chronological look-ahead or `append`), `rewrite`
+  (headers, CIDR/MAC maps, fixed-width fields, dry-run), gzip/Zstd capture I/O,
+  frame selection, epoch bounds, and checked PCAP/PCAPNG normalization.
+- Packet sets (`--axis`, `--set`), deterministic TCP/UDP sessions, byte
+  generators, nested reflection/filter paths, `--tree` and `--field` projection,
+  decode-as bindings, DNS/DHCP/TLS fixture construction, and NTP, STP, LLDP,
+  EAPOL, VRRP, EtherIP, GTP-U, TFTP, and syslog codecs.
+- Versioned resource presets (`ci-v1`, `workstation-v1`), `--resource-diagnostics`,
+  built-in `topics`, generated completions/man pages (`documentation`), and
+  Linux Arm64 release archives.
 
 ### Changed
 
 - Preparation and final transmission share policy, pacing, deadlines, and
-  finite packet/byte budgets. Destination allowlists only narrow existing
-  permissions; interface and target resolution follow authorization.
-- Blocking native calls share process-wide admission. Cancelled or timed-out
-  work keeps its permits until cleanup, and callback publication has bounded
-  waits without promising to interrupt arbitrary user callbacks.
-- Offline analysis charges retained state, provenance, compression, and
-  transient allocation work explicitly. More precise accounting may reject
-  inputs previously accepted near a limit; see [resource guidance](docs/analysis-resources.md).
-- Human output uses stable readable durations, addresses, outcomes, and causes.
-  CLI output types remain independent of clap; command format validation and
-  machine records share the command catalog.
-- Consolidate contributor/repository guidance in `CONTRIBUTING.md` and remove
-  `AGENTS.md`; assistant guidance now points to the contributor guide. Trim
-  duplicate documentation and update scanner implementation descriptions without
-  changing contracts, historical evidence, or open acceptance gates.
+  packet/byte budgets; `--allow-destination` narrows permitted addresses.
+- Blocking native calls share process-wide admission; timed-out or cancelled
+  workers retain permits until cleanup.
+- Offline analysis charges retained state, provenance, compression, and TCP
+  out-of-order page slack explicitly ([resource guidance](docs/analysis-resources.md)).
+- Consolidate contributor guidance in `CONTRIBUTING.md` and streamline CLI help,
+  built-in topics, user guides, migration notes, and roadmap documentation.
 
 ### Fixed
 
-- SMTP greetings accept reply-code-only terminal lines while retaining exact
-  preceding greeting and product claims.
-- SMTP and FTP greeting collection stops after the final permitted continuation
-  line, retaining truncated observations without waiting for the peer to close.
-- FTP multiline greeting detection retains uncoded continuation text, including
-  product markers at the start of a line. FTP markers are not inferred from
-  hostname labels or explicit SMTP greetings.
-- Active TLS exchanges honor application timeouts within the connection lifetime
-  and retain decrypted response bytes when cancellation, deadline expiry, or a
-  subsequent TLS record error follows a completed read. Identification reports
-  retained fatal TLS errors even when the decrypted application reply is complete,
-  preserving response bytes and original diagnostics without another native read.
-  Fatal TLS errors reject further application writes while permitting bounded
-  flushing of queued alerts.
-- Update the YAML parser to enforce typed-deserialization resource budgets
-  (RUSTSEC-2026-0333), retaining the document layer's independent limits.
-- Scan follow-ups share the client's monotonic deadline and propagate reverse-DNS
-  cancellation and pacing-clock failures before sending further queries.
-- Reverse-DNS batches narrow each question's capture settings to its share of
-  the evidence budget, so multi-host lookups retain valid capture limits.
-- Scan follow-ups preserve configured neighbor bounds and authorize DNS neighbor
-  discovery after connect scans. Invalid DNS capture settings and zero-capacity
-  trace runtimes fail before scanning.
-- Preserve authorization before active discovery and validate every route-bearing
-  address and final wire image. Reject malformed routing/VLAN state, invalid
-  limits, unsupported socket route overrides, and impossible collection budgets
-  before transmission; preserve policy and underlying I/O classifications.
-- Preserve exact bytes, unknown values, padding, reserved bits, capture scope,
-  timestamps, and source evidence through codecs and reconstruction. DNS
-  correlation/EDNS, DHCP nesting, TCP options, TLS continuations, and IPv4/IPv6
-  fragments retain malformed or incomplete evidence without inventing success.
-- HTTP/2 handles capture-delayed frames, SETTINGS/HPACK, stream lifecycle,
-  flow-control debt, upgrades, resets, and GOAWAY under finite budgets. Later
-  failures qualify earlier complete messages instead of being hidden.
-- Service matching rejects malformed HTTP/SSH evidence and stale DNS identities;
-  truncated replies retain uncertainty, and unknown or ambiguous results never
-  assert exact versions.
-  CHAOS-class TXT metadata retains its original class and bounded values.
-- Scan, exchange, DNS, replay, and traceroute preserve partial results and
-  accounting across timeouts, cancellation, delayed replies, and worker cleanup.
-  Submission timing denotes a native interval, not proven wire departure.
-- Capture transforms refuse unrepresentable metadata, timestamps, and declared
-  frame check sequences. Staged publication binds to the selected directory,
-  never overwrites a destination, and checks interruption after synchronization.
-  Initialized compression is finalized on processing failures where possible.
-- Forwarding verdicts retain readable violations despite unrelated incomplete
-  evidence, distinguish absence from preservation, and enforce complete output
-  and comparison bounds. Filters/projections use physical-frame facts and
-  reject ambiguous byte literals and unavailable timestamps consistently.
-- Native route/capture fixes preserve platform capability errors and source
-  causes; release validation verifies exact-commit evidence, required assets,
-  executable identity, and immutable schema/example snapshots.
+- Service identification handles reply-code-only SMTP terminals, final
+  permitted SMTP/FTP continuation lines, uncoded FTP multiline banners, fatal
+  TLS alerts after completed reads, CHAOS TXT class retention, and YAML
+  deserialization budgets (RUSTSEC-2026-0333).
+- Scan follow-ups share the client deadline, propagate reverse-DNS cancellation
+  and pacing errors, narrow per-question DNS capture settings, and preserve
+  configured neighbor bounds.
+- Preserve authorization before active discovery, final-wire validation, exact
+  unknown/reserved/padding bytes, HTTP/2 delayed frames and GOAWAY qualification,
+  staged output directory binding, and forwarding violation precedence.
 
 ### Removed
 
 - Redundant compatibility workspaces, signature-diff and coverage workflows,
-  stale repository-policy mirrors, and optional local harnesses outside the
-  maintained CI/release path. Current validation lives in [CONTRIBUTING.md](CONTRIBUTING.md).
+  `AGENTS.md`, and unmaintained local harnesses outside CI/release validation.
 
 ## [0.5.0-beta.3] - 2026-09-08
 

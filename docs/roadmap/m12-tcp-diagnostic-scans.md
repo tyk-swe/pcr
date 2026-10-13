@@ -4,98 +4,44 @@
 | --- | --- | --- |
 | In progress | [M6](m06-port-planning-inference.md) | ACK/window and flag-dependent diagnostics |
 
-Software implementation and an independently authored diagnostic corpus are present.
-Revision-bound native cross-platform acceptance and broader operating-system truth
-remain open, so M12 stays **In progress**. No native
-parity or completed close gate is claimed. Usage and limits are in
-[TCP diagnostics](../tcp-diagnostics.md).
+Software implementation, dataset 1.7.0 diagnostic scenarios, and the native
+acceptance runner are present. Cross-platform recordings and broader OS stack
+truth remain open. Usage and rule tables live in
+[TCP diagnostics](../tcp-diagnostics.md) and
+[scanner evidence](../scanner-evidence.md#port-inference).
 
 ## Implemented decisions
 
 - Modes: `syn` (default), `ack`, `window`, `fin`, `null`, `xmas`, `maimon`, and
-  `custom`. Flags are `SYN=0x002`, `ACK`/`window`=`0x010`, `FIN=0x001`, `NULL=0`,
-  `Xmas=0x029` (FIN, PSH, URG), `Maimon=0x011` (FIN, ACK); custom accepts
-  `0..=0x1ff` with no reserved bits.
-- The request mode applies to scan-stage TCP endpoints only. Discovery TCP stays
-  SYN; UDP and ICMP are unaffected; connect, traceroute, and identification
-  probes build their own segments. A non-SYN mode needs the raw method and one
-  scan TCP endpoint; it fails before resolution or I/O otherwise, and an explicit
-  or automatic method never falls back to connect.
-- Probe sequence stays the operation sequence. A probe with ACK carries the
-  nonzero per-sequence acknowledgment `sequence + 0x50435201`, so a bare reset
-  (sequence equal to the request acknowledgment) binds to one probe and retries
-  never share reset identities. ACK-less probes carry acknowledgment zero. The
-  final wire check requires the exact flags, acknowledgment, endpoint, address,
-  sequence, empty options, and no payload.
-- Correlation reuses the shared matcher. SYN correlation is unchanged; a SYN/ACK
-  answering a probe without SYN is an uninterpreted reply, not evidence of open.
-  Corrupt, unrelated, or mis-identified replies stay rejected.
-- Attempt classification never claims open for a diagnostic segment: ACK, window,
-  and custom resets, and SYN/ACK or other TCP segments, are `unknown`; FIN-family
-  resets are `closed`. ICMP port-unreachable is `unreachable` for diagnostic modes.
-  Silence stays `timeout`. The correlated reply window is retained as observed.
-- Inference tables (rule IDs `tcp_<mode>.<reason>`):
-  ACK: reset→`unfiltered`; unreachable→`filtered`; time exceeded and other→`unknown`;
-  silence→`filtered`. Window: reset window >0→`open`, 0→`closed`, missing→`unknown`;
-  unreachable→`filtered`; time exceeded and other→`unknown`; silence→`filtered`.
-  FIN/NULL/Xmas/Maimon: reset→`closed`; unreachable→`filtered`; time exceeded and
-  other→`unknown`; silence→`open_or_filtered`. Custom: any reply or silence→`unknown`.
-  `unfiltered` never means open; operational failures never imply a state.
-- Output family v15 adds the effective `tcp_scan` (mode and flags), per-response
-  `tcp_window`, `unfiltered`, and the diagnostic rule vocabulary; v6–v14 stay frozen.
+  observation-only `custom` (`0..=0x1ff`). Non-SYN modes apply only to raw
+  scan-stage TCP endpoints and never fall back to connect.
+- ACK-bearing probes carry per-sequence acknowledgment `sequence + 0x50435201`
+  so bare resets bind to a single attempt; ACK-less probes carry `0`. Final wire
+  checks enforce exact flags, acknowledgment, empty options, and empty payload.
+- Attempt classification never claims `open` for a diagnostic probe (FIN-family
+  reset is `closed`; other TCP replies are `unknown`; port-unreachable is
+  `unreachable`). Correlated direct TCP replies retain `tcp_window`.
+- Output/v15 adds `tcp_scan` (`{mode, flags}`), `tcp_window`, `unfiltered`, and
+  `tcp_<mode>.*` rules ([v15 contract](../consumer-compatibility.md#output-family-v15)).
 
-## Software evidence
+## Evidence and native route
 
-Injected-responder and serialization tests, not native runtime evidence:
-
-- Owner tests: `scan/tcp.rs` (exact flags, acknowledgment identities, final-wire
-  mutation rejection), `scan/inference/tests.rs` (every rule/state row, windows,
-  ordering, partitions), and `scan/method/tests.rs` (no connect fallback).
-- [`tcp_diagnostic_contracts.rs`](../../crates/packetcraftr/tests/integration/tcp_diagnostic_contracts.rs)
-  drives an independent IPv4/IPv6 responder through the serial, pipelined, and
-  adaptive engines: exact wire per mode, reset/silent/prohibited/unexpected
-  behaviors, unrelated, corrupt, late, and reordered frames, a reset beside ICMP
-  prohibition in both delivery orders, custom SYN-bearing sequence space, retries,
-  discovery staying SYN, validation, policy, ceilings, and mid-flight failure.
-- [CLI `tcp_diagnostic_contracts.rs`](../../crates/packetcraftr-cli/tests/integration/tcp_diagnostic_contracts.rs)
-  covers parsing, method conflicts, list output, and aggregate/stream schema
-  conformance with frozen v14.
-
-## Independent corpus and native route
-
-Dataset **1.7.0** adds eight `tcp_diagnostic_scenarios`, each declaring seven
-mode/flag rows, dual-stack attempts, window observations, states, rules, and
-partitions before execution. Port-unreachable TCP quotes retain the matcher's
-generic destination-unreachable identity; unexpected SYN/ACK is `tcp_other`.
-The serial/pipelined/adaptive matrix covers ordinary, wrong-identity/checksum,
-reordered, duplicate, and late delivery. These injected providers still use the
-project codecs and establish workflow contracts, rather than independent wire
-encoding or operating-system compatibility.
-
-[`test-tcp-diagnostics-native.py`](../../scripts/test-tcp-diagnostics-native.py)
-is the separate native route. Linux provisions an independently encoded immediate
-reply peer plus a real kernel peer in parent-distinct namespaces. Hosted macOS
-and Windows use existing loopback sockets and capture drivers; the isolated link
-inventory remains unavailable there. The route covers five feature profiles,
-IPv4/IPv6, serial/pipelined scheduling, JSON/NDJSON, and SYN socket controls.
-Independent bounded capture verifies outgoing kernel probes; the scripted peer
-retains its own request/reply bytes and timestamps.
-
-Reports use `packetcraftr.tcp-diagnostic-native-evidence/v1` and bind the exact
-clean reviewed commit, source/corpus/binary digests, kernel, backend, isolation,
-commands, process results, observations, and cleanup. Actual typed refusals in
-capture-disabled profiles count only as expected capability checks. Failed,
-missing, lossy, or unexercised supported cases prevent completeness. Socket truth
-and conflicting open/closed heuristic claims are retained separately; a Window/FIN-family mismatch
-with a known socket does not rewrite the inference table or establish accuracy.
-Native execution is selected with `tcp_diagnostics` in both reviewed workflows.
-No exact-revision cross-platform recording is claimed by adding this route.
+- Unit and integration suites (`scan/tcp.rs`, `scan/inference/tests.rs`,
+  [`tcp_diagnostic_contracts.rs`](../../crates/packetcraftr/tests/integration/tcp_diagnostic_contracts.rs),
+  and [CLI contracts](../../crates/packetcraftr-cli/tests/integration/tcp_diagnostic_contracts.rs))
+  cover serial, pipelined, and adaptive execution, noise/reordering/duplicates,
+  and v15 schema conformance.
+- Dataset **1.7.0** adds eight dual-stack `tcp_diagnostic_scenarios` across all
+  seven modes.
+- [`test-tcp-diagnostics-native.py`](../../scripts/test-tcp-diagnostics-native.py)
+  (`packetcraftr.tcp-diagnostic-native-evidence/v1`, workflow `scenario=tcp_diagnostics`)
+  provisions an independent Linux reply peer + kernel peer in fresh namespaces
+  and host-local macOS/Windows loopback sockets across five profiles. See
+  [native validation](../native-validation.md#m12-tcp-diagnostic-acceptance).
 
 ## Remaining acceptance gates
 
 - Exact-revision native acceptance on supported Linux, macOS, and Windows profiles
-  under [M2](m02-ground-truth-benchmarks.md)/[M3](m03-native-validation.md);
-  injected-responder tests are software evidence, not runtime evidence.
+  under [M2](m02-ground-truth-benchmarks.md)/[M3](m03-native-validation.md).
 - Independent ground truth for stack-dependent window and FIN-family behavior
-  across operating systems; the heuristics are documented as unreliable until then.
-- Data review as the corpus grows. Idle/bounce/evasion remain outside scope.
+  across operating systems.

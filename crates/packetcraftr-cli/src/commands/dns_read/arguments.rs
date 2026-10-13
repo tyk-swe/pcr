@@ -9,9 +9,9 @@ use crate::command_options::{
     ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, Selector, stream_selector,
 };
 
-pub(crate) const AFTER_LONG_HELP: &str = r"DNS messages are read offline from a capture file; nothing is transmitted. UDP datagrams and reassembled TCP streams on port 53 and every --dns-port are framed into messages, and each query is paired with its response by flow and DNS ID into a transaction that is matched, unanswered, an orphan response, or a duplicate response.
-
---stream keeps one whole conversation, as tcp:INDEX or udp:INDEX, using the indices stats reports and stream filters match. Text prints captured names escaped; JSON and NDJSON keep each message's exact wire bytes as hex.
+pub(crate) const AFTER_LONG_HELP: &str = r"Offline DNS message and transaction inspection over UDP and reassembled TCP on
+port 53 and each --dns-port. Pairs queries and responses by flow and DNS ID into
+matched, unanswered, orphan, or duplicate transactions.
 
 Examples:
   packetcraftr dns-read capture.pcapng

@@ -6,11 +6,8 @@ use std::path::PathBuf;
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 use crate::output;
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Statistics are computed offline over dissected frames; no live capture or transmission is involved.
-
-Conversation (stream) indices are assigned in first-seen order over the whole capture before any --filter runs, so the index one invocation reports names the same conversation in every other invocation, and stream-aware filters such as 'tcp.stream == 7' are supported.
-
-The fragments table reports capture-global IPv4 and IPv6 reassembly because every physical fragment must advance the same bounded state even when --filter narrows downstream frames. Its derived datagram and payload bytes are separate from the physical matched frame and byte totals.
+pub(crate) const AFTER_LONG_HELP: &str = r"Offline capture statistics. Conversation indices (`tcp.stream`, `udp.stream`)
+and the `fragments` table are computed capture-globally before `--filter`.
 
 Examples:
   packetcraftr stats capture.pcapng --table conversations

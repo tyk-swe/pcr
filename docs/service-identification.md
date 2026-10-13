@@ -101,19 +101,14 @@ nonzero ports, 64 KiB serialized bytes; overlaps preserve all reasons/provenance
 
 ## Reading evidence
 
-[v14](../schemas/packetcraftr.output.v14.schema.json) separates exact planned
-request/response hex, actual partial bytes written, numeric peers, observed claims,
-candidates, ordinal confidence, and corpus/probe/rule/field provenance.
-`claim` and `protocol` are not probabilities or authentication.
-Excluded/unknown/ambiguous/malformed/truncated/budget_exhausted/tls_failed are
-explicit. Nonmatching outcomes have empty candidates; ambiguous versions are
-erased, including conflicts across individually singular probes. Earlier matches
-can survive later budget exhaustion. No result is a vulnerability finding.
-
-JSON retains endpoint records; NDJSON emits identify_endpoint plus terminal usage,
-data versions, elapsed time, complete/cancelled state. Pre-I/O admission conservatively
-bounds hex/claims/candidate copies within the 16 MiB record ceiling.
-Read complete/error, not just endpoint records. See [consumer rules](consumer-compatibility.md).
+[Output/v15](../schemas/packetcraftr.output.v15.schema.json) (introduced in
+v12/v13) separates exact planned request/response hex, actual partial bytes
+written, numeric peers, observed claims, candidates, ordinal confidence, and
+corpus/probe/rule/field provenance. `claim` and `protocol` are not probabilities
+or authentication. Excluded, unknown, ambiguous, malformed, truncated,
+`budget_exhausted`, and `tls_failed` outcomes are explicit; nonmatching or
+ambiguous results assert no exact product versions, and no result is a
+vulnerability finding. See [consumer rules](consumer-compatibility.md).
 
 ## Corpus quality and supported metadata
 

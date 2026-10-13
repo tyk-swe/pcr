@@ -7,19 +7,15 @@ use packetcraftr_core::frame::LinkType;
 
 use crate::command_options::{DecodeArgs, PacketBudgetArgs, TreeArgs, link_type};
 
-pub(crate) const AFTER_LONG_HELP: &str = r"When none of --hex, --hex-file, or --file is supplied, raw frame bytes are read from standard input.
-
-Hexadecimal text comes from --hex VALUE, from redirected stdin with --hex -, or from a file with --hex-file. It may carry a 0x prefix and whitespace, colon, or dash separators, so `packetcraftr --output hex build ...` pipes straight in. The text is read through a bound derived from --max-packet-size, and the decoded bytes must also fit it.
-
---tree prints each layer's header line followed by its fields as an indented tree, in text output only. Bytes print as lowercase hex with their count, malformed layers show their preserved bytes, and (derived) marks fields the protocol schema defines as derivable, such as lengths and checksums; values are always the decoded wire values. All tree text is terminal-escaped and counts against --max-tree-bytes.
-
-With --filter, text, hex, and raw output emit the dissection only when the frame matches; when the frame does not match, stdout stays empty (still a success) and `frame did not match the filter` is reported on stderr. Aggregate JSON always emits one document: result.matched reports the filter outcome and result.dissection is null only when the frame does not match.
+pub(crate) const AFTER_LONG_HELP: &str = r"Reads raw bytes from stdin when none of --hex, --hex-file, or --file is given.
+Hex input accepts an optional 0x prefix and whitespace, colon, or dash separators.
+With --filter, non-matching frames emit nothing in text/hex/raw (noting the miss
+on stderr) and emit `matched: false, dissection: null` in JSON.
 
 Examples:
   packetcraftr dissect --link-type 228 --hex '4500001c0000000040018eaac0000201c63364020800f7ff00000000'
   packetcraftr --output json dissect --file frame.bin --link-type 1
   packetcraftr dissect --file frame.bin --filter 'icmpv4 && ip.dst == 198.51.100.2'
-  packetcraftr dissect --file frame.bin --link-type 228 --tls-port 4433
   packetcraftr --output hex build --packet 'ipv4()/icmpv4(identifier=1)' | packetcraftr dissect --link-type ipv4 --hex -
   packetcraftr dissect --hex-file frame.txt --link-type ipv4 --tree
 

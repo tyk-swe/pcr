@@ -10,11 +10,9 @@ use crate::command_options::{
 };
 use clap::ValueEnum;
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Replay is policy-gated and may require native features, dependencies, and privileges.
-
-Frames a --filter rejects are skipped before authorization, so they are never policy-checked or transmitted, but they still count against the operation's frame budget. With original/scaled timing, the delay before a kept frame spans any skipped frames in between.
-
---bps counts exact submitted frame bytes, with no synthetic link overhead. The first selected frame is immediate; subsequent targets use the cumulative bytes already sent. Filtered frames do not consume bit-rate timing. Scheduled duration and transmitted bytes describe the run; the requested bit rate is not a throughput guarantee.
+pub(crate) const AFTER_LONG_HELP: &str = r"Policy-gated capture replay. Frames rejected by --filter are skipped before
+authorization (still counting toward --max-frames). --bps paces by submitted
+frame bytes without synthetic link overhead.
 
 Examples:
   packetcraftr replay capture.pcapng --interface eth0 --timing immediate

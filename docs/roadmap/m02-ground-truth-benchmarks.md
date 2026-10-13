@@ -9,56 +9,34 @@ Nmap agreement is never fixture truth.
 
 ## Implemented method
 
-- The reviewed [inventory](../scanner-corpus.v1.json) uses the independent
-  [scanner-corpus/v1 schema](../../schemas/packetcraftr.scanner-corpus.v1.schema.json).
-  Scenarios declare expected outcomes before execution and cover responsive,
-  closed, blocked, silent, malformed, and unrelated replies in IPv4/IPv6. The
-  `inference_scenarios` inventory additionally authors mixed same-port,
-  silent-UDP, and contradictory-attempt expectations with their scripted
-  responses, attempt outcomes, inferred states and rules, and evidence
-  partitions. Dataset 1.7.0 adds eight independently authored TCP diagnostic
-  conditions and seven mode/flag expectation rows. The dedicated M12 workflow
-  matrix and revision-bound native route are separate from the 88-cell benchmark;
-  native socket truth never comes from scanner output.
-- `scanner_fixture` runs real `Client` scan/traceroute paths with deterministic
-  injected providers, never native I/O. Native loopback connect uses the CLI.
-- `scripts/benchmark-scanner.py` repeats 88 cells: 72 raw scan, 12 traceroute,
-  four native connect. It records accuracy, work, elapsed time, exact
-  `retained_evidence_bytes`, and child-process peak RSS using POSIX `wait4`.
-  Logical retention is not RSS; Windows peak under that method is unavailable.
-- Optional comparison uses an official Nmap 7.991 build, never vendored.
-  Retain acquisition URL/hash, configure flags, version, arguments, fixture truth,
-  acquisition conditions, and explained divergences with each run.
-- Benchmarks run on demand; record a fixed-behavior baseline before optimizing.
-  Native platform behavior requires the separate [M3](m03-native-validation.md) gate.
+- The reviewed [inventory](../scanner-corpus.v1.json) uses
+  [scanner-corpus/v1](../../schemas/packetcraftr.scanner-corpus.v1.schema.json)
+  with pre-declared responsive, closed, blocked, silent, malformed, and unrelated
+  IPv4/IPv6 scenarios, `inference_scenarios` (mixed same-port, silent UDP,
+  contradictory attempts), `trace_path_scenarios` (shared, divergent, silent-hop
+  paths), and dataset 1.7.0 `tcp_diagnostic_scenarios` (eight conditions × seven modes).
+- `scanner_fixture` exercises `Client` scan/traceroute paths with injected providers;
+  native loopback connect uses the CLI.
+- `scripts/benchmark-scanner.py` repeats 88 cells (72 raw scan, 12 traceroute,
+  4 native connect), recording accuracy, work, elapsed time, `retained_evidence_bytes`,
+  and POSIX `wait4` peak RSS.
+- Optional comparison uses an official Nmap 7.991 build (never vendored),
+  retaining build/version metadata, fixture truth, and explained divergences.
 
 ## Recorded results and limits
 
-Early `target/validation/scanner-baseline*.json` snapshots are local history,
-not checked-in acceptance. `scanner-baseline-final.json` was incomplete: its
-injected cells matched expectations, but six IPv6 connect case-runs could not
-bind `::1`. IPv4 connect agreed with Nmap; no raw-versus-Nmap comparison was run.
-A closed-port-unreachable echo fixture remains `unreachable` because it has no
-port; do not alter expectations to match the classifier.
-
-Later [M4 evidence](evidence/m04/README.md) at
-`8e010a0b9eac118aa13384f0b854111a73d47d76` records 264 passing case-runs
-(dataset 1.1.0, three repetitions), including IPv6 connect in an isolated
-namespace. This supersedes that environment gap for M4, not every M2 workflow.
-[M8](evidence/m08/README.md) and [M9](evidence/m09/README.md) close their declared
-identification inventories. [M7](m07-adaptive-scheduling.md) retains separate
-fixed/adaptive measurements. None establishes an Internet-wide accuracy claim.
+- Early `target/validation/scanner-baseline*.json` snapshots are local history;
+  six IPv6 connect case-runs could not bind `::1`, while IPv4 connect agreed with Nmap.
+- [M4 evidence](evidence/m04/README.md) (`8e010a0b9eac118aa13384f0b854111a73d47d76`)
+  records 264 passing case-runs (dataset 1.1.0, three repetitions), including
+  isolated-namespace IPv6 connect.
+- [M8](evidence/m08/README.md) and [M9](evidence/m09/README.md) close their
+  identification inventories; [M7](m07-adaptive-scheduling.md) retains fixed/adaptive
+  measurements.
 
 ## Remaining gates
 
-- Mixed-port inference, silent UDP, and contradictory attempts are now corpus
-  `inference_scenarios` (dataset 1.6.0), executed through `Client::scan`. The
-  reconvergent/ECMP paths remain missing for M11, whose shared, divergent, and
-  silent-hop paths are corpus `trace_path_scenarios` (added in dataset 1.5.0).
-- Retain exact-version Nmap differential runs for supported native workflows,
-  explaining differences without treating one tool as ground truth.
+- Add reconvergent/ECMP path fixtures for [M11](m11-scan-informed-traceroute.md).
+- Retain exact-version Nmap differential runs for supported native workflows.
 - Review workflow baselines and variance/performance targets across applicable
-  platforms; report unavailable methods explicitly.
-
-M2 remains **In progress**. Local snapshots, compilation, and repeated fixture
-instances cannot substitute for these gates.
+  platforms.

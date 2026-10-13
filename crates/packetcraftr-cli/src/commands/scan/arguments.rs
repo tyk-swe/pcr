@@ -22,142 +22,29 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr --output ndjson scan 198.51.100.10 --transport icmp
   packetcraftr scan 192.0.2.10 --transport tcp,udp --ports @name-services,udp:ntp
   packetcraftr scan 192.0.2.10 --ports @all --exclude-ports ssh,8000-8100
-  packetcraftr scan 192.0.2.10 --transport udp --ports @infrastructure \
-    --curated-udp-payloads
+  packetcraftr scan 192.0.2.10 --transport udp --ports @infrastructure --curated-udp-payloads
   packetcraftr scan 192.0.2.0/28 --discovery only --discovery-probes icmp,neighbor
   packetcraftr scan 192.0.2.0/28 --discovery before --discovery-probes icmp,tcp \
     --discovery-ports 22,443 --ports @web --reverse-dns 192.0.2.53
 
-Port syntax:
-  --ports and --exclude-ports accept comma-separated terms: a u16 port, an
-  inclusive START-END range with START <= END, a catalog name such as `https`,
-  or a catalog preset such as `@web`. A `tcp:` or `udp:` prefix limits a term to
-  one transport; otherwise it applies to every --transport. A name resolves to
-  its catalog port on each transport that lists it. Endpoints keep their
-  first-seen order and deduplicate; TCP and UDP on one port stay distinct.
-  Exclusions are removed after expansion and before any probe is planned, so
-  no stage probes an excluded endpoint, then --max-ports bounds the remainder.
-  No transport has a default selection: a scan names its ports. Catalog names
-  are conventional assignments (hints), not service identification; results
-  name the catalog version. The bundled presets are web, mail, name-services,
-  infrastructure, legacy-services, and all.
+Ports and methods:
+  --ports and --exclude-ports accept u16 ports, START-END ranges, catalog names,
+  and @presets (@web, @mail, @name-services, @infrastructure, @legacy-services,
+  @all), optionally prefixed tcp: or udp:. Exclusions apply before budgets.
+  --method selects raw (default), tcp-connect (--connect), or auto; explicit
+  methods never fall back. --tcp-scan selects syn (default), ack, window, fin,
+  null, xmas, maimon, or observation-only custom (--tcp-flags 0..=0x1ff) for raw
+  TCP scan endpoints. Each endpoint publishes an inferred state and supporting,
+  conflicting, unanswered, or failed attempt sequences beside attempt outcomes.
 
-The default window is one probe. --rate bounds probe starts across the operation;
-larger windows overlap response waits. Planned duration conservatively includes
-timeout waves and pacing delays; it is not an achieved-throughput guarantee.
-
-Multiple targets accept IP addresses, hostnames, scoped fe80::/10%zone
-targets, and bounded CIDRs. --targets-file/- and --exclude-file/- read
-line-oriented manifests (one declaration per line, # comments); at most one
-stdin consumer is admitted across include/exclude/payload/profile inputs.
---exclude removes numeric addresses/CIDRs; --max-targets bounds the distinct
-selection. --list publishes the exact selected target plan with origins and
-resolved scopes without transmitting, capturing, or connecting; hostname
-resolution still requires its policy opt-in and is reported as performed.
---connect uses ordinary TCP sockets, requires no raw-packet privileges, and
-bounds overlapping connections by --max-in-flight, the operation ceiling; a
-process pool of 16 workers caps what actually runs at once, so windows above
-16 queue with backpressure. It reports socket outcomes and rejects packet
-route overrides. Hostname lookup requires the existing policy opt-in.
---method selects raw packets (the default), tcp-connect (the same as
---connect), or auto. An explicit method is never replaced: raw fails with a
-capability error when this build cannot capture and transmit. auto chooses raw
-when the build can, and otherwise tcp-connect when every scan and discovery
-probe is TCP and no packet route override is set; results publish the method
-and why auto chose it.
-
---tcp-scan selects the segment sent to raw TCP scan endpoints: syn (default),
-ack, window, fin, null, xmas, maimon, or custom with --tcp-flags (decimal or
-0x hexadecimal, 0..=0x1ff). Diagnostic modes need the raw method and at least
-one TCP scan endpoint; discovery, traceroute, and connect probes are unaffected.
-ack reports unfiltered (a reset), never open. window reads the reset window
-(nonzero open, zero closed) and fin, null, xmas, and maimon read silence as
-open_or_filtered and a reset as closed. All are stack-dependent heuristics, not
-reliable detection or authenticated identity. custom is observation-only: it
-reports replies and infers no port state.
-
-Each port endpoint reports an inferred state (open, closed, filtered,
-unfiltered, open_or_filtered, or unknown) with the rule that produced it and the attempts
-that support, conflict with, or did not answer it, beside every attempt
-outcome. A silent UDP port is open_or_filtered. Socket deadlines and local
-errors are operational failures, never port states. Late, duplicate, and
-ambiguous replies are retained as unattributed evidence, bounded by
---max-undecoded and the evidence budget.
-
---max-in-flight bounds overlapping raw-packet response windows (1..=1024).
-The complete plan is authorized before active discovery; capture is shared per
-interface and ready before sends. One pacing schedule, operation deadline and
-evidence budget apply across every window. --max-prepared-bytes bounds charged
-plans and active packet descriptions.
-
---adaptive schedules probes adaptively per scoped host while remaining inside
-the same bounds: hosts take turns in selection order instead of draining one
-host's endpoints first, each attempt's timeout follows a bounded per-host RTT
-estimate (only verified first-attempt replies update it) between
---min-timeout-ms (default 10, so --timeout-ms below 10 needs a smaller
---min-timeout-ms) and --max-timeout-ms, silent endpoints retry at most
---attempts times with --retry-backoff-ms doubling up to --max-backoff-ms, and
-the admission window starts at --initial-window and adjusts between
---min-window and --max-in-flight. Every host's
-own deadline starts at its first admitted probe and ends --host-timeout-ms
-(default --max-duration-ms) later; preparation, pacing, and transmission all
-spend it, and an endpoint whose deadline is spent sends nothing and publishes
-no evidence while the host reports scan=incomplete. A host whose replies
-resemble rate limiting (enough control errors from one responder beside
-losses) publishes suspected_response_rate_limit as an inference, not a
-verdict, and is paced more slowly within its deadline; silence alone never
-infers it. Reports record the observed peak pending count and additional
-starts, both measurements of what ran, not throughput claims. The adaptive
-tuning options require --adaptive; fixed scheduling stays the default order.
-With a window above one, NDJSON publishes probe_sent receipts before final probe
-events and failures retain confirmed pending transmissions in error.scan;
-adaptive waves publish probe_sent receipts at any window, while fixed serial
-scheduling with a window of one publishes final probe events only.
-
---udp-profiles reads a bounded packetcraftr.udp-profiles/v1 document. Profiles
-select a typed DNS query or explicit hexadecimal bytes per port, with DNS identity
-checks or bounded offset/mask checks. Unmapped ports use --udp-payload-* or the
-empty default payload. A profile's application status is separate from endpoint
-reachability: open does not imply confirmed. DNS responses must match ID, opcode,
-and questions. Configured byte checks only confirm those checks, not identity.
-A nonmatching UDP reply remains evidence while a rolling window waits for a valid
-application reply or its deadline. Profiles do not perform hidden resolution.
---curated-udp-payloads adds the bundled, versioned payload profiles (named
-curated/...) for the selected UDP ports they cover; an operator profile for the
-same port wins, and results list applied and overridden ports.
-
-Discovery never runs unless selected. --discovery before sends the
---discovery-probes to every target first and scans only hosts that answered,
-unless --unresponsive-hosts scan; --discovery only stops there and takes no
---ports; --discovery skip scans every host and records the skip. Every result
-has one host record per target saying whether discovery ran, why the host
-counts as responded (each reason names its wire, socket, or cache evidence and
-whether it is direct, cached, or a possible proxy), and whether the scan probed
-it. A host that did not answer is no_response, never absent; an ICMP error from
-another router is not host evidence. A TCP reset counts: closed, but
-responsive. neighbor sends each on-link target up to --attempts ARP or NDP
-requests, paced by --rate and waiting --timeout, before the other probes; a
-routed target is sent none and reports its next hop, whose link address
-belongs to the gateway and is never host evidence. --discovery-ports
-takes --ports terms for tcp and udp probes, after --exclude-ports. Discovery and
-the scan share one authorization, sequence space, --max-probes,
---max-duration, and evidence budget. With --connect only tcp discovery runs,
-and its reasons are socket observations. --reverse-dns sends one PTR question
-per looked-up host through the DNS workflow within the remaining
---max-duration; names are observations, never authenticated identity.
-
---traceroute traces every scanned host after the scan, within the remaining
---max-duration and one --traceroute-max-probes budget, before reverse DNS. Each
-host is traced with a TCP port or ICMP echo probe it answered during the scan
-(a SYN/ACK over a reset over an echo reply, naming that scan probe); a host the
-scan saw no such answer from is traced with --traceroute-strategy and
---traceroute-port when given, and is otherwise reported not_traced rather
-than guessed at. --traceroute-reuse-max-age-ms lets a host copy a hop that an
-earlier host's trace observed within this operation, for hops younger than
-that age; a reused hop is reported apart from probed hops, naming its source
-host and age, and is a claim from that host's path, not an observation for this
-host. Tracing needs the raw method and no --list.
-";
+Targets, discovery, scheduling, and follow-ups:
+  Targets accept IPs, hostnames (with --allow-hostname-resolution), scoped
+  fe80::/10%zone addresses, CIDRs, and --targets-file/--exclude-file manifests.
+  --list publishes the target/port plan without sending probes.
+  --discovery before|only|skip runs ICMP, neighbor (ARP/NDP), TCP, or UDP probes
+  sharing the scan's budgets. --adaptive enables per-host RTT timeouts, AIMD
+  windows, backoff retries, and host deadlines. --traceroute (raw only) traces
+  scanned hosts before --reverse-dns PTR lookups under remaining budgets.";
 
 /// One `--ports` or `--exclude-ports` term.
 #[derive(Clone, Debug, PartialEq, Eq)]

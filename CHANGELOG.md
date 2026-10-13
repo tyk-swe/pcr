@@ -99,6 +99,12 @@ remaining acceptance gates.
 
 ### Fixed
 
+- Composed IP discovery consumes shared protocol exclusions before selecting
+  port-scan endpoints. M13 native acceptance builds and executes all Linux
+  profiles in an isolated link fixture and rejects missing or duplicate evidence
+  inventories; its commands use the capture queue and byte limits.
+- Bounded benchmark execution keeps child reaping in the measurement thread
+  when output overflow kills a process.
 - Service identification handles reply-code-only SMTP terminals, final
   permitted SMTP/FTP continuation lines, uncoded FTP multiline banners, fatal
   TLS alerts after completed reads, CHAOS TXT class retention, and YAML

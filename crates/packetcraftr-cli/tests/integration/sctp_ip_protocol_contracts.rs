@@ -119,6 +119,46 @@ fn list_publishes_sctp_modes_mixed_ports_and_ip_protocol_selections() {
 }
 
 #[test]
+fn discovery_ip_exclusions_are_consumed_before_port_scan_method_validation() {
+    for transport in ["tcp", "icmp"] {
+        let mut command = vec![
+            "--output",
+            "json",
+            "scan",
+            "127.0.0.1",
+            "--connect",
+            "--transport",
+            transport,
+            "--discovery",
+            "before",
+            "--discovery-probes",
+            "ip",
+            "--discovery-ip-protocols",
+            "47,50",
+            "--exclude-ip-protocols",
+            "50",
+        ];
+        if transport == "tcp" {
+            command.extend_from_slice(&["--ports", "80"]);
+        }
+        let output = run(&command);
+        let error = parse_json(&output);
+        assert_eq!(error["error"]["code"], "cli.scan_method", "{error}");
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("tcp_connect"),
+            "{error}"
+        );
+    }
+    usage(
+        &["--ports", "80", "--exclude-ip-protocols", "50"],
+        "require --transport ip",
+    );
+}
+
+#[test]
 fn invalid_sctp_ip_protocol_and_discovery_combinations_fail_before_network_io() {
     for (args, expected) in [
         (

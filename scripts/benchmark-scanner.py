@@ -9,6 +9,7 @@ import os
 import pathlib
 import platform
 import re
+import signal
 import socket
 import subprocess
 import threading
@@ -145,7 +146,15 @@ def measured(command):
             while block := pipe.read(8192):
                 if len(destination) + len(block) > OUTPUT_LIMIT:
                     overflow.set()
-                    process.kill()
+                    # Popen.kill() polls/reaps on POSIX, racing the owner's
+                    # wait4() and losing the child's exit/resource record.
+                    if hasattr(os, "wait4"):
+                        try:
+                            os.kill(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    else:
+                        process.kill()
                     return
                 destination.extend(block)
 

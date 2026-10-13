@@ -271,6 +271,19 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         max_ports,
     )?;
     let scanning = discovery.mode != discovery::Mode::Only;
+    // Discovery has already consumed these shared exclusions. A port scan
+    // must not reject exclusions that apply to its IP discovery stage.
+    let exclude_ip_protocols = if transports != [Transport::Ip]
+        && discovery.runs()
+        && discovery
+            .probes
+            .iter()
+            .any(|probe| matches!(probe, packetcraftr::probe::ProbeEndpoint::Ip { .. }))
+    {
+        Vec::new()
+    } else {
+        exclude_ip_protocols
+    };
     let udp = (scanning && transports.contains(&Transport::Udp))
         || discovery
             .probes

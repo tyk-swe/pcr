@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Synthetic validator regressions; these tests do not establish native coverage."""
 import copy
+import ctypes
 import importlib.util
 import io
+import ipaddress
 import json
 from pathlib import Path
 import struct
@@ -20,6 +22,7 @@ from tcp_diagnostic_corpus import validate as validate_corpus
 import tcp_diagnostic_native_evidence as evidence
 import tcp_diagnostic_isolated_fixture as isolated
 import tcp_diagnostic_kernel_fixture as kernel_fixture
+import tcp_diagnostic_capture as capture_module
 from tcp_diagnostic_isolated_fixture import reply
 from tcp_diagnostic_wire import network, outgoing, response, tcp
 
@@ -361,6 +364,61 @@ class EvidenceContracts(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 evidence.validate_kernel_capture(dict(kernel_capture=bad), case, run)
 
+    def test_darwin_timeval_ignores_nonzero_padding(self):
+        timeval = capture_module.timeval_type('Darwin')
+        self.assertEqual(timeval.microseconds.size, 4)
+        raw = bytearray(b'\xff' * ctypes.sizeof(timeval))
+        raw[:ctypes.sizeof(ctypes.c_long)] = (1234).to_bytes(ctypes.sizeof(ctypes.c_long), sys.byteorder)
+        raw[timeval.microseconds.offset:timeval.microseconds.offset + 4] = (567890).to_bytes(4, sys.byteorder)
+        stamp = timeval.from_buffer_copy(raw)
+        self.assertEqual(stamp.seconds * 1000000000 + stamp.microseconds * 1000, 1234567890000)
+
+    def test_scripted_peer_answers_only_its_arp_and_ndp_targets(self):
+        scanner_mac, peer_mac = bytes.fromhex('020000000001'), bytes.fromhex('020000000002')
+        source = ipaddress.ip_address('192.0.2.1').packed
+        for target in ('192.0.2.2', '192.0.2.3'):
+            packed = ipaddress.ip_address(target).packed
+            request = b'\xff' * 6 + scanner_mac + b'\x08\x06' + bytes.fromhex('0001080006040001') + scanner_mac + source + b'\x00' * 6 + packed
+            answer = isolated.neighbor_reply(request, peer_mac)
+            if target.endswith('.3'):
+                self.assertIsNone(answer)
+            else:
+                self.assertEqual(answer[:12], scanner_mac + peer_mac)
+                self.assertEqual(answer[14:22], bytes.fromhex('0001080006040002'))
+                self.assertEqual(answer[22:32], peer_mac + packed)
+                self.assertEqual(answer[32:42], scanner_mac + source)
+        source, multicast = '2001:db8::1', 'ff02::1:ff00:2'
+        for target in ('2001:db8::2', '2001:db8::3'):
+            solicitation = struct.pack('!BBHI', 135, 0, 0, 0) + ipaddress.ip_address(target).packed + b'\x01\x01' + scanner_mac
+            solicitation = transport(source, multicast, 58, solicitation, 2)
+            request = bytes.fromhex('3333ff000002') + scanner_mac + b'\x86\xdd' + packet(source, multicast, 58, solicitation)
+            answer = isolated.neighbor_reply(request, peer_mac)
+            if target.endswith('::3'):
+                self.assertIsNone(answer)
+            else:
+                ip = network(answer, 1)
+                self.assertEqual((ip['source'], ip['target']), (target, source))
+                self.assertEqual(ip['body'][0], 136)
+                self.assertEqual(ip['body'][24:], b'\x02\x01' + peer_mac)
+
+    def test_dependency_fetch_precedes_namespace_launch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+            path = Path(directory) / 'native.json'
+            argv = ['runner', '--reviewed-commit', 'a' * 40, '--profiles', 'full-native', '--report', str(path)]
+            def git(*args):
+                return 'a' * 40 if args == ('rev-parse', 'HEAD') else ''
+            def cargo_record(command, log):
+                calls.append(command)
+                return dict(exit_code=0)
+            def launch(command, **kwargs):
+                calls.append(command)
+                return SimpleNamespace(returncode=0)
+            with patch.object(sys, 'argv', argv), patch.object(RUNNER, 'git', side_effect=git), patch.object(RUNNER, 'privileged', return_value=True), patch.object(RUNNER.platform, 'system', return_value='Linux'), patch.object(RUNNER.shutil, 'which', return_value='/usr/bin/tool'), patch.object(RUNNER, 'cargo_record', side_effect=cargo_record), patch.object(RUNNER.subprocess, 'run', side_effect=launch):
+                self.assertEqual(RUNNER.main(), 0)
+            self.assertEqual(calls[0], ['cargo', 'fetch', '--locked'])
+            self.assertEqual(calls[1][:3], ['unshare', '--net', '--'])
+
     def test_exact_source_and_corpus_bindings(self):
         report = synthetic_report()
         self.assertFalse(evidence.validate(report, CORPUS, expected_sources=report['sources'], expected_corpus_digest=report['corpus_digest_sha256']))
@@ -481,12 +539,13 @@ class EvidenceContracts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.object(RUNNER, 'measurements', return_value=Timeout):
             report_path = Path(directory) / 'report.json'
             with self.assertRaises(RuntimeError):
-                RUNNER.build('layer2', report_path)
+                RUNNER.build('layer2', report_path, offline=True)
             record = json.loads((report_path.parent / 'tcp-diagnostics-build-layer2.json').read_text())
             self.assertTrue(record['timed_out'])
             self.assertEqual(record['stdout'], 'partial compiler')
             self.assertEqual(record['stderr'], 'build deadline')
             self.assertIn('--locked', record['command'])
+            self.assertIn('--offline', record['command'])
 
     def test_dirty_revision_and_missing_privilege_preserve_unavailable_inventory(self):
         for dirty, reason in ((True, 'runtime_evidence_missing'), (False, 'privilege_not_granted')):

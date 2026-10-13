@@ -11,8 +11,14 @@ import threading
 import time
 
 
-class Timeval(c.Structure):
-    _fields_ = [('seconds', c.c_long), ('microseconds', c.c_long)]
+def timeval_type(system):
+    class Timeval(c.Structure):
+        # Darwin's suseconds_t is int32 even when time_t/long is int64.
+        _fields_ = [('seconds', c.c_long), ('microseconds', c.c_int32 if system == 'Darwin' else c.c_long)]
+    return Timeval
+
+
+Timeval = timeval_type(platform.system())
 
 
 class Header(c.Structure):

@@ -71,11 +71,9 @@ def measurements():
     return module
 
 
-def build(profile, report_path):
-    args = ['cargo', 'build', '--locked', '-p', 'packetcraftr-cli', '--message-format=json', *FEATURES[profile]]
+def cargo_record(args, log):
     measurement = measurements()
     measurement.PROCESS_TIMEOUT = 900
-    log = report_path.parent / ('tcp-diagnostics-build-' + profile + '.json')
     try:
         record = measurement.measured(args)
     except Exception as error:
@@ -85,10 +83,19 @@ def build(profile, report_path):
                       stderr=retained(getattr(error, 'stderr', '')), error=str(error),
                       timed_out=isinstance(error, subprocess.TimeoutExpired))
         write(log, record)
-        raise RuntimeError('native profile build failed; retained ' + str(log)) from error
+        raise RuntimeError('native Cargo command failed; retained ' + str(log)) from error
     write(log, record)
     if record['exit_code']:
-        raise RuntimeError('native profile build failed; retained ' + str(log))
+        raise RuntimeError('native Cargo command failed; retained ' + str(log))
+    return record
+
+
+def build(profile, report_path, offline=False):
+    args = ['cargo', 'build', '--locked', '-p', 'packetcraftr-cli', '--message-format=json', *FEATURES[profile]]
+    if offline:
+        args.append('--offline')
+    log = report_path.parent / ('tcp-diagnostics-build-' + profile + '.json')
+    record = cargo_record(args, log)
     artifacts = [json.loads(line) for line in record['stdout'].splitlines() if line.startswith('{')]
     paths = [item['executable'] for item in artifacts if item.get('reason') == 'compiler-artifact' and item.get('executable') and item.get('target', {}).get('name') == 'packetcraftr']
     if len(set(paths)) != 1:
@@ -172,7 +179,7 @@ def classify(case, run, profile):
 
 
 def run_profile(profile, args, report, corpus, measurement):
-    binary, build_record = build(profile['profile'], args.report)
+    binary, build_record = build(profile['profile'], args.report, offline=getattr(args, 'inside', False))
     profile.update(binary=str(binary), binary_digest_sha256=digest(binary), build=build_record,
                    execution='privileged_native', privilege_granted=True,
                    capture_backend_version=capture_version(), kernel=platform.release(), architecture=platform.machine())
@@ -266,6 +273,10 @@ def main():
                     for case in profile['cases']:
                         case.update(reason='isolation_unavailable', message='missing isolation prerequisites: ' + ','.join(missing))
                 raise ValueError('isolation unavailable: missing ' + ','.join(missing))
+            # Only native traffic needs isolation. Populate Cargo's cache while
+            # the launcher can still reach the configured registry, then make
+            # every build in the child namespace explicitly offline.
+            cargo_record(['cargo', 'fetch', '--locked'], args.report.parent / 'tcp-diagnostics-fetch.json')
             parent = os.stat('/proc/self/ns/net').st_ino
             command = ['unshare', '--net', '--', sys.executable, str(Path(__file__).resolve()),
                        '--inside', '--parent-netns', str(parent), '--reviewed-commit', args.reviewed_commit,

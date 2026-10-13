@@ -2,18 +2,29 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Immediate independent M12 replies; unassigned peer IPs cannot use kernel truth."""
 import contextlib
+import ipaddress
 import json
 import socket
 import struct
 import subprocess
 import threading
 import time
-from discovery_isolated_fixture import packet, transport
+from discovery_isolated_fixture import packet, transport, reply as discovery_reply
 from tcp_diagnostic_wire import network, tcp
 
 SCANNER, PEER = 'pcrm12s', 'pcrm12p'
 SOURCES = {'ipv4': '192.0.2.1', 'ipv6': '2001:db8::1'}
 TARGETS = {'ipv4': '192.0.2.2', 'ipv6': '2001:db8::2'}
+
+
+def neighbor_reply(wire, mac):
+    """Answer only ARP/NDP for this fixture's unassigned documentation peers."""
+    if len(wire) >= 42 and wire[12:14] == b'\x08\x06' and wire[38:42] == ipaddress.ip_address(TARGETS['ipv4']).packed:
+        return discovery_reply(wire, mac, [])
+    if (len(wire) >= 78 and wire[12:14] == b'\x86\xdd' and wire[20] == 58 and wire[54] == 135
+            and wire[62:78] == ipaddress.ip_address(TARGETS['ipv6']).packed):
+        return discovery_reply(wire, mac, [])
+    return None
 
 
 def reply(wire):
@@ -107,7 +118,16 @@ def provision(evidence=None):
                             wire, address = channel.recvfrom(2048)
                         except socket.timeout:
                             continue
-                        if address[2] == socket.PACKET_OUTGOING or len(wire) < 14 or wire[12:14] not in (b'\x08\x00', b'\x86\xdd'):
+                        if address[2] == socket.PACKET_OUTGOING or len(wire) < 14:
+                            continue
+                        neighbor = neighbor_reply(wire, bytes.fromhex(mac.replace(':', '')))
+                        if neighbor is not None:
+                            charged += len(wire) + len(neighbor)
+                            if charged > 1048576:
+                                raise ValueError('independent peer exceeded its byte ceiling')
+                            channel.send(neighbor)
+                            continue
+                        if wire[12:14] not in (b'\x08\x00', b'\x86\xdd'):
                             continue
                         ip = network(wire, 1)
                         if ip['proto'] != 6 or ip['target'] not in TARGETS.values():

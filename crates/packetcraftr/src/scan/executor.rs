@@ -283,7 +283,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
         explicit: bool,
         deadline: &Deadline,
     ) -> Result<Pending, BoundaryError> {
-        let scope = target.scope.as_ref().map(|scope| scope.interface.clone());
+        let scope = target.interface().cloned();
         if let Some((address, routed_scope, routed_explicit, pending)) = self.routed.take()
             && (address, &routed_scope, routed_explicit) == (target.address, &scope, explicit)
         {
@@ -292,7 +292,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
         let base = self.send.clone();
         let client = self.configured()?;
         let packet = route_probe(target).packet();
-        let interface = target.scope.as_ref().map(|scope| &scope.interface);
+        let interface = target.interface();
         let route_with = |send: &crate::send::Options| {
             client
                 .admitting(send, 1, deadline)
@@ -359,14 +359,6 @@ enum Pending {
     Request(crate::neighbor::Request, Box<crate::route::Plan>),
 }
 
-/// Identifies `target` among the operation's neighbor requests.
-fn requested(target: &SelectedAddress) -> (IpAddr, Option<interface::Id>) {
-    (
-        target.address,
-        target.scope.as_ref().map(|scope| scope.interface.clone()),
-    )
-}
-
 /// A probe that routes like any of `target`'s, for finding its neighbor.
 fn route_probe(target: &SelectedAddress) -> Probe {
     Probe {
@@ -379,22 +371,6 @@ fn route_probe(target: &SelectedAddress) -> Probe {
         attempt: 1,
         udp_payload: bytes::Bytes::new(),
         udp_profile: None,
-    }
-}
-
-/// The statistics of a resolution that sent `attempts` copies of `frame`.
-fn neighbor_stats(
-    attempts: u32,
-    frame: &bytes::Bytes,
-    elapsed: Duration,
-    capture: packetcraftr_netio::capture::Stats,
-) -> Stats {
-    Stats {
-        packets_attempted: u64::from(attempts),
-        packets_completed: u64::from(attempts),
-        bytes: u64::from(attempts).saturating_mul(frame.len() as u64),
-        elapsed,
-        capture,
     }
 }
 
@@ -535,9 +511,9 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             Err(error) => return Err(BoundaryError::from_error(error)),
         };
         if attempts > 0 {
-            self.requested.insert(requested(target));
+            self.requested.insert(target.key());
         }
-        let stats = neighbor_stats(attempts, &frame, elapsed, capture);
+        let stats = crate::neighbor::stats(attempts, frame.len(), elapsed, capture);
         let neighbor = Neighbor {
             outcome: link.map_or(NeighborOutcome::Silent, NeighborOutcome::Resolved),
             interface: request.interface.clone(),
@@ -568,7 +544,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         {
             return Ok(NextHopResolution::default());
         }
-        if self.requested.contains(&requested(target)) {
+        if self.requested.contains(&target.key()) {
             return Err(BoundaryError::from_error(
                 crate::Error::UnresolvedNeighbor {
                     target: request.target,
@@ -603,10 +579,10 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             }
         };
         if attempts > 0 {
-            self.requested.insert(requested(target));
+            self.requested.insert(target.key());
         }
         Ok(NextHopResolution {
-            stats: neighbor_stats(attempts, &frame, elapsed, capture),
+            stats: crate::neighbor::stats(attempts, frame.len(), elapsed, capture),
             silence,
         })
     }
@@ -621,8 +597,12 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             return Ok(false);
         }
         let pending = self.pending(target, explicit, deadline)?;
-        let scope = target.scope.as_ref().map(|scope| scope.interface.clone());
-        self.routed = Some((target.address, scope, explicit, pending.clone()));
+        self.routed = Some((
+            target.address,
+            target.interface().cloned(),
+            explicit,
+            pending.clone(),
+        ));
         let Pending::Request(request, _) = pending else {
             return Ok(false);
         };

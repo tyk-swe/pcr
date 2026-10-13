@@ -10,7 +10,7 @@ use bytes::Bytes;
 use packetcraftr_core::budget::{Deadline, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
-use crate::bounded::{Exchange, Outcome, retryable, timeout};
+use crate::bounded::{Exchange, Outcome, prepare_transfer, retryable};
 
 pub const MAX_PAYLOAD_BYTES: usize = packetcraftr_core::document::udp_profiles::MAX_PAYLOAD_BYTES;
 pub const MAX_RESPONSE_BYTES: usize = 65_535;
@@ -77,15 +77,9 @@ impl Provider for SystemProvider {
         let mut bytes_sent = 0;
         let mut bytes_read = 0;
         let outcome = 'exchange: {
-            let wait = match timeout(deadline) {
-                Ok(wait) => wait,
-                Err(outcome) => break 'exchange outcome,
-            };
-            if let Err(source) = socket.set_write_timeout(Some(wait)) {
-                break 'exchange Outcome::Failed(source);
-            }
-            if let Err(source) = deadline.enforce() {
-                break 'exchange Outcome::interrupted(source);
+            if let Err(outcome) = prepare_transfer(deadline, |wait| socket.set_write_timeout(wait))
+            {
+                break 'exchange outcome;
             }
             // A single datagram send is never retried: a receive timeout must
             // not cause another transmission outside the caller's attempt budget.
@@ -102,15 +96,10 @@ impl Provider for SystemProvider {
                 break 'exchange Outcome::Failed(io::ErrorKind::WriteZero.into());
             }
             loop {
-                let wait = match timeout(deadline) {
-                    Ok(wait) => wait,
-                    Err(outcome) => break 'exchange outcome,
-                };
-                if let Err(source) = socket.set_read_timeout(Some(wait)) {
-                    break 'exchange Outcome::Failed(source);
-                }
-                if let Err(source) = deadline.enforce() {
-                    break 'exchange Outcome::interrupted(source);
+                if let Err(outcome) =
+                    prepare_transfer(deadline, |wait| socket.set_read_timeout(wait))
+                {
+                    break 'exchange outcome;
                 }
                 match crate::platform::receive_datagram(&socket, &mut response) {
                     Ok((count, truncated)) => {

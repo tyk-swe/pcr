@@ -120,7 +120,7 @@ where
         sequence: 1,
         attempt: 1,
         address: target.address,
-        interface: target.scope.as_ref().map(|scope| scope.interface.clone()),
+        interface: target.interface().cloned(),
         port: request.open_port,
         source_port,
         identity: base_identity,

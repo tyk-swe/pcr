@@ -45,13 +45,11 @@ pub(super) fn plan<'c, P: PacketProviders, K: Clock>(
     let mut interfaces = Vec::new();
     let mut admitted_probes = Vec::with_capacity(planned.len());
     let mut base_bytes = planned.iter().fold(0usize, |bytes, planned| {
-        let scope_bytes = planned.probe.scope.as_ref().map_or(0, |scope| {
-            scope
-                .zone
-                .as_str()
-                .len()
-                .saturating_add(scope.interface.name.len())
-        });
+        let scope_bytes = planned
+            .probe
+            .scope
+            .as_ref()
+            .map_or(0, crate::target::ResolvedZone::retained_bytes);
         bytes.saturating_add(384).saturating_add(scope_bytes)
     });
     if base_bytes > options.max_prepared_bytes {

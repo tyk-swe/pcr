@@ -4,9 +4,8 @@
 pub(super) mod arguments;
 mod connect;
 mod list;
-mod payload;
-mod profiles;
 mod rendering;
+mod selection;
 mod streaming;
 mod traceroute;
 
@@ -14,20 +13,24 @@ use crate::output::contract::Format;
 
 use crate::output;
 
-use packetcraftr_core::error::{Classified, Kind};
+use packetcraftr_core::error::Kind;
 
 use std::time::Duration;
 
-use packetcraftr::probe::{ProbeEndpoint, Transport};
+use packetcraftr::probe::Transport;
 use packetcraftr::scan::{discovery, followup, method, profile::curated};
 
 use self::arguments::Args;
+use self::selection::{
+    discovery_options, ingest_targets, load_udp_profiles, read_udp_payload, select_endpoints,
+    transports,
+};
 use super::execution;
 use crate::command_options::parse_target;
 use crate::errors::CliError;
 use crate::input::manifest;
 use crate::rendering::StreamEncoder;
-use crate::system::{Runtime, prepare_workflow};
+use crate::system::{Runtime, collection, prepare_workflow};
 
 impl super::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[
@@ -209,8 +212,9 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             .probes
             .iter()
             .any(|probe| probe.transport() == Transport::Udp);
-    let udp_payload = payload::read(udp, udp_payload_hex.as_deref(), udp_payload_file.as_deref())?;
-    let operator_profiles = profiles::load(udp_profiles.as_deref(), udp)?;
+    let udp_payload =
+        read_udp_payload(udp, udp_payload_hex.as_deref(), udp_payload_file.as_deref())?;
+    let operator_profiles = load_udp_profiles(udp_profiles.as_deref(), udp)?;
     if curated_udp_payloads && !udp {
         return Err(CliError::new(
             Kind::Usage,
@@ -276,7 +280,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             link_mode: route.link_mode.into(),
             ..Default::default()
         },
-        collection: crate::system::exchange::collection(timeout.timeout(), queue_limits)?,
+        collection: collection(timeout.timeout(), queue_limits)?,
     };
     if !tcp_scan.is_syn() {
         request.validate().map_err(CliError::classified)?;
@@ -547,149 +551,6 @@ pub(super) struct Streamed {
     pub(super) traceroute: Option<output::traceroute::hosts::Complete>,
 }
 
-/// The requested transports in first-seen order. ICMP echo is portless and
-/// cannot share a plan with port endpoints.
-fn transports(requested: &[arguments::Transport]) -> Result<Vec<Transport>, CliError> {
-    let mut transports: Vec<Transport> = Vec::with_capacity(requested.len());
-    for transport in requested {
-        let transport = Transport::from(*transport);
-        if !transports.contains(&transport) {
-            transports.push(transport);
-        }
-    }
-    if transports.len() > 1 && transports.contains(&Transport::Icmp) {
-        return Err(CliError::new(
-            Kind::Usage,
-            "--transport icmp is portless and cannot be combined with tcp or udp",
-        ));
-    }
-    Ok(transports)
-}
-
-/// The discovery stage the flags select, with the endpoints --exclude-ports
-/// removed from it. Port probes take --discovery-ports through the scan's
-/// catalog and --exclude-ports, so discovery never probes an excluded
-/// endpoint; ICMP echo is the default probe.
-fn discovery_options(
-    mode: Option<arguments::Discovery>,
-    probes: &[arguments::DiscoveryProbe],
-    ports: Vec<arguments::PortTerm>,
-    exclude_ports: &[arguments::PortTerm],
-    unresponsive: Option<arguments::UnresponsiveHosts>,
-    max_ports: usize,
-) -> Result<(discovery::Options, usize), CliError> {
-    let Some(mode) = mode else {
-        return Ok((discovery::Options::default(), 0));
-    };
-    let mut options = discovery::Options {
-        mode: mode.into(),
-        unresponsive: unresponsive.map_or_else(Default::default, Into::into),
-        ..discovery::Options::default()
-    };
-    let probes = if probes.is_empty() && options.runs() {
-        &[arguments::DiscoveryProbe::Icmp][..]
-    } else {
-        probes
-    };
-    let mut transports = Vec::new();
-    for probe in probes {
-        let transport = match probe {
-            arguments::DiscoveryProbe::Neighbor => {
-                options.neighbor = true;
-                continue;
-            }
-            arguments::DiscoveryProbe::Icmp => Transport::Icmp,
-            arguments::DiscoveryProbe::Tcp => Transport::Tcp,
-            arguments::DiscoveryProbe::Udp => Transport::Udp,
-        };
-        if !transports.contains(&transport) {
-            transports.push(transport);
-        }
-    }
-    // ICMP echo is portless and leads; port probes follow in term order.
-    if let Some(index) = transports
-        .iter()
-        .position(|transport| *transport == Transport::Icmp)
-    {
-        transports.remove(index);
-        options.probes.push(ProbeEndpoint::Icmp);
-    }
-    if transports.is_empty() {
-        if !ports.is_empty() {
-            return Err(CliError::new(
-                Kind::Usage,
-                "--discovery-ports needs tcp or udp among --discovery-probes",
-            ));
-        }
-        return Ok((options, 0));
-    }
-    if ports.is_empty() {
-        return Err(CliError::new(
-            Kind::Usage,
-            "tcp and udp discovery probes need --discovery-ports",
-        ));
-    }
-    // An exclusion prefixed with a transport discovery does not probe
-    // applies only to the scan's endpoints.
-    let exclude = exclude_ports
-        .iter()
-        .filter(|term| {
-            term.0
-                .transport
-                .is_none_or(|transport| transports.contains(&transport))
-        })
-        .map(|term| term.0.clone())
-        .collect();
-    let selected = packetcraftr::scan::select_endpoints(
-        &packetcraftr::scan::PortSelection {
-            transports,
-            include: ports.into_iter().map(|term| term.0).collect(),
-            exclude,
-        },
-        packetcraftr::scan::catalog::bundled(),
-        max_ports,
-    )
-    .map_err(|error| {
-        CliError::from_classification(
-            error.classification(),
-            format!("--discovery-ports: {error}"),
-            error.causes(),
-        )
-    })?;
-    options.probes.extend(selected.endpoints);
-    Ok((options, selected.excluded))
-}
-
-fn select_endpoints(
-    transports: &[Transport],
-    ports: Vec<arguments::PortTerm>,
-    exclude_ports: Vec<arguments::PortTerm>,
-    max_ports: usize,
-) -> Result<packetcraftr::scan::Selected, CliError> {
-    if transports == [Transport::Icmp] {
-        if !ports.is_empty() || !exclude_ports.is_empty() {
-            return Err(CliError::new(
-                Kind::Usage,
-                "--ports and --exclude-ports do not apply to portless ICMP echo scans",
-            ));
-        }
-        return Ok(packetcraftr::scan::Selected {
-            endpoints: vec![packetcraftr::probe::ProbeEndpoint::Icmp],
-            excluded: 0,
-        });
-    }
-    packetcraftr::scan::select_endpoints(
-        &packetcraftr::scan::PortSelection {
-            transports: transports.to_vec(),
-            include: ports.into_iter().map(|term| term.0).collect(),
-            exclude: exclude_ports.into_iter().map(|term| term.0).collect(),
-        },
-        packetcraftr::scan::catalog::bundled(),
-        max_ports,
-    )
-    .map_err(CliError::classified)
-}
-
 /// Raw scans need packet capture and transmission in the requested link mode.
 fn raw_capability(
     link_mode: packetcraftr_netio::link::Mode,
@@ -697,86 +558,4 @@ fn raw_capability(
     use packetcraftr_netio::NativeCapability;
     NativeCapability::Capture.check()?;
     NativeCapability::Transmission(link_mode).check()
-}
-
-pub(super) struct Ingested {
-    pub(crate) targets: packetcraftr::target::Selection,
-    pub(crate) origins: Vec<manifest::Declaration>,
-}
-
-fn ingest_targets(
-    positional: &[String],
-    targets_file: &[std::path::PathBuf],
-    exclusions: &[packetcraftr::target::Network],
-    exclude_file: &[std::path::PathBuf],
-    max_manifest_bytes: Option<usize>,
-    max_manifest_lines: Option<usize>,
-) -> Result<Ingested, CliError> {
-    let bounds = manifest::ManifestBounds::new(
-        max_manifest_bytes.unwrap_or(manifest::MAX_MANIFEST_BYTES),
-        max_manifest_lines.unwrap_or(manifest::MAX_MANIFEST_LINES),
-    )?;
-    let mut budget = bounds.budget();
-    let mut origins = positional
-        .iter()
-        .enumerate()
-        .map(|(position, target)| manifest::Declaration {
-            token: target.clone(),
-            source: manifest::DeclarationSource::Argument {
-                position: position + 1,
-            },
-            line: None,
-        })
-        .collect::<Vec<_>>();
-    origins.extend(manifest::read_with_budget(
-        &manifest_sources(targets_file),
-        &mut budget,
-    )?);
-    let include = parse_declarations(&origins)?;
-    if include.is_empty() {
-        return Err(CliError::new(
-            Kind::Usage,
-            "at least one target is required: pass TARGET or --targets-file",
-        ));
-    }
-    let mut exclude = exclusions.to_vec();
-    exclude.extend(parse_declarations::<packetcraftr::target::Network>(
-        &manifest::read_with_budget(&manifest_sources(exclude_file), &mut budget)?,
-    )?);
-    Ok(Ingested {
-        targets: packetcraftr::target::Selection { include, exclude },
-        origins,
-    })
-}
-
-fn manifest_sources(paths: &[std::path::PathBuf]) -> Vec<manifest::ManifestSource> {
-    paths
-        .iter()
-        .map(|path| manifest::ManifestSource::open(path))
-        .collect()
-}
-
-fn parse_declarations<T>(declarations: &[manifest::Declaration]) -> Result<Vec<T>, CliError>
-where
-    T: std::str::FromStr,
-    T::Err: Classified,
-{
-    declarations
-        .iter()
-        .map(|declaration| {
-            declaration
-                .token
-                .parse()
-                .map_err(|source| declaration_error(source, declaration))
-        })
-        .collect()
-}
-
-fn declaration_error(source: impl Classified, declaration: &manifest::Declaration) -> CliError {
-    CliError::from_classification(
-        source.classification(),
-        format!("invalid declaration at {declaration}: {source}"),
-        crate::errors::source_causes(&source),
-    )
-    .with_context(source.context())
 }

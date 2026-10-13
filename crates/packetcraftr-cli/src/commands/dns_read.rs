@@ -7,13 +7,13 @@ mod rendering;
 use packetcraftr_core::analysis::dns::{Collector, Event};
 
 use self::arguments::Args;
-use super::offline_analysis::{Inspection, inspect};
+use super::offline_analysis::{Inspection, complete_application, inspect};
 use crate::errors::CliError;
 use crate::output::{
     contract::{Command, Format},
     dns_read as wire,
 };
-use crate::rendering::{StreamEncoder, emit_aggregate};
+use crate::rendering::StreamEncoder;
 
 impl super::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[
@@ -86,14 +86,12 @@ fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliErro
     )?;
     let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
         .map_err(CliError::classified)?;
-    match format {
-        Format::Json => emit_aggregate(
-            Command::DnsRead,
-            wire::Report::from((messages, transactions, issues, complete)),
-            Vec::new(),
-        ),
-        Format::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
-        Format::Text => rendering::render_complete(&complete),
-        other => other.unreachable(),
-    }
+    complete_application(
+        Command::DnsRead,
+        format,
+        stream,
+        complete,
+        |complete| wire::Report::from((messages, transactions, issues, complete)),
+        rendering::render_complete,
+    )
 }

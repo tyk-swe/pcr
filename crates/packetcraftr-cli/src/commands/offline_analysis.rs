@@ -10,14 +10,14 @@ use packetcraftr_core::registry::Registry;
 
 use std::path::Path;
 
-use analysis::StreamRef;
+use analysis::{StreamRef, StreamTransport};
 use packetcraftr_core::error::Kind;
 
-use crate::command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs};
+use crate::command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, Selector};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
-use crate::output::contract::Format;
-use crate::rendering::{EventOutput, StreamEncoder, ip_event_sink};
+use crate::output::contract::{Command, Format};
+use crate::rendering::{EventOutput, StreamEncoder, emit_aggregate, ip_event_sink};
 
 pub(super) struct AnalysisSetup {
     pub(super) registry: Arc<Registry>,
@@ -131,4 +131,38 @@ pub(super) fn inspect<C: analysis::Collector>(
         return Err(CliError::new(Kind::Usage, "selected stream is not present"));
     }
     Ok(outcome)
+}
+
+pub(super) fn require_tcp_stream(
+    stream: Option<&Selector<StreamRef>>,
+    protocol: &str,
+) -> Result<Option<StreamRef>, CliError> {
+    let selector = stream.map(Selector::get).transpose()?;
+    if selector.is_some_and(|selected| selected.transport != StreamTransport::Tcp) {
+        return Err(CliError::new(
+            Kind::Usage,
+            format!("{protocol} inspection requires --stream tcp:INDEX"),
+        ));
+    }
+    Ok(selector)
+}
+
+pub(super) fn complete_application<C, R>(
+    command: Command,
+    format: Format,
+    stream: &StreamEncoder,
+    complete: C,
+    report: impl FnOnce(C) -> R,
+    render: impl FnOnce(&C) -> Result<(), CliError>,
+) -> Result<(), CliError>
+where
+    C: serde::Serialize,
+    R: serde::Serialize,
+{
+    match format {
+        Format::Json => emit_aggregate(command, report(complete), Vec::new()),
+        Format::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
+        Format::Text => render(&complete),
+        other => other.unreachable(),
+    }
 }

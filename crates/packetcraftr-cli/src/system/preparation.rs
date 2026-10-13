@@ -8,7 +8,7 @@ use std::time::Duration;
 use packetcraftr_core as core;
 use packetcraftr_netio as net;
 
-use super::{Client, Runtime, client, exchange, route};
+use super::{Client, Runtime, client, route};
 use crate::command_options::{RouteArgs, RouteSelectionArgs, SendArgs, TemplateArgs};
 use crate::errors::CliError;
 use crate::input::read_recipe;
@@ -170,6 +170,31 @@ impl Workflow {
     }
 }
 
+pub(crate) fn collection(
+    timeout: Duration,
+    limits: net::capture::Limits,
+) -> Result<packetcraftr::exchange::Collection, CliError> {
+    let mut collection = packetcraftr::exchange::Collection {
+        max_unmatched_frames: limits.max_frames,
+        max_responses: limits.max_frames,
+        capture: limits,
+        ..packetcraftr::exchange::Collection::default()
+    };
+    collection.decode.limits.max_packet_size = limits.snap_length;
+    packetcraftr::exchange::Request {
+        // A zero window is left to the calling workflow's own limit error.
+        timeout: timeout.max(Duration::from_nanos(1)),
+        collection: collection.clone(),
+        ..packetcraftr::exchange::Request::new(
+            placeholder(),
+            packetcraftr::send::Options::default(),
+        )
+    }
+    .validate()
+    .map_err(CliError::classified)?;
+    Ok(collection)
+}
+
 /// Validates the policy, the interface selector, and the collection bounds,
 /// in that order. The client resolves the selector only after it admits each
 /// exchange, so a denied target never enumerates interfaces.
@@ -184,7 +209,7 @@ pub(crate) fn prepare_workflow(
     Ok(Workflow {
         policy: Arc::new(policy),
         route,
-        collection: exchange::collection(timeout, queue_limits)?,
+        collection: collection(timeout, queue_limits)?,
     })
 }
 

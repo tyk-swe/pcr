@@ -39,7 +39,6 @@ fn public_os_workflow_retains_wire_evidence_and_bounded_cleanup() {
         os::builtin_corpus().unwrap(),
     );
     request.attempts = 1;
-    request.timeout = Duration::from_millis(10);
     request.route = route::Options {
         link_mode: Mode::Layer3,
         ..Default::default()
@@ -116,7 +115,6 @@ fn cached_layer2_neighbor_needs_no_discovery_capture_minimum() {
     );
     request.route.link_mode = Mode::Layer2;
     request.attempts = 1;
-    request.timeout = Duration::from_millis(10);
     request.collection.capture.snap_length = 100;
     let report = client.identify_os(request, Collector::default()).unwrap();
     assert_eq!(report.stats.packets_attempted, 2);

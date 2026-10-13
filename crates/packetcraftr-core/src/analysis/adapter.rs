@@ -3,8 +3,8 @@
 
 use std::net::IpAddr;
 
-use crate::byte_slice::checked_slice;
 use crate::decode::DecodedPacket;
+use crate::frame::checked_slice;
 use crate::layer::Layer;
 use crate::layer::Padding;
 use crate::packet::Packet;

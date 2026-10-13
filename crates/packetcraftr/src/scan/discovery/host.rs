@@ -211,10 +211,7 @@ impl Composer {
         let indices = targets
             .iter()
             .enumerate()
-            .map(|(index, target)| {
-                let interface = target.scope.as_ref().map(|scope| scope.interface.clone());
-                ((target.address, interface), index)
-            })
+            .map(|(index, target)| (target.key(), index))
             .collect();
         Self {
             mode,

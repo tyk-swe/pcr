@@ -360,7 +360,7 @@ where
             validate_neighbor_send(request, request_bytes, &report)?;
             let freshness_marker = report.timing().freshness_marker().monotonic();
 
-            let wait = crate::deadline::until(attempt_deadline, cancellation.clone());
+            let wait = Deadline::until(attempt_deadline, cancellation.clone());
             while remaining_before(attempt_deadline).is_some() {
                 let Some(captured_frame) = capture.next_captured_frame(&wait).map_err(|error| {
                     map_io_error(request, "receiving discovery response", error)
@@ -412,7 +412,7 @@ where
         evidence: &mut EvidenceBuffer,
         cancellation: &Option<packetcraftr_core::budget::Cancellation>,
     ) -> Result<(), Error> {
-        let queued = crate::deadline::immediate(cancellation.clone());
+        let queued = Deadline::immediate(cancellation.clone());
         for _ in 0..self.state.options.max_capture_queue_frames {
             let Some(captured_frame) = capture
                 .next_captured_frame(&queued)

@@ -76,19 +76,17 @@ impl Materialized {
         let Some(resolution) = &self.neighbor_resolution else {
             return Ok(crate::Stats::default());
         };
-        let attempts = u64::from(resolution.attempts);
-        let frame_bytes = if attempts == 0 {
+        let frame_bytes = if resolution.attempts == 0 {
             0
         } else {
-            neighbor::request_frame(&neighbor_request(&self.plan)?)?.len() as u64
+            neighbor::request_frame(&neighbor_request(&self.plan)?)?.len()
         };
-        Ok(crate::Stats {
-            packets_attempted: attempts,
-            packets_completed: attempts,
-            bytes: attempts.saturating_mul(frame_bytes),
-            capture: resolution.capture_statistics,
-            ..crate::Stats::default()
-        })
+        Ok(neighbor::stats(
+            resolution.attempts,
+            frame_bytes,
+            std::time::Duration::ZERO,
+            resolution.capture_statistics,
+        ))
     }
 
     pub fn transmit_route(&self) -> transmit::Route<'_> {

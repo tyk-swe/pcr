@@ -13,7 +13,7 @@ use crate::probe::{check_collection_evidence, check_probe_count, check_probe_dur
 use crate::target::ResolveTarget;
 use crate::target::{DeclaredTargets, FamilyGate, SelectedAddress, admit_selection, wire_limits};
 
-use crate::neighbor::{IPV4_REQUEST_BYTES, IPV6_REQUEST_BYTES};
+use crate::neighbor::{needs_resolution, request_wire_bytes};
 use crate::probe::ProbeEndpoint;
 use crate::scan::Error;
 use crate::scan::Request;
@@ -125,10 +125,7 @@ pub(super) fn plan_scan(
     // own, so neither discovery nor a stage asks for its neighbor.
     let resolvable: Vec<&SelectedAddress> = targets
         .iter()
-        .filter(|target| {
-            !target.address.is_multicast()
-                && target.address != IpAddr::from(std::net::Ipv4Addr::BROADCAST)
-        })
+        .filter(|target| needs_resolution(target.address))
         .collect();
     let explicit_requests = if discovery.runs() && discovery.neighbor {
         probe_count(resolvable.len(), 1, request.attempts)?
@@ -204,12 +201,7 @@ pub(super) fn plan_scan(
         request.limits.max_probes,
     )?;
     let neighbor_frames = resolvable.iter().try_fold(0u64, |total, target| {
-        let frame = if target.address.is_ipv4() {
-            IPV4_REQUEST_BYTES
-        } else {
-            IPV6_REQUEST_BYTES
-        };
-        total.checked_add(frame)
+        total.checked_add(request_wire_bytes(target.address))
     });
     // One target's neighbor bytes cover `attempts` discovery requests plus
     // at most one implicit request for its probes' neighbor.

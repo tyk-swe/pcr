@@ -697,7 +697,6 @@ fn trace_followups_preserve_configured_neighbor_capture_bounds() {
     let mut request = request(&[7]);
     request.reverse_dns = None;
     request.scan.route = Default::default();
-    request.scan.timeout = Duration::from_millis(10);
     request.trace.as_mut().unwrap().max_hops = 1;
     client
         .scan_with_followups(request, |_: Event| Ok(()))

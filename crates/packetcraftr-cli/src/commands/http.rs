@@ -6,20 +6,16 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr_core::analysis::{
-    StreamTransport,
-    http::{Collector, Event},
-};
-use packetcraftr_core::error::Kind;
+use packetcraftr_core::analysis::http::{Collector, Event};
 
 use self::arguments::Args;
-use super::offline_analysis::{Inspection, inspect};
+use super::offline_analysis::{Inspection, complete_application, inspect, require_tcp_stream};
 use crate::errors::CliError;
 use crate::output::{
     contract::{Command, Format},
     http as wire,
 };
-use crate::rendering::{StreamEncoder, emit_aggregate};
+use crate::rendering::StreamEncoder;
 
 impl super::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[
@@ -58,17 +54,7 @@ fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliErro
     ports.extend([80, 8080]);
     let collector = Collector::new(args.application.core(), ports, args.max_http_body_bytes)
         .map_err(CliError::classified)?;
-    let selector = args
-        .stream
-        .as_ref()
-        .map(crate::command_options::Selector::get)
-        .transpose()?;
-    if selector.is_some_and(|selected| selected.transport != StreamTransport::Tcp) {
-        return Err(CliError::new(
-            Kind::Usage,
-            "HTTP/1 inspection requires --stream tcp:INDEX",
-        ));
-    }
+    let selector = require_tcp_stream(args.stream.as_ref(), "HTTP/1")?;
     let (mut messages, mut issues) = (Vec::new(), Vec::new());
     let outcome = inspect(
         Inspection {
@@ -96,14 +82,12 @@ fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliErro
     )?;
     let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
         .map_err(CliError::classified)?;
-    match format {
-        Format::Json => emit_aggregate(
-            Command::Http,
-            wire::Report::from((messages, issues, complete)),
-            Vec::new(),
-        ),
-        Format::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
-        Format::Text => rendering::render_complete(&complete),
-        other => other.unreachable(),
-    }
+    complete_application(
+        Command::Http,
+        format,
+        stream,
+        complete,
+        |complete| wire::Report::from((messages, issues, complete)),
+        rendering::render_complete,
+    )
 }

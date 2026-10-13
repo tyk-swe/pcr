@@ -250,13 +250,11 @@ pub(super) fn admit_adaptive<P: PacketProviders, K: Clock>(
         .map(Planned::new)
         .collect::<Result<Vec<_>, _>>()?;
     for planned in &planned {
-        let scope_bytes = planned.probe.scope.as_ref().map_or(0, |scope| {
-            scope
-                .zone
-                .as_str()
-                .len()
-                .saturating_add(scope.interface.name.len())
-        });
+        let scope_bytes = planned
+            .probe
+            .scope
+            .as_ref()
+            .map_or(0, crate::target::ResolvedZone::retained_bytes);
         summary.max_description_bytes = summary
             .max_description_bytes
             .max(384usize.saturating_add(scope_bytes));

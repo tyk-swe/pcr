@@ -201,6 +201,15 @@ pub struct ResolvedZone {
     pub interface: packetcraftr_netio::interface::Id,
 }
 
+impl ResolvedZone {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.zone
+            .as_str()
+            .len()
+            .saturating_add(self.interface.name.len())
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct SelectedAddress {
     pub address: IpAddr,
@@ -215,19 +224,26 @@ impl SelectedAddress {
         }
     }
 
+    pub fn interface(&self) -> Option<&packetcraftr_netio::interface::Id> {
+        self.scope.as_ref().map(|scope| &scope.interface)
+    }
+
     pub fn identity(&self) -> (IpAddr, Option<&packetcraftr_netio::interface::Id>) {
-        (
-            self.address,
-            self.scope.as_ref().map(|scope| &scope.interface),
-        )
+        (self.address, self.interface())
+    }
+
+    pub(crate) fn key(&self) -> (IpAddr, Option<packetcraftr_netio::interface::Id>) {
+        (self.address, self.interface().cloned())
+    }
+
+    pub(crate) fn scope_bytes(&self) -> usize {
+        self.scope.as_ref().map_or(0, ResolvedZone::retained_bytes)
     }
 }
 
 impl PartialEq for SelectedAddress {
     fn eq(&self, other: &Self) -> bool {
-        self.address == other.address
-            && self.scope.as_ref().map(|scope| &scope.interface)
-                == other.scope.as_ref().map(|scope| &scope.interface)
+        self.identity() == other.identity()
     }
 }
 
@@ -235,11 +251,7 @@ impl Eq for SelectedAddress {}
 
 impl std::hash::Hash for SelectedAddress {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.address.hash(state);
-        self.scope
-            .as_ref()
-            .map(|scope| &scope.interface)
-            .hash(state);
+        self.identity().hash(state);
     }
 }
 

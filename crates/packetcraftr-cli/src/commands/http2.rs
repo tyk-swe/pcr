@@ -4,20 +4,16 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr_core::analysis::{
-    StreamTransport,
-    http2::{Collector, Event},
-};
-use packetcraftr_core::error::Kind;
+use packetcraftr_core::analysis::http2::{Collector, Event};
 
 use self::arguments::Args;
-use super::offline_analysis::{Inspection, inspect};
+use super::offline_analysis::{Inspection, complete_application, inspect, require_tcp_stream};
 use crate::errors::CliError;
 use crate::output::{
     contract::{Command, Format},
     http2 as wire,
 };
-use crate::rendering::{StreamEncoder, emit_aggregate};
+use crate::rendering::StreamEncoder;
 
 impl super::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[
@@ -74,17 +70,7 @@ fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliErro
     if let Some(deadline) = crate::invocation::deadline() {
         collector = collector.with_deadline(deadline);
     }
-    let selector = args
-        .stream
-        .as_ref()
-        .map(crate::command_options::Selector::get)
-        .transpose()?;
-    if selector.is_some_and(|selected| selected.transport != StreamTransport::Tcp) {
-        return Err(CliError::new(
-            Kind::Usage,
-            "HTTP/2 inspection requires --stream tcp:INDEX",
-        ));
-    }
+    let selector = require_tcp_stream(args.stream.as_ref(), "HTTP/2")?;
     let (mut frames, mut messages, mut issues, mut connections) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let outcome = inspect(
@@ -123,14 +109,12 @@ fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliErro
     )?;
     let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
         .map_err(CliError::classified)?;
-    match format {
-        Format::Json => emit_aggregate(
-            Command::Http2,
-            wire::Report::from((frames, messages, issues, connections, complete)),
-            Vec::new(),
-        ),
-        Format::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
-        Format::Text => rendering::render_complete(&complete),
-        other => other.unreachable(),
-    }
+    complete_application(
+        Command::Http2,
+        format,
+        stream,
+        complete,
+        |complete| wire::Report::from((frames, messages, issues, connections, complete)),
+        rendering::render_complete,
+    )
 }

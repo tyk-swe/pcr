@@ -4,7 +4,13 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-mod limits_serde;
+crate::evidence::limits_serde!(
+    before: {
+        max_probes: usize,
+        max_duration: std::time::Duration,
+    },
+    after: {}
+);
 
 use packetcraftr_netio::deadline::MAX_WAIT;
 

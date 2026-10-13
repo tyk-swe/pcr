@@ -4,7 +4,7 @@
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
@@ -38,7 +38,18 @@ const SILENT: u16 = 1002;
 const PROHIBITED: u16 = 1003;
 const UNEXPECTED: u16 = 1004;
 const RESET_AND_PROHIBITED: u16 = 1005;
-const PORTS: [u16; 5] = [RESET_ZERO, RESET_POSITIVE, SILENT, PROHIBITED, UNEXPECTED];
+const PORT_UNREACHABLE: u16 = 1006;
+const TIME_EXCEEDED: u16 = 1007;
+const PORTS: [u16; 8] = [
+    RESET_ZERO,
+    RESET_POSITIVE,
+    SILENT,
+    PROHIBITED,
+    UNEXPECTED,
+    RESET_AND_PROHIBITED,
+    PORT_UNREACHABLE,
+    TIME_EXCEEDED,
+];
 const POSITIVE_WINDOW: u16 = 4096;
 const UNEXPECTED_WINDOW: u16 = 29_200;
 const MODES: [TcpScan; 7] = [
@@ -61,6 +72,7 @@ enum Schedule {
 #[derive(Clone, Copy, Default)]
 struct Script {
     noise: bool,
+    duplicate: bool,
     reverse: bool,
     fail_at: Option<usize>,
     icmp_first: bool,
@@ -196,6 +208,10 @@ fn reply_frame(sent: &Packet, tcp: Tcp) -> Frame {
 }
 
 fn icmp_error(sent: &Packet, wire: &Bytes, unreachable_code: u8) -> Frame {
+    icmp_packet(sent, wire, unreachable_code, false)
+}
+
+fn icmp_packet(sent: &Packet, wire: &Bytes, code: u8, expired: bool) -> Frame {
     let mut response = Packet::new();
     if let Some(ip) = sent.get::<Ipv4>() {
         let mut body = vec![0_u8; 4];
@@ -206,8 +222,8 @@ fn icmp_error(sent: &Packet, wire: &Bytes, unreachable_code: u8) -> Frame {
             ..Default::default()
         });
         response.push(Icmpv4 {
-            icmp_type: 3,
-            code: unreachable_code,
+            icmp_type: if expired { 11 } else { 3 },
+            code,
             body: Bytes::from(body),
             ..Default::default()
         });
@@ -221,8 +237,8 @@ fn icmp_error(sent: &Packet, wire: &Bytes, unreachable_code: u8) -> Frame {
             ..Default::default()
         });
         response.push(Icmpv6 {
-            icmp_type: 1,
-            code: 1,
+            icmp_type: if expired { 3 } else { 1 },
+            code,
             body: Bytes::from(body),
             ..Default::default()
         });
@@ -268,6 +284,12 @@ fn answers(sent: &Packet, wire: &Bytes, script: Script) -> Vec<Frame> {
             if sent.get::<Ipv4>().is_some() { 13 } else { 1 },
         )],
         UNEXPECTED => vec![reply_frame(sent, syn_ack(probe, UNEXPECTED_WINDOW))],
+        PORT_UNREACHABLE => vec![icmp_error(
+            sent,
+            wire,
+            if sent.get::<Ipv4>().is_some() { 3 } else { 4 },
+        )],
+        TIME_EXCEEDED => vec![icmp_packet(sent, wire, 0, true)],
         _ => Vec::new(),
     }
 }
@@ -322,7 +344,10 @@ impl transmit::Provider for ScriptedIo {
             frames.extend(noise(&decoded.packet));
         }
         frames.extend(answers(&decoded.packet, &wire, self.scripted.script));
-        let ingress = Instant::now();
+        if self.scripted.script.duplicate {
+            frames.extend(frames.clone());
+        }
+        let ingress = state.late_ingress.flatten().unwrap_or_else(Instant::now);
         for frame in frames {
             let captured = capture::Captured::new(frame, ingress);
             if self.scripted.script.reverse {
@@ -459,13 +484,25 @@ fn request(ipv6: bool, mode: TcpScan, schedule: Schedule) -> Request {
         udp_profiles: Default::default(),
         limits: scan::Limits {
             max_duration: Duration::from_secs(10),
+            max_probes: 8,
+            evidence: packetcraftr::evidence::Limits {
+                max_bytes: 65536,
+                ..Default::default()
+            },
             ..Default::default()
         },
         route: packetcraftr::route::Options {
             link_mode: Mode::Layer3,
             ..Default::default()
         },
-        collection: Default::default(),
+        collection: packetcraftr::exchange::Collection {
+            capture: packetcraftr_netio::capture::Limits {
+                max_bytes: 65536,
+                snap_length: 1500,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
     }
 }
 
@@ -484,74 +521,40 @@ fn execute(request: Request, script: Script) -> (Fixture, Result<scan::Aggregate
     (fixture, result)
 }
 
-fn is_fin_family(mode: TcpScan) -> bool {
-    matches!(
-        mode,
-        TcpScan::Fin | TcpScan::Null | TcpScan::Xmas | TcpScan::Maimon
-    )
+fn corpus() -> &'static serde_json::Value {
+    static CORPUS: OnceLock<serde_json::Value> = OnceLock::new();
+    CORPUS.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../../docs/scanner-corpus.v1.json")).unwrap()
+    })
 }
 
-fn prefix(mode: TcpScan) -> &'static str {
-    match mode {
-        TcpScan::Syn => "tcp_syn",
-        TcpScan::Ack => "tcp_ack",
-        TcpScan::Window => "tcp_window",
-        TcpScan::Fin => "tcp_fin",
-        TcpScan::Null => "tcp_null",
-        TcpScan::Xmas => "tcp_xmas",
-        TcpScan::Maimon => "tcp_maimon",
-        TcpScan::Custom { .. } => "tcp_custom",
-    }
+fn expected(mode: TcpScan, port: u16) -> serde_json::Value {
+    let corpus = corpus();
+    let case = corpus["tcp_diagnostic_scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["port"] == port)
+        .unwrap();
+    case["expected"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["mode"] == mode.as_str())
+        .unwrap()
+        .clone()
 }
 
-/// The attempt classification, state, and rule suffix each behavior earns.
-fn expected(mode: TcpScan, port: u16) -> (Classification, State, String) {
-    let id = |suffix: &str| format!("{}.{suffix}", prefix(mode));
-    if matches!(mode, TcpScan::Custom { .. }) {
-        return match port {
-            SILENT => (Classification::Timeout, State::Unknown, id("silence")),
-            PROHIBITED => (Classification::Filtered, State::Unknown, id("reply")),
-            _ => (Classification::Unknown, State::Unknown, id("reply")),
-        };
-    }
-    match port {
-        SILENT => (
-            Classification::Timeout,
-            if is_fin_family(mode) {
-                State::OpenOrFiltered
-            } else {
-                State::Filtered
-            },
-            id("silence"),
-        ),
-        PROHIBITED => (
-            Classification::Filtered,
-            State::Filtered,
-            id("icmp_unreachable"),
-        ),
-        UNEXPECTED => (
-            Classification::Unknown,
-            State::Unknown,
-            id("unclassified_reply"),
-        ),
-        RESET_ZERO | RESET_POSITIVE => match mode {
-            TcpScan::Ack => (Classification::Unknown, State::Unfiltered, id("reset")),
-            TcpScan::Window if port == RESET_ZERO => {
-                (Classification::Unknown, State::Closed, id("reset_zero"))
-            }
-            TcpScan::Window => (Classification::Unknown, State::Open, id("reset_nonzero")),
-            _ => (Classification::Closed, State::Closed, id("reset")),
-        },
-        _ => unreachable!("fixture port"),
-    }
-}
-
-fn expected_window(port: u16) -> Option<u16> {
-    match port {
-        RESET_ZERO => Some(0),
-        RESET_POSITIVE => Some(POSITIVE_WINDOW),
-        UNEXPECTED => Some(UNEXPECTED_WINDOW),
-        _ => None,
+fn reply_name(reply: scan::Reply) -> &'static str {
+    match reply {
+        scan::Reply::TcpReset => "tcp_reset",
+        scan::Reply::TcpSynAck => "tcp_syn_ack",
+        scan::Reply::TcpOther => "tcp_other",
+        scan::Reply::IcmpPortUnreachable => "icmp_port_unreachable",
+        scan::Reply::IcmpAdministrativelyProhibited => "icmp_administratively_prohibited",
+        scan::Reply::IcmpTimeExceeded => "icmp_time_exceeded",
+        scan::Reply::IcmpDestinationUnreachable => "icmp_destination_unreachable",
+        _ => panic!("not an authored diagnostic reply"),
     }
 }
 
@@ -564,7 +567,11 @@ fn assert_wire(mode: TcpScan, sent: &[Packet], attempts: usize) {
     let mut sequences = std::collections::HashSet::new();
     let mut acknowledgments = std::collections::HashSet::new();
     for probe in &tcp {
-        assert_eq!(probe.flags, mode.flags(), "{mode:?}");
+        assert_eq!(
+            serde_json::json!(probe.flags),
+            expected(mode, RESET_ZERO)["flags"],
+            "{mode:?}"
+        );
         assert!(probe.options.is_empty());
         assert!(sequences.insert(probe.sequence));
         if mode.flags() & Tcp::ACK == 0 {
@@ -584,40 +591,51 @@ fn check(aggregate: &scan::Aggregate, mode: TcpScan, label: &str) {
     assert_eq!(aggregate.endpoints.len(), PORTS.len(), "{label}");
     for endpoint in &aggregate.endpoints {
         let port = endpoint.port.unwrap();
-        let (classification, state, rule) = expected(mode, port);
+        let row = expected(mode, port);
         let inference = endpoint.inference.as_ref().expect("TCP endpoints infer");
-        assert_eq!(inference.state, Some(state), "{label} port {port}");
-        assert_eq!(inference.rule.as_str(), rule, "{label} port {port}");
+        assert_eq!(
+            inference.state.unwrap().as_str(),
+            row["state"],
+            "{label} port {port}"
+        );
+        assert_eq!(inference.rule.as_str(), row["rule"], "{label} port {port}");
         let [probe] = endpoint.probes.as_slice() else {
             panic!("{label}: one attempt per endpoint");
         };
-        assert_eq!(probe.classification, classification, "{label} port {port}");
+        assert_eq!(
+            probe.classification.as_str(),
+            row["classification"],
+            "{label} port {port}"
+        );
+        assert_eq!(
+            endpoint.classification.as_str(),
+            row["classification"],
+            "{label} port {port}"
+        );
         assert_eq!(probe.tcp_scan, Some(mode), "{label} port {port}");
         assert_eq!(
-            probe.tcp_window,
-            expected_window(port),
+            serde_json::json!(probe.tcp_window),
+            row["tcp_window"],
             "{label} port {port}"
         );
         assert_eq!(
-            probe.status,
-            if port == SILENT {
-                ProbeStatus::Timeout
-            } else {
-                ProbeStatus::Response
-            },
+            serde_json::json!(probe.reply.map(reply_name)),
+            row["reply"],
             "{label} port {port}"
         );
-        if mode != TcpScan::Window {
-            assert_ne!(
-                inference.state,
-                Some(State::Open),
-                "{label}: only window inference may conclude open"
-            );
-        }
         assert_eq!(
-            endpoint.classification, classification,
+            serde_json::json!(probe.status),
+            row["status"],
             "{label} port {port}"
         );
+        assert_eq!(
+            inference.supporting,
+            vec![probe.sequence],
+            "{label} port {port}"
+        );
+        assert!(inference.conflicting.is_empty());
+        assert!(inference.unanswered.is_empty());
+        assert!(inference.failed.is_empty());
     }
 }
 
@@ -637,29 +655,40 @@ fn every_mode_sends_exact_wire_and_infers_per_table_on_every_schedule() {
 }
 
 #[test]
-fn unrelated_noise_and_reordering_never_change_evidence() {
-    for mode in MODES {
-        for schedule in [Schedule::Serial, Schedule::Pipelined, Schedule::Adaptive] {
-            for (noise, reverse) in [(true, false), (false, true), (true, true)] {
-                let label = format!(
-                    "{mode:?} noise={noise} reverse={reverse} {}",
-                    schedule as u8
-                );
-                let script = Script {
-                    noise,
-                    reverse,
-                    ..Script::default()
-                };
-                let (fixture, result) = execute(request(false, mode, schedule), script);
-                let aggregate = result.unwrap_or_else(|error| panic!("{label}: {error}"));
-                assert_wire(mode, &fixture.sent(), 1);
-                check(&aggregate, mode, &label);
-                for probe in aggregate
-                    .endpoints
-                    .iter()
-                    .flat_map(|endpoint| &endpoint.probes)
-                {
-                    assert_ne!(probe.tcp_window, Some(NOISE_WINDOW), "{label}");
+fn unrelated_noise_duplicates_and_reordering_never_change_evidence() {
+    for ipv6 in [false, true] {
+        for mode in MODES {
+            for schedule in [Schedule::Serial, Schedule::Pipelined, Schedule::Adaptive] {
+                for (noise, reverse, duplicate) in [
+                    (true, false, false),
+                    (false, true, false),
+                    (true, true, false),
+                    (false, false, true),
+                ] {
+                    let label = format!(
+                        "{mode:?} ipv6={ipv6} noise={noise} reverse={reverse} duplicate={duplicate} {}",
+                        schedule as u8
+                    );
+                    let script = Script {
+                        noise,
+                        reverse,
+                        duplicate,
+                        ..Script::default()
+                    };
+                    let (fixture, result) = execute(request(ipv6, mode, schedule), script);
+                    let aggregate = result.unwrap_or_else(|error| panic!("{label}: {error}"));
+                    assert_wire(mode, &fixture.sent(), 1);
+                    check(&aggregate, mode, &label);
+                    if duplicate {
+                        assert!(!aggregate.unattributed.is_empty(), "duplicates retained");
+                    }
+                    for probe in aggregate
+                        .endpoints
+                        .iter()
+                        .flat_map(|endpoint| &endpoint.probes)
+                    {
+                        assert_ne!(probe.tcp_window, Some(NOISE_WINDOW), "{label}");
+                    }
                 }
             }
         }
@@ -667,44 +696,60 @@ fn unrelated_noise_and_reordering_never_change_evidence() {
 }
 
 #[test]
-fn a_late_reply_is_retained_beside_a_silent_attempt_and_never_positive() {
-    let mut request = request(false, TcpScan::Window, Schedule::Serial);
-    request.endpoints = vec![ProbeEndpoint::Tcp {
-        port: RESET_POSITIVE,
-    }];
-    request.timeout = Duration::from_secs(1);
-    let clock = VirtualClock::default();
-    let ingress = clock.now() + request.timeout / 2;
-    let fixture = Fixture::new(
-        Script::default(),
-        responder::State {
-            idle_clock: Some(clock.clone()),
-            release_replies_after_timeout: true,
-            late_ingress: Some(Some(ingress)),
-            ..responder::State::default()
-        },
-    );
-    let client = fixture.client(policy()).with_clock(clock);
-    let aggregate = run(&client, request).unwrap();
-    let [endpoint] = aggregate.endpoints.as_slice() else {
-        panic!("one endpoint");
-    };
-    let [probe] = endpoint.probes.as_slice() else {
-        panic!("one attempt");
-    };
-    assert_eq!(probe.status, ProbeStatus::Timeout);
-    assert_eq!(probe.tcp_window, None);
-    assert_eq!(probe.classification, Classification::Timeout);
-    let inference = endpoint.inference.as_ref().unwrap();
-    assert_eq!(inference.state, Some(State::Filtered));
-    assert_eq!(inference.rule.as_str(), "tcp_window.silence");
-    assert!(
-        aggregate
-            .unattributed
-            .iter()
-            .all(|late| late.attribution == scan::Attribution::Late)
-    );
-    assert_eq!(aggregate.unattributed.len(), 1);
+fn late_replies_remain_evidence_without_changing_silent_inference() {
+    for ipv6 in [false, true] {
+        for mode in MODES {
+            for schedule in [Schedule::Serial, Schedule::Pipelined, Schedule::Adaptive] {
+                for port in PORTS {
+                    let mut request = request(ipv6, mode, schedule);
+                    request.endpoints = vec![ProbeEndpoint::Tcp { port }];
+                    let clock = VirtualClock::default();
+                    let ingress = clock.now() + request.timeout * 2;
+                    let fixture = Fixture::new(
+                        Script::default(),
+                        responder::State {
+                            idle_clock: Some(clock.clone()),
+                            release_replies_after: Some(ingress),
+                            late_ingress: Some(Some(ingress)),
+                            ..responder::State::default()
+                        },
+                    );
+                    let client = fixture.client(policy()).with_clock(clock);
+                    let aggregate = run(&client, request).unwrap();
+                    let endpoint = &aggregate.endpoints[0];
+                    let probe = &endpoint.probes[0];
+                    let row = expected(mode, SILENT);
+                    assert_eq!(
+                        probe.status,
+                        ProbeStatus::Timeout,
+                        "mode={mode:?} ipv6={ipv6} port={port} schedule={}",
+                        schedule as u8
+                    );
+                    assert_eq!(probe.tcp_window, None);
+                    assert_eq!(probe.reply, None);
+                    assert_eq!(probe.classification, Classification::Timeout);
+                    let inference = endpoint.inference.as_ref().unwrap();
+                    assert_eq!(inference.state.unwrap().as_str(), row["state"]);
+                    assert_eq!(inference.rule.as_str(), row["rule"]);
+                    assert!(
+                        aggregate
+                            .unattributed
+                            .iter()
+                            .all(|late| late.attribution == scan::Attribution::Late)
+                    );
+                    if port == SILENT {
+                        assert!(aggregate.unattributed.is_empty());
+                    } else {
+                        assert!(!aggregate.unattributed.is_empty(), "late response retained");
+                        assert!(
+                            aggregate.unattributed.len()
+                                <= if port == RESET_AND_PROHIBITED { 2 } else { 1 }
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -735,6 +780,7 @@ fn retries_use_distinct_acknowledgment_identities() {
 #[test]
 fn discovery_stays_syn_while_scan_probes_use_the_mode() {
     let mut request = request(false, TcpScan::Xmas, Schedule::Serial);
+    request.limits.max_probes = 9;
     request.discovery = scan::discovery::Options {
         mode: scan::discovery::Mode::Before,
         probes: vec![ProbeEndpoint::Tcp { port: 2000 }],

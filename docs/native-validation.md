@@ -127,3 +127,44 @@ unavailable, and failed paths remain explicit; loopback execution does not close
 isolated routed/shared-link acceptance. Original training and independent-kernel
 hold-out evidence are described in [M10 evidence](roadmap/evidence/m10/README.md).
 Broader M10 exact reviewed-revision/platform acceptance remains open.
+
+## M12 TCP diagnostic acceptance
+
+Both reviewed workflows accept `scenario=tcp_diagnostics`. Use a full reviewed
+commit whose clean checkout includes the runner. Linux requires existing root
+privileges plus `ip`, `unshare`, `nsenter`, `ethtool`, and libpcap. It creates only
+fresh network namespaces and disposable documentation-address veth peers.
+macOS/Windows use literal loopback sockets, existing administrator/root privileges,
+and an already installed capture backend; the runner does not install drivers or
+modify host interfaces. A non-listening bound socket reserves the closed fixture
+port independently of scanner output; SYN controls verify both socket conditions.
+
+```sh
+sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
+  python3 scripts/test-tcp-diagnostics-native.py --reviewed-commit "$REVIEWED_COMMIT" \
+  --require-complete --report target/validation/tcp-diagnostics-native.json
+```
+
+`REVIEWED_COMMIT` is the full reviewed SHA, not a branch name. `--profiles` selects
+an ordered subset for investigation; `--require-complete` requires all five
+profiles and supported exercised coverage. `--emit-unavailable
+runtime_evidence_missing` initializes the complete inventory before builds.
+Host-local execution leaves isolated scripted-link cases unavailable and therefore
+cannot pass `--require-complete`. Actual typed capability refusals in disabled
+profiles remain refusal checks, rather than exercised scans.
+
+Each invocation permits at most 32 probes, a 500 ms response window, 10 seconds of
+operation duration, 15 seconds of process duration, and 1 MiB per output stream or
+capture retention domain. Fixtures and independent watchers have finite frame,
+readiness, and cleanup bounds. Reports retain build diagnostics, commands and
+failures, exact source/corpus/binary digests, kernel/backend/isolation, independent
+wire bytes/timestamps, socket provision, output observations, and cleanup.
+JSON and NDJSON are checked through output/v15 without changing that interface.
+
+ACK unfiltered and FIN-family open-or-filtered results are not socket truth.
+Window and FIN-family disagreement with a known listener or closed socket is a
+recorded heuristic divergence for conflicting open/closed claims. Ambiguous and
+path states remain observations. Incorrect bytes, correlation, rule application,
+partitions, missing positive evidence, or loss is a failure. Reports remain
+revision-bound artifacts, and adding the runner closes no broader platform,
+routed/middlebox, or operating-system accuracy gate.

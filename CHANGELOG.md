@@ -50,6 +50,15 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Added
 
+- M12 acceptance infrastructure: original scanner corpus dataset 1.7.0 adds
+  eight dual-stack TCP diagnostic conditions and seven mode/flag expectation rows;
+  workflow checks cover serial, pipelined, adaptive, noise, duplicate, reordered,
+  and late delivery. A revision-bound five-profile native runner provisions
+  independent Linux reply/kernel peers and hosted macOS/Windows loopback routes,
+  retaining exact wire evidence, socket truth, heuristic divergences, and precise
+  failures/unavailability. Both reviewed native workflows expose `tcp_diagnostics`.
+  Cross-platform acceptance remains open; scan APIs and output/v15 are unchanged.
+
 - Raw TCP diagnostic scans: `scan::TcpScan` (`Syn`, `Ack`, `Window`, `Fin`, `Null`,
   `Xmas`, `Maimon`, and observation-only `Custom`) selected by `Request::tcp_scan`
   and `--tcp-scan`/`--tcp-flags`, with exact flag and per-sequence acknowledgment

@@ -8,13 +8,14 @@ on:
         type: string
         required: true
       scenario:
-        description: Select the inventory, scoped targets, discovery, or OS identification
+        description: Select the inventory, scoped targets, discovery, OS identification, or TCP diagnostics
         type: choice
         options:
           - all
           - scoped_ipv6_targets
           - host_discovery
           - os_identification
+          - tcp_diagnostics
         default: all
 
 permissions:
@@ -55,7 +56,10 @@ jobs:
       - name: Initialize honest unexercised platform inventory
         shell: bash
         run: |
-          if [[ "${{ inputs.scenario }}" == host_discovery ]]; then
+          if [[ "${{ inputs.scenario }}" == tcp_diagnostics ]]; then
+            ${{ matrix.python }} scripts/test-tcp-diagnostics-native.py --reviewed-commit "${{ inputs.commit }}" \
+              --emit-unavailable runtime_evidence_missing --report target/validation/tcp-diagnostics-native.json
+          elif [[ "${{ inputs.scenario }}" == host_discovery ]]; then
             ${{ matrix.python }} scripts/test-host-discovery-native.py --emit-unavailable \
               --report target/validation/host-discovery.json
           elif [[ "${{ inputs.scenario }}" == os_identification ]]; then
@@ -78,6 +82,12 @@ jobs:
           REVIEWED_COMMIT: ${{ inputs.commit }}
           SCENARIO: ${{ inputs.scenario }}
         run: |
+          if [[ "$SCENARIO" == tcp_diagnostics ]]; then
+            sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
+              python3 scripts/test-tcp-diagnostics-native.py --reviewed-commit "$REVIEWED_COMMIT" \
+              --report target/validation/tcp-diagnostics-native.json
+            exit
+          fi
           if [[ "$SCENARIO" == host_discovery ]]; then
             sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
               python3 scripts/test-host-discovery-native.py --reviewed-commit "$REVIEWED_COMMIT" \
@@ -101,6 +111,11 @@ jobs:
           REVIEWED_COMMIT: ${{ inputs.commit }}
           SCENARIO: ${{ inputs.scenario }}
         run: |
+          if [[ "$SCENARIO" == tcp_diagnostics ]]; then
+            python scripts/test-tcp-diagnostics-native.py --reviewed-commit "$REVIEWED_COMMIT" \
+              --report target/validation/tcp-diagnostics-native.json
+            exit
+          fi
           if [[ "$SCENARIO" == host_discovery ]]; then
             python scripts/test-host-discovery-native.py --reviewed-commit "$REVIEWED_COMMIT" \
               --report target/validation/host-discovery.json

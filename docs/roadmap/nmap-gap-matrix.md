@@ -89,7 +89,7 @@ building are not scanner workflows.
 
 | Capability | Nmap behavior/reference | Current behavior and remaining gate | Status | Roadmap |
 | --- | --- | --- | --- | --- |
-| TCP ACK/window and flag-based diagnostics | [scan techniques][nmap-techniques] | ACK, window, FIN, NULL, Xmas, Maimon, and observation-only custom modes keep probe flags separate from stack-dependent inference rules (`unfiltered`, window open/closed, `open_or_filtered`). Native cross-platform and independent ground-truth acceptance are pending ([TCP diagnostics](../tcp-diagnostics.md)). | Partial | [M12][m12] |
+| TCP ACK/window and flag-based diagnostics | [scan techniques][nmap-techniques] | ACK, window, FIN, NULL, Xmas, Maimon, and observation-only custom modes keep probe flags separate from stack-dependent inference rules (`unfiltered`, window open/closed, `open_or_filtered`). Dataset 1.7.0 authors eight dual-stack response conditions; reviewed independent-peer/kernel acceptance routes exist. Exact-revision cross-platform recordings and broader stack truth remain pending ([TCP diagnostics](../tcp-diagnostics.md)). | Partial | [M12][m12] |
 | SCTP INIT/COOKIE-ECHO diagnostics | [scan techniques][nmap-techniques] | SCTP codec/tag helpers only, no scanner transport. Need bounded chunks, workflow correlation, and ambiguity-preserving results. | Partial | [M13][m13], [M13][m13] |
 | IP-protocol inventory | [scan techniques][nmap-techniques] | No selected protocol-number scan plan. Must be typed separately from transport ports with correlated positive/negative/ambiguous evidence. | Missing | [M13][m13] |
 

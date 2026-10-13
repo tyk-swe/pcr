@@ -3,9 +3,194 @@
   "$id": "packetcraftr.scanner-corpus/v1",
   "title": "Independent scanner ground-truth inventory",
   "type": "object",
-  "required": ["schema", "dataset_version", "families", "transports", "fixture_addresses", "request", "nmap", "scenarios", "native_connect_scenarios", "traceroute_scenarios", "identification_scenarios", "provenance"],
+  "required": ["schema", "dataset_version", "families", "transports", "fixture_addresses", "request", "nmap", "scenarios", "native_connect_scenarios", "traceroute_scenarios", "identification_scenarios", "provenance", "tcp_diagnostic_scenarios"],
   "additionalProperties": false,
   "properties": {
+    "tcp_diagnostic_scenarios": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "port",
+          "families",
+          "provision",
+          "request",
+          "variants",
+          "expected"
+        ],
+        "properties": {
+          "id": {
+            "enum": [
+              "reset-zero",
+              "reset-positive",
+              "silent",
+              "prohibited",
+              "unexpected",
+              "reset-and-prohibited",
+              "port-unreachable",
+              "time-exceeded"
+            ]
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 1007
+          },
+          "families": {
+            "const": [
+              "ipv4",
+              "ipv6"
+            ]
+          },
+          "provision": {
+            "const": "independent_tcp_reply_scripts"
+          },
+          "request": {
+            "const": {
+              "attempts": 1,
+              "timeout_ms": 40,
+              "max_duration_ms": 10000,
+              "max_probes": 8,
+              "max_evidence_bytes": 65536,
+              "windows": [
+                1,
+                4
+              ]
+            }
+          },
+          "variants": {
+            "const": [
+              "ordinary",
+              "wrong_identity_and_checksum",
+              "reordered",
+              "duplicate",
+              "late"
+            ]
+          },
+          "expected": {
+            "type": "array",
+            "minItems": 7,
+            "maxItems": 7,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "flags",
+                "status",
+                "classification",
+                "reply",
+                "tcp_window",
+                "state",
+                "rule",
+                "partitions"
+              ],
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "ack",
+                    "window",
+                    "fin",
+                    "null",
+                    "xmas",
+                    "maimon",
+                    "custom"
+                  ]
+                },
+                "flags": {
+                  "enum": [
+                    0,
+                    1,
+                    16,
+                    17,
+                    41
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "response",
+                    "timeout"
+                  ]
+                },
+                "classification": {
+                  "enum": [
+                    "closed",
+                    "filtered",
+                    "unreachable",
+                    "unknown",
+                    "timeout"
+                  ]
+                },
+                "reply": {
+                  "enum": [
+                    null,
+                    "tcp_reset",
+                    "tcp_syn_ack",
+                    "tcp_other",
+                    "icmp_administratively_prohibited",
+                    "icmp_destination_unreachable",
+                    "icmp_port_unreachable",
+                    "icmp_time_exceeded"
+                  ]
+                },
+                "tcp_window": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 65535
+                },
+                "state": {
+                  "enum": [
+                    "open",
+                    "closed",
+                    "filtered",
+                    "open_or_filtered",
+                    "unfiltered",
+                    "unknown"
+                  ]
+                },
+                "rule": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "partitions": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "supporting",
+                    "conflicting",
+                    "unanswered",
+                    "failed"
+                  ],
+                  "properties": {
+                    "supporting": {
+                      "const": [
+                        1
+                      ]
+                    },
+                    "conflicting": {
+                      "const": []
+                    },
+                    "unanswered": {
+                      "const": []
+                    },
+                    "failed": {
+                      "const": []
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "identification_scenarios": {"type": "array", "minItems": 10, "items": {"$ref": "#/$defs/identificationScenario"}},
     "inference_scenarios": {
       "type": "array",

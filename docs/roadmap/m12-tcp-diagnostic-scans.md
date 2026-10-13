@@ -4,8 +4,9 @@
 | --- | --- | --- |
 | In progress | [M6](m06-port-planning-inference.md) | ACK/window and flag-dependent diagnostics |
 
-Software implementation is present; native cross-platform acceptance and
-independent ground truth remain open, so M12 stays **In progress**. No native
+Software implementation and an independently authored diagnostic corpus are present.
+Revision-bound native cross-platform acceptance and broader operating-system truth
+remain open, so M12 stays **In progress**. No native
 parity or completed close gate is claimed. Usage and limits are in
 [TCP diagnostics](../tcp-diagnostics.md).
 
@@ -59,6 +60,36 @@ Injected-responder and serialization tests, not native runtime evidence:
 - [CLI `tcp_diagnostic_contracts.rs`](../../crates/packetcraftr-cli/tests/integration/tcp_diagnostic_contracts.rs)
   covers parsing, method conflicts, list output, and aggregate/stream schema
   conformance with frozen v14.
+
+## Independent corpus and native route
+
+Dataset **1.7.0** adds eight `tcp_diagnostic_scenarios`, each declaring seven
+mode/flag rows, dual-stack attempts, window observations, states, rules, and
+partitions before execution. Port-unreachable TCP quotes retain the matcher's
+generic destination-unreachable identity; unexpected SYN/ACK is `tcp_other`.
+The serial/pipelined/adaptive matrix covers ordinary, wrong-identity/checksum,
+reordered, duplicate, and late delivery. These injected providers still use the
+project codecs and establish workflow contracts, rather than independent wire
+encoding or operating-system compatibility.
+
+[`test-tcp-diagnostics-native.py`](../../scripts/test-tcp-diagnostics-native.py)
+is the separate native route. Linux provisions an independently encoded immediate
+reply peer plus a real kernel peer in parent-distinct namespaces. Hosted macOS
+and Windows use existing loopback sockets and capture drivers; the isolated link
+inventory remains unavailable there. The route covers five feature profiles,
+IPv4/IPv6, serial/pipelined scheduling, JSON/NDJSON, and SYN socket controls.
+Independent bounded capture verifies outgoing kernel probes; the scripted peer
+retains its own request/reply bytes and timestamps.
+
+Reports use `packetcraftr.tcp-diagnostic-native-evidence/v1` and bind the exact
+clean reviewed commit, source/corpus/binary digests, kernel, backend, isolation,
+commands, process results, observations, and cleanup. Actual typed refusals in
+capture-disabled profiles count only as expected capability checks. Failed,
+missing, lossy, or unexercised supported cases prevent completeness. Socket truth
+and conflicting open/closed heuristic claims are retained separately; a Window/FIN-family mismatch
+with a known socket does not rewrite the inference table or establish accuracy.
+Native execution is selected with `tcp_diagnostics` in both reviewed workflows.
+No exact-revision cross-platform recording is claimed by adding this route.
 
 ## Remaining acceptance gates
 

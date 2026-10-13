@@ -101,3 +101,20 @@ Software tests inject independent IPv4 and IPv6 responders. M12 native
 cross-platform runs and independent operating-system ground truth are still open,
 so no native parity or completed gate is claimed. Idle, bounce, decoy, and
 evasion scans are out of scope.
+
+## Independent expectations and native checks
+
+The original scanner corpus (dataset 1.7.0) declares eight response conditions
+for all seven diagnostic modes. Its dual-stack workflow matrix covers ordinary,
+wrong-identity/checksum, reordered, duplicate, and late delivery through serial,
+pipelined, and adaptive engines. The injected responder exercises the workflow;
+independent native wire encoding belongs to the separate Linux peer.
+
+The reviewed `tcp_diagnostics` native workflow route runs independently encoded
+Linux replies plus known kernel sockets, and hosted macOS/Windows loopback sockets,
+across five profiles with JSON/NDJSON and serial/pipelined scans. Retained evidence
+separates socket truth, observed response/window, inferred state/rule, and heuristic
+divergences. Unsupported or missing execution never establishes parity. See
+[native validation](native-validation.md#m12-tcp-diagnostic-acceptance) for exact
+revision admission, isolation, limits, and report interpretation. Cross-platform
+recordings and broader stack-dependent accuracy remain open M12 gates.

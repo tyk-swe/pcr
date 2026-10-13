@@ -552,8 +552,11 @@ class EvidenceContracts(unittest.TestCase):
                     raise RuntimeError('injected peer setup failure')
                 stdout = json.dumps([dict(address='02:00:00:00:00:02')]) if args == ('ip', '-j', 'link', 'show', kernel_fixture.PEER) else ''
                 return dict(command=list(args), exit_code=0, stdout=stdout, stderr='')
-            def stat(path):
-                return SimpleNamespace(st_ino=1 if path == '/proc/self/ns/net' else 2)
+            real_stat = kernel_fixture.os.stat
+            def stat(path, *args, **kwargs):
+                if str(path) in ('/proc/self/ns/net', f'/proc/{Process.pid}/ns/net'):
+                    return SimpleNamespace(st_ino=1 if str(path) == '/proc/self/ns/net' else 2)
+                return real_stat(path, *args, **kwargs)
             with patch.object(kernel_fixture.subprocess, 'Popen', return_value=Process()), patch.object(kernel_fixture.select, 'select', return_value=([True], [], [])), patch.object(kernel_fixture.os, 'stat', side_effect=stat), patch.object(kernel_fixture, 'command', side_effect=command):
                 profile = {}
                 if fail_setup:

@@ -3,6 +3,7 @@
 """Synthetic validator regressions; these tests do not establish native coverage."""
 import copy
 import importlib.util
+import io
 import json
 from pathlib import Path
 import struct
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from discovery_isolated_fixture import packet, transport
@@ -17,6 +19,7 @@ from native_platform_evidence import PROFILES
 from tcp_diagnostic_corpus import validate as validate_corpus
 import tcp_diagnostic_native_evidence as evidence
 import tcp_diagnostic_isolated_fixture as isolated
+import tcp_diagnostic_kernel_fixture as kernel_fixture
 from tcp_diagnostic_isolated_fixture import reply
 from tcp_diagnostic_wire import network, outgoing, response, tcp
 
@@ -102,6 +105,7 @@ def kernel_run():
         probe = endpoint['probes'][0]
         probe.update(sequence=identity, destination=target, destination_port=port)
         probe['frame'].update(bytes_hex=answer.hex(), captured_length=len(answer), original_length=len(answer))
+        capture['frames'].append(dict(bytes_hex=answer.hex(), link_type=1, unix_ns=1000000001, monotonic_ingress_ns=21))
     doc['result']['retained_evidence_bytes'] = 108
     doc['stats'].update(packets_attempted=2, packets_completed=2, bytes=80)
     run.update(stdout=json.dumps(doc), command=evidence.command('/synthetic/packetcraftr', case, '198.51.100.2', [43123, 43125]))
@@ -277,6 +281,66 @@ class EvidenceContracts(unittest.TestCase):
         with self.assertRaises(ValueError):
             evidence.validate(report, CORPUS)
 
+    def test_peer_reply_bytes_and_local_tuple_must_match_both_formats_and_families(self):
+        for family in ('ipv4', 'ipv6'):
+            for output in ('json', 'ndjson'):
+                case, run, peer = fixture_run(family, output=output)
+                for mutation in ('window', 'local_address', 'local_port'):
+                    bad_peer = copy.deepcopy(peer)
+                    answer = bytes.fromhex(bad_peer['requests'][0]['replies'][0]['bytes_hex'])
+                    ip = network(answer, 1)
+                    body = bytearray(ip['body'])
+                    target = ip['target']
+                    if mutation == 'window':
+                        body[14:16] = (999).to_bytes(2, 'big')
+                    elif mutation == 'local_port':
+                        body[2:4] = (50001).to_bytes(2, 'big')
+                    else:
+                        target = '192.0.2.99' if family == 'ipv4' else '2001:db8::99'
+                    body[16:18] = b'\x00\x00'
+                    changed = answer[:14] + packet(ip['source'], target, 6, transport(ip['source'], target, 6, bytes(body), 16))
+                    if mutation == 'window':
+                        bad_peer['requests'][0]['replies'][0]['bytes_hex'] = changed.hex()
+                        bad_run = run
+                    else:
+                        bad_run = copy.deepcopy(run)
+                        docs = [json.loads(run['stdout'])] if output == 'json' else [json.loads(line) for line in run['stdout'].splitlines()]
+                        probe = docs[0]['result']['endpoints'][0]['probes'][0] if output == 'json' else docs[0]['result']['probe']
+                        probe['frame']['bytes_hex'] = changed.hex()
+                        bad_run['stdout'] = json.dumps(docs[0]) if output == 'json' else '\n'.join(map(json.dumps, docs))
+                        # The contract-only validator cannot establish the local tuple.
+                        bad_run['observation'] = evidence.validate_output(bad_run, case, CORPUS)
+                    with self.subTest(family=family, output=output, mutation=mutation), self.assertRaises(ValueError):
+                        evidence.validate_peer(dict(independent_peer=bad_peer), case, bad_run)
+
+    def test_kernel_timely_replies_cannot_be_relabelled_as_silence(self):
+        case, run, capture = kernel_run()
+        doc = json.loads(run['stdout'])
+        for endpoint in doc['result']['endpoints']:
+            probe = endpoint['probes'][0]
+            probe.pop('frame')
+            probe.pop('tcp_window')
+            probe.update(status='timeout', classification='timeout')
+            endpoint.update(classification='timeout')
+            endpoint['inference'].update(state='filtered', rule='tcp_window.silence')
+        doc['result']['retained_evidence_bytes'] = 0
+        run['stdout'] = json.dumps(doc)
+        run['observation'] = evidence.validate_output(run, case, CORPUS)
+        with self.assertRaisesRegex(ValueError, 'timeout contradicts'):
+            evidence.validate_kernel_capture(dict(kernel_capture=capture), case, run)
+        # Replies arriving only after the per-probe deadline do not refute silence.
+        for frame in capture['frames']:
+            if network(bytes.fromhex(frame['bytes_hex']), 1)['source'] == '198.51.100.2':
+                frame['unix_ns'] += evidence.LIMITS['timeout_ms'] * 1000000
+        run['finished_unix_ns'] += 1000000000
+        evidence.validate_kernel_capture(dict(kernel_capture=capture), case, run)
+
+    def test_kernel_positive_capture_must_match_independent_reply_bytes(self):
+        case, run, capture = kernel_run()
+        capture['frames'][1]['bytes_hex'] = capture['frames'][3]['bytes_hex']
+        with self.assertRaisesRegex(ValueError, 'response lacks'):
+            evidence.validate_kernel_capture(dict(kernel_capture=capture), case, run)
+
     def test_kernel_capture_requires_every_probe_loss_free_stats_and_cleanup(self):
         case, run, capture = kernel_run()
         evidence.validate_kernel_capture(dict(kernel_capture=capture), case, run)
@@ -358,6 +422,56 @@ class EvidenceContracts(unittest.TestCase):
         self.assertIn(('ip', 'link', 'delete', isolated.SCANNER), calls)
         self.assertEqual(trace['error'], 'injected setup failure')
         self.assertEqual(trace['cleanup']['exit_code'], 0)
+
+    def test_kernel_link_deleted_before_peer_termination_even_after_setup_failure(self):
+        for fail_setup in (False, True):
+            calls = []
+            class Process:
+                pid = 123
+                returncode = -15
+                stdout = io.StringIO(json.dumps(dict(parent_netns_inode=1, netns_inode=2)) + '\n')
+                def poll(self):
+                    return None
+                def terminate(self):
+                    calls.append('terminate')
+                def communicate(self, timeout):
+                    return '', ''
+            def command(*args):
+                calls.append(args)
+                if fail_setup and args[:4] == ('ip', 'link', 'set', kernel_fixture.PEER):
+                    raise RuntimeError('injected peer setup failure')
+                return dict(command=list(args), exit_code=0, stdout='', stderr='')
+            def stat(path):
+                return SimpleNamespace(st_ino=1 if path == '/proc/self/ns/net' else 2)
+            with patch.object(kernel_fixture.subprocess, 'Popen', return_value=Process()), patch.object(kernel_fixture.select, 'select', return_value=([True], [], [])), patch.object(kernel_fixture.os, 'stat', side_effect=stat), patch.object(kernel_fixture, 'command', side_effect=command):
+                profile = {}
+                if fail_setup:
+                    with self.assertRaisesRegex(RuntimeError, 'injected peer'):
+                        with kernel_fixture.provision(profile):
+                            self.fail('failed setup must not yield')
+                else:
+                    with kernel_fixture.provision(profile):
+                        pass
+            self.assertLess(calls.index(('ip', 'link', 'delete', kernel_fixture.SCANNER)), calls.index('terminate'))
+            self.assertEqual(profile['kernel_cleanup'], 'sockets_closed')
+
+    def test_profile_error_returns_failure_without_require_complete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native.json'
+            def fail_after_cases(profile, *args):
+                for case in profile['cases']:
+                    case.update(reason='isolation_unavailable', message='host-local scripted coverage unavailable')
+                raise ValueError('native executable changed during execution')
+            argv = ['runner', '--reviewed-commit', 'a' * 40, '--profiles', 'full-native', '--report', str(path)]
+            def git(*args):
+                return 'a' * 40 if args == ('rev-parse', 'HEAD') else ''
+            with patch.object(sys, 'argv', argv), patch.object(RUNNER, 'git', side_effect=git), patch.object(RUNNER, 'privileged', return_value=True), patch.object(RUNNER.platform, 'system', return_value='Darwin'), patch.object(RUNNER, 'run_profile', side_effect=fail_after_cases):
+                self.assertEqual(RUNNER.main(), 1)
+            report = json.loads(path.read_text())
+            self.assertEqual(report['status'], 'failed')
+            self.assertNotIn('launcher_error', report)
+            self.assertTrue(all(case['status'] == 'unavailable' for case in report['profiles'][0]['cases']))
+            self.assertIn('executable changed', report['profiles'][0]['error'])
 
     def test_build_timeout_retains_partial_diagnostics(self):
         class Timeout:

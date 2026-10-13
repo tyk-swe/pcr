@@ -84,6 +84,14 @@ def provision(profile):
                                              exit_code=getattr(error, 'returncode', None))
         raise
     finally:
+        # Remove the pair while its peer namespace is still alive; namespace
+        # destruction can otherwise race a checked scanner-side deletion.
+        try:
+            if created:
+                fixture['cleanup'] = command('ip', 'link', 'delete', SCANNER)
+        except Exception as error:
+            fixture['cleanup_failed'] = True
+            fixture['cleanup_error'] = str(error)
         if process.poll() is None:
             process.terminate()
         try:
@@ -93,8 +101,6 @@ def provision(profile):
             stdout, stderr = process.communicate(timeout=5)
             fixture['cleanup_failed'] = True
         fixture['stdout'], fixture['stderr'], fixture['exit_code'] = stdout[:1048576], stderr[:1048576], process.returncode
-        if created:
-            fixture['cleanup'] = command('ip', 'link', 'delete', SCANNER)
         profile['kernel_cleanup'] = 'sockets_closed'
         if fixture.get('cleanup_failed'):
             raise RuntimeError('kernel peer failed bounded cleanup')

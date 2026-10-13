@@ -72,7 +72,7 @@ def kernel_targets(platform):
 
 
 def report_status(profiles):
-    return 'failed' if any(profile['status'] == 'failed' for profile in profiles) else (
+    return 'failed' if any(profile['status'] == 'failed' or profile.get('error') for profile in profiles) else (
         'incomplete' if any(profile['status'] != 'exercised' for profile in profiles) else 'exercised')
 
 
@@ -354,6 +354,19 @@ def validate(report, corpus, expected_commit=None, require_complete=False, expec
     return complete
 
 
+def retained_frames(run, case):
+    """Keep attribution separate from other retained traffic in either output format."""
+    docs = documents(run, case['output'])
+    if case['output'] == 'json':
+        result = docs[0]['result']
+        probes = [probe for endpoint in result['endpoints'] for probe in endpoint['probes']]
+        extras = [item['frame'] for item in result.get('unattributed', [])]
+    else:
+        probes = [doc['result']['probe'] for doc in docs if doc.get('event') == 'probe']
+        extras = [doc['result']['unattributed']['frame'] for doc in docs if doc.get('event') == 'unattributed']
+    return {probe['sequence']: probe['frame'] for probe in probes if probe.get('frame')}, extras
+
+
 def validate_peer(profile, case, run):
     peer = profile.get('independent_peer', {})
     requests = peer.get('requests', [])
@@ -364,15 +377,10 @@ def validate_peer(profile, case, run):
     identities = {item['sequence']: item['port'] for item in run['observation']['observations']}
     matched = {}
     target = SCRIPTED_TARGETS[case['family'] == 'ipv6']
-    docs = documents(run, case['output'])
-    if case['output'] == 'json':
-        result = docs[0]['result']
-        captures = [probe['frame'] for endpoint in result['endpoints'] for probe in endpoint['probes'] if probe.get('frame')]
-        captures += [item['frame'] for item in result.get('unattributed', [])]
-    else:
-        captures = [doc['result']['probe']['frame'] for doc in docs if doc.get('event') == 'probe' and doc['result']['probe'].get('frame')]
-        captures += [doc['result']['unattributed']['frame'] for doc in docs if doc.get('event') == 'unattributed']
+    attributed, extras = retained_frames(run, case)
+    captures = [*attributed.values(), *extras]
     captured_packets = [network(frame_bytes(frame, True), frame['link_type'])['wire'] for frame in captures]
+    recorded_replies = set()
     for request in requests:
         if not run['started_unix_ns'] <= request.get('unix_ns', 0) <= run['finished_unix_ns']:
             continue
@@ -384,20 +392,32 @@ def validate_peer(profile, case, run):
             continue
         if identity in matched:
             raise ValueError('peer received duplicate diagnostic probe identity')
-        outgoing(raw, 1, case['mode'], case['flags'], identity, target, identities[identity])
+        sent = outgoing(raw, 1, case['mode'], case['flags'], identity, target, identities[identity])
         if type(request.get('unix_ns')) is not int or type(request.get('monotonic_ns')) is not int:
             raise ValueError('peer request lacks exact timestamps')
         port = identities[identity]
         expected_count = 0 if port == 1002 else 2 if port == 1005 else 1
         if len(request.get('replies', [])) != expected_count:
             raise ValueError('peer omitted independently provisioned replies')
+        replies = set()
         for answer in request['replies']:
             if answer.get('link_type') != 1 or type(answer.get('unix_ns')) is not int or type(answer.get('monotonic_ns')) is not int:
                 raise ValueError('peer response lacks exact wire scope/timestamps')
-            response(bytes.fromhex(answer['bytes_hex']), 1, target, port, identity, case['flags'], (ip, segment))
+            answer_bytes = bytes.fromhex(answer['bytes_hex'])
+            response(answer_bytes, 1, target, port, identity, case['flags'], sent)
+            replies.add(network(answer_bytes, 1)['wire'])
+        recorded_replies.update(replies)
+        if identity in attributed:
+            frame = attributed[identity]
+            raw_response = frame_bytes(frame, True)
+            response(raw_response, frame['link_type'], target, port, identity, case['flags'], sent)
+            if network(raw_response, frame['link_type'])['wire'] not in replies:
+                raise ValueError('attributed capture contradicts independent peer reply bytes')
         matched[identity] = request
     if set(matched) != set(identities):
         raise ValueError('independent peer did not observe every expected outgoing probe')
+    if any(packet not in recorded_replies for packet in captured_packets):
+        raise ValueError('retained capture is absent from independent peer replies')
 
 
 def validate_kernel_capture(profile, case, run):
@@ -425,8 +445,33 @@ def validate_kernel_capture(profile, case, run):
         if identity not in identities or segment['port'] != identities[identity] or segment['flags'] & 4:
             continue  # The host kernel may reset an unsolicited SYN/ACK.
         outgoing(raw, frame['link_type'], case['mode'], case['flags'], identity, target, identities[identity])
-        if identity in matched and matched[identity] != ip['wire']:
+        if identity in matched and matched[identity][0]['wire'] != ip['wire']:
             raise ValueError('kernel capture shares an identity across distinct wire probes')
-        matched[identity] = ip['wire']
+        matched.setdefault(identity, (ip, segment, frame['unix_ns']))
     if set(matched) != set(identities):
         raise ValueError('independent kernel capture omitted an outgoing probe')
+    attributed, _ = retained_frames(run, case)
+    for identity, port in identities.items():
+        sent_ip, sent_tcp, sent_ns = matched[identity]
+        replies = set()
+        for frame in frames:
+            stamp = frame.get('unix_ns', 0)
+            if not sent_ns <= stamp <= min(run['finished_unix_ns'], sent_ns + LIMITS['timeout_ms'] * 1000000):
+                continue
+            raw = bytes.fromhex(frame['bytes_hex'])
+            ip = network(raw, frame['link_type'])
+            if ip['source'] != target or ip['target'] != sent_ip['source']:
+                continue
+            try:
+                response(raw, frame['link_type'], target, port, identity, case['flags'], (sent_ip, sent_tcp))
+            except ValueError:
+                continue  # Other probes and kernel-generated traffic are not this exchange.
+            replies.add(ip['wire'])
+        if identity in attributed:
+            frame = attributed[identity]
+            raw = frame_bytes(frame, True)
+            response(raw, frame['link_type'], target, port, identity, case['flags'], (sent_ip, sent_tcp))
+            if network(raw, frame['link_type'])['wire'] not in replies:
+                raise ValueError('kernel response lacks timely independent correlated capture')
+        elif replies:
+            raise ValueError('kernel timeout contradicts timely independent response')

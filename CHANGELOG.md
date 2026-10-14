@@ -99,6 +99,10 @@ remaining acceptance gates.
 
 ### Fixed
 
+- Retain ambiguous IP retry replies as unattributed evidence, distinguish
+  IPv6 link padding from Jumbo Payload options, and count excluded TCP
+  discovery endpoints after SYN/ACK expansion.
+
 - Correlate ICMPv6 errors quoting empty IPv6 probes when RFC 4884 padding
   and extension objects follow the declared datagram.
 

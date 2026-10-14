@@ -5,7 +5,7 @@ mod prepare;
 use super::{PipelineEvent, PipelineOptions};
 use crate::probe::Batch;
 use crate::scan::plan::replies_overlap;
-use crate::scan::{Attribution, PendingEvidence, PipelineFailure, Probe, SentProbe};
+use crate::scan::{Attribution, PendingEvidence, PipelineFailure, Probe, Reply, SentProbe};
 use crate::{
     Client, Stats,
     clock::Clock,
@@ -696,6 +696,25 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             return self.unattributed(raw, Attribution::Ambiguous, None);
         }
         let (index, observation) = candidates.pop().expect("one candidate");
+        if observation.response.reply == Reply::IpProtocolPayload
+            && !settled(
+                self.recent.iter().map(|(index, sent, _)| (*index, sent)),
+                &self.planned,
+                &self.executor.client.registry,
+                &decoded,
+                &self.plan.interfaces[source],
+                received,
+            )
+            .is_empty()
+        {
+            if self.diagnostics.insert("ambiguous") {
+                (self.emit)(PipelineEvent::Diagnostic(Diagnostic::warning(
+                    "scan.ambiguous_response",
+                    "identity-less capture also matched a settled probe and was not attributed",
+                )))?;
+            }
+            return self.unattributed(raw, Attribution::Ambiguous, None);
+        }
         let definitive = definitive(&observation);
         let entry = self.pending.get_mut(&index).expect("candidate is pending");
         let candidate = Best {

@@ -154,23 +154,28 @@ pub(super) fn discovery_options(
             })
             .map(|term| term.0.clone())
             .collect();
-        let selected = packetcraftr::scan::select_endpoints(
-            &packetcraftr::scan::PortSelection {
-                transports: port_transports,
-                include: ports.into_iter().map(|term| term.0).collect(),
-                exclude,
-            },
-            packetcraftr::scan::catalog::bundled(),
-            max_ports,
-        )
-        .map_err(|error| {
-            CliError::from_classification(
-                error.classification(),
-                format!("--discovery-ports: {error}"),
-                error.causes(),
+        let (selected, excluded_counts) =
+            packetcraftr::scan::select_endpoints_with_exclusion_counts(
+                &packetcraftr::scan::PortSelection {
+                    transports: port_transports,
+                    include: ports.into_iter().map(|term| term.0).collect(),
+                    exclude,
+                },
+                packetcraftr::scan::catalog::bundled(),
+                max_ports,
             )
-        })?;
+            .map_err(|error| {
+                CliError::from_classification(
+                    error.classification(),
+                    format!("--discovery-ports: {error}"),
+                    error.causes(),
+                )
+            })?;
         excluded_total = excluded_total.saturating_add(selected.excluded);
+        excluded_total = excluded_total.saturating_add(
+            excluded_counts.get(&Transport::Tcp).copied().unwrap_or(0)
+                * tcp_modes.len().saturating_sub(1),
+        );
         for endpoint in selected.endpoints {
             match endpoint {
                 ProbeEndpoint::Tcp { port } => {
@@ -431,4 +436,37 @@ fn declaration_error(source: impl Classified, declaration: &manifest::Declaratio
         crate::errors::source_causes(&source),
     )
     .with_context(source.context())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovery_exclusions_count_each_tcp_mode_without_multiplying_udp_or_sctp() {
+        use arguments::DiscoveryProbe::{Sctp, Tcp, TcpAck, Udp};
+        for (probes, exclusions, expected) in [
+            (vec![Tcp, TcpAck], vec!["tcp:80"], 2),
+            (vec![TcpAck], vec!["tcp:80"], 1),
+            (vec![Tcp, TcpAck, Udp, Sctp], vec!["80"], 4),
+            (vec![Tcp, TcpAck, Udp, Sctp], vec!["udp:80", "sctp:80"], 2),
+        ] {
+            let (options, excluded) = discovery_options(
+                Some(arguments::Discovery::Before),
+                &probes,
+                vec!["80".parse().unwrap(), "81".parse().unwrap()],
+                &exclusions
+                    .iter()
+                    .map(|term| term.parse().unwrap())
+                    .collect::<Vec<_>>(),
+                vec![],
+                &[],
+                None,
+                16,
+            )
+            .unwrap();
+            assert_eq!(excluded, expected);
+            assert!(!options.probes.is_empty());
+        }
+    }
 }

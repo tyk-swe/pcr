@@ -55,7 +55,10 @@ pub use report::{
 };
 pub use request::{Limits, PortSpec, Request, select_ports};
 pub use sctp::SctpScan;
-pub use selection::{MAX_PORT_TERMS, PortSelection, Selected, Selector, Term, select_endpoints};
+pub use selection::{
+    MAX_PORT_TERMS, PortSelection, Selected, Selector, Term, select_endpoints,
+    select_endpoints_with_exclusion_counts,
+};
 pub use tcp::TcpScan;
 
 pub(crate) use executor::NeighborBounds;

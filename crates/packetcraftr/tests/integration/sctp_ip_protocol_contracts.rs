@@ -89,6 +89,7 @@ struct ScriptedIo {
     inner: responder::Io,
     sent: Arc<Mutex<Vec<Packet>>>,
     delivery_ingress: bool,
+    replay_first_ip_reply: bool,
 }
 
 struct ScriptedCapture {
@@ -144,8 +145,15 @@ impl transmit::Provider for ScriptedIo {
     fn send(&self, outbound: transmit::Outbound<'_>) -> Result<transmit::Report, net::Error> {
         let wire = Bytes::copy_from_slice(outbound.bytes());
         let decoded = decode(&wire);
-        self.sent.lock().unwrap().push(decoded.clone());
-        let frames = respond(&decoded, &wire);
+        let mut sent = self.sent.lock().unwrap();
+        sent.push(decoded.clone());
+        let frames = if self.replay_first_ip_reply && sent.len() > 1 {
+            let first = &sent[0];
+            respond(first, &encode(first.clone()))
+        } else {
+            respond(&decoded, &wire)
+        };
+        drop(sent);
         let report = transmit::Submission::start().complete(wire.len(), wire);
         let mut state = self.inner.0.lock().unwrap();
         let ingress = Instant::now();
@@ -495,11 +503,19 @@ fn client() -> (Client<Fixtures>, Arc<Mutex<Vec<Packet>>>) {
 fn client_with_delivery_ingress(
     delivery_ingress: bool,
 ) -> (Client<Fixtures>, Arc<Mutex<Vec<Packet>>>) {
+    client_with_reply_flags(delivery_ingress, false)
+}
+
+fn client_with_reply_flags(
+    delivery_ingress: bool,
+    replay_first_ip_reply: bool,
+) -> (Client<Fixtures>, Arc<Mutex<Vec<Packet>>>) {
     let sent = Arc::new(Mutex::new(Vec::new()));
     let io = ScriptedIo {
         inner: responder::Io(Arc::new(Mutex::new(responder::State::default()))),
         sent: Arc::clone(&sent),
         delivery_ingress,
+        replay_first_ip_reply,
     };
     let providers = ProviderSet {
         udp: (),
@@ -749,7 +765,7 @@ fn serialized_ip_duration_is_rejected_before_scan_or_discovery_transmission() {
 }
 
 #[test]
-fn pipelined_ip_attempts_and_extension_probes_keep_delayed_positive_replies() {
+fn pipelined_ip_identities_serialize_while_independent_protocols_keep_parallelism() {
     for (ipv6, protocols, expected_peak) in [
         (false, vec![47], 1),
         (true, vec![47], 1),
@@ -777,18 +793,44 @@ fn pipelined_ip_attempts_and_extension_probes_keep_delayed_positive_replies() {
         let aggregate = collector.finish(report).unwrap();
         assert_eq!(sent.lock().unwrap().len(), protocols.len() * 2);
         assert_eq!(aggregate.endpoints.len(), protocols.len());
-        assert!(aggregate.unattributed.is_empty());
         for endpoint in aggregate.endpoints {
             assert_eq!(endpoint.probes.len(), 2);
-            assert!(
-                endpoint
-                    .probes
-                    .iter()
-                    .all(|probe| probe.status == ProbeStatus::Response),
-                "{endpoint:?}"
-            );
-            assert_eq!(endpoint.inference.unwrap().state, Some(State::Open));
         }
+    }
+}
+
+#[test]
+fn a_delayed_duplicate_never_answers_an_ip_retry_or_adds_retry_rtt() {
+    for ipv6 in [false, true] {
+        let mut request = base_request(
+            ipv6,
+            vec![ProbeEndpoint::Ip { protocol: 47 }],
+            Schedule::Pipelined,
+        );
+        request.attempts = 2;
+        request.max_in_flight = 2;
+        let (client, sent) = client_with_reply_flags(true, true);
+        let collector = scan::Collector::default();
+        let report = client.scan(request, collector.clone()).unwrap();
+        let aggregate = collector.finish(report).unwrap();
+        assert_eq!(sent.lock().unwrap().len(), 2);
+        let probes = &aggregate.endpoints[0].probes;
+        assert_eq!(probes[0].status, ProbeStatus::Response);
+        assert_eq!(probes[1].status, ProbeStatus::Timeout);
+        assert_eq!(probes[1].reply, None);
+        assert!(probes[1].response.is_none());
+        assert!(probes[1].latency.is_none());
+        assert_eq!(aggregate.rtt.received, 1);
+        assert_eq!(
+            aggregate.endpoints[0].inference.as_ref().unwrap().state,
+            Some(State::Open)
+        );
+        assert_eq!(aggregate.unattributed.len(), 1);
+        assert_eq!(
+            aggregate.unattributed[0].attribution,
+            scan::Attribution::Ambiguous
+        );
+        assert_eq!(aggregate.unattributed[0].sequence, None);
     }
 }
 

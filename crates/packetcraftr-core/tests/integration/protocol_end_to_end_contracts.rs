@@ -16,7 +16,7 @@ use packetcraftr_core::diagnostic::{
 };
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::layer::{Layer, Malformed, Raw};
+use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
 use packetcraftr_core::protocol::link::{Arp, Ethernet};
 use packetcraftr_core::protocol::network::{
@@ -63,6 +63,41 @@ fn known_tcp() -> Tcp {
         window: 0xfaf0,
         ..Tcp::default()
     }
+}
+
+#[test]
+fn empty_ipv6_hop_by_hop_probes_round_trip_link_padding_without_accepting_jumbograms() {
+    for bytes in [vec![0; 6], vec![0; 32], vec![0x55; 32]] {
+        let mut packet = Packet::new();
+        packet.push(Ethernet::default());
+        let mut header = ipv6("2001:db8::1", "2001:db8::2");
+        header.next_header = WireValue::Exact(0);
+        packet.push(header);
+        packet.push(Padding::after_layer(Bytes::from(bytes.clone()), 1));
+        let (_, decoded) = round_trip(packet, "ethernet");
+        assert!(decoded.packet.get::<Ipv6>().is_some());
+        assert!(decoded.packet.get::<Malformed>().is_none());
+        assert_eq!(
+            decoded.packet.get::<Padding>().unwrap().bytes.as_ref(),
+            bytes
+        );
+    }
+    let mut packet = Packet::new();
+    packet.push(Ethernet::default());
+    let mut header = ipv6("2001:db8::1", "2001:db8::2");
+    header.next_header = WireValue::Exact(0);
+    packet.push(header);
+    // A complete Jumbo Payload option remains unsupported.
+    packet.push(Padding::after_layer(
+        Bytes::from_static(&[59, 0, 0xc2, 4, 0, 1, 0, 0]),
+        1,
+    ));
+    let registry = rooted_registry("ethernet");
+    let built = build::Builder::new(Arc::clone(&registry))
+        .build(packet, codec::Context::default(), build::Options::default())
+        .unwrap();
+    let decoded = decode_from_root(&registry, built.bytes, decode::Options::default()).unwrap();
+    assert!(decoded.packet.get::<Malformed>().is_some());
 }
 
 #[test]

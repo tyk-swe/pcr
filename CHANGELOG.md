@@ -104,6 +104,11 @@ for replacement APIs.
 
 ### Fixed
 
+- Keep rejected UDP application checks visible in compact scan output, including
+  their profile and rejection reason.
+- Preserve option descriptions in generated manuals for both grouped and legacy
+  command paths, including options omitted from short CLI help.
+
 - NDP Route Information options accept every prefix-field length permitted by
   RFC 4191, retaining valid longer encodings as typed routes without changing
   their wire bytes.

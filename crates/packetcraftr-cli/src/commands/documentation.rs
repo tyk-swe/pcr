@@ -40,8 +40,13 @@ fn run(arguments: &Args) -> Result<(), CliError> {
 
 /// Include compatibility commands, and omit clap's synthetic help command tree.
 fn write_man_pages(command: &clap::Command, directory: &Path) -> io::Result<()> {
-    clap_mangen::Man::new(command.clone().hide(false).disable_help_subcommand(true))
-        .generate_to(directory)?;
+    // Short-help visibility must not suppress the manual's fallback descriptions.
+    let manual = command
+        .clone()
+        .hide(false)
+        .disable_help_subcommand(true)
+        .mut_args(|arg| arg.hide_short_help(false));
+    clap_mangen::Man::new(manual).generate_to(directory)?;
     for command in command
         .get_subcommands()
         .filter(|command| command.get_name() != "help")

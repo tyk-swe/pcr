@@ -309,6 +309,29 @@ fn generated_documentation_covers_all_paths_and_five_shells() {
             assert!(text.contains(group), "{file}: {group}");
         }
     }
+    for file in ["packetcraftr-network-scan.1", "packetcraftr-scan.1"] {
+        let text = std::fs::read_to_string(directory.path().join("man").join(file)).unwrap();
+        for (option, description) in [
+            (
+                "udp\\-profiles",
+                "Bounded per\\-port payload and response\\-check assignments (UDP profiles v1)",
+            ),
+            (
+                "max\\-probes",
+                "Maximum generated probes after target resolution and attempts",
+            ),
+            (
+                "max\\-backoff\\-ms",
+                "Ceiling on the retry delay in milliseconds (default 1000)",
+            ),
+        ] {
+            let entry = text
+                .split(".TP\n")
+                .find(|entry| entry.starts_with(&format!("\\fB\\-\\-{option}\\fR")))
+                .unwrap_or_else(|| panic!("{file}: missing option {option}"));
+            assert!(entry.contains(description), "{file}: {entry}");
+        }
+    }
     assert_eq!(
         std::fs::read_dir(directory.path().join("man"))
             .unwrap()

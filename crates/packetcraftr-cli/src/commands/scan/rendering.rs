@@ -61,11 +61,8 @@ pub(super) fn render_text(
             )
         ))?;
         render_inference_text(endpoint.port_hint, endpoint.inference.as_ref())?;
-        for evidence in &endpoint.probes {
-            if presentation.verbose || evidence.status == packetcraftr::probe::ProbeStatus::Timeout
-            {
-                render_probe_text("  ", evidence, presentation)?;
-            }
+        for evidence in visible_probes(&endpoint.probes, presentation) {
+            render_probe_text("  ", evidence, presentation)?;
         }
     }
     render_undecoded(result.undecoded.iter().map(|frame| (None, frame)))?;
@@ -233,6 +230,19 @@ pub(super) fn sctp_scan_text(sctp_scan: output::scan::plan::SctpScan) -> String 
             "{line} (stack-dependent heuristic: conclusions are inferences, never authenticated identity or proof of a listening service)"
         ),
     }
+}
+
+fn visible_probes(
+    probes: &[output::scan::Probe],
+    presentation: crate::rendering::Presentation,
+) -> impl Iterator<Item = &output::scan::Probe> {
+    probes.iter().filter(move |evidence| {
+        presentation.verbose
+            || evidence.status == packetcraftr::probe::ProbeStatus::Timeout
+            || evidence.application.as_ref().is_some_and(|application| {
+                application.status == output::scan::ApplicationStatus::Rejected
+            })
+    })
 }
 
 /// A raw probe's evidence line after `lead`, with any application and frame
@@ -410,6 +420,70 @@ fn endpoint_text(
 mod tests {
     use super::*;
     use output::{network::InterfaceId, scan::Classification};
+
+    #[test]
+    fn compact_output_keeps_rejected_udp_checks_and_timeouts() {
+        use output::scan::{ApplicationEvidence, ApplicationStatus, Probe, Protocol, Stage};
+        use packetcraftr::probe::ProbeStatus;
+
+        let probes = [
+            (Some(ApplicationStatus::Confirmed), "dns", "DNS ID matched"),
+            (Some(ApplicationStatus::Rejected), "dns", "DNS ID mismatch"),
+            (Some(ApplicationStatus::Unchecked), "bytes", "no checks"),
+            (Some(ApplicationStatus::Rejected), "bytes", "byte mismatch"),
+            (None, "", ""),
+            (Some(ApplicationStatus::NotObserved), "dns", "no reply"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(sequence, (application, profile, reason))| {
+            let timeout = application == Some(ApplicationStatus::NotObserved);
+            Probe {
+                sequence: sequence as u64,
+                stage: Stage::Scan,
+                protocol: Protocol::Udp,
+                destination: "192.0.2.1".parse().unwrap(),
+                scope: None,
+                destination_port: Some(53),
+                ip_protocol: None,
+                icmp_request: None,
+                tcp_scan: None,
+                sctp_scan: None,
+                attempt: 1,
+                status: if timeout {
+                    ProbeStatus::Timeout
+                } else {
+                    ProbeStatus::Response
+                },
+                classification: if timeout {
+                    Classification::Timeout
+                } else {
+                    Classification::Open
+                },
+                responder: None,
+                sent_at: std::time::UNIX_EPOCH.try_into().unwrap(),
+                received_at: None,
+                latency: None,
+                frame: None,
+                reason: "fixture".to_owned(),
+                application: application.map(|status| ApplicationEvidence {
+                    profile: profile.to_owned(),
+                    status,
+                    reason: reason.to_owned(),
+                }),
+                tcp_window: None,
+            }
+        })
+        .collect::<Vec<_>>();
+
+        let sequences = |verbose| {
+            visible_probes(&probes, crate::rendering::Presentation { verbose })
+                .map(|probe| probe.sequence)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(sequences(false), [1, 3, 5]);
+        assert_eq!(sequences(true), [0, 1, 2, 3, 4, 5]);
+    }
 
     #[test]
     fn text_endpoints_distinguish_identical_ipv6_addresses_on_different_interfaces() {

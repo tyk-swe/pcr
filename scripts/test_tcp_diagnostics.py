@@ -28,7 +28,7 @@ from tcp_diagnostic_wire import network, outgoing, response, tcp
 
 ROOT = Path(__file__).resolve().parents[1]
 CORPUS = json.loads((ROOT / 'docs/scanner-corpus.v1.json').read_text())
-SPEC = importlib.util.spec_from_file_location('m12_runner', ROOT / 'scripts/test-tcp-diagnostics-native.py')
+SPEC = importlib.util.spec_from_file_location('tcp_diagnostic_runner', ROOT / 'scripts/test-tcp-diagnostics-native.py')
 RUNNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUNNER)
 

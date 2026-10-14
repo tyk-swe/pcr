@@ -1,6 +1,6 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Strict inventory and runtime-output verification for M5 native evidence."""
+"""Strict inventory and runtime-output verification for host-discovery native evidence."""
 import re
 
 from discovery_native_fixture import MODES, REASONS, measurements, validate_router_evidence

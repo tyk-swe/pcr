@@ -1,6 +1,6 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""M12 inventory validation; expectations are original corpus data, not output."""
+"""TCP diagnostic inventory validation; expectations are original corpus data, not output."""
 MODES = dict(ack=16, window=16, fin=1, null=0, xmas=41, maimon=17, custom=1)
 CONDITIONS = ('reset-zero', 'reset-positive', 'silent', 'prohibited', 'unexpected',
               'reset-and-prohibited', 'port-unreachable', 'time-exceeded')

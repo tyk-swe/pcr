@@ -4,7 +4,7 @@ Four vocabularies stay distinct: **attempt observations**, **method-dependent
 port inference**, **host observations**, and **operational failures**. Coordinates,
 timing, routes, capture state, and accounting support them; none independently
 proves identity. The [consumer policy](consumer-compatibility.md) owns versioned
-shapes and the [roadmap](roadmap/README.md) owns acceptance.
+shapes and [native validation](native-validation.md) owns runtime verification.
 
 ## Attempt observations
 
@@ -154,7 +154,6 @@ address on one interface within a request report `possible_proxy`.
 `scheduling` reports fixed/adaptive mode, effective config, `observed_peak_window`,
 `retries_started`, `suspected_response_rate_limit` conditions, `incomplete` hosts,
 and connect ceilings. Unsent/omitted probes count as neither starts nor outcomes.
-See [M7](roadmap/m07-adaptive-scheduling.md).
 
 ### Traceroute stage
 
@@ -163,7 +162,6 @@ under remaining budgets. Selection prefers target SYN/ACK, then reset, then echo
 (lowest sequence tie), or explicit `--traceroute-strategy`/`--traceroute-port`
 fallback; missing evidence or scoped targets report `not_traced`. Fresh `hops`
 are observations; `reused_hops` cite source host/probes/time/age and are claims.
-See [M11](roadmap/m11-scan-informed-traceroute.md).
 
 ## OS fingerprint evidence
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Revision-bound M12 checks in fresh Linux namespaces or host-local sockets.
+"""Revision-bound TCP diagnostic checks in fresh Linux namespaces or host-local sockets.
 
 No external destinations, host interface changes, DNS, or driver installation.
 """
@@ -65,7 +65,7 @@ def privileged():
 
 
 def measurements():
-    spec = importlib.util.spec_from_file_location('m12_measurements', ROOT / 'scripts/benchmark-scanner.py')
+    spec = importlib.util.spec_from_file_location('tcp_diagnostic_measurements', ROOT / 'scripts/benchmark-scanner.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -205,7 +205,7 @@ def run_profile(profile, args, report, corpus, measurement):
     with (kernel_provision(profile) if platform.system() == 'Linux' else sockets(profile)) as provisioned:
         from tcp_diagnostic_capture import provision as capture_provision
         targets = evidence.kernel_targets('Linux' if platform.system() == 'Linux' else 'host')
-        device = 'pcrm12ks' if platform.system() == 'Linux' else None
+        device = 'pcrtcpks' if platform.system() == 'Linux' else None
         capture_available = bool(profile['capture_backend_version'])
         with (capture_provision(targets, device) if capture_available else contextlib.nullcontext(None)) as capture:
             profile['kernel_capture'] = capture

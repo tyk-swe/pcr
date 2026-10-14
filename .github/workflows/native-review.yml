@@ -9,7 +9,7 @@ on:
         required: true
 
       scenario:
-        description: Select the native inventory, M5 discovery, M12 diagnostics, or M13 SCTP/IP-protocol
+        description: Select the native inventory, host discovery, TCP diagnostics, or SCTP/IP-protocol
         type: choice
         options:
           - all
@@ -75,7 +75,7 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as out:
               out.write(f'NATIVE_TEST_BINARY={binary}\n')
           PY
-      - name: Exercise M5 discovery across every profile in fresh isolated namespaces
+      - name: Exercise host discovery across every profile in fresh isolated namespaces
         if: inputs.scenario == 'host_discovery'
         env:
           REVIEWED_COMMIT: ${{ inputs.commit }}
@@ -83,7 +83,7 @@ jobs:
           sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
             python3 scripts/test-host-discovery-native.py --reviewed-commit "$REVIEWED_COMMIT" \
             --require-complete --report target/validation/host-discovery.json
-      - name: Exercise M12 diagnostics across every profile in fresh isolated namespaces
+      - name: Exercise TCP diagnostics across every profile in fresh isolated namespaces
         if: inputs.scenario == 'tcp_diagnostics'
         env:
           REVIEWED_COMMIT: ${{ inputs.commit }}
@@ -91,7 +91,7 @@ jobs:
           sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
             python3 scripts/test-tcp-diagnostics-native.py --reviewed-commit "$REVIEWED_COMMIT" \
             --require-complete --report target/validation/tcp-diagnostics-native.json
-      - name: Exercise M13 SCTP and IP-protocol across every profile in fresh isolated namespaces
+      - name: Exercise SCTP and IP-protocol across every profile in fresh isolated namespaces
         if: inputs.scenario == 'sctp_ip_protocol'
         env:
           REVIEWED_COMMIT: ${{ inputs.commit }}

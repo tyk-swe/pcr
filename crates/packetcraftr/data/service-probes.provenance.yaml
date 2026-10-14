@@ -51,15 +51,6 @@ transforms:
       versions; versions are never inserted into CPEs. Device metadata is
       available only through an explicit reviewed rule, and no bundled rule
       has a supported device classification.
-  - step: "freeze-independent-held-out-instances-before-rule-writing"
-    detail: |
-      Held-out fixture instances were committed at 97267ae4 before authoring
-      the M9 match additions. The manifest is
-      docs/roadmap/evidence/m09/held-out.v1.json with SHA-256
-      399ae8d919fe3ca2ac32c62962eee37e54a811c5dee30b02f9226e45be94774c.
-      Rule authors did not inspect held-out response bytes or tune against
-      evaluation outcomes. Training results remain separate from held-out
-      quality totals; fixture and evaluation scope limits accompany results.
 
 maintenance:
   maintainer: "tyk-swe"
@@ -84,18 +75,11 @@ coverage:
       smtp-postfix-training -> postfix-claim; smtp-exim-training -> exim-claim;
       ftp-vsftpd-training -> vsftpd-claim; ftp-proftpd-training -> proftpd-claim.
       These are the complete product-positive instances written against for
-      the four M9 rule additions, not held-out coverage evidence.
+      the four SMTP and FTP rule additions.
   - fixture: "crates/packetcraftr-core/tests/integration/service_corpus_contracts.rs"
     covers: |
       Declared training-instance replay, fragmented and multiline greeting
       collection, CRLF/syntax and bounded-line failures, SMTP/FTP numeric-code
       overlap, unknown products, invalid/conflicting hostname observations,
       static CPE validation, absent unsupported device labels, and explicit
-      rule-backed metadata sources. These parser contracts are also training
-      fixtures and are excluded from held-out quality totals.
-  - fixture: "docs/roadmap/evidence/m09/held-out.v1.json"
-    covers: |
-      Independently frozen service instances across the five supported
-      protocols, with deceptive, unknown, ambiguous, and failure conditions.
-      The acceptance runner publishes corpus-version-specific quality totals;
-      those limits do not establish accuracy against arbitrary real services.
+      rule-backed metadata sources.

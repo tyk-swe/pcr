@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""M5 native discovery: fresh Linux namespaces or admitted host-local sockets/packets."""
+"""Host discovery native validation: fresh Linux namespaces or admitted host-local sockets/packets."""
 import argparse
 import importlib.util
 import json

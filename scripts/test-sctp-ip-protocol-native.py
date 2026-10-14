@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Revision-bound M13 SCTP and IP-protocol native validation runner.
+"""Revision-bound SCTP and IP-protocol native validation runner.
 
 No external destinations, host interface changes, DNS, or driver installation.
 """
@@ -81,7 +81,7 @@ FEATURES = {"portable": ["--no-default-features"], "default": [],
 
 
 def measurements():
-    spec = importlib.util.spec_from_file_location("m13_measurements", ROOT / "scripts/benchmark-scanner.py")
+    spec = importlib.util.spec_from_file_location("sctp_ip_protocol_measurements", ROOT / "scripts/benchmark-scanner.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -111,7 +111,7 @@ def build(profile, args):
     paths = {item["executable"] for item in artifacts if item.get("reason") == "compiler-artifact" and item.get("executable") and item.get("target", {}).get("name") == "packetcraftr"}
     if len(paths) != 1:
         raise ValueError("build lacks a unique CLI artifact")
-    binary = args.report.parent / ("packetcraftr-m13-" + profile)
+    binary = args.report.parent / ("packetcraftr-sctp-ip-protocol-" + profile)
     shutil.copy2(paths.pop(), binary)
     return binary.resolve(), dict(path=str(log), digest_sha256=digest(log), command=command, exit_code=0)
 
@@ -242,8 +242,8 @@ def main():
         if native_platform != "Linux":
             for profile in report["profiles"]:
                 for case in profile["cases"]:
-                    case.update(reason="isolation_unavailable", message="independent M13 link fixture requires a fresh Linux network namespace")
-            raise ValueError("independent M13 native isolation is unavailable on this platform")
+                    case.update(reason="isolation_unavailable", message="independent SCTP/IP-protocol link fixture requires a fresh Linux network namespace")
+            raise ValueError("independent SCTP/IP-protocol native isolation is unavailable on this platform")
         if not args.inside:
             missing = [name for name in ("unshare", "ip", "ethtool") if not shutil.which(name)]
             if missing:

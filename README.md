@@ -36,7 +36,6 @@ filters, formats, and exit codes.
 | Run live diagnostics | [Isolated lab recipe](docs/tasks.md#3-run-an-authorized-diagnostic-in-an-isolated-lab), [native validation](docs/native-validation.md) |
 | Interpret scans and services | [Scanner evidence](docs/scanner-evidence.md), [TCP diagnostic scans](docs/tcp-diagnostics.md), [service identification](docs/service-identification.md), [OS identification](docs/os-identification.md) |
 | Automate processing | [Resource presets](docs/resource-presets.md), [consumer compatibility](docs/consumer-compatibility.md) |
-| Review coverage and open work | [Roadmap](docs/roadmap/README.md), [Nmap comparison](docs/roadmap/nmap-gap-matrix.md) |
 
 ## Install
 

@@ -1,6 +1,6 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Strict M12 evidence admission; inferred port states never establish socket truth."""
+"""Strict TCP diagnostic evidence admission; inferred port states never establish socket truth."""
 import copy
 import json
 from pathlib import Path
@@ -259,7 +259,7 @@ def validate_output(run, case, corpus, preparation=None):
 def validate(report, corpus, expected_commit=None, require_complete=False, expected_sources=None, expected_corpus_digest=None):
     validate_corpus(corpus)
     if report.get('schema') != SCHEMA or report.get('platform') not in PLATFORMS:
-        raise ValueError('unknown M12 evidence schema/platform')
+        raise ValueError('unknown TCP diagnostic evidence schema/platform')
     revision = report.get('source_revision')
     if not hexadecimal(revision, 40) or type(report.get('source_dirty')) is not bool:
         raise ValueError('missing exact source identity')
@@ -289,7 +289,7 @@ def validate(report, corpus, expected_commit=None, require_complete=False, expec
         complete &= not bool(profile.get('error'))
         cases = profile.get('cases', [])
         if [case.get('id') for case in cases] != [case['id'] for case in inventory()]:
-            raise ValueError('missing/duplicate/unordered M12 native cases')
+            raise ValueError('missing/duplicate/unordered TCP diagnostic native cases')
         for case, expected in zip(cases, inventory()):
             if any(case.get(key) != value for key, value in expected.items()):
                 raise ValueError('native case changed immutable fixture inventory')
@@ -371,7 +371,7 @@ def validate(report, corpus, expected_commit=None, require_complete=False, expec
     if report.get('acceptance_complete') is not complete:
         raise ValueError('acceptance completion contradicts retained coverage')
     if require_complete and not complete:
-        raise ValueError('M12 acceptance lacks clean complete supported runtime coverage')
+        raise ValueError('TCP diagnostic acceptance lacks clean complete supported runtime coverage')
     return complete
 
 

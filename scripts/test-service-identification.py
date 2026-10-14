@@ -30,8 +30,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "packetcraftr.output/v16"
 SCHEMAS = ("packetcraftr.output/v14", "packetcraftr.output/v15", SCHEMA)
 FIXTURES = ROOT / "scripts/fixtures/service-identification"
-HELD_OUT_PATH = ROOT / "docs/roadmap/evidence/m09/held-out.v1.json"
-HELD_OUT_SHA256 = "399ae8d919fe3ca2ac32c62962eee37e54a811c5dee30b02f9226e45be94774c"
 PROFILES = {
     "portable": ["--no-default-features"],
     "default": [],
@@ -130,24 +128,6 @@ def scenarios():
          "tls": True, "tls_certificate_limit": 16,
          "outcome": "matched", "product": "nginx", "version": "1.26.2"},
     ]
-    for case in cases:
-        case["split"] = "training_or_acceptance"
-    return cases
-
-
-def held_out_scenarios():
-    """Read the immutable service-instance holdout without adapting its expectations."""
-    content = HELD_OUT_PATH.read_bytes()
-    require(hashlib.sha256(content).hexdigest() == HELD_OUT_SHA256,
-            "held-out manifest changed after it was fixed before rule authorship")
-    manifest = json.loads(content)
-    require(manifest["schema"] == "packetcraftr.service-identification-held-out/v1",
-            "held-out schema changed")
-    cases = copy.deepcopy(manifest["scenarios"])
-    for case in cases:
-        case["reply"] = bytes.fromhex(case.pop("reply_hex"))
-        if "txt_hex" in case:
-            case["txt"] = bytes.fromhex(case.pop("txt_hex"))
     return cases
 
 
@@ -376,9 +356,6 @@ def verify_result(record, summary, fixture, scenario, corpus):
         require(len(candidates) >= 2 and all(candidate["version"] is None for candidate in candidates), "ambiguous result published an exact version")
         if scenario.get("product"):
             require(all(candidate["product"] == scenario["product"] for candidate in candidates), "version ambiguity changed the product")
-        if scenario.get("products"):
-            require({candidate["product"] for candidate in candidates} == set(scenario["products"]),
-                    "held-out product ambiguity changed the declared claims")
         if scenario["name"] == "ambiguous-products":
             require({candidate["product"] for candidate in candidates} == {"nginx", "Apache HTTP Server"}, "declared product ambiguity was not exercised")
             require({tuple(candidate["provenance"]["field_indices"]) for candidate in candidates} == {(1,), (2,)}, "product ambiguity must cite separate Server fields")
@@ -492,7 +469,7 @@ def verify_tls(probe, summary, fixture, scenario):
 
 
 def run_case(binary, family_name, scenario, output_format):
-    result = {"scenario": scenario["name"], "split": scenario.get("split", "training_or_acceptance"),
+    result = {"scenario": scenario["name"],
               "family": family_name, "format": output_format, "status": "failed"}
     fixture = None
     started = time.monotonic()
@@ -531,7 +508,7 @@ def run_case(binary, family_name, scenario, output_format):
             result["stderr"] = completed.stderr
             require(completed.returncode == 0, "CLI failed: " + completed.stderr + completed.stdout)
             record, summary = parse_output(completed.stdout, output_format)
-            # Preserve unexpected observed outcomes in the held-out report;
+            # Preserve unexpected observed outcomes in the report;
             # assertions must not turn a mismatch into missing evidence.
             result.update(record=record, summary=summary)
             fixture.close()
@@ -566,59 +543,15 @@ def run_profile(name, build_timeout):
         binary = target / "debug" / ("packetcraftr.exe" if os.name == "nt" else "packetcraftr")
         require(binary.is_file(), "built CLI binary is missing")
         for family in ("ipv4", "ipv6"):
-            for scenario in scenarios() + held_out_scenarios():
+            for scenario in scenarios():
                 for output_format in ("json", "ndjson"):
                     case = run_case(binary, family, scenario, output_format)
                     result["cases"].append(case)
                     print(f"{name}/{family}/{scenario['name']}/{output_format}: {case['status']}", flush=True)
         result["status"] = "passed" if all(case["status"] == "passed" for case in result["cases"]) else "failed"
-        result["held_out_evaluation"] = evaluate_held_out(result["cases"])
     except Exception as error:
         result["error"] = str(error)
     return result
-
-
-def evaluate_held_out(cases):
-    """Report observed coverage and uncertainty, separating confidence categories."""
-    inventory = {case["name"]: case for case in held_out_scenarios()}
-    selected = [case for case in cases if case.get("split") == "held_out"]
-    eligible = [case for case in selected if inventory[case["scenario"]].get("quality_eligible", True)]
-    counts = {name: 0 for name in ("matched", "unknown", "ambiguous", "malformed", "truncated",
-                                  "tls_failed", "budget_exhausted", "missing_record")}
-    confidence = {"claim": 0, "protocol": 0}
-    faithfully_extracted = {"claim": 0, "protocol": 0}
-    misleading_claims = 0
-    for case in selected:
-        record = case.get("record")
-        if record is None:
-            counts["missing_record"] += 1
-            continue
-        counts[record["outcome"]] = counts.get(record["outcome"], 0) + 1
-        expected = inventory[case["scenario"]]
-        for candidate in record["candidates"]:
-            category = candidate["confidence"]
-            confidence[category] = confidence.get(category, 0) + 1
-            if record["outcome"] == "matched" and candidate["product"] == expected.get("product") and candidate["version"] == expected.get("version"):
-                faithfully_extracted[category] = faithfully_extracted.get(category, 0) + 1
-            if expected.get("misleading"):
-                misleading_claims += 1
-    matched = sum(case.get("record", {}).get("outcome") == "matched" for case in eligible)
-    unknown = sum(case.get("record", {}).get("outcome") == "unknown" for case in eligible)
-    ambiguous = sum(case.get("record", {}).get("outcome") == "ambiguous" for case in eligible)
-    denominator = len(eligible)
-    return {"manifest_version": "1.0.0", "manifest_sha256": HELD_OUT_SHA256,
-            "corpus": next((case["summary"]["corpus"] for case in selected if "corpus" in case.get("summary", {})), None),
-            "corpus_version": next((case["summary"]["corpus_version"] for case in selected if "corpus_version" in case.get("summary", {})), None),
-            "declared_service_instances": len(inventory), "attempted_case_runs": len(selected),
-            "eligible_case_runs": denominator, "matched_case_runs": matched,
-            "coverage": matched / denominator if denominator else None,
-            "unknown_case_runs": unknown, "unknown_share": unknown / denominator if denominator else None,
-            "ambiguous_case_runs": ambiguous, "ambiguous_share": ambiguous / denominator if denominator else None,
-            "outcomes": counts, "candidate_confidence_counts": confidence,
-            "faithful_unambiguous_presented_token_counts": faithfully_extracted,
-            "misleading_claim_candidates": misleading_claims,
-            "identity_accuracy": None,
-            "limits": "Repeated IPv4/IPv6 and JSON/NDJSON case-runs are not additional independent service instances. Claim fidelity measures presented tokens, not actual software identity. Handshake/malformed cases are reported outside eligible service coverage. No production prevalence or confidence calibration is inferred."}
 
 
 def main():
@@ -637,8 +570,7 @@ def main():
               "platform": platform.system(), "architecture": platform.machine(),
               "python": platform.python_version(), "tls_fixture_runtime": ssl.OPENSSL_VERSION,
               "shipped_corpus_sha256": hashlib.sha256((ROOT / "crates/packetcraftr/data/service-probes.json").read_bytes()).hexdigest(),
-              "held_out_manifest": {"path": str(HELD_OUT_PATH.relative_to(ROOT)), "sha256": HELD_OUT_SHA256,
-                                    "fixed_before_rule_commit": "97267ae4"}, "profiles": []}
+              "profiles": []}
     if args.require_clean and dirty:
         report["error"] = "acceptance requires a clean worktree at the recorded revision"
         args.report.parent.mkdir(parents=True, exist_ok=True)

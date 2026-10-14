@@ -9,9 +9,9 @@ its dataset and the feature's acceptance, regardless of utility.
 
 | Kind | Review focus / current source |
 | --- | --- |
-| Port | Factual names/selections and creative payload bytes; original [M6](roadmap/m06-port-planning-inference.md) catalog/UDP profiles |
-| Service | Requests, literal matches, product/version metadata; original [M8](roadmap/m08-service-identification.md)/[M9](roadmap/m09-tls-services-corpus.md) corpus/exclusions |
-| OS | Original Linux Ethernet profiles in [OS provenance](../crates/packetcraftr/data/os-fingerprints.provenance.yaml); [M10](roadmap/m10-os-identification.md) in progress |
+| Port | Factual names/selections and creative payload bytes; original port catalog and UDP profiles |
+| Service | Requests, literal matches, product/version metadata; original [service identification](service-identification.md) corpus and exclusions |
+| OS | Original Linux Ethernet profiles in [OS provenance](../crates/packetcraftr/data/os-fingerprints.provenance.yaml) ([OS identification](os-identification.md)) |
 | Vendor | Prefix assignments; none bundled, so discovery emits links without vendor labels |
 
 Current sources: [port catalog](../crates/packetcraftr/data/port-catalog.provenance.yaml),
@@ -59,8 +59,9 @@ redistributable. The project makes no license claim over operator input.
 ## Packaging
 
 Embedded and separate assets both require completed source review, manifest,
-and independent version. M6 catalog/UDP and M8/M9 probes/exclusions are embedded
-with adjacent provenance; no packaging choice bypasses review.
+and independent version. Port catalogs, UDP payloads, service probes/exclusions,
+and OS fingerprints are embedded with adjacent provenance; no packaging choice
+bypasses review.
 
 ## Versioning, maintenance, and coverage
 

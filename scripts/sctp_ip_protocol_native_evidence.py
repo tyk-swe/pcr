@@ -1,6 +1,6 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""M13 SCTP and IP-protocol native evidence inventory and strict validation."""
+"""SCTP and IP-protocol native evidence inventory and strict validation."""
 import json
 import re
 
@@ -42,18 +42,18 @@ def strict_json(text):
 def validate_corpus(corpus):
     cases = corpus.get("sctp_ip_protocol_scenarios", [])
     if [case.get("id") for case in cases] != list(MODES):
-        raise ValueError("M13 SCTP/IP-protocol corpus inventory missing or reordered")
+        raise ValueError("SCTP/IP-protocol corpus inventory missing or reordered")
     for case in cases:
         if case.get("families") != list(FAMILIES):
-            raise ValueError("M13 corpus case must cover ipv4 and ipv6")
+            raise ValueError("SCTP/IP-protocol corpus case must cover ipv4 and ipv6")
         endpoints = case.get("endpoints", [])
         if not endpoints:
-            raise ValueError("M13 corpus case lacks endpoints")
+            raise ValueError("SCTP/IP-protocol corpus case lacks endpoints")
         for row in endpoints:
             if row.get("status") not in ("response", "timeout"):
-                raise ValueError("invalid M13 corpus status")
+                raise ValueError("invalid SCTP/IP-protocol corpus status")
             if (row.get("status") == "timeout") != (row.get("reply") is None):
-                raise ValueError("silent M13 corpus row cannot carry a reply")
+                raise ValueError("silent SCTP/IP-protocol corpus row cannot carry a reply")
 
 
 def inventory(profiles=PROFILES):

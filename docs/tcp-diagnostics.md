@@ -3,8 +3,7 @@
 Raw scans can send ACK, window, FIN, NULL, Xmas, Maimon, or custom-flag TCP
 segments instead of SYN. Their states are stack-dependent inferences kept beside
 every attempt, not reliable open/closed detection, service identification, or
-authenticated identity. See [evidence tables](scanner-evidence.md#port-inference)
-and [M12](roadmap/m12-tcp-diagnostic-scans.md).
+authenticated identity. See [evidence tables](scanner-evidence.md#port-inference).
 
 ## Use
 
@@ -63,4 +62,4 @@ Output/v15 publishes `tcp_scan` (`{mode, flags}`) and `tcp_window`; see the
 [v15 contract](consumer-compatibility.md#output-family-v15),
 [aggregate fixture](../examples/documents/output-scan-tcp-diagnostic.json),
 [event fixture](../examples/documents/output-scan-tcp-diagnostic-event.json),
-and [native validation](native-validation.md#m12-tcp-diagnostic-acceptance).
+and [native validation](native-validation.md#tcp-diagnostic-acceptance).

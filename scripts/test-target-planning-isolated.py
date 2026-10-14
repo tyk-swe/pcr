@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""M4 scoped evidence across Linux profiles, using fresh private namespaces."""
+"""Scoped target-planning evidence across Linux profiles, using fresh private namespaces."""
 import argparse
 import importlib.util
 import json
@@ -31,7 +31,7 @@ host = load('host', 'test-native-platform.py')
 def child(args):
     namespace = os.stat('/proc/self/ns/net').st_ino
     if namespace == args.parent_namespace or {name for _, name in socket.if_nameindex()} != {'lo'}:
-        raise RuntimeError('refusing M4 fixtures outside a fresh private network namespace')
+        raise RuntimeError('refusing scoped target fixtures outside a fresh private network namespace')
     isolated.ip('link', 'set', 'lo', 'up')
     result = dict(namespace=namespace, parent_namespace=args.parent_namespace)
     try:
@@ -44,9 +44,9 @@ def child(args):
 
 
 def parent(args):
-    report = host.unavailable_report('Only M4 scoped target evidence is selected.')
+    report = host.unavailable_report('Only scoped target evidence is selected.')
     if report['dirty']:
-        raise RuntimeError('M4 profile evidence requires a clean implementation revision')
+        raise RuntimeError('Scoped target profile evidence requires a clean implementation revision')
     namespace = os.stat('/proc/self/ns/net').st_ino
     mapping = ['--map-root-user']
     if os.geteuid() == 0 and 'SUDO_UID' in os.environ:
@@ -119,7 +119,7 @@ def parent(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--report', type=pathlib.Path, default=ROOT / 'target/validation/m4-linux/native-platform.json')
+    parser.add_argument('--report', type=pathlib.Path, default=ROOT / 'target/validation/target-planning-linux/native-platform.json')
     parser.add_argument('--binary', type=pathlib.Path, help=argparse.SUPPRESS)
     parser.add_argument('--profile', choices=PROFILES, help=argparse.SUPPRESS)
     parser.add_argument('--parent-namespace', type=int, help=argparse.SUPPRESS)

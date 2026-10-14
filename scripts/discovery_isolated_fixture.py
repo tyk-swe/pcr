@@ -8,8 +8,8 @@ import struct
 import subprocess
 import threading
 
-SCANNER = 'pcrm5s'
-PEER = 'pcrm5p'
+SCANNER = 'pcrds'
+PEER = 'pcrdp'
 
 
 def checksum(data):

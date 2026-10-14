@@ -99,6 +99,9 @@ remaining acceptance gates.
 
 ### Fixed
 
+- Keep compact IP reply ambiguity history for the entire operation, including
+  serial execution, adaptive waves, and discovery-to-scan transitions.
+
 - Retain ambiguous IP retry replies as unattributed evidence, distinguish
   IPv6 link padding from Jumbo Payload options, and count excluded TCP
   discovery endpoints after SYN/ACK expansion.

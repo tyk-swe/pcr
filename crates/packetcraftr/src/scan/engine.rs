@@ -106,7 +106,7 @@ where
                 controller.host_index(target);
             }
         }
-    } else if request.max_in_flight > 1 {
+    } else if request.max_in_flight > 1 || request.has_ip_probes() {
         // Each stage is admitted for every target before any neighbor request
         // or probe, though discovery may leave the scan fewer.
         let mut first_sequence = 0;

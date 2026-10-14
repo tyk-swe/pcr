@@ -153,6 +153,7 @@ pub(super) fn run<P: PacketProviders, K: Clock>(
     batches: &[Batch<Probe>],
     options: PipelineOptions,
     emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    history: &mut super::reply_history::ReplyHistory,
 ) -> Result<Stats, BoundaryError> {
     validate_options(batches, &options)?;
     let started = executor.client.now();
@@ -167,7 +168,7 @@ pub(super) fn run<P: PacketProviders, K: Clock>(
         deadline,
         started,
         &preparation,
-        emit,
+        (emit, history),
     )?;
     let result = pipeline.drive();
     pipeline.finish(result)
@@ -287,6 +288,7 @@ pub(super) fn admit_adaptive<P: PacketProviders, K: Clock>(
 type CaptureSession<P> = <<P as CaptureProviders>::Capture as capture::Provider>::Capture;
 
 struct Pipeline<'a, P: PacketProviders, K> {
+    history: &'a mut super::reply_history::ReplyHistory,
     executor: &'a ExchangeExecutor<'a, P, K>,
     batches: &'a [Batch<Probe>],
     planned: Vec<Planned<'a>>,
@@ -325,7 +327,10 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         deadline: Instant,
         started: Instant,
         preparation: &'a Deadline,
-        emit: &'a mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+        (emit, history): (
+            &'a mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+            &'a mut super::reply_history::ReplyHistory,
+        ),
     ) -> Result<Self, BoundaryError> {
         let planned = batches
             .iter()
@@ -355,6 +360,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             * source_count;
         let seen = SeenFrames::new(options.max_evidence_frames);
         Ok(Self {
+            history,
             executor,
             batches,
             planned,
@@ -529,6 +535,11 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
                 .map_err(BoundaryError::from_error)?,
         );
         self.stats.packets_completed += 1;
+        self.history.sent(
+            probe,
+            &sent.built().packet,
+            &sent.route().plan.decision.interface,
+        );
         self.stats.bytes = self
             .stats
             .bytes
@@ -697,20 +708,16 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         }
         let (index, observation) = candidates.pop().expect("one candidate");
         if observation.response.reply == Reply::IpProtocolPayload
-            && !settled(
-                self.recent.iter().map(|(index, sent, _)| (*index, sent)),
-                &self.planned,
-                &self.executor.client.registry,
-                &decoded,
+            && self.history.ambiguous(
+                self.planned[index].probe,
+                &decoded.packet,
                 &self.plan.interfaces[source],
-                received,
             )
-            .is_empty()
         {
             if self.diagnostics.insert("ambiguous") {
                 (self.emit)(PipelineEvent::Diagnostic(Diagnostic::warning(
                     "scan.ambiguous_response",
-                    "identity-less capture also matched a settled probe and was not attributed",
+                    "identity-less capture also matched a previous transmission and was not attributed",
                 )))?;
             }
             return self.unattributed(raw, Attribution::Ambiguous, None);

@@ -36,6 +36,13 @@ attributed reply within its window; otherwise `timeout`.
 Checksum failures produce no observation. Undecodable, unsolicited, late,
 duplicate, and ambiguous replies stay unattributed and never overwrite a timeout.
 
+Direct IP-protocol replies carry no attempt identifier. Bounded transmission
+history for each interface, address pair, and protocol lasts until the operation
+ends. A reply compatible with an earlier transmission stays unattributed even
+after its packet evidence is evicted, across serial execution, adaptive waves,
+and discovery-to-scan transitions. Quoted ICMP errors retain their independent
+header identity and can still provide an attributable outcome.
+
 ### Connect scan attempts (`connect_probe` events and `endpoints[].probes[]`)
 
 Connect evidence (`method: tcp_connect`) records socket outcomes rather than wire

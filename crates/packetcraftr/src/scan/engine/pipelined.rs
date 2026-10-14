@@ -30,6 +30,13 @@ pub(super) struct StagePlan<'a> {
 }
 
 impl StagePlan<'_> {
+    fn uses_pipeline(&self, request: &Request) -> bool {
+        request.max_in_flight > 1
+            || self
+                .endpoints
+                .iter()
+                .any(|endpoint| matches!(endpoint, ProbeEndpoint::Ip { .. }))
+    }
     pub(super) fn probes(&self, request: &Request) -> Result<u64, Error> {
         probe_count(self.targets.len(), self.endpoints.len(), request.attempts)
             .map(|count| count as u64)
@@ -72,7 +79,7 @@ where
         return Ok(crate::Stats::default());
     }
     enforce_deadline(&Probes, deadline)?;
-    if request.max_in_flight == 1 {
+    if !plan.uses_pipeline(request) {
         let probes = run_batches(
             plan.batches(request),
             request.probes_per_second,
@@ -118,6 +125,9 @@ pub(super) fn admit_pipelined<E: Pipelined>(
     deadline: &Deadline,
     plan: &StagePlan<'_>,
 ) -> Result<(), Error> {
+    if !plan.uses_pipeline(request) {
+        return Ok(());
+    }
     if plan.targets.is_empty() || plan.endpoints.is_empty() {
         return Ok(());
     }

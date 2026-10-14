@@ -3,7 +3,7 @@
 
 pub(super) mod packet;
 mod reply_identity;
-pub(super) use reply_identity::replies_overlap;
+pub(super) use reply_identity::{replies_overlap, response_protocol};
 
 use std::net::IpAddr;
 use std::time::Duration;

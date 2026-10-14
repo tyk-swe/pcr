@@ -18,7 +18,7 @@ pub(in crate::scan) fn replies_overlap(a: &Probe, b: &Probe) -> bool {
         || (a.address.is_ipv6() && (extension_probe(a.endpoint) || extension_probe(b.endpoint)))
 }
 
-fn response_protocol(endpoint: ProbeEndpoint, ipv6: bool) -> u8 {
+pub(in crate::scan) fn response_protocol(endpoint: ProbeEndpoint, ipv6: bool) -> u8 {
     match endpoint {
         ProbeEndpoint::Ip { protocol } => protocol,
         ProbeEndpoint::Tcp { .. } | ProbeEndpoint::TcpAck { .. } => ip_protocol::TCP,

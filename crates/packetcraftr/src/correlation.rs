@@ -346,26 +346,28 @@ fn direct_ip_protocol_reply(request: &Packet, response: &Packet) -> Option<IpAdd
             matches!((&req.protocol, &resp.protocol), (WireValue::Exact(a), WireValue::Exact(b)) if a == b)
         }
         _ => match (request.get::<Ipv6>(), response.get::<Ipv6>()) {
-            (Some(req), Some(resp)) => match req.next_header {
-                WireValue::Exact(protocol) => {
-                    matches!(resp.next_header, WireValue::Exact(value) if value == protocol)
-                        || semantics::outer_layers(response)
-                            .skip_while(|layer| !layer.is::<Ipv6>())
-                            .skip(1)
-                            .take_while(|layer| {
-                                BuiltinProtocol::of(*layer)
-                                    .is_some_and(BuiltinProtocol::is_ipv6_extension)
-                            })
-                            .any(|layer| {
-                                matches!(layer.field("next_header"), Some(FieldValue::Unsigned(value)) if value == u64::from(protocol))
-                            })
-                }
+            (Some(req), Some(_)) => match req.next_header {
+                WireValue::Exact(protocol) => outer_has_protocol(response, protocol),
                 _ => false,
             },
             _ => false,
         },
     };
     protocol_matches.then_some(response_path.source)
+}
+
+pub(crate) fn outer_has_protocol(packet: &Packet, protocol: u8) -> bool {
+    let mut layers = semantics::outer_layers(packet)
+        .skip_while(|layer| !BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ip));
+    let Some(header) = layers.next() else {
+        return false;
+    };
+    if let Some(ipv4) = header.downcast_ref::<Ipv4>() {
+        return ipv4.protocol == WireValue::Exact(protocol);
+    }
+    header.downcast_ref::<Ipv6>().is_some_and(|ipv6| ipv6.next_header == WireValue::Exact(protocol))
+        || layers.take_while(|layer| BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ipv6_extension))
+            .any(|layer| matches!(layer.field("next_header"), Some(FieldValue::Unsigned(value)) if value == u64::from(protocol)))
 }
 
 fn classify_icmp_error(

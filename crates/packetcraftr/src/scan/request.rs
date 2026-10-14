@@ -165,6 +165,18 @@ pub struct Request {
 }
 
 impl Request {
+    pub(super) fn has_ip_probes(&self) -> bool {
+        self.endpoints
+            .iter()
+            .any(|endpoint| matches!(endpoint, crate::probe::ProbeEndpoint::Ip { .. }))
+            || self.discovery.runs()
+                && self
+                    .discovery
+                    .probes
+                    .iter()
+                    .any(|endpoint| matches!(endpoint, crate::probe::ProbeEndpoint::Ip { .. }))
+    }
+
     pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
         if self.max_in_flight == 0 || self.max_in_flight > MAX_IN_FLIGHT {

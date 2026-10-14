@@ -42,7 +42,7 @@ use crate::common::{self, responder};
 const SCTP_PORTS: [u16; 6] = [2000, 2001, 2002, 2003, 2004, 2005];
 const IP_PROTOCOLS: [u8; 5] = [47, 50, 112, 115, 254];
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Schedule {
     Serial,
     Pipelined,
@@ -90,6 +90,7 @@ struct ScriptedIo {
     sent: Arc<Mutex<Vec<Packet>>>,
     delivery_ingress: bool,
     replay_first_ip_reply: bool,
+    withhold_first_ip_reply: bool,
 }
 
 struct ScriptedCapture {
@@ -147,9 +148,35 @@ impl transmit::Provider for ScriptedIo {
         let decoded = decode(&wire);
         let mut sent = self.sent.lock().unwrap();
         sent.push(decoded.clone());
-        let frames = if self.replay_first_ip_reply && sent.len() > 1 {
-            let first = &sent[0];
-            respond(first, &encode(first.clone()))
+        let is_ip47 = |packet: &Packet| {
+            packet
+                .get::<Ipv4>()
+                .is_some_and(|ip| ip.protocol == WireValue::Exact(47))
+                || packet
+                    .get::<Ipv6>()
+                    .is_some_and(|ip| ip.next_header == WireValue::Exact(47))
+        };
+        let previous = sent[..sent.len() - 1].iter().find(|packet| is_ip47(packet));
+        let replay_icmp = self.replay_first_ip_reply
+            && sent.len() > 1
+            && ((decoded
+                .get::<Ipv4>()
+                .is_some_and(|ip| ip.protocol == WireValue::Exact(1))
+                && decoded.get::<Icmpv4>().is_none())
+                || (decoded
+                    .get::<Ipv6>()
+                    .is_some_and(|ip| ip.next_header == WireValue::Exact(58))
+                    && decoded.get::<Icmpv6>().is_none()));
+        let frames = if replay_icmp {
+            respond(&sent[0], &encode(sent[0].clone()))
+        } else if self.replay_first_ip_reply && is_ip47(&decoded) {
+            if let Some(first) = previous {
+                respond(first, &encode(first.clone()))
+            } else if self.withhold_first_ip_reply {
+                Vec::new()
+            } else {
+                respond(&decoded, &wire)
+            }
         } else {
             respond(&decoded, &wire)
         };
@@ -383,8 +410,18 @@ fn respond(sent: &Packet, wire: &Bytes) -> Vec<Frame> {
         return vec![frame(reply)];
     }
 
-    if sent.get::<Icmpv6>().is_some() {
-        return Vec::new();
+    if let Some(icmp) = sent.get::<Icmpv6>() {
+        if icmp.icmp_type != 128 {
+            return Vec::new();
+        }
+        let mut reply = ip_envelope(destination, source, None);
+        reply.push(Icmpv6 {
+            icmp_type: 129,
+            code: 0,
+            body: icmp.body.clone(),
+            ..Icmpv6::default()
+        });
+        return vec![frame(reply)];
     }
 
     // Empty-payload IP-protocol probe.
@@ -503,12 +540,13 @@ fn client() -> (Client<Fixtures>, Arc<Mutex<Vec<Packet>>>) {
 fn client_with_delivery_ingress(
     delivery_ingress: bool,
 ) -> (Client<Fixtures>, Arc<Mutex<Vec<Packet>>>) {
-    client_with_reply_flags(delivery_ingress, false)
+    client_with_reply_flags(delivery_ingress, false, false)
 }
 
 fn client_with_reply_flags(
     delivery_ingress: bool,
     replay_first_ip_reply: bool,
+    withhold_first_ip_reply: bool,
 ) -> (Client<Fixtures>, Arc<Mutex<Vec<Packet>>>) {
     let sent = Arc::new(Mutex::new(Vec::new()));
     let io = ScriptedIo {
@@ -516,6 +554,7 @@ fn client_with_reply_flags(
         sent: Arc::clone(&sent),
         delivery_ingress,
         replay_first_ip_reply,
+        withhold_first_ip_reply,
     };
     let providers = ProviderSet {
         udp: (),
@@ -800,59 +839,145 @@ fn pipelined_ip_identities_serialize_while_independent_protocols_keep_parallelis
 }
 
 #[test]
-fn a_delayed_duplicate_never_answers_an_ip_retry_or_adds_retry_rtt() {
+fn operation_history_preserves_ambiguity_across_schedules_and_retention_eviction() {
+    for ipv6 in [false, true] {
+        for schedule in [Schedule::Serial, Schedule::Pipelined, Schedule::Adaptive] {
+            for withhold in [false, true] {
+                // Adaptive scheduling skips retries once the endpoint is open.
+                if schedule == Schedule::Adaptive && !withhold {
+                    continue;
+                }
+                for protocols in [vec![47], vec![47, 4, 41, 50, 112]] {
+                    let mut request = base_request(
+                        ipv6,
+                        protocols
+                            .iter()
+                            .map(|&protocol| ProbeEndpoint::Ip { protocol })
+                            .collect(),
+                        schedule,
+                    );
+                    request.attempts = 2;
+                    request.max_in_flight = if schedule == Schedule::Serial { 1 } else { 2 };
+                    let (client, _) = client_with_reply_flags(true, true, withhold);
+                    let collector = scan::Collector::default();
+                    let report = client.scan(request, collector.clone()).unwrap();
+                    let aggregate = collector.finish(report).unwrap();
+                    let endpoint = aggregate
+                        .endpoints
+                        .iter()
+                        .find(|endpoint| endpoint.ip_protocol == Some(47))
+                        .unwrap();
+                    assert_eq!(endpoint.probes.len(), 2, "{schedule:?}, {withhold}");
+                    assert_eq!(
+                        endpoint.probes[0].status,
+                        if withhold {
+                            ProbeStatus::Timeout
+                        } else {
+                            ProbeStatus::Response
+                        }
+                    );
+                    let retry = &endpoint.probes[1];
+                    assert_eq!(retry.status, ProbeStatus::Timeout);
+                    assert!(
+                        retry.reply.is_none()
+                            && retry.response.is_none()
+                            && retry.latency.is_none()
+                    );
+                    assert!(!aggregate.unattributed.is_empty());
+                    assert_eq!(
+                        aggregate.unattributed[0].attribution,
+                        scan::Attribution::Ambiguous
+                    );
+                    assert_eq!(aggregate.unattributed[0].sequence, None);
+                    if protocols.len() == 1 {
+                        assert_eq!(aggregate.unattributed.len(), 1);
+                        assert_eq!(aggregate.rtt.received, u64::from(!withhold));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn discovery_reply_history_prevents_attributing_a_duplicate_to_the_scan_stage() {
+    for ipv6 in [false, true] {
+        for schedule in [Schedule::Serial, Schedule::Pipelined, Schedule::Adaptive] {
+            let mut request =
+                base_request(ipv6, vec![ProbeEndpoint::Ip { protocol: 47 }], schedule);
+            request.discovery = discovery::Options {
+                mode: discovery::Mode::Before,
+                probes: request.endpoints.clone(),
+                ..Default::default()
+            };
+            let (client, sent) = client_with_reply_flags(true, true, false);
+            let collector = scan::Collector::default();
+            let report = client.scan(request, collector.clone()).unwrap();
+            let aggregate = collector.finish(report).unwrap();
+            assert_eq!(sent.lock().unwrap().len(), 2);
+            let probe = &aggregate.endpoints[0].probes[0];
+            assert_eq!(probe.status, ProbeStatus::Timeout);
+            assert!(probe.latency.is_none() && probe.response.is_none());
+            assert_eq!(aggregate.rtt.received, 1);
+            assert_eq!(aggregate.unattributed.len(), 1);
+            assert_eq!(
+                aggregate.unattributed[0].attribution,
+                scan::Attribution::Ambiguous
+            );
+        }
+    }
+}
+
+#[test]
+fn typed_serial_discovery_history_also_protects_a_later_ip_probe() {
     for ipv6 in [false, true] {
         let mut request = base_request(
             ipv6,
-            vec![ProbeEndpoint::Ip { protocol: 47 }],
-            Schedule::Pipelined,
+            vec![ProbeEndpoint::Ip {
+                protocol: if ipv6 { 58 } else { 1 },
+            }],
+            Schedule::Serial,
         );
-        request.attempts = 2;
-        request.max_in_flight = 2;
-        let (client, sent) = client_with_reply_flags(true, true);
+        request.discovery = discovery::Options {
+            mode: discovery::Mode::Before,
+            probes: vec![ProbeEndpoint::Icmp],
+            ..Default::default()
+        };
+        let (client, sent) = client_with_reply_flags(true, true, false);
         let collector = scan::Collector::default();
         let report = client.scan(request, collector.clone()).unwrap();
         let aggregate = collector.finish(report).unwrap();
-        assert_eq!(sent.lock().unwrap().len(), 2);
-        let probes = &aggregate.endpoints[0].probes;
-        assert_eq!(probes[0].status, ProbeStatus::Response);
-        assert_eq!(probes[1].status, ProbeStatus::Timeout);
-        assert_eq!(probes[1].reply, None);
-        assert!(probes[1].response.is_none());
-        assert!(probes[1].latency.is_none());
-        assert_eq!(aggregate.rtt.received, 1);
         assert_eq!(
-            aggregate.endpoints[0].inference.as_ref().unwrap().state,
-            Some(State::Open)
+            sent.lock().unwrap().len(),
+            2,
+            "{ipv6}: {:?}",
+            aggregate.hosts
         );
+        let probe = &aggregate.endpoints[0].probes[0];
+        assert_eq!(probe.status, ProbeStatus::Timeout);
+        assert!(probe.response.is_none() && probe.latency.is_none());
+        assert_eq!(aggregate.rtt.received, 1);
         assert_eq!(aggregate.unattributed.len(), 1);
         assert_eq!(
             aggregate.unattributed[0].attribution,
             scan::Attribution::Ambiguous
         );
-        assert_eq!(aggregate.unattributed[0].sequence, None);
     }
 }
 
 #[test]
 fn ipv6_ip_protocol_replies_match_extension_chains_and_extension_numbers() {
-    let protocols = [47, 0, 60, 44, 43, 99];
-    let mut request = base_request(
-        true,
-        protocols
-            .into_iter()
-            .map(|protocol| ProbeEndpoint::Ip { protocol })
-            .collect(),
-        Schedule::Serial,
-    );
-    request.timeout = Duration::from_millis(200);
-    let (client, _) = client();
-    let collector = scan::Collector::default();
-    let report = client.scan(request, collector.clone()).unwrap();
-    let aggregate = collector.finish(report).unwrap();
-    assert_eq!(aggregate.endpoints.len(), protocols.len());
-    for endpoint in &aggregate.endpoints {
-        let matched = endpoint.ip_protocol != Some(99);
+    // Each extension identity gets a fresh operation: one reply could match
+    // every member of this chain, so combined probes must remain ambiguous.
+    for protocol in [47, 0, 60, 44, 43, 99] {
+        let request = base_request(true, vec![ProbeEndpoint::Ip { protocol }], Schedule::Serial);
+        let (client, _) = client();
+        let collector = scan::Collector::default();
+        let report = client.scan(request, collector.clone()).unwrap();
+        let aggregate = collector.finish(report).unwrap();
+        assert_eq!(aggregate.endpoints.len(), 1);
+        let endpoint = &aggregate.endpoints[0];
+        let matched = protocol != 99;
         assert_eq!(
             endpoint.probes[0].status,
             if matched {

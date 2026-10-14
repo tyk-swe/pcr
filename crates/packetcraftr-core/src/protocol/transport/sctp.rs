@@ -214,7 +214,7 @@ fn warn_zero_port(diagnostics: &mut Vec<Diagnostic>, field: &'static str, which:
     );
 }
 
-fn validate_chunks(payload: &[u8], require_zero_padding: bool) -> Result<(), String> {
+pub(crate) fn validate_chunks(payload: &[u8], require_zero_padding: bool) -> Result<(), String> {
     if payload.is_empty() {
         return Err("packet must contain at least one SCTP chunk".to_owned());
     }

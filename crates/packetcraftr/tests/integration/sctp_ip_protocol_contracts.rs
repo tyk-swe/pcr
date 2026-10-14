@@ -63,6 +63,7 @@ impl route::Provider for Routes {
         _: &Deadline,
     ) -> Result<route::Decision, Infallible> {
         let source = match destination {
+            ip if ip.is_loopback() => ip,
             IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
             IpAddr::V6(_) => IpAddr::V6("2001:db8::1".parse::<Ipv6Addr>().unwrap()),
         };
@@ -167,7 +168,30 @@ impl transmit::Provider for ScriptedIo {
                     .get::<Ipv6>()
                     .is_some_and(|ip| ip.next_header == WireValue::Exact(58))
                     && decoded.get::<Icmpv6>().is_none()));
-        let frames = if replay_icmp {
+        let local = decoded
+            .get::<Ipv4>()
+            .is_some_and(|ip| ip.source == ip.destination)
+            || decoded
+                .get::<Ipv6>()
+                .is_some_and(|ip| ip.source == ip.destination);
+        let frames = if local {
+            let address = decoded
+                .get::<Ipv4>()
+                .map(|ip| IpAddr::V4(ip.source))
+                .unwrap_or_else(|| IpAddr::V6(decoded.get::<Ipv6>().unwrap().source));
+            vec![
+                frame(decoded.clone()),
+                frame(icmp_error(
+                    address.is_ipv6(),
+                    address,
+                    address,
+                    (3, 2),
+                    (4, 1),
+                    6,
+                    &wire,
+                )),
+            ]
+        } else if replay_icmp {
             respond(&sent[0], &encode(sent[0].clone()))
         } else if self.replay_first_ip_reply && is_ip47(&decoded) {
             if let Some(first) = previous {
@@ -339,11 +363,35 @@ fn respond(sent: &Packet, wire: &Bytes) -> Vec<Frame> {
                 ..Sctp::default()
             });
             reply.push(Raw::new(chunk));
-            frame(reply)
+            if matches!(sctp.destination_port, 2007 | 2008) {
+                let built = Builder::new(builtin::registry())
+                    .build(
+                        reply,
+                        Default::default(),
+                        packetcraftr_core::build::Options {
+                            mode: packetcraftr_core::codec::Mode::Permissive,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, built.bytes).unwrap()
+            } else {
+                frame(reply)
+            }
         };
         return match sctp.destination_port {
             2000 | 9899 => vec![sctp_reply(tag, sctp_init_ack_chunk(0x1122_3344))],
             2001 => vec![sctp_reply(tag, Bytes::from_static(&[6, 1, 0, 4]))],
+            2007 | 2008 => {
+                let mut chunk = sctp_init_ack_chunk(0x1122_3344).to_vec();
+                if sctp.destination_port == 2007 {
+                    chunk.extend_from_slice(&[6, 0, 0]);
+                } else {
+                    chunk[3] = 21;
+                    chunk.push(0);
+                }
+                vec![sctp_reply(tag, Bytes::from(chunk))]
+            }
             2002 => vec![sctp_reply(tag, Bytes::from_static(&[9, 0, 0, 4]))],
             2003 => vec![frame(icmp_error(
                 ipv6,
@@ -1123,5 +1171,65 @@ fn extra_discovery_probes_record_host_reasons_and_reject_ipv6_timestamp_or_netma
             .unwrap_err();
         assert!(matches!(error, scan::Error::InvalidDiscovery { .. }));
         assert!(sent.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn self_captured_loopback_ip_probes_do_not_hide_protocol_unreachable() {
+    for ipv6 in [false, true] {
+        for schedule in [Schedule::Serial, Schedule::Pipelined, Schedule::Adaptive] {
+            let mut request =
+                base_request(ipv6, vec![ProbeEndpoint::Ip { protocol: 254 }], schedule);
+            request.targets.include = vec![Specification::Target(Target::Address(if ipv6 {
+                IpAddr::V6(Ipv6Addr::LOCALHOST)
+            } else {
+                IpAddr::V4(Ipv4Addr::LOCALHOST)
+            }))];
+            let (client, _) = client();
+            let collector = scan::Collector::default();
+            let report = client.scan(request, collector.clone()).unwrap();
+            let aggregate = collector.finish(report).unwrap();
+            let endpoint = &aggregate.endpoints[0];
+            assert_eq!(
+                endpoint.probes[0].reply,
+                Some(scan::Reply::IcmpProtocolUnreachable)
+            );
+            assert_eq!(
+                endpoint.inference.as_ref().unwrap().state,
+                Some(State::Closed)
+            );
+        }
+    }
+}
+
+#[test]
+fn checksum_valid_init_ack_with_malformed_trailing_chunks_never_opens_an_endpoint() {
+    for ipv6 in [false, true] {
+        let request = base_request(
+            ipv6,
+            [2000, 2007, 2008]
+                .map(|port| ProbeEndpoint::Sctp { port })
+                .to_vec(),
+            Schedule::Pipelined,
+        );
+        let (client, _) = client();
+        let collector = scan::Collector::default();
+        let report = client.scan(request, collector.clone()).unwrap();
+        let aggregate = collector.finish(report).unwrap();
+        for endpoint in &aggregate.endpoints {
+            let valid = endpoint.port == Some(2000);
+            assert_eq!(
+                endpoint.probes[0].status,
+                if valid {
+                    ProbeStatus::Response
+                } else {
+                    ProbeStatus::Timeout
+                }
+            );
+            assert_eq!(
+                endpoint.inference.as_ref().unwrap().state,
+                Some(if valid { State::Open } else { State::Filtered })
+            );
+        }
     }
 }

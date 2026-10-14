@@ -8,6 +8,7 @@ mod udp;
 
 pub use sctp::Sctp;
 pub(crate) use sctp::SctpCodec;
+pub(crate) use sctp::validate_chunks as validate_sctp_chunks;
 pub(crate) use tcp::TcpCodec;
 pub use tcp::{SackBlock, Tcp, TcpOption};
 pub use udp::Udp;

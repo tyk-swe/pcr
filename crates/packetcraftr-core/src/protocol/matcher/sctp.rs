@@ -6,6 +6,7 @@ use bytes::Bytes;
 use crate::packet::Packet;
 
 use super::opaque_bytes;
+use crate::protocol::transport::validate_sctp_chunks;
 
 const CHUNK_HEADER_LEN: usize = 4;
 
@@ -52,6 +53,8 @@ pub(super) fn sctp_cookie_echo(packet: &Packet, sctp_index: usize) -> Option<Byt
 pub fn sctp_response_kind(packet: &Packet, sctp_index: usize) -> Option<SctpResponseKind> {
     let chunk_index = sctp_index.checked_add(1)?;
     let bytes = opaque_bytes(packet.layer(chunk_index)?)?;
+    // Validate every chunk before recognizing the leading INIT ACK.
+    validate_sctp_chunks(bytes, false).ok()?;
     if bytes.is_empty() {
         return None;
     }

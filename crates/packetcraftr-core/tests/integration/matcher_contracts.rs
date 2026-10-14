@@ -410,3 +410,57 @@ fn sctp_cookie_echo_icmp_and_ip_protocol_quotes_correlate_strictly() {
         assert!(icmp_matcher.matches(&req, &resp).is_some());
     }
 }
+
+#[test]
+fn init_ack_requires_complete_chunk_framing_and_padding() {
+    let reg = registry();
+    let matcher = reg.matcher("sctp").unwrap();
+    let request = build_probe(NetworkVersion::V4, ProbeTransport::Sctp);
+    let valid = vec![
+        2, 0, 0, 20, 0x11, 0x22, 0x33, 0x44, 0, 1, 0, 0, 0, 10, 0, 10, 0, 0, 0, 1,
+    ];
+    let mut missing_padding = valid.clone();
+    missing_padding[3] = 21;
+    missing_padding.push(0);
+    let mut chunks = vec![(valid.clone(), true), (missing_padding, false)];
+    for suffix in [
+        vec![6],
+        vec![6, 0, 0],
+        vec![6, 0, 0, 8],
+        vec![6, 0, 0, 3],
+        vec![6, 0, 0, 4],
+    ] {
+        let mut malformed = valid.clone();
+        malformed.extend_from_slice(&suffix);
+        chunks.push((malformed, false));
+    }
+    for (chunk, valid) in chunks {
+        let mut response = ipv4_envelope(IPV4_SERVER, IPV4_CLIENT);
+        response.push(Sctp {
+            source_port: SERVER_PORT,
+            destination_port: CLIENT_PORT,
+            verification_tag: INITIATE_TAG,
+            ..Default::default()
+        });
+        response.push(Raw::new(Bytes::from(chunk)));
+        // Building supplies a correct CRC, so rejection tests chunk framing.
+        let response = build::Builder::new(registry())
+            .build(
+                response,
+                codec::Context::default(),
+                build::Options {
+                    mode: codec::Mode::Permissive,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            sctp_response_kind(&response.packet, 1),
+            valid.then_some(SctpResponseKind::InitAck)
+        );
+        assert_eq!(
+            matcher.matches(&request.packet, &response.packet).is_some(),
+            valid
+        );
+    }
+}

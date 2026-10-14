@@ -341,6 +341,21 @@ fn direct_ip_protocol_reply(request: &Packet, response: &Packet) -> Option<IpAdd
     {
         return None;
     }
+    if request_path.source == request_path.final_destination {
+        let self_capture = match (request.get::<Ipv4>(), response.get::<Ipv4>()) {
+            (Some(req), Some(resp)) => {
+                req.identification == resp.identification
+                    && req.options == resp.options
+                    && resp.total_length == WireValue::Exact((20 + resp.options.len()) as u16)
+            }
+            _ => matches!((request.get::<Ipv6>(), response.get::<Ipv6>()),
+                (Some(req), Some(resp)) if req.flow_label == resp.flow_label
+                    && resp.payload_length == WireValue::Exact(0)),
+        };
+        if self_capture {
+            return None;
+        }
+    }
     let protocol_matches = match (request.get::<Ipv4>(), response.get::<Ipv4>()) {
         (Some(req), Some(resp)) => {
             matches!((&req.protocol, &resp.protocol), (WireValue::Exact(a), WireValue::Exact(b)) if a == b)

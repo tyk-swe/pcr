@@ -99,6 +99,9 @@ remaining acceptance gates.
 
 ### Fixed
 
+- Loopback IP scans exclude captures of their own empty transmitted probes,
+  and SCTP INIT ACK observations validate every chunk's framing and padding.
+
 - Keep compact IP reply ambiguity history for the entire operation, including
   serial execution, adaptive waves, and discovery-to-scan transitions.
 

@@ -377,9 +377,12 @@ fn parse_quoted_probe(bytes: &[u8], require_transport: bool) -> Option<QuotedPro
         }
         6 => {
             if !require_transport
-                && bytes.len() == Ipv6Header::LENGTH
+                && bytes.len() >= Ipv6Header::LENGTH
                 && bytes.get(4..6) == Some(&[0, 0])
             {
+                // The declared empty datagram ends at the base header. RFC
+                // 4884 padding and ICMP extensions belong to the error, not
+                // the quoted packet (and must not imply a jumbogram).
                 let first = u32::from_be_bytes(<[u8; 4]>::try_from(bytes.get(..4)?).ok()?);
                 return Some(QuotedProbe {
                     source: IpAddr::V6(Ipv6Addr::from(

@@ -172,6 +172,49 @@ fn quoted_response(network: NetworkVersion, quote: &[u8], icmp_type: u8, code: u
 }
 
 #[test]
+fn empty_ipv6_protocol_quotes_ignore_padding_and_icmp_extensions() {
+    for protocol in [0, 6, 47, 59, 60] {
+        let mut packet = ipv6_envelope(IPV6_CLIENT, IPV6_SERVER);
+        let ipv6 = packet.get_mut::<Ipv6>().unwrap();
+        ipv6.next_header = WireValue::Exact(protocol);
+        ipv6.flow_label = 0x12345;
+        let request = build_packet(packet);
+        let mut quote = request.bytes.to_vec();
+        quote.resize(128, 0);
+        // RFC 4884 extension header and an MPLS object, including checksum.
+        quote.extend_from_slice(&[0x20, 0, 0xdd, 0xb6, 0, 8, 1, 1, 0, 0, 1, 0x40]);
+        for (icmp_type, code, kind) in [
+            (1, 1, IcmpErrorKind::AdministrativelyProhibited),
+            (3, 0, IcmpErrorKind::TimeExceeded),
+        ] {
+            let mut response = quoted_response(NetworkVersion::V6, &quote, icmp_type, code);
+            let icmp = response.get_mut::<Icmpv6>().unwrap();
+            let mut body = icmp.body.to_vec();
+            body[0] = 16; // 128 padded quote octets, in 64-bit words.
+            icmp.body = Bytes::from(body);
+            assert_eq!(
+                quoted_icmp_error(&request.packet, &response, QuotedTransport::Ip),
+                Some(kind)
+            );
+        }
+        for index in [3, 5, 6] {
+            let mut wrong = quote.clone();
+            wrong[index] ^= 1;
+            let response = quoted_response(NetworkVersion::V6, &wrong, 1, 1);
+            assert_eq!(
+                quoted_icmp_error(&request.packet, &response, QuotedTransport::Ip),
+                None
+            );
+        }
+        let short = quoted_response(NetworkVersion::V6, &quote[..39], 3, 0);
+        assert_eq!(
+            quoted_icmp_error(&request.packet, &short, QuotedTransport::Ip),
+            None
+        );
+    }
+}
+
+#[test]
 fn quoted_icmp_reject_bad_inexact_ipv4_probes() {
     let request = build_probe(NetworkVersion::V4, ProbeTransport::Tcp);
     let variants = [

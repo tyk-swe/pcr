@@ -156,7 +156,13 @@ class SctpIpProtocolEvidenceContracts(unittest.TestCase):
                                         'time-exceeded': (11, 0) if v4 else (3, 0),
                                         'protocol-unreachable': (3, 2) if v4 else (4, 1)}[row['condition']]
                             self.assertEqual(tuple(ip['body'][:2]), expected)
-                            self.assertEqual(ip['body'][8:], raw)
+                            if not v4 and scenario['kind'] == 'ip_protocol' and expected[0] in (1, 3):
+                                self.assertEqual(ip['body'][4:8], bytes.fromhex('10000000'))
+                                self.assertEqual(ip['body'][8:48], raw)
+                                self.assertEqual(ip['body'][48:136], b'\0' * 88)
+                                self.assertEqual(ip['body'][136:], bytes.fromhex('2000ddb60008010100000140'))
+                            else:
+                                self.assertEqual(ip['body'][8:], raw)
 
 
 if __name__ == "__main__":

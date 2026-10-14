@@ -99,6 +99,9 @@ remaining acceptance gates.
 
 ### Fixed
 
+- Correlate ICMPv6 errors quoting empty IPv6 probes when RFC 4884 padding
+  and extension objects follow the declared datagram.
+
 - Include shared IP reply identities in scan and discovery duration admission,
   and consume discovery-only transport exclusions before validating scan ports.
 

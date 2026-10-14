@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Independent M13 wire peer on the existing isolated documentation-address link."""
 import struct
-from discovery_isolated_fixture import packet, transport
+from discovery_isolated_fixture import checksum, packet, transport
 from tcp_diagnostic_isolated_fixture import provision as link_provision, SOURCES, TARGETS
 from tcp_diagnostic_wire import network
 
@@ -66,7 +66,14 @@ def reply(wire):
                  'expired': (11, 0) if v4 else (3, 0),
                  'unsupported': (3, 2) if v4 else (4, 1)}
         pointer = 6 if not v4 and kind == 'unsupported' else 0
-        body = struct.pack('!BBHI', *types[kind], 0, pointer) + ip['wire']
+        quote = ip['wire']
+        if not v4 and ip['proto'] != 132 and kind in ('prohibited', 'expired'):
+            # RFC 4884: fifth ICMPv6 octet holds padded quote length / 8.
+            pointer = 16 << 24
+            extension = bytes.fromhex('200000000008010100000140')
+            extension = extension[:2] + struct.pack('!H', checksum(extension)) + extension[4:]
+            quote = quote.ljust(128, b'\0') + extension
+        body = struct.pack('!BBHI', *types[kind], 0, pointer) + quote
         return envelope + packet(source, target, protocol, transport(source, target, protocol, body, 2))
 
     if ip['proto'] == 132:

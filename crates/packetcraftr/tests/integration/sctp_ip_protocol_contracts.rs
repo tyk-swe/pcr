@@ -231,6 +231,11 @@ fn icmp_error(
 ) -> Packet {
     let mut body = pointer.to_be_bytes().to_vec();
     body.extend_from_slice(quoted);
+    if ipv6 && quoted.len() == 40 && matches!(v6.0, 1 | 3) {
+        body[0] = 16;
+        body.resize(4 + 128, 0);
+        body.extend_from_slice(&[0x20, 0, 0xdd, 0xb6, 0, 8, 1, 1, 0, 0, 1, 0x40]);
+    }
     let mut packet = ip_envelope(router, destination, None);
     if ipv6 {
         packet.push(HopByHop::default());

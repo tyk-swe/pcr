@@ -80,7 +80,7 @@ def command(*args):
 
 
 @contextlib.contextmanager
-def provision(evidence=None):
+def provision(evidence=None, responder=reply, accepts=None):
     if evidence is None:
         evidence = dict(requests=[], setup=[])
     evidence.setdefault('neighbor_requests', [])
@@ -133,11 +133,14 @@ def provision(evidence=None):
                         if wire[12:14] not in (b'\x08\x00', b'\x86\xdd'):
                             continue
                         ip = network(wire, 1)
-                        if ip['proto'] != 6 or ip['target'] not in TARGETS.values():
+                        if accepts is None:
+                            if ip['proto'] != 6 or ip['target'] not in TARGETS.values():
+                                continue
+                            if tcp(ip)['flags'] & 4:
+                                continue
+                        elif not accepts(ip):
                             continue
-                        if tcp(ip)['flags'] & 4:
-                            continue
-                        answers = reply(wire)
+                        answers = responder(wire)
                         charged += len(wire) + sum(map(len, answers))
                         if len(wire) > 2048 or any(len(answer) > 2048 for answer in answers) or charged > 1048576:
                             raise ValueError('independent scripted peer exceeded its byte/snap ceiling')

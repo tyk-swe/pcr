@@ -150,7 +150,7 @@ impl Network {
                         });
                     packet
                 }
-                (_, Transport::Icmp) => {
+                (_, Transport::Icmp | Transport::Sctp | Transport::Ip) => {
                     let echo = sent.get::<Icmpv4>().expect("ICMP probe");
                     let mut packet = Packet::new();
                     packet
@@ -586,7 +586,10 @@ fn scan_probe(
     responder: Option<IpAddr>,
 ) -> scan::ProbeEvidence {
     scan::ProbeEvidence {
+        ip_protocol: None,
+        icmp_request: (transport == Transport::Icmp).then_some("echo"),
         tcp_scan: None,
+        sctp_scan: None,
         tcp_window: None,
         sequence,
         stage: if sequence < 10 {
@@ -622,6 +625,7 @@ fn scan_endpoint(probe: scan::ProbeEvidence) -> scan::Endpoint {
         scope: None,
         transport: probe.transport,
         port: probe.port,
+        ip_protocol: probe.ip_protocol,
         classification: probe.classification,
         port_hint: None,
         inference: None,
@@ -1778,6 +1782,7 @@ fn a_link_layer_rate_that_outlasts_the_timeout_is_rejected() {
 fn udp_scan_probe(target: IpAddr, attempt: u32) -> scan::Probe {
     scan::Probe {
         tcp_scan: Default::default(),
+        sctp_scan: Default::default(),
         sequence: 0,
         stage: Stage::Scan,
         address: target,

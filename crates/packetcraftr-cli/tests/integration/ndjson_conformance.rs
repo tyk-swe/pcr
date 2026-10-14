@@ -186,7 +186,10 @@ fn decoded(bytes: &[u8]) -> core::decode::DecodedPacket {
 fn scan_probe(sequence: u64) -> packetcraftr::scan::ProbeEvidence {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     packetcraftr::scan::ProbeEvidence {
+        ip_protocol: None,
+        icmp_request: None,
         tcp_scan: None,
+        sctp_scan: None,
         tcp_window: None,
         scope: None,
         application: None,
@@ -403,6 +406,7 @@ fn validate_active_event_variants() {
         packetcraftr::scan::Event::Sent(packetcraftr::scan::SentProbe {
             probe: packetcraftr::scan::Probe {
                 tcp_scan: Default::default(),
+                sctp_scan: Default::default(),
                 scope: None,
                 udp_profile: None,
                 sequence: 0,
@@ -440,6 +444,7 @@ fn validate_active_event_variants() {
             scope: None,
             transport: probe.transport,
             port: probe.port,
+            ip_protocol: probe.ip_protocol,
             classification: probe.classification,
             port_hint: Some("http"),
             inference: Some(packetcraftr::scan::Inference {
@@ -647,7 +652,7 @@ fn schema_reject_event_unknown_root_discs() {
             common::frozen_v10_schema_validator(),
             output::contract::SCHEMA_V10,
         ),
-        (schema_validator(), output::contract::SCHEMA_V15),
+        (schema_validator(), output::contract::SCHEMA_V16),
     ] {
         let mut document = original.clone();
         document["schema"] = family.into();

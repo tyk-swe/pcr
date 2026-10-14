@@ -7,36 +7,83 @@ use crate::correlation::Transport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ProbeEndpoint {
-    Tcp { port: u16 },
-    Udp { port: u16 },
+    Tcp {
+        port: u16,
+    },
+    /// Discovery-only bare TCP ACK probe.
+    TcpAck {
+        port: u16,
+    },
+    Udp {
+        port: u16,
+    },
+    Sctp {
+        port: u16,
+    },
     Icmp,
+    /// Discovery-only IPv4 ICMP timestamp request (type 13, reply 14).
+    IcmpTimestamp,
+    /// Discovery-only IPv4 ICMP address mask request (type 17, reply 18).
+    IcmpNetmask,
+    Ip {
+        protocol: u8,
+    },
 }
 
 impl ProbeEndpoint {
     #[must_use]
     pub const fn transport(self) -> Transport {
         match self {
-            Self::Tcp { .. } => Transport::Tcp,
+            Self::Tcp { .. } | Self::TcpAck { .. } => Transport::Tcp,
             Self::Udp { .. } => Transport::Udp,
-            Self::Icmp => Transport::Icmp,
+            Self::Sctp { .. } => Transport::Sctp,
+            Self::Icmp | Self::IcmpTimestamp | Self::IcmpNetmask => Transport::Icmp,
+            Self::Ip { .. } => Transport::Ip,
         }
     }
 
     #[must_use]
     pub const fn port(self) -> Option<u16> {
         match self {
-            Self::Tcp { port } | Self::Udp { port } => Some(port),
-            Self::Icmp => None,
+            Self::Tcp { port }
+            | Self::TcpAck { port }
+            | Self::Udp { port }
+            | Self::Sctp { port } => Some(port),
+            Self::Icmp | Self::IcmpTimestamp | Self::IcmpNetmask | Self::Ip { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn ip_protocol(self) -> Option<u8> {
+        match self {
+            Self::Ip { protocol } => Some(protocol),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn icmp_request_kind(self) -> Option<&'static str> {
+        match self {
+            Self::Icmp => Some("echo"),
+            Self::IcmpTimestamp => Some("timestamp"),
+            Self::IcmpNetmask => Some("netmask"),
+            _ => None,
         }
     }
 }
 
-/// Renders `tcp/80`, `udp/53`, or `icmp`.
+/// Renders `tcp/80`, `tcp-ack/80`, `udp/53`, `sctp/80`, `ip/47`, or `icmp*`.
 impl std::fmt::Display for ProbeEndpoint {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.port() {
-            Some(port) => write!(formatter, "{}/{port}", self.transport()),
-            None => write!(formatter, "{}", self.transport()),
+        match self {
+            Self::Tcp { port } => write!(formatter, "tcp/{port}"),
+            Self::TcpAck { port } => write!(formatter, "tcp-ack/{port}"),
+            Self::Udp { port } => write!(formatter, "udp/{port}"),
+            Self::Sctp { port } => write!(formatter, "sctp/{port}"),
+            Self::Icmp => formatter.write_str("icmp"),
+            Self::IcmpTimestamp => formatter.write_str("icmp-timestamp"),
+            Self::IcmpNetmask => formatter.write_str("icmp-netmask"),
+            Self::Ip { protocol } => write!(formatter, "ip/{protocol}"),
         }
     }
 }

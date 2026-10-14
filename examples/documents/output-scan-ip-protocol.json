@@ -1,0 +1,169 @@
+{
+  "schema": "packetcraftr.output/v16",
+  "command": "scan",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "target": "192.168.56.10",
+    "resolved_addresses": [
+      "192.168.56.10"
+    ],
+    "plan": {
+      "method": {
+        "requested": "raw",
+        "selected": "raw"
+      },
+      "port_catalog": {
+        "name": "port-catalog",
+        "version": "1.0.0"
+      },
+      "excluded_endpoints": 0,
+      "discovery": {
+        "mode": "omitted",
+        "probes": [],
+        "neighbor": false,
+        "excluded_endpoints": 0,
+        "unresponsive": "skip"
+      }
+    },
+    "hosts": [
+      {
+        "address": "192.168.56.10",
+        "discovery": "not_requested",
+        "scan": "scanned",
+        "reasons": [],
+        "probes": []
+      }
+    ],
+    "endpoints": [
+      {
+        "address": "192.168.56.10",
+        "transport": "ip",
+        "ip_protocol": 47,
+        "classification": "open",
+        "inference": {
+          "state": "open",
+          "rule": "ip_protocol.reply",
+          "supporting": [
+            81000
+          ],
+          "conflicting": [],
+          "unanswered": [],
+          "failed": []
+        },
+        "probes": [
+          {
+            "sequence": 81000,
+            "stage": "scan",
+            "protocol": "ip",
+            "destination": "192.168.56.10",
+            "ip_protocol": 47,
+            "attempt": 1,
+            "sent_at": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 0
+            },
+            "status": "response",
+            "classification": "open",
+            "responder": "192.168.56.10",
+            "received_at": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 1000000
+            },
+            "latency": {
+              "secs": 0,
+              "nanos": 1000000
+            },
+            "reason": "correlated IP protocol response"
+          }
+        ]
+      },
+      {
+        "address": "192.168.56.10",
+        "transport": "ip",
+        "ip_protocol": 254,
+        "classification": "closed",
+        "inference": {
+          "state": "closed",
+          "rule": "ip_protocol.protocol_unreachable",
+          "supporting": [
+            81001
+          ],
+          "conflicting": [],
+          "unanswered": [],
+          "failed": []
+        },
+        "probes": [
+          {
+            "sequence": 81001,
+            "stage": "scan",
+            "protocol": "ip",
+            "destination": "192.168.56.10",
+            "ip_protocol": 254,
+            "attempt": 1,
+            "sent_at": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 0
+            },
+            "status": "response",
+            "classification": "closed",
+            "responder": "192.168.56.10",
+            "received_at": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 2000000
+            },
+            "latency": {
+              "secs": 0,
+              "nanos": 2000000
+            },
+            "reason": "ICMPv4 protocol unreachable"
+          }
+        ]
+      }
+    ],
+    "undecoded": [],
+    "unattributed": [],
+    "retained_evidence_bytes": 0,
+    "rtt": {
+      "sent": 2,
+      "received": 2,
+      "lost": 0,
+      "min": {
+        "secs": 0,
+        "nanos": 1000000
+      },
+      "avg": {
+        "secs": 0,
+        "nanos": 1500000
+      },
+      "max": {
+        "secs": 0,
+        "nanos": 2000000
+      }
+    },
+    "scheduling": {
+      "mode": "fixed",
+      "observed_peak_window": 1,
+      "retries_started": 0,
+      "conditions": [],
+      "incomplete": []
+    }
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 2,
+    "packets_completed": 2,
+    "bytes": 40,
+    "elapsed": {
+      "secs": 1,
+      "nanos": 0
+    },
+    "capture": {
+      "received_frames": 0,
+      "received_bytes": 0,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

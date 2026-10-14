@@ -246,6 +246,10 @@ pub(super) fn check_destination_port(
     destination_port: Option<u16>,
 ) -> Result<(), Error> {
     match (transport, destination_port) {
+        (Transport::Sctp | Transport::Ip, _) => Err(Error::InvalidProbeOption {
+            option: "strategy",
+            reason: "traceroute supports UDP, TCP, and ICMP strategies".to_owned(),
+        }),
         (Transport::Udp | Transport::Tcp, None) => Err(Error::InvalidPort {
             message: "UDP and TCP traceroute require a destination port".to_owned(),
         }),

@@ -18,8 +18,8 @@ use super::arguments;
 use crate::errors::CliError;
 use crate::input::{InputKind, manifest, read_bounded_file_allow_empty};
 
-/// The requested transports in first-seen order. ICMP echo is portless and
-/// cannot share a plan with port endpoints.
+/// The requested transports in first-seen order. ICMP echo and IP-protocol
+/// inventory are portless and cannot share a plan with port endpoints.
 pub(super) fn transports(requested: &[arguments::Transport]) -> Result<Vec<Transport>, CliError> {
     let mut transports: Vec<Transport> = Vec::with_capacity(requested.len());
     for transport in requested {
@@ -31,21 +31,31 @@ pub(super) fn transports(requested: &[arguments::Transport]) -> Result<Vec<Trans
     if transports.len() > 1 && transports.contains(&Transport::Icmp) {
         return Err(CliError::new(
             Kind::Usage,
-            "--transport icmp is portless and cannot be combined with tcp or udp",
+            "--transport icmp is portless and cannot be combined with tcp or udp (or sctp/ip)",
+        ));
+    }
+    if transports.len() > 1 && transports.contains(&Transport::Ip) {
+        return Err(CliError::new(
+            Kind::Usage,
+            "--transport ip is portless and cannot be combined with tcp or udp (or sctp/icmp)",
         ));
     }
     Ok(transports)
 }
 
 /// The discovery stage the flags select, with the endpoints --exclude-ports
-/// removed from it. Port probes take --discovery-ports through the scan's
-/// catalog and --exclude-ports, so discovery never probes an excluded
-/// endpoint; ICMP echo is the default probe.
+/// and --exclude-ip-protocols removed from it. Port probes take
+/// --discovery-ports through the scan's catalog and --exclude-ports; IP
+/// protocol probes take --discovery-ip-protocols and --exclude-ip-protocols;
+/// ICMP echo is the default probe.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn discovery_options(
     mode: Option<arguments::Discovery>,
     probes: &[arguments::DiscoveryProbe],
     ports: Vec<arguments::PortTerm>,
     exclude_ports: &[arguments::PortTerm],
+    ip_protocols: Vec<arguments::IpProtocolTerm>,
+    exclude_ip_protocols: &[arguments::IpProtocolTerm],
     unresponsive: Option<arguments::UnresponsiveHosts>,
     max_ports: usize,
 ) -> Result<(discovery::Options, usize), CliError> {
@@ -62,79 +72,165 @@ pub(super) fn discovery_options(
     } else {
         probes
     };
-    let mut transports = Vec::new();
+    let mut portless_icmp = Vec::new();
+    let mut port_transports = Vec::new();
+    let mut tcp_modes = Vec::new();
+    let mut wants_ip_protocols = false;
     for probe in probes {
-        let transport = match probe {
+        match probe {
             arguments::DiscoveryProbe::Neighbor => {
                 options.neighbor = true;
-                continue;
             }
-            arguments::DiscoveryProbe::Icmp => Transport::Icmp,
-            arguments::DiscoveryProbe::Tcp => Transport::Tcp,
-            arguments::DiscoveryProbe::Udp => Transport::Udp,
-        };
-        if !transports.contains(&transport) {
-            transports.push(transport);
+            arguments::DiscoveryProbe::Icmp => {
+                if !portless_icmp.contains(&ProbeEndpoint::Icmp) {
+                    portless_icmp.push(ProbeEndpoint::Icmp);
+                }
+            }
+            arguments::DiscoveryProbe::IcmpTimestamp => {
+                if !portless_icmp.contains(&ProbeEndpoint::IcmpTimestamp) {
+                    portless_icmp.push(ProbeEndpoint::IcmpTimestamp);
+                }
+            }
+            arguments::DiscoveryProbe::IcmpNetmask => {
+                if !portless_icmp.contains(&ProbeEndpoint::IcmpNetmask) {
+                    portless_icmp.push(ProbeEndpoint::IcmpNetmask);
+                }
+            }
+            arguments::DiscoveryProbe::Tcp => {
+                if !port_transports.contains(&Transport::Tcp) {
+                    port_transports.push(Transport::Tcp);
+                }
+                if !tcp_modes.contains(&false) {
+                    tcp_modes.push(false);
+                }
+            }
+            arguments::DiscoveryProbe::TcpAck => {
+                if !port_transports.contains(&Transport::Tcp) {
+                    port_transports.push(Transport::Tcp);
+                }
+                if !tcp_modes.contains(&true) {
+                    tcp_modes.push(true);
+                }
+            }
+            arguments::DiscoveryProbe::Udp => {
+                if !port_transports.contains(&Transport::Udp) {
+                    port_transports.push(Transport::Udp);
+                }
+            }
+            arguments::DiscoveryProbe::Sctp => {
+                if !port_transports.contains(&Transport::Sctp) {
+                    port_transports.push(Transport::Sctp);
+                }
+            }
+            arguments::DiscoveryProbe::Ip => {
+                wants_ip_protocols = true;
+            }
         }
     }
-    // ICMP echo is portless and leads; port probes follow in term order.
-    if let Some(index) = transports
-        .iter()
-        .position(|transport| *transport == Transport::Icmp)
-    {
-        transports.remove(index);
-        options.probes.push(ProbeEndpoint::Icmp);
-    }
-    if transports.is_empty() {
+    // Portless ICMP probes lead in first-seen order; port probes follow in
+    // term order, then IP-protocol probes.
+    options.probes.extend(portless_icmp);
+    let mut excluded_total = 0usize;
+    if port_transports.is_empty() {
         if !ports.is_empty() {
             return Err(CliError::new(
                 Kind::Usage,
-                "--discovery-ports needs tcp or udp among --discovery-probes",
+                "--discovery-ports needs tcp or udp among --discovery-probes (or tcp-ack/sctp)",
             ));
         }
-        return Ok((options, 0));
+    } else {
+        if ports.is_empty() {
+            return Err(CliError::new(
+                Kind::Usage,
+                "tcp and udp discovery probes need --discovery-ports (as do tcp-ack and sctp)",
+            ));
+        }
+        let exclude = exclude_ports
+            .iter()
+            .filter(|term| {
+                term.0
+                    .transport
+                    .is_none_or(|transport| port_transports.contains(&transport))
+            })
+            .map(|term| term.0.clone())
+            .collect();
+        let (selected, excluded_counts) =
+            packetcraftr::scan::select_endpoints_with_exclusion_counts(
+                &packetcraftr::scan::PortSelection {
+                    transports: port_transports,
+                    include: ports.into_iter().map(|term| term.0).collect(),
+                    exclude,
+                },
+                packetcraftr::scan::catalog::bundled(),
+                max_ports,
+            )
+            .map_err(|error| {
+                CliError::from_classification(
+                    error.classification(),
+                    format!("--discovery-ports: {error}"),
+                    error.causes(),
+                )
+            })?;
+        excluded_total = excluded_total.saturating_add(selected.excluded);
+        excluded_total = excluded_total.saturating_add(
+            excluded_counts.get(&Transport::Tcp).copied().unwrap_or(0)
+                * tcp_modes.len().saturating_sub(1),
+        );
+        for endpoint in selected.endpoints {
+            match endpoint {
+                ProbeEndpoint::Tcp { port } => {
+                    for &is_ack in &tcp_modes {
+                        options.probes.push(if is_ack {
+                            ProbeEndpoint::TcpAck { port }
+                        } else {
+                            ProbeEndpoint::Tcp { port }
+                        });
+                    }
+                }
+                other => options.probes.push(other),
+            }
+        }
     }
-    if ports.is_empty() {
-        return Err(CliError::new(
-            Kind::Usage,
-            "tcp and udp discovery probes need --discovery-ports",
-        ));
-    }
-    // An exclusion prefixed with a transport discovery does not probe
-    // applies only to the scan's endpoints.
-    let exclude = exclude_ports
-        .iter()
-        .filter(|term| {
-            term.0
-                .transport
-                .is_none_or(|transport| transports.contains(&transport))
-        })
-        .map(|term| term.0.clone())
-        .collect();
-    let selected = packetcraftr::scan::select_endpoints(
-        &packetcraftr::scan::PortSelection {
-            transports,
-            include: ports.into_iter().map(|term| term.0).collect(),
-            exclude,
-        },
-        packetcraftr::scan::catalog::bundled(),
-        max_ports,
-    )
-    .map_err(|error| {
-        CliError::from_classification(
-            error.classification(),
-            format!("--discovery-ports: {error}"),
-            error.causes(),
+    if !wants_ip_protocols {
+        if !ip_protocols.is_empty() {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--discovery-ip-protocols needs ip among --discovery-probes",
+            ));
+        }
+    } else {
+        if ip_protocols.is_empty() {
+            return Err(CliError::new(
+                Kind::Usage,
+                "ip discovery probes need --discovery-ip-protocols",
+            ));
+        }
+        let selected = packetcraftr::scan::select_ip_protocols(
+            &packetcraftr::scan::IpProtocolSelection {
+                include: ip_protocols.into_iter().map(|term| term.0).collect(),
+                exclude: exclude_ip_protocols.iter().map(|term| term.0).collect(),
+            },
+            max_ports,
         )
-    })?;
-    options.probes.extend(selected.endpoints);
-    Ok((options, selected.excluded))
+        .map_err(|error| {
+            CliError::from_classification(
+                error.classification(),
+                format!("--discovery-ip-protocols: {error}"),
+                error.causes(),
+            )
+        })?;
+        excluded_total = excluded_total.saturating_add(selected.excluded);
+        options.probes.extend(selected.endpoints);
+    }
+    Ok((options, excluded_total))
 }
 
 pub(super) fn select_endpoints(
     transports: &[Transport],
     ports: Vec<arguments::PortTerm>,
     exclude_ports: Vec<arguments::PortTerm>,
+    ip_protocols: Vec<arguments::IpProtocolTerm>,
+    exclude_ip_protocols: Vec<arguments::IpProtocolTerm>,
     max_ports: usize,
 ) -> Result<packetcraftr::scan::Selected, CliError> {
     if transports == [Transport::Icmp] {
@@ -144,10 +240,41 @@ pub(super) fn select_endpoints(
                 "--ports and --exclude-ports do not apply to portless ICMP echo scans",
             ));
         }
+        if !ip_protocols.is_empty() || !exclude_ip_protocols.is_empty() {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--ip-protocols and --exclude-ip-protocols require --transport ip",
+            ));
+        }
         return Ok(packetcraftr::scan::Selected {
             endpoints: vec![ProbeEndpoint::Icmp],
             excluded: 0,
         });
+    }
+    if transports == [Transport::Ip] {
+        if !ports.is_empty() || !exclude_ports.is_empty() {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--ports and --exclude-ports do not apply to portless IP-protocol scans; use --ip-protocols",
+            ));
+        }
+        return packetcraftr::scan::select_ip_protocols(
+            &packetcraftr::scan::IpProtocolSelection {
+                include: ip_protocols.into_iter().map(|term| term.0).collect(),
+                exclude: exclude_ip_protocols
+                    .into_iter()
+                    .map(|term| term.0)
+                    .collect(),
+            },
+            max_ports,
+        )
+        .map_err(CliError::classified);
+    }
+    if !ip_protocols.is_empty() || !exclude_ip_protocols.is_empty() {
+        return Err(CliError::new(
+            Kind::Usage,
+            "--ip-protocols and --exclude-ip-protocols require --transport ip",
+        ));
     }
     packetcraftr::scan::select_endpoints(
         &packetcraftr::scan::PortSelection {
@@ -309,4 +436,37 @@ fn declaration_error(source: impl Classified, declaration: &manifest::Declaratio
         crate::errors::source_causes(&source),
     )
     .with_context(source.context())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovery_exclusions_count_each_tcp_mode_without_multiplying_udp_or_sctp() {
+        use arguments::DiscoveryProbe::{Sctp, Tcp, TcpAck, Udp};
+        for (probes, exclusions, expected) in [
+            (vec![Tcp, TcpAck], vec!["tcp:80"], 2),
+            (vec![TcpAck], vec!["tcp:80"], 1),
+            (vec![Tcp, TcpAck, Udp, Sctp], vec!["80"], 4),
+            (vec![Tcp, TcpAck, Udp, Sctp], vec!["udp:80", "sctp:80"], 2),
+        ] {
+            let (options, excluded) = discovery_options(
+                Some(arguments::Discovery::Before),
+                &probes,
+                vec!["80".parse().unwrap(), "81".parse().unwrap()],
+                &exclusions
+                    .iter()
+                    .map(|term| term.parse().unwrap())
+                    .collect::<Vec<_>>(),
+                vec![],
+                &[],
+                None,
+                16,
+            )
+            .unwrap();
+            assert_eq!(excluded, expected);
+            assert!(!options.probes.is_empty());
+        }
+    }
 }

@@ -16,7 +16,7 @@ remaining acceptance gates.
   under `evidence: packetcraftr::evidence::Limits { max_frames, max_bytes, max_undecoded }`,
   preserving JSON and binary Serde representations.
 - Packet documents use `packetcraftr.packet/v2`; machine output uses
-  `packetcraftr.output/v15` (output v6–v14 remain frozen; see
+  `packetcraftr.output/v16` (output v6–v15 remain frozen; see
   [consumer compatibility](docs/consumer-compatibility.md)).
 - Live workflows run through `Client<P, K>` with explicit providers, policy,
   clock, cancellation, and runtime, taking `(request, sink)` and returning
@@ -38,6 +38,13 @@ remaining acceptance gates.
 
 ### Added
 
+- Raw SCTP `INIT` and `COOKIE-ECHO` scans (`scan::SctpScan`, `--transport sctp`,
+  `--sctp-scan`, `sctp:` port prefixes), standalone IP-protocol (`0..=255`)
+  inventory (`scan::select_ip_protocols`, `--transport ip`, `--ip-protocols`,
+  `--exclude-ip-protocols`), extra host-discovery probe families (`tcp-ack`,
+  `icmp-timestamp`, `icmp-netmask`, `sctp`, `ip`), output/v16, dataset 1.8.0
+  `sctp_ip_protocol_scenarios`, and the `sctp_ip_protocol` native validation
+  runner ([M13](docs/roadmap/m13-sctp-ip-protocol.md)).
 - Raw TCP diagnostic scans (`scan::TcpScan`: `Syn`, `Ack`, `Window`, `Fin`,
   `Null`, `Xmas`, `Maimon`, and observation-only `Custom`, via `--tcp-scan` and
   `--tcp-flags`) with mode-specific inference (`unfiltered`, `tcp_<mode>.*`),
@@ -57,7 +64,7 @@ remaining acceptance gates.
   opt-in host discovery, reverse DNS, adaptive scheduling, and scan-informed
   traceroute with sourced hop reuse (`Client::scan_with_followups`,
   `Client::scan_connect_with_followups`, `Client::trace_hosts`), backed by
-  scanner corpus datasets 1.1.0–1.7.0.
+  scanner corpus datasets 1.1.0–1.8.0.
 - Multi-interface live capture with bounded PCAPNG rotation/retention, native
   buffer and timestamp controls, and opt-in dissection/projection.
 - DNS direct TCP (`--tcp`), bounded question batches, `--reverse` PTR queries,
@@ -92,6 +99,37 @@ remaining acceptance gates.
 
 ### Fixed
 
+- Loopback IP scans exclude captures of their own empty transmitted probes,
+  and SCTP INIT ACK observations validate every chunk's framing and padding.
+
+- Keep compact IP reply ambiguity history for the entire operation, including
+  serial execution, adaptive waves, and discovery-to-scan transitions.
+
+- Retain ambiguous IP retry replies as unattributed evidence, distinguish
+  IPv6 link padding from Jumbo Payload options, and count excluded TCP
+  discovery endpoints after SYN/ACK expansion.
+
+- Correlate ICMPv6 errors quoting empty IPv6 probes when RFC 4884 padding
+  and extension objects follow the declared datagram.
+
+- Include shared IP reply identities in scan and discovery duration admission,
+  and consume discovery-only transport exclusions before validating scan ports.
+
+- Pipelined IP-protocol probes serialize overlapping reply identities, including
+  repeated attempts and IPv6 extension probes, so responsive protocols retain
+  positive evidence.
+- Strict IPv6 extension builds still require their declared child headers;
+  IP-in-IP replies retain positive evidence when an inner packet contains an
+  ICMP error.
+- IP-protocol replies resolve IPv6 extension chains while retaining extension
+  protocol probes. Portless scans consume exclusions applied to their active
+  TCP, UDP, or SCTP discovery transports.
+- Composed IP discovery consumes shared protocol exclusions before selecting
+  port-scan endpoints. M13 native acceptance builds and executes all Linux
+  profiles in an isolated link fixture and rejects missing or duplicate evidence
+  inventories; its commands use the capture queue and byte limits.
+- Bounded benchmark execution keeps child reaping in the measurement thread
+  when output overflow kills a process.
 - Service identification handles reply-code-only SMTP terminals, final
   permitted SMTP/FTP continuation lines, uncoded FTP multiline banners, fatal
   TLS alerts after completed reads, CHAOS TXT class retention, and YAML

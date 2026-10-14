@@ -190,7 +190,9 @@ fn endpoint(transport: Transport) -> ProbeEndpoint {
     match transport {
         Transport::Tcp => ProbeEndpoint::Tcp { port: PORT },
         Transport::Udp => ProbeEndpoint::Udp { port: PORT },
+        Transport::Sctp => ProbeEndpoint::Sctp { port: PORT },
         Transport::Icmp => ProbeEndpoint::Icmp,
+        Transport::Ip => ProbeEndpoint::Ip { protocol: 47 },
     }
 }
 
@@ -240,6 +242,7 @@ fn run_scan(
         .scan(
             scan::Request {
                 tcp_scan: Default::default(),
+                sctp_scan: Default::default(),
                 target_sources: Vec::new(),
                 targets: Selection {
                     include: vec![Specification::Target(Target::Address(
@@ -518,6 +521,7 @@ fn window_two_publishes_sent_before_the_probe_event() {
         .scan(
             scan::Request {
                 tcp_scan: Default::default(),
+                sctp_scan: Default::default(),
                 target_sources: Vec::new(),
                 targets: Selection {
                     include: vec![Specification::Target(Target::Address(
@@ -719,6 +723,7 @@ fn assert_inference_scenario(scenario: &InferenceScenario, family: &str) {
         .scan(
             scan::Request {
                 tcp_scan: Default::default(),
+                sctp_scan: Default::default(),
                 target_sources: Vec::new(),
                 targets: Selection {
                     include: vec![Specification::Target(Target::Address(

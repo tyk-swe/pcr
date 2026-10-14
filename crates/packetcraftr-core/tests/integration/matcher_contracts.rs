@@ -11,8 +11,10 @@ use bytes::Bytes;
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::network::{Icmpv4, Icmpv6, Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
-use packetcraftr_core::protocol::{QuotedTransport, quoted_icmp_error};
-use packetcraftr_core::{build, codec, packet::Packet};
+use packetcraftr_core::protocol::{
+    IcmpErrorKind, QuotedTransport, SctpResponseKind, quoted_icmp_error, sctp_response_kind,
+};
+use packetcraftr_core::{build, codec, field::WireValue, packet::Packet};
 
 const IPV4_CLIENT: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
 const IPV4_SERVER: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 2);
@@ -170,6 +172,49 @@ fn quoted_response(network: NetworkVersion, quote: &[u8], icmp_type: u8, code: u
 }
 
 #[test]
+fn empty_ipv6_protocol_quotes_ignore_padding_and_icmp_extensions() {
+    for protocol in [0, 6, 47, 59, 60] {
+        let mut packet = ipv6_envelope(IPV6_CLIENT, IPV6_SERVER);
+        let ipv6 = packet.get_mut::<Ipv6>().unwrap();
+        ipv6.next_header = WireValue::Exact(protocol);
+        ipv6.flow_label = 0x12345;
+        let request = build_packet(packet);
+        let mut quote = request.bytes.to_vec();
+        quote.resize(128, 0);
+        // RFC 4884 extension header and an MPLS object, including checksum.
+        quote.extend_from_slice(&[0x20, 0, 0xdd, 0xb6, 0, 8, 1, 1, 0, 0, 1, 0x40]);
+        for (icmp_type, code, kind) in [
+            (1, 1, IcmpErrorKind::AdministrativelyProhibited),
+            (3, 0, IcmpErrorKind::TimeExceeded),
+        ] {
+            let mut response = quoted_response(NetworkVersion::V6, &quote, icmp_type, code);
+            let icmp = response.get_mut::<Icmpv6>().unwrap();
+            let mut body = icmp.body.to_vec();
+            body[0] = 16; // 128 padded quote octets, in 64-bit words.
+            icmp.body = Bytes::from(body);
+            assert_eq!(
+                quoted_icmp_error(&request.packet, &response, QuotedTransport::Ip),
+                Some(kind)
+            );
+        }
+        for index in [3, 5, 6] {
+            let mut wrong = quote.clone();
+            wrong[index] ^= 1;
+            let response = quoted_response(NetworkVersion::V6, &wrong, 1, 1);
+            assert_eq!(
+                quoted_icmp_error(&request.packet, &response, QuotedTransport::Ip),
+                None
+            );
+        }
+        let short = quoted_response(NetworkVersion::V6, &quote[..39], 3, 0);
+        assert_eq!(
+            quoted_icmp_error(&request.packet, &short, QuotedTransport::Ip),
+            None
+        );
+    }
+}
+
+#[test]
 fn quoted_icmp_reject_bad_inexact_ipv4_probes() {
     let request = build_probe(NetworkVersion::V4, ProbeTransport::Tcp);
     let variants = [
@@ -229,4 +274,193 @@ fn quoted_icmp_reject_bad_inexact_ipv4_probes() {
         None,
         "echo request is not an ICMP error"
     );
+}
+
+#[test]
+fn sctp_cookie_echo_icmp_and_ip_protocol_quotes_correlate_strictly() {
+    let reg = registry();
+    let sctp_matcher = reg.matcher("sctp").expect("sctp matcher");
+
+    // SCTP INIT matches INIT ACK, ABORT, and other valid chunks with the initiate tag.
+    let init_request = build_probe(NetworkVersion::V4, ProbeTransport::Sctp);
+    let mut abort_response = ipv4_envelope(IPV4_SERVER, IPV4_CLIENT);
+    abort_response.push(Sctp {
+        source_port: SERVER_PORT,
+        destination_port: CLIENT_PORT,
+        verification_tag: INITIATE_TAG,
+        ..Sctp::default()
+    });
+    abort_response.push(Raw::new(Bytes::from_static(&[6, 1, 0, 4])));
+    let abort_response = build_packet(abort_response);
+    assert!(
+        sctp_matcher
+            .matches(&init_request.packet, &abort_response.packet)
+            .is_some()
+    );
+    assert_eq!(
+        sctp_response_kind(&abort_response.packet, 1),
+        Some(SctpResponseKind::Abort)
+    );
+
+    // SCTP COOKIE ECHO correlates direct ABORT and quoted ICMP errors by verification tag.
+    let mut cookie_echo = ipv6_envelope(IPV6_CLIENT, IPV6_SERVER);
+    cookie_echo.push(Sctp {
+        source_port: CLIENT_PORT,
+        destination_port: SERVER_PORT,
+        verification_tag: INITIATE_TAG,
+        ..Sctp::default()
+    });
+    cookie_echo.push(Raw::new(Bytes::from_static(&[10, 0, 0, 8, 1, 2, 3, 4])));
+    let cookie_echo = build_packet(cookie_echo);
+
+    let mut cookie_abort = ipv6_envelope(IPV6_SERVER, IPV6_CLIENT);
+    cookie_abort.push(Sctp {
+        source_port: SERVER_PORT,
+        destination_port: CLIENT_PORT,
+        verification_tag: INITIATE_TAG,
+        ..Sctp::default()
+    });
+    cookie_abort.push(Raw::new(Bytes::from_static(&[6, 1, 0, 4])));
+    let cookie_abort = build_packet(cookie_abort);
+    assert!(
+        sctp_matcher
+            .matches(&cookie_echo.packet, &cookie_abort.packet)
+            .is_some()
+    );
+
+    let mut wrong_tag = ipv6_envelope(IPV6_SERVER, IPV6_CLIENT);
+    wrong_tag.push(Sctp {
+        source_port: SERVER_PORT,
+        destination_port: CLIENT_PORT,
+        verification_tag: INITIATE_TAG ^ 1,
+        ..Sctp::default()
+    });
+    wrong_tag.push(Raw::new(Bytes::from_static(&[6, 1, 0, 4])));
+    let wrong_tag = build_packet(wrong_tag);
+    assert!(
+        sctp_matcher
+            .matches(&cookie_echo.packet, &wrong_tag.packet)
+            .is_none()
+    );
+
+    let cookie_icmp = quoted_response(NetworkVersion::V6, &cookie_echo.bytes, 1, 1);
+    assert_eq!(
+        quoted_icmp_error(&cookie_echo.packet, &cookie_icmp, QuotedTransport::Sctp),
+        Some(IcmpErrorKind::AdministrativelyProhibited)
+    );
+
+    // IPv4 and IPv6 empty-payload IP-protocol probes correlate protocol-unreachable errors.
+    let mut ipv4_proto = Packet::new();
+    ipv4_proto.push(Ipv4 {
+        source: IPV4_CLIENT,
+        destination: IPV4_SERVER,
+        identification: 0x4242,
+        protocol: WireValue::Exact(47),
+        ..Ipv4::default()
+    });
+    let ipv4_proto = build_packet(ipv4_proto);
+    let proto_unreach_v4 = quoted_response(NetworkVersion::V4, &ipv4_proto.bytes, 3, 2);
+    assert_eq!(
+        quoted_icmp_error(&ipv4_proto.packet, &proto_unreach_v4, QuotedTransport::Ip),
+        Some(IcmpErrorKind::ProtocolUnreachable)
+    );
+
+    let mut ipv6_proto = Packet::new();
+    ipv6_proto.push(Ipv6 {
+        source: IPV6_CLIENT,
+        destination: IPV6_SERVER,
+        flow_label: 0x12345,
+        next_header: WireValue::Exact(47),
+        ..Ipv6::default()
+    });
+    let ipv6_proto = build_packet(ipv6_proto);
+    let mut param_prob_body = vec![0, 0, 0, 6];
+    param_prob_body.extend_from_slice(&ipv6_proto.bytes);
+    let mut proto_unreach_v6 = ipv6_envelope(IPV6_SERVER, IPV6_CLIENT);
+    proto_unreach_v6.push(Icmpv6 {
+        icmp_type: 4,
+        code: 1,
+        body: Bytes::from(param_prob_body),
+        ..Icmpv6::default()
+    });
+    assert_eq!(
+        quoted_icmp_error(&ipv6_proto.packet, &proto_unreach_v6, QuotedTransport::Ip),
+        Some(IcmpErrorKind::ProtocolUnreachable)
+    );
+
+    // ICMPv4 Timestamp (13 -> 14) and Netmask (17 -> 18) match by 4-byte identity.
+    let icmp_matcher = reg.matcher("icmpv4").expect("icmpv4 matcher");
+    for (req_type, resp_type, body_len) in [(13_u8, 14_u8, 16_usize), (17_u8, 18_u8, 8_usize)] {
+        let mut req_body = vec![0x50, 0x43, 0x00, 0x07];
+        req_body.resize(body_len, 0);
+        let mut req = ipv4_envelope(IPV4_CLIENT, IPV4_SERVER);
+        req.push(Icmpv4 {
+            icmp_type: req_type,
+            code: 0,
+            body: Bytes::from(req_body.clone()),
+            ..Icmpv4::default()
+        });
+        let mut resp = ipv4_envelope(IPV4_SERVER, IPV4_CLIENT);
+        resp.push(Icmpv4 {
+            icmp_type: resp_type,
+            code: 0,
+            body: Bytes::from(req_body),
+            ..Icmpv4::default()
+        });
+        assert!(icmp_matcher.matches(&req, &resp).is_some());
+    }
+}
+
+#[test]
+fn init_ack_requires_complete_chunk_framing_and_padding() {
+    let reg = registry();
+    let matcher = reg.matcher("sctp").unwrap();
+    let request = build_probe(NetworkVersion::V4, ProbeTransport::Sctp);
+    let valid = vec![
+        2, 0, 0, 20, 0x11, 0x22, 0x33, 0x44, 0, 1, 0, 0, 0, 10, 0, 10, 0, 0, 0, 1,
+    ];
+    let mut missing_padding = valid.clone();
+    missing_padding[3] = 21;
+    missing_padding.push(0);
+    let mut chunks = vec![(valid.clone(), true), (missing_padding, false)];
+    for suffix in [
+        vec![6],
+        vec![6, 0, 0],
+        vec![6, 0, 0, 8],
+        vec![6, 0, 0, 3],
+        vec![6, 0, 0, 4],
+    ] {
+        let mut malformed = valid.clone();
+        malformed.extend_from_slice(&suffix);
+        chunks.push((malformed, false));
+    }
+    for (chunk, valid) in chunks {
+        let mut response = ipv4_envelope(IPV4_SERVER, IPV4_CLIENT);
+        response.push(Sctp {
+            source_port: SERVER_PORT,
+            destination_port: CLIENT_PORT,
+            verification_tag: INITIATE_TAG,
+            ..Default::default()
+        });
+        response.push(Raw::new(Bytes::from(chunk)));
+        // Building supplies a correct CRC, so rejection tests chunk framing.
+        let response = build::Builder::new(registry())
+            .build(
+                response,
+                codec::Context::default(),
+                build::Options {
+                    mode: codec::Mode::Permissive,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            sctp_response_kind(&response.packet, 1),
+            valid.then_some(SctpResponseKind::InitAck)
+        );
+        assert_eq!(
+            matcher.matches(&request.packet, &response.packet).is_some(),
+            valid
+        );
+    }
 }

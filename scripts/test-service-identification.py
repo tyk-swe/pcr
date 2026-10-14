@@ -27,8 +27,8 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = "packetcraftr.output/v15"
-SCHEMAS = ("packetcraftr.output/v14", SCHEMA)
+SCHEMA = "packetcraftr.output/v16"
+SCHEMAS = ("packetcraftr.output/v14", "packetcraftr.output/v15", SCHEMA)
 FIXTURES = ROOT / "scripts/fixtures/service-identification"
 HELD_OUT_PATH = ROOT / "docs/roadmap/evidence/m09/held-out.v1.json"
 HELD_OUT_SHA256 = "399ae8d919fe3ca2ac32c62962eee37e54a811c5dee30b02f9226e45be94774c"

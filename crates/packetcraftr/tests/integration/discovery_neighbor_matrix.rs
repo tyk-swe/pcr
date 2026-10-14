@@ -22,6 +22,7 @@ use crate::common::{self, RecordingTransmit, Step, Steps};
 fn request(targets: &[IpAddr]) -> Request {
     Request {
         tcp_scan: Default::default(),
+        sctp_scan: Default::default(),
         max_in_flight: 1,
         targets: Selection {
             include: targets

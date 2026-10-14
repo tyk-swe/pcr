@@ -6,9 +6,9 @@ A contract family covers names, units, meanings, enums, ordering, and terminal
 semantics, not only JSON shape. Incompatible changes require a new family even
 when an older schema accepts their shape.
 
-Current producers emit [output/v15](../schemas/packetcraftr.output.v15.schema.json)
+Current producers emit [output/v16](../schemas/packetcraftr.output.v16.schema.json)
 and [packet/v2](../schemas/packetcraftr.packet.v2.schema.json). Beta.3 used
-output/v2 and packet/v1; output v6–v14 remain frozen for historical evidence.
+output/v2 and packet/v1; output v6–v15 remain frozen for historical evidence.
 Resolve `$id` to the bundled local file, never moving `main` or a network fetch.
 Tolerate unknown object members, but reject unknown families, verdicts, check
 kinds, or evidence states.
@@ -24,6 +24,17 @@ Missing metadata, null ingress operand on an expectation, and explicit decoder
 `absent` are distinct. Summary counters include accepted evidence regardless of
 retained detail/omissions. Forwarding fail/inconclusive returns exit 1 after
 publication; an error envelope is execution failure.
+
+## Output family v16
+
+Adds SCTP `init` and `cookie_echo` scanning (`plan.sctp_scan`, `ports.sctp_scan`,
+and per-probe `sctp_scan: {mode, chunk_type}`), standalone IP-protocol (`0..=255`)
+inventory (`ip_protocol` on endpoints/probes/sends/failures and `ip_protocols` on
+`target_list` reports), extra host-discovery probe discriminators (`icmp_request`
+for `timestamp`/`netmask` and `tcp_scan` for `tcp-ack`), new host reason kinds
+(`sctp_init_ack`, `sctp_abort`, `sctp_other`, `icmp_timestamp_reply`,
+`icmp_netmask_reply`, `ip_protocol_payload`, `icmp_protocol_unreachable`), and
+`sctp_init.*`, `sctp_cookie_echo.*`, and `ip_protocol.*` inference rules.
 
 ## Output family v15
 

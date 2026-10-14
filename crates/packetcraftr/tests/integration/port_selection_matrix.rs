@@ -233,6 +233,7 @@ fn no_probe_reaches_an_excluded_port() {
     );
     let request = Request {
         tcp_scan: Default::default(),
+        sctp_scan: Default::default(),
         max_in_flight: 2,
         targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
         target_sources: Vec::new(),

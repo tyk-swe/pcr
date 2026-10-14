@@ -3,7 +3,22 @@
   "$id": "packetcraftr.scanner-corpus/v1",
   "title": "Independent scanner ground-truth inventory",
   "type": "object",
-  "required": ["schema", "dataset_version", "families", "transports", "fixture_addresses", "request", "nmap", "scenarios", "native_connect_scenarios", "traceroute_scenarios", "identification_scenarios", "provenance", "tcp_diagnostic_scenarios"],
+  "required": [
+    "schema",
+    "dataset_version",
+    "families",
+    "transports",
+    "fixture_addresses",
+    "request",
+    "nmap",
+    "scenarios",
+    "native_connect_scenarios",
+    "traceroute_scenarios",
+    "identification_scenarios",
+    "provenance",
+    "tcp_diagnostic_scenarios",
+    "sctp_ip_protocol_scenarios"
+  ],
   "additionalProperties": false,
   "properties": {
     "tcp_diagnostic_scenarios": {
@@ -191,46 +206,124 @@
         }
       }
     },
-    "identification_scenarios": {"type": "array", "minItems": 10, "items": {"$ref": "#/$defs/identificationScenario"}},
+    "identification_scenarios": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "$ref": "#/$defs/identificationScenario"
+      }
+    },
     "inference_scenarios": {
       "type": "array",
       "minItems": 3,
       "maxItems": 3,
-      "items": {"$ref": "#/$defs/inferenceScenario"}
+      "items": {
+        "$ref": "#/$defs/inferenceScenario"
+      }
     },
-    "schema": {"const": "packetcraftr.scanner-corpus/v1"},
-    "dataset_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
-    "families": {"const": ["ipv4", "ipv6"]},
-    "transports": {"const": ["tcp", "udp", "icmp"]},
+    "schema": {
+      "const": "packetcraftr.scanner-corpus/v1"
+    },
+    "dataset_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "families": {
+      "const": [
+        "ipv4",
+        "ipv6"
+      ]
+    },
+    "transports": {
+      "const": [
+        "tcp",
+        "udp",
+        "icmp"
+      ]
+    },
     "fixture_addresses": {
       "type": "object",
-      "required": ["ipv4", "ipv6"],
+      "required": [
+        "ipv4",
+        "ipv6"
+      ],
       "additionalProperties": false,
-      "properties": {"ipv4": {"$ref": "#/$defs/addresses"}, "ipv6": {"$ref": "#/$defs/addresses"}}
+      "properties": {
+        "ipv4": {
+          "$ref": "#/$defs/addresses"
+        },
+        "ipv6": {
+          "$ref": "#/$defs/addresses"
+        }
+      }
     },
     "request": {
       "type": "object",
-      "required": ["attempts", "ports", "timeout_ms", "max_duration_ms", "max_probes", "max_evidence_bytes", "windows"],
+      "required": [
+        "attempts",
+        "ports",
+        "timeout_ms",
+        "max_duration_ms",
+        "max_probes",
+        "max_evidence_bytes",
+        "windows"
+      ],
       "additionalProperties": false,
       "properties": {
-        "attempts": {"const": 1},
-        "ports": {"const": [443]},
-        "timeout_ms": {"const": 20},
-        "max_duration_ms": {"const": 2000},
-        "max_probes": {"const": 1},
-        "max_evidence_bytes": {"const": 65536},
-        "windows": {"const": [1, 2]}
+        "attempts": {
+          "const": 1
+        },
+        "ports": {
+          "const": [
+            443
+          ]
+        },
+        "timeout_ms": {
+          "const": 20
+        },
+        "max_duration_ms": {
+          "const": 2000
+        },
+        "max_probes": {
+          "const": 1
+        },
+        "max_evidence_bytes": {
+          "const": 65536
+        },
+        "windows": {
+          "const": [
+            1,
+            2
+          ]
+        }
       }
     },
     "nmap": {
       "type": "object",
-      "required": ["version", "acquisition", "connect_arguments", "limitations"],
+      "required": [
+        "version",
+        "acquisition",
+        "connect_arguments",
+        "limitations"
+      ],
       "additionalProperties": false,
       "properties": {
-        "version": {"const": "7.991"},
-        "acquisition": {"$ref": "#/$defs/text"},
-        "connect_arguments": {"type": "array", "minItems": 1, "items": {"type": "string"}},
-        "limitations": {"$ref": "#/$defs/text"}
+        "version": {
+          "const": "7.991"
+        },
+        "acquisition": {
+          "$ref": "#/$defs/text"
+        },
+        "connect_arguments": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "limitations": {
+          "$ref": "#/$defs/text"
+        }
       }
     },
     "scenarios": {
@@ -239,20 +332,57 @@
       "maxItems": 6,
       "items": {
         "type": "object",
-        "required": ["id", "condition", "provision", "expected", "divergence"],
+        "required": [
+          "id",
+          "condition",
+          "provision",
+          "expected",
+          "divergence"
+        ],
         "additionalProperties": false,
         "properties": {
-          "id": {"enum": ["responsive", "closed", "blocked", "silent", "malformed", "unrelated"]},
-          "condition": {"$ref": "#/$defs/text"},
-          "provision": {"$ref": "#/$defs/text"},
+          "id": {
+            "enum": [
+              "responsive",
+              "closed",
+              "blocked",
+              "silent",
+              "malformed",
+              "unrelated"
+            ]
+          },
+          "condition": {
+            "$ref": "#/$defs/text"
+          },
+          "provision": {
+            "$ref": "#/$defs/text"
+          },
           "expected": {
             "type": "object",
-            "required": ["attempt_classification", "status", "attributed_response"],
+            "required": [
+              "attempt_classification",
+              "status",
+              "attributed_response"
+            ],
             "additionalProperties": false,
             "properties": {
-              "attempt_classification": {"enum": ["open", "closed", "filtered", "timeout"]},
-              "status": {"enum": ["response", "timeout"]},
-              "attributed_response": {"type": "boolean"}
+              "attempt_classification": {
+                "enum": [
+                  "open",
+                  "closed",
+                  "filtered",
+                  "timeout"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "response",
+                  "timeout"
+                ]
+              },
+              "attributed_response": {
+                "type": "boolean"
+              }
             }
           },
           "expected_by_transport": {
@@ -261,17 +391,29 @@
             "properties": {
               "icmp": {
                 "type": "object",
-                "required": ["attempt_classification", "status", "attributed_response"],
+                "required": [
+                  "attempt_classification",
+                  "status",
+                  "attributed_response"
+                ],
                 "additionalProperties": false,
                 "properties": {
-                  "attempt_classification": {"const": "unreachable"},
-                  "status": {"const": "response"},
-                  "attributed_response": {"const": true}
+                  "attempt_classification": {
+                    "const": "unreachable"
+                  },
+                  "status": {
+                    "const": "response"
+                  },
+                  "attributed_response": {
+                    "const": true
+                  }
                 }
               }
             }
           },
-          "divergence": {"$ref": "#/$defs/text"}
+          "divergence": {
+            "$ref": "#/$defs/text"
+          }
         }
       }
     },
@@ -281,15 +423,46 @@
       "maxItems": 2,
       "items": {
         "type": "object",
-        "required": ["id", "condition", "expected_outcome", "expected_classification", "nmap_expected", "divergence"],
+        "required": [
+          "id",
+          "condition",
+          "expected_outcome",
+          "expected_classification",
+          "nmap_expected",
+          "divergence"
+        ],
         "additionalProperties": false,
         "properties": {
-          "id": {"enum": ["connect-responsive", "connect-closed"]},
-          "condition": {"$ref": "#/$defs/text"},
-          "expected_outcome": {"enum": ["connected", "refused"]},
-          "expected_classification": {"enum": ["open", "closed"]},
-          "nmap_expected": {"enum": ["open", "closed"]},
-          "divergence": {"$ref": "#/$defs/text"}
+          "id": {
+            "enum": [
+              "connect-responsive",
+              "connect-closed"
+            ]
+          },
+          "condition": {
+            "$ref": "#/$defs/text"
+          },
+          "expected_outcome": {
+            "enum": [
+              "connected",
+              "refused"
+            ]
+          },
+          "expected_classification": {
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "nmap_expected": {
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "divergence": {
+            "$ref": "#/$defs/text"
+          }
         }
       }
     },
@@ -299,15 +472,43 @@
       "maxItems": 2,
       "items": {
         "type": "object",
-        "required": ["id", "condition", "expected_termination", "expected_status", "expected_attributed_response", "divergence"],
+        "required": [
+          "id",
+          "condition",
+          "expected_termination",
+          "expected_status",
+          "expected_attributed_response",
+          "divergence"
+        ],
         "additionalProperties": false,
         "properties": {
-          "id": {"enum": ["responsive", "silent"]},
-          "condition": {"$ref": "#/$defs/text"},
-          "expected_termination": {"enum": ["destination_reached", "timeout"]},
-          "expected_status": {"enum": ["response", "timeout"]},
-          "expected_attributed_response": {"type": "boolean"},
-          "divergence": {"$ref": "#/$defs/text"}
+          "id": {
+            "enum": [
+              "responsive",
+              "silent"
+            ]
+          },
+          "condition": {
+            "$ref": "#/$defs/text"
+          },
+          "expected_termination": {
+            "enum": [
+              "destination_reached",
+              "timeout"
+            ]
+          },
+          "expected_status": {
+            "enum": [
+              "response",
+              "timeout"
+            ]
+          },
+          "expected_attributed_response": {
+            "type": "boolean"
+          },
+          "divergence": {
+            "$ref": "#/$defs/text"
+          }
         }
       }
     },
@@ -315,7 +516,9 @@
       "type": "array",
       "minItems": 3,
       "maxItems": 3,
-      "items": {"$ref": "#/$defs/tracePathScenario"}
+      "items": {
+        "$ref": "#/$defs/tracePathScenario"
+      }
     },
     "target_planning_scenarios": {
       "type": "array",
@@ -759,31 +962,218 @@
       "maxItems": 8,
       "items": {
         "type": "object",
-        "required": ["id", "condition", "provision", "families", "expected", "measurement_scope"],
+        "required": [
+          "id",
+          "condition",
+          "provision",
+          "families",
+          "expected",
+          "measurement_scope"
+        ],
         "additionalProperties": false,
         "properties": {
-          "id": {"enum": ["adaptive-responsive", "adaptive-selective-retry", "adaptive-rate-limited-control", "adaptive-fair-hosts", "adaptive-host-deadline", "adaptive-window-loss", "adaptive-connect-cleanup", "adaptive-plan-boundary"]},
-          "condition": {"$ref": "#/$defs/text"},
-          "provision": {"enum": ["injected_provider_virtual_clock", "injected_provider_isolated_process"]},
-          "families": {"const": ["ipv4", "ipv6"]},
-          "expected": {"$ref": "#/$defs/text"},
-          "measurement_scope": {"$ref": "#/$defs/text"}
+          "id": {
+            "enum": [
+              "adaptive-responsive",
+              "adaptive-selective-retry",
+              "adaptive-rate-limited-control",
+              "adaptive-fair-hosts",
+              "adaptive-host-deadline",
+              "adaptive-window-loss",
+              "adaptive-connect-cleanup",
+              "adaptive-plan-boundary"
+            ]
+          },
+          "condition": {
+            "$ref": "#/$defs/text"
+          },
+          "provision": {
+            "enum": [
+              "injected_provider_virtual_clock",
+              "injected_provider_isolated_process"
+            ]
+          },
+          "families": {
+            "const": [
+              "ipv4",
+              "ipv6"
+            ]
+          },
+          "expected": {
+            "$ref": "#/$defs/text"
+          },
+          "measurement_scope": {
+            "$ref": "#/$defs/text"
+          }
         }
       }
     },
     "provenance": {
       "type": "object",
-      "required": ["source", "retrieved", "transforms", "license", "license_rationale", "maintainer", "refresh", "coverage"],
+      "required": [
+        "source",
+        "retrieved",
+        "transforms",
+        "license",
+        "license_rationale",
+        "maintainer",
+        "refresh",
+        "coverage"
+      ],
       "additionalProperties": false,
       "properties": {
-        "source": {"$ref": "#/$defs/text"},
-        "retrieved": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
-        "transforms": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
-        "license": {"const": "AGPL-3.0-only"},
-        "license_rationale": {"$ref": "#/$defs/text"},
-        "maintainer": {"$ref": "#/$defs/text"},
-        "refresh": {"$ref": "#/$defs/text"},
-        "coverage": {"$ref": "#/$defs/text"}
+        "source": {
+          "$ref": "#/$defs/text"
+        },
+        "retrieved": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "transforms": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/text"
+          }
+        },
+        "license": {
+          "const": "AGPL-3.0-only"
+        },
+        "license_rationale": {
+          "$ref": "#/$defs/text"
+        },
+        "maintainer": {
+          "$ref": "#/$defs/text"
+        },
+        "refresh": {
+          "$ref": "#/$defs/text"
+        },
+        "coverage": {
+          "$ref": "#/$defs/text"
+        }
+      }
+    },
+    "sctp_ip_protocol_scenarios": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "families",
+          "endpoints"
+        ],
+        "properties": {
+          "id": {
+            "enum": [
+              "sctp-init",
+              "sctp-cookie-echo",
+              "ip-protocol"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "sctp",
+              "ip_protocol"
+            ]
+          },
+          "mode": {
+            "enum": [
+              "init",
+              "cookie_echo"
+            ]
+          },
+          "chunk_type": {
+            "enum": [
+              1,
+              10
+            ]
+          },
+          "families": {
+            "const": [
+              "ipv4",
+              "ipv6"
+            ]
+          },
+          "endpoints": {
+            "type": "array",
+            "minItems": 5,
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "condition",
+                "status",
+                "classification",
+                "reply",
+                "state",
+                "rule"
+              ],
+              "properties": {
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "ip_protocol": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                },
+                "condition": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "status": {
+                  "enum": [
+                    "response",
+                    "timeout"
+                  ]
+                },
+                "classification": {
+                  "enum": [
+                    "open",
+                    "closed",
+                    "filtered",
+                    "unreachable",
+                    "unknown",
+                    "timeout"
+                  ]
+                },
+                "reply": {
+                  "enum": [
+                    null,
+                    "sctp_init_ack",
+                    "sctp_abort",
+                    "sctp_other",
+                    "ip_protocol_payload",
+                    "icmp_protocol_unreachable",
+                    "icmp_administratively_prohibited",
+                    "icmp_destination_unreachable",
+                    "icmp_time_exceeded"
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "open",
+                    "closed",
+                    "filtered",
+                    "open_or_filtered",
+                    "unknown"
+                  ]
+                },
+                "rule": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -874,67 +1264,163 @@
         }
       }
     },
-
     "inferenceScenario": {
       "type": "object",
-      "required": ["id", "condition", "provision", "families", "request", "endpoints", "divergence"],
+      "required": [
+        "id",
+        "condition",
+        "provision",
+        "families",
+        "request",
+        "endpoints",
+        "divergence"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": {"enum": ["mixed-same-port", "silent-udp", "contradictory-udp"]},
-        "condition": {"$ref": "#/$defs/text"},
-        "provision": {"const": "injected_endpoint_attempt_scripts"},
-        "families": {"const": ["ipv4", "ipv6"]},
-        "request": {"$ref": "#/$defs/inferenceRequest"},
+        "id": {
+          "enum": [
+            "mixed-same-port",
+            "silent-udp",
+            "contradictory-udp"
+          ]
+        },
+        "condition": {
+          "$ref": "#/$defs/text"
+        },
+        "provision": {
+          "const": "injected_endpoint_attempt_scripts"
+        },
+        "families": {
+          "const": [
+            "ipv4",
+            "ipv6"
+          ]
+        },
+        "request": {
+          "$ref": "#/$defs/inferenceRequest"
+        },
         "endpoints": {
           "type": "array",
           "minItems": 1,
           "maxItems": 2,
-          "items": {"$ref": "#/$defs/inferenceEndpoint"}
+          "items": {
+            "$ref": "#/$defs/inferenceEndpoint"
+          }
         },
-        "divergence": {"$ref": "#/$defs/text"}
+        "divergence": {
+          "$ref": "#/$defs/text"
+        }
       }
     },
     "inferenceRequest": {
       "type": "object",
-      "required": ["attempts", "max_in_flight", "timeout_ms", "max_duration_ms", "max_probes", "max_evidence_bytes"],
+      "required": [
+        "attempts",
+        "max_in_flight",
+        "timeout_ms",
+        "max_duration_ms",
+        "max_probes",
+        "max_evidence_bytes"
+      ],
       "additionalProperties": false,
       "properties": {
-        "attempts": {"type": "integer", "minimum": 1, "maximum": 3},
-        "max_in_flight": {"type": "integer", "minimum": 1, "maximum": 2},
-        "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 1000},
-        "max_duration_ms": {"type": "integer", "minimum": 100, "maximum": 60000},
-        "max_probes": {"type": "integer", "minimum": 1, "maximum": 32},
-        "max_evidence_bytes": {"type": "integer", "minimum": 64, "maximum": 1048576}
+        "attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "max_in_flight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "max_duration_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 60000
+        },
+        "max_probes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "max_evidence_bytes": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 1048576
+        }
       }
     },
     "inferenceEndpoint": {
       "type": "object",
-      "required": ["transport", "port", "script", "expected"],
+      "required": [
+        "transport",
+        "port",
+        "script",
+        "expected"
+      ],
       "additionalProperties": false,
       "properties": {
-        "transport": {"enum": ["tcp", "udp"]},
-        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
         "script": {
           "type": "array",
           "minItems": 1,
           "maxItems": 3,
-          "items": {"enum": ["direct_reply", "refusal", "silence"]}
+          "items": {
+            "enum": [
+              "direct_reply",
+              "refusal",
+              "silence"
+            ]
+          }
         },
-        "expected": {"$ref": "#/$defs/inferenceExpectation"}
+        "expected": {
+          "$ref": "#/$defs/inferenceExpectation"
+        }
       }
     },
     "inferenceExpectation": {
       "type": "object",
-      "required": ["attempts", "state", "rule", "partitions"],
+      "required": [
+        "attempts",
+        "state",
+        "rule",
+        "partitions"
+      ],
       "additionalProperties": false,
       "properties": {
         "attempts": {
           "type": "array",
           "minItems": 1,
           "maxItems": 3,
-          "items": {"$ref": "#/$defs/inferenceAttempt"}
+          "items": {
+            "$ref": "#/$defs/inferenceAttempt"
+          }
         },
-        "state": {"enum": ["open", "closed", "filtered", "open_or_filtered", "unknown"]},
+        "state": {
+          "enum": [
+            "open",
+            "closed",
+            "filtered",
+            "open_or_filtered",
+            "unknown"
+          ]
+        },
         "rule": {
           "enum": [
             "tcp_syn.syn_ack",
@@ -951,105 +1437,252 @@
             "udp.silence"
           ]
         },
-        "partitions": {"$ref": "#/$defs/inferencePartitions"}
+        "partitions": {
+          "$ref": "#/$defs/inferencePartitions"
+        }
       }
     },
     "inferenceAttempt": {
       "type": "object",
-      "required": ["ordinal", "status", "classification", "reply"],
+      "required": [
+        "ordinal",
+        "status",
+        "classification",
+        "reply"
+      ],
       "additionalProperties": false,
       "properties": {
-        "ordinal": {"type": "integer", "minimum": 1, "maximum": 3},
-        "status": {"enum": ["response", "timeout"]},
-        "classification": {"enum": ["open", "closed", "filtered", "unknown", "timeout"]},
-        "reply": {"enum": ["tcp_syn_ack", "udp_payload", "icmp_port_unreachable", null]}
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "status": {
+          "enum": [
+            "response",
+            "timeout"
+          ]
+        },
+        "classification": {
+          "enum": [
+            "open",
+            "closed",
+            "filtered",
+            "unknown",
+            "timeout"
+          ]
+        },
+        "reply": {
+          "enum": [
+            "tcp_syn_ack",
+            "udp_payload",
+            "icmp_port_unreachable",
+            null
+          ]
+        }
       }
     },
     "inferencePartitions": {
       "type": "object",
-      "required": ["supporting", "conflicting", "unanswered", "failed"],
+      "required": [
+        "supporting",
+        "conflicting",
+        "unanswered",
+        "failed"
+      ],
       "additionalProperties": false,
       "properties": {
-        "supporting": {"$ref": "#/$defs/inferenceOrdinals"},
-        "conflicting": {"$ref": "#/$defs/inferenceOrdinals"},
-        "unanswered": {"$ref": "#/$defs/inferenceOrdinals"},
-        "failed": {"$ref": "#/$defs/inferenceOrdinals"}
+        "supporting": {
+          "$ref": "#/$defs/inferenceOrdinals"
+        },
+        "conflicting": {
+          "$ref": "#/$defs/inferenceOrdinals"
+        },
+        "unanswered": {
+          "$ref": "#/$defs/inferenceOrdinals"
+        },
+        "failed": {
+          "$ref": "#/$defs/inferenceOrdinals"
+        }
       }
     },
     "inferenceOrdinals": {
       "type": "array",
       "maxItems": 3,
-      "items": {"type": "integer", "minimum": 1, "maximum": 3}
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 3
+      }
     },
     "tracePathScenario": {
       "type": "object",
-      "required": ["id", "condition", "targets", "paths", "expected_termination", "expected_probes_without_reuse", "expected_probes_with_reuse", "expected_reused_hops", "divergence"],
+      "required": [
+        "id",
+        "condition",
+        "targets",
+        "paths",
+        "expected_termination",
+        "expected_probes_without_reuse",
+        "expected_probes_with_reuse",
+        "expected_reused_hops",
+        "divergence"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": {"enum": ["shared-path", "divergent-paths", "silent-hop"]},
-        "condition": {"$ref": "#/$defs/text"},
+        "id": {
+          "enum": [
+            "shared-path",
+            "divergent-paths",
+            "silent-hop"
+          ]
+        },
+        "condition": {
+          "$ref": "#/$defs/text"
+        },
         "targets": {
           "type": "array",
           "minItems": 2,
           "maxItems": 16,
-          "items": {"type": "string", "minLength": 1, "maxLength": 64}
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
         },
         "paths": {
           "type": "array",
           "minItems": 2,
           "maxItems": 16,
-          "items": {"$ref": "#/$defs/tracePath"}
+          "items": {
+            "$ref": "#/$defs/tracePath"
+          }
         },
-        "expected_termination": {"enum": ["destination_reached", "unreachable", "maximum_hops", "timeout"]},
-        "expected_probes_without_reuse": {"type": "integer", "minimum": 1, "maximum": 4096},
-        "expected_probes_with_reuse": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "expected_termination": {
+          "enum": [
+            "destination_reached",
+            "unreachable",
+            "maximum_hops",
+            "timeout"
+          ]
+        },
+        "expected_probes_without_reuse": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "expected_probes_with_reuse": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
         "expected_reused_hops": {
           "type": "array",
           "maxItems": 16,
-          "items": {"$ref": "#/$defs/reusedHops"}
+          "items": {
+            "$ref": "#/$defs/reusedHops"
+          }
         },
-        "divergence": {"$ref": "#/$defs/text"}
+        "divergence": {
+          "$ref": "#/$defs/text"
+        }
       }
     },
     "tracePath": {
       "type": "object",
-      "required": ["target", "hops", "arrival"],
+      "required": [
+        "target",
+        "hops",
+        "arrival"
+      ],
       "additionalProperties": false,
       "properties": {
-        "target": {"type": "string", "minLength": 1, "maxLength": 64},
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
         "hops": {
           "type": "array",
           "minItems": 1,
           "maxItems": 64,
-          "items": {"anyOf": [
-            {"type": "string", "minLength": 1, "maxLength": 64},
-            {"type": "null"}
-          ]}
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
         },
-        "arrival": {"enum": ["reply", "unreachable", "silent"]}
+        "arrival": {
+          "enum": [
+            "reply",
+            "unreachable",
+            "silent"
+          ]
+        }
       }
     },
     "reusedHops": {
       "type": "object",
-      "required": ["target", "source", "hop_limits"],
+      "required": [
+        "target",
+        "source",
+        "hop_limits"
+      ],
       "additionalProperties": false,
       "properties": {
-        "target": {"type": "string", "minLength": 1, "maxLength": 64},
-        "source": {"type": "string", "minLength": 1, "maxLength": 64},
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
         "hop_limits": {
           "type": "array",
           "minItems": 1,
           "maxItems": 64,
-          "items": {"type": "integer", "minimum": 1, "maximum": 255}
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255
+          }
         }
       }
     },
-    "text": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
     "addresses": {
       "type": "object",
-      "required": ["source", "destination", "router"],
+      "required": [
+        "source",
+        "destination",
+        "router"
+      ],
       "additionalProperties": false,
-      "properties": {"source": {"type": "string"}, "destination": {"type": "string"}, "router": {"type": "string"}}
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "destination": {
+          "type": "string"
+        },
+        "router": {
+          "type": "string"
+        }
+      }
     }
   }
 }

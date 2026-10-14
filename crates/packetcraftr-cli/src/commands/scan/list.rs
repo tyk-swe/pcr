@@ -15,6 +15,7 @@ use packetcraftr_core::diagnostic::Diagnostic;
 pub(super) struct Options {
     pub origins: Vec<Declaration>,
     pub ports: Option<output::scan::plan::Ports>,
+    pub ip_protocols: Option<output::scan::plan::IpProtocols>,
     pub family: AddressFamily,
     pub max_targets: usize,
     pub max_duration: Duration,
@@ -30,6 +31,7 @@ pub(super) fn run(
     let Options {
         origins,
         ports,
+        ip_protocols,
         family,
         max_targets,
         max_duration,
@@ -52,11 +54,11 @@ pub(super) fn run(
     let diagnostics = duplicate_diagnostics(&report.duplicates, &origins);
     match format {
         Format::Text => {
-            render_text(&report, &origins, ports.as_ref())?;
+            render_text(&report, &origins, ports.as_ref(), ip_protocols.as_ref())?;
             crate::rendering::render_diagnostics_text(&diagnostics)
         }
         Format::Json => {
-            let published = output::scan::list::Report::new(report, &origins, ports);
+            let published = output::scan::list::Report::new(report, &origins, ports, ip_protocols);
             crate::rendering::emit_aggregate(
                 output::contract::Command::Scan,
                 published,
@@ -64,7 +66,7 @@ pub(super) fn run(
             )
         }
         Format::Ndjson => {
-            let published = output::scan::list::Report::new(report, &origins, ports);
+            let published = output::scan::list::Report::new(report, &origins, ports, ip_protocols);
             for target in &published.targets {
                 stream.emit_data(output::scan::list::TargetEvent::from(target), Vec::new())?;
             }
@@ -97,6 +99,7 @@ fn render_text(
     report: &plan::Report,
     origins: &[Declaration],
     ports: Option<&output::scan::plan::Ports>,
+    ip_protocols: Option<&output::scan::plan::IpProtocols>,
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "target={} resolution_performed={}",
@@ -140,6 +143,12 @@ fn render_text(
                 super::rendering::tcp_scan_text(tcp_scan)
             ))?;
         }
+        if let Some(sctp_scan) = ports.sctp_scan {
+            write_stdout_line(format_args!(
+                "{}",
+                super::rendering::sctp_scan_text(sctp_scan)
+            ))?;
+        }
         for endpoint in &ports.endpoints {
             write_stdout_line(format_args!(
                 "port {}/{} port-hint={}",
@@ -154,6 +163,16 @@ fn render_text(
             ports.excluded_endpoints,
             ports.port_catalog.name,
             ports.port_catalog.version
+        ))?;
+    }
+    if let Some(ip_protocols) = ip_protocols {
+        for protocol in &ip_protocols.protocols {
+            write_stdout_line(format_args!("ip-protocol ip/{protocol}"))?;
+        }
+        write_summary_line(format_args!(
+            "planned {} IP protocol endpoint(s) per target, {} excluded",
+            ip_protocols.protocols.len(),
+            ip_protocols.excluded_protocols,
         ))?;
     }
     write_summary_line(format_args!(

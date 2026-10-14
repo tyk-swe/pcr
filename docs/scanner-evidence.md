@@ -21,8 +21,13 @@ attributed reply within its window; otherwise `timeout`.
 | TCP SYN/ACK acknowledging `sequence + 1` | `open` | `correlated TCP SYN/ACK` |
 | Other TCP flags from the endpoint | `unknown` | `correlated TCP response with inconclusive flags` |
 | UDP reply reversing the transport tuple | `open` | `correlated UDP response from the requested endpoint` |
-| ICMP echo reply | `open` | `correlated ICMP echo reply` |
-| ICMP port unreachable quoting the probe | `closed` | `ICMPv4 port unreachable` / `ICMPv6 port unreachable` |
+| SCTP INIT ACK matching the initiate tag | `open` (`unknown` for `cookie_echo`) | `correlated SCTP INIT ACK` |
+| SCTP ABORT matching the verification tag | `closed` | `correlated SCTP ABORT` |
+| Other SCTP chunk matching the verification tag | `unknown` | `correlated SCTP response with inconclusive chunk` |
+| ICMP echo / timestamp / address mask reply | `open` | `correlated ICMP echo reply` / `correlated ICMP timestamp reply` / `correlated ICMP address mask reply` |
+| Direct IP-protocol response matching protocol number | `open` | `correlated IP protocol response` |
+| ICMP port unreachable quoting the probe | `closed` (`unreachable` for TCP/SCTP diagnostics) | `ICMPv4 port unreachable` / `ICMPv6 port unreachable` |
+| ICMP protocol unreachable / unrecognized next header quoting the probe | `closed` (`unreachable` for SCTP `cookie_echo`) | `ICMPv4 protocol unreachable` / `ICMPv6 unrecognized next header` |
 | ICMP administratively prohibited | `filtered` | `ICMPv4 administratively prohibited` / `ICMPv6 policy or administrative rejection` |
 | ICMP destination unreachable | `unreachable` | `ICMPv4 destination unreachable` / `ICMPv6 destination unreachable` |
 | ICMP time exceeded before the endpoint | `filtered` | `ICMPv4 time exceeded before reaching the endpoint` / `ICMPv6 time exceeded before reaching the endpoint` |
@@ -30,6 +35,13 @@ attributed reply within its window; otherwise `timeout`.
 
 Checksum failures produce no observation. Undecodable, unsolicited, late,
 duplicate, and ambiguous replies stay unattributed and never overwrite a timeout.
+
+Direct IP-protocol replies carry no attempt identifier. Bounded transmission
+history for each interface, address pair, and protocol lasts until the operation
+ends. A reply compatible with an earlier transmission stays unattributed even
+after its packet evidence is evicted, across serial execution, adaptive waves,
+and discovery-to-scan transitions. Quoted ICMP errors retain their independent
+header identity and can still provide an attributable outcome.
 
 ### Connect scan attempts (`connect_probe` events and `endpoints[].probes[]`)
 
@@ -98,6 +110,15 @@ exceeded 3, other reply 2, silence 1) with rule IDs `tcp_<mode>.<reason>`:
 | `tcp_window` | `reset_nonzero` → `open`; `reset_zero` → `closed`; no window → `unknown` | `filtered` | `unknown` | `filtered` |
 | `tcp_fin`, `tcp_null`, `tcp_xmas`, `tcp_maimon` | `closed` | `filtered` | `unknown` | `open_or_filtered` |
 | `tcp_custom` | `tcp_custom.reply` → `unknown` (any TCP/ICMP reply) | | | `tcp_custom.silence` → `unknown` |
+
+SCTP (`init` and `cookie_echo`) and IP-protocol (`ip`) modes (v16) use the same
+ranking order:
+
+| Mode | Direct positive reply | ABORT / protocol unreachable | ICMP unreachable | Time exceeded | Other reply | Silence |
+| --- | --- | --- | --- | --- | --- | --- |
+| `sctp_init` | `sctp_init.init_ack` → `open` | `sctp_init.abort` → `closed` | `sctp_init.icmp_unreachable` → `filtered` | `sctp_init.time_exceeded` → `filtered` | `sctp_init.unclassified_reply` → `unknown` | `sctp_init.silence` → `filtered` |
+| `sctp_cookie_echo` | `sctp_cookie_echo.unclassified_reply` → `unknown` | `sctp_cookie_echo.abort` → `closed` | `sctp_cookie_echo.icmp_unreachable` → `filtered` | `sctp_cookie_echo.time_exceeded` → `unknown` | `sctp_cookie_echo.unclassified_reply` → `unknown` | `sctp_cookie_echo.silence` → `open_or_filtered` |
+| `ip_protocol` | `ip_protocol.reply` → `open` | `ip_protocol.protocol_unreachable` → `closed` | `ip_protocol.icmp_unreachable` → `filtered` | `ip_protocol.time_exceeded` → `filtered` | `ip_protocol.unclassified_reply` → `unknown` | `ip_protocol.silence` → `open_or_filtered` |
 
 For diagnostic probes, attempt classification is `closed` for FIN-family resets,
 `unknown` for other direct TCP replies, `unreachable` for ICMP port-unreachable,

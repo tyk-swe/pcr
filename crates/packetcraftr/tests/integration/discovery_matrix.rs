@@ -185,6 +185,14 @@ impl Wire {
                 ip(&mut reply, destination, source);
                 icmp(&mut reply, v4, (0, 129), 0, body);
             }
+            (
+                Host::Answers | Host::Responsive,
+                ProbeEndpoint::TcpAck { .. }
+                | ProbeEndpoint::Sctp { .. }
+                | ProbeEndpoint::IcmpTimestamp
+                | ProbeEndpoint::IcmpNetmask
+                | ProbeEndpoint::Ip { .. },
+            ) => unreachable!("matrix uses TCP SYN, UDP, and ICMP echo"),
         }
         (destination, endpoint, vec![frame(reply)])
     }
@@ -228,6 +236,7 @@ fn request(target: IpAddr, probe: ProbeEndpoint, then: Then) -> Request {
     };
     Request {
         tcp_scan: Default::default(),
+        sctp_scan: Default::default(),
         max_in_flight: 1,
         targets: Selection {
             include: vec![Specification::Target(Target::Address(target))],

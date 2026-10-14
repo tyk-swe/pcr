@@ -25,6 +25,9 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ExchangeExecutor<'
             Transport::Udp => "destination_port",
             Transport::Tcp => "sequence",
             Transport::Icmp => "body",
+            Transport::Sctp | Transport::Ip => {
+                return Err(EXECUTOR_FAULT.invalid("unsupported traceroute strategy"));
+            }
         };
         let mut template = packetcraftr_core::template::Template::new(first.packet());
         if batch.probes.len() > 1 {

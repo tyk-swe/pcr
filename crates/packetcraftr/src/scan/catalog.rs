@@ -46,7 +46,7 @@ pub(crate) const fn catalog_transport(transport: Transport) -> Option<CatalogTra
     match transport {
         Transport::Tcp => Some(CatalogTransport::Tcp),
         Transport::Udp => Some(CatalogTransport::Udp),
-        Transport::Icmp => None,
+        Transport::Sctp | Transport::Icmp | Transport::Ip => None,
     }
 }
 

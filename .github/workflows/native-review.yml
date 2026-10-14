@@ -9,12 +9,13 @@ on:
         required: true
 
       scenario:
-        description: Select the native inventory, M5 discovery, or M12 diagnostics
+        description: Select the native inventory, M5 discovery, M12 diagnostics, or M13 SCTP/IP-protocol
         type: choice
         options:
           - all
           - host_discovery
           - tcp_diagnostics
+          - sctp_ip_protocol
         default: all
 
 permissions:
@@ -50,6 +51,9 @@ jobs:
       - name: Initialize TCP diagnostic evidence
         if: inputs.scenario == 'tcp_diagnostics'
         run: python3 scripts/test-tcp-diagnostics-native.py --reviewed-commit "${{ inputs.commit }}" --emit-unavailable runtime_evidence_missing --report target/validation/tcp-diagnostics-native.json
+      - name: Initialize SCTP and IP-protocol evidence
+        if: inputs.scenario == 'sctp_ip_protocol'
+        run: python3 scripts/test-sctp-ip-protocol-native.py --reviewed-commit "${{ inputs.commit }}" --emit-unavailable runtime_evidence_missing --report target/validation/sctp-ip-protocol-native.json
       - name: Install prerequisites
         run: |
           rustup toolchain install
@@ -87,6 +91,14 @@ jobs:
           sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
             python3 scripts/test-tcp-diagnostics-native.py --reviewed-commit "$REVIEWED_COMMIT" \
             --require-complete --report target/validation/tcp-diagnostics-native.json
+      - name: Exercise M13 SCTP and IP-protocol across every profile in fresh isolated namespaces
+        if: inputs.scenario == 'sctp_ip_protocol'
+        env:
+          REVIEWED_COMMIT: ${{ inputs.commit }}
+        run: |
+          sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
+            python3 scripts/test-sctp-ip-protocol-native.py --reviewed-commit "$REVIEWED_COMMIT" \
+            --require-complete --report target/validation/sctp-ip-protocol-native.json
       - name: Exercise native I/O in a fresh isolated namespace
         if: inputs.scenario == 'all'
         run: |

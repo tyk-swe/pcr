@@ -177,6 +177,7 @@ fn a_scans_neighbor_wait_is_measured_by_the_clients_clock() {
     let timeout = Duration::from_millis(200);
     let request = scan::Request {
         tcp_scan: Default::default(),
+        sctp_scan: Default::default(),
         target_sources: Vec::new(),
         max_in_flight: 1,
         targets: Selection::from(Target::Address("192.0.2.10".parse().unwrap())),

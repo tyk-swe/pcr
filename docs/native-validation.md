@@ -77,3 +77,20 @@ sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
 bounds probes (`≤ 32`), response window (`500 ms`), operation/process duration
 (`10 s`/`15 s`), and stream/capture retention (`1 MiB`), separating socket truth,
 observed replies/windows, inferred states/rules, and heuristic divergences.
+
+## M13 SCTP and IP-protocol acceptance
+
+Both reviewed workflows also accept `scenario=sctp_ip_protocol` via
+`scripts/test-sctp-ip-protocol-native.py`
+(`packetcraftr.sctp-ip-protocol-native-evidence/v1`), tracking five-profile
+SCTP `init`/`cookie-echo` and IP-protocol inventory execution and typed
+capability refusals.
+
+M13 execution uses a fresh Linux network namespace and the independent
+documentation-address Ethernet peer, with bounded SCTP chunks, CRC32c checks,
+ICMP quotations, and exact retained replies checked against dataset 1.8.0.
+The Linux acceptance gate requires all five profiles and all twelve unique
+scenario/family/output cases per profile. macOS and Windows currently lack this
+independent link fixture: execution exits nonzero and retains an
+`isolation_unavailable` report. `--emit-unavailable` can record that limitation
+explicitly; it cannot satisfy `--require-complete`.

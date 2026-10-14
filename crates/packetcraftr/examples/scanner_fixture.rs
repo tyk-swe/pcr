@@ -145,6 +145,7 @@ fn scan_request(arguments: &Arguments) -> scan::Request {
     };
     scan::Request {
         tcp_scan: Default::default(),
+        sctp_scan: Default::default(),
         target_sources: Vec::new(),
         targets: Selection {
             include: vec![Specification::Target(Target::Address(
@@ -161,7 +162,9 @@ fn scan_request(arguments: &Arguments) -> scan::Request {
         endpoints: vec![match arguments.transport {
             packetcraftr::probe::Transport::Tcp => ProbeEndpoint::Tcp { port: PORT },
             packetcraftr::probe::Transport::Udp => ProbeEndpoint::Udp { port: PORT },
+            packetcraftr::probe::Transport::Sctp => ProbeEndpoint::Sctp { port: PORT },
             packetcraftr::probe::Transport::Icmp => ProbeEndpoint::Icmp,
+            packetcraftr::probe::Transport::Ip => ProbeEndpoint::Ip { protocol: 47 },
         }],
         discovery: Default::default(),
         attempts: 1,
@@ -246,11 +249,7 @@ fn run(arguments: &Arguments) -> Result<Record, String> {
         Arc::new(move |sent: &[u8]| conditions::respond(condition, addresses, sent)),
     );
     let client = client(providers);
-    let transport_id = match arguments.transport {
-        packetcraftr::probe::Transport::Tcp => "tcp",
-        packetcraftr::probe::Transport::Udp => "udp",
-        packetcraftr::probe::Transport::Icmp => "icmp",
-    };
+    let transport_id = arguments.transport.as_str();
     let (observation, attempted, completed, retained, frames, elapsed) = match arguments.workflow {
         Workflow::RawScan => {
             let collector = scan::Collector::default();

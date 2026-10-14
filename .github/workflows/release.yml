@@ -276,8 +276,11 @@ jobs:
               "examples/consumers/fixtures/v13-forwarding.json",
               "examples/consumers/fixtures/v14-forwarding.json",
               "examples/consumers/fixtures/v15-forwarding.json",
+              "examples/consumers/fixtures/v16-forwarding.json",
               "examples/documents/output-scan-tcp-diagnostic.json",
               "examples/documents/output-scan-tcp-diagnostic-event.json",
+              "examples/documents/output-scan-sctp-diagnostic.json",
+              "examples/documents/output-scan-ip-protocol.json",
               "crates/packetcraftr/data/os-fingerprints.v1.json",
               "crates/packetcraftr/data/os-fingerprints.provenance.yaml",
           )

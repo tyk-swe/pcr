@@ -127,7 +127,7 @@ def synthetic_report():
 class CorpusContracts(unittest.TestCase):
     def test_complete_independent_inventory(self):
         validate_corpus(CORPUS)
-        self.assertEqual(CORPUS['dataset_version'], '1.7.0')
+        self.assertEqual(CORPUS['dataset_version'], '1.8.0')
 
     def test_missing_reordered_unknown_and_unbounded_rejected(self):
         for mutation in ('missing', 'reorder', 'unknown', 'budget', 'partition', 'flags'):

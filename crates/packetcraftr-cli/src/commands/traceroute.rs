@@ -114,7 +114,9 @@ fn prepare_request(
                 .port
                 .unwrap_or(packetcraftr::traceroute::DEFAULT_TCP_PORT),
         ),
-        packetcraftr::probe::Transport::Icmp => arguments.port,
+        packetcraftr::probe::Transport::Icmp
+        | packetcraftr::probe::Transport::Sctp
+        | packetcraftr::probe::Transport::Ip => arguments.port,
     };
     let trace_limits = packetcraftr::traceroute::Limits {
         max_probes: arguments.max_probes,

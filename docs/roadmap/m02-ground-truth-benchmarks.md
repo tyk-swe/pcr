@@ -14,7 +14,8 @@ Nmap agreement is never fixture truth.
   with pre-declared responsive, closed, blocked, silent, malformed, and unrelated
   IPv4/IPv6 scenarios, `inference_scenarios` (mixed same-port, silent UDP,
   contradictory attempts), `trace_path_scenarios` (shared, divergent, silent-hop
-  paths), and dataset 1.7.0 `tcp_diagnostic_scenarios` (eight conditions × seven modes).
+  paths), dataset 1.7.0 `tcp_diagnostic_scenarios` (eight conditions × seven modes),
+  and dataset 1.8.0 `sctp_ip_protocol_scenarios` (SCTP INIT, COOKIE-ECHO, and IP-protocol).
 - `scanner_fixture` exercises `Client` scan/traceroute paths with injected providers;
   native loopback connect uses the CLI.
 - `scripts/benchmark-scanner.py` repeats 88 cells (72 raw scan, 12 traceroute,

@@ -31,11 +31,13 @@ mod evidence;
 mod executor;
 pub mod followup;
 mod inference;
+mod ip_protocol;
 pub mod method;
 mod plan;
 pub mod profile;
 mod report;
 mod request;
+mod sctp;
 mod selection;
 mod tcp;
 #[cfg(test)]
@@ -45,13 +47,18 @@ pub use adaptive::{Adaptive, Condition, ConditionKind, HostIdentity, Scheduling,
 pub use error::{Error, PipelineFailure};
 pub use evidence::{CorrelatedResponse, classify_response};
 pub use inference::{DiagnosticMethod, DiagnosticRule, Inference, Rule, State};
+pub use ip_protocol::{IpProtocolSelection, IpProtocolSpec, select_ip_protocols};
 pub use plan::{Probe, Stage};
 pub use report::{
     Aggregate, Attribution, Classification, ClassificationCounts, Collector, Endpoint, Event,
     PendingEvidence, ProbeEvidence, Reply, Report, Rtt, SentProbe, Unattributed,
 };
 pub use request::{Limits, PortSpec, Request, select_ports};
-pub use selection::{MAX_PORT_TERMS, PortSelection, Selected, Selector, Term, select_endpoints};
+pub use sctp::SctpScan;
+pub use selection::{
+    MAX_PORT_TERMS, PortSelection, Selected, Selector, Term, select_endpoints,
+    select_endpoints_with_exclusion_counts,
+};
 pub use tcp::TcpScan;
 
 pub(crate) use executor::NeighborBounds;

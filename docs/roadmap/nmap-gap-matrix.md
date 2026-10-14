@@ -32,7 +32,7 @@ See the [roadmap scorecard](README.md#gap-gate-and-scorecard).
 | Scanner DNS enrichment and controls | [targets][nmap-targets] | Bounded target resolution and explicit PTR follow-up under remaining duration; broader native acceptance open. | Partial | [M5][m5], [M7][m7] |
 | Dedicated/composed host discovery | [discovery][nmap-discovery] | Opt-in `before`/`only`/`skip` over echo/SYN/UDP/TCP connect; Linux recorded, macOS/Windows native acceptance open. | Partial | [M5][m5] |
 | Local ARP/NDP discovery | [discovery][nmap-discovery] | Bounded neighbors with direct/cache/possible-proxy/silent/routed evidence; Linux recorded, macOS/Windows open. | Partial | [M5][m5] |
-| Additional discovery probe families | [discovery][nmap-discovery] | No ACK/timestamp/netmask/SCTP/IP-protocol discovery. | Missing | [M5][m5], [M13][m13] |
+| Additional discovery probe families | [discovery][nmap-discovery] | Opt-in `tcp-ack`, `icmp-timestamp`, `icmp-netmask`, `sctp`, and `ip` discovery probes with exclusions and finite budgets; native acceptance open. | Partial | [M5][m5], [M13][m13] |
 | Host identity/context metadata | [guide][nmap-guide], [discovery][nmap-discovery] | Ordered host reasons, timestamps, PTR, and link observations with provenance; no vendor DB; broader acceptance open. | Partial | [M5][m5] |
 
 ## Mainstream scanning and port-state evidence
@@ -44,9 +44,9 @@ See the [roadmap scorecard](README.md#gap-gate-and-scorecard).
 | UDP scanning | [scan techniques][nmap-techniques] | Empty/explicit/curated/operator payloads and response checks; silent attempts infer `open_or_filtered`. | Present with constraints | [M6][m6], [M8][m8] |
 | Numeric port lists and ranges | [port selection][nmap-ports] | Inclusive ranges, first-seen deduplication, transport identity, explicit selection required. | Present with constraints | [M6][m6] |
 | Common/named-port presets and exclusions | [port selection][nmap-ports] | Catalog 1.0.0 (73 RFC-cited names, six presets); exclusions precede budgets; M6 close gates open. | Partial | [M1][m1], [M6][m6] |
-| Mixed-protocol scan plans | [scan techniques][nmap-techniques], [port selection][nmap-ports] | Typed TCP/UDP endpoints share budgets without merging equal ports; M6 native/comparison gates open; SCTP is M13. | Partial | [M6][m6], [M13][m13] |
+| Mixed-protocol scan plans | [scan techniques][nmap-techniques], [port selection][nmap-ports] | Typed TCP/UDP/SCTP endpoints share budgets without merging equal ports; M6/M13 native/comparison gates open. | Partial | [M6][m6], [M13][m13] |
 | Capability-aware method choice | [scan techniques][nmap-techniques] | `--method auto` selects raw when build supports capture+transmit, else TCP connect; M6 acceptance open. | Partial | [M6][m6] |
-| Scan-dependent ambiguous states | [state meanings][nmap-states] | [Inference][evidence-inference] partitions supporting/conflicting/unanswered/failed attempts; M6/M12 close gates open; SCTP/IP-proto in M13. | Partial | [M1][m1], [M6][m6], [M12][m12], [M13][m13] |
+| Scan-dependent ambiguous states | [state meanings][nmap-states] | [Inference][evidence-inference] partitions supporting/conflicting/unanswered/failed attempts across TCP, UDP, SCTP, and IP-protocol scans; M6/M12/M13 close gates open. | Partial | [M1][m1], [M6][m6], [M12][m12], [M13][m13] |
 | Reasons, timing, and raw evidence | [output][nmap-output] | Per-probe reasons, submission/ingress timing, RTT, capture/source evidence, `probe_sent`, and partial errors. | Present with constraints | [M1][m1], [M6][m6] |
 
 ## Identification, data, and traceroute
@@ -72,15 +72,15 @@ See the [roadmap scorecard](README.md#gap-gate-and-scorecard).
 | Existing resource and failure evidence | [performance][nmap-performance], [output][nmap-output] | Finite preparation/evidence, pending confirmed sends, capture-source validity, omissions, and typed partial errors. | Present with constraints | [M1][m1], [M7][m7] |
 | IPv4/IPv6 and native platform coverage | [options][nmap-options], [downloads][nmap-download] | Five profiles on Linux/macOS/Windows with explicit platform capability limits; broad native parity open. | Partial | [M3][m3] |
 | Privileged native runtime evidence | [scan techniques][nmap-techniques], [downloads][nmap-download] | Isolated Linux and reviewed host-local routes; broader macOS/Windows inventory and admin gates remain in M3. | Partial | [M3][m3] |
-| Versioned machine output | [output][nmap-output] | Text/JSON/NDJSON output/v15 with terminal/error semantics; v6–v14 remain frozen ([compatibility][compatibility]). | Present with constraints | [M4][m4] |
+| Versioned machine output | [output][nmap-output] | Text/JSON/NDJSON output/v16 with terminal/error semantics; v6–v15 remain frozen ([compatibility][compatibility]). | Present with constraints | [M4][m4] |
 
 ## Broader diagnostic scan coverage
 
 | Capability | Nmap reference | Current behavior and remaining gate | Status | Roadmap |
 | --- | --- | --- | --- | --- |
 | TCP ACK/window and flag-based diagnostics | [scan techniques][nmap-techniques] | ACK, window, FIN, NULL, Xmas, Maimon, and custom modes with dataset 1.7.0 and `tcp_diagnostics` native runner; cross-platform recordings and OS truth open ([TCP diagnostics](../tcp-diagnostics.md)). | Partial | [M12][m12] |
-| SCTP INIT/COOKIE-ECHO diagnostics | [scan techniques][nmap-techniques] | SCTP codec/tag helpers only; no scanner workflow. | Partial | [M13][m13] |
-| IP-protocol inventory | [scan techniques][nmap-techniques] | No protocol-number scan plan. | Missing | [M13][m13] |
+| SCTP INIT/COOKIE-ECHO diagnostics | [scan techniques][nmap-techniques] | Raw `init` and `cookie-echo` modes with per-sequence tags, `sctp_init.*`/`sctp_cookie_echo.*` rules, and dataset 1.8.0; cross-platform recordings open. | Partial | [M13][m13] |
+| IP-protocol inventory | [scan techniques][nmap-techniques] | Standalone `--transport ip` (`0..=255`) with exclusions, `ip_protocol.*` rules, and dataset 1.8.0; cross-platform recordings open. | Partial | [M13][m13] |
 
 ## Deferred capabilities and deliberate differences
 

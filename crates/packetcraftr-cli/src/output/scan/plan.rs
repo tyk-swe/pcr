@@ -77,12 +77,18 @@ published_enum! {
     }
 }
 
-/// One discovery probe; `port` is absent for ICMP echo.
+/// One discovery probe; `port` is absent for ICMP and IP-protocol probes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct DiscoveryProbe {
     pub transport: Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_protocol: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icmp_request: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_scan: Option<TcpScan>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -124,6 +130,10 @@ impl Discovery {
                 .map(|probe| DiscoveryProbe {
                     transport: probe.transport(),
                     port: probe.port(),
+                    ip_protocol: probe.ip_protocol(),
+                    icmp_request: probe.icmp_request_kind().filter(|kind| *kind != "echo"),
+                    tcp_scan: matches!(probe, packetcraftr::probe::ProbeEndpoint::TcpAck { .. })
+                        .then(|| TcpScan::from(library::TcpScan::Ack)),
                 })
                 .collect(),
             neighbor: options.neighbor,
@@ -150,17 +160,37 @@ impl From<library::TcpScan> for TcpScan {
     }
 }
 
+/// The effective SCTP chunk a raw scan sends to SCTP scan endpoints.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct SctpScan {
+    pub mode: &'static str,
+    pub chunk_type: u8,
+}
+
+impl From<library::SctpScan> for SctpScan {
+    fn from(mode: library::SctpScan) -> Self {
+        Self {
+            mode: mode.as_str(),
+            chunk_type: mode.chunk_type(),
+        }
+    }
+}
+
 /// Published once per scan, beside its results.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Plan {
     /// Present for the raw method with TCP scan endpoints.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tcp_scan: Option<TcpScan>,
+    /// Present for the raw method with SCTP scan endpoints.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sctp_scan: Option<SctpScan>,
     pub method: Method,
     /// The catalog behind port names, presets, and `port_hint`s.
     pub port_catalog: DataSet,
-    /// Distinct expanded scan endpoints `--exclude-ports` removed before
-    /// planning; `discovery` counts its own.
+    /// Distinct expanded scan endpoints `--exclude-ports` or
+    /// `--exclude-ip-protocols` removed before planning; `discovery` counts
+    /// its own.
     pub excluded_endpoints: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub curated_udp_payloads: Option<CuratedPayloads>,
@@ -175,6 +205,9 @@ pub struct Ports {
     /// Present when an endpoint is TCP and the raw method would probe it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tcp_scan: Option<TcpScan>,
+    /// Present when an endpoint is SCTP and the raw method would probe it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sctp_scan: Option<SctpScan>,
     pub endpoints: Vec<PortEndpoint>,
 }
 
@@ -187,6 +220,36 @@ impl Ports {
             .any(|endpoint| endpoint.transport == Transport::Tcp);
         self.tcp_scan = tcp.then(|| TcpScan::from(mode));
         self
+    }
+
+    #[must_use]
+    pub fn with_sctp_scan(mut self, mode: library::SctpScan) -> Self {
+        let sctp = self
+            .endpoints
+            .iter()
+            .any(|endpoint| endpoint.transport == Transport::Sctp);
+        self.sctp_scan = sctp.then(|| SctpScan::from(mode));
+        self
+    }
+}
+
+/// The IP protocol numbers a scan would probe on every target, after exclusions.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct IpProtocols {
+    pub excluded_protocols: usize,
+    pub protocols: Vec<u8>,
+}
+
+impl From<&library::Selected> for IpProtocols {
+    fn from(selected: &library::Selected) -> Self {
+        Self {
+            excluded_protocols: selected.excluded,
+            protocols: selected
+                .endpoints
+                .iter()
+                .filter_map(|endpoint| endpoint.ip_protocol())
+                .collect(),
+        }
     }
 }
 
@@ -204,6 +267,7 @@ impl From<&library::Selected> for Ports {
             port_catalog: library::catalog::data_set().into(),
             excluded_endpoints: selected.excluded,
             tcp_scan: None,
+            sctp_scan: None,
             endpoints: selected
                 .endpoints
                 .iter()

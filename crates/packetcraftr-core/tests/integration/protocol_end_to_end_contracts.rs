@@ -14,11 +14,14 @@ use packetcraftr_core::diagnostic::{
     CHECKSUM_FAILURE_CODES, GRE_CHECKSUM, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM, IGMP_CHECKSUM,
     IPV4_CHECKSUM, SCTP_CHECKSUM, TCP_CHECKSUM, UDP_CHECKSUM, VRRP_CHECKSUM,
 };
+use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::layer::{Layer, Malformed, Raw};
+use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
 use packetcraftr_core::protocol::link::{Arp, Ethernet};
-use packetcraftr_core::protocol::network::{Icmpv4, Icmpv6, Igmp, Ipv4, Ipv6, Vrrp};
+use packetcraftr_core::protocol::network::{
+    DestinationOptions, HopByHop, Icmpv4, Icmpv6, Igmp, Ipv4, Ipv6, SegmentRoutingHeader, Vrrp,
+};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::Gre;
 use packetcraftr_core::registry::Registry;
@@ -59,6 +62,84 @@ fn known_tcp() -> Tcp {
         sequence: 1,
         window: 0xfaf0,
         ..Tcp::default()
+    }
+}
+
+#[test]
+fn empty_ipv6_hop_by_hop_probes_round_trip_link_padding_without_accepting_jumbograms() {
+    for bytes in [vec![0; 6], vec![0; 32], vec![0x55; 32]] {
+        let mut packet = Packet::new();
+        packet.push(Ethernet::default());
+        let mut header = ipv6("2001:db8::1", "2001:db8::2");
+        header.next_header = WireValue::Exact(0);
+        packet.push(header);
+        packet.push(Padding::after_layer(Bytes::from(bytes.clone()), 1));
+        let (_, decoded) = round_trip(packet, "ethernet");
+        assert!(decoded.packet.get::<Ipv6>().is_some());
+        assert!(decoded.packet.get::<Malformed>().is_none());
+        assert_eq!(
+            decoded.packet.get::<Padding>().unwrap().bytes.as_ref(),
+            bytes
+        );
+    }
+    let mut packet = Packet::new();
+    packet.push(Ethernet::default());
+    let mut header = ipv6("2001:db8::1", "2001:db8::2");
+    header.next_header = WireValue::Exact(0);
+    packet.push(header);
+    // A complete Jumbo Payload option remains unsupported.
+    packet.push(Padding::after_layer(
+        Bytes::from_static(&[59, 0, 0xc2, 4, 0, 1, 0, 0]),
+        1,
+    ));
+    let registry = rooted_registry("ethernet");
+    let built = build::Builder::new(Arc::clone(&registry))
+        .build(packet, codec::Context::default(), build::Options::default())
+        .unwrap();
+    let decoded = decode_from_root(&registry, built.bytes, decode::Options::default()).unwrap();
+    assert!(decoded.packet.get::<Malformed>().is_some());
+}
+
+#[test]
+fn ipv6_empty_protocol_probes_do_not_exempt_extension_child_validation() {
+    let builder = build::Builder::new(registry());
+    let mut base = Packet::new();
+    base.push(ipv6("2001:db8::1", "2001:db8::2"));
+    let mut probe = base.clone();
+    probe.get_mut::<Ipv6>().unwrap().next_header = WireValue::Exact(6);
+    builder
+        .build(probe, codec::Context::default(), build::Options::default())
+        .expect("header-only IPv6 protocol probe");
+    for extension in [
+        Box::new(HopByHop {
+            next_header: WireValue::Exact(6),
+            ..HopByHop::default()
+        }) as Box<dyn Layer>,
+        Box::new(DestinationOptions {
+            next_header: WireValue::Exact(6),
+            ..DestinationOptions::default()
+        }),
+        Box::new(SegmentRoutingHeader {
+            next_header: WireValue::Exact(6),
+            segments_left: WireValue::Exact(0),
+            segments: vec!["2001:db8::2".parse().unwrap()],
+            ..SegmentRoutingHeader::default()
+        }),
+    ] {
+        let mut packet = base.clone();
+        packet.push_boxed(extension);
+        let error = builder
+            .build(packet, codec::Context::default(), build::Options::default())
+            .expect_err("extension headers must include the declared TCP child");
+        let build::Error::Codec { source, .. } = error else {
+            panic!("{error}")
+        };
+        assert!(
+            source
+                .to_string()
+                .contains("selects registered layer tcp, but that layer is absent"),
+            "{source}"
+        );
     }
 }
 

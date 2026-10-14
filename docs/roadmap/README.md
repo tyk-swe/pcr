@@ -8,7 +8,7 @@ and each milestone owns its decisions and remaining gates.
 ## Comparison baseline
 
 The initial review used `22c7d182d577` (2026-10-05) and the official
-[Nmap reference guide][nmap-guide] (7.991). Current `main` emits output/v15;
+[Nmap reference guide][nmap-guide] (7.991). Current `main` emits output/v16;
 beta.3 emits v2. See [migration guidance][project-readme] for producer contracts.
 Comparison runs must record actual Nmap versions/build features; database size
 and advertised throughput are not targets.
@@ -43,7 +43,7 @@ need not wait for one another.
 | M10 | [OS identification][m10] | Finite IPv4/IPv6 stack-fingerprint collection, corpus matching, and qualified or inconclusive results. | M5, M7 | In progress |
 | M11 | [Scan-informed traceroute][m11] | Traceroute selecting an observed responsive probe, tracing multiple authorized hosts under one plan with sourced path reuse. | M5, M6 | In progress |
 | M12 | [TCP diagnostic scans][m12] | ACK/window and FIN/NULL/Xmas/Maimon/custom scan families keeping probe flags separate from inference rules. | M6 | In progress |
-| M13 | [SCTP and IP-protocol inventory][m13] | SCTP INIT/COOKIE-ECHO scanning, typed IP-protocol inventory, and remaining discovery probe families. | M5, M6 | Planned |
+| M13 | [SCTP and IP-protocol inventory][m13] | SCTP INIT/COOKIE-ECHO scanning, typed IP-protocol inventory, and remaining discovery probe families. | M5, M6 | In progress |
 
 ### Close gates
 

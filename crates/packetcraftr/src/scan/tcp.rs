@@ -130,6 +130,7 @@ mod tests {
             scope: None,
             endpoint: crate::probe::ProbeEndpoint::Tcp { port: 80 },
             tcp_scan: mode,
+            sctp_scan: Default::default(),
             attempt: 1,
             udp_payload: bytes::Bytes::new(),
             udp_profile: None,

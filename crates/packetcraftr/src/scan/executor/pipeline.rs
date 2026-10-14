@@ -4,7 +4,8 @@ mod correlation;
 mod prepare;
 use super::{PipelineEvent, PipelineOptions};
 use crate::probe::Batch;
-use crate::scan::{Attribution, PendingEvidence, PipelineFailure, Probe, SentProbe};
+use crate::scan::plan::replies_overlap;
+use crate::scan::{Attribution, PendingEvidence, PipelineFailure, Probe, Reply, SentProbe};
 use crate::{
     Client, Stats,
     clock::Clock,
@@ -152,6 +153,7 @@ pub(super) fn run<P: PacketProviders, K: Clock>(
     batches: &[Batch<Probe>],
     options: PipelineOptions,
     emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    history: &mut super::reply_history::ReplyHistory,
 ) -> Result<Stats, BoundaryError> {
     validate_options(batches, &options)?;
     let started = executor.client.now();
@@ -166,7 +168,7 @@ pub(super) fn run<P: PacketProviders, K: Clock>(
         deadline,
         started,
         &preparation,
-        emit,
+        (emit, history),
     )?;
     let result = pipeline.drive();
     pipeline.finish(result)
@@ -286,6 +288,7 @@ pub(super) fn admit_adaptive<P: PacketProviders, K: Clock>(
 type CaptureSession<P> = <<P as CaptureProviders>::Capture as capture::Provider>::Capture;
 
 struct Pipeline<'a, P: PacketProviders, K> {
+    history: &'a mut super::reply_history::ReplyHistory,
     executor: &'a ExchangeExecutor<'a, P, K>,
     batches: &'a [Batch<Probe>],
     planned: Vec<Planned<'a>>,
@@ -324,7 +327,10 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         deadline: Instant,
         started: Instant,
         preparation: &'a Deadline,
-        emit: &'a mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+        (emit, history): (
+            &'a mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+            &'a mut super::reply_history::ReplyHistory,
+        ),
     ) -> Result<Self, BoundaryError> {
         let planned = batches
             .iter()
@@ -354,6 +360,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             * source_count;
         let seen = SeenFrames::new(options.max_evidence_frames);
         Ok(Self {
+            history,
             executor,
             batches,
             planned,
@@ -444,6 +451,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         while !draining_captures
             && self.pending.len() < self.options.max_in_flight
             && self.executor.client.now() >= self.next_send
+            && !self.next_reply_overlaps()
         {
             while self.admitted.peek().is_some_and(|probe| {
                 self.retained.saturating_add(probe.memory) > self.options.max_prepared_bytes
@@ -466,6 +474,14 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
 
     fn host_deadline(&self, index: usize) -> Option<Instant> {
         self.options.host_deadlines.get(index).copied().flatten()
+    }
+
+    fn next_reply_overlaps(&self) -> bool {
+        self.planned.get(self.next).is_some_and(|next| {
+            self.pending
+                .keys()
+                .any(|index| replies_overlap(next.probe, self.planned[*index].probe))
+        })
     }
 
     fn omit(&mut self, index: usize) -> Result<(), BoundaryError> {
@@ -519,6 +535,11 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
                 .map_err(BoundaryError::from_error)?,
         );
         self.stats.packets_completed += 1;
+        self.history.sent(
+            probe,
+            &sent.built().packet,
+            &sent.route().plan.decision.interface,
+        );
         self.stats.bytes = self
             .stats
             .bytes
@@ -566,6 +587,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .unwrap_or(self.deadline)
             .min(self.deadline);
         if self.pending.len() < self.options.max_in_flight
+            && !self.next_reply_overlaps()
             && self.admitted.peek().is_some_and(|probe| {
                 self.retained.saturating_add(probe.memory) <= self.options.max_prepared_bytes
             })
@@ -685,6 +707,21 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             return self.unattributed(raw, Attribution::Ambiguous, None);
         }
         let (index, observation) = candidates.pop().expect("one candidate");
+        if observation.response.reply == Reply::IpProtocolPayload
+            && self.history.ambiguous(
+                self.planned[index].probe,
+                &decoded.packet,
+                &self.plan.interfaces[source],
+            )
+        {
+            if self.diagnostics.insert("ambiguous") {
+                (self.emit)(PipelineEvent::Diagnostic(Diagnostic::warning(
+                    "scan.ambiguous_response",
+                    "identity-less capture also matched a previous transmission and was not attributed",
+                )))?;
+            }
+            return self.unattributed(raw, Attribution::Ambiguous, None);
+        }
         let definitive = definitive(&observation);
         let entry = self.pending.get_mut(&index).expect("candidate is pending");
         let candidate = Best {

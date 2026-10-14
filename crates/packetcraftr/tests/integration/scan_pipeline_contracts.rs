@@ -48,6 +48,7 @@ fn client(state: &Arc<Mutex<State>>) -> Client<common::FakeProviders<Routes, Io>
 fn request() -> Request {
     Request {
         tcp_scan: Default::default(),
+        sctp_scan: Default::default(),
         target_sources: Vec::new(),
         max_in_flight: 2,
         targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
@@ -292,6 +293,8 @@ fn sink_failure() -> BoundaryError {
 fn extra_replies_are_retained_beside_each_outcome_under_the_undecoded_count() {
     let observe = |max_in_flight, max_undecoded| {
         let mut request = request();
+        // This checks retention accounting, not CPU scheduling deadlines.
+        request.timeout = Duration::from_millis(200);
         request.max_in_flight = max_in_flight;
         request.limits.evidence.max_undecoded = max_undecoded;
         // Every probe draws two resets; one becomes the outcome.

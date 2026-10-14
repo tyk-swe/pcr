@@ -77,6 +77,7 @@ struct Script {
     fail_at: Option<usize>,
     icmp_first: bool,
     syn_ack_delta: i32,
+    reply_delay: Option<Duration>,
 }
 
 struct Scripted {
@@ -324,6 +325,11 @@ impl transmit::Provider for ScriptedIo {
         let wire = outbound.bytes().clone();
         let report = transmit::Report::committed(wire.len(), wire.clone());
         let mut state = self.inner.0.lock().expect("fixture io");
+        if let Some(delay) = self.scripted.script.reply_delay {
+            let ingress = report.timing().freshness_marker().monotonic() + delay;
+            state.release_replies_after = Some(ingress);
+            state.late_ingress = Some(Some(ingress));
+        }
         assert!(state.ready, "capture must be ready before every send");
         let mut wires = self.scripted.wires.lock().expect("fixture wires");
         if self.scripted.script.fail_at == Some(wires.len()) {
@@ -459,6 +465,7 @@ fn address(ipv6: bool) -> IpAddr {
 fn request(ipv6: bool, mode: TcpScan, schedule: Schedule) -> Request {
     Request {
         tcp_scan: mode,
+        sctp_scan: Default::default(),
         target_sources: Vec::new(),
         max_in_flight: if schedule == Schedule::Serial { 1 } else { 4 },
         targets: Selection {
@@ -470,15 +477,17 @@ fn request(ipv6: bool, mode: TcpScan, schedule: Schedule) -> Request {
         discovery: Default::default(),
         attempts: 1,
         adaptive: (schedule == Schedule::Adaptive).then(|| scan::Adaptive {
-            min_timeout: Duration::from_millis(40),
-            max_timeout: Duration::from_millis(40),
+            min_timeout: Duration::from_millis(200),
+            max_timeout: Duration::from_millis(200),
             min_window: 1,
             initial_window: 2,
             host_timeout: Duration::from_secs(5),
             retry_backoff: Duration::from_millis(10),
             max_backoff: Duration::from_millis(50),
         }),
-        timeout: Duration::from_millis(40),
+        // This fixture encodes replies synchronously during send; leave CPU
+        // headroom so preparation latency is not mistaken for network silence.
+        timeout: Duration::from_millis(200),
         probes_per_second: None,
         udp_payload: Default::default(),
         udp_profiles: Default::default(),
@@ -676,7 +685,7 @@ fn unrelated_noise_duplicates_and_reordering_never_change_evidence() {
                         ..Script::default()
                     };
                     let (fixture, result) = execute(request(ipv6, mode, schedule), script);
-                    let aggregate = result.unwrap_or_else(|error| panic!("{label}: {error}"));
+                    let aggregate = result.unwrap_or_else(|error| panic!("{label}: {error:?}"));
                     assert_wire(mode, &fixture.sent(), 1);
                     check(&aggregate, mode, &label);
                     if duplicate {
@@ -704,13 +713,13 @@ fn late_replies_remain_evidence_without_changing_silent_inference() {
                     let mut request = request(ipv6, mode, schedule);
                     request.endpoints = vec![ProbeEndpoint::Tcp { port }];
                     let clock = VirtualClock::default();
-                    let ingress = clock.now() + request.timeout * 2;
                     let fixture = Fixture::new(
-                        Script::default(),
+                        Script {
+                            reply_delay: Some(request.timeout * 2),
+                            ..Script::default()
+                        },
                         responder::State {
                             idle_clock: Some(clock.clone()),
-                            release_replies_after: Some(ingress),
-                            late_ingress: Some(Some(ingress)),
                             ..responder::State::default()
                         },
                     );

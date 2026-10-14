@@ -50,6 +50,17 @@ pub(crate) fn frozen_v14_schema_validator() -> &'static jsonschema::Validator {
     })
 }
 
+pub(crate) fn frozen_v15_schema_validator() -> &'static jsonschema::Validator {
+    static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
+    VALIDATOR.get_or_init(|| {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../../../../schemas/packetcraftr.output.v15.schema.json"
+        ))
+        .expect("frozen output/v15 schema must be JSON");
+        jsonschema::validator_for(&schema).expect("frozen output/v15 schema must compile")
+    })
+}
+
 pub(crate) fn path_text(path: &Path) -> &str {
     path.to_str().expect("temporary path must be UTF-8")
 }

@@ -287,7 +287,11 @@ fn limits() -> crate::scan::Limits {
 }
 
 fn validate(options: &Options) -> Result<(), Error> {
-    options.validate(&crate::route::Options::default(), &limits())
+    options.validate(
+        &crate::route::Options::default(),
+        &limits(),
+        crate::target::Family::Any,
+    )
 }
 
 #[test]
@@ -355,5 +359,9 @@ fn options_reject_probes_that_would_not_run_or_cannot_be_bounded() {
         link_mode: packetcraftr_netio::link::Mode::Layer3,
         ..Default::default()
     };
-    assert!(neighbor.validate(&layer3, &limits()).is_err());
+    assert!(
+        neighbor
+            .validate(&layer3, &limits(), crate::target::Family::Any)
+            .is_err()
+    );
 }

@@ -11,7 +11,8 @@ use crate::{
 
 use super::{
     QuotedTransport, ReversedProtocolLayers, quoted_icmp_error, response_source,
-    reversed_protocol_layers, sctp::sctp_initiate_tag,
+    reversed_protocol_layers,
+    sctp::{sctp_cookie_echo, sctp_initiate_tag, sctp_response_kind},
 };
 
 #[derive(Clone, Debug)]
@@ -88,13 +89,18 @@ fn match_sctp(
     for layers in layers {
         let request_sctp = layers.request.downcast_ref::<Sctp>()?;
         let response_sctp = layers.response.downcast_ref::<Sctp>()?;
-        if request_sctp.verification_tag != 0 {
-            return None;
-        }
-        let (request_initiate_tag, _) = sctp_initiate_tag(request, layers.request_index, 1)?;
-        if request_initiate_tag == 0
-            || sctp_initiate_tag(response, layers.response_index, 2).is_none()
-            || response_sctp.verification_tag != request_initiate_tag
+        let expected_tag = if request_sctp.verification_tag == 0 {
+            let (request_initiate_tag, _) = sctp_initiate_tag(request, layers.request_index, 1)?;
+            if request_initiate_tag == 0 {
+                return None;
+            }
+            request_initiate_tag
+        } else {
+            sctp_cookie_echo(request, layers.request_index)?;
+            request_sctp.verification_tag
+        };
+        if response_sctp.verification_tag != expected_tag
+            || sctp_response_kind(response, layers.response_index).is_none()
         {
             return None;
         }

@@ -11,7 +11,6 @@
 use packetcraftr_netio::Unsupported;
 
 use super::{Error, Request};
-use crate::probe::Transport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Method {
@@ -127,6 +126,9 @@ pub(super) fn unconnectable(request: &Request) -> Option<&'static str> {
     if !request.tcp_scan.is_syn() {
         return Some("non-SYN TCP diagnostic");
     }
+    if !request.sctp_scan.is_init() {
+        return Some("SCTP COOKIE-ECHO diagnostic");
+    }
     let discovery = &request.discovery;
     let probes = if discovery.runs() {
         discovery.probes.as_slice()
@@ -137,9 +139,13 @@ pub(super) fn unconnectable(request: &Request) -> Option<&'static str> {
         .endpoints
         .iter()
         .chain(probes)
-        .map(|endpoint| endpoint.transport())
-        .find(|transport| *transport != Transport::Tcp)
-        .map(Transport::as_str)
+        .find_map(|endpoint| match endpoint {
+            crate::probe::ProbeEndpoint::Tcp { .. } => None,
+            crate::probe::ProbeEndpoint::TcpAck { .. } => Some("tcp-ack"),
+            crate::probe::ProbeEndpoint::IcmpTimestamp => Some("icmp-timestamp"),
+            crate::probe::ProbeEndpoint::IcmpNetmask => Some("icmp-netmask"),
+            other => Some(other.transport().as_str()),
+        })
         .or_else(|| (discovery.runs() && discovery.neighbor).then_some("neighbor"))
 }
 

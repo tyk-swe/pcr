@@ -126,8 +126,10 @@ impl From<library::profile::Evidence> for ApplicationEvidence {
 pub enum Protocol {
     Tcp,
     Udp,
+    Sctp,
     Icmpv4,
     Icmpv6,
+    Ip,
 }
 
 impl From<(Transport, IpAddr)> for Protocol {
@@ -135,8 +137,10 @@ impl From<(Transport, IpAddr)> for Protocol {
         match (transport, address) {
             (Transport::Tcp, _) => Self::Tcp,
             (Transport::Udp, _) => Self::Udp,
+            (Transport::Sctp, _) => Self::Sctp,
             (Transport::Icmp, IpAddr::V4(_)) => Self::Icmpv4,
             (Transport::Icmp, IpAddr::V6(_)) => Self::Icmpv6,
+            (Transport::Ip, _) => Self::Ip,
         }
     }
 }
@@ -158,9 +162,16 @@ pub struct Probe {
     pub scope: Option<Scope>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_protocol: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icmp_request: Option<&'static str>,
     /// The TCP segment a raw TCP probe sent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tcp_scan: Option<plan::TcpScan>,
+    /// The SCTP chunk a raw SCTP probe sent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sctp_scan: Option<plan::SctpScan>,
     pub attempt: u32,
     pub status: ProbeStatus,
     pub classification: Classification,
@@ -189,6 +200,8 @@ pub struct Endpoint {
     pub transport: Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_protocol: Option<u8>,
     /// The highest-ranked attempt observation, kept from v7.
     pub classification: Classification,
     /// The catalog's conventional name for this transport and port; a hint,
@@ -411,6 +424,7 @@ impl TryFrom<library::Endpoint> for Endpoint {
             scope: endpoint.scope.as_ref().map(Scope::from),
             transport: endpoint.transport,
             port: endpoint.port,
+            ip_protocol: endpoint.ip_protocol,
             classification: endpoint.classification.into(),
             port_hint: endpoint.port_hint,
             inference: endpoint.inference.map(plan::Inference::from),
@@ -433,7 +447,13 @@ pub struct Sent {
     pub scope: Option<Scope>,
     pub destination_port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_protocol: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icmp_request: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tcp_scan: Option<plan::TcpScan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sctp_scan: Option<plan::SctpScan>,
     pub attempt: u32,
     pub sent_at: Timestamp,
     pub udp_profile: Option<String>,
@@ -457,8 +477,15 @@ impl TryFrom<library::SentProbe> for Sent {
             destination: probe.address,
             scope: probe.scope.as_ref().map(Scope::from),
             destination_port: probe.endpoint.port(),
+            ip_protocol: probe.endpoint.ip_protocol(),
+            icmp_request: probe
+                .endpoint
+                .icmp_request_kind()
+                .filter(|kind| *kind != "echo"),
             tcp_scan: (probe.endpoint.transport() == Transport::Tcp)
                 .then(|| plan::TcpScan::from(probe.tcp_scan)),
+            sctp_scan: (probe.endpoint.transport() == Transport::Sctp)
+                .then(|| plan::SctpScan::from(probe.sctp_scan)),
             attempt: probe.attempt,
             sent_at: Timestamp::try_from(sent.timing().freshness_marker().wall_clock())?,
             frame: sent.wire_bytes().clone().into(),
@@ -549,6 +576,8 @@ pub struct EndpointSummary {
     pub transport: Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_protocol: Option<u8>,
     pub classification: Classification,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port_hint: Option<&'static str>,
@@ -566,6 +595,7 @@ impl From<library::Endpoint> for Published<Event> {
                     scope: endpoint.scope.as_ref().map(Scope::from),
                     transport: endpoint.transport,
                     port: endpoint.port,
+                    ip_protocol: endpoint.ip_protocol,
                     classification: endpoint.classification.into(),
                     port_hint: endpoint.port_hint,
                     inference: endpoint.inference.map(plan::Inference::from),
@@ -620,7 +650,10 @@ impl TryFrom<library::ProbeEvidence> for Probe {
             destination: evidence.address,
             scope: evidence.scope.as_ref().map(Scope::from),
             destination_port: evidence.port,
+            ip_protocol: evidence.ip_protocol,
+            icmp_request: evidence.icmp_request.filter(|kind| *kind != "echo"),
             tcp_scan: evidence.tcp_scan.map(plan::TcpScan::from),
+            sctp_scan: evidence.sctp_scan.map(plan::SctpScan::from),
             attempt: evidence.attempt,
             status: evidence.status,
             classification: evidence.classification.into(),
@@ -664,6 +697,8 @@ pub struct FailedProbe {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
     pub destination_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_protocol: Option<u8>,
     pub transport: Transport,
     pub attempt: u32,
 }
@@ -706,6 +741,7 @@ impl TryFrom<&library::PipelineFailure> for Failure {
                 destination: probe.address,
                 scope: probe.scope.as_ref().map(Scope::from),
                 destination_port: probe.endpoint.port(),
+                ip_protocol: probe.endpoint.ip_protocol(),
                 transport: probe.endpoint.transport(),
                 attempt: probe.attempt,
             }),

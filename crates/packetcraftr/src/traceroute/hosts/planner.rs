@@ -325,7 +325,7 @@ fn cache_index(address: IpAddr, transport: Transport) -> usize {
     let transport = match transport {
         Transport::Tcp => 0,
         Transport::Udp => 1,
-        Transport::Icmp => 2,
+        Transport::Icmp | Transport::Sctp | Transport::Ip => 2,
     };
     usize::from(address.is_ipv6()) * 3 + transport
 }
@@ -440,7 +440,7 @@ impl Current {
     ) -> Result<Batch<Probe>, Error> {
         let strategy = self.selection.strategy;
         let source_port = match strategy.transport {
-            Transport::Icmp => 0,
+            Transport::Icmp | Transport::Sctp | Transport::Ip => 0,
             Transport::Udp | Transport::Tcp => {
                 request.source_port.unwrap_or(SCAN_FOLLOWUP_SOURCE_PORT)
             }

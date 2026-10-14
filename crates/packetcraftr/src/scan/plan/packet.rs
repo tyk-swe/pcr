@@ -16,7 +16,7 @@ use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::tunnel::Geneve;
 use packetcraftr_core::protocol::{
     network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
-    transport::{Tcp, Udp},
+    transport::{Sctp, Tcp, Udp},
 };
 use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{build, decode, packet::Packet, protocol::BuiltinProtocol};
@@ -40,11 +40,13 @@ fn scan_udp_source_port(attempt: u32) -> u16 {
 // matches
 pub(in crate::scan) fn probe_packet(probe: &Probe) -> Packet {
     let mut packet = Packet::new();
+    let explicit_ip_protocol = probe.endpoint.ip_protocol();
     match probe.address {
         IpAddr::V4(destination) => {
             packet.push(Ipv4 {
                 destination,
                 identification: nonzero_ipv4_identification(probe.sequence),
+                protocol: explicit_ip_protocol.map_or(WireValue::Auto, WireValue::Exact),
                 ..Ipv4::default()
             });
         }
@@ -52,18 +54,21 @@ pub(in crate::scan) fn probe_packet(probe: &Probe) -> Packet {
             packet.push(Ipv6 {
                 destination,
                 flow_label: (probe.sequence as u32) & 0x000f_ffff,
+                next_header: explicit_ip_protocol.map_or(WireValue::Auto, WireValue::Exact),
                 ..Ipv6::default()
             });
         }
     }
     match probe.endpoint {
-        ProbeEndpoint::Tcp { port } => packet.push(Tcp {
-            destination_port: port,
-            sequence: probe.sequence as u32,
-            acknowledgment: probe.tcp_scan.acknowledgment(probe.sequence),
-            flags: probe.tcp_scan.flags(),
-            ..Tcp::default()
-        }),
+        ProbeEndpoint::Tcp { port } | ProbeEndpoint::TcpAck { port } => {
+            packet.push(Tcp {
+                destination_port: port,
+                sequence: probe.sequence as u32,
+                acknowledgment: probe.tcp_scan.acknowledgment(probe.sequence),
+                flags: probe.tcp_scan.flags(),
+                ..Tcp::default()
+            });
+        }
         ProbeEndpoint::Udp { port } => {
             packet.push(Udp {
                 source_port: scan_udp_source_port(probe.attempt),
@@ -75,30 +80,64 @@ pub(in crate::scan) fn probe_packet(probe: &Probe) -> Packet {
                     if !probe.udp_payload.is_empty() {
                         packet.push(Raw::new(probe.udp_payload.clone()));
                     }
+                } else if let Ok(dns) = Dns::try_from(probe.udp_payload.clone()) {
+                    packet.push(dns);
                 } else {
-                    if let Ok(dns) = Dns::try_from(probe.udp_payload.clone()) {
-                        packet.push(dns);
-                    } else {
-                        packet.push(Raw::new(probe.udp_payload.clone()));
-                    }
+                    packet.push(Raw::new(probe.udp_payload.clone()));
                 }
             } else {
                 push_udp_payload(&mut packet, port, &probe.udp_payload);
             }
-            &mut packet
         }
-        ProbeEndpoint::Icmp => match probe.address {
-            IpAddr::V4(_) => packet.push(Icmpv4 {
-                body: icmp_identity(ICMP_IDENTITY_TAG, probe.sequence),
-                ..Icmpv4::default()
-            }),
-            IpAddr::V6(_) => packet.push(Icmpv6 {
-                body: icmp_identity(ICMP_IDENTITY_TAG, probe.sequence),
-                ..Icmpv6::default()
-            }),
-        },
-    };
+        ProbeEndpoint::Sctp { port } => {
+            packet.push(Sctp {
+                destination_port: port,
+                verification_tag: probe.sctp_scan.verification_tag(probe.sequence),
+                ..Sctp::default()
+            });
+            packet.push(Raw::new(probe.sctp_scan.chunk_bytes(probe.sequence)));
+        }
+        ProbeEndpoint::Icmp | ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask => {
+            let (icmp_type, body) =
+                icmp_probe_fields(probe.endpoint, probe.address, probe.sequence);
+            match probe.address {
+                IpAddr::V4(_) => {
+                    packet.push(Icmpv4 {
+                        icmp_type,
+                        body,
+                        ..Icmpv4::default()
+                    });
+                }
+                IpAddr::V6(_) => {
+                    packet.push(Icmpv6 {
+                        icmp_type,
+                        body,
+                        ..Icmpv6::default()
+                    });
+                }
+            }
+        }
+        ProbeEndpoint::Ip { .. } => {}
+    }
     packet
+}
+
+fn icmp_probe_fields(endpoint: ProbeEndpoint, address: IpAddr, sequence: u64) -> (u8, Bytes) {
+    let identity = icmp_identity(ICMP_IDENTITY_TAG, sequence);
+    match (endpoint, address) {
+        (ProbeEndpoint::IcmpTimestamp, _) => {
+            let mut body = identity.to_vec();
+            body.resize(16, 0);
+            (13, Bytes::from(body))
+        }
+        (ProbeEndpoint::IcmpNetmask, _) => {
+            let mut body = identity.to_vec();
+            body.resize(8, 0);
+            (17, Bytes::from(body))
+        }
+        (_, IpAddr::V4(_)) => (8, identity),
+        (_, IpAddr::V6(_)) => (128, identity),
+    }
 }
 
 /// Second byte of every scan ICMP echo payload; see [`icmp_identity`].
@@ -267,22 +306,33 @@ fn sent_payload_matches(
     probe: &Probe,
     sent: &Packet,
     network_protocol: BuiltinProtocol,
-    transport_protocol: BuiltinProtocol,
+    transport_protocol: Option<BuiltinProtocol>,
 ) -> bool {
     let network_index = usize::from(
         sent.layer(0)
             .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Ethernet)),
     );
-    if sent.layer(network_index).and_then(BuiltinProtocol::of) != Some(network_protocol)
-        || sent.layer(network_index + 1).and_then(BuiltinProtocol::of) != Some(transport_protocol)
-    {
+    if sent.layer(network_index).and_then(BuiltinProtocol::of) != Some(network_protocol) {
+        return false;
+    }
+    let Some(transport_protocol) = transport_protocol else {
+        return sent
+            .iter()
+            .skip(network_index + 1)
+            .all(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Padding));
+    };
+    if sent.layer(network_index + 1).and_then(BuiltinProtocol::of) != Some(transport_protocol) {
         return false;
     }
     let mut suffix = Packet::new();
     for layer in sent.iter().skip(network_index + 2) {
         suffix.push_boxed(layer.clone_box());
     }
-    payload_bytes(&suffix).is_some_and(|bytes| bytes == probe.udp_payload)
+    let expected = match probe.endpoint {
+        ProbeEndpoint::Sctp { .. } => probe.sctp_scan.chunk_bytes(probe.sequence),
+        _ => probe.udp_payload.clone(),
+    };
+    payload_bytes(&suffix).is_some_and(|bytes| bytes == expected)
 }
 
 fn payload_bytes(payload: &Packet) -> Option<Bytes> {
@@ -306,16 +356,31 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
     }) {
         return false;
     }
+    if matches!(
+        probe.endpoint,
+        ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask
+    ) && probe.address.is_ipv6()
+    {
+        return false;
+    }
     let network_protocol = if probe.address.is_ipv4() {
         BuiltinProtocol::Ipv4
     } else {
         BuiltinProtocol::Ipv6
     };
     let transport_protocol = match probe.endpoint {
-        ProbeEndpoint::Tcp { .. } => BuiltinProtocol::Tcp,
-        ProbeEndpoint::Udp { .. } => BuiltinProtocol::Udp,
-        ProbeEndpoint::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
-        ProbeEndpoint::Icmp => BuiltinProtocol::Icmpv6,
+        ProbeEndpoint::Tcp { .. } | ProbeEndpoint::TcpAck { .. } => Some(BuiltinProtocol::Tcp),
+        ProbeEndpoint::Udp { .. } => Some(BuiltinProtocol::Udp),
+        ProbeEndpoint::Sctp { .. } => Some(BuiltinProtocol::Sctp),
+        ProbeEndpoint::Icmp | ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask
+            if probe.address.is_ipv4() =>
+        {
+            Some(BuiltinProtocol::Icmpv4)
+        }
+        ProbeEndpoint::Icmp | ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask => {
+            Some(BuiltinProtocol::Icmpv6)
+        }
+        ProbeEndpoint::Ip { .. } => None,
     };
     if !sent_payload_matches(probe, sent, network_protocol, transport_protocol) {
         return false;
@@ -324,6 +389,7 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
         IpAddr::V4(destination) => sent.get::<Ipv4>().is_some_and(|ipv4| {
             ipv4.destination == destination
                 && ipv4.identification == nonzero_ipv4_identification(probe.sequence)
+                && ipv4.options.is_empty()
         }),
         IpAddr::V6(destination) => sent.get::<Ipv6>().is_some_and(|ipv6| {
             ipv6.destination == destination
@@ -334,27 +400,49 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
         return false;
     }
     match probe.endpoint {
-        ProbeEndpoint::Tcp { port } => sent.get::<Tcp>().is_some_and(|tcp| {
-            tcp.destination_port == port
-                && tcp.sequence == probe.sequence as u32
-                && tcp.flags == probe.tcp_scan.flags()
-                && tcp.acknowledgment == probe.tcp_scan.acknowledgment(probe.sequence)
-                && tcp.options.is_empty()
-        }),
+        ProbeEndpoint::Tcp { port } | ProbeEndpoint::TcpAck { port } => {
+            let expected_mode = match (probe.stage, probe.endpoint) {
+                (super::Stage::Discovery, ProbeEndpoint::TcpAck { .. }) => {
+                    crate::scan::TcpScan::Ack
+                }
+                _ => probe.tcp_scan,
+            };
+            sent.get::<Tcp>().is_some_and(|tcp| {
+                tcp.destination_port == port
+                    && tcp.sequence == probe.sequence as u32
+                    && tcp.flags == expected_mode.flags()
+                    && tcp.acknowledgment == expected_mode.acknowledgment(probe.sequence)
+                    && tcp.options.is_empty()
+            })
+        }
         ProbeEndpoint::Udp { port } => sent.get::<Udp>().is_some_and(|udp| {
             udp.source_port == scan_udp_source_port(probe.attempt) && udp.destination_port == port
         }),
-        ProbeEndpoint::Icmp => match probe.address {
-            IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
-                icmp.icmp_type == 8
-                    && icmp.code == 0
-                    && icmp.body == icmp_identity(ICMP_IDENTITY_TAG, probe.sequence)
-            }),
-            IpAddr::V6(_) => sent.get::<Icmpv6>().is_some_and(|icmp| {
-                icmp.icmp_type == 128
-                    && icmp.code == 0
-                    && icmp.body == icmp_identity(ICMP_IDENTITY_TAG, probe.sequence)
-            }),
+        ProbeEndpoint::Sctp { port } => sent.get::<Sctp>().is_some_and(|sctp| {
+            port != 0
+                && sctp.source_port == Sctp::default().source_port
+                && sctp.destination_port == port
+                && sctp.verification_tag == probe.sctp_scan.verification_tag(probe.sequence)
+        }),
+        ProbeEndpoint::Icmp | ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask => {
+            let (expected_type, expected_body) =
+                icmp_probe_fields(probe.endpoint, probe.address, probe.sequence);
+            match probe.address {
+                IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
+                    icmp.icmp_type == expected_type && icmp.code == 0 && icmp.body == expected_body
+                }),
+                IpAddr::V6(_) => sent.get::<Icmpv6>().is_some_and(|icmp| {
+                    icmp.icmp_type == expected_type && icmp.code == 0 && icmp.body == expected_body
+                }),
+            }
+        }
+        ProbeEndpoint::Ip { protocol } => match probe.address {
+            IpAddr::V4(_) => sent
+                .get::<Ipv4>()
+                .is_some_and(|ipv4| ipv4.protocol == WireValue::Exact(protocol)),
+            IpAddr::V6(_) => sent
+                .get::<Ipv6>()
+                .is_some_and(|ipv6| ipv6.next_header == WireValue::Exact(protocol)),
         },
     }
 }

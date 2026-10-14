@@ -568,7 +568,7 @@ fn published_http2_examples_match_real_cli() {
         .expect("published example parses");
         assert_eq!(
             document["schema"],
-            packetcraftr_cli::output::contract::SCHEMA_V15
+            packetcraftr_cli::output::contract::SCHEMA_V16
         );
         let mut frozen = document.clone();
         frozen["schema"] = packetcraftr_cli::output::contract::SCHEMA_V10.into();
@@ -577,10 +577,10 @@ fn published_http2_examples_match_real_cli() {
             .expect("HTTP/2 payloads remain compatible with frozen output/v10");
         // HTTP/2 payloads and envelope fields remain compatible. Only the
         // current family's marker differs from the frozen released example.
-        document["schema"] = packetcraftr_cli::output::contract::SCHEMA_V15.into();
+        document["schema"] = packetcraftr_cli::output::contract::SCHEMA_V16.into();
         common::schema_validator()
             .validate(&document)
-            .expect("the preserved HTTP/2 contract remains valid in output/v15");
+            .expect("the preserved HTTP/2 contract remains valid in output/v16");
         document
     };
     let path = multiplexed();
@@ -592,7 +592,7 @@ fn published_http2_examples_match_real_cli() {
     ]));
     assert_eq!(
         aggregate["schema"],
-        packetcraftr_cli::output::contract::SCHEMA_V15
+        packetcraftr_cli::output::contract::SCHEMA_V16
     );
     assert_eq!(
         aggregate,

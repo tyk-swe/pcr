@@ -3,6 +3,7 @@
 
 mod pipeline;
 mod registry;
+mod reply_history;
 
 pub(super) use pipeline::AdaptiveAdmission;
 pub(super) use pipeline::limit;
@@ -149,6 +150,7 @@ pub(crate) trait Pipelined: Executor<Batch<Probe>> {
 }
 
 pub(crate) struct ClientExecutor<'c, P, K> {
+    reply_history: reply_history::ReplyHistory,
     client: &'c Client<P, K>,
     bindings: Vec<(u16, packetcraftr_core::layer::Id)>,
     configured: Option<Client<P, K>>,
@@ -227,6 +229,7 @@ impl NeighborBounds {
 impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
     pub(crate) fn new(client: &'c Client<P, K>, request: &Request) -> Self {
         Self {
+            reply_history: reply_history::ReplyHistory::new(request.has_ip_probes()),
             client,
             bindings: registry::bindings(request),
             configured: None,
@@ -368,6 +371,7 @@ fn route_probe(target: &SelectedAddress) -> Probe {
         scope: target.scope.clone(),
         endpoint: crate::probe::ProbeEndpoint::Icmp,
         tcp_scan: super::TcpScan::default(),
+        sctp_scan: super::SctpScan::default(),
         attempt: 1,
         udp_payload: bytes::Bytes::new(),
         udp_profile: None,
@@ -408,7 +412,15 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_,
             &mut matches_request,
             None,
         )?;
-        Ok(Evidence::from_exchange(batch.permit, exchange))
+        let evidence = Evidence::from_exchange(batch.permit, exchange);
+        for sent in &evidence.sent {
+            self.reply_history.sent(
+                first,
+                &sent.built().packet,
+                &sent.route().plan.decision.interface,
+            );
+        }
+        Ok(evidence)
     }
 }
 
@@ -419,7 +431,15 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         options: PipelineOptions,
         emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
     ) -> Result<Stats, BoundaryError> {
-        pipeline::run(&self.exchange()?, batches, options, emit)
+        let mut history = std::mem::replace(
+            &mut self.reply_history,
+            reply_history::ReplyHistory::new(false),
+        );
+        let result = self
+            .exchange()
+            .and_then(|executor| pipeline::run(&executor, batches, options, emit, &mut history));
+        self.reply_history = history;
+        result
     }
 
     fn admit_pipeline(
@@ -637,6 +657,7 @@ mod tests {
         let (client, providers) = fake_client();
         let request = Request {
             tcp_scan: Default::default(),
+            sctp_scan: Default::default(),
             target_sources: Vec::new(),
             max_in_flight: 1,
             targets: Target::Address("192.0.2.2".parse().unwrap()).into(),

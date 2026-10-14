@@ -147,7 +147,7 @@ impl LayerCodec for Ipv6Codec {
         let payload_length = usize::from(payload_length_field);
         // A jumbogram must start with a Hop-by-Hop header carrying the Jumbo
         // Payload option.
-        if payload_length == 0 && input.len() > IPV6_LEN && header[6] == 0 {
+        if payload_length == 0 && header[6] == 0 && has_jumbo_option(&input[IPV6_LEN..]) {
             return Err(unsupported(
                 NAME,
                 "IPv6 jumbogram payload requires a Hop-by-Hop Jumbo Payload option",
@@ -183,7 +183,11 @@ impl LayerCodec for Ipv6Codec {
             }),
             consumed: IPV6_LEN,
             payload_len: payload_length,
-            next: vec![Discriminator(u64::from(next))],
+            next: if payload_length == 0 {
+                Vec::new()
+            } else {
+                vec![Discriminator(u64::from(next))]
+            },
             fields: ipv6_layout(),
             diagnostics: Vec::new(),
             stop: payload_length == 0,
@@ -197,6 +201,34 @@ impl LayerCodec for Ipv6Codec {
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Ipv6::default(), fields)
     }
+}
+
+/// A zero payload length alone does not make trailing link padding a
+/// jumbogram. Only a Hop-by-Hop Jumbo Payload option has that meaning.
+fn has_jumbo_option(payload: &[u8]) -> bool {
+    let Some(&length) = payload.get(1) else {
+        return false;
+    };
+    let Some(mut options) = payload.get(2..(usize::from(length) + 1) * 8) else {
+        return false;
+    };
+    while let Some(&kind) = options.first() {
+        if kind == 0 {
+            options = &options[1..];
+            continue;
+        }
+        if kind == 0xc2 {
+            return true;
+        }
+        let Some(&length) = options.get(1) else {
+            return false;
+        };
+        let Some(rest) = options.get(usize::from(length) + 2..) else {
+            return false;
+        };
+        options = rest;
+    }
+    false
 }
 
 fn resolve_next_header(
@@ -215,7 +247,14 @@ fn resolve_next_header(
         context.mode,
         diagnostics,
     )?;
-    validate_raw_child_discriminator(name, u64::from(next), context, diagnostics)?;
+    let empty_protocol_probe = name == NAME
+        && matches!(value, WireValue::Exact(_))
+        && context
+            .child
+            .is_none_or(|child| BuiltinProtocol::Padding.identifies(child));
+    if !empty_protocol_probe {
+        validate_raw_child_discriminator(name, u64::from(next), context, diagnostics)?;
+    }
     validate_ipv6_routing_child(name, next, context, diagnostics)?;
     Ok((next, materialized))
 }

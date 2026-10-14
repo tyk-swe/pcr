@@ -9,6 +9,7 @@ import os
 import pathlib
 import platform
 import re
+import signal
 import socket
 import subprocess
 import threading
@@ -145,7 +146,15 @@ def measured(command):
             while block := pipe.read(8192):
                 if len(destination) + len(block) > OUTPUT_LIMIT:
                     overflow.set()
-                    process.kill()
+                    # Popen.kill() polls/reaps on POSIX, racing the owner's
+                    # wait4() and losing the child's exit/resource record.
+                    if hasattr(os, "wait4"):
+                        try:
+                            os.kill(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    else:
+                        process.kill()
                     return
                 destination.extend(block)
 
@@ -317,15 +326,15 @@ def connect_case(binary, corpus, case, family, nmap, adaptive=False):
         if run["exit_code"] != 0:
             raise ValueError(f"native connect execution failed: {run['stderr']} {run['stdout']}")
         envelope = strict_json(run["stdout"])
-        if (envelope["schema"] not in ("packetcraftr.output/v9", "packetcraftr.output/v10", "packetcraftr.output/v11", "packetcraftr.output/v12", "packetcraftr.output/v13", "packetcraftr.output/v14", "packetcraftr.output/v15")
+        if (envelope["schema"] not in ("packetcraftr.output/v9", "packetcraftr.output/v10", "packetcraftr.output/v11", "packetcraftr.output/v12", "packetcraftr.output/v13", "packetcraftr.output/v14", "packetcraftr.output/v15", "packetcraftr.output/v16")
                 or envelope["status"] != "success" or envelope["command"] != "scan"):
             raise ValueError("native connect did not publish a successful scan envelope")
         result = envelope["result"]
-        if envelope["schema"] in ("packetcraftr.output/v10", "packetcraftr.output/v11", "packetcraftr.output/v12", "packetcraftr.output/v13", "packetcraftr.output/v14", "packetcraftr.output/v15"):
+        if envelope["schema"] in ("packetcraftr.output/v10", "packetcraftr.output/v11", "packetcraftr.output/v12", "packetcraftr.output/v13", "packetcraftr.output/v14", "packetcraftr.output/v15", "packetcraftr.output/v16"):
             if result["scheduling"]["mode"] != ("adaptive" if adaptive else "fixed"):
                 raise ValueError("connect scheduling mode disagrees with the requested mode")
         if adaptive:
-            if envelope["schema"] not in ("packetcraftr.output/v10", "packetcraftr.output/v11", "packetcraftr.output/v12", "packetcraftr.output/v13", "packetcraftr.output/v14", "packetcraftr.output/v15"):
+            if envelope["schema"] not in ("packetcraftr.output/v10", "packetcraftr.output/v11", "packetcraftr.output/v12", "packetcraftr.output/v13", "packetcraftr.output/v14", "packetcraftr.output/v15", "packetcraftr.output/v16"):
                 raise ValueError("adaptive connect requires the v10 or later supported scheduling contract")
         endpoints = result["endpoints"]
         if result["method"] != "tcp_connect" or len(endpoints) != 1 or len(endpoints[0]["probes"]) != 1:

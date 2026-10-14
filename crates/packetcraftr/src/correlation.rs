@@ -6,8 +6,13 @@
 use std::net::IpAddr;
 
 use bytes::Bytes;
+use packetcraftr_core::field::{FieldValue, WireValue};
 use packetcraftr_core::protocol::{
-    IcmpErrorKind, QuotedTransport, quoted_icmp_error, transport::Tcp, transport_tuple_reversed,
+    IcmpErrorKind, QuotedTransport, SctpResponseKind,
+    network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
+    quoted_icmp_error, sctp_response_kind,
+    transport::{Sctp, Tcp},
+    transport_tuple_reversed,
 };
 use packetcraftr_core::{
     decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet, protocol::BuiltinProtocol,
@@ -21,7 +26,9 @@ pub enum Transport {
     Tcp,
     #[default]
     Udp,
+    Sctp,
     Icmp,
+    Ip,
 }
 
 impl Transport {
@@ -30,7 +37,9 @@ impl Transport {
         match self {
             Self::Tcp => "tcp",
             Self::Udp => "udp",
+            Self::Sctp => "sctp",
             Self::Icmp => "icmp",
+            Self::Ip => "ip",
         }
     }
 }
@@ -81,8 +90,15 @@ pub(crate) enum Correlation {
     TcpSynAck,
     TcpOther,
     UdpReply,
+    SctpInitAck,
+    SctpAbort,
+    SctpOther,
     IcmpReply,
+    IcmpTimestampReply,
+    IcmpNetmaskReply,
+    IpProtocolReply,
     PortUnreachable,
+    ProtocolUnreachable,
     TimeExceeded,
     AdministrativelyProhibited,
     DestinationUnreachable,
@@ -92,7 +108,17 @@ impl Correlation {
     pub(crate) const fn is_direct_reply(self) -> bool {
         matches!(
             self,
-            Self::TcpReset | Self::TcpSynAck | Self::TcpOther | Self::UdpReply | Self::IcmpReply
+            Self::TcpReset
+                | Self::TcpSynAck
+                | Self::TcpOther
+                | Self::UdpReply
+                | Self::SctpInitAck
+                | Self::SctpAbort
+                | Self::SctpOther
+                | Self::IcmpReply
+                | Self::IcmpTimestampReply
+                | Self::IcmpNetmaskReply
+                | Self::IpProtocolReply
         )
     }
 
@@ -167,7 +193,10 @@ pub(crate) fn observe(
     let udp_responder = (transport == Transport::Udp)
         .then(|| transport_tuple_reversed(request, &response.packet, BuiltinProtocol::Udp))
         .flatten();
-    let (direct_reply, direct_responder) = if let Some(responder) = udp_responder {
+    let ip_responder = (transport == Transport::Ip)
+        .then(|| direct_ip_protocol_reply(request, &response.packet))
+        .flatten();
+    let (direct_reply, direct_responder) = if let Some(responder) = udp_responder.or(ip_responder) {
         (true, Some(responder))
     } else {
         match request
@@ -219,16 +248,141 @@ pub(crate) fn observe(
                 Correlation::UdpReply,
                 "correlated UDP response from the requested endpoint",
             ),
-            Transport::Icmp => Observation::new(
+            Transport::Sctp => {
+                let request_sctp = request.get::<Sctp>()?;
+                let sctp_index = response
+                    .packet
+                    .iter()
+                    .rposition(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Sctp))?;
+                match sctp_response_kind(&response.packet, sctp_index)? {
+                    SctpResponseKind::InitAck if request_sctp.verification_tag == 0 => {
+                        Observation::new(
+                            responder,
+                            Correlation::SctpInitAck,
+                            "correlated SCTP INIT ACK",
+                        )
+                    }
+                    SctpResponseKind::InitAck => Observation::new(
+                        responder,
+                        Correlation::SctpOther,
+                        "correlated SCTP INIT ACK to a COOKIE ECHO probe",
+                    ),
+                    SctpResponseKind::Abort => {
+                        Observation::new(responder, Correlation::SctpAbort, "correlated SCTP ABORT")
+                    }
+                    SctpResponseKind::Other => Observation::new(
+                        responder,
+                        Correlation::SctpOther,
+                        "correlated SCTP response with inconclusive chunk",
+                    ),
+                }
+            }
+            Transport::Icmp => match response.packet.get::<Icmpv4>().map(|icmp| icmp.icmp_type) {
+                Some(14) => Observation::new(
+                    responder,
+                    Correlation::IcmpTimestampReply,
+                    "correlated ICMP timestamp reply",
+                ),
+                Some(18) => Observation::new(
+                    responder,
+                    Correlation::IcmpNetmaskReply,
+                    "correlated ICMP address mask reply",
+                ),
+                _ => Observation::new(
+                    responder,
+                    Correlation::IcmpReply,
+                    "correlated ICMP echo reply",
+                ),
+            },
+            Transport::Ip => Observation::new(
                 responder,
-                Correlation::IcmpReply,
-                "correlated ICMP echo reply",
+                Correlation::IpProtocolReply,
+                "correlated IP protocol response",
             ),
         };
         return Some(observation);
     }
 
     None
+}
+
+fn direct_ip_protocol_reply(request: &Packet, response: &Packet) -> Option<IpAddr> {
+    if !request.iter().all(|layer| {
+        matches!(
+            BuiltinProtocol::of(layer),
+            Some(
+                BuiltinProtocol::Ethernet
+                    | BuiltinProtocol::Ipv4
+                    | BuiltinProtocol::Ipv6
+                    | BuiltinProtocol::Padding
+            )
+        )
+    }) {
+        return None;
+    }
+    let outer_payload = semantics::outer_layers(response)
+        .skip_while(|layer| !BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ip))
+        .skip(1)
+        .find(|layer| !BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ipv6_extension));
+    if outer_payload.is_some_and(|layer| {
+        layer
+            .downcast_ref::<Icmpv4>()
+            .is_some_and(|icmp| matches!(icmp.icmp_type, 3 | 4 | 5 | 11 | 12))
+            || layer
+                .downcast_ref::<Icmpv6>()
+                .is_some_and(|icmp| icmp.icmp_type < 128)
+    }) {
+        return None;
+    }
+    let request_path = semantics::outer_ip_path(request).ok()??;
+    let response_path = semantics::outer_ip_path(response).ok()??;
+    if request_path.source != response_path.final_destination
+        || request_path.final_destination != response_path.source
+    {
+        return None;
+    }
+    if request_path.source == request_path.final_destination {
+        let self_capture = match (request.get::<Ipv4>(), response.get::<Ipv4>()) {
+            (Some(req), Some(resp)) => {
+                req.identification == resp.identification
+                    && req.options == resp.options
+                    && resp.total_length == WireValue::Exact((20 + resp.options.len()) as u16)
+            }
+            _ => matches!((request.get::<Ipv6>(), response.get::<Ipv6>()),
+                (Some(req), Some(resp)) if req.flow_label == resp.flow_label
+                    && resp.payload_length == WireValue::Exact(0)),
+        };
+        if self_capture {
+            return None;
+        }
+    }
+    let protocol_matches = match (request.get::<Ipv4>(), response.get::<Ipv4>()) {
+        (Some(req), Some(resp)) => {
+            matches!((&req.protocol, &resp.protocol), (WireValue::Exact(a), WireValue::Exact(b)) if a == b)
+        }
+        _ => match (request.get::<Ipv6>(), response.get::<Ipv6>()) {
+            (Some(req), Some(_)) => match req.next_header {
+                WireValue::Exact(protocol) => outer_has_protocol(response, protocol),
+                _ => false,
+            },
+            _ => false,
+        },
+    };
+    protocol_matches.then_some(response_path.source)
+}
+
+pub(crate) fn outer_has_protocol(packet: &Packet, protocol: u8) -> bool {
+    let mut layers = semantics::outer_layers(packet)
+        .skip_while(|layer| !BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ip));
+    let Some(header) = layers.next() else {
+        return false;
+    };
+    if let Some(ipv4) = header.downcast_ref::<Ipv4>() {
+        return ipv4.protocol == WireValue::Exact(protocol);
+    }
+    header.downcast_ref::<Ipv6>().is_some_and(|ipv6| ipv6.next_header == WireValue::Exact(protocol))
+        || layers.take_while(|layer| BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ipv6_extension))
+            .any(|layer| matches!(layer.field("next_header"), Some(FieldValue::Unsigned(value)) if value == u64::from(protocol)))
 }
 
 fn classify_icmp_error(
@@ -240,7 +394,9 @@ fn classify_icmp_error(
     let expected_transport = match transport {
         Transport::Tcp => QuotedTransport::Tcp,
         Transport::Udp => QuotedTransport::Udp,
+        Transport::Sctp => QuotedTransport::Sctp,
         Transport::Icmp => QuotedTransport::Icmp,
+        Transport::Ip => QuotedTransport::Ip,
     };
     let kind = quoted_icmp_error(request, response, expected_transport)?;
     let icmp_protocol = response
@@ -255,6 +411,11 @@ fn classify_icmp_error(
             Correlation::PortUnreachable,
             "ICMPv4 port unreachable",
             "ICMPv6 port unreachable",
+        ),
+        IcmpErrorKind::ProtocolUnreachable => (
+            Correlation::ProtocolUnreachable,
+            "ICMPv4 protocol unreachable",
+            "ICMPv6 unrecognized next header",
         ),
         IcmpErrorKind::AdministrativelyProhibited => (
             Correlation::AdministrativelyProhibited,

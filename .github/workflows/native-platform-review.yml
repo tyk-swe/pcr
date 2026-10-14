@@ -8,7 +8,7 @@ on:
         type: string
         required: true
       scenario:
-        description: Select the inventory, scoped targets, discovery, OS identification, or TCP diagnostics
+        description: Select the inventory, scoped targets, discovery, OS identification, TCP diagnostics, or SCTP/IP-protocol
         type: choice
         options:
           - all
@@ -16,6 +16,7 @@ on:
           - host_discovery
           - os_identification
           - tcp_diagnostics
+          - sctp_ip_protocol
         default: all
 
 permissions:
@@ -59,6 +60,9 @@ jobs:
           if [[ "${{ inputs.scenario }}" == tcp_diagnostics ]]; then
             ${{ matrix.python }} scripts/test-tcp-diagnostics-native.py --reviewed-commit "${{ inputs.commit }}" \
               --emit-unavailable runtime_evidence_missing --report target/validation/tcp-diagnostics-native.json
+          elif [[ "${{ inputs.scenario }}" == sctp_ip_protocol ]]; then
+            ${{ matrix.python }} scripts/test-sctp-ip-protocol-native.py --reviewed-commit "${{ inputs.commit }}" \
+              --emit-unavailable runtime_evidence_missing --report target/validation/sctp-ip-protocol-native.json
           elif [[ "${{ inputs.scenario }}" == host_discovery ]]; then
             ${{ matrix.python }} scripts/test-host-discovery-native.py --emit-unavailable \
               --report target/validation/host-discovery.json
@@ -88,6 +92,12 @@ jobs:
               --report target/validation/tcp-diagnostics-native.json
             exit
           fi
+          if [[ "$SCENARIO" == sctp_ip_protocol ]]; then
+            sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
+              python3 scripts/test-sctp-ip-protocol-native.py --reviewed-commit "$REVIEWED_COMMIT" \
+              --report target/validation/sctp-ip-protocol-native.json
+            exit
+          fi
           if [[ "$SCENARIO" == host_discovery ]]; then
             sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
               python3 scripts/test-host-discovery-native.py --reviewed-commit "$REVIEWED_COMMIT" \
@@ -114,6 +124,11 @@ jobs:
           if [[ "$SCENARIO" == tcp_diagnostics ]]; then
             python scripts/test-tcp-diagnostics-native.py --reviewed-commit "$REVIEWED_COMMIT" \
               --report target/validation/tcp-diagnostics-native.json
+            exit
+          fi
+          if [[ "$SCENARIO" == sctp_ip_protocol ]]; then
+            python scripts/test-sctp-ip-protocol-native.py --reviewed-commit "$REVIEWED_COMMIT" \
+              --report target/validation/sctp-ip-protocol-native.json
             exit
           fi
           if [[ "$SCENARIO" == host_discovery ]]; then

@@ -66,6 +66,7 @@ impl Options {
         &self,
         route: &crate::route::Options,
         limits: &super::Limits,
+        family: crate::target::Family,
     ) -> Result<(), Error> {
         let invalid = |message: &str| {
             Err(Error::InvalidDiscovery {
@@ -86,6 +87,23 @@ impl Options {
         }
         if self.probes.is_empty() && !self.neighbor {
             return invalid("discovery needs at least one probe");
+        }
+        if self.probes.contains(&ProbeEndpoint::Sctp { port: 0 }) {
+            return Err(Error::InvalidPort {
+                message: "SCTP discovery probes require a non-zero destination port".to_owned(),
+            });
+        }
+        if family == crate::target::Family::Ipv6
+            && self.probes.iter().any(|probe| {
+                matches!(
+                    probe,
+                    ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask
+                )
+            })
+        {
+            return invalid(
+                "ICMP timestamp and netmask discovery probes are IPv4-only and cannot be used with IPv6 targets",
+            );
         }
         if self.probes.len() > limits.max_ports {
             return Err(Error::InvalidLimit {

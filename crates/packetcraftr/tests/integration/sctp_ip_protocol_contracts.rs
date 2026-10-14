@@ -88,17 +88,55 @@ impl route::Provider for Routes {
 struct ScriptedIo {
     inner: responder::Io,
     sent: Arc<Mutex<Vec<Packet>>>,
+    delivery_ingress: bool,
+}
+
+struct ScriptedCapture {
+    inner: responder::Capture,
+    delivery_ingress: bool,
+}
+
+impl capture::Session for ScriptedCapture {
+    fn metadata(&self) -> &capture::Metadata {
+        self.inner.metadata()
+    }
+    fn wait_ready(&mut self, deadline: &Deadline) -> Result<(), net::Error> {
+        self.inner.wait_ready(deadline)
+    }
+    fn next_captured_frame(
+        &mut self,
+        deadline: &Deadline,
+    ) -> Result<Option<capture::Captured>, net::Error> {
+        let mut captured = self.inner.next_captured_frame(deadline)?;
+        if self.delivery_ingress
+            && let Some(frame) = &mut captured
+        {
+            frame.received_at = Some(Instant::now());
+        }
+        Ok(captured)
+    }
+    fn shutdown(&mut self) -> Result<(), net::Error> {
+        self.inner.shutdown()
+    }
+    fn stats(&self) -> capture::Stats {
+        self.inner.stats()
+    }
 }
 
 impl capture::Provider for ScriptedIo {
-    type Capture = <responder::Io as capture::Provider>::Capture;
+    type Capture = ScriptedCapture;
 
     fn arm_capture(
         &self,
         request: &capture::Request,
         deadline: &Deadline,
     ) -> Result<Self::Capture, net::Error> {
-        self.inner.arm_capture(request, deadline)
+        self.inner
+            .arm_capture(request, deadline)
+            .map(|inner| ScriptedCapture {
+                inner,
+                delivery_ingress: self.delivery_ingress,
+            })
     }
 }
 
@@ -446,10 +484,17 @@ fn respond(sent: &Packet, wire: &Bytes) -> Vec<Frame> {
 }
 
 fn client() -> (Client<Fixtures>, Arc<Mutex<Vec<Packet>>>) {
+    client_with_delivery_ingress(false)
+}
+
+fn client_with_delivery_ingress(
+    delivery_ingress: bool,
+) -> (Client<Fixtures>, Arc<Mutex<Vec<Packet>>>) {
     let sent = Arc::new(Mutex::new(Vec::new()));
     let io = ScriptedIo {
         inner: responder::Io(Arc::new(Mutex::new(responder::State::default()))),
         sent: Arc::clone(&sent),
+        delivery_ingress,
     };
     let providers = ProviderSet {
         udp: (),
@@ -491,15 +536,15 @@ fn base_request(ipv6: bool, endpoints: Vec<ProbeEndpoint>, schedule: Schedule) -
         discovery: Default::default(),
         attempts: 1,
         adaptive: (schedule == Schedule::Adaptive).then(|| scan::Adaptive {
-            min_timeout: Duration::from_millis(20),
-            max_timeout: Duration::from_millis(20),
+            min_timeout: Duration::from_millis(200),
+            max_timeout: Duration::from_millis(200),
             min_window: 1,
             initial_window: 2,
             host_timeout: Duration::from_secs(5),
             retry_backoff: Duration::from_millis(10),
             max_backoff: Duration::from_millis(50),
         }),
-        timeout: Duration::from_millis(20),
+        timeout: Duration::from_millis(200),
         probes_per_second: None,
         udp_payload: Default::default(),
         udp_profiles: Default::default(),
@@ -648,6 +693,50 @@ fn sctp_abort_outranks_router_icmp_and_ignores_wrong_tag_while_retaining_superse
             aggregate.unattributed[0].attribution,
             scan::Attribution::Duplicate
         );
+    }
+}
+
+#[test]
+fn pipelined_ip_attempts_and_extension_probes_keep_delayed_positive_replies() {
+    for (ipv6, protocols, expected_peak) in [
+        (false, vec![47], 1),
+        (true, vec![47], 1),
+        (true, vec![47, 0, 60, 44, 43], 1),
+        (false, vec![47, 4, 41], 2),
+        (true, vec![47, 4, 41], 2),
+    ] {
+        let mut request = base_request(
+            ipv6,
+            protocols
+                .iter()
+                .map(|&protocol| ProbeEndpoint::Ip { protocol })
+                .collect(),
+            Schedule::Pipelined,
+        );
+        request.max_in_flight = 2;
+        request.attempts = 2;
+        request.timeout = Duration::from_millis(200);
+        // Replies arrive at capture polling, after the pipeline has filled
+        // every available send slot. They carry no attempt nonce.
+        let (client, sent) = client_with_delivery_ingress(true);
+        let collector = scan::Collector::default();
+        let report = client.scan(request, collector.clone()).unwrap();
+        assert_eq!(report.scheduling.observed_peak_window, expected_peak);
+        let aggregate = collector.finish(report).unwrap();
+        assert_eq!(sent.lock().unwrap().len(), protocols.len() * 2);
+        assert_eq!(aggregate.endpoints.len(), protocols.len());
+        assert!(aggregate.unattributed.is_empty());
+        for endpoint in aggregate.endpoints {
+            assert_eq!(endpoint.probes.len(), 2);
+            assert!(
+                endpoint
+                    .probes
+                    .iter()
+                    .all(|probe| probe.status == ProbeStatus::Response),
+                "{endpoint:?}"
+            );
+            assert_eq!(endpoint.inference.unwrap().state, Some(State::Open));
+        }
     }
 }
 

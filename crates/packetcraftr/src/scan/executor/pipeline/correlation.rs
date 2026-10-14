@@ -3,7 +3,9 @@
 
 use super::{Pending, Planned};
 use crate::evidence::SentPacket;
-use crate::scan::{Classification, evidence::Observation, profile};
+use crate::probe::ProbeEndpoint;
+use crate::scan::{Classification, Probe, evidence::Observation, profile};
+use packetcraftr_core::protocol::network::ip_protocol;
 use packetcraftr_netio::capture::RecordIdentity;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
@@ -11,6 +13,43 @@ use std::{
     sync::Arc,
     time::Instant,
 };
+
+/// Header-only IP replies have no echoed attempt identity. IPv6 extension
+/// replies may also match a probe for a protocol carried after that header.
+pub(super) fn replies_overlap(a: &Probe, b: &Probe) -> bool {
+    if a.address != b.address
+        || (a.endpoint.ip_protocol().is_none() && b.endpoint.ip_protocol().is_none())
+    {
+        return false;
+    }
+    let response_protocol = |endpoint| match endpoint {
+        ProbeEndpoint::Ip { protocol } => protocol,
+        ProbeEndpoint::Tcp { .. } | ProbeEndpoint::TcpAck { .. } => ip_protocol::TCP,
+        ProbeEndpoint::Udp { .. } => ip_protocol::UDP,
+        ProbeEndpoint::Sctp { .. } => ip_protocol::SCTP,
+        ProbeEndpoint::Icmp | ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask => {
+            if a.address.is_ipv6() {
+                ip_protocol::ICMPV6
+            } else {
+                ip_protocol::ICMPV4
+            }
+        }
+    };
+    let extension_probe = |endpoint: ProbeEndpoint| {
+        endpoint.ip_protocol().is_some_and(|protocol| {
+            matches!(
+                protocol,
+                ip_protocol::HOP_BY_HOP
+                    | ip_protocol::ROUTING
+                    | ip_protocol::FRAGMENT
+                    | ip_protocol::AH
+                    | ip_protocol::DESTINATION_OPTIONS
+            )
+        })
+    };
+    response_protocol(a.endpoint) == response_protocol(b.endpoint)
+        || (a.address.is_ipv6() && (extension_probe(a.endpoint) || extension_probe(b.endpoint)))
+}
 
 pub(super) struct SeenFrames {
     set: HashSet<RecordIdentity>,

@@ -69,7 +69,7 @@ fn scan_request(octets: &[u8]) -> scan::Request {
         discovery: Default::default(),
         attempts: 1,
         adaptive: None,
-        timeout: Duration::from_millis(50),
+        timeout: Duration::from_millis(200),
         probes_per_second: None,
         udp_payload: Default::default(),
         udp_profiles: Default::default(),

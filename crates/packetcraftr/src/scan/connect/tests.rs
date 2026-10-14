@@ -337,7 +337,10 @@ fn adaptive_connect_reports_mode_ceilings_and_outcomes() {
     let client = client(Verdicts {
         closed: Arc::new(AtomicUsize::new(0)),
     });
-    let request = adaptive_request(vec![80, 81, 82], 1, Duration::from_secs(5));
+    let mut request = adaptive_request(vec![80, 81, 82], 1, Duration::from_secs(5));
+    // Verify provider outcomes without timing out a thread waiting for CPU.
+    request.timeout = Duration::from_millis(500);
+    request.adaptive.as_mut().unwrap().min_timeout = Duration::from_millis(500);
     let report = collect(&client, request).expect("adaptive connect scan");
     let scheduling = &report.report.scheduling;
     assert_eq!(scheduling.mode, crate::scan::SchedulingMode::Adaptive,);
@@ -552,9 +555,12 @@ fn the_descriptor_queue_caps_pending_even_when_leases_free_early() {
         request.max_in_flight = 64;
         request.limits.max_duration = Duration::from_secs(60);
         if adaptive {
+            request.timeout = Duration::from_millis(500);
             let adaptive = request.adaptive.as_mut().unwrap();
-            adaptive.min_timeout = Duration::from_millis(200);
-            adaptive.max_timeout = Duration::from_millis(200);
+            // Capacity is the subject here; permit all 64 deliberately slow
+            // authorization calls even when the test process is descheduled.
+            adaptive.min_timeout = Duration::from_millis(500);
+            adaptive.max_timeout = Duration::from_millis(500);
             adaptive.initial_window = 64;
         } else {
             request.adaptive = None;

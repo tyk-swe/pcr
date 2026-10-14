@@ -15,7 +15,7 @@ use crate::{
     providers::{CaptureProviders, PacketProviders},
     scan::error::Probes,
 };
-use correlation::{Best, SeenFrames, candidates, definitive, settled};
+use correlation::{Best, SeenFrames, candidates, definitive, replies_overlap, settled};
 use packetcraftr_core::{
     budget::Deadline,
     decode::Dissector,
@@ -444,6 +444,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         while !draining_captures
             && self.pending.len() < self.options.max_in_flight
             && self.executor.client.now() >= self.next_send
+            && !self.next_reply_overlaps()
         {
             while self.admitted.peek().is_some_and(|probe| {
                 self.retained.saturating_add(probe.memory) > self.options.max_prepared_bytes
@@ -466,6 +467,14 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
 
     fn host_deadline(&self, index: usize) -> Option<Instant> {
         self.options.host_deadlines.get(index).copied().flatten()
+    }
+
+    fn next_reply_overlaps(&self) -> bool {
+        self.planned.get(self.next).is_some_and(|next| {
+            self.pending
+                .keys()
+                .any(|index| replies_overlap(next.probe, self.planned[*index].probe))
+        })
     }
 
     fn omit(&mut self, index: usize) -> Result<(), BoundaryError> {
@@ -566,6 +575,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .unwrap_or(self.deadline)
             .min(self.deadline);
         if self.pending.len() < self.options.max_in_flight
+            && !self.next_reply_overlaps()
             && self.admitted.peek().is_some_and(|probe| {
                 self.retained.saturating_add(probe.memory) <= self.options.max_prepared_bytes
             })

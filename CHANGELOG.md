@@ -99,6 +99,9 @@ remaining acceptance gates.
 
 ### Fixed
 
+- Pipelined IP-protocol probes serialize overlapping reply identities, including
+  repeated attempts and IPv6 extension probes, so responsive protocols retain
+  positive evidence.
 - Strict IPv6 extension builds still require their declared child headers;
   IP-in-IP replies retain positive evidence when an inner packet contains an
   ICMP error.

@@ -93,7 +93,7 @@ def load_corpus(path):
             raise ValueError("trace-path reuse must cite declared targets")
     if [case["id"] for case in corpus.get("inference_scenarios", [])] != [
             "mixed-same-port", "silent-udp", "contradictory-udp"]:
-        raise ValueError("corpus must contain the complete M6 inference inventory")
+        raise ValueError("corpus must contain the complete inference inventory")
     for case in corpus.get("inference_scenarios", []):
         attempts = case["request"]["attempts"]
         if case["families"] != ["ipv4", "ipv6"]:
@@ -393,13 +393,13 @@ def main():
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--report", type=pathlib.Path, required=True)
     parser.add_argument("--adaptive", action="store_true",
-                        help="exercise opt-in scheduling on the same M2 fixtures and hard ceilings")
+                        help="exercise opt-in scheduling on the same scanner fixtures and hard ceilings")
     args = parser.parse_args()
     if not 1 <= args.repetitions <= 10:
         parser.error("repetitions must be 1..=10")
     report = dict(schema="packetcraftr.scanner-benchmark/v1", platform=platform.platform(),
                   scheduling_mode="adaptive" if args.adaptive else "fixed",
-                  measured_inventory="m2_single_probe_scan_connect_and_traceroute",
+                  measured_inventory="single_probe_scan_connect_and_traceroute",
                   adaptive_scenario_performance="not_benchmarked",
                   repetitions=args.repetitions, cases=[], status="incomplete",
                   coverage_complete=False, comparison_complete=False, tools={})

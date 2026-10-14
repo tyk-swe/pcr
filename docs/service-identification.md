@@ -115,9 +115,5 @@ vulnerability finding. See [consumer rules](consumer-compatibility.md).
 Bundled original corpus 1.1.0 includes SMTP/FTP and supported observed hostnames/
 static wildcard-version CPEs with observed_field/match_rule sources; no device
 types are bundled. [Data policy](scanner-data-policy.md) governs maintenance.
-
-[M9 evidence](roadmap/evidence/m09/README.md) records 21 fixed held-out instances,
-18 eligible: 66.67% matched, 22.22% unknown, 11.11% ambiguous. Malformed and TLS
-failure fixtures retain separate outcomes. Families/formats/profiles repeat the
-same instances, not independent services. Token fidelity is not implementation
-identity, calibrated confidence, production prevalence, or a performance baseline.
+Presented-token fidelity does not establish implementation identity, calibrated
+confidence, production prevalence, or a performance baseline.

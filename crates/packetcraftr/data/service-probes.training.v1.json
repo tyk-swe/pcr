@@ -2,7 +2,7 @@
   "fixture_version": 1,
   "corpus": "project-service-probes",
   "corpus_version": "1.1.0",
-  "source": "PacketcraftR project-authored training instances; excluded from held-out quality totals",
+  "source": "PacketcraftR project-authored training instances",
   "fixtures": [
     {
       "id": "smtp-postfix-training",

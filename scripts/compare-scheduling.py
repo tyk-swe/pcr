@@ -64,7 +64,7 @@ def rows(report):
         expected.update(("tcp_connect", condition, family, None, None)
                         for condition in ("connect-responsive", "connect-closed"))
         if not expected <= grouped.keys():
-            raise ValueError("benchmark omitted a declared M2 fixture cell")
+            raise ValueError("benchmark omitted a declared scanner fixture cell")
     return grouped
 
 
@@ -126,7 +126,7 @@ def compare(baseline, candidate):
                 else "incomplete" if any(cell["status"] == "unavailable" for cell in cells) else "measured"),
         optimization_accepted=False,
         limitations=[
-            "M2 single-probe fixtures measure preservation, not multi-host adaptive throughput.",
+            "Single-probe fixtures measure preservation, not multi-host adaptive throughput.",
             "Proposed budgets require review before optimization acceptance.",
             "A platform report is not runtime evidence for either other supported platform.",
             "Logical retained-byte charges are separate from exact-process peak memory.",
@@ -135,7 +135,7 @@ def compare(baseline, candidate):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Compare frozen fixed and adaptive M2 measurements without claiming optimization acceptance.")
+    parser = argparse.ArgumentParser(description="Compare frozen fixed and adaptive scanner measurements without claiming optimization acceptance.")
     parser.add_argument("--baseline", type=pathlib.Path, required=True)
     parser.add_argument("--candidate", type=pathlib.Path, required=True)
     parser.add_argument("--report", type=pathlib.Path, required=True)

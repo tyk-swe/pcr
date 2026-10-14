@@ -1,6 +1,6 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Immediate independent M12 replies; unassigned peer IPs cannot use kernel truth."""
+"""Immediate independent TCP diagnostic replies; unassigned peer IPs cannot use kernel truth."""
 import contextlib
 import ipaddress
 import json
@@ -12,7 +12,7 @@ import time
 from discovery_isolated_fixture import packet, transport, reply as discovery_reply
 from tcp_diagnostic_wire import network, tcp
 
-SCANNER, PEER = 'pcrm12s', 'pcrm12p'
+SCANNER, PEER = 'pcrtcps', 'pcrtcpp'
 SOURCES = {'ipv4': '192.0.2.1', 'ipv6': '2001:db8::1'}
 TARGETS = {'ipv4': '192.0.2.2', 'ipv6': '2001:db8::2'}
 
@@ -159,7 +159,7 @@ def provision(evidence=None, responder=reply, accepts=None):
         worker = threading.Thread(target=serve, daemon=True)
         worker.start()
         if not ready.wait(2) or errors:
-            raise RuntimeError('independent M12 peer did not become ready: ' + '; '.join(errors))
+            raise RuntimeError('independent TCP diagnostic peer did not become ready: ' + '; '.join(errors))
         yield evidence
     except Exception as error:
         evidence['error'] = str(error)

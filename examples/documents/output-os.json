@@ -17,7 +17,7 @@
           "signature": "linux-ethernet1500-ipv4",
           "corpus": "project-os-fingerprints",
           "corpus_version": "1.0.0",
-          "reference": "Original Linux 7.0.0-38-generic kernel captures; docs/roadmap/evidence/m10/training-kernel-7.0.0-38-generic.json.gz; 1500-byte veth MTU, default TCP settings",
+          "reference": "Original Linux 7.0.0-38-generic kernel captures; crates/packetcraftr/data/os-fingerprints.provenance.yaml; 1500-byte veth MTU, default TCP settings",
           "matched_predicates": 17,
           "confidence": "qualified",
           "observation_indices": [

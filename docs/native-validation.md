@@ -10,7 +10,7 @@ checks, and unavailable paths never prove parity.
 | Readiness, cancellation, queue loss, settings, filter errors, disappearance, exchange | Eight isolated scenarios, including scoped targets | Eight-scenario inventory; record each exercised/failed/unavailable path |
 | Raw IPv4 | Fixed loopback host-route delivery | `loopback_exchange`; Layer 3-only has no capture assertions |
 | Raw IPv6 | Scoped namespace-local link-local TCP SYN | macOS complete-header send unsupported; Windows scoped UDP recorded |
-| Scoped IPv6 | Same addresses on two isolated links; zone selects peer | [M4 five-profile records](roadmap/evidence/m04/README.md) |
+| Scoped IPv6 | Same addresses on two isolated links; zone selects peer | Five-profile host-local `scoped_ipv6_targets` |
 | Windows non-local UDP | Not claimed | No external destination tested |
 
 `scripts/test-native-platform.py` builds CLI/test binaries per profile and runs
@@ -45,21 +45,19 @@ sudo python3 scripts/test-native-isolated.py --binary target/release/packetcraft
   --native-test-binary PATH_TO_NATIVE_ISOLATED_EXECUTABLE
 ```
 
-For M4's five-profile scoped route, run `python3 scripts/test-target-planning-isolated.py`.
+For the five-profile scoped target-planning route, run `python3 scripts/test-target-planning-isolated.py`.
 
 ## Host discovery and OS identification
 
 - **Host discovery (`scenario=host_discovery`):** `scripts/test-host-discovery-native.py`
   emits `discovery-native-evidence/v1` across five profiles and six dual-stack
-  conditions using immediate replies and reserved closed sockets. See
-  [M5](roadmap/m05-host-discovery.md#independent-discovery-corpus-and-runtime-route)
-  and [Linux records](roadmap/evidence/m05/README.md).
+  conditions using immediate replies and reserved closed sockets.
 - **OS identification (`scenario=os_identification`):** Build the all-feature CLI
   and run `sudo python3 scripts/test-os-identification-native.py --require-complete`
   (requires `ip`, `unshare`, `nsenter`, `ethtool`). See
-  [M10 evidence](roadmap/evidence/m10/README.md).
+  [OS identification](os-identification.md).
 
-## M12 TCP diagnostic acceptance
+## TCP diagnostic acceptance
 
 Both reviewed workflows accept `scenario=tcp_diagnostics` for a clean reviewed
 commit. Linux uses fresh namespaces and disposable veth peers (`ip`, `unshare`,
@@ -78,7 +76,7 @@ bounds probes (`≤ 32`), response window (`500 ms`), operation/process duration
 (`10 s`/`15 s`), and stream/capture retention (`1 MiB`), separating socket truth,
 observed replies/windows, inferred states/rules, and heuristic divergences.
 
-## M13 SCTP and IP-protocol acceptance
+## SCTP and IP-protocol acceptance
 
 Both reviewed workflows also accept `scenario=sctp_ip_protocol` via
 `scripts/test-sctp-ip-protocol-native.py`
@@ -86,7 +84,7 @@ Both reviewed workflows also accept `scenario=sctp_ip_protocol` via
 SCTP `init`/`cookie-echo` and IP-protocol inventory execution and typed
 capability refusals.
 
-M13 execution uses a fresh Linux network namespace and the independent
+Execution uses a fresh Linux network namespace and the independent
 documentation-address Ethernet peer, with bounded SCTP chunks, CRC32c checks,
 ICMP quotations, and exact retained replies checked against dataset 1.8.0.
 The Linux acceptance gate requires all five profiles and all twelve unique

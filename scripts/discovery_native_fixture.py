@@ -227,7 +227,7 @@ def udp_peer(family, address, port):
                     received += 1
                     if received > 32:
                         raise ValueError('loopback UDP peer exceeds finite request budget')
-                    peer.sendto(b'm05', remote)
+                    peer.sendto(b'pcr', remote)
             except Exception as error:
                 failures.append(str(error))
 

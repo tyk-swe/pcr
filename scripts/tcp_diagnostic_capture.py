@@ -107,7 +107,7 @@ def provision(targets, device=None):
     worker, errors = None, []
     stop = threading.Event()
     expression = '(tcp and (host ' + targets[0] + ' or host ' + targets[1] + ') and (port 43123 or port 43125))'
-    if device == 'pcrm12ks':
+    if device == 'pcrtcpks':
         expression += ' or (arp and host ' + targets[0] + ') or (icmp6 and ip6[40] == 135)'
     report = dict(device=device, filter=expression, link_type=lib.pcap_datalink(handle), frames=[],
                   backend_version=lib.pcap_lib_version().decode(errors='replace'), cleanup_complete=False)

@@ -1,6 +1,6 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Independent, bounded M12 wire checks (RFC 9293 §3.10.7 reset generation).
+"""Independent, bounded TCP diagnostic wire checks (RFC 9293 §3.10.7 reset generation).
 
 No PacketcraftR codecs or inferred states are used to encode or decode packets.
 """

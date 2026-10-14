@@ -1,4 +1,3 @@
 # Keep reviewed document digests stable across supported checkout platforms.
 /crates/packetcraftr/data/service-* text eol=lf
-/docs/roadmap/evidence/m09/**/*.json text eol=lf
 /scripts/fixtures/service-identification/*.pem text eol=lf

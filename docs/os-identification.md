@@ -52,8 +52,7 @@ snaplen).
 
 Bundled `project-os-fingerprints` 1.0.0 contains two qualified Linux signatures
 for 1500-byte Ethernet IPv4/IPv6 profiles; see
-[provenance](../crates/packetcraftr/data/os-fingerprints.provenance.yaml) and
-[evaluation](roadmap/evidence/m10/README.md). `--corpus PATH` validates a
+[provenance](../crates/packetcraftr/data/os-fingerprints.provenance.yaml). `--corpus PATH` validates a
 `packetcraftr.os-fingerprints/v1` JSON document (≤ 512 KiB, ≤ 512 signatures,
 ≤ 64 predicates/signature) before provider activity.
 
@@ -74,6 +73,5 @@ println!("{:?}", aggregate.report.identification.outcome);
 
 Pure parsing/matching lives in `packetcraftr_core::document::os_fingerprints`;
 see the [schema](../schemas/packetcraftr.os-fingerprints.v1.schema.json),
-[example](../examples/documents/os-fingerprints.json),
-[v14 contract](consumer-compatibility.md#output-family-v14), and
-[M10](roadmap/m10-os-identification.md).
+[example](../examples/documents/os-fingerprints.json), and
+[v14 contract](consumer-compatibility.md#output-family-v14).

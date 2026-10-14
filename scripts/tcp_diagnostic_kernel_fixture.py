@@ -12,7 +12,7 @@ import sys
 import time
 from tcp_diagnostic_isolated_fixture import command
 
-SCANNER, PEER = 'pcrm12ks', 'pcrm12kp'
+SCANNER, PEER = 'pcrtcpks', 'pcrtcpkp'
 SOURCES = ('198.51.100.1', '2001:db8:1::1')
 TARGETS = ('198.51.100.2', '2001:db8:1::2')
 

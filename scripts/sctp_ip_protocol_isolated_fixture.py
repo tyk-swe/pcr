@@ -1,6 +1,6 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Independent M13 wire peer on the existing isolated documentation-address link."""
+"""Independent SCTP and IP-protocol wire peer on the existing isolated documentation-address link."""
 import struct
 from discovery_isolated_fixture import checksum, packet, transport
 from tcp_diagnostic_isolated_fixture import provision as link_provision, SOURCES, TARGETS
@@ -29,7 +29,7 @@ def accepts(ip):
 
 def request(ip):
     if not accepts(ip):
-        raise ValueError('request outside the isolated M13 endpoint inventory')
+        raise ValueError('request outside the isolated SCTP/IP-protocol endpoint inventory')
     body = ip['body']
     if ip['proto'] != 132:
         if body:

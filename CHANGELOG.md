@@ -7,8 +7,7 @@ All notable changes to PacketcraftR are documented here. The format follows
 ## [Unreleased]
 
 Net changes since 0.5.0-beta.3. See [migration guidance](docs/migration-unreleased.md)
-for replacement APIs and the [scanner roadmap](docs/roadmap/README.md) for
-remaining acceptance gates.
+for replacement APIs.
 
 ### Breaking
 
@@ -44,7 +43,7 @@ remaining acceptance gates.
   `--exclude-ip-protocols`), extra host-discovery probe families (`tcp-ack`,
   `icmp-timestamp`, `icmp-netmask`, `sctp`, `ip`), output/v16, dataset 1.8.0
   `sctp_ip_protocol_scenarios`, and the `sctp_ip_protocol` native validation
-  runner ([M13](docs/roadmap/m13-sctp-ip-protocol.md)).
+  runner ([native validation](docs/native-validation.md#sctp-and-ip-protocol-acceptance)).
 - Raw TCP diagnostic scans (`scan::TcpScan`: `Syn`, `Ack`, `Window`, `Fin`,
   `Null`, `Xmas`, `Maimon`, and observation-only `Custom`, via `--tcp-scan` and
   `--tcp-flags`) with mode-specific inference (`unfiltered`, `tcp_<mode>.*`),
@@ -56,8 +55,8 @@ remaining acceptance gates.
 - Explicit service identification (`identify` / `Client::identify`) over
   selected TCP/UDP endpoints with SSH, HTTP HEAD, DNS, SMTP, and FTP probes,
   optional `--tls` wrapping (TLS 1.2/1.3, declared SNI, DER certificate
-  observations, `usage.tls`), sensitive-service exclusions, sourced hostnames
-  and wildcard-version CPEs, and held-out evaluation
+  observations, `usage.tls`), sensitive-service exclusions, and sourced hostnames
+  and wildcard-version CPEs
   ([service identification](docs/service-identification.md)).
 - Bounded target manifests/exclusions, `scan --list`, scoped IPv6 selection,
   port catalog/presets, curated and operator UDP profiles, mixed TCP/UDP plans,
@@ -95,7 +94,7 @@ remaining acceptance gates.
 - Offline analysis charges retained state, provenance, compression, and TCP
   out-of-order page slack explicitly ([resource guidance](docs/analysis-resources.md)).
 - Consolidate contributor guidance in `CONTRIBUTING.md` and streamline CLI help,
-  built-in topics, user guides, migration notes, and roadmap documentation.
+  built-in topics, user guides, and migration notes.
 
 ### Fixed
 
@@ -125,9 +124,9 @@ remaining acceptance gates.
   protocol probes. Portless scans consume exclusions applied to their active
   TCP, UDP, or SCTP discovery transports.
 - Composed IP discovery consumes shared protocol exclusions before selecting
-  port-scan endpoints. M13 native acceptance builds and executes all Linux
-  profiles in an isolated link fixture and rejects missing or duplicate evidence
-  inventories; its commands use the capture queue and byte limits.
+  port-scan endpoints. SCTP and IP-protocol native acceptance builds and executes
+  all Linux profiles in an isolated link fixture and rejects missing or duplicate
+  evidence inventories; its commands use the capture queue and byte limits.
 - Bounded benchmark execution keeps child reaping in the measurement thread
   when output overflow kills a process.
 - Service identification handles reply-code-only SMTP terminals, final
@@ -144,7 +143,8 @@ remaining acceptance gates.
 ### Removed
 
 - Redundant compatibility workspaces, signature-diff and coverage workflows,
-  `AGENTS.md`, and unmaintained local harnesses outside CI/release validation.
+  `AGENTS.md`, `docs/roadmap/`, and unmaintained local harnesses outside
+  CI/release validation.
 
 ## [0.5.0-beta.3] - 2026-09-08
 

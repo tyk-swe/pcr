@@ -98,6 +98,10 @@ for replacement APIs.
 
 ### Fixed
 
+- NDP Route Information options accept every prefix-field length permitted by
+  RFC 4191, retaining valid longer encodings as typed routes without changing
+  their wire bytes.
+
 - Loopback IP scans exclude captures of their own empty transmitted probes,
   and SCTP INIT ACK observations validate every chunk's framing and padding.
 

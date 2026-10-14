@@ -246,11 +246,10 @@ impl MessageOption {
                 if option.reserved & !ROUTE_RESERVED_MASK != 0 {
                     return Err(field_range("route information reserved", option.reserved));
                 }
-                // RFC 4191 ties the option's length to the prefix it carries.
-                let Some(expected) = route_prefix_bytes(option.prefix_length) else {
+                if option.prefix_length > 128 {
                     return Err(field_range("route prefix length", option.prefix_length));
-                };
-                if option.prefix.len() != expected {
+                }
+                if !route_prefix_fits(option.prefix_length, option.prefix.len()) {
                     return Err(Error::OptionValue {
                         kind: ROUTE_INFORMATION,
                         length: option.prefix.len(),
@@ -298,15 +297,13 @@ fn field_range(field: &'static str, value: impl Into<u64>) -> Error {
     }
 }
 
-/// The prefix byte count a Route Information option reserves for a prefix
-/// length, or `None` when the length exceeds the option's wire layout.
-fn route_prefix_bytes(prefix_length: u8) -> Option<usize> {
-    match prefix_length {
-        0 => Some(0),
-        1..=64 => Some(8),
-        65..=128 => Some(16),
-        _ => None,
-    }
+/// RFC 4191 section 2.3 permits a prefix field longer than the minimum
+/// needed for its prefix length, but only in zero-, eight- or sixteen-byte form.
+fn route_prefix_fits(prefix_length: u8, prefix_bytes: usize) -> bool {
+    matches!(
+        (prefix_length, prefix_bytes),
+        (0, 0 | 8 | 16) | (1..=64, 8 | 16) | (65..=128, 16)
+    )
 }
 
 impl PrefixInformation {
@@ -378,9 +375,9 @@ impl MtuOption {
 impl RouteInformation {
     fn from_value(value: &[u8]) -> Option<Self> {
         let (fixed, prefix) = value.split_first_chunk::<ROUTE_FIXED_VALUE>()?;
-        // Only a canonical layout decodes typed: a noncanonical option stays
-        // generic so the message re-encodes to its captured bytes.
-        if route_prefix_bytes(fixed[0]) != Some(prefix.len()) {
+        // Keep every valid prefix field verbatim, including optional trailing
+        // bytes. Invalid layouts stay generic so no captured bytes are lost.
+        if !route_prefix_fits(fixed[0], prefix.len()) {
             return None;
         }
         Some(Self {

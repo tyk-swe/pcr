@@ -4,7 +4,9 @@
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::output::{contract::Command, stream::StreamEncoder};
+use crate::output::contract::Command;
+#[cfg(not(test))]
+use crate::output::stream::StreamEncoder;
 use packetcraftr_core::diagnostic::Diagnostic;
 use serde_json::Value;
 
@@ -35,9 +37,19 @@ impl Write for SharedBuffer {
     }
 }
 
+#[cfg(not(test))]
 pub fn stream(command: Command) -> (StreamEncoder, SharedBuffer) {
     let buffer = SharedBuffer::default();
     (StreamEncoder::new(command, buffer.clone()), buffer)
+}
+
+#[cfg(test)]
+pub(crate) fn stream(command: Command) -> (crate::rendering::StreamEncoder, SharedBuffer) {
+    let buffer = SharedBuffer::default();
+    (
+        crate::rendering::StreamEncoder::new(command, buffer.clone()),
+        buffer,
+    )
 }
 
 pub fn parse_ndjson(bytes: &[u8]) -> Vec<Value> {

@@ -13,9 +13,9 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Offline HTTP/1 inspection over reasse
 each --http-port. Bodies are counted against --max-http-body-bytes and discarded.
 
 Examples:
-  packetcraftr http capture.pcapng
-  packetcraftr http capture.pcapng --http-port 8000 --stream tcp:2
-  packetcraftr --output json http capture.pcapng";
+  packetcraftr analyze http capture.pcapng
+  packetcraftr analyze http capture.pcapng --http-port 8000 --stream tcp:2
+  packetcraftr --output json analyze http capture.pcapng";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

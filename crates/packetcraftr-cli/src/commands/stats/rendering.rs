@@ -17,6 +17,7 @@ pub(super) fn render_text(
     report: &analysis::stats::Report,
     frames_read: u64,
     diagnostics: &[core::diagnostic::Diagnostic],
+    presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     write_summary_line(format_args!(
         "matched {} of {} frame(s), {} byte(s)",
@@ -35,13 +36,17 @@ pub(super) fn render_text(
             ))?,
         }
     }
-    for (id, interface) in report.interfaces.iter().enumerate() {
-        write_stdout_line(format_args!(
-            "interface {id}: link-type {} snaplen {}",
-            interface.link_type.0, interface.snap_len,
-        ))?;
+    if presentation.verbose {
+        for (id, interface) in report.interfaces.iter().enumerate() {
+            write_stdout_line(format_args!(
+                "interface {id}: link-type {} snaplen {}",
+                interface.link_type.0, interface.snap_len,
+            ))?;
+        }
+        crate::rendering::render_clock(&report.clock)?;
+    } else if report.clock.regressions > 0 {
+        crate::rendering::render_clock(&report.clock)?;
     }
-    crate::rendering::render_clock(&report.clock)?;
     match table {
         Table::Conversations => {
             for row in &report.conversations {
@@ -63,22 +68,37 @@ pub(super) fn render_text(
             }
         }
         Table::Endpoints => {
+            crate::rendering::table_row(&[
+                ("ADDRESS", 39),
+                ("TX FRAMES", 12),
+                ("TX BYTES", 12),
+                ("RX FRAMES", 12),
+                ("RX BYTES", 12),
+            ])?;
             for row in &report.endpoints {
-                write_stdout_line(format_args!(
-                    "{}: tx {} frame(s) {} byte(s), rx {} frame(s) {} byte(s)",
-                    row.address, row.tx_frames, row.tx_bytes, row.rx_frames, row.rx_bytes,
-                ))?;
+                crate::rendering::table_row(&[
+                    (&row.address.to_string(), 39),
+                    (&row.tx_frames.to_string(), 12),
+                    (&row.tx_bytes.to_string(), 12),
+                    (&row.rx_frames.to_string(), 12),
+                    (&row.rx_bytes.to_string(), 12),
+                ])?;
             }
         }
         Table::Protocols => {
+            crate::rendering::table_row(&[
+                ("PROTOCOL", 16),
+                ("FRAMES", 12),
+                ("SHARE", 8),
+                ("BYTES", 12),
+            ])?;
             for row in &report.protocols {
-                write_stdout_line(format_args!(
-                    "{}: frames {} ({:.1}%) bytes {}",
-                    row.protocol,
-                    row.frames,
-                    percent(row.frames, report.frames),
-                    row.bytes,
-                ))?;
+                crate::rendering::table_row(&[
+                    (&row.protocol.to_string(), 16),
+                    (&row.frames.to_string(), 12),
+                    (&format!("{:.1}%", percent(row.frames, report.frames)), 8),
+                    (&row.bytes.to_string(), 12),
+                ])?;
             }
         }
         Table::Ports => {

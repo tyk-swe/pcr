@@ -13,7 +13,7 @@ use crate::system::prepare_plan;
 pub(crate) const AFTER_LONG_HELP: &str = r"Route planning is passive: it performs no packet transmission.
 
 Example:
-  packetcraftr plan --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)'";
+  packetcraftr network plan --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)'";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
@@ -62,13 +62,17 @@ impl super::Spec for Args {
     fn run(
         self,
         format: Format,
-        _stream: &crate::rendering::StreamEncoder,
+        stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format).map(|()| super::CommandExit::SUCCESS)
+        run(self, format, stream.presentation()).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: Format,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     let Args { route, policy } = arguments;
     let plan = prepare_plan(route, policy.into_policy())?;
     let route = plan
@@ -82,7 +86,10 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
         .map_err(CliError::classified)?;
     let result = output::plan::Report::from(route);
     match format {
-        Format::Text => render_text(&result.plan),
+        Format::Text => {
+            render_text(&result.plan)?;
+            presentation.details("Route decision", &result.plan)
+        }
         Format::Json => emit_aggregate(output::contract::Command::Plan, result, Vec::new()),
         other => other.unreachable(),
     }

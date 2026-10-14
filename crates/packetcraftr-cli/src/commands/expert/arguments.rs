@@ -16,11 +16,11 @@ frames passing --filter; filter by stream (e.g. 'tcp.stream == 3') or host pair
 to keep both directions of a conversation.
 
 Examples:
-  packetcraftr expert capture.pcapng
-  packetcraftr expert capture.pcapng --filter 'tcp.stream == 3'
-  packetcraftr expert capture.pcapng --min-severity warning
-  packetcraftr expert capture.pcapng --code tcp.reset --code tcp.retransmission
-  packetcraftr --output ndjson expert capture.pcapng";
+  packetcraftr analyze expert capture.pcapng
+  packetcraftr analyze expert capture.pcapng --filter 'tcp.stream == 3'
+  packetcraftr analyze expert capture.pcapng --min-severity warning
+  packetcraftr analyze expert capture.pcapng --code tcp.reset --code tcp.retransmission
+  packetcraftr --output ndjson analyze expert capture.pcapng";
 
 /// Minimum finding severity selector for `expert`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

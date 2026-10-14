@@ -10,10 +10,10 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Offline capture statistics. Conversat
 and the `fragments` table are computed capture-globally before `--filter`.
 
 Examples:
-  packetcraftr stats capture.pcapng --table conversations
-  packetcraftr stats capture.pcapng --table fragments
-  packetcraftr stats capture.pcapng --table protocols --filter 'ip.src in 10.0.0.0/8'
-  packetcraftr --output json stats capture.pcapng --table io --interval-ms 100";
+  packetcraftr analyze stats capture.pcapng --table conversations
+  packetcraftr analyze stats capture.pcapng --table fragments
+  packetcraftr analyze stats capture.pcapng --table protocols --filter 'ip.src in 10.0.0.0/8'
+  packetcraftr --output json analyze stats capture.pcapng --table io --interval-ms 100";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

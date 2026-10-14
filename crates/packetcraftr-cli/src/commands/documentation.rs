@@ -32,7 +32,22 @@ fn run(arguments: &Args) -> Result<(), CliError> {
         std::fs::create_dir_all(directory).map_err(|error| io_error(directory, error))?;
     }
     write_completions(&completions).map_err(|error| io_error(&completions, error))?;
-    clap_mangen::generate_to(Cli::command(), &man).map_err(|error| io_error(&man, error))?;
+    let mut definition = Cli::command();
+    definition.build();
+    write_man_pages(&definition, &man).map_err(|error| io_error(&man, error))?;
+    Ok(())
+}
+
+/// Include compatibility commands, and omit clap's synthetic help command tree.
+fn write_man_pages(command: &clap::Command, directory: &Path) -> io::Result<()> {
+    clap_mangen::Man::new(command.clone().hide(false).disable_help_subcommand(true))
+        .generate_to(directory)?;
+    for command in command
+        .get_subcommands()
+        .filter(|command| command.get_name() != "help")
+    {
+        write_man_pages(command, directory)?;
+    }
     Ok(())
 }
 

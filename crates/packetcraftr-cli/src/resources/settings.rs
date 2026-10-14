@@ -372,11 +372,9 @@ pub(crate) fn collect_settings(
     format: Format,
     declare: impl FnOnce(&mut Settings<'_>),
 ) -> Vec<(Setting, Enabled)> {
-    let selected = matches.subcommand().and_then(|(name, values)| {
-        definition
-            .find_subcommand(name)
-            .map(|definition| (definition, values))
-    });
+    let selected = matches
+        .subcommand()
+        .map(|_| crate::cli::leaf(definition, matches));
     let mut settings = Settings {
         target: Target::Diagnostics(Diagnostics {
             root: (definition, matches),

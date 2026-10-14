@@ -93,7 +93,7 @@ fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliErro
             Event::Message(message) => output.emit(
                 wire::Message::try_from(*message).map_err(CliError::classified)?,
                 &mut messages,
-                rendering::render_message,
+                |message| rendering::render_message(message, stream.presentation()),
             ),
             Event::Issue(issue) => output.emit(
                 wire::Issue::try_from(issue).map_err(CliError::classified)?,

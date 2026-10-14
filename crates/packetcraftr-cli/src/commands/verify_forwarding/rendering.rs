@@ -21,11 +21,16 @@ pub(super) fn render(
     match format {
         Format::Text => {
             render_text(report)?;
-            for (side, source) in [("ingress", sources.ingress), ("egress", sources.egress)] {
-                write_stdout_line(format_args!(
-                    "{side} source: sha256 {}, {} encoded bytes consumed through EOF",
-                    source.sha256, source.encoded_bytes,
-                ))?;
+            if stream.presentation().verbose {
+                for matched in &report.matches {
+                    write_stdout_line(format_args!("match: {matched:?}"))?;
+                }
+                for (side, source) in [("ingress", sources.ingress), ("egress", sources.egress)] {
+                    write_stdout_line(format_args!(
+                        "{side} source: sha256 {}, {} encoded bytes consumed through EOF",
+                        source.sha256, source.encoded_bytes,
+                    ))?;
+                }
             }
             Ok(())
         }

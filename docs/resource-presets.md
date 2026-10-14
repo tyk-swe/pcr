@@ -7,7 +7,7 @@ incompatible limits still fail, never automatically clamp.
 
 ```sh
 packetcraftr --resource-preset ci-v1 --resource-diagnostics --output json \
-  verify-forwarding before.pcap after.pcap --identity ipv4.identification \
+  analyze verify-forwarding before.pcap after.pcap --identity ipv4.identification \
   --preserve ipv4.ttl --max-flows 2048
 ```
 

@@ -77,7 +77,7 @@ pub(super) fn run(
     {
         return Err(CliError::new(
             Kind::Usage,
-            "dissect cannot assign stream indexes; use read with --field",
+            "dissect cannot assign stream indexes; use packetcraftr files read with --field",
         ));
     }
     let max_packet_size = arguments.budget.max_packet_size;
@@ -134,7 +134,7 @@ pub(super) fn run(
         return emit_stderr_message("frame did not match the filter");
     }
     match format {
-        Format::Text => render_text(&decoded, tree.as_mut()),
+        Format::Text => render_text(&decoded, tree.as_mut(), stream.presentation()),
         Format::Hex => write_hex_line(decoded.frame.bytes()),
         Format::Raw => write_raw(decoded.frame.bytes()),
         Format::Json => emit_published(
@@ -149,7 +149,11 @@ pub(super) fn run(
     }
 }
 
-fn render_text(decoded: &DecodedPacket, tree: Option<&mut FieldTree>) -> Result<(), CliError> {
+fn render_text(
+    decoded: &DecodedPacket,
+    tree: Option<&mut FieldTree>,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     write_summary_line(format_args!(
         "decoded {} bytes into {} layer(s)",
         decoded.frame.bytes().len(),
@@ -165,6 +169,7 @@ fn render_text(decoded: &DecodedPacket, tree: Option<&mut FieldTree>) -> Result<
                 write_stdout_line(format_args!("{index}: {}", layer.protocol_id()))?;
             }
             render_dns_records(&packet)?;
+            presentation.details("Decoded fields", &packet)?;
         }
     }
     render_diagnostics_text(&decoded.diagnostics)

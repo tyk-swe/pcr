@@ -15,11 +15,11 @@ use crate::rendering::emit_stdout_document;
 pub(crate) const AFTER_LONG_HELP: &str = r"Without NAME, lists the topics. Topics print text only and need no capture, network, or privileges.
 
 Examples:
-  packetcraftr topics
-  packetcraftr topics expressions
-  packetcraftr topics filters
-  packetcraftr topics formats
-  packetcraftr topics exit-codes";
+  packetcraftr reference topics
+  packetcraftr reference topics expressions
+  packetcraftr reference topics filters
+  packetcraftr reference topics formats
+  packetcraftr reference topics exit-codes";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
@@ -83,7 +83,7 @@ fn render(name: Option<&str>) -> Result<String, CliError> {
                 Classification::new(
                     "cli.topic",
                     Kind::Usage,
-                    Some("run `packetcraftr topics` to list the topics"),
+                    Some("run `packetcraftr reference topics` to list the topics"),
                 ),
                 format!("unknown topic `{name}`; topics are {}", names().join(", ")),
                 Vec::new(),
@@ -105,7 +105,7 @@ fn listing() -> String {
     for topic in TOPICS {
         let _ = writeln!(listing, "  {:<width$}  {}", topic.name, topic.summary);
     }
-    listing.push_str("\nRun `packetcraftr topics NAME` to print one.\n");
+    listing.push_str("\nRun `packetcraftr reference topics NAME` to print one.\n");
     listing
 }
 
@@ -113,7 +113,12 @@ fn formats() -> String {
     let commands = Command::ALL;
     let width = commands
         .iter()
-        .map(|command| command.as_str().len())
+        .map(|command| {
+            super::registry::entry(command.as_str())
+                .expect("registered command")
+                .path()
+                .len()
+        })
         .max()
         .unwrap_or(0);
     let mut help = String::from(crate::cli::output_formats_help());
@@ -130,7 +135,13 @@ fn formats() -> String {
             .map(|format| format.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        let _ = writeln!(help, "  {:<width$}  {names}", command.as_str());
+        let _ = writeln!(
+            help,
+            "  {:<width$}  {names}",
+            super::registry::entry(command.as_str())
+                .expect("registered command")
+                .path()
+        );
     }
     help
 }

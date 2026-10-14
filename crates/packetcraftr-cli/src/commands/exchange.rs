@@ -101,7 +101,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     .map_err(CliError::classified)
             }),
             render: Box::new(move |report, format| match format {
-                Format::Text => rendering::render_text(&report),
+                Format::Text => rendering::render_text(&report, stream.presentation()),
                 Format::Pcap => {
                     rendering::render_capture(&report, capture::Format::Pcap, compression)
                 }

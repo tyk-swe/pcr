@@ -44,13 +44,17 @@ impl super::Spec for Args {
     fn run(
         self,
         format: Format,
-        _stream: &crate::rendering::StreamEncoder,
+        stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format).map(|()| super::CommandExit::SUCCESS)
+        run(self, format, stream.presentation()).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: Format,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     let table = Table::from(arguments.table);
     let aggregation = analysis::stats::Table::from(arguments.table);
     let prepared = prepare(
@@ -77,7 +81,9 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     let diagnostics = cap_table(&mut report, table, arguments.top);
 
     match format {
-        Format::Text => rendering::render_text(table, &report, frames_read, &diagnostics),
+        Format::Text => {
+            rendering::render_text(table, &report, frames_read, &diagnostics, presentation)
+        }
         Format::Json => {
             let result = output::stats::Report::try_from((table, report, frames_read))
                 .map_err(CliError::classified)?;

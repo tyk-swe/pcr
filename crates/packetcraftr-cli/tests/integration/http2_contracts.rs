@@ -325,11 +325,6 @@ fn application_output_budget_exact_formats() {
     let path = upgrade();
     let expected_text = concat!(
         "HTTP2 tcp:0 stream=1 message=1 kind=request status=complete body_bytes=4 request=none frames=4\n",
-        "  Host: www.example.com\n",
-        "  Connection: upgrade, HTTP2-Settings\n",
-        "  Upgrade: h2c\n",
-        "  HTTP2-Settings: AAEAAAAA\n",
-        "  Content-Length: 4\n",
         "H2 tcp:0 frame=1 type=0x04 stream=0 length=0 flags=0x00\n",
         "H2 tcp:0 frame=2 type=0x04 stream=0 length=0 flags=0x00\n",
         "H2 tcp:0 frame=3 type=0x04 stream=0 length=0 flags=0x01\n",
@@ -337,7 +332,6 @@ fn application_output_budget_exact_formats() {
         "H2 tcp:0 frame=5 type=0x01 stream=1 length=2 flags=0x04\n",
         "H2 tcp:0 frame=6 type=0x00 stream=1 length=5 flags=0x01\n",
         "HTTP2 tcp:0 stream=1 message=2 kind=response status=complete body_bytes=5 request=1 frames=7\n",
-        "  :status: 200\n",
         "HTTP2 tcp:0 connection startup=h2c status=complete streams=1 frames=6 issues=0\n",
         "1 HTTP/2 connections (0 prior knowledge, 1 h2c, 0 unsupported); 2 messages (2 complete, 0 incomplete, 0 malformed, 0 limited); 0 issues\n",
     );
@@ -478,7 +472,7 @@ fn invalid_hdr_bytes_escaped_hex_faithful() {
     exchange.client(&common::http2_capture::frame(0x1, 0x4 | 0x1, 1, &block));
     let capture = common::http2_capture::write_capture(&[exchange]);
     let path = common::path_text(capture.path());
-    let text = run_success(&["http2", path]);
+    let text = run_success(&["http2", path, "--verbose"]);
     let stdout = String::from_utf8_lossy(&text.stdout);
     assert!(
         !stdout.chars().any(|c| c.is_control() && c != '\n'),

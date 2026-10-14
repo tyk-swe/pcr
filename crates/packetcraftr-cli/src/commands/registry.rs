@@ -15,6 +15,9 @@ use crate::resources::Settings;
 
 /// Declares every command once, in `--help` order.
 macro_rules! commands {
+    (@name Documentation) => { "documentation" };
+    (@name Topics) => { "topics" };
+    (@name $variant:ident, $name:literal) => { $name };
     (@offline $arguments:ty) => { false };
     (@offline $arguments:ty, $name:literal) => { <$arguments as Spec>::OFFLINE };
     (@start $launch:ident, $arguments:ident, $variant:ident) => {
@@ -40,8 +43,8 @@ macro_rules! commands {
     ) => {
         /// The parsed subcommand with its arguments.
         #[derive(Debug, Subcommand)]
-        #[allow(clippy::large_enum_variant)]
-        pub(crate) enum CommandLine {
+        #[allow(dead_code, clippy::large_enum_variant)]
+        enum FlatDefinition {
             $(
                 $(#[$attribute])*
                 $(#[command(name = $name)])?
@@ -49,7 +52,22 @@ macro_rules! commands {
             )*
         }
 
+        #[derive(Debug)]
+        #[allow(clippy::large_enum_variant)]
+        pub(crate) enum CommandLine {
+            $( $variant($arguments), )*
+        }
+
         impl CommandLine {
+            fn from_leaf(name: &str, values: &clap::ArgMatches) -> Result<Self, clap::Error> {
+                $(
+                    if name == commands!(@name $variant $(, $name)?) {
+                        return <$arguments as clap::FromArgMatches>::from_arg_matches(values)
+                            .map(Self::$variant);
+                    }
+                )*
+                Err(clap::Error::new(clap::error::ErrorKind::InvalidSubcommand))
+            }
             pub(crate) const fn offline(&self) -> bool {
                 match self {
                     $( Self::$variant(_) => commands!(@offline $arguments $(, $name)?), )*
@@ -163,6 +181,7 @@ commands! {
     #[command(after_long_help = identify::arguments::AFTER_LONG_HELP)]
     Identify(identify::arguments::Args) = "identify",
     /// Identify qualified OS families from bounded raw packet observations.
+    #[command(after_long_help = "Requires a native raw packet provider and explicit destination authorization. Conclusions are qualified inferences, not authenticated identities.\n\nExample:\n  packetcraftr network identify-os 192.0.2.10 --open-port 80 --closed-port 81")]
     IdentifyOs(identify_os::Args) = "identify-os",
     /// Compute aggregate statistics over a capture file.
     #[command(after_long_help = stats::arguments::AFTER_LONG_HELP)]
@@ -209,8 +228,306 @@ commands! {
     #[command(after_long_help = verify_forwarding::arguments::AFTER_LONG_HELP)]
     VerifyForwarding(verify_forwarding::arguments::Args) = "verify-forwarding",
     /// Generate shell completions and man pages under a directory.
+    #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all canonical and legacy paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
     Documentation(documentation::Args),
     /// Print built-in references for packet expressions, filters, formats, and exit codes.
     #[command(after_long_help = topics::AFTER_LONG_HELP)]
     Topics(topics::Args),
+}
+
+/// Workflow placement. Published identifiers deliberately remain the legacy names.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Entry {
+    pub(crate) group: &'static str,
+    pub(crate) name: &'static str,
+    pub(crate) legacy: &'static str,
+}
+
+pub(crate) const GROUPS: &[(&str, &str)] = &[
+    ("packet", "Construct, inspect, fragment, and fuzz packets"),
+    ("files", "Read, combine, rewrite, and export capture files"),
+    ("analyze", "Analyze captured traffic and compare forwarding"),
+    (
+        "network",
+        "Inspect the local network and run policy-gated live workflows",
+    ),
+    (
+        "reference",
+        "Browse protocols, syntax, and generated documentation",
+    ),
+];
+
+pub(crate) const INVENTORY: &[Entry] = &[
+    Entry {
+        group: "packet",
+        name: "build",
+        legacy: "build",
+    },
+    Entry {
+        group: "packet",
+        name: "dissect",
+        legacy: "dissect",
+    },
+    Entry {
+        group: "packet",
+        name: "fragment",
+        legacy: "fragment",
+    },
+    Entry {
+        group: "packet",
+        name: "fuzz",
+        legacy: "fuzz",
+    },
+    Entry {
+        group: "files",
+        name: "read",
+        legacy: "read",
+    },
+    Entry {
+        group: "files",
+        name: "merge",
+        legacy: "merge",
+    },
+    Entry {
+        group: "files",
+        name: "rewrite",
+        legacy: "rewrite",
+    },
+    Entry {
+        group: "files",
+        name: "export",
+        legacy: "export",
+    },
+    Entry {
+        group: "analyze",
+        name: "stats",
+        legacy: "stats",
+    },
+    Entry {
+        group: "analyze",
+        name: "expert",
+        legacy: "expert",
+    },
+    Entry {
+        group: "analyze",
+        name: "follow",
+        legacy: "follow",
+    },
+    Entry {
+        group: "analyze",
+        name: "dns",
+        legacy: "dns-read",
+    },
+    Entry {
+        group: "analyze",
+        name: "http",
+        legacy: "http",
+    },
+    Entry {
+        group: "analyze",
+        name: "http2",
+        legacy: "http2",
+    },
+    Entry {
+        group: "analyze",
+        name: "tls",
+        legacy: "tls",
+    },
+    Entry {
+        group: "analyze",
+        name: "verify-forwarding",
+        legacy: "verify-forwarding",
+    },
+    Entry {
+        group: "network",
+        name: "interfaces",
+        legacy: "interfaces",
+    },
+    Entry {
+        group: "network",
+        name: "routes",
+        legacy: "routes",
+    },
+    Entry {
+        group: "network",
+        name: "plan",
+        legacy: "plan",
+    },
+    Entry {
+        group: "network",
+        name: "capture",
+        legacy: "capture",
+    },
+    Entry {
+        group: "network",
+        name: "send",
+        legacy: "send",
+    },
+    Entry {
+        group: "network",
+        name: "exchange",
+        legacy: "exchange",
+    },
+    Entry {
+        group: "network",
+        name: "replay",
+        legacy: "replay",
+    },
+    Entry {
+        group: "network",
+        name: "scan",
+        legacy: "scan",
+    },
+    Entry {
+        group: "network",
+        name: "identify",
+        legacy: "identify",
+    },
+    Entry {
+        group: "network",
+        name: "identify-os",
+        legacy: "identify-os",
+    },
+    Entry {
+        group: "network",
+        name: "traceroute",
+        legacy: "traceroute",
+    },
+    Entry {
+        group: "network",
+        name: "dns",
+        legacy: "dns",
+    },
+    Entry {
+        group: "reference",
+        name: "protocols",
+        legacy: "protocols",
+    },
+    Entry {
+        group: "reference",
+        name: "topics",
+        legacy: "topics",
+    },
+    Entry {
+        group: "reference",
+        name: "documentation",
+        legacy: "documentation",
+    },
+];
+
+impl Entry {
+    pub(crate) fn path(self) -> String {
+        format!("{} {}", self.group, self.name)
+    }
+}
+
+pub(crate) fn entry(legacy: &str) -> Option<&'static Entry> {
+    INVENTORY.iter().find(|entry| entry.legacy == legacy)
+}
+
+impl clap::FromArgMatches for CommandLine {
+    fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
+        let (name, values) = matches
+            .subcommand()
+            .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::MissingSubcommand))?;
+        if GROUPS.iter().any(|(group, _)| *group == name) {
+            let (leaf, _) = values
+                .subcommand()
+                .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::MissingSubcommand))?;
+            let selected = INVENTORY
+                .iter()
+                .find(|entry| entry.group == name && entry.name == leaf)
+                .expect("clap validated the workflow command");
+            let (_, leaf_values) = values.subcommand().expect("leaf exists");
+            Self::from_leaf(selected.legacy, leaf_values)
+        } else {
+            Self::from_leaf(name, values)
+        }
+    }
+
+    fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
+        *self = Self::from_arg_matches(matches)?;
+        Ok(())
+    }
+}
+
+impl clap::Subcommand for CommandLine {
+    fn augment_subcommands(command: clap::Command) -> clap::Command {
+        let flat = FlatDefinition::augment_subcommands(clap::Command::new("packetcraftr"));
+        let mut command = command;
+        for (group, about) in GROUPS {
+            let mut workflow = clap::Command::new(*group)
+                .about(*about)
+                .subcommand_required(true)
+                .arg_required_else_help(true);
+            for entry in INVENTORY.iter().filter(|entry| entry.group == *group) {
+                let leaf = flat
+                    .find_subcommand(entry.legacy)
+                    .expect("registered command")
+                    .clone();
+                workflow =
+                    workflow.subcommand(crate::cli::help::leaf(leaf.name(entry.name), entry));
+            }
+            command = command.subcommand(workflow);
+        }
+        for entry in INVENTORY {
+            let leaf = flat
+                .find_subcommand(entry.legacy)
+                .expect("registered command")
+                .clone();
+            command = command.subcommand(crate::cli::help::leaf(leaf, entry).hide(true));
+        }
+        command
+    }
+
+    fn augment_subcommands_for_update(command: clap::Command) -> clap::Command {
+        Self::augment_subcommands(command)
+    }
+
+    fn has_subcommand(name: &str) -> bool {
+        GROUPS.iter().any(|(group, _)| *group == name)
+            || INVENTORY.iter().any(|entry| entry.legacy == name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn every_workflow_and_legacy_path_has_the_same_arguments_and_help() {
+        let mut definition = crate::cli::Cli::command();
+        definition.build();
+        assert_eq!(INVENTORY.len(), 31);
+        for entry in INVENTORY {
+            let canonical = definition
+                .find_subcommand(entry.group)
+                .unwrap()
+                .find_subcommand(entry.name)
+                .unwrap();
+            let legacy = definition.find_subcommand(entry.legacy).unwrap();
+            assert!(legacy.is_hide_set());
+            assert_eq!(
+                canonical.get_about(),
+                legacy.get_about(),
+                "{}",
+                entry.path()
+            );
+            let ids = |command: &clap::Command| {
+                command
+                    .get_arguments()
+                    .map(|arg| arg.get_id().to_string())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(ids(canonical), ids(legacy));
+            assert!(
+                canonical
+                    .get_after_long_help()
+                    .unwrap()
+                    .to_string()
+                    .contains(&entry.path())
+            );
+        }
+    }
 }

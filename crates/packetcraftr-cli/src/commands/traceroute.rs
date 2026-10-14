@@ -91,6 +91,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             render: Box::new(|report, _| {
                 rendering::render_text(
                     output::envelope::Published::try_from(report).map_err(CliError::classified)?,
+                    stream.presentation(),
                 )
             }),
             complete: rendering::emit_complete,

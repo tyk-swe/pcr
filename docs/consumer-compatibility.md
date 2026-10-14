@@ -110,7 +110,7 @@ NDJSON requires contiguous zero-based sequences, newline-ended records (at most
 
 ```sh
 set +e
-packetcraftr --output ndjson verify-forwarding before.pcap after.pcap \
+packetcraftr --output ndjson analyze verify-forwarding before.pcap after.pcap \
   --identity ipv4.identification --preserve ipv4.ttl > report.ndjson
 status=$?
 set -e

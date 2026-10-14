@@ -167,7 +167,7 @@ impl super::Spec for Args {
                     output::envelope::Published::<output::os::Report>::try_from(report)
                         .map_err(CliError::classified)
                 }),
-                render: Box::new(|aggregate, _| render(aggregate.report)),
+                render: Box::new(|aggregate, _| render(aggregate.report, stream.presentation())),
                 complete: |report, stream| {
                     stream
                         .complete_published(output::envelope::Published::<output::os::Event>::from(
@@ -182,11 +182,19 @@ impl super::Spec for Args {
     }
 }
 
-fn render(report: library::Report) -> Result<(), CliError> {
+fn render(
+    report: library::Report,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "OS identification {}: {:?} — {}",
         report.target, report.identification.outcome, report.identification.reason
     ))?;
+    if presentation.verbose {
+        for observation in &report.observations {
+            write_stdout_line(format_args!("  observation: {observation:?}"))?;
+        }
+    }
     for candidate in report.identification.candidates {
         write_stdout_line(format_args!(
             "  {:?}: signature={} corpus={}@{} qualification=qualified",

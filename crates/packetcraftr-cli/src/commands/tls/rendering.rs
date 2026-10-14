@@ -51,7 +51,10 @@ pub(super) fn render_session(
     state.select();
     let session = Session::try_from(session).map_err(CliError::classified)?;
     match format {
-        Format::Text => write_stdout_line(format_args!("{}", session_line(&session))),
+        Format::Text => write_stdout_line(format_args!(
+            "{}",
+            session_line_with(&session, stream.presentation())
+        )),
         Format::Json => {
             state.retained.push(|| session);
             Ok(())
@@ -129,6 +132,41 @@ fn render_empty(summary: &Summary, registry: &core::registry::Registry) -> Resul
     write_stdout_line(format_args!(
         "hint: no ClientHello was assembled, so the capture most likely starts after the handshake or does not carry one"
     ))
+}
+
+fn session_line_with(session: &Session, presentation: crate::rendering::Presentation) -> String {
+    if presentation.verbose {
+        return session_line(session);
+    }
+    let mut line = format!(
+        "session={} stream=tcp:{} client={} server={} status={} sni={} version={}",
+        session.session,
+        session.tcp_stream,
+        session.client_endpoint,
+        session.server_endpoint,
+        session.status,
+        optional_display(
+            session
+                .client
+                .as_ref()
+                .and_then(|client| client.sni.as_deref())
+        ),
+        optional_display(session.server.as_ref().map(version_text).as_deref())
+    );
+    if !session.alerts.is_empty() {
+        let _ = write!(
+            line,
+            " alerts={}",
+            comma_separated(session.alerts.iter().map(alert_text))
+        );
+    }
+    if session.alerts_dropped > 0 {
+        let _ = write!(line, " alerts_dropped={}", session.alerts_dropped);
+    }
+    if let Some(reason) = &session.reason {
+        let _ = write!(line, " reason={reason}");
+    }
+    line
 }
 
 fn session_line(session: &Session) -> String {

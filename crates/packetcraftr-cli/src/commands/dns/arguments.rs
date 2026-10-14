@@ -9,11 +9,11 @@ use crate::command_options::{
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
-  packetcraftr dns 192.0.2.53 example.test --type a
-  packetcraftr dns 127.0.0.1 example.test --tcp
-  packetcraftr --output json dns 192.0.2.53 _service._tcp.example.test --type srv
-  packetcraftr dns 192.0.2.53 example.test other.test --reverse 192.0.2.1 --reverse 2001:db8::1
-  packetcraftr dns 192.0.2.53 example.test --udp-only";
+  packetcraftr network dns 192.0.2.53 example.test --type a
+  packetcraftr network dns 127.0.0.1 example.test --tcp
+  packetcraftr --output json network dns 192.0.2.53 _service._tcp.example.test --type srv
+  packetcraftr network dns 192.0.2.53 example.test other.test --reverse 192.0.2.1 --reverse 2001:db8::1
+  packetcraftr network dns 192.0.2.53 example.test --udp-only";
 
 pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated DNS queries over UDP with TCP fallback on validated truncation (default), direct TCP (--tcp), or UDP-only (--udp-only). Multiple NAMEs and repeatable --reverse ADDRESS form a batch of up to 256 questions sharing the server, transport, and --max-duration-ms deadline.";
 

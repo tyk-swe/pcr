@@ -6,6 +6,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+- Group all 31 CLI commands under packet, files, analyze, network, and reference,
+  retaining every flat path as a supported alias. Add layered short/full help,
+  compact text results and global verbose details, canonical command references,
+  and completion/man-page coverage for grouped and legacy paths. Machine output
+  identifiers and schemas remain unchanged.
+
 Net changes since 0.5.0-beta.3. See [migration guidance](docs/migration-unreleased.md)
 for replacement APIs.
 

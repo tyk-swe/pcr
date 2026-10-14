@@ -23,6 +23,7 @@ pub(crate) struct Context {
 pub(crate) fn parse(arguments: &[OsString]) -> Context {
     let mut context = Context::default();
     let mut saw_root_positional = false;
+    let mut group = None;
     let mut arguments = arguments.iter().skip(1).peekable();
     while let Some(raw) = arguments.next() {
         if raw == "--" {
@@ -61,7 +62,22 @@ pub(crate) fn parse(arguments: &[OsString]) -> Context {
             && argument.is_none_or(|argument| !argument.starts_with('-') || argument == "-")
         {
             saw_root_positional = true;
+            group = argument.filter(|name| {
+                crate::commands::registry::GROUPS
+                    .iter()
+                    .any(|(group, _)| group == name)
+            });
             context.command = argument.and_then(parse_command);
+        } else if let Some(selected) = group
+            && argument.is_none_or(|argument| !argument.starts_with('-') || argument == "-")
+        {
+            context.command = argument.and_then(|name| {
+                crate::commands::registry::INVENTORY
+                    .iter()
+                    .find(|entry| entry.group == selected && entry.name == name)
+                    .and_then(|entry| parse_command(entry.legacy))
+            });
+            group = None;
         }
     }
     context

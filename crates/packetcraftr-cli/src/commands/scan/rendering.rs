@@ -17,6 +17,7 @@ use crate::rendering::{
 
 pub(super) fn render_text(
     published: output::envelope::Published<output::scan::Report>,
+    presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
         result,
@@ -61,7 +62,10 @@ pub(super) fn render_text(
         ))?;
         render_inference_text(endpoint.port_hint, endpoint.inference.as_ref())?;
         for evidence in &endpoint.probes {
-            render_probe_text("  ", evidence)?;
+            if presentation.verbose || evidence.status == packetcraftr::probe::ProbeStatus::Timeout
+            {
+                render_probe_text("  ", evidence, presentation)?;
+            }
         }
     }
     render_undecoded(result.undecoded.iter().map(|frame| (None, frame)))?;
@@ -74,7 +78,7 @@ pub(super) fn render_text(
         ))?;
     }
     render_hosts_text(&result.plan, &result.hosts, |probe| {
-        render_probe_text("  probe ", probe)
+        render_probe_text("  probe ", probe, presentation)
     })?;
     let rtt = result.rtt;
     write_summary_line(format_args!(
@@ -95,7 +99,7 @@ pub(super) fn render_text(
     ))?;
     render_scheduling_text(&result.scheduling)?;
     if let Some(trace) = &result.traceroute {
-        render_traceroute_text(trace)?;
+        render_traceroute_text(trace, presentation)?;
     }
     render_diagnostics_text(&diagnostics)
 }
@@ -233,7 +237,11 @@ pub(super) fn sctp_scan_text(sctp_scan: output::scan::plan::SctpScan) -> String 
 
 /// A raw probe's evidence line after `lead`, with any application and frame
 /// lines beneath it.
-fn render_probe_text(lead: &str, evidence: &output::scan::Probe) -> Result<(), CliError> {
+fn render_probe_text(
+    lead: &str,
+    evidence: &output::scan::Probe,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "{lead}sequence={} attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
         evidence.sequence,
@@ -269,7 +277,9 @@ fn render_probe_text(lead: &str, evidence: &output::scan::Probe) -> Result<(), C
             application.reason
         ))?;
     }
-    if let Some(frame) = &evidence.frame {
+    if let Some(frame) = &evidence.frame
+        && presentation.verbose
+    {
         write_stdout_line(format_args!("{nested}frame {}", captured_frame_text(frame)))?;
     }
     Ok(())
@@ -337,7 +347,10 @@ fn listed<T: std::fmt::Display>(values: &[T]) -> String {
     }
 }
 
-pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Result<(), CliError> {
+pub(super) fn render_connect_text(
+    report: &output::scan::connect::Report,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     render_plan_text(&report.summary.plan)?;
     for endpoint in &report.endpoints {
         write_stdout_line(format_args!(
@@ -351,7 +364,13 @@ pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Res
         ))?;
         render_inference_text(endpoint.port_hint, Some(&endpoint.inference))?;
     }
-    render_hosts_text(&report.summary.plan, &report.hosts, connect_probe_text)?;
+    render_hosts_text(&report.summary.plan, &report.hosts, |probe| {
+        if presentation.verbose || probe.error.is_some() {
+            connect_probe_text(probe)
+        } else {
+            Ok(())
+        }
+    })?;
     write_stdout_line(format_args!(
         "{} socket connections attempted; {} succeeded; elapsed {}",
         report.summary.socket_stats.connections_attempted,

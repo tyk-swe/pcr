@@ -8,9 +8,9 @@ use crate::errors::CliError;
 use crate::output::{self, contract::Format};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
-  packetcraftr interfaces
-  packetcraftr interfaces --interface lo
-  packetcraftr --output json interfaces";
+  packetcraftr network interfaces
+  packetcraftr network interfaces --interface lo
+  packetcraftr --output json network interfaces";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
@@ -33,13 +33,17 @@ impl super::Spec for Args {
     fn run(
         self,
         format: Format,
-        _stream: &crate::rendering::StreamEncoder,
+        stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format).map(|()| super::CommandExit::SUCCESS)
+        run(self, format, stream.presentation()).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: Format,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     let selector = arguments
         .interface
         .as_ref()
@@ -62,11 +66,31 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
         })
         .collect::<Result<Vec<_>, CliError>>()?;
     let result = output::interfaces::Report::from(interfaces);
+    if format == Format::Text && !presentation.verbose && !arguments.timestamp_types {
+        crate::rendering::table_row(&[
+            ("INTERFACE", 16),
+            ("INDEX", 5),
+            ("CAPABILITY", 12),
+            ("ADDRESSES", 0),
+        ])?;
+    }
     crate::rendering::render_aggregate_rows(
         output::contract::Command::Interfaces,
         format,
         &result,
         &result.interfaces,
-        rendering::interface_line,
+        |interface| {
+            if presentation.verbose || arguments.timestamp_types {
+                rendering::interface_line(interface)
+            } else {
+                format!(
+                    "{:<16}  {:<5}  {:<12}  {}",
+                    interface.name,
+                    interface.index,
+                    interface.capability,
+                    interface.addresses.join(", ")
+                )
+            }
+        },
     )
 }

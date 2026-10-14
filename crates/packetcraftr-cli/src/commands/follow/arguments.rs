@@ -13,11 +13,11 @@ direction. `--write DIR` atomically stages `TRANSPORT-INDEX-client.bin` and
 `TRANSPORT-INDEX-server.bin` in an existing directory without overwriting files.
 
 Examples:
-  packetcraftr follow capture.pcapng --stream tcp:0
-  packetcraftr follow capture.pcapng --stream tcp:0 --direction client --output raw > client.bin
-  mkdir -p ./directions && packetcraftr follow capture.pcapng --stream tcp:0 --write ./directions
-  packetcraftr --output json follow capture.pcapng --stream udp:2
-  packetcraftr --output ndjson follow capture.pcapng --stream tcp:7";
+  packetcraftr analyze follow capture.pcapng --stream tcp:0
+  packetcraftr analyze follow capture.pcapng --stream tcp:0 --direction client --output raw > client.bin
+  mkdir -p ./directions && packetcraftr analyze follow capture.pcapng --stream tcp:0 --write ./directions
+  packetcraftr --output json analyze follow capture.pcapng --stream udp:2
+  packetcraftr --output ndjson analyze follow capture.pcapng --stream tcp:7";
 
 /// How a followed conversation's chunks are narrowed by sender.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

@@ -95,6 +95,7 @@ pub(super) fn run(
                 super::rendering::render_connect_text(
                     &output::scan::connect::Report::publish(aggregate, plan, names, lookups)
                         .map_err(CliError::classified)?,
+                    stream.presentation(),
                 )?;
                 crate::rendering::render_diagnostics_text(&diagnostics)
             }),

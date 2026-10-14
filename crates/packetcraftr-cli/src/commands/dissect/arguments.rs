@@ -13,13 +13,13 @@ With --filter, non-matching frames emit nothing in text/hex/raw (noting the miss
 on stderr) and emit `matched: false, dissection: null` in JSON.
 
 Examples:
-  packetcraftr dissect --link-type 228 --hex '4500001c0000000040018eaac0000201c63364020800f7ff00000000'
-  packetcraftr --output json dissect --file frame.bin --link-type 1
-  packetcraftr dissect --file frame.bin --filter 'icmpv4 && ip.dst == 198.51.100.2'
-  packetcraftr --output hex build --packet 'ipv4()/icmpv4(identifier=1)' | packetcraftr dissect --link-type ipv4 --hex -
-  packetcraftr dissect --hex-file frame.txt --link-type ipv4 --tree
+  packetcraftr packet dissect --link-type 228 --hex '4500001c0000000040018eaac0000201c63364020800f7ff00000000'
+  packetcraftr --output json packet dissect --file frame.bin --link-type 1
+  packetcraftr packet dissect --file frame.bin --filter 'icmpv4 && ip.dst == 198.51.100.2'
+  packetcraftr --output hex packet build --packet 'ipv4()/icmpv4(identifier=1)' | packetcraftr packet dissect --link-type ipv4 --hex -
+  packetcraftr packet dissect --hex-file frame.txt --link-type ipv4 --tree
 
-See `packetcraftr topics filters` for the --filter language.";
+See `packetcraftr reference topics filters` for the --filter language.";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

@@ -1,15 +1,17 @@
 # Three starting tasks
 
 Commands assume `packetcraftr` on `PATH`; see [installation](../README.md#install).
+Use `packetcraftr --help` to find the workflow groups.
+`-h` shows common options; `--help` shows full help; `--verbose` expands text evidence.
 Library callers should [pin a reviewed revision](consumer-compatibility.md#rust-api-adoption).
 
 ## 1. Build a fixture and test one property
 
 ```sh
-packetcraftr --output hex build --packet 'raw(text=hello)'
+packetcraftr --output hex packet build --packet 'raw(text=hello)'
 ```
 
-This emits `68656c6c6f`, without traffic. For IPv4/UDP, use `build --packet-file`
+This emits `68656c6c6f`, without traffic. For IPv4/UDP, use `packet build --packet-file`
 with [the structured fixture](../examples/documents/packet-ipv4-udp.json).
 Invalid fields/values fail before transmission.
 
@@ -23,14 +25,14 @@ a deliberate forwarding fail can be a passing regression. Choose a stable identi
 
 ```sh
 packetcraftr --resource-preset ci-v1 --resource-diagnostics --output ndjson \
-  http examples/captures/http-stream.pcap > http.ndjson
-packetcraftr --output json stats examples/captures/http-stream.pcap
+  analyze http examples/captures/http-stream.pcap > http.ndjson
+packetcraftr --output json analyze stats examples/captures/http-stream.pcap
 packetcraftr --resource-preset ci-v1 --resource-diagnostics --output ndjson \
-  http2 examples/captures/http2-multiplexed.pcapng
-packetcraftr --output json http2 examples/captures/http2-upgrade.pcapng --stream tcp:0
+  analyze http2 examples/captures/http2-multiplexed.pcapng
+packetcraftr --output json analyze http2 examples/captures/http2-upgrade.pcapng --stream tcp:0
 ```
 
-`http` is HTTP/1-only; `http2` handles cleartext prior knowledge/h2c, not TLS
+`analyze http` is HTTP/1-only; `analyze http2` handles cleartext prior knowledge/h2c, not TLS
 decryption. `tcp:INDEX` selects a conversation, not an HTTP/2 stream. Defaults
 inspect ports 80/8080; repeat `--http2-port` for others. DATA bodies are discarded.
 Read frames/messages/issues and final connections plus terminal complete/error.
@@ -40,16 +42,16 @@ h2c preserves exact HTTP/1 evidence without invented streams.
 Lower `--max-frames` to inspect a controlled failure. Filtered input still counts;
 raise only the specific finite ceiling justified by diagnostics.
 Parse/resource failure does not prove message absence. Two captures can use
-`verify-forwarding`; [consumer rules](consumer-compatibility.md) reject incomplete streams.
+`analyze verify-forwarding`; [consumer rules](consumer-compatibility.md) reject incomplete streams.
 
 ### Selecting and saving evidence
 
-`read --filter`, `--frames`, `--every`, and inclusive epoch bounds select physical
-frames; `export --stream tcp:INDEX` keeps a scoped conversation and contributing
+`files read --filter`, `--frames`, `--every`, and inclusive epoch bounds select physical
+frames; `files export --stream tcp:INDEX` keeps a scoped conversation and contributing
 fragments. Source frame numbers/budgets survive selection. Epoch bounds exclude
 untimestamped frames and assume no time order.
 
-Unselected, unnormalized `read` rewrites capture bytes exactly. `--normalize`
+Unselected, unnormalized `files read` rewrites capture bytes exactly. `--normalize`
 discards comments/unknown blocks/options/sections but rejects declared FCS and
 inexact timestamps. PCAP additionally needs a nonempty single-interface/link-type
 selection without direction metadata and with compatible snapshot/precision;
@@ -67,7 +69,7 @@ availability; owner authorization is required independently of flags.
 Finite budgets, final-wire policy, route/interface, and MTU checks apply.
 `--allow-destination ADDRESS[/PREFIX]` only narrows permission (canonical prefixes);
 public destinations still need separate opt-in. Read each command's help.
-Explicit `identify` claims are neither authentication nor vulnerabilities.
+Explicit `network identify` claims are neither authentication nor vulnerabilities.
 
 Linux raw I/O usually needs root/CAP_NET_RAW; macOS Layer 2 needs BPF access and
 cannot send complete-header raw IPv6. Windows Layer 2 needs Npcap 1.88; raw I/O

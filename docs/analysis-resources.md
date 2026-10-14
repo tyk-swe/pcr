@@ -59,9 +59,9 @@ remain legal.
 ## Example captures
 
 ```sh
-packetcraftr --output json stats examples/captures/clock-regression.pcap \
+packetcraftr --output json analyze stats examples/captures/clock-regression.pcap \
   --table io --interval-ms 1000   # examples/documents/output-stats-clock.json
-packetcraftr --output json stats examples/captures/scoped-vxlan.pcap \
+packetcraftr --output json analyze stats examples/captures/scoped-vxlan.pcap \
   --table conversations           # examples/documents/output-stats-scopes.json
 ```
 
@@ -104,7 +104,7 @@ systemd-run --user --wait --pipe \
   -p MemoryMax=512M -p MemorySwapMax=0 -p TasksMax=32 -p RuntimeMaxSec=60s \
   -p KillMode=control-group -p KillSignal=SIGKILL \
   ./target/release/packetcraftr --output ndjson --resource-diagnostics \
-  tls CAPTURE.pcap --max-duration-ms 55000
+  analyze tls CAPTURE.pcap --max-duration-ms 55000
 ```
 
 See [resource presets](resource-presets.md) for named defaults and the

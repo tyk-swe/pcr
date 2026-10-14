@@ -72,13 +72,17 @@ impl super::Spec for Args {
     fn run(
         self,
         format: Format,
-        _stream: &crate::rendering::StreamEncoder,
+        stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format).map(|()| super::CommandExit::SUCCESS)
+        run(self, format, stream.presentation()).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: Format,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     let compression = arguments.send.compression.for_output(format)?;
     let prepared = prepare(arguments)?;
     match format {
@@ -96,7 +100,25 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
                         for diagnostic in &frame.packet.built().diagnostics {
                             core::diagnostic::push_once(&mut collected, diagnostic.clone());
                         }
-                        write_summary_line(format_args!("{}", sent_line(frame)))
+                        write_summary_line(format_args!("{}", sent_line(frame)))?;
+                        let route = frame.packet.route();
+                        if let Some(neighbor) = &route.neighbor_resolution
+                            && neighbor.evidence_truncated
+                        {
+                            crate::rendering::write_stdout_line(format_args!(
+                                "warning: neighbor evidence truncated"
+                            ))?;
+                        }
+                        if presentation.verbose {
+                            let route = output::send::MaterializedRoute::try_from(route.clone())
+                                .map_err(CliError::classified)?;
+                            presentation.details("Route and neighbor evidence", &route)?;
+                            crate::rendering::write_stdout_line(format_args!(
+                                "bytes: {}",
+                                crate::rendering::spaced_hex(frame.packet.wire_bytes())
+                            ))?;
+                        }
+                        Ok(())
                     }),
                 )
                 .map_err(CliError::classified)?;

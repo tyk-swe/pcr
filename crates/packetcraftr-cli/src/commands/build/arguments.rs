@@ -6,19 +6,19 @@ use super::session::SessionArgs;
 use crate::command_options::{BuildMode, PacketBudgetArgs, RecipeArgs, TemplateArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
-  packetcraftr build --packet 'raw(text=hello)'
-  packetcraftr --output raw build --packet-file packet.json
-  packetcraftr --output ndjson build --packet 'ipv4(dst=192.0.2.1)/udp()' --axis '0.ttl=[1,64]' --axis '1.dport=[53,5353]'
-  packetcraftr build --packet-file vlan.json --set ipv4.ttl=5 --set udp.destination_port=53
-  packetcraftr --output pcapng build --packet 'ipv4()/icmpv4(identifier=1)' --link-type ipv4 > packet.pcapng
-  packetcraftr --output pcap build --session tcp --packet 'ethernet()/ipv4(src=192.0.2.1,dst=192.0.2.2)/tcp(dport=80)/raw(text=ping)' --link-type ethernet --session-response-file reply.bin > conversation.pcap
+  packetcraftr packet build --packet 'raw(text=hello)'
+  packetcraftr --output raw packet build --packet-file packet.json
+  packetcraftr --output ndjson packet build --packet 'ipv4(dst=192.0.2.1)/udp()' --axis '0.ttl=[1,64]' --axis '1.dport=[53,5353]'
+  packetcraftr packet build --packet-file vlan.json --set ipv4.ttl=5 --set udp.destination_port=53
+  packetcraftr --output pcapng packet build --packet 'ipv4()/icmpv4(identifier=1)' --link-type ipv4 > packet.pcapng
+  packetcraftr --output pcap packet build --session tcp --packet 'ethernet()/ipv4(src=192.0.2.1,dst=192.0.2.2)/tcp(dport=80)/raw(text=ping)' --link-type ethernet --session-response-file reply.bin > conversation.pcap
 
 Packet sets expand in Cartesian order (last axis varies fastest); JSON and raw
 require a single packet. PCAP/PCAPNG output requires --link-type matching the
 first layer. --session expands a deterministic TCP or UDP conversation spaced
 by --session-step-ns from --timestamp.
 
-See `packetcraftr topics expressions` and `packetcraftr topics filters`.";
+See `packetcraftr reference topics expressions` and `packetcraftr reference topics filters`.";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

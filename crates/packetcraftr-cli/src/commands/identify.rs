@@ -141,7 +141,7 @@ impl super::Spec for Args {
         crate::invocation::check()?;
         let report = output::identify::Report::try_from(report).map_err(CliError::classified)?;
         match format {
-            Format::Text => rendering::render_text(&report)?,
+            Format::Text => rendering::render_text(&report, stream.presentation())?,
             Format::Json => crate::rendering::emit_aggregate(
                 output::contract::Command::Identify,
                 report,

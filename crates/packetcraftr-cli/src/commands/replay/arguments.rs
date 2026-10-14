@@ -15,10 +15,10 @@ authorization (still counting toward --max-frames). --bps paces by submitted
 frame bytes without synthetic link overhead.
 
 Examples:
-  packetcraftr replay capture.pcapng --interface eth0 --timing immediate
-  packetcraftr replay capture.pcap --interface 2 --rate 100
-  packetcraftr replay capture.pcap --interface 2 --bps 8000000
-  packetcraftr replay capture.pcap --interface eth0 --filter 'udp && ip.dst == 10.0.0.2'";
+  packetcraftr network replay capture.pcapng --interface eth0 --timing immediate
+  packetcraftr network replay capture.pcap --interface 2 --rate 100
+  packetcraftr network replay capture.pcap --interface 2 --bps 8000000
+  packetcraftr network replay capture.pcap --interface eth0 --filter 'udp && ip.dst == 10.0.0.2'";
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub(crate) enum Timing {

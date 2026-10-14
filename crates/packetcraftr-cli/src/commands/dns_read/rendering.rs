@@ -13,7 +13,10 @@ use crate::rendering::{
     comma_separated, optional_display, render_dns_fields, write_stdout_line, write_summary_line,
 };
 
-pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
+pub(super) fn render_message(
+    message: &wire::Message,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     let flow = &message.flow.flow;
     write_stdout_line(format_args!(
         "DNS {}:{} message={} status={} {} -> {} frames={}",
@@ -27,6 +30,11 @@ pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
     ))?;
     if let Some(fields) = &message.fields {
         render_dns_fields(fields)?;
+    }
+    if presentation.verbose {
+        for source in &message.sources {
+            write_stdout_line(format_args!("  source: {source:?}"))?;
+        }
     }
     if let Some(error) = &message.error {
         write_stdout_line(format_args!("  error: {error}"))?;

@@ -27,6 +27,9 @@ pub(crate) fn run(parsed: Parsed) -> ExitCode {
     } = parsed;
     cli.command.start(Launch {
         format: output::contract::Format::from(cli.format),
+        presentation: crate::rendering::Presentation {
+            verbose: cli.verbose,
+        },
         resource_diagnostics: cli.resource_diagnostics,
         resource_preset: cli.resource_preset,
         output_timeout_ms: cli.output_timeout_ms,
@@ -38,6 +41,7 @@ pub(crate) fn run(parsed: Parsed) -> ExitCode {
 
 pub(super) struct Launch<'a> {
     format: output::contract::Format,
+    presentation: crate::rendering::Presentation,
     resource_diagnostics: bool,
     resource_preset: Option<Preset>,
     output_timeout_ms: Option<u64>,
@@ -115,6 +119,7 @@ impl Launch<'_> {
                 return ExitCode::from(error.exit_code());
             }
         };
+        let stream = stream.with_presentation(self.presentation);
         if self.resource_diagnostics
             && !matches!(
                 format,

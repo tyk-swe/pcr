@@ -14,9 +14,9 @@ port 53 and each --dns-port. Pairs queries and responses by flow and DNS ID into
 matched, unanswered, orphan, or duplicate transactions.
 
 Examples:
-  packetcraftr dns-read capture.pcapng
-  packetcraftr dns-read capture.pcapng --dns-port 5353 --stream udp:3
-  packetcraftr --output ndjson dns-read - < capture.pcapng";
+  packetcraftr analyze dns capture.pcapng
+  packetcraftr analyze dns capture.pcapng --dns-port 5353 --stream udp:3
+  packetcraftr --output ndjson analyze dns - < capture.pcapng";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

@@ -94,16 +94,50 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     match format {
         Format::Json => emit_aggregate(Command::Export, report, Vec::new()),
         Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        Format::Text => write_summary_line(format_args!(
-            "exported {} of {} physical frames to {}; {} complete and {} incomplete datagrams, {} unmatched stream selectors, {} unmatched datagram selectors",
-            report.capture.frames_selected,
-            report.capture.frames_read,
-            report.path,
-            report.selected_complete_datagrams,
-            report.selected_incomplete_datagrams.len(),
-            report.unmatched_streams.len(),
-            report.unmatched_datagram_frames.len()
-        )),
+        Format::Text => {
+            for selected in &report.matched_streams {
+                crate::rendering::write_stdout_line(format_args!(
+                    "exported stream: {}:{}",
+                    selected.transport.as_str(),
+                    selected.index
+                ))?;
+            }
+            for missing in &report.unmatched_streams {
+                crate::rendering::write_stdout_line(format_args!(
+                    "warning: unmatched stream {}:{}",
+                    missing.transport.as_str(),
+                    missing.index
+                ))?;
+            }
+            for missing in &report.unmatched_datagram_frames {
+                crate::rendering::write_stdout_line(format_args!(
+                    "warning: unmatched datagram frame {missing}"
+                ))?;
+            }
+            for incomplete in &report.selected_incomplete_datagrams {
+                crate::rendering::write_stdout_line(format_args!(
+                    "warning: incomplete datagram {:?}",
+                    incomplete.key
+                ))?;
+            }
+            if report.source_outcomes_omitted > 0 {
+                crate::rendering::write_stdout_line(format_args!(
+                    "{} source outcomes omitted",
+                    report.source_outcomes_omitted
+                ))?;
+            }
+            stream.presentation().details("Export sources", &report)?;
+            write_summary_line(format_args!(
+                "exported {} of {} physical frames to {}; {} complete and {} incomplete datagrams, {} unmatched stream selectors, {} unmatched datagram selectors",
+                report.capture.frames_selected,
+                report.capture.frames_read,
+                report.path,
+                report.selected_complete_datagrams,
+                report.selected_incomplete_datagrams.len(),
+                report.unmatched_streams.len(),
+                report.unmatched_datagram_frames.len()
+            ))
+        }
         other => other.unreachable(),
     }
 }

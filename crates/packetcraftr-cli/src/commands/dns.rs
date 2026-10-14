@@ -104,6 +104,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     rendering::render_text(
                         output::envelope::Published::try_from(aggregate)
                             .map_err(CliError::classified)?,
+                        stream.presentation(),
                     )
                 }),
                 complete: rendering::emit_complete,
@@ -140,6 +141,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 rendering::render_batch_text(
                     output::envelope::Published::try_from(aggregate)
                         .map_err(CliError::classified)?,
+                    stream.presentation(),
                 )
             }),
             complete: rendering::emit_batch_complete,

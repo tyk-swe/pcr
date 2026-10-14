@@ -295,7 +295,7 @@ jobs:
           # Completions and man pages come from the packaged binary itself, so
           # they always describe the shipped command definitions.
           subprocess.run([
-              str(binary.resolve()), "documentation", "--directory", str(staging),
+              str(binary.resolve()), "reference", "documentation", "--directory", str(staging),
           ], check=True, timeout=60)
 
           archive = shutil.make_archive(

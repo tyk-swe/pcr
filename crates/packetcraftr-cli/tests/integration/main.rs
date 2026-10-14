@@ -40,6 +40,7 @@ mod field_projection_contracts;
 mod forwarding_verification_contracts;
 mod frame_selection_contracts;
 mod header_rewrite_contracts;
+mod hierarchy_contracts;
 mod http2_contracts;
 mod http_contracts;
 mod identify_contracts;

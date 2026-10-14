@@ -11,7 +11,7 @@ use crate::errors::CliError;
 
 use crate::output;
 
-pub(crate) use crate::output::stream::StreamEncoder;
+use super::StreamEncoder;
 
 /// Per-write ceiling when `--output-timeout-ms` is absent.
 pub(crate) const OUTPUT_TIMEOUT_MS: u64 = 1000;
@@ -22,8 +22,8 @@ pub(crate) fn stdout_stream(
     timeout: Duration,
 ) -> Result<StreamEncoder, CliError> {
     let runtime = crate::system::runtime(crate::system::Runtime::OutputWriter);
-    StreamEncoder::new_bounded(command, io::stdout(), &runtime, timeout)
-        .map(|stream| stream.with_terminal_error_timeout(OUTPUT_TIMEOUT))
+    output::stream::StreamEncoder::new_bounded(command, io::stdout(), &runtime, timeout)
+        .map(|stream| StreamEncoder::from(stream).with_terminal_error_timeout(OUTPUT_TIMEOUT))
         .map_err(CliError::classified)
 }
 

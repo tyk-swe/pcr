@@ -17,11 +17,11 @@ Value preservation requires readable values on both sides (use
 on pass, 1 on fail or inconclusive.
 
 Examples:
-  packetcraftr verify-forwarding pre.pcap post.pcap --identity ipv4.identification --identity udp.source_port
-  packetcraftr verify-forwarding pre.pcap post.pcap --identity raw.bytes --preserve ipv4.total_length
-  packetcraftr verify-forwarding pre.pcap post.pcap --identity ipv4.identification --expect ipv4.destination=198.51.100.2
-  packetcraftr verify-forwarding pre.pcap post.pcap --identity raw.bytes --ingress-filter 'udp.destination_port == 9000'
-  packetcraftr --output json verify-forwarding pre.pcap post.pcap --identity raw.bytes";
+  packetcraftr analyze verify-forwarding pre.pcap post.pcap --identity ipv4.identification --identity udp.source_port
+  packetcraftr analyze verify-forwarding pre.pcap post.pcap --identity raw.bytes --preserve ipv4.total_length
+  packetcraftr analyze verify-forwarding pre.pcap post.pcap --identity ipv4.identification --expect ipv4.destination=198.51.100.2
+  packetcraftr analyze verify-forwarding pre.pcap post.pcap --identity raw.bytes --ingress-filter 'udp.destination_port == 9000'
+  packetcraftr --output json analyze verify-forwarding pre.pcap post.pcap --identity raw.bytes";
 
 /// Bounded comparison of an ingress and an egress capture.
 #[derive(Debug, clap::Args)]

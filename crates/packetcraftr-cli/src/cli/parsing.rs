@@ -15,15 +15,39 @@ pub(crate) struct Parsed {
 }
 
 fn preset_definition(
-    subcommand: &str,
+    path: &[&str],
     defaults: &BTreeMap<&'static str, &'static str>,
 ) -> clap::Command {
-    Cli::command().mut_subcommand(subcommand, |command| {
-        command.mut_args(|arg| match defaults.get(arg.get_id().as_str()) {
-            Some(value) => arg.default_value(*value),
-            None => arg,
-        })
-    })
+    fn apply(
+        command: clap::Command,
+        path: &[&str],
+        defaults: &BTreeMap<&'static str, &'static str>,
+    ) -> clap::Command {
+        match path.split_first() {
+            Some((name, rest)) => {
+                command.mut_subcommand(name, |command| apply(command, rest, defaults))
+            }
+            None => command.mut_args(|arg| match defaults.get(arg.get_id().as_str()) {
+                Some(value) => arg.default_value(*value),
+                None => arg,
+            }),
+        }
+    }
+    apply(Cli::command(), path, defaults)
+}
+
+/// Resolve a validated invocation to its leaf without dropping value sources.
+pub(crate) fn leaf<'a>(
+    mut definition: &'a clap::Command,
+    mut matches: &'a ArgMatches,
+) -> (&'a clap::Command, &'a ArgMatches) {
+    while let Some((name, nested)) = matches.subcommand() {
+        definition = definition
+            .find_subcommand(name)
+            .expect("validated subcommand");
+        matches = nested;
+    }
+    (definition, matches)
 }
 
 pub(crate) fn parse_from(arguments: Vec<OsString>) -> Result<Parsed, clap::Error> {
@@ -47,7 +71,14 @@ pub(crate) fn parse_from(arguments: Vec<OsString>) -> Result<Parsed, clap::Error
         }
     };
     let defaults = cli.command.preset_defaults(preset);
-    let mut definition = preset_definition(subcommand, &defaults);
+    let path = match matches
+        .subcommand()
+        .and_then(|(_, values)| values.subcommand_name())
+    {
+        Some(leaf) => vec![subcommand, leaf],
+        None => vec![subcommand],
+    };
+    let mut definition = preset_definition(&path, &defaults);
     let matches = definition.try_get_matches_from_mut(arguments)?;
     let cli = Cli::from_arg_matches(&matches)?;
     Ok(Parsed {

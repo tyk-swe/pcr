@@ -8,11 +8,11 @@ authenticated identity. See [evidence tables](scanner-evidence.md#port-inference
 ## Use
 
 ```sh
-packetcraftr scan 192.0.2.10 --tcp-scan ack --ports 22,80,443
-packetcraftr scan 192.0.2.10 --tcp-scan window --ports 80
-packetcraftr --output ndjson scan 192.0.2.10 --tcp-scan xmas --ports 1-1024 --max-in-flight 32
-packetcraftr scan 192.0.2.10 --tcp-scan custom --tcp-flags 0x029 --ports 80
-packetcraftr --output json scan 192.0.2.10 --tcp-scan fin --ports 80 --list
+packetcraftr network scan 192.0.2.10 --tcp-scan ack --ports 22,80,443
+packetcraftr network scan 192.0.2.10 --tcp-scan window --ports 80
+packetcraftr --output ndjson network scan 192.0.2.10 --tcp-scan xmas --ports 1-1024 --max-in-flight 32
+packetcraftr network scan 192.0.2.10 --tcp-scan custom --tcp-flags 0x029 --ports 80
+packetcraftr --output json network scan 192.0.2.10 --tcp-scan fin --ports 80 --list
 ```
 
 `--tcp-scan` accepts `syn` (default), `ack`, `window`, `fin`, `null`, `xmas`,

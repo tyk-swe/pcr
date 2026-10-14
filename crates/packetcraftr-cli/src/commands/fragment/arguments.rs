@@ -10,8 +10,8 @@ pub(crate) const AFTER_LONG_HELP: &str = r#"Fragmentation is explicit and offlin
 Text and hex print one fragment per line, NDJSON streams each fragment before one complete event, and PCAP or PCAPNG write the fragments to stdout as a capture stream.
 
 Examples:
-  packetcraftr fragment --mtu 576 --packet 'ipv4(dst=192.0.2.1)/udp(dport=9)/raw(text=hello)'
-  packetcraftr --output pcapng fragment --mtu 1280 --identification 7 --packet 'ipv6(dst=2001:db8::1)/udp(dport=9)/raw(hex="00")' > fragments.pcapng"#;
+  packetcraftr packet fragment --mtu 576 --packet 'ipv4(dst=192.0.2.1)/udp(dport=9)/raw(text=hello)'
+  packetcraftr --output pcapng packet fragment --mtu 1280 --identification 7 --packet 'ipv6(dst=2001:db8::1)/udp(dport=9)/raw(hex="00")' > fragments.pcapng"#;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

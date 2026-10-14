@@ -23,12 +23,12 @@ The destination is published only when all frames succeed; --dry-run reports
 field changes without writing.
 
 Examples:
-  packetcraftr rewrite capture.pcapng --write rewritten.pcapng --destination-ip 192.0.2.10
-  packetcraftr rewrite capture.pcapng --write out.pcapng --set ipv4.ttl=64 --filter 'udp'
-  packetcraftr rewrite capture.pcapng --write out.pcapng --rules-file rules.json
-  packetcraftr rewrite capture.pcapng --write out.pcapng --map-ip 192.0.2.0/24=198.51.100.0/24
-  packetcraftr rewrite capture.pcapng --write out.pcapng --map-mac 02:00:00:00:00:01=02:00:00:00:00:02
-  packetcraftr rewrite capture.pcapng --write out.pcapng --set dns.id=7 --dry-run";
+  packetcraftr files rewrite capture.pcapng --write rewritten.pcapng --destination-ip 192.0.2.10
+  packetcraftr files rewrite capture.pcapng --write out.pcapng --set ipv4.ttl=64 --filter 'udp'
+  packetcraftr files rewrite capture.pcapng --write out.pcapng --rules-file rules.json
+  packetcraftr files rewrite capture.pcapng --write out.pcapng --map-ip 192.0.2.0/24=198.51.100.0/24
+  packetcraftr files rewrite capture.pcapng --write out.pcapng --map-mac 02:00:00:00:00:01=02:00:00:00:00:02
+  packetcraftr files rewrite capture.pcapng --write out.pcapng --set dns.id=7 --dry-run";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

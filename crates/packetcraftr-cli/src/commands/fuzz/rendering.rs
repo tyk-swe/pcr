@@ -12,6 +12,7 @@ use crate::rendering::{
 
 pub(super) fn render_text(
     published: output::envelope::Published<output::fuzz::Report>,
+    presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
         result,
@@ -69,6 +70,7 @@ pub(super) fn render_text(
             }
         }
         render_diagnostics_text(&case.diagnostics)?;
+        presentation.details("Case evidence", case)?;
     }
     crate::cancellation::check()?;
     write_stdout_line(format_args!(

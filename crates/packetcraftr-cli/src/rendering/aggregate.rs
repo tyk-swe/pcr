@@ -17,7 +17,11 @@ pub(crate) fn render_aggregate_rows<T, R: serde::Serialize>(
             for row in rows {
                 write_stdout_line(format_args!("{}", line(row)))?;
             }
-            Ok(())
+            super::write_summary_line(format_args!(
+                "{} {} result(s)",
+                rows.len(),
+                command.as_str()
+            ))
         }
         output::contract::Format::Json => emit_aggregate(command, result, Vec::new()),
         other => other.unreachable(),

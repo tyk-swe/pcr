@@ -26,8 +26,9 @@ pub(crate) fn render_frame_text(
     source_frame: output::frame::SourceFrame,
     frame: &output::frame::Captured,
     decoded: Option<&output::frame::Stack>,
+    presentation: super::Presentation,
 ) -> Result<(), CliError> {
-    render_frame(source_frame, frame, decoded, None)
+    render_frame(source_frame, frame, decoded, None, presentation)
 }
 
 /// As [`render_frame_text`], listing each layer's fields in place of the DNS summary lines.
@@ -37,7 +38,13 @@ pub(crate) fn render_frame_tree(
     decoded: Option<&output::frame::Stack>,
     tree: &mut FieldTree,
 ) -> Result<(), CliError> {
-    render_frame(source_frame, frame, decoded, Some(tree))
+    render_frame(
+        source_frame,
+        frame,
+        decoded,
+        Some(tree),
+        super::Presentation { verbose: true },
+    )
 }
 
 fn render_frame(
@@ -45,11 +52,12 @@ fn render_frame(
     frame: &output::frame::Captured,
     decoded: Option<&output::frame::Stack>,
     tree: Option<&mut FieldTree>,
+    presentation: super::Presentation,
 ) -> Result<(), CliError> {
     match decoded {
         None => write_stdout_line(format_args!(
             "{source_frame}: {}",
-            captured_frame_text(frame)
+            frame_summary(frame, presentation)
         )),
         Some(decoded) => {
             write_stdout_line(format_args!(
@@ -64,13 +72,20 @@ fn render_frame(
                     .map(|layer| layer.protocol.as_str())
                     .collect::<Vec<_>>()
                     .join("/"),
-                spaced_hex(frame.bytes())
+                if presentation.verbose {
+                    format!("{}", spaced_hex(frame.bytes()))
+                } else {
+                    String::new()
+                }
             ))?;
             match tree {
                 Some(tree) => tree.render_layers(&decoded.packet, |index, protocol| {
                     format!("{source_frame}: {index}: {protocol}")
                 })?,
-                None => render_dns_records(&decoded.packet)?,
+                None => {
+                    render_dns_records(&decoded.packet)?;
+                    presentation.details("Decoded fields", &decoded.packet)?;
+                }
             }
             if !decoded.diagnostics.is_empty() {
                 write_stdout_line(format_args!("{source_frame}: diagnostics:"))?;
@@ -310,6 +325,17 @@ impl fmt::Display for CapturedFrameText<'_> {
             frame.captured_length,
             frame.original_length,
             spaced_hex(frame.bytes())
+        )
+    }
+}
+
+fn frame_summary(frame: &output::frame::Captured, presentation: super::Presentation) -> String {
+    if presentation.verbose {
+        captured_frame_text(frame).to_string()
+    } else {
+        format!(
+            "dlt={} caplen={} wirelen={}",
+            frame.link_type, frame.captured_length, frame.original_length
         )
     }
 }

@@ -1,5 +1,28 @@
 # Migrating from 0.5.0-beta.3
 
+## CLI workflow groups
+
+Prefer `packetcraftr <group> <command>`: `packet` for packet operations, `files`
+for capture files, `analyze` for offline analysis, `network` for live operations,
+and `reference` for built-in documentation. Every previous flat command remains
+supported without runtime warnings. `analyze dns` is the former `dns-read`;
+`network dns` is the live DNS command.
+
+`-h` shows common options and short examples. `--help` includes every option,
+default, supported format, and prerequisite. Empty root/group invocations show
+help and exit 2. `packetcraftr help <group> <command>` also works.
+
+Human text output is compact by default; add `-v`/`--verbose` for retained
+evidence, provenance, and technical details. Warnings, failed checks, ambiguity,
+incomplete outcomes, and omission counts remain visible. Explicit detail
+selectors, including `--tree`, `--dissect`, and `--field`, remain effective.
+Reference output and requested packet bytes stay comprehensive.
+
+No scripts need to migrate: command identifiers, output/v16 and packet/v2,
+flags, defaults, exit codes, policy enforcement, and machine/byte output retain
+their contracts. Verbosity has no effect on machine/byte formats.
+
+
 Net upgrade from 0.5.0-beta.3 to current `main`. See the [changelog](../CHANGELOG.md)
 for additions, the [path tables](#renamed-and-removed-paths) for mechanical Rust
 replacements, and [the provider cleanup](#callers-tracking-main) if you already

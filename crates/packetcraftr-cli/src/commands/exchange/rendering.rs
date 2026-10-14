@@ -11,7 +11,10 @@ use crate::rendering::{
     StreamEncoder, render_diagnostics_text, write_capture_file, write_stdout_line,
 };
 
-pub(super) fn render_text(result: &packetcraftr::exchange::Aggregate) -> Result<(), CliError> {
+pub(super) fn render_text(
+    result: &packetcraftr::exchange::Aggregate,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "sent={} responses={} unanswered={} unsolicited={} undecoded={} bytes={}",
         result.sent.len(),
@@ -21,6 +24,23 @@ pub(super) fn render_text(result: &packetcraftr::exchange::Aggregate) -> Result<
         result.undecoded.len(),
         result.stats.bytes
     ))?;
+    for response in &result.responses {
+        write_stdout_line(format_args!(
+            "request={} response_bytes={} latency={}",
+            response.request_index,
+            response.response.frame.bytes().len(),
+            crate::rendering::duration_text(response.latency)
+        ))?;
+        if presentation.verbose {
+            write_stdout_line(format_args!(
+                "  bytes: {}",
+                crate::rendering::spaced_hex(response.response.frame.bytes())
+            ))?;
+        }
+    }
+    for request in &result.unanswered {
+        write_stdout_line(format_args!("request={request} unanswered"))?;
+    }
     render_diagnostics_text(&text_diagnostics(result))
 }
 

@@ -5,9 +5,9 @@ IPv4 or IPv6 target. Supply a known open TCP port and a distinct known closed
 TCP port; the workflow verifies both before sending remaining probes.
 
 ```sh
-packetcraftr --output json identify-os 192.0.2.2 \
+packetcraftr --output json network identify-os 192.0.2.2 \
   --open-port 443 --closed-port 43125 --interface eth0 --link-mode layer2
-packetcraftr --output ndjson identify-os 2001:db8::2 \
+packetcraftr --output ndjson network identify-os 2001:db8::2 \
   --open-port 443 --closed-port 43125 --attempts 1 --timeout-ms 500
 ```
 

@@ -12,22 +12,22 @@ use crate::command_options::{
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
-  packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
-  packetcraftr scan 192.0.2.10 --transport udp --ports 53,8000-8100
-  packetcraftr scan 192.0.2.10 --transport sctp --ports 80,9899
-  packetcraftr scan 192.0.2.10 --transport sctp --sctp-scan cookie-echo --ports 80
-  packetcraftr scan 192.0.2.10 --transport ip --ip-protocols 1,6,17,47,132
-  packetcraftr scan 192.0.2.10 --ports 1-1024 --max-in-flight 32
-  packetcraftr scan 192.0.2.10 --tcp-scan ack --ports 22,80,443
-  packetcraftr scan 192.0.2.10 --tcp-scan custom --tcp-flags 0x029 --ports 80
-  packetcraftr scan 192.0.2.10 --transport udp --ports 53,9000 \
+  packetcraftr network scan 192.0.2.10 --transport tcp --ports 22,80,443
+  packetcraftr network scan 192.0.2.10 --transport udp --ports 53,8000-8100
+  packetcraftr network scan 192.0.2.10 --transport sctp --ports 80,9899
+  packetcraftr network scan 192.0.2.10 --transport sctp --sctp-scan cookie-echo --ports 80
+  packetcraftr network scan 192.0.2.10 --transport ip --ip-protocols 1,6,17,47,132
+  packetcraftr network scan 192.0.2.10 --ports 1-1024 --max-in-flight 32
+  packetcraftr network scan 192.0.2.10 --tcp-scan ack --ports 22,80,443
+  packetcraftr network scan 192.0.2.10 --tcp-scan custom --tcp-flags 0x029 --ports 80
+  packetcraftr network scan 192.0.2.10 --transport udp --ports 53,9000 \
     --udp-profiles examples/documents/udp-profiles.json --max-in-flight 8
-  packetcraftr --output ndjson scan 198.51.100.10 --transport icmp
-  packetcraftr scan 192.0.2.10 --transport tcp,udp,sctp --ports @name-services,udp:ntp,sctp:9899
-  packetcraftr scan 192.0.2.10 --ports @all --exclude-ports ssh,8000-8100
-  packetcraftr scan 192.0.2.10 --transport udp --ports @infrastructure --curated-udp-payloads
-  packetcraftr scan 192.0.2.0/28 --discovery only --discovery-probes icmp,neighbor
-  packetcraftr scan 192.0.2.0/28 --discovery before --discovery-probes icmp,tcp,tcp-ack,sctp \
+  packetcraftr --output ndjson network scan 198.51.100.10 --transport icmp
+  packetcraftr network scan 192.0.2.10 --transport tcp,udp,sctp --ports @name-services,udp:ntp,sctp:9899
+  packetcraftr network scan 192.0.2.10 --ports @all --exclude-ports ssh,8000-8100
+  packetcraftr network scan 192.0.2.10 --transport udp --ports @infrastructure --curated-udp-payloads
+  packetcraftr network scan 192.0.2.0/28 --discovery only --discovery-probes icmp,neighbor
+  packetcraftr network scan 192.0.2.0/28 --discovery before --discovery-probes icmp,tcp,tcp-ack,sctp \
     --discovery-ports 22,443 --ports @web --reverse-dns 192.0.2.53
 
 Ports, IP protocols, and methods:

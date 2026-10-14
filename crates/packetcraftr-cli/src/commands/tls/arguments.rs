@@ -22,11 +22,11 @@ selected sessions.
 Statuses: complete, client_only, retry, alert, malformed, gap, truncated.
 
 Examples:
-  packetcraftr tls examples/captures/tls-handshake.pcapng
-  packetcraftr tls capture.pcapng --sni '*.example.test' --status complete
-  packetcraftr tls capture.pcapng --stream tcp:12
-  packetcraftr tls capture.pcapng --server-port 4433 --status complete --status alert
-  packetcraftr --output ndjson tls capture.pcapng | jq -r 'select(.event == "session") | .result.client.ja4'"#;
+  packetcraftr analyze tls examples/captures/tls-handshake.pcapng
+  packetcraftr analyze tls capture.pcapng --sni '*.example.test' --status complete
+  packetcraftr analyze tls capture.pcapng --stream tcp:12
+  packetcraftr analyze tls capture.pcapng --server-port 4433 --status complete --status alert
+  packetcraftr --output ndjson analyze tls capture.pcapng | jq -r 'select(.event == "session") | .result.client.ja4'"#;
 
 /// Session status selector for `tls`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

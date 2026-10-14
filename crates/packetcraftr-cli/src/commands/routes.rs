@@ -10,9 +10,9 @@ use crate::errors::CliError;
 use crate::rendering::optional_display;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
-  packetcraftr routes
-  packetcraftr routes --all
-  packetcraftr --output json routes";
+  packetcraftr network routes
+  packetcraftr network routes --all
+  packetcraftr --output json network routes";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

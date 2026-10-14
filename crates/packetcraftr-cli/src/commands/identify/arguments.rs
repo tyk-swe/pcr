@@ -12,10 +12,10 @@ use crate::command_options::{Bounded, IdentificationPolicyArgs};
 mod tls;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
-  packetcraftr identify 127.0.0.1:8080 --transport tcp
-  packetcraftr --output json identify 192.0.2.53:5353 --transport udp
-  packetcraftr --output ndjson identify '[::1]:2222' --intensity 1
-  packetcraftr identify 192.0.2.1:8080 --corpus service-probes.json
+  packetcraftr network identify 127.0.0.1:8080 --transport tcp
+  packetcraftr --output json network identify 192.0.2.53:5353 --transport udp
+  packetcraftr --output ndjson network identify '[::1]:2222' --intensity 1
+  packetcraftr network identify 192.0.2.1:8080 --corpus service-probes.json
 
 Explicit read-only service identification over numeric endpoints (never started
 automatically by `scan`). `--tls` wraps TCP probes (--server-name sets SNI

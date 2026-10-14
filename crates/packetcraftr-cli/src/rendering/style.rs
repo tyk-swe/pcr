@@ -73,7 +73,7 @@ pub(crate) fn style_human_line(value: &str) -> String {
 }
 
 pub(crate) fn style_summary_line(value: &str) -> String {
-    let style = success_style();
+    let style = heading_style();
     match split_leading_token(value) {
         Some((prefix, rest)) => format!("{style}{prefix}{style:#}{rest}"),
         None => format!("{style}{value}{style:#}"),
@@ -107,6 +107,15 @@ fn style_document_line(line: &str) -> String {
         ("Arguments:", heading_style()),
         ("Options:", heading_style()),
         ("Global options:", heading_style()),
+        ("Input:", heading_style()),
+        ("Selection and decoding:", heading_style()),
+        ("Operation:", heading_style()),
+        ("Output:", heading_style()),
+        ("Limits:", heading_style()),
+        ("Policy:", heading_style()),
+        ("Discovery:", heading_style()),
+        ("Identification:", heading_style()),
+        ("Scheduling:", heading_style()),
         ("Output formats:", heading_style()),
         ("Examples:", heading_style()),
         ("Example:", heading_style()),
@@ -129,10 +138,6 @@ pub(crate) fn error_style() -> Style {
 
 pub(crate) fn warning_style() -> Style {
     Style::new().fg_color(Some(AnsiColor::Yellow.into())).bold()
-}
-
-fn success_style() -> Style {
-    Style::new().fg_color(Some(AnsiColor::Green.into())).bold()
 }
 
 fn info_style() -> Style {

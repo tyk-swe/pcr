@@ -15,9 +15,9 @@ use crate::errors::CliError;
 use crate::rendering::emit_aggregate;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
-  packetcraftr protocols
-  packetcraftr protocols ipv4
-  packetcraftr --output json protocols IP4";
+  packetcraftr reference protocols
+  packetcraftr reference protocols ipv4
+  packetcraftr --output json reference protocols IP4";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
@@ -91,7 +91,7 @@ fn unknown_protocol(name: &str) -> CliError {
         Classification::new(
             "cli.protocol",
             Kind::Usage,
-            Some("run `packetcraftr protocols` to list built-in protocols"),
+            Some("run `packetcraftr reference protocols` to list built-in protocols"),
         ),
         format!("unknown built-in protocol '{name}'"),
         Vec::new(),

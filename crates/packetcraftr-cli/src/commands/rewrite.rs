@@ -205,12 +205,26 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     match format {
         Format::Json => emit_aggregate(Command::Rewrite, report, Vec::new()),
         Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        Format::Text => render_text(&report),
+        Format::Text => {
+            stream.presentation().details("Rewrite evidence", &report)?;
+            render_text(&report)
+        }
         other => other.unreachable(),
     }
 }
 
 fn render_text(report: &output::rewrite::Report) -> Result<(), CliError> {
+    for change in &report.changes {
+        crate::rendering::write_stdout_line(format_args!(
+            "frame={} layer={} field={} {} -> {} origin={}",
+            change.frame,
+            change.layer,
+            change.field,
+            change.old,
+            change.new,
+            change.origin.as_str()
+        ))?;
+    }
     if report.dry_run {
         write_summary_line(format_args!(
             "dry-run: {} of {} frames would change across {} interfaces; \

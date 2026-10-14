@@ -14,9 +14,9 @@ TCP streams on ports 80, 8080, and each --http2-port (TLS is not decrypted).
 DATA bodies are counted and discarded.
 
 Examples:
-  packetcraftr http2 capture.pcapng
-  packetcraftr http2 capture.pcapng --http2-port 8000 --stream tcp:1
-  packetcraftr --output ndjson http2 capture.pcapng";
+  packetcraftr analyze http2 capture.pcapng
+  packetcraftr analyze http2 capture.pcapng --http2-port 8000 --stream tcp:1
+  packetcraftr --output ndjson analyze http2 capture.pcapng";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

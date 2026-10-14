@@ -78,7 +78,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         filtered,
     } = prepare(&arguments)?;
     match format {
-        Format::Text => replay_text(&client, request, filtered),
+        Format::Text => replay_text(&client, request, filtered, stream.presentation()),
         Format::Json => replay_aggregate(&client, request),
         Format::Ndjson => replay_stream(&client, request, stream),
         Format::Pcap => replay_capture(
@@ -224,12 +224,13 @@ fn replay_text<P: PacketProviders, K: Clock, R: Read>(
     client: &packetcraftr::Client<P, K>,
     request: Request<R>,
     filtered: bool,
+    presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     // The sink runs on a runtime worker, so it enters the invocation's deadline itself.
     let deadline = crate::invocation::deadline();
     let report = drive(client, request, move |Event::Frame(evidence): Event| {
         let _scope = crate::invocation::enter_deadline(deadline.clone());
-        text_record_with(evidence, write_stdout_line_with_interrupt)
+        text_record_with(evidence, presentation, write_stdout_line_with_interrupt)
     })?;
     rendering::render_summary(&report, filtered)
 }
@@ -396,10 +397,15 @@ fn output_frame(evidence: FrameEvidence) -> Result<output::replay::Frame, Bounda
 
 fn text_record_with(
     evidence: FrameEvidence,
+    presentation: crate::rendering::Presentation,
     write_line: impl FnOnce(std::fmt::Arguments<'_>) -> Result<(), HumanWriteError>,
 ) -> Result<(), BoundaryError> {
     let result = output_frame(evidence)?;
-    write_line(format_args!("{}", rendering::frame_line(&result))).map_err(|source| match source {
+    write_line(format_args!(
+        "{}",
+        rendering::frame_line(&result, presentation)
+    ))
+    .map_err(|source| match source {
         HumanWriteError::Interrupted(interrupted) => BoundaryError::from_error(interrupted),
         HumanWriteError::Write(source) => output_failure("write stdout failed", source),
     })

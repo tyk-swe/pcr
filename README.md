@@ -11,22 +11,27 @@ The crates are unpublished; [pin a reviewed revision](docs/consumer-compatibilit
 > Test only systems and networks you own or are explicitly authorized to test.
 > Opt-in flags are technical controls, not permission.
 
+Commands are grouped by workflow: `packet`, `files`, `analyze`, `network`, and
+`reference`. All 31 commands retain supported flat aliases. Use `-h` for common
+options and `--help` for full help. Text results are compact; `-v`/`--verbose`
+expands retained evidence and technical details. JSON, NDJSON, and byte output are unchanged by verbosity.
+
 ## Quick start
 
 These commands work in every profile and send no traffic:
 
 ```console
-packetcraftr protocols
-packetcraftr --output hex build --packet 'raw(text=hello)'
-packetcraftr --output hex build --packet 'ipv4()/icmpv4(identifier=1)' \
-  | packetcraftr dissect --link-type ipv4 --hex - --tree
-packetcraftr --output ndjson read examples/captures/tls-handshake.pcapng --max-frames 100
-packetcraftr tls examples/captures/tls-handshake.pcapng
-packetcraftr http2 examples/captures/http2-multiplexed.pcapng
+packetcraftr reference protocols
+packetcraftr --output hex packet build --packet 'raw(text=hello)'
+packetcraftr --output hex packet build --packet 'ipv4()/icmpv4(identifier=1)' \
+  | packetcraftr packet dissect --link-type ipv4 --hex - --tree
+packetcraftr --output ndjson files read examples/captures/tls-handshake.pcapng --max-frames 100
+packetcraftr analyze tls examples/captures/tls-handshake.pcapng
+packetcraftr analyze http2 examples/captures/http2-multiplexed.pcapng
 ```
 
-Put `--output` before the command. Use `packetcraftr <COMMAND> --help` for options
-and examples, `protocols [PROTOCOL]` for packet fields, and `topics` for expressions,
+Global options such as `--output` may appear before the group, between the group and command, or after the command. Use `packetcraftr <group> <command> --help` for options
+and examples, `reference protocols [PROTOCOL]` for packet fields, and `reference topics` for expressions,
 filters, formats, and exit codes.
 
 | Task | Guide |
@@ -66,7 +71,7 @@ Run `cargo build --locked --release -p packetcraftr-cli` with the chosen argumen
 
 | Profile | Cargo arguments | Capabilities |
 | --- | --- | --- |
-| Portable | `--no-default-features` | Offline tools, ordinary-socket `dns --tcp`, `scan --connect`, and `identify` |
+| Portable | `--no-default-features` | Offline tools, ordinary-socket `network dns --tcp`, `network scan --connect`, and `network identify` |
 | Default | none | Portable plus passive interfaces and routes |
 | Layer 2 only | `--no-default-features --features native-layer2` | Default plus Layer 2 capture/injection |
 | Pcap-free | `--no-default-features --features native-layer3` | Default plus raw Layer 3 send/replay |
@@ -80,7 +85,7 @@ See [Contributing](CONTRIBUTING.md) for development checks.
 
 Archives ship Bash, Elvish, Fish, PowerShell, and Zsh completions under
 `completions/` and one man page per command under `man/`. Regenerate them with
-`packetcraftr documentation --directory DIR`, then install them in your shell's
+`packetcraftr reference documentation --directory DIR`, then install them in your shell's
 completion directory and `man1` directory.
 
 ## Contracts

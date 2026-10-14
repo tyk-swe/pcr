@@ -14,6 +14,7 @@ use crate::{errors::CliError, output};
 /// probes that observed a hop for this host.
 pub(super) fn render_traceroute_text(
     trace: &output::traceroute::hosts::Report,
+    presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     use output::traceroute::hosts::Basis;
 
@@ -81,7 +82,11 @@ pub(super) fn render_traceroute_text(
             write_stdout_line(format_args!("  hop={hop_limit}"))?;
             if let Some(hop) = fresh {
                 for probe in &hop.probes {
-                    crate::commands::traceroute::rendering::render_probe_text("    ", probe)?;
+                    crate::commands::traceroute::rendering::render_probe_text(
+                        "    ",
+                        probe,
+                        presentation,
+                    )?;
                 }
             }
             if let Some(hop) = reused {

@@ -12,10 +12,10 @@ optional --max-reorder-frames look-ahead) or verbatim argument order (--order
 append). Published atomically only after all frames succeed.
 
 Examples:
-  packetcraftr merge --write merged.pcapng first.pcapng second.pcap
-  packetcraftr merge --write merged.pcapng.zst --compression zstd first.pcapng - < second.pcapng
-  packetcraftr merge --write combined.pcapng --order append first.pcapng second.pcapng
-  packetcraftr merge --write sorted.pcapng --max-reorder-frames 64 queue0.pcapng queue1.pcapng";
+  packetcraftr files merge --write merged.pcapng first.pcapng second.pcap
+  packetcraftr files merge --write merged.pcapng.zst --compression zstd first.pcapng - < second.pcapng
+  packetcraftr files merge --write combined.pcapng --order append first.pcapng second.pcapng
+  packetcraftr files merge --write sorted.pcapng --max-reorder-frames 64 queue0.pcapng queue1.pcapng";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

@@ -6,7 +6,7 @@ pub(super) const EXPRESSIONS: &str = r#"Packet expressions
 A packet expression stacks protocol layers from outermost inward, separated by
 `/`. Each layer is `protocol(field=value, ...)`; a bare protocol name takes
 defaults. Protocol and field names are case-insensitive and accept schema
-aliases (`src`, `dst`, `sport`, `dport`). Run `packetcraftr protocols [NAME]`
+aliases (`src`, `dst`, `sport`, `dport`). Run `packetcraftr reference protocols [NAME]`
 to inspect protocols and fields.
 
 Supply `--packet`, `--packet-file` (JSON/YAML), or stdin when neither is given.
@@ -43,7 +43,7 @@ Overrides & axes:
   `--axis SELECTOR=[V1,V2,...]` or `SELECTOR=START..END[:STEP]` expands a Cartesian
   product (last axis varies fastest, bounded by `--max-template-packets`).
 
-See also `packetcraftr topics filters`.
+See also `packetcraftr reference topics filters`.
 "#;
 
 pub(super) const FILTERS: &str = r#"Display filters
@@ -98,5 +98,5 @@ Reserved fields:
 
 Limits: 64 KiB text, 1024 terms, 1024 set members, 64 nesting levels.
 
-See also `packetcraftr topics expressions`.
+See also `packetcraftr reference topics expressions`.
 "#;

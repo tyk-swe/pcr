@@ -605,6 +605,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                             .map_err(CliError::classified)?,
                     )
                     .map_err(CliError::classified)?,
+                    stream.presentation(),
                 )
             }),
             complete: streaming::emit_complete,

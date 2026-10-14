@@ -6,9 +6,9 @@ Ordinary numeric TCP/UDP sockets work in every profile without raw privileges.
 endpoints for a separate invocation with independent authorization/budgets.
 
 ```sh
-packetcraftr --output json identify 127.0.0.1:8080 '[::1]:2222'
-packetcraftr --output ndjson identify 192.0.2.53:5353 --transport udp --allow-public-destinations
-packetcraftr identify 127.0.0.1:8080 --corpus examples/documents/service-probes.json
+packetcraftr --output json network identify 127.0.0.1:8080 '[::1]:2222'
+packetcraftr --output ndjson network identify 192.0.2.53:5353 --transport udp --allow-public-destinations
+packetcraftr network identify 127.0.0.1:8080 --corpus examples/documents/service-probes.json
 ```
 
 Run live examples only on explicitly authorized lab endpoints. IPv6 link-local
@@ -40,7 +40,7 @@ resolution. Peer certificate trust/hostname authentication is intentionally abse
 handshake signatures remain verified. No STARTTLS, UDP TLS, or cleartext fallback.
 
 ```sh
-packetcraftr --output json identify 127.0.0.1:8443 --tls --server-name lab.example
+packetcraftr --output json network identify 127.0.0.1:8443 --tls --server-name lab.example
 ```
 
 Presented ordered DER chains, negotiated protocol/cipher, handshake status, and

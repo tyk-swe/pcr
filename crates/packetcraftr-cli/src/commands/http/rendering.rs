@@ -5,7 +5,10 @@ use crate::errors::CliError;
 use crate::output::http as wire;
 use crate::rendering::{comma_separated, optional_display, write_stdout_line, write_summary_line};
 
-pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
+pub(super) fn render_message(
+    message: &wire::Message,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     let start = match &message.start {
         Some(wire::StartLine::Request { method, target, .. }) => {
             format!("{} {}", escaped(method), escaped(target))
@@ -26,12 +29,25 @@ pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
         optional_display(message.request),
         if frames.is_empty() { "none" } else { &frames },
     ))?;
-    for header in &message.headers {
-        write_stdout_line(format_args!(
-            "  {}: {}",
-            escaped(&header.name),
-            escaped(&header.value)
-        ))?;
+    if presentation.verbose {
+        for header in &message.headers {
+            write_stdout_line(format_args!(
+                "  {}: {}",
+                escaped(&header.name),
+                escaped(&header.value)
+            ))?;
+        }
+    }
+    if presentation.verbose {
+        for trailer in &message.trailers {
+            write_stdout_line(format_args!(
+                "  trailer {}: {}",
+                escaped(&trailer.name),
+                escaped(&trailer.value)
+            ))?;
+        }
+        write_stdout_line(format_args!("  header bytes: {}", message.header_wire_hex))?;
+        presentation.details("Provenance", &message.sources)?;
     }
     if let Some(error) = &message.error {
         write_stdout_line(format_args!("  error: {error}"))?;

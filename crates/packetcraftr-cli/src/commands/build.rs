@@ -177,7 +177,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     )),
                 )?;
             } else {
-                rendering::render_packet(built, format)?;
+                rendering::render_packet(built, format, stream.presentation())?;
             }
             summary.packets_built =
                 super::increment_counter(summary.packets_built, "built packets")?;

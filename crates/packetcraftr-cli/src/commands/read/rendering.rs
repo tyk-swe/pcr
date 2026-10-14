@@ -24,7 +24,12 @@ pub(super) fn render_record(
     match format {
         Format::Text => match tree {
             Some(tree) => render_frame_tree(*source_frame, frame, decoded.as_ref(), tree),
-            None => render_frame_text(*source_frame, frame, decoded.as_ref()),
+            None => render_frame_text(
+                *source_frame,
+                frame,
+                decoded.as_ref(),
+                stream.presentation(),
+            ),
         },
         Format::Hex => write_hex_line(frame.bytes()),
         Format::Ndjson => Ok(stream.emit_data(output::read::Event::from(record), Vec::new())?),

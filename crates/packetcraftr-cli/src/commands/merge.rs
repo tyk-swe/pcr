@@ -109,13 +109,16 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     match format {
         Format::Json => emit_aggregate(output::contract::Command::Merge, report, Vec::new()),
         Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        Format::Text => write_summary_line(format_args!(
-            "merged {} frames ({} bytes) across {} interfaces into {}",
-            report.frames,
-            report.captured_bytes,
-            report.interfaces.len(),
-            report.path
-        )),
+        Format::Text => {
+            stream.presentation().details("Capture sources", &report)?;
+            write_summary_line(format_args!(
+                "merged {} frames ({} bytes) across {} interfaces into {}",
+                report.frames,
+                report.captured_bytes,
+                report.interfaces.len(),
+                report.path
+            ))
+        }
         other => other.unreachable(),
     }
 }

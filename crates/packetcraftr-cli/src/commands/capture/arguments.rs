@@ -20,13 +20,13 @@ PCAPNG (required for --output json) with optional --rotate-bytes,
 --dissect, --tree, and --field decode matched frames on emission.
 
 Examples:
-  packetcraftr capture --interface 1 --timeout-ms 1000
-  packetcraftr --output ndjson capture --interface 1 --interface 2
-  packetcraftr --output json capture --interface 1 --write trace.pcapng.gz \
+  packetcraftr network capture --interface 1 --timeout-ms 1000
+  packetcraftr --output ndjson network capture --interface 1 --interface 2
+  packetcraftr --output json network capture --interface 1 --write trace.pcapng.gz \
     --compression gzip --rotate-bytes 1048576 --rotate-files 4
-  packetcraftr capture --interface 1 --write ring.pcapng \
+  packetcraftr network capture --interface 1 --write ring.pcapng \
     --rotate-interval-ms 1000 --rotate-files 3 --retention ring
-  packetcraftr capture --interface 1 --promiscuous \
+  packetcraftr network capture --interface 1 --promiscuous \
     --capture-filter 'udp port 53' \
     --filter 'udp.source_port == 53'";
 

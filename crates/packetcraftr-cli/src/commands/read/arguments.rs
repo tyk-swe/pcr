@@ -9,14 +9,14 @@ use crate::command_options::{
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
-  packetcraftr read capture.pcapng --max-frames 100
-  packetcraftr --output ndjson read - < capture.pcapng
-  packetcraftr read capture.pcapng --filter 'tcp.flags.syn == 1 && !tcp.flags.ack' --dissect
-  packetcraftr --output pcapng read capture.pcapng --filter 'udp.port == 53' > dns.pcapng
-  packetcraftr --output pcapng read - --normalize --filter 'udp' < capture.pcap > selected.pcapng
-  packetcraftr read capture.pcapng --start-epoch 1700000000.5 --stop-epoch 1700000060
-  packetcraftr read capture.pcapng --frames 1-100,250,300- --every 5
-  packetcraftr read capture.pcapng --filter 'dns' --dissect --tree
+  packetcraftr files read capture.pcapng --max-frames 100
+  packetcraftr --output ndjson files read - < capture.pcapng
+  packetcraftr files read capture.pcapng --filter 'tcp.flags.syn == 1 && !tcp.flags.ack' --dissect
+  packetcraftr --output pcapng files read capture.pcapng --filter 'udp.port == 53' > dns.pcapng
+  packetcraftr --output pcapng files read - --normalize --filter 'udp' < capture.pcap > selected.pcapng
+  packetcraftr files read capture.pcapng --start-epoch 1700000000.5 --stop-epoch 1700000060
+  packetcraftr files read capture.pcapng --frames 1-100,250,300- --every 5
+  packetcraftr files read capture.pcapng --filter 'dns' --dissect --tree
 
 Selection (--start-epoch/--stop-epoch, --frames, --every, --filter) preserves
 one-based source frame numbers; skipped frames still count toward --max-frames
@@ -27,7 +27,7 @@ writes matching physical frames into one PCAPNG section or a single-interface
 classic PCAP (requiring one link type, timestamps, and no direction metadata),
 discarding comments and unknown blocks/options while rejecting declared FCS.
 
-See `packetcraftr topics filters` for the --filter language.";
+See `packetcraftr reference topics filters` for the --filter language.";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

@@ -230,7 +230,7 @@ fn replay_text_fail_expiring_write() {
         &client(10),
         request(reader(1)),
         move |Event::Frame(evidence): Event| {
-            text_record_with(evidence, |_| {
+            text_record_with(evidence, crate::rendering::Presentation::default(), |_| {
                 expired.store(true, Ordering::Relaxed);
                 Err(HumanWriteError::Write(io::Error::other(
                     "fixture pipe closed",

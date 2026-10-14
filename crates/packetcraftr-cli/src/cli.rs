@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 mod context;
+pub(crate) mod help;
 mod parsing;
 
 pub(crate) use context::{Context, MachineFormat, parse as error_context};
-pub(crate) use parsing::{Parsed, parse_from};
+pub(crate) use parsing::{Parsed, leaf, parse_from};
 
 use std::fmt::Write as _;
 use std::sync::OnceLock;
@@ -30,11 +31,11 @@ Output availability is command-specific. Machine formats never contain terminal 
 const ROOT_HELP_EXAMPLES: &str = r"For codes 2 through 70, the word after the code is the `error.kind` of the same failure in JSON and NDJSON output; a cancellation reports kind `io`.
 
 Examples:
-  packetcraftr build --packet 'raw(text=hello)'
-  packetcraftr --output json dissect --link-type 228 --hex '4500001c0000000040018eaac0000201c63364020800f7ff00000000'
-  packetcraftr --output ndjson read capture.pcapng --max-frames 100
+  packetcraftr packet build --packet 'raw(text=hello)'
+  packetcraftr --output json packet dissect --link-type 228 --hex '4500001c0000000040018eaac0000201c63364020800f7ff00000000'
+  packetcraftr --output ndjson files read capture.pcapng --max-frames 100
 
-Run `packetcraftr <COMMAND> --help` for command-specific options and examples.";
+Run `packetcraftr <group> <command> --help` for command-specific options and examples.";
 
 /// The output formats every command draws from, as `--help` describes them.
 pub(crate) const fn output_formats_help() -> &'static str {
@@ -102,30 +103,60 @@ fn long_version() -> &'static str {
     arg_required_else_help = true,
     about = "Reflective packet construction, dissection, capture, and network tools",
     long_about = "PacketcraftR builds and dissects arbitrary packet stacks with exact bytes, bounded parsing, passive route planning, and policy-gated live workflows. Native features, dependencies, and privileges determine which live paths are available.",
+    after_help = "Examples:\n  packetcraftr packet build --packet 'raw(text=hello)'\n  packetcraftr files read capture.pcapng\n\nUse --help for formats, exit codes, and all global options.",
     after_long_help = root_after_help()
 )]
 pub(crate) struct Cli {
+    /// Show retained evidence, provenance, and technical details in text output.
+    #[arg(
+        short,
+        long,
+        global = true,
+        help_heading = "Global options",
+        display_order = 10000
+    )]
+    pub(crate) verbose: bool,
     /// Select the output encoding; supported formats are command-specific.
     #[arg(
         long = "output",
         global = true,
         value_enum,
         value_name = "FORMAT",
-        help_heading = "Global options",
+        help_heading = "Global options", display_order = 10000,
         default_value_t = Format::Text
     )]
     pub(crate) format: Format,
     /// Include effective resource settings and worker snapshots in JSON/NDJSON.
-    #[arg(long, global = true, help_heading = "Global options")]
+    #[arg(
+        long,
+        global = true,
+        help_heading = "Global options",
+        display_order = 10000
+    )]
+    #[arg(hide_short_help = true)]
     pub(crate) resource_diagnostics: bool,
     /// Versioned offline resource defaults; explicit flags override the preset.
-    #[arg(long, global = true, value_enum, help_heading = "Global options")]
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        help_heading = "Global options",
+        display_order = 10000
+    )]
+    #[arg(hide_short_help = true)]
     pub(crate) resource_preset: Option<crate::resources::Preset>,
     /// NDJSON per-write wait in milliseconds (default 1000; range 1..=3600000).
-    #[arg(long, global = true, value_parser = clap::value_parser!(u64).range(1..=3_600_000), help_heading = "Global options")]
+    #[arg(long, global = true, value_parser = clap::value_parser!(u64).range(1..=3_600_000), help_heading = "Global options", display_order = 10000)]
+    #[arg(hide_short_help = true)]
     pub(crate) output_timeout_ms: Option<u64>,
     /// Allow binary raw/PCAP/PCAPNG bytes to be written to an interactive terminal.
-    #[arg(long, global = true, help_heading = "Global options")]
+    #[arg(
+        long,
+        global = true,
+        help_heading = "Global options",
+        display_order = 10000
+    )]
+    #[arg(hide_short_help = true)]
     pub(crate) force_binary_stdout: bool,
     /// Control terminal colours in human-facing output.
     #[arg(
@@ -133,7 +164,7 @@ pub(crate) struct Cli {
         global = true,
         value_enum,
         value_name = "WHEN",
-        help_heading = "Global options",
+        help_heading = "Global options", display_order = 10000,
         default_value_t = ColorChoice::Auto
     )]
     pub(crate) color: ColorChoice,

@@ -211,6 +211,7 @@ fn execute_offline(
             render: Box::new(|report, _| {
                 rendering::render_text(
                     output::envelope::Published::try_from(report).map_err(CliError::classified)?,
+                    stream.presentation(),
                 )
             }),
             complete: rendering::render_offline_complete,
@@ -262,6 +263,7 @@ fn execute_live(
                 rendering::render_text(
                     output::envelope::Published::try_from(aggregate)
                         .map_err(CliError::classified)?,
+                    stream.presentation(),
                 )
             }),
             complete: rendering::render_live_complete,

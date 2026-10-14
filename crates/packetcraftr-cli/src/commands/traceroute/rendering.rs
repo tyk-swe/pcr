@@ -13,6 +13,7 @@ use crate::rendering::{
 
 pub(super) fn render_text(
     published: output::envelope::Published<output::traceroute::Report>,
+    presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
         result,
@@ -31,7 +32,7 @@ pub(super) fn render_text(
     for hop in &result.hops {
         write_stdout_line(format_args!("hop={}", hop.hop_limit))?;
         for probe in &hop.probes {
-            render_probe_text("  ", probe)?;
+            render_probe_text("  ", probe, presentation)?;
         }
     }
     render_undecoded(
@@ -72,6 +73,7 @@ pub(super) fn emit_complete(
 pub(in crate::commands) fn render_probe_text(
     lead: &str,
     probe: &output::traceroute::Probe,
+    presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "{lead}sequence={} attempt={} status={} response={} sent={} received={} responder={} latency={} port={} reason={}",
@@ -88,7 +90,9 @@ pub(in crate::commands) fn render_probe_text(
         optional_display(probe.destination_port),
         probe.reason,
     ))?;
-    if let Some(frame) = &probe.frame {
+    if let Some(frame) = &probe.frame
+        && presentation.verbose
+    {
         write_stdout_line(format_args!("{lead}  frame {}", captured_frame_text(frame)))?;
     }
     Ok(())

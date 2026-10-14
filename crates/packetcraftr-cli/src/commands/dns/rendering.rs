@@ -17,6 +17,7 @@ use crate::rendering::{
 
 pub(super) fn render_batch_text(
     published: output::envelope::Published<output::dns::BatchResult>,
+    presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
         result,
@@ -37,7 +38,10 @@ pub(super) fn render_batch_text(
             question.error.as_deref().unwrap_or("none"),
         ))?;
         if let Some(report) = question.result {
-            render_text(output::envelope::Published::new(*report, Vec::new()))?;
+            render_text(
+                output::envelope::Published::new(*report, Vec::new()),
+                presentation,
+            )?;
         }
     }
     write_stdout_line(format_args!(
@@ -49,6 +53,7 @@ pub(super) fn render_batch_text(
 
 pub(super) fn render_text(
     published: output::envelope::Published<output::dns::Report>,
+    presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
         result,
@@ -84,7 +89,9 @@ pub(super) fn render_text(
             optional_display(attempt.response_code),
             attempt.reason,
         ))?;
-        if let Some(frame) = &attempt.frame {
+        if let Some(frame) = &attempt.frame
+            && presentation.verbose
+        {
             write_stdout_line(format_args!("  frame {}", captured_frame_text(frame)))?;
         }
     }

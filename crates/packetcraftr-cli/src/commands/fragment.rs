@@ -112,7 +112,14 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         Format::Ndjson => stream
             .complete(summary, built.diagnostics)
             .map_err(Into::into),
-        Format::Text | Format::Hex | Format::Pcap | Format::PcapNg => Ok(()),
+        Format::Text => {
+            crate::rendering::write_summary_line(format_args!(
+                "{} fragments, {} bytes, MTU {}",
+                summary.fragments, summary.bytes, summary.mtu
+            ))?;
+            crate::rendering::render_diagnostics_text(&built.diagnostics)
+        }
+        Format::Hex | Format::Pcap | Format::PcapNg => Ok(()),
         other => other.unreachable(),
     }
 }

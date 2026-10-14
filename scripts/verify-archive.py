@@ -5,6 +5,7 @@
 import argparse
 import json
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -171,17 +172,40 @@ def verify(root, version, commit, target, variant):
         if actual != expected:
             raise ValueError(f'packaged stats output differs from {example}')
 
-    # The generated man tree must cover every shipped subcommand; `help` is
-    # clap's implicit subcommand and gets no page.
-    commands = cli('--help').split('Commands:')[1].split('Options:')[0]
-    names = [line.split()[0] for line in commands.splitlines()
-             if line.split() and line.split()[0] != 'help']
-    if not names:
-        raise ValueError('could not read the packaged command list')
-    for name in names:
+    # Discover canonical commands and retained aliases through registry-backed
+    # help, then verify their packaged pages without a separate inventory file.
+    def commands(help_text):
+        _, heading, body = help_text.partition('Commands:\n')
+        if not heading:
+            raise ValueError('packaged help has no command list')
+        section = body.split('\n\n', 1)[0]
+        return [name for name in re.findall(r'^  ([a-z][a-z0-9-]*) {2,}', section, re.MULTILINE)
+                if name != 'help']
+
+    groups = commands(cli('--help'))
+    if set(groups) != {'packet', 'files', 'analyze', 'network', 'reference'}:
+        raise ValueError('packaged help must list the five workflow groups')
+    paths = []
+    for group in groups:
+        for command in commands(cli(group, '--help')):
+            canonical = f'{group} {command}'
+            help_text = cli(group, command, '--help')
+            legacy = re.search(r'Legacy alias:\s+packetcraftr\s+([a-z0-9-]+)\.', help_text)
+            if legacy is None:
+                raise ValueError(f'packaged help for {canonical} has no legacy alias')
+            paths.append((canonical, legacy.group(1)))
+    if len(paths) != 31:
+        raise ValueError('packaged help must describe all 31 commands')
+    for path in [*groups, *(path for pair in paths for path in pair)]:
+        name = path.replace(' ', '-')
         page = root / 'man' / f'packetcraftr-{name}.1'
         if not page.is_file() or page.stat().st_size == 0:
-            raise ValueError(f'packaged man page for {name} is missing or empty')
+            raise ValueError(f'packaged man page for {path} is missing or empty')
+        cli(*path.split(), '--help')
+    for file in (root / 'completions').iterdir():
+        completion = file.read_text(encoding='utf-8')
+        if not all(group in completion for group in groups):
+            raise ValueError(f'completion {file.name} is missing workflow groups')
 
 
 def main():

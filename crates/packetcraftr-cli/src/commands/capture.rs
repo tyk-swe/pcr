@@ -115,7 +115,7 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     {
         return Err(CliError::new(
             Kind::Usage,
-            "capture --field cannot select stream indices; save the capture and use read --field",
+            "capture --field cannot select stream indices; save the capture and use packetcraftr files read --field",
         ));
     }
     let mut decoding = Decoding::prepare(
@@ -545,7 +545,9 @@ fn emit_frame(
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
                 match tree {
                     Some(tree) => render_frame_tree(source_frame, &frame, Some(&stack), tree),
-                    None => render_frame_text(source_frame, &frame, Some(&stack)),
+                    None => {
+                        render_frame_text(source_frame, &frame, Some(&stack), stream.presentation())
+                    }
                 }
             }
             Format::Ndjson => output::read::Frame::try_from((source_frame, frame, &decoded))
@@ -563,7 +565,7 @@ fn emit_frame(
             .map_err(CliError::classified)
             .and_then(|frame| {
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
-                render_frame_text(source_frame, &frame, None)
+                render_frame_text(source_frame, &frame, None, stream.presentation())
             }),
         Format::Hex => output::frame::Captured::try_from(frame)
             .map_err(CliError::classified)

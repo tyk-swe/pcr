@@ -5,29 +5,49 @@ use crate::errors::CliError;
 use crate::output::identify::Report;
 use crate::rendering::{duration_text, write_stdout_line};
 
-pub(super) fn render_text(report: &Report) -> Result<(), CliError> {
+pub(super) fn render_text(
+    report: &Report,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     for record in &report.records {
         write_stdout_line(format_args!(
             "{} {} {}",
             record.endpoint.transport, record.endpoint.address, record.outcome
         ))?;
         for probe in &record.probes {
-            write_stdout_line(format_args!(
-                "  probe={} attempt={} io={} observation={} response_hex={}",
-                probe.probe,
-                probe.attempt,
+            if !matches!(
                 probe.io_outcome,
-                probe.observation.outcome,
-                probe.response_hex
-            ))?;
-            for claim in &probe.observation.claims {
+                crate::output::identify::IoOutcome::Complete
+                    | crate::output::identify::IoOutcome::Eof
+            ) || probe.observation.outcome
+                != crate::output::identify::ObservationOutcome::Complete
+            {
                 write_stdout_line(format_args!(
-                    "    unauthenticated_claim field={} value_hex={}",
-                    claim.field, claim.value_hex
+                    "  probe={} attempt={} io={} observation={}",
+                    probe.probe, probe.attempt, probe.io_outcome, probe.observation.outcome
                 ))?;
             }
+            for diagnostic in [&probe.diagnostic, &probe.observation.diagnostic]
+                .into_iter()
+                .flatten()
+            {
+                write_stdout_line(format_args!("  warning: {diagnostic}"))?;
+            }
+            if let Some(tls) = &probe.tls
+                && tls.certificates_truncated
+            {
+                write_stdout_line(format_args!("  warning: certificate evidence truncated"))?;
+            }
+            presentation.details("Probe evidence (unauthenticated)", probe)?;
         }
         for candidate in &record.candidates {
+            if !presentation.verbose {
+                write_stdout_line(format_args!(
+                    "  candidate product={:?} version={:?} confidence={} (inferred, unauthenticated)",
+                    candidate.product, candidate.version, candidate.confidence
+                ))?;
+                continue;
+            }
             write_stdout_line(format_args!(
                 "  candidate product={:?} version={:?} confidence={} corpus={:?} corpus_version={:?} probe={:?} rule={:?}",
                 candidate.product,

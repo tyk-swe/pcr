@@ -39,7 +39,7 @@ mod offline_analysis;
 mod plan;
 mod protocols;
 mod read;
-mod registry;
+pub(crate) mod registry;
 mod replay;
 mod rewrite;
 mod routes;

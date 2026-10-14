@@ -17,7 +17,10 @@ pub(super) fn render_frame(frame: &wire::Frame) -> Result<(), CliError> {
     ))
 }
 
-pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
+pub(super) fn render_message(
+    message: &wire::Message,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
     let frames = comma_separated(message.sources.iter().map(|source| source.number));
     write_stdout_line(format_args!(
         "HTTP2 tcp:{} stream={} message={} kind={} status={} body_bytes={} request={} frames={}",
@@ -30,19 +33,26 @@ pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
         optional_display(message.request),
         if frames.is_empty() { "none" } else { &frames },
     ))?;
-    for header in &message.headers {
-        write_stdout_line(format_args!(
-            "  {}: {}",
-            escaped(&header.name),
-            escaped(&header.value)
-        ))?;
+    if presentation.verbose {
+        for header in &message.headers {
+            write_stdout_line(format_args!(
+                "  {}: {}",
+                escaped(&header.name),
+                escaped(&header.value)
+            ))?;
+        }
+        for trailer in &message.trailers {
+            write_stdout_line(format_args!(
+                "  trailer {}: {}",
+                escaped(&trailer.name),
+                escaped(&trailer.value)
+            ))?;
+        }
     }
-    for trailer in &message.trailers {
-        write_stdout_line(format_args!(
-            "  trailer {}: {}",
-            escaped(&trailer.name),
-            escaped(&trailer.value)
-        ))?;
+    if presentation.verbose {
+        presentation.details("Header block bytes", &message.header_blocks_hex)?;
+        presentation.details("Provenance", &message.sources)?;
+        presentation.details("Compression dependencies", &message.compression_sources)?;
     }
     Ok(())
 }

@@ -5,7 +5,10 @@ use crate::errors::CliError;
 use crate::output;
 use crate::rendering::{duration_text, spaced_hex, write_summary_line};
 
-pub(super) fn frame_line(frame: &output::replay::Frame) -> String {
+pub(super) fn frame_line(
+    frame: &output::replay::Frame,
+    presentation: crate::rendering::Presentation,
+) -> String {
     format!(
         "{}: sent {} bytes via {} (index {}, {}) dlt={} {}",
         frame.source_index,
@@ -14,7 +17,11 @@ pub(super) fn frame_line(frame: &output::replay::Frame) -> String {
         frame.interface.index,
         frame.link_mode,
         frame.frame.link_type,
-        spaced_hex(frame.frame.bytes())
+        if presentation.verbose {
+            spaced_hex(frame.frame.bytes()).to_string()
+        } else {
+            String::new()
+        }
     )
 }
 

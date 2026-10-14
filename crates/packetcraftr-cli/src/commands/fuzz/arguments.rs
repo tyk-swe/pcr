@@ -14,9 +14,9 @@ use crate::command_options::{
 pub(crate) const AFTER_LONG_HELP: &str = r"NDJSON publishes each case as soon as its offline or live outcome is final, then one complete event with campaign statistics. Earlier case records remain valid if a later case fails.
 
 Examples:
-  packetcraftr fuzz --packet 'ipv4(dst=192.0.2.1)/udp(dport=9)/raw(text=hi)' --cases 16
-  packetcraftr fuzz --packet 'ipv4(dst=192.0.2.1)/udp(dport=9)/raw(text=hi)' --field ipv4.ttl,udp.* --cases 16
-  packetcraftr --output ndjson fuzz --packet-file packet.json --seed 7 --first-case 42 --cases 1";
+  packetcraftr packet fuzz --packet 'ipv4(dst=192.0.2.1)/udp(dport=9)/raw(text=hi)' --cases 16
+  packetcraftr packet fuzz --packet 'ipv4(dst=192.0.2.1)/udp(dport=9)/raw(text=hi)' --field ipv4.ttl,udp.* --cases 16
+  packetcraftr --output ndjson packet fuzz --packet-file packet.json --seed 7 --first-case 42 --cases 1";
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub(crate) enum Strategy {

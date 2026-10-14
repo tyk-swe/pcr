@@ -14,11 +14,17 @@ use crate::rendering::{
 pub(super) fn render_packet(
     built: core::build::BuiltPacket,
     format: Format,
+    presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     match format {
         Format::Text => {
             write_summary_line(format_args!("built {} bytes", built.bytes.len()))?;
             write_stdout_line(format_args!("{}", spaced_hex(&built.bytes)))?;
+            presentation.details(
+                "Packet fields",
+                &core::document::Packet::from_packet(&built.packet),
+            )?;
+            presentation.details("Packet layout", &built.layout)?;
             render_diagnostics_text(&built.diagnostics)
         }
         Format::Hex => write_hex_line(&built.bytes),

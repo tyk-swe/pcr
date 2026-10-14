@@ -227,6 +227,88 @@ fn discovery_port_exclusions_are_consumed_before_portless_scan_method_validation
 }
 
 #[test]
+fn discovery_transport_exclusions_are_consumed_only_when_absent_from_scan() {
+    for exclusion in ["443", "tcp:443"] {
+        // Both stages must retain the exclusion to fit their one-port budget.
+        let output = run(&[
+            "--output",
+            "json",
+            "scan",
+            "127.0.0.1",
+            "--connect",
+            "--tcp-scan",
+            "fin",
+            "--transport",
+            "tcp",
+            "--ports",
+            "80,443",
+            "--max-ports",
+            "1",
+            "--discovery",
+            "before",
+            "--discovery-probes",
+            "tcp",
+            "--discovery-ports",
+            "80,443",
+            "--exclude-ports",
+            exclusion,
+        ]);
+        assert_eq!(parse_json(&output)["error"]["code"], "cli.scan_method");
+    }
+    for (scan_transport, probe, discovery_ports, exclusion) in [
+        ("tcp", "sctp", "2000,2001", "sctp:2001"),
+        ("udp", "tcp", "80,443", "tcp:443"),
+        ("sctp", "udp", "53,123", "udp:123"),
+    ] {
+        let mut command = vec![
+            "--output",
+            "json",
+            "scan",
+            "127.0.0.1",
+            "--connect",
+            "--transport",
+            scan_transport,
+            "--ports",
+            "80",
+            "--discovery",
+            "before",
+            "--discovery-probes",
+            probe,
+            "--discovery-ports",
+            discovery_ports,
+            "--exclude-ports",
+            exclusion,
+        ];
+        if scan_transport == "tcp" {
+            command.extend_from_slice(&["--tcp-scan", "fin"]);
+        }
+        let output = run(&command);
+        let error = parse_json(&output);
+        assert_eq!(
+            error["error"]["code"], "cli.scan_method",
+            "{command:?}: {error}"
+        );
+    }
+    usage(
+        &[
+            "--transport",
+            "tcp",
+            "--ports",
+            "80",
+            "--discovery",
+            "before",
+            "--discovery-probes",
+            "sctp",
+            "--discovery-ports",
+            "2000,2001",
+            "--exclude-ports",
+            "udp:53",
+        ],
+        "needs udp among the scan transports",
+    );
+}
+
+#[test]
 fn invalid_sctp_ip_protocol_and_discovery_combinations_fail_before_network_io() {
     for (args, expected) in [
         (

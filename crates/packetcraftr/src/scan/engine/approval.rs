@@ -18,7 +18,7 @@ use crate::probe::ProbeEndpoint;
 use crate::scan::Error;
 use crate::scan::Request;
 use crate::scan::error::Probes;
-use crate::scan::plan::{adaptive_worst_case_duration, probe_count, worst_case_duration};
+use crate::scan::plan::{adaptive_worst_case_duration, ip_worst_case_duration, probe_count};
 use crate::scan::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
 
 pub(super) struct ApprovedScan {
@@ -270,17 +270,17 @@ pub(super) fn plan_scan(
     } else {
         Duration::ZERO
     };
-    let stage_duration = |probes| {
+    let stage_duration = |count, stage_endpoints: &[ProbeEndpoint]| {
         request.adaptive.map_or_else(
-            || worst_case_duration(request, probes),
-            |adaptive| adaptive_worst_case_duration(request, &adaptive, probes),
+            || ip_worst_case_duration(request, count, targets, stage_endpoints),
+            |adaptive| adaptive_worst_case_duration(request, &adaptive, count),
         )
     };
     let worst_case = [
-        stage_duration(discovery_probes)?,
+        stage_duration(discovery_probes, probes)?,
         neighbor_duration,
         stage_pause,
-        stage_duration(scan_probes)?,
+        stage_duration(scan_probes, endpoints)?,
     ]
     .into_iter()
     .try_fold(Duration::ZERO, Duration::checked_add)

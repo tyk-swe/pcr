@@ -99,6 +99,9 @@ remaining acceptance gates.
 
 ### Fixed
 
+- Include shared IP reply identities in scan and discovery duration admission,
+  and consume discovery-only transport exclusions before validating scan ports.
+
 - Pipelined IP-protocol probes serialize overlapping reply identities, including
   repeated attempts and IPv6 extension probes, so responsive protocols retain
   positive evidence.

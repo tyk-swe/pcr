@@ -697,6 +697,53 @@ fn sctp_abort_outranks_router_icmp_and_ignores_wrong_tag_while_retaining_superse
 }
 
 #[test]
+fn serialized_ip_duration_is_rejected_before_scan_or_discovery_transmission() {
+    for (ipv6, protocols, attempts) in [
+        (false, vec![254], 3),
+        (true, vec![254], 3),
+        (true, vec![47, 0, 60], 1),
+    ] {
+        for discovery_only in [false, true] {
+            let endpoints = protocols
+                .iter()
+                .map(|&protocol| ProbeEndpoint::Ip { protocol })
+                .collect();
+            let mut request = base_request(ipv6, endpoints, Schedule::Pipelined);
+            request.attempts = attempts;
+            request.max_in_flight = 3;
+            request.limits.max_duration = Duration::from_millis(400);
+            if discovery_only {
+                request.discovery.mode = scan::discovery::Mode::Only;
+                request.discovery.probes = request.endpoints.clone();
+                request.endpoints.clear();
+            }
+            let (client, sent) = client();
+            let result = client.scan(request, scan::Collector::default());
+            assert!(
+                matches!(result, Err(scan::Error::DurationLimit { actual, limit })
+                if actual == Duration::from_millis(600) && limit == Duration::from_millis(400)),
+                "{result:?}"
+            );
+            assert!(sent.lock().unwrap().is_empty());
+        }
+    }
+    // Distinct IPv4 protocols have no shared reply identity and retain their
+    // three-slot duration admission, including protocols used as IPv6 headers.
+    let mut request = base_request(
+        false,
+        [0, 47, 60]
+            .map(|protocol| ProbeEndpoint::Ip { protocol })
+            .to_vec(),
+        Schedule::Pipelined,
+    );
+    request.max_in_flight = 3;
+    request.limits.max_duration = Duration::from_millis(400);
+    let (client, _) = client();
+    let report = client.scan(request, scan::Collector::default()).unwrap();
+    assert_eq!(report.scheduling.observed_peak_window, 3);
+}
+
+#[test]
 fn pipelined_ip_attempts_and_extension_probes_keep_delayed_positive_replies() {
     for (ipv6, protocols, expected_peak) in [
         (false, vec![47], 1),

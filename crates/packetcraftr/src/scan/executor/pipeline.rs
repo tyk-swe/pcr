@@ -4,6 +4,7 @@ mod correlation;
 mod prepare;
 use super::{PipelineEvent, PipelineOptions};
 use crate::probe::Batch;
+use crate::scan::plan::replies_overlap;
 use crate::scan::{Attribution, PendingEvidence, PipelineFailure, Probe, SentProbe};
 use crate::{
     Client, Stats,
@@ -15,7 +16,7 @@ use crate::{
     providers::{CaptureProviders, PacketProviders},
     scan::error::Probes,
 };
-use correlation::{Best, SeenFrames, candidates, definitive, replies_overlap, settled};
+use correlation::{Best, SeenFrames, candidates, definitive, settled};
 use packetcraftr_core::{
     budget::Deadline,
     decode::Dissector,

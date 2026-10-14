@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod packet;
+mod reply_identity;
+pub(super) use reply_identity::replies_overlap;
 
 use std::net::IpAddr;
 use std::time::Duration;
@@ -177,6 +179,48 @@ pub(super) fn worst_case_duration(
         batch_count_u32
     } else {
         batch_count_u32.div_ceil(request.max_in_flight as u32)
+    };
+    duration_with_windows(request, batch_count_u32, windows)
+}
+
+/// Bound each potentially overlapping send by an additional timeout. Distinct
+/// IP protocols and addresses retain the ordinary parallel projection.
+pub(super) fn ip_worst_case_duration(
+    request: &Request,
+    batch_count: usize,
+    targets: &[crate::target::SelectedAddress],
+    endpoints: &[ProbeEndpoint],
+) -> Result<Duration, Error> {
+    if batch_count == 0 {
+        return Ok(Duration::ZERO);
+    }
+    let overflow = || Error::DurationLimit {
+        actual: Duration::MAX,
+        limit: request.limits.max_duration,
+    };
+    let count = u32::try_from(batch_count).map_err(|_| overflow())?;
+    let parallel = batch_count.div_ceil(request.max_in_flight.max(1));
+    let extra = reply_identity::overlap_waits(targets, endpoints, request.attempts)
+        .ok_or_else(&overflow)?;
+    let windows = parallel
+        .checked_add(extra)
+        .ok_or_else(&overflow)?
+        .min(batch_count);
+    duration_with_windows(
+        request,
+        count,
+        u32::try_from(windows).map_err(|_| overflow())?,
+    )
+}
+
+fn duration_with_windows(
+    request: &Request,
+    batch_count_u32: u32,
+    windows: u32,
+) -> Result<Duration, Error> {
+    let overflow = || Error::DurationLimit {
+        actual: Duration::MAX,
+        limit: request.limits.max_duration,
     };
     let exchange_time = request.timeout.checked_mul(windows).ok_or_else(&overflow)?;
     let delay_count = batch_count_u32.saturating_sub(1);

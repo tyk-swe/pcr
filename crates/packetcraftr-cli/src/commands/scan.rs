@@ -271,27 +271,34 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         max_ports,
     )?;
     let scanning = discovery.mode != discovery::Mode::Only;
-    let exclude_ports = if matches!(transports.as_slice(), [Transport::Ip] | [Transport::Icmp])
-        && discovery.runs()
-    {
+    let exclude_ports = if discovery.runs() {
         exclude_ports
             .into_iter()
             .filter(|term| {
-                !discovery_probes
-                    .iter()
-                    .filter_map(|probe| match probe {
-                        arguments::DiscoveryProbe::Tcp | arguments::DiscoveryProbe::TcpAck => {
-                            Some(Transport::Tcp)
-                        }
-                        arguments::DiscoveryProbe::Udp => Some(Transport::Udp),
-                        arguments::DiscoveryProbe::Sctp => Some(Transport::Sctp),
-                        _ => None,
-                    })
-                    .any(|transport| {
-                        term.0
-                            .transport
-                            .is_none_or(|excluded| excluded == transport)
-                    })
+                let applies_to_scan = term.0.transport.map_or_else(
+                    || {
+                        transports.iter().any(|transport| {
+                            matches!(transport, Transport::Tcp | Transport::Udp | Transport::Sctp)
+                        })
+                    },
+                    |transport| transports.contains(&transport),
+                );
+                applies_to_scan
+                    || !discovery_probes
+                        .iter()
+                        .filter_map(|probe| match probe {
+                            arguments::DiscoveryProbe::Tcp | arguments::DiscoveryProbe::TcpAck => {
+                                Some(Transport::Tcp)
+                            }
+                            arguments::DiscoveryProbe::Udp => Some(Transport::Udp),
+                            arguments::DiscoveryProbe::Sctp => Some(Transport::Sctp),
+                            _ => None,
+                        })
+                        .any(|transport| {
+                            term.0
+                                .transport
+                                .is_none_or(|excluded| excluded == transport)
+                        })
             })
             .collect()
     } else {

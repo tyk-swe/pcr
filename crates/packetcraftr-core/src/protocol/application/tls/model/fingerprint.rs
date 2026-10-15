@@ -3,15 +3,15 @@
 //
 // Third-party format notice
 // JA3 is the fingerprint format published by Salesforce
-// (<https://github.com/salesforce/ja3>, BSD-3-Clause). JA4 is the fingerprint
-// format published by FoxIO (<https://github.com/FoxIO-LLC/ja4>); the JA4
-// specification text is licensed BSD-3-Clause, while FoxIO's reference
+// (<https://github.com/salesforce/ja3>, BSD-3-Clause). JA4 and JA4S are
+// fingerprint formats published by FoxIO (<https://github.com/FoxIO-LLC/ja4>);
+// the JA4 specification text is licensed BSD-3-Clause, while FoxIO's reference
 // implementations carry additional terms. The code below is an independent
 // implementation written from the specification text; no FoxIO source was
 // copied. Only the format is reproduced here, which is what interoperability
 // requires.
 
-//! JA3, JA3S, and JA4 client fingerprints.
+//! JA3, JA3S, JA4, and JA4S fingerprints.
 
 use std::fmt::Write as _;
 
@@ -107,6 +107,48 @@ pub fn ja4(hello: &ClientHello, transport: Transport) -> String {
     )
 }
 
+/// JA4S fingerprints one ServerHello, pairing with the client's JA4. The value
+/// is `{transport}{version}{extension_count}{alpn}_{cipher}_{extension_hash}`.
+///
+/// Unlike the JA4 client fingerprint, the extension list keeps wire order and
+/// retains GREASE code points, includes the `server_name` and ALPN extensions,
+/// and is not sorted, so server order itself stays part of the identity. The
+/// version component reads [`ServerHello::selected_version`], which the
+/// `supported_versions` extension supplies when the server sent one. The
+/// server selects a single cipher suite, so the middle component is its four
+/// hex digits without hashing.
+#[must_use]
+pub fn ja4s(hello: &ServerHello, transport: Transport) -> String {
+    format!(
+        "{}_{}_{}",
+        ja4s_a(hello, transport),
+        ja4s_b(hello),
+        ja4s_c(hello)
+    )
+}
+
+fn ja4s_a(hello: &ServerHello, transport: Transport) -> String {
+    format!(
+        "{}{}{:02}{}",
+        transport.code(),
+        version_code(hello.selected_version),
+        hello.extensions.len().min(JA4_MAX_COUNT),
+        alpn_code(hello.alpn_raw.as_deref()),
+    )
+}
+
+fn ja4s_b(hello: &ServerHello) -> String {
+    format!("{:04x}", hello.cipher_suite)
+}
+
+fn ja4s_c(hello: &ServerHello) -> String {
+    let extensions: Vec<u16> = hello.extension_kinds().collect();
+    if extensions.is_empty() {
+        return JA4_EMPTY_HASH.to_owned();
+    }
+    truncated_sha256(&hex_list(&extensions))
+}
+
 fn ja4_a(hello: &ClientHello, transport: Transport) -> String {
     let ciphers = without_grease(hello.cipher_suites.iter().copied()).count();
     let extensions = without_grease(hello.extension_kinds()).count();
@@ -166,10 +208,17 @@ fn version_code(version: u16) -> &'static str {
 }
 
 fn ja4_alpn(hello: &ClientHello) -> String {
-    let Some(first) = hello.alpn_raw.first() else {
+    alpn_code(hello.alpn_raw.first().map(|bytes| &bytes[..]))
+}
+
+/// Two-character ALPN code shared by JA4 and JA4S: the first and last byte of
+/// the chosen protocol, or `00` when none was chosen. Bytes that are not ASCII
+/// alphanumeric use their high and low nibbles as hex digits, matching JA4.
+fn alpn_code(alpn: Option<&[u8]>) -> String {
+    let Some(alpn) = alpn else {
         return "00".to_owned();
     };
-    let (Some(head), Some(tail)) = (first.first(), first.last()) else {
+    let (Some(head), Some(tail)) = (alpn.first(), alpn.last()) else {
         return "00".to_owned();
     };
     let mut code = String::with_capacity(2);
@@ -215,5 +264,77 @@ fn push_decimal<T: std::fmt::Display>(text: &mut String, values: impl Iterator<I
             text.push('-');
         }
         let _ = write!(text, "{value}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+
+    use super::super::Extension;
+    use super::{ServerHello, Transport, hex_list, ja3s, ja4s, truncated_sha256, JA4_EMPTY_HASH};
+
+    fn server_hello(extensions: Vec<Extension>) -> ServerHello {
+        ServerHello {
+            extensions,
+            ..ServerHello::default()
+        }
+    }
+
+    fn extension(kind: u16) -> Extension {
+        Extension {
+            kind,
+            data: Bytes::new(),
+        }
+    }
+
+    fn part(fingerprint: &str, index: usize) -> &str {
+        fingerprint.split('_').nth(index).unwrap_or_default()
+    }
+
+    #[test]
+    fn ja4s_keeps_wire_order_and_grease_and_names_every_extension() {
+        let mut hello = server_hello(vec![extension(0x002b), extension(0x0a0a)]);
+        hello.selected_version = 0x0303;
+        hello.cipher_suite = 0xc02f;
+        let fingerprint = ja4s(&hello, Transport::Tcp);
+        // GREASE 0x0a0a is retained and the wire order is not sorted, so the
+        // hashed list is "002b,0a0a", not "0a0a,002b".
+        let expected = truncated_sha256(&hex_list(&[0x002b, 0x0a0a]));
+        assert_eq!(part(&fingerprint, 0), "t120200");
+        assert_eq!(part(&fingerprint, 1), "c02f");
+        assert_eq!(part(&fingerprint, 2), expected);
+    }
+
+    #[test]
+    fn ja4s_writes_the_sentinel_when_the_server_sent_no_extensions() {
+        let mut hello = server_hello(Vec::new());
+        hello.selected_version = 0x0304;
+        hello.cipher_suite = 0x1301;
+        assert_eq!(
+            ja4s(&hello, Transport::Tcp),
+            format!("t130000_1301_{JA4_EMPTY_HASH}")
+        );
+    }
+
+    #[test]
+    fn ja4s_encodes_the_chosen_alpn_like_ja4() {
+        let mut hello = server_hello(Vec::new());
+        hello.alpn_raw = Some(Bytes::from_static(b"h2"));
+        assert_eq!(part(&ja4s(&hello, Transport::Tcp), 0), "t0000h2");
+        hello.alpn_raw = Some(Bytes::from_static(&[0x01, 0x02]));
+        assert_eq!(part(&ja4s(&hello, Transport::Tcp), 0), "t000002");
+        hello.alpn_raw = Some(Bytes::from_static(b"a"));
+        assert_eq!(part(&ja4s(&hello, Transport::Tcp), 0), "t0000aa");
+    }
+
+    #[test]
+    fn ja3s_and_ja4s_agree_on_a_common_server_hello_shape() {
+        let mut hello = server_hello(vec![extension(0x002b), extension(0x0033)]);
+        hello.legacy_version = 0x0303;
+        hello.selected_version = 0x0304;
+        hello.cipher_suite = 0x1301;
+        assert_eq!(ja3s(&hello).raw, "771,4865,43-51");
+        assert_eq!(ja4s(&hello, Transport::Tcp), "t130200_1301_a56c5b993250");
     }
 }

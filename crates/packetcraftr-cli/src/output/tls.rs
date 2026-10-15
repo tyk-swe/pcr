@@ -102,6 +102,8 @@ pub struct Server {
     /// Lowercase hex MD5 of [`Self::ja3s_raw`].
     pub ja3s: String,
     pub ja3s_raw: String,
+    /// SHA-256-based FoxIO JA4S fingerprint of this server hello.
+    pub ja4s: String,
 }
 
 impl From<tls::ServerSummary> for Server {
@@ -116,6 +118,7 @@ impl From<tls::ServerSummary> for Server {
             key_share_group_name: value.key_share_group.and_then(named_group_name),
             ja3s: value.ja3s,
             ja3s_raw: value.ja3s_raw,
+            ja4s: value.ja4s,
         }
     }
 }

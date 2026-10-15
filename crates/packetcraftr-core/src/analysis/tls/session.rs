@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::analysis::Endpoint;
 use crate::protocol::application::tls::{
-    ClientHello, ServerHello, Transport, escape_wire_bytes, escape_wire_text, ja3, ja3s, ja4,
+    ClientHello, ServerHello, Transport, escape_wire_bytes, escape_wire_text, ja3, ja3s, ja4, ja4s,
 };
 
 pub const ALERT_LEVEL_WARNING: u8 = 1;
@@ -125,6 +125,7 @@ pub struct ServerSummary {
     pub key_share_group: Option<u16>,
     pub ja3s: String,
     pub ja3s_raw: String,
+    pub ja4s: String,
 }
 
 impl ServerSummary {
@@ -137,6 +138,7 @@ impl ServerSummary {
             key_share_group: hello.key_share_group,
             ja3s: fingerprint.md5,
             ja3s_raw: fingerprint.raw,
+            ja4s: ja4s(hello, Transport::Tcp),
         }
     }
 }

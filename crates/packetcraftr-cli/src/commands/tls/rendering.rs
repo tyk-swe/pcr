@@ -200,7 +200,7 @@ fn session_line(session: &Session) -> String {
     let server = session.server.as_ref();
     let mut line = format!(
         "session={} stream=tcp:{} client={} server={} status={} sni={} version={} \
-         cipher={} group={} alpn={} selected_alpn={} ja3={} ja4={} frames={}..{} rtt_ms={}",
+         cipher={} group={} alpn={} selected_alpn={} ja3={} ja4={} ja4s={} frames={}..{} rtt_ms={}",
         session.session,
         session.tcp_stream,
         session.client_endpoint,
@@ -214,6 +214,7 @@ fn session_line(session: &Session) -> String {
         optional_display(server.and_then(|server| server.alpn.as_deref())),
         optional_display(client.map(|client| client.ja3.as_str())),
         optional_display(client.map(|client| client.ja4.as_str())),
+        optional_display(server.map(|server| server.ja4s.as_str())),
         session.first_frame,
         session.last_frame,
         session
@@ -355,7 +356,7 @@ mod tests {
         assert!(line.starts_with(
             "session=0 stream=tcp:3 client=192.0.2.1:40000 server=192.0.2.2:443 \
              status=truncated sni=none version=none cipher=none group=none alpn=none \
-             selected_alpn=none ja3=none ja4=none frames=4..9 rtt_ms=1.250"
+             selected_alpn=none ja3=none ja4=none ja4s=none frames=4..9 rtt_ms=1.250"
         ));
     }
 }

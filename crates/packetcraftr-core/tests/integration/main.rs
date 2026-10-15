@@ -72,6 +72,7 @@ mod tcp_reassembly_edge_contracts;
 mod tftp_contracts;
 mod tls_construction_contracts;
 mod tls_dissection_contracts;
+mod tls_fingerprint_contracts;
 mod tls_session_assembly_contracts;
 mod tls_session_gap_contracts;
 mod tls_session_handshake_contracts;

@@ -65,7 +65,8 @@
           "key_share_group": 29,
           "key_share_group_name": "x25519",
           "ja3s": "f4febc55ea12b31ae17cfb7e614afda8",
-          "ja3s_raw": "771,4865,43-51"
+          "ja3s_raw": "771,4865,43-51",
+          "ja4s": "t130200_1301_a56c5b993250"
         },
         "hello_retry": false,
         "alerts": [],

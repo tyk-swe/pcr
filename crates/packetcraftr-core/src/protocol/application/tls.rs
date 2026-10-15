@@ -9,7 +9,7 @@ mod test_support;
 
 pub use codec::{Outcome, looks_like_record_start, parse_handshake, parse_record};
 pub(crate) use codec::{TlsCodec, escape_wire_bytes, escape_wire_text};
-pub use model::fingerprint::{Ja3, Transport, ja3, ja3s, ja4};
+pub use model::fingerprint::{Ja3, Transport, ja3, ja3s, ja4, ja4s};
 pub use model::names::{alert_description_name, cipher_suite_name, named_group_name, version_name};
 pub use model::{
     CONTENT_TYPE_ALERT, CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC,

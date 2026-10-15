@@ -9,6 +9,7 @@ pub(crate) struct HelloVector {
     pub(crate) record_hex: &'static str,
     pub(crate) expected_ja3_raw: Option<&'static str>,
     pub(crate) expected_ja4_a: Option<&'static str>,
+    pub(crate) expected_ja4s: Option<&'static str>,
 }
 
 pub(crate) const CLIENT_HELLO_VECTORS: &[HelloVector] = &[
@@ -25,6 +26,7 @@ pub(crate) const CLIENT_HELLO_VECTORS: &[HelloVector] = &[
             "769,47-53-5-10-49161-49162-49171-49172-50-56-19-4,0-10-11,23-24-25,0",
         ),
         expected_ja4_a: None,
+        expected_ja4s: None,
     },
     HelloVector {
         name: "FoxIO JA4 README example JA4_a component",
@@ -44,6 +46,7 @@ pub(crate) const CLIENT_HELLO_VECTORS: &[HelloVector] = &[
         ),
         expected_ja3_raw: None,
         expected_ja4_a: Some("t13d1516h2"),
+        expected_ja4s: None,
     },
 ];
 
@@ -58,6 +61,13 @@ pub(crate) const SERVER_HELLO_VECTORS: &[HelloVector] = &[HelloVector {
     ),
     expected_ja3_raw: Some("771,4865,43-51"),
     expected_ja4_a: None,
+    // Derived by hand from the JA4S schema (FoxIO JA4 technical details):
+    // TCP (`t`), selected version 0x0304 from supported_versions (`13`),
+    // two extensions (`02`), no ALPN (`00`), the selected cipher 0x1301
+    // (`1301`), and SHA-256 of the wire-order extension list "002b,0033"
+    // truncated to twelve hex characters (`a56c5b993250`, computed with
+    // Python's hashlib rather than this implementation).
+    expected_ja4s: Some("t130200_1301_a56c5b993250"),
 }];
 
 pub(crate) fn decode_hex(text: &str) -> Vec<u8> {

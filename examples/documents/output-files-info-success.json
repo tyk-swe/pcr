@@ -1,0 +1,54 @@
+{
+  "schema": "packetcraftr.output/v18",
+  "command": "info",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "format": "pcapng",
+    "compression": "none",
+    "endianness": "little",
+    "pcapng_version": {
+      "major": 1,
+      "minor": 0
+    },
+    "sections": 1,
+    "frames": 8,
+    "captured_bytes": 659,
+    "original_bytes": 659,
+    "truncated_frames": 0,
+    "first_timestamp": {
+      "unix_seconds": 1787616000,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 1787616000,
+      "nanoseconds": 68000000
+    },
+    "interfaces": [
+      {
+        "global_id": 0,
+        "section": 0,
+        "local_id": 0,
+        "link_type": 228,
+        "snap_len": 16777216,
+        "timestamp_resolution": {
+          "decimal": 9
+        },
+        "timestamp_offset": 0
+      }
+    ],
+    "packet_blocks": {
+      "classic": 0,
+      "enhanced": 8,
+      "simple": 0,
+      "obsolete": 0
+    },
+    "name_resolution_blocks": 0,
+    "interface_statistics_blocks": 0,
+    "custom_blocks": 0,
+    "unknown_blocks": [],
+    "unknown_block_types_omitted": 0,
+    "declares_fcs": false
+  },
+  "diagnostics": []
+}

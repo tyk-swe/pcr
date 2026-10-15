@@ -186,7 +186,7 @@ fn scan_traceroute_member_matches_the_published_schema() {
         "../../../../examples/documents/output-scan-success.json"
     ))
     .expect("published scan example must parse");
-    document["schema"] = packetcraftr_cli::output::contract::SCHEMA_V17.into();
+    document["schema"] = packetcraftr_cli::output::contract::SCHEMA_V18.into();
     let report =
         Report::new(trace_plan(), common::trace_hosts::aggregate()).expect("a representable trace");
     let member = serde_json::to_value(&report).expect("the trace serializes");
@@ -247,7 +247,7 @@ fn an_adaptive_scan_with_a_traceroute_member_matches_the_published_schema() {
         "../../../../examples/documents/output-scan-success.json"
     ))
     .expect("published scan example must parse");
-    document["schema"] = packetcraftr_cli::output::contract::SCHEMA_V17.into();
+    document["schema"] = packetcraftr_cli::output::contract::SCHEMA_V18.into();
     document["result"]["scheduling"] = serde_json::json!({
         "mode": "adaptive",
         "adaptive": {

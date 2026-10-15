@@ -5,7 +5,7 @@ use crate::common::{parse_json, run, run_success};
 
 const GROUPS: &[(&str, &[&str])] = &[
     ("packet", &["build", "dissect", "fragment", "fuzz"]),
-    ("files", &["read", "merge", "rewrite", "export"]),
+    ("files", &["info", "read", "merge", "rewrite", "export"]),
     (
         "analyze",
         &[
@@ -347,7 +347,7 @@ fn generated_documentation_covers_all_paths_and_five_shells() {
         std::fs::read_dir(directory.path().join("man"))
             .unwrap()
             .count(),
-        68
+        70
     );
     let mut entries = std::fs::read_dir(directory.path())
         .unwrap()

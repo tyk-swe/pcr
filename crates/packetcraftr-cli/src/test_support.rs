@@ -80,7 +80,7 @@ pub fn output_schema() -> &'static Value {
     static SCHEMA: OnceLock<Value> = OnceLock::new();
     SCHEMA.get_or_init(|| {
         serde_json::from_str(include_str!(
-            "../../../schemas/packetcraftr.output.v17.schema.json"
+            "../../../schemas/packetcraftr.output.v18.schema.json"
         ))
         .expect("published output schema must be JSON")
     })

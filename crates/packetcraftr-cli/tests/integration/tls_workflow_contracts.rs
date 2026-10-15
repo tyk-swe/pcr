@@ -39,7 +39,8 @@ fn limit_fails_reported_before_capture_read() {
 
 #[test]
 fn server_sessions_report_the_published_ja4s_fingerprint() {
-    let capture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/captures/tls-handshake.pcapng");
+    let capture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/captures/tls-handshake.pcapng");
     let report = common::parse_json(&common::run_success(&[
         "--output",
         "json",

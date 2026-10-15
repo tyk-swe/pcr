@@ -12,5 +12,8 @@ pub(crate) use bounded::{
     read_bounded_file_allow_empty, read_bounded_json_document, read_stdin_bounded,
     read_stdin_bounded_allow_empty,
 };
-pub(crate) use capture::{open_capture, open_capture_file, open_capture_hashed, snapshot_capture};
+pub(crate) use capture::{
+    open_capture, open_capture_file, open_capture_hashed, open_capture_with_compression,
+    snapshot_capture,
+};
 pub(crate) use recipe::{apply_overrides, read_recipe};

@@ -65,7 +65,7 @@ fn overview_totals_survive_independent_limits_and_preserve_scoped_rows() {
 
 fn check_overview(path: &Path) {
     let overview = document(path, "overview", &["--top", "100", "--sort", "bytes"]);
-    assert_eq!(overview["schema"], "packetcraftr.output/v17");
+    assert_eq!(overview["schema"], "packetcraftr.output/v18");
     for (table, count) in [
         ("protocols", "protocol_count"),
         ("endpoints", "endpoint_count"),

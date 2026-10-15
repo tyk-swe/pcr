@@ -17,6 +17,7 @@ mod capture_file_fidelity_contracts;
 mod capture_file_rewrite_contracts;
 mod capture_limit_contracts;
 mod capture_merge_contracts;
+mod capture_metadata_contracts;
 mod conversation_contracts;
 mod core_model_contracts;
 mod dependency_export_contracts;

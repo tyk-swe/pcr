@@ -35,6 +35,36 @@ pub(crate) fn open_capture(
     capture_reader(invocation, capture_source(invocation, path)?, bounds)
 }
 
+/// Opens a capture and reports the compression the source actually used, for
+/// commands that describe the capture rather than its packets.
+pub(crate) fn open_capture_with_compression(
+    invocation: &crate::invocation::Invocation,
+    path: &Path,
+    bounds: CaptureReaderBoundsArgs,
+) -> Result<
+    (
+        Reader<Box<dyn Read>>,
+        core::capture_file::compression::Format,
+    ),
+    CliError,
+> {
+    invocation.check()?;
+    let source = capture_source(invocation, path)?;
+    let compression = core::capture_file::compression::Input::new(
+        source,
+        core::capture_file::compression::Limits {
+            max_decoded_bytes: bounds.max_decoded_bytes,
+            max_encoded_bytes: bounds.max_encoded_bytes,
+            ..Default::default()
+        },
+    )
+    .map_err(CliError::classified)?;
+    let format = compression.format();
+    let source: Box<dyn Read> = Box::new(compression);
+    let reader = bounded_reader(invocation, source, bounds)?;
+    Ok((reader, format))
+}
+
 pub(crate) fn open_capture_hashed(
     invocation: &crate::invocation::Invocation,
     path: &Path,

@@ -62,6 +62,7 @@ pub mod hex;
 pub mod http;
 pub mod http2;
 pub mod identify;
+pub mod info;
 pub mod interfaces;
 pub mod merge;
 pub mod network;

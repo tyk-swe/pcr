@@ -8,6 +8,7 @@ pub mod compression;
 mod error;
 mod format;
 mod header;
+pub mod inspect;
 mod limits;
 mod link_type;
 mod map;
@@ -22,6 +23,7 @@ mod writer;
 pub use error::Error;
 pub use format::{Endianness, Format, PcapNgOptions, PcapOptions, TimestampResolution};
 pub use header::{CaptureHeader, Interface, PcapHeader, PcapNgOption, Section};
+pub use inspect::{InfoReport, InterfaceInfo, MAX_RETAINED_BLOCK_TYPES, PacketBlocks};
 pub use limits::{
     Budget, DEFAULT_MAX_INTERFACES_PER_SECTION, DEFAULT_MAX_METADATA_BLOCKS_PER_FRAME,
     DEFAULT_MAX_METADATA_BYTES_PER_FRAME, DEFAULT_MAX_OPTIONS_PER_BLOCK, DEFAULT_MAX_STREAM_BYTES,

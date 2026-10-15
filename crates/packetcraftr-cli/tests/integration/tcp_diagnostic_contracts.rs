@@ -450,7 +450,7 @@ fn diagnostic_example() -> Value {
         "../../../../examples/documents/output-scan-tcp-diagnostic.json"
     ))
     .unwrap();
-    example["schema"] = output::contract::SCHEMA_V17.into();
+    example["schema"] = output::contract::SCHEMA_V18.into();
     example
 }
 
@@ -462,7 +462,7 @@ fn the_published_diagnostic_examples_match_the_current_schema_and_reject_impossi
         "../../../../examples/documents/output-scan-tcp-diagnostic-event.json"
     ))
     .unwrap();
-    event["schema"] = output::contract::SCHEMA_V17.into();
+    event["schema"] = output::contract::SCHEMA_V18.into();
     schema_validator().validate(&event).unwrap();
     assert!(
         !common::frozen_v14_schema_validator().is_valid(&example),

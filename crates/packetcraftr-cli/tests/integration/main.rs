@@ -37,6 +37,7 @@ mod dns_tcp_direct_contracts;
 mod documentation_failure_contracts;
 mod field_edit_contracts;
 mod field_projection_contracts;
+mod files_info_contracts;
 mod forwarding_verification_contracts;
 mod frame_selection_contracts;
 mod header_rewrite_contracts;

@@ -272,7 +272,7 @@ mod tests {
     use bytes::Bytes;
 
     use super::super::Extension;
-    use super::{ServerHello, Transport, hex_list, ja3s, ja4s, truncated_sha256, JA4_EMPTY_HASH};
+    use super::{JA4_EMPTY_HASH, ServerHello, Transport, hex_list, ja3s, ja4s, truncated_sha256};
 
     fn server_hello(extensions: Vec<Extension>) -> ServerHello {
         ServerHello {

@@ -23,7 +23,7 @@ fn identify_example() -> Value {
         "../../../../examples/documents/output-identify-success.json"
     ))
     .expect("published identification example must be JSON");
-    document["schema"] = packetcraftr_cli::output::contract::SCHEMA_V17.into();
+    document["schema"] = packetcraftr_cli::output::contract::SCHEMA_V18.into();
     document
 }
 
@@ -250,7 +250,7 @@ fn schema_accepts_based_source_reject_zero() {
         ),
         (
             schema_validator(),
-            packetcraftr_cli::output::contract::SCHEMA_V17,
+            packetcraftr_cli::output::contract::SCHEMA_V18,
         ),
     ] {
         let mut document = original.clone();
@@ -596,7 +596,8 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v17" => output_validator,
+            "packetcraftr.output/v18" => output_validator,
+            "packetcraftr.output/v17" => common::frozen_v17_schema_validator(),
             "packetcraftr.output/v16" => common::frozen_v16_schema_validator(),
             "packetcraftr.output/v15" => v15_validator,
             "packetcraftr.output/v14" => v14_validator,

@@ -13,11 +13,10 @@ use super::{
 use crate::output::contract::Format;
 use crate::resources::Settings;
 
-/// Declares every command once, in `--help` order.
+/// Declares every command once, in `--help` order, with its workflow placement.
 macro_rules! commands {
-    (@name Documentation) => { "documentation" };
-    (@name Topics) => { "topics" };
-    (@name $variant:ident, $name:literal) => { $name };
+    (@legacy $canonical:literal) => { $canonical };
+    (@legacy $canonical:literal, $name:literal) => { $name };
     (@offline $arguments:ty) => { false };
     (@offline $arguments:ty, $name:literal) => { <$arguments as Spec>::OFFLINE };
     (@start $launch:ident, $arguments:ident, $variant:ident) => {
@@ -38,7 +37,8 @@ macro_rules! commands {
     (
         $(
             $(#[$attribute:meta])*
-            $variant:ident($arguments:ty) $(= $name:literal)?,
+            $variant:ident($arguments:ty) $(= $name:literal)?
+                => ($group:literal, $canonical:literal, $position:literal),
         )*
     ) => {
         /// The parsed subcommand with its arguments.
@@ -47,7 +47,7 @@ macro_rules! commands {
         enum FlatDefinition {
             $(
                 $(#[$attribute])*
-                $(#[command(name = $name)])?
+                #[command(name = commands!(@legacy $canonical $(, $name)?))]
                 $variant($arguments),
             )*
         }
@@ -61,7 +61,7 @@ macro_rules! commands {
         impl CommandLine {
             fn from_leaf(name: &str, values: &clap::ArgMatches) -> Result<Self, clap::Error> {
                 $(
-                    if name == commands!(@name $variant $(, $name)?) {
+                    if name == commands!(@legacy $canonical $(, $name)?) {
                         return <$arguments as clap::FromArgMatches>::from_arg_matches(values)
                             .map(Self::$variant);
                     }
@@ -128,111 +128,137 @@ macro_rules! commands {
                 }
             }
         }
+
+        // Inventory positions preserve workflow order independently of declaration order.
+        pub(crate) const INVENTORY: &[Entry] = &{
+            const POSITIONS: &[usize] = &[ $( $position, )* ];
+            let declarations = [
+                $(
+                    Entry {
+                        group: $group,
+                        name: $canonical,
+                        legacy: commands!(@legacy $canonical $(, $name)?),
+                    },
+                )*
+            ];
+            let mut inventory = declarations;
+            let mut assigned = [false; POSITIONS.len()];
+            let mut index = 0;
+            while index < declarations.len() {
+                let position = POSITIONS[index];
+                assert!(position < declarations.len(), "command inventory position out of bounds");
+                assert!(!assigned[position], "duplicate command inventory position");
+                inventory[position] = declarations[index];
+                assigned[position] = true;
+                index += 1;
+            }
+            inventory
+        };
     };
 }
 
 commands! {
     /// Merge time-ordered captures into scoped PCAPNG.
     #[command(after_long_help = merge::arguments::AFTER_LONG_HELP)]
-    Merge(merge::arguments::Args) = "merge",
+    Merge(merge::arguments::Args) = "merge" => ("files", "merge", 5),
     /// Explicitly split a complete IPv4/IPv6 recipe into bounded fragments.
     #[command(after_long_help = fragment::arguments::AFTER_LONG_HELP)]
-    Fragment(fragment::arguments::Args) = "fragment",
+    Fragment(fragment::arguments::Args) = "fragment" => ("packet", "fragment", 2),
     /// Build exact packet bytes from an expression or document.
     #[command(after_long_help = build::arguments::AFTER_LONG_HELP)]
-    Build(build::arguments::Args) = "build",
+    Build(build::arguments::Args) = "build" => ("packet", "build", 0),
     /// Decode a frame with bounded, registry-driven dissection.
     #[command(after_long_help = dissect::arguments::AFTER_LONG_HELP)]
-    Dissect(dissect::arguments::Args) = "dissect",
+    Dissect(dissect::arguments::Args) = "dissect" => ("packet", "dissect", 1),
     /// List built-in protocols or describe one protocol.
     #[command(after_long_help = protocols::AFTER_LONG_HELP)]
-    Protocols(protocols::Args) = "protocols",
+    Protocols(protocols::Args) = "protocols" => ("reference", "protocols", 28),
     /// Stream frames from a classic PCAP or PCAPNG file.
     #[command(after_long_help = read::arguments::AFTER_LONG_HELP)]
-    Read(read::arguments::Args) = "read",
+    Read(read::arguments::Args) = "read" => ("files", "read", 4),
     /// Enumerate local interfaces.
     #[command(after_long_help = interfaces::AFTER_LONG_HELP)]
-    Interfaces(interfaces::Args) = "interfaces",
+    Interfaces(interfaces::Args) = "interfaces" => ("network", "interfaces", 16),
     /// Passively select route, source, MTU, and link mode.
     #[command(after_long_help = plan::AFTER_LONG_HELP)]
-    Plan(plan::Args) = "plan",
+    Plan(plan::Args) = "plan" => ("network", "plan", 18),
     /// Transmit a packet under traffic policy.
     #[command(after_long_help = send::arguments::AFTER_LONG_HELP)]
-    Send(send::arguments::Args) = "send",
+    Send(send::arguments::Args) = "send" => ("network", "send", 20),
     /// Capture-ready request/response exchange.
     #[command(after_long_help = exchange::arguments::AFTER_LONG_HELP)]
-    Exchange(exchange::arguments::Args) = "exchange",
+    Exchange(exchange::arguments::Args) = "exchange" => ("network", "exchange", 21),
     /// Stream live captured frames.
     #[command(after_long_help = capture::arguments::AFTER_LONG_HELP)]
-    Capture(capture::arguments::Args) = "capture",
+    Capture(capture::arguments::Args) = "capture" => ("network", "capture", 19),
     /// Report protocol health findings over a capture file.
     #[command(after_long_help = expert::arguments::AFTER_LONG_HELP)]
-    Expert(expert::arguments::Args) = "expert",
+    Expert(expert::arguments::Args) = "expert" => ("analyze", "expert", 9),
     /// Extract one conversation's payload from a capture file.
     #[command(after_long_help = follow::arguments::AFTER_LONG_HELP)]
-    Follow(follow::arguments::Args) = "follow",
+    Follow(follow::arguments::Args) = "follow" => ("analyze", "follow", 10),
     /// Replay a PCAP/PCAPNG stream.
     #[command(after_long_help = replay::arguments::AFTER_LONG_HELP)]
-    Replay(replay::arguments::Args) = "replay",
+    Replay(replay::arguments::Args) = "replay" => ("network", "replay", 22),
     /// Run a structured network scan.
     #[command(after_long_help = scan::arguments::AFTER_LONG_HELP)]
-    Scan(scan::arguments::Args) = "scan",
+    Scan(scan::arguments::Args) = "scan" => ("network", "scan", 23),
     /// Explicitly identify services at selected numeric TCP or UDP endpoints.
     #[command(after_long_help = identify::arguments::AFTER_LONG_HELP)]
-    Identify(identify::arguments::Args) = "identify",
+    Identify(identify::arguments::Args) = "identify" => ("network", "identify", 24),
     /// Identify qualified OS families from bounded raw packet observations.
     #[command(after_long_help = "Requires a native raw packet provider and explicit destination authorization. Conclusions are qualified inferences, not authenticated identities.\n\nExample:\n  packetcraftr network identify-os 192.0.2.10 --open-port 80 --closed-port 81")]
-    IdentifyOs(identify_os::Args) = "identify-os",
+    IdentifyOs(identify_os::Args) = "identify-os" => ("network", "identify-os", 25),
     /// Compute aggregate statistics over a capture file.
     #[command(after_long_help = stats::arguments::AFTER_LONG_HELP)]
-    Stats(stats::arguments::Args) = "stats",
+    Stats(stats::arguments::Args) = "stats" => ("analyze", "stats", 8),
     /// Assemble TLS handshake sessions from a capture file.
     #[command(after_long_help = tls::arguments::AFTER_LONG_HELP)]
-    Tls(tls::arguments::Args) = "tls",
+    Tls(tls::arguments::Args) = "tls" => ("analyze", "tls", 14),
     /// Run bounded, policy-gated traceroute probes.
     #[command(
         long_about = traceroute::arguments::LONG_ABOUT,
         after_long_help = traceroute::arguments::AFTER_LONG_HELP
     )]
-    Traceroute(traceroute::arguments::Args) = "traceroute",
+    Traceroute(traceroute::arguments::Args) = "traceroute" => ("network", "traceroute", 26),
     /// Run bounded DNS over UDP, TCP, or UDP with TCP fallback.
     #[command(
         long_about = dns::arguments::LONG_ABOUT,
         after_long_help = dns::arguments::AFTER_LONG_HELP
     )]
-    Dns(dns::arguments::Args) = "dns",
+    Dns(dns::arguments::Args) = "dns" => ("network", "dns", 27),
     /// Inspect captured UDP/TCP DNS messages and transaction evidence.
     #[command(after_long_help = dns_read::arguments::AFTER_LONG_HELP)]
-    DnsRead(dns_read::arguments::Args) = "dns-read",
+    DnsRead(dns_read::arguments::Args) = "dns-read" => ("analyze", "dns", 11),
     /// Inspect cleartext HTTP/1 messages over captured TCP streams.
     #[command(after_long_help = http::arguments::AFTER_LONG_HELP)]
-    Http(http::arguments::Args) = "http",
+    Http(http::arguments::Args) = "http" => ("analyze", "http", 12),
     #[command(
         about = "Inspect cleartext HTTP/2 and h2c over captured TCP streams.",
         after_long_help = http2::arguments::AFTER_LONG_HELP
     )]
-    Http2(http2::arguments::Args) = "http2",
+    Http2(http2::arguments::Args) = "http2" => ("analyze", "http2", 13),
     /// Export streams and reassembled IP datagrams with their physical dependencies.
     #[command(after_long_help = export::arguments::AFTER_LONG_HELP)]
-    Export(export::arguments::Args) = "export",
+    Export(export::arguments::Args) = "export" => ("files", "export", 7),
     /// Rewrite capture headers with checked lengths and transport checksums.
     #[command(after_long_help = rewrite::arguments::AFTER_LONG_HELP)]
-    Rewrite(rewrite::arguments::Args) = "rewrite",
+    Rewrite(rewrite::arguments::Args) = "rewrite" => ("files", "rewrite", 6),
     /// Run bounded field-aware packet fuzzing.
     #[command(after_long_help = fuzz::arguments::AFTER_LONG_HELP)]
-    Fuzz(fuzz::arguments::Args) = "fuzz",
+    Fuzz(fuzz::arguments::Args) = "fuzz" => ("packet", "fuzz", 3),
     /// Enumerate passive interface-bound route decisions.
     #[command(after_long_help = routes::AFTER_LONG_HELP)]
-    Routes(routes::Args) = "routes",
+    Routes(routes::Args) = "routes" => ("network", "routes", 17),
     /// Compare ingress and egress captures under explicit identity rules.
     #[command(after_long_help = verify_forwarding::arguments::AFTER_LONG_HELP)]
-    VerifyForwarding(verify_forwarding::arguments::Args) = "verify-forwarding",
+    VerifyForwarding(verify_forwarding::arguments::Args) = "verify-forwarding" => ("analyze", "verify-forwarding", 15),
     /// Generate shell completions and man pages under a directory.
     #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all canonical and legacy paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
-    Documentation(documentation::Args),
+    Documentation(documentation::Args) => ("reference", "documentation", 30),
     /// Print built-in references for packet expressions, filters, formats, and exit codes.
     #[command(after_long_help = topics::AFTER_LONG_HELP)]
-    Topics(topics::Args),
+    Topics(topics::Args) => ("reference", "topics", 29),
 }
 
 /// Workflow placement. Published identifiers deliberately remain the legacy names.
@@ -255,164 +281,6 @@ pub(crate) const GROUPS: &[(&str, &str)] = &[
         "reference",
         "Browse protocols, syntax, and generated documentation",
     ),
-];
-
-pub(crate) const INVENTORY: &[Entry] = &[
-    Entry {
-        group: "packet",
-        name: "build",
-        legacy: "build",
-    },
-    Entry {
-        group: "packet",
-        name: "dissect",
-        legacy: "dissect",
-    },
-    Entry {
-        group: "packet",
-        name: "fragment",
-        legacy: "fragment",
-    },
-    Entry {
-        group: "packet",
-        name: "fuzz",
-        legacy: "fuzz",
-    },
-    Entry {
-        group: "files",
-        name: "read",
-        legacy: "read",
-    },
-    Entry {
-        group: "files",
-        name: "merge",
-        legacy: "merge",
-    },
-    Entry {
-        group: "files",
-        name: "rewrite",
-        legacy: "rewrite",
-    },
-    Entry {
-        group: "files",
-        name: "export",
-        legacy: "export",
-    },
-    Entry {
-        group: "analyze",
-        name: "stats",
-        legacy: "stats",
-    },
-    Entry {
-        group: "analyze",
-        name: "expert",
-        legacy: "expert",
-    },
-    Entry {
-        group: "analyze",
-        name: "follow",
-        legacy: "follow",
-    },
-    Entry {
-        group: "analyze",
-        name: "dns",
-        legacy: "dns-read",
-    },
-    Entry {
-        group: "analyze",
-        name: "http",
-        legacy: "http",
-    },
-    Entry {
-        group: "analyze",
-        name: "http2",
-        legacy: "http2",
-    },
-    Entry {
-        group: "analyze",
-        name: "tls",
-        legacy: "tls",
-    },
-    Entry {
-        group: "analyze",
-        name: "verify-forwarding",
-        legacy: "verify-forwarding",
-    },
-    Entry {
-        group: "network",
-        name: "interfaces",
-        legacy: "interfaces",
-    },
-    Entry {
-        group: "network",
-        name: "routes",
-        legacy: "routes",
-    },
-    Entry {
-        group: "network",
-        name: "plan",
-        legacy: "plan",
-    },
-    Entry {
-        group: "network",
-        name: "capture",
-        legacy: "capture",
-    },
-    Entry {
-        group: "network",
-        name: "send",
-        legacy: "send",
-    },
-    Entry {
-        group: "network",
-        name: "exchange",
-        legacy: "exchange",
-    },
-    Entry {
-        group: "network",
-        name: "replay",
-        legacy: "replay",
-    },
-    Entry {
-        group: "network",
-        name: "scan",
-        legacy: "scan",
-    },
-    Entry {
-        group: "network",
-        name: "identify",
-        legacy: "identify",
-    },
-    Entry {
-        group: "network",
-        name: "identify-os",
-        legacy: "identify-os",
-    },
-    Entry {
-        group: "network",
-        name: "traceroute",
-        legacy: "traceroute",
-    },
-    Entry {
-        group: "network",
-        name: "dns",
-        legacy: "dns",
-    },
-    Entry {
-        group: "reference",
-        name: "protocols",
-        legacy: "protocols",
-    },
-    Entry {
-        group: "reference",
-        name: "topics",
-        legacy: "topics",
-    },
-    Entry {
-        group: "reference",
-        name: "documentation",
-        legacy: "documentation",
-    },
 ];
 
 impl Entry {
@@ -494,6 +362,131 @@ impl clap::Subcommand for CommandLine {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn declaration_order_and_published_identifiers_are_preserved() {
+        let expected = [
+            "merge",
+            "fragment",
+            "build",
+            "dissect",
+            "protocols",
+            "read",
+            "interfaces",
+            "plan",
+            "send",
+            "exchange",
+            "capture",
+            "expert",
+            "follow",
+            "replay",
+            "scan",
+            "identify",
+            "identify-os",
+            "stats",
+            "tls",
+            "traceroute",
+            "dns",
+            "dns-read",
+            "http",
+            "http2",
+            "export",
+            "rewrite",
+            "fuzz",
+            "routes",
+            "verify-forwarding",
+            "documentation",
+            "topics",
+        ];
+        let flat = FlatDefinition::augment_subcommands(clap::Command::new("packetcraftr"));
+        assert_eq!(
+            flat.get_subcommands()
+                .map(clap::Command::get_name)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        // Generators have legacy names but no published output identifiers.
+        let published = &expected[..29];
+        assert_eq!(
+            Command::ALL
+                .iter()
+                .map(|command| command.as_str())
+                .collect::<Vec<_>>(),
+            published
+        );
+        assert_eq!(
+            serde_json::to_value(Command::ALL).unwrap(),
+            serde_json::json!(published)
+        );
+    }
+
+    #[test]
+    fn inventory_and_command_tree_order_are_preserved() {
+        let expected = [
+            "packet build",
+            "packet dissect",
+            "packet fragment",
+            "packet fuzz",
+            "files read",
+            "files merge",
+            "files rewrite",
+            "files export",
+            "analyze stats",
+            "analyze expert",
+            "analyze follow",
+            "analyze dns",
+            "analyze http",
+            "analyze http2",
+            "analyze tls",
+            "analyze verify-forwarding",
+            "network interfaces",
+            "network routes",
+            "network plan",
+            "network capture",
+            "network send",
+            "network exchange",
+            "network replay",
+            "network scan",
+            "network identify",
+            "network identify-os",
+            "network traceroute",
+            "network dns",
+            "reference protocols",
+            "reference topics",
+            "reference documentation",
+        ];
+        assert_eq!(
+            INVENTORY
+                .iter()
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        let definition = crate::cli::Cli::command();
+        assert_eq!(
+            definition
+                .get_subcommands()
+                .filter(|command| !command.is_hide_set())
+                .flat_map(|group| {
+                    group
+                        .get_subcommands()
+                        .map(move |command| format!("{} {}", group.get_name(), command.get_name()))
+                })
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            definition
+                .get_subcommands()
+                .filter(|command| command.is_hide_set())
+                .map(clap::Command::get_name)
+                .collect::<Vec<_>>(),
+            INVENTORY
+                .iter()
+                .map(|entry| entry.legacy)
+                .collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn every_workflow_and_legacy_path_has_the_same_arguments_and_help() {

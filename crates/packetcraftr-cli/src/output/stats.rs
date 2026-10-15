@@ -21,6 +21,7 @@ pub enum Table {
     Io,
     Fragments,
     Overview,
+    Rtt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -94,6 +95,44 @@ impl From<library::IoBucketStat> for IoBucket {
             frames: value.frames,
             bytes: value.bytes,
         }
+    }
+}
+
+/// Round-trip evidence for one TCP conversation, in nanoseconds.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Rtt {
+    pub transport: Transport,
+    pub stream: u64,
+    pub scope: Scope,
+    pub address_a: IpAddr,
+    pub port_a: u16,
+    pub address_b: IpAddr,
+    pub port_b: u16,
+    pub handshake_rtt_ns: Option<u64>,
+    pub samples: u64,
+    pub min_rtt_ns: Option<u64>,
+    pub mean_rtt_ns: Option<u64>,
+    pub max_rtt_ns: Option<u64>,
+}
+
+impl TryFrom<library::RttStat> for Rtt {
+    type Error = Error;
+
+    fn try_from(value: library::RttStat) -> Result<Self, Error> {
+        Ok(Self {
+            transport: value.transport.into(),
+            stream: value.stream,
+            scope: value.scope.try_into()?,
+            address_a: value.address_a,
+            port_a: value.port_a,
+            address_b: value.address_b,
+            port_b: value.port_b,
+            handshake_rtt_ns: value.handshake_rtt_ns,
+            samples: value.samples,
+            min_rtt_ns: value.min_rtt_ns,
+            mean_rtt_ns: value.mean_rtt_ns,
+            max_rtt_ns: value.max_rtt_ns,
+        })
     }
 }
 
@@ -182,6 +221,9 @@ pub enum TableData {
     Fragments {
         fragments: super::reassembly::Report,
     },
+    Rtt {
+        rtt: Vec<Rtt>,
+    },
 }
 
 impl TryFrom<(Table, library::Report, u64)> for Report {
@@ -243,6 +285,13 @@ impl TryFrom<(Table, library::Report, u64)> for Report {
             },
             Table::Fragments => TableData::Fragments {
                 fragments: (&report.ip_reassembly).into(),
+            },
+            Table::Rtt => TableData::Rtt {
+                rtt: report
+                    .rtt
+                    .into_iter()
+                    .map(Rtt::try_from)
+                    .collect::<Result<_, _>>()?,
             },
         };
         Ok(Self {

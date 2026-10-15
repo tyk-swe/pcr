@@ -1,0 +1,67 @@
+{
+  "schema": "packetcraftr.output/v18",
+  "command": "stats",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "clock": {
+      "regressions": 0,
+      "max_regression": {
+        "secs": 0,
+        "nanos": 0
+      },
+      "max_forward_step": {
+        "secs": 0,
+        "nanos": 24000000
+      },
+      "max_forward_step_frame": 5
+    },
+    "table": "rtt",
+    "rtt": [
+      {
+        "transport": "tcp",
+        "stream": 0,
+        "scope": {
+          "id": 0,
+          "interface": 0,
+          "encapsulation": []
+        },
+        "address_a": "192.0.2.1",
+        "port_a": 54321,
+        "address_b": "198.51.100.2",
+        "port_b": 443,
+        "handshake_rtt_ns": 8000000,
+        "samples": 2,
+        "min_rtt_ns": 19000000,
+        "mean_rtt_ns": 21500000,
+        "max_rtt_ns": 24000000
+      }
+    ],
+    "frames_read": 8,
+    "frames_matched": 8,
+    "bytes_matched": 659,
+    "first_timestamp": {
+      "unix_seconds": 1787616000,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 1787616000,
+      "nanoseconds": 68000000
+    },
+    "duration": {
+      "secs": 0,
+      "nanos": 68000000
+    },
+    "average_packet_size": 82.375,
+    "packets_per_second": 117.6470588235294,
+    "bytes_per_second": 9691.176470588234,
+    "interfaces": [
+      {
+        "id": 0,
+        "link_type": 228,
+        "snap_length": 16777216
+      }
+    ]
+  },
+  "diagnostics": []
+}

@@ -64,6 +64,29 @@ pub struct IoBucketStat {
     pub bytes: u64,
 }
 
+/// Round-trip evidence for one TCP conversation, in nanoseconds. Handshake
+/// latency comes from the first SYN to the first answering SYN-ACK; data
+/// samples come from each data segment's first covering ACK. Captures that
+/// start mid-conversation or mid-handshake simply lack the corresponding
+/// observation.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct RttStat {
+    pub transport: StreamTransport,
+    pub stream: u64,
+    pub scope: crate::analysis::scope::Definition,
+    pub address_a: IpAddr,
+    pub port_a: u16,
+    pub address_b: IpAddr,
+    pub port_b: u16,
+    /// First SYN to first answering SYN-ACK, when both were captured.
+    pub handshake_rtt_ns: Option<u64>,
+    /// Data segments whose covering ACK was also captured.
+    pub samples: u64,
+    pub min_rtt_ns: Option<u64>,
+    pub mean_rtt_ns: Option<u64>,
+    pub max_rtt_ns: Option<u64>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Report {
     pub clock: crate::analysis::ClockReport,
@@ -88,6 +111,8 @@ pub struct Report {
     pub endpoints: Vec<EndpointStat>,
     pub ports: Vec<PortStat>,
     pub io: Vec<IoBucketStat>,
+    /// TCP conversations in capture-global stream order.
+    pub rtt: Vec<RttStat>,
     /// Capture-global fragment accounting, independent of the display filter.
     pub ip_reassembly: IpReassemblyReport,
     pub interfaces: Vec<crate::capture_file::Interface>,

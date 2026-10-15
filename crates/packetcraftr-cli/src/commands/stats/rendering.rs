@@ -9,7 +9,8 @@ use packetcraftr_core::analysis;
 use crate::errors::CliError;
 use crate::output::stats::Table;
 use crate::rendering::{
-    duration_text, optional_display, render_diagnostics_text, write_stdout_line, write_summary_line,
+    duration_text, optional_display, optional_duration, render_diagnostics_text, write_stdout_line,
+    write_summary_line,
 };
 
 pub(super) fn render_text(
@@ -170,6 +171,28 @@ pub(super) fn render_text(
             }
         }
         Table::Fragments => render_fragments(invocation, &report.ip_reassembly)?,
+        Table::Rtt => {
+            let rtt =
+                |value: Option<u64>| optional_duration(value.map(std::time::Duration::from_nanos));
+            for row in &report.rtt {
+                crate::rendering::render_scope(invocation, &row.scope)?;
+                write_stdout_line(
+                    invocation,
+                    format_args!(
+                        "{} stream {}: {} <-> {} handshake_rtt {} samples {} min {} mean {} max {}",
+                        row.transport.as_str(),
+                        row.stream,
+                        SocketAddr::new(row.address_a, row.port_a),
+                        SocketAddr::new(row.address_b, row.port_b),
+                        rtt(row.handshake_rtt_ns),
+                        row.samples,
+                        rtt(row.min_rtt_ns),
+                        rtt(row.mean_rtt_ns),
+                        rtt(row.max_rtt_ns),
+                    ),
+                )?;
+            }
+        }
         Table::Overview => {
             write_stdout_line(
                 invocation,

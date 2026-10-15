@@ -535,3 +535,94 @@ fn csv_write_failure_is_nonzero_and_reported_on_stderr() {
     assert_eq!(output.status.code(), Some(5));
     assert!(String::from_utf8_lossy(&output.stderr).contains("io.stdout"));
 }
+
+#[test]
+fn rtt_tables_report_handshake_and_data_evidence() {
+    let report = document(&capture("tls-handshake.pcapng"), "rtt", &[]);
+    assert_eq!(report["result"]["table"], "rtt");
+    let rows = report["result"]["rtt"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row["transport"], "tcp");
+    assert_eq!(row["stream"], 0);
+    assert_eq!(row["address_a"], "192.0.2.1");
+    assert_eq!(row["port_a"], 54321);
+    assert_eq!(row["address_b"], "198.51.100.2");
+    assert_eq!(row["port_b"], 443);
+    // The capture stamps the handshake's SYN eight milliseconds before its
+    // SYN-ACK, and the two data exchanges measure 19 and 24 milliseconds.
+    assert_eq!(row["handshake_rtt_ns"], 8_000_000);
+    assert_eq!(row["samples"], 2);
+    assert_eq!(row["min_rtt_ns"], 19_000_000);
+    assert_eq!(row["mean_rtt_ns"], 21_500_000);
+    assert_eq!(row["max_rtt_ns"], 24_000_000);
+
+    // CSV exports the same rows under the documented header.
+    let csv = common::run_success(&[
+        "--output",
+        "csv",
+        "analyze",
+        "stats",
+        common::path_text(&capture("tls-handshake.pcapng")),
+        "--table",
+        "rtt",
+    ]);
+    let text = String::from_utf8_lossy(&csv.stdout);
+    assert!(
+        text.starts_with(
+            "transport,stream,scope_id,scope_interface,scope_encapsulation,address_a,port_a,\
+             address_b,port_b,handshake_rtt_ns,samples,min_rtt_ns,mean_rtt_ns,max_rtt_ns\r\n"
+        ),
+        "csv header: {text}"
+    );
+    assert!(
+        text.contains("tcp,0,0,0,[],192.0.2.1,54321,198.51.100.2,443,"),
+        "csv row: {text}"
+    );
+    assert!(
+        text.contains("8000000,2,19000000,21500000,24000000"),
+        "{text}"
+    );
+
+    // Compact text keeps the stream order and names each measured value.
+    let rendered = common::run_success(&[
+        "analyze",
+        "stats",
+        common::path_text(&capture("tls-handshake.pcapng")),
+        "--table",
+        "rtt",
+    ]);
+    let text = String::from_utf8_lossy(&rendered.stdout);
+    assert!(
+        text.contains("handshake_rtt 8.000ms samples 2 min 19.000ms mean 21.500ms max 24.000ms"),
+        "{text}"
+    );
+}
+
+#[test]
+fn rtt_tables_reject_sorting_and_cap_rows_with_diagnostics() {
+    let sorted = common::run(&[
+        "analyze",
+        "stats",
+        common::path_text(&capture("tls-handshake.pcapng")),
+        "--table",
+        "rtt",
+        "--sort",
+        "frames",
+    ]);
+    assert_eq!(sorted.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&sorted.stderr).contains("--sort is not supported"),
+        "{:?}",
+        String::from_utf8_lossy(&sorted.stderr)
+    );
+
+    let capped = document(&capture("tls-handshake.pcapng"), "rtt", &["--top", "0"]);
+    assert_eq!(capped["result"]["rtt"], json!([]));
+    assert_eq!(capped["diagnostics"].as_array().unwrap().len(), 1);
+    assert_eq!(capped["diagnostics"][0]["code"], "stats.rtt_omitted");
+
+    // A capture without TCP conversations reports an empty table, not an error.
+    let udp_only = document(&capture("dns-response.pcap"), "rtt", &[]);
+    assert_eq!(udp_only["result"]["rtt"], json!([]));
+}

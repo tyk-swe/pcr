@@ -132,6 +132,9 @@ pub(super) fn select(
             cap(&mut report.io, top, "stats.io_omitted", "io bucket(s)")
         }
         Table::Fragments => Vec::new(),
+        // Stream order is the natural key; rows keep it unless --top keeps the
+        // first ones only.
+        Table::Rtt => cap(&mut report.rtt, top, "stats.rtt_omitted", "rtt row(s)"),
     }
 }
 

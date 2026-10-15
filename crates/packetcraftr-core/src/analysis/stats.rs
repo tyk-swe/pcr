@@ -1,20 +1,31 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
 use crate::protocol::network::{Ipv4, Ipv6};
+use crate::protocol::transport::Tcp;
 
 use crate::analysis::StreamTransport;
 use crate::analysis::conversation_index::CanonicalFlow;
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
+use crate::analysis::scope::Definition;
 use crate::analysis::{Constraint, Error};
 
 mod report;
-pub use report::{ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report};
+pub use report::{
+    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report, RttStat,
+};
+
+/// Data segments retained per conversation direction awaiting a covering
+/// ACK; beyond the window the oldest segment leaves without a sample.
+pub const MAX_OUTSTANDING_SEGMENTS: usize = 64;
+
+/// Sequence-space half: acknowledgment distances below it count as coverage.
+const SERIAL_WINDOW: u32 = 0x8000_0000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Table {
@@ -28,6 +39,8 @@ pub enum Table {
     Fragments,
     /// Capture totals and protocol, endpoint, and conversation leaderboards.
     Overview,
+    /// Per-conversation TCP handshake and data round-trip times.
+    Rtt,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -64,6 +77,37 @@ struct EndpointTally {
     rx: Tally,
 }
 
+/// One data segment awaiting the ACK that covers it.
+#[derive(Clone, Copy, Debug)]
+struct OutstandingSegment {
+    /// First sequence byte after the segment, including SYN and FIN octets.
+    sequence_end: u32,
+    sent: SystemTime,
+}
+
+/// One direction of an RTT-tracked conversation.
+#[derive(Debug, Default)]
+struct RttDirection {
+    /// First SYN from this side; consumed by the first answering SYN-ACK.
+    syn: Option<SystemTime>,
+    /// Data segments in arrival order, bounded by [`MAX_OUTSTANDING_SEGMENTS`].
+    outstanding: VecDeque<OutstandingSegment>,
+}
+
+/// Running round-trip evidence for one TCP conversation.
+#[derive(Debug)]
+struct RttState {
+    flow: CanonicalFlow,
+    scope: Definition,
+    handshake_rtt_ns: Option<u64>,
+    /// Directions in canonical order: index 0 sends as endpoint A.
+    directions: [RttDirection; 2],
+    samples: u64,
+    sum_ns: u128,
+    min_ns: Option<u64>,
+    max_ns: Option<u64>,
+}
+
 #[derive(Debug)]
 pub struct Collector {
     table: Table,
@@ -79,6 +123,7 @@ pub struct Collector {
     endpoints: BTreeMap<IpAddr, EndpointTally>,
     ports: BTreeMap<(StreamTransport, u16), Tally>,
     io: BTreeMap<u64, Tally>,
+    rtt: BTreeMap<u64, RttState>,
 }
 
 impl Collector {
@@ -108,6 +153,7 @@ impl Collector {
             endpoints: BTreeMap::new(),
             ports: BTreeMap::new(),
             io: BTreeMap::new(),
+            rtt: BTreeMap::new(),
         })
     }
 
@@ -169,6 +215,20 @@ impl Collector {
                     self.record_ports(transport, stream.flow, bytes);
                 }
             }
+        }
+
+        if self.collects(Table::Rtt)
+            && let Some(view) = record.tcp
+            && let Some(conversation) = view.conversation
+        {
+            self.record_rtt(
+                conversation.index,
+                conversation.flow,
+                view.header,
+                view.payload,
+                timestamp,
+                record,
+            );
         }
     }
 
@@ -252,6 +312,93 @@ impl Collector {
         }
     }
 
+    /// Updates one conversation's round-trip evidence from a TCP segment.
+    fn record_rtt(
+        &mut self,
+        stream: u64,
+        flow: &ScopedFlowKey,
+        header: &Tcp,
+        payload: &[u8],
+        timestamp: SystemTime,
+        record: &FrameRecord<'_>,
+    ) {
+        let canonical = CanonicalFlow::from_flow(flow);
+        let state = self.rtt.entry(stream).or_insert_with(|| RttState {
+            flow: canonical,
+            scope: record
+                .scope_definition(flow.scope)
+                .expect("indexed scope exists")
+                .clone(),
+            handshake_rtt_ns: None,
+            directions: Default::default(),
+            samples: 0,
+            sum_ns: 0,
+            min_ns: None,
+            max_ns: None,
+        });
+        let [a_to_b, b_to_a] = &mut state.directions;
+        let (sent, peer) = if (flow.flow.source, flow.flow.source_port) == state.flow.first {
+            (a_to_b, b_to_a)
+        } else {
+            (b_to_a, a_to_b)
+        };
+        let syn = header.flags & Tcp::SYN != 0;
+        let fin = header.flags & Tcp::FIN != 0;
+        let ack = header.flags & Tcp::ACK != 0;
+        let reset = header.flags & Tcp::RST != 0;
+
+        if syn && !ack && sent.syn.is_none() {
+            sent.syn = Some(timestamp);
+        }
+        if syn
+            && ack
+            && state.handshake_rtt_ns.is_none()
+            && let Some(peer_syn) = peer.syn
+        {
+            state.handshake_rtt_ns = elapsed_ns(timestamp, peer_syn);
+        }
+
+        if !payload.is_empty() {
+            if sent.outstanding.len() >= MAX_OUTSTANDING_SEGMENTS {
+                sent.outstanding.pop_front();
+            }
+            let advance =
+                u32::try_from(payload.len()).unwrap_or(u32::MAX) + u32::from(syn) + u32::from(fin);
+            sent.outstanding.push_back(OutstandingSegment {
+                sequence_end: header.sequence.wrapping_add(advance),
+                sent: timestamp,
+            });
+        }
+
+        // A reset reports the peer's violation, not progress; its acknowledgment
+        // field never covers outstanding data.
+        if ack && !reset {
+            let acknowledgment = header.acknowledgment;
+            let mut earliest: Option<SystemTime> = None;
+            let mut index = 0;
+            while index < peer.outstanding.len() {
+                let segment = peer.outstanding[index];
+                if acknowledgment.wrapping_sub(segment.sequence_end) < SERIAL_WINDOW {
+                    peer.outstanding.remove(index);
+                    earliest = Some(match earliest {
+                        Some(earliest) if earliest <= segment.sent => earliest,
+                        _ => segment.sent,
+                    });
+                } else {
+                    index += 1;
+                }
+            }
+            if let Some(oldest) = earliest
+                && let Some(nanos) = elapsed_ns(timestamp, oldest)
+            {
+                state.samples = state.samples.saturating_add(1);
+                state.sum_ns = state.sum_ns.saturating_add(u128::from(nanos));
+                state.min_ns = Some(state.min_ns.map_or(nanos, |min| min.min(nanos)));
+                state.max_ns = Some(state.max_ns.map_or(nanos, |max| max.max(nanos)));
+            }
+        }
+    }
+
     pub fn finish(self, summary: &RunSummary) -> Report {
         let ip_reassembly = summary.ip_reassembly.clone();
         let mut protocols = self
@@ -327,6 +474,28 @@ impl Collector {
             })
             .collect::<Vec<_>>();
 
+        // The map keys are capture-global stream indices, so rows keep that order.
+        let rtt = self
+            .rtt
+            .into_iter()
+            .map(|(stream, state)| RttStat {
+                transport: StreamTransport::Tcp,
+                stream,
+                scope: state.scope,
+                address_a: state.flow.first.0,
+                port_a: state.flow.first.1,
+                address_b: state.flow.second.0,
+                port_b: state.flow.second.1,
+                handshake_rtt_ns: state.handshake_rtt_ns,
+                samples: state.samples,
+                min_rtt_ns: state.min_ns,
+                mean_rtt_ns: (state.samples > 0).then(|| {
+                    u64::try_from(state.sum_ns / u128::from(state.samples)).unwrap_or(u64::MAX)
+                }),
+                max_rtt_ns: state.max_ns,
+            })
+            .collect::<Vec<_>>();
+
         Report {
             clock: summary.clock.clone(),
             io_origin: self.io_origin,
@@ -344,10 +513,20 @@ impl Collector {
             endpoints,
             ports,
             io,
+            rtt,
             ip_reassembly,
             interfaces: summary.interfaces.clone(),
         }
     }
+}
+
+/// Nanoseconds from `sent` to `acknowledged`, when the capture clock did not
+/// regress between the two observations.
+fn elapsed_ns(later: SystemTime, earlier: SystemTime) -> Option<u64> {
+    later
+        .duration_since(earlier)
+        .ok()
+        .and_then(|elapsed| u64::try_from(elapsed.as_nanos()).ok())
 }
 
 fn duration_from_nanos_saturating(nanoseconds: u128) -> Duration {

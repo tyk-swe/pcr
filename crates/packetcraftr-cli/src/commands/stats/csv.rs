@@ -175,6 +175,57 @@ pub(super) fn render(
                 )?;
             }
         }
+        TableData::Rtt { rtt } => {
+            header(
+                invocation,
+                &[
+                    "transport",
+                    "stream",
+                    "scope_id",
+                    "scope_interface",
+                    "scope_encapsulation",
+                    "address_a",
+                    "port_a",
+                    "address_b",
+                    "port_b",
+                    "handshake_rtt_ns",
+                    "samples",
+                    "min_rtt_ns",
+                    "mean_rtt_ns",
+                    "max_rtt_ns",
+                ],
+            )?;
+            let nanos = |value: Option<u64>| value.map(|v| v.to_string()).unwrap_or_default();
+            for row in rtt {
+                write(
+                    invocation,
+                    &[
+                        row.transport.to_string(),
+                        row.stream.to_string(),
+                        row.scope.id.to_string(),
+                        row.scope
+                            .interface
+                            .map(|id| id.to_string())
+                            .unwrap_or_default(),
+                        serde_json::to_string(&row.scope.encapsulation).map_err(|error| {
+                            CliError::new(
+                                packetcraftr_core::error::Kind::Internal,
+                                format!("encode scope encapsulation failed: {error}"),
+                            )
+                        })?,
+                        row.address_a.to_string(),
+                        row.port_a.to_string(),
+                        row.address_b.to_string(),
+                        row.port_b.to_string(),
+                        nanos(row.handshake_rtt_ns),
+                        row.samples.to_string(),
+                        nanos(row.min_rtt_ns),
+                        nanos(row.mean_rtt_ns),
+                        nanos(row.max_rtt_ns),
+                    ],
+                )?;
+            }
+        }
         TableData::Overview { .. } | TableData::Fragments { .. } => {
             unreachable!("CSV table was validated before opening the capture")
         }

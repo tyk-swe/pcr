@@ -67,16 +67,16 @@ pub(super) fn run(
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     let table = Table::from(arguments.table);
-    if arguments.sort.is_some() && table == Table::Fragments {
+    if arguments.sort.is_some() && matches!(table, Table::Fragments | Table::Rtt) {
         return Err(CliError::new(
             core::error::Kind::Usage,
-            "--sort is not supported for fragments",
+            "--sort is not supported for fragments or rtt",
         ));
     }
     if format == Format::Csv && matches!(table, Table::Overview | Table::Fragments) {
         return Err(CliError::new(
             core::error::Kind::Usage,
-            "CSV supports only conversations, endpoints, protocols, ports, and io tables",
+            "CSV supports only conversations, endpoints, protocols, ports, rtt, and io tables",
         ));
     }
     let top = arguments.effective_top();

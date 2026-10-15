@@ -15,6 +15,7 @@ Examples:
   packetcraftr analyze stats capture.pcapng --table conversations --sort bytes --top 10
   packetcraftr --output csv analyze stats capture.pcapng --table endpoints
   packetcraftr analyze stats capture.pcapng --table fragments
+  packetcraftr analyze stats capture.pcapng --table rtt
   packetcraftr analyze stats capture.pcapng --table protocols --filter 'ip.src in 10.0.0.0/8'
   packetcraftr --output json analyze stats capture.pcapng --table io --interval-ms 100";
 
@@ -41,7 +42,7 @@ pub(crate) struct Args {
     pub(crate) top: Option<usize>,
     /// Rank rows by descending frames or bytes before --top, breaking ties by
     /// the other metric then natural key. Overview defaults to frames.
-    /// Not supported for fragments.
+    /// Not supported for fragments or rtt.
     #[arg(long, value_enum)]
     pub(crate) sort: Option<Sort>,
     #[command(flatten)]
@@ -60,6 +61,7 @@ pub(crate) enum Table {
     Io,
     Fragments,
     Overview,
+    Rtt,
 }
 
 impl From<Table> for output::stats::Table {
@@ -72,6 +74,7 @@ impl From<Table> for output::stats::Table {
             Table::Io => Self::Io,
             Table::Fragments => Self::Fragments,
             Table::Overview => Self::Overview,
+            Table::Rtt => Self::Rtt,
         }
     }
 }
@@ -86,6 +89,7 @@ impl From<Table> for packetcraftr_core::analysis::stats::Table {
             Table::Io => Self::Io,
             Table::Fragments => Self::Fragments,
             Table::Overview => Self::Overview,
+            Table::Rtt => Self::Rtt,
         }
     }
 }

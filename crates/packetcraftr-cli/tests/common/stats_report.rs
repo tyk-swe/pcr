@@ -77,6 +77,7 @@ pub(crate) fn report(
             frames: 5,
             bytes: 240,
         }],
+        rtt: Vec::new(),
         ip_reassembly: IpReassemblyReport {
             counters: IpCounters {
                 ipv4: IpFamilyCounters {

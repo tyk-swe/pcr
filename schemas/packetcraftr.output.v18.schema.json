@@ -714,7 +714,8 @@
             "ports",
             "io",
             "fragments",
-            "overview"
+            "overview",
+            "rtt"
           ]
         },
         "frames_read": {
@@ -788,6 +789,13 @@
         "fragments": {
           "description": "Capture-global fragment accounting; derived bytes are separate from the physical matched frame and byte totals.",
           "$ref": "#/$defs/ipReassemblyReport"
+        },
+        "rtt": {
+          "description": "Per-conversation TCP round-trip rows in capture-global stream order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/statsRtt"
+          }
         },
         "clock": {
           "$ref": "#/$defs/captureClock"
@@ -1101,10 +1109,124 @@
               ]
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "table": {
+                "const": "rtt"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "rtt"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "conversations"
+                  ]
+                },
+                {
+                  "required": [
+                    "endpoints"
+                  ]
+                },
+                {
+                  "required": [
+                    "protocols"
+                  ]
+                },
+                {
+                  "required": [
+                    "ports"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                },
+                {
+                  "required": [
+                    "fragments"
+                  ]
+                }
+              ]
+            }
+          }
         }
       ],
       "additionalProperties": true,
       "description": "Matched capture statistics. Explicit sorting ranks frames or bytes descending, then the other volume metric, then the natural key, before retention. Default ordering is unchanged; overview defaults to frame ranking and five rows per leaderboard. Counts precede retention."
+    },
+    "statsRtt": {
+      "type": "object",
+      "required": [
+        "transport",
+        "stream",
+        "address_a",
+        "port_a",
+        "address_b",
+        "port_b",
+        "handshake_rtt_ns",
+        "samples",
+        "min_rtt_ns",
+        "mean_rtt_ns",
+        "max_rtt_ns"
+      ],
+      "properties": {
+        "transport": {
+          "enum": [
+            "tcp"
+          ]
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "address_a": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "port_a": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "address_b": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "port_b": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "handshake_rtt_ns": {
+          "description": "First SYN to first answering SYN-ACK in nanoseconds; absent when either side was not captured.",
+          "$ref": "#/$defs/uint64"
+        },
+        "samples": {
+          "description": "Data segments whose covering ACK was also captured.",
+          "$ref": "#/$defs/uint64"
+        },
+        "min_rtt_ns": {
+          "description": "Smallest observed data round trip in nanoseconds; absent with zero samples.",
+          "$ref": "#/$defs/uint64"
+        },
+        "mean_rtt_ns": {
+          "description": "Saturating mean of the observed data round trips in nanoseconds; absent with zero samples.",
+          "$ref": "#/$defs/uint64"
+        },
+        "max_rtt_ns": {
+          "description": "Largest observed data round trip in nanoseconds; absent with zero samples.",
+          "$ref": "#/$defs/uint64"
+        },
+        "scope": {
+          "$ref": "#/$defs/captureScope"
+        }
+      },
+      "additionalProperties": true
     },
     "statsConversation": {
       "type": "object",

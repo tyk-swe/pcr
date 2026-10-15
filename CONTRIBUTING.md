@@ -20,6 +20,9 @@ cargo test --locked --workspace --all-features
 For native I/O changes, follow [native validation](docs/native-validation.md);
 skipped checks and cross-compilation are not runtime evidence.
 
+See [Codebase structure](docs/codebase-structure.md) for crate ownership,
+fixture locations, and guidance on keeping public paths stable.
+
 ## Code and tests
 
 - Keep code with its owner: `packetcraftr-core` for packets and offline analysis,

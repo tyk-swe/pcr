@@ -446,20 +446,23 @@ fn synthetic_diagnostic_reports_serialize_in_aggregate_and_stream_forms() {
 }
 
 fn diagnostic_example() -> Value {
-    serde_json::from_str(include_str!(
+    let mut example: Value = serde_json::from_str(include_str!(
         "../../../../examples/documents/output-scan-tcp-diagnostic.json"
     ))
-    .unwrap()
+    .unwrap();
+    example["schema"] = output::contract::SCHEMA_V17.into();
+    example
 }
 
 #[test]
 fn the_published_diagnostic_examples_match_the_current_schema_and_reject_impossible_edits() {
     let example = diagnostic_example();
     schema_validator().validate(&example).unwrap();
-    let event: Value = serde_json::from_str(include_str!(
+    let mut event: Value = serde_json::from_str(include_str!(
         "../../../../examples/documents/output-scan-tcp-diagnostic-event.json"
     ))
     .unwrap();
+    event["schema"] = output::contract::SCHEMA_V17.into();
     schema_validator().validate(&event).unwrap();
     assert!(
         !common::frozen_v14_schema_validator().is_valid(&example),

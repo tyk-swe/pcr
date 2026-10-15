@@ -26,6 +26,8 @@ pub enum Table {
     Ports,
     Io,
     Fragments,
+    /// Capture totals and protocol, endpoint, and conversation leaderboards.
+    Overview,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -171,7 +173,13 @@ impl Collector {
     }
 
     fn collects(&self, table: Table) -> bool {
-        self.table == Table::All || self.table == table
+        self.table == Table::All
+            || self.table == table
+            || (self.table == Table::Overview
+                && matches!(
+                    table,
+                    Table::Protocols | Table::Endpoints | Table::Conversations
+                ))
     }
 
     fn observe_time(&mut self, timestamp: SystemTime, bytes: u64) {
@@ -280,7 +288,7 @@ impl Collector {
                 first_timestamp: state.first_timestamp,
                 last_timestamp: state.last_timestamp,
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         let endpoints = self
             .endpoints
@@ -292,7 +300,7 @@ impl Collector {
                 rx_frames: tally.rx.frames,
                 rx_bytes: tally.rx.bytes,
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         let ports = self
             .ports
@@ -303,7 +311,7 @@ impl Collector {
                 frames: tally.frames,
                 bytes: tally.bytes,
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         let interval = self.interval;
         let io = self
@@ -317,7 +325,7 @@ impl Collector {
                 frames: tally.frames,
                 bytes: tally.bytes,
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         Report {
             clock: summary.clock.clone(),
@@ -328,6 +336,9 @@ impl Collector {
             bytes: self.bytes,
             first_timestamp: self.first_timestamp,
             last_timestamp: self.last_timestamp,
+            protocol_count: protocols.len(),
+            endpoint_count: endpoints.len(),
+            conversation_count: conversations.len(),
             protocols,
             conversations,
             endpoints,

@@ -17,9 +17,11 @@ pub const SCHEMA_V12: &str = "packetcraftr.output/v12";
 pub const SCHEMA_V13: &str = "packetcraftr.output/v13";
 pub const SCHEMA_V14: &str = "packetcraftr.output/v14";
 pub const SCHEMA_V15: &str = "packetcraftr.output/v15";
-/// Current family: SCTP INIT/COOKIE-ECHO scanning, IP-protocol inventory, and
+/// SCTP INIT/COOKIE-ECHO scanning, IP-protocol inventory, and
 /// extra host-discovery probe families.
 pub const SCHEMA_V16: &str = "packetcraftr.output/v16";
+/// Current family: capture overview and explicit statistics ordering.
+pub const SCHEMA_V17: &str = "packetcraftr.output/v17";
 
 pub use crate::commands::Command;
 
@@ -46,6 +48,7 @@ impl fmt::Display for Command {
 pub enum Format {
     Text,
     Json,
+    Csv,
     Ndjson,
     Hex,
     Raw,
@@ -58,6 +61,7 @@ impl Format {
         match self {
             Self::Text => "text",
             Self::Json => "json",
+            Self::Csv => "csv",
             Self::Ndjson => "ndjson",
             Self::Hex => "hex",
             Self::Raw => "raw",

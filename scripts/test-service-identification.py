@@ -27,7 +27,7 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = "packetcraftr.output/v16"
+SCHEMA = "packetcraftr.output/v17"
 SCHEMAS = ("packetcraftr.output/v14", "packetcraftr.output/v15", SCHEMA)
 FIXTURES = ROOT / "scripts/fixtures/service-identification"
 PROFILES = {

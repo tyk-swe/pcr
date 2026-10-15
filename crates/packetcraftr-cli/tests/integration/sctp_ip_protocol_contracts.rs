@@ -381,7 +381,7 @@ fn invalid_sctp_ip_protocol_and_discovery_combinations_fail_before_network_io() 
 }
 
 #[test]
-fn synthetic_sctp_and_ip_protocol_reports_conform_to_output_v16_in_json_and_ndjson() {
+fn synthetic_sctp_and_ip_protocol_reports_conform_to_output_v17_in_json_and_ndjson() {
     let collector = scan::Collector::default();
     let mut sink = collector.clone();
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));

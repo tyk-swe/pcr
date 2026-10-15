@@ -12,6 +12,7 @@ fn malformed_window_scale_remains_a_bounded_wire_observation() {
         "../../../../examples/documents/output-os-probe.json"
     ))
     .unwrap();
+    value["schema"] = packetcraftr_cli::output::contract::SCHEMA_V17.into();
     value["result"]["observation"]["suitable"] = false.into();
     value["result"]["observation"]["tcp"]["window_scale"] = 255.into();
     assert!(schema_validator().is_valid(&value));
@@ -80,10 +81,11 @@ fn invalid_requests_documents_and_policy_refusals_are_terminal_errors() {
 
 #[test]
 fn os_result_contract_rejects_unknown_semantics_and_unqualified_candidates() {
-    let output: Value = serde_json::from_str(include_str!(
+    let mut output: Value = serde_json::from_str(include_str!(
         "../../../../examples/documents/output-os.json"
     ))
     .unwrap();
+    output["schema"] = packetcraftr_cli::output::contract::SCHEMA_V17.into();
     assert!(schema_validator().is_valid(&output));
     for (field, value) in [("outcome", "certain"), ("outcome", "unknown")] {
         let mut changed = output.clone();

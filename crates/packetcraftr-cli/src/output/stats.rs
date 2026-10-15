@@ -20,6 +20,7 @@ pub enum Table {
     Ports,
     Io,
     Fragments,
+    Overview,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -155,6 +156,14 @@ pub struct Report {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "table", rename_all = "snake_case")]
 pub enum TableData {
+    Overview {
+        protocol_count: usize,
+        endpoint_count: usize,
+        conversation_count: usize,
+        protocols: Vec<Protocol>,
+        endpoints: Vec<Endpoint>,
+        conversations: Vec<Conversation>,
+    },
     Conversations {
         conversations: Vec<Conversation>,
     },
@@ -196,6 +205,18 @@ impl TryFrom<(Table, library::Report, u64)> for Report {
             })
             .collect();
         let table = match table {
+            Table::Overview => TableData::Overview {
+                protocol_count: report.protocol_count,
+                endpoint_count: report.endpoint_count,
+                conversation_count: report.conversation_count,
+                protocols: report.protocols.into_iter().map(Into::into).collect(),
+                endpoints: report.endpoints.into_iter().map(Into::into).collect(),
+                conversations: report
+                    .conversations
+                    .into_iter()
+                    .map(Conversation::try_from)
+                    .collect::<Result<_, _>>()?,
+            },
             Table::Conversations => TableData::Conversations {
                 conversations: report
                     .conversations

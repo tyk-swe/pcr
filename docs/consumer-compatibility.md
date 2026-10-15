@@ -6,9 +6,9 @@ A contract family covers names, units, meanings, enums, ordering, and terminal
 semantics, not only JSON shape. Incompatible changes require a new family even
 when an older schema accepts their shape.
 
-Current producers emit [output/v16](../schemas/packetcraftr.output.v16.schema.json)
+Current producers emit [output/v17](../schemas/packetcraftr.output.v17.schema.json)
 and [packet/v2](../schemas/packetcraftr.packet.v2.schema.json). Beta.3 used
-output/v2 and packet/v1; output v6–v15 remain frozen for historical evidence.
+output/v2 and packet/v1; output v6–v16 remain frozen for historical evidence.
 Resolve `$id` to the bundled local file, never moving `main` or a network fetch.
 Tolerate unknown object members, but reject unknown families, verdicts, check
 kinds, or evidence states.
@@ -24,6 +24,15 @@ Missing metadata, null ingress operand on an expectation, and explicit decoder
 `absent` are distinct. Summary counters include accepted evidence regardless of
 retained detail/omissions. Forwarding fail/inconclusive returns exit 1 after
 publication; an error envelope is execution failure.
+
+## Output family v17
+
+Adds statistics `table: "overview"` with total protocol/endpoint/conversation
+counts and the corresponding retained leaderboards. Explicit `--sort frames|bytes`
+ranks statistics before truncation, with the other volume metric and natural key
+as tie-breakers. Existing default ordering is unchanged; overview defaults to
+frames. CSV is a separate flat-table format and does not use the JSON envelope.
+See [statistics](statistics.md) for exact headers, units, and omission semantics.
 
 ## Output family v16
 

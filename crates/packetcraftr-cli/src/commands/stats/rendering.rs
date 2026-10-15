@@ -133,6 +133,54 @@ pub(super) fn render_text(
             }
         }
         Table::Fragments => render_fragments(&report.ip_reassembly)?,
+        Table::Overview => {
+            write_stdout_line(format_args!(
+                "timestamps {} to {}; {} interface(s)",
+                optional_display(
+                    report
+                        .first_timestamp
+                        .map(crate::output::frame::Timestamp::try_from)
+                        .transpose()?
+                ),
+                optional_display(
+                    report
+                        .last_timestamp
+                        .map(crate::output::frame::Timestamp::try_from)
+                        .transpose()?
+                ),
+                report.interfaces.len(),
+            ))?;
+            write_stdout_line(format_args!(
+                "{} protocol(s), {} endpoint(s), {} conversation(s)",
+                report.protocol_count, report.endpoint_count, report.conversation_count,
+            ))?;
+            for row in &report.protocols {
+                write_stdout_line(format_args!(
+                    "protocol {}: frames {} bytes {}",
+                    row.protocol, row.frames, row.bytes
+                ))?;
+            }
+            for row in &report.endpoints {
+                write_stdout_line(format_args!(
+                    "endpoint {}: frames {} bytes {}",
+                    row.address,
+                    row.tx_frames.saturating_add(row.rx_frames),
+                    row.tx_bytes.saturating_add(row.rx_bytes)
+                ))?;
+            }
+            for row in &report.conversations {
+                crate::rendering::render_scope(&row.scope)?;
+                write_stdout_line(format_args!(
+                    "conversation {} stream {}: {} <-> {} frames {} bytes {}",
+                    row.transport.as_str(),
+                    row.stream,
+                    SocketAddr::new(row.address_a, row.port_a),
+                    SocketAddr::new(row.address_b, row.port_b),
+                    row.frames_a_to_b.saturating_add(row.frames_b_to_a),
+                    row.bytes_a_to_b.saturating_add(row.bytes_b_to_a)
+                ))?;
+            }
+        }
     }
     render_diagnostics_text(diagnostics)
 }

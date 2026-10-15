@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
+mod csv;
 mod rendering;
+mod selection;
 
 use crate::output::contract::Format;
 
@@ -19,12 +21,12 @@ use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::output::stats::Table;
 use crate::rendering::emit_aggregate;
-use crate::rendering::omitted_diagnostic;
 
 impl super::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[
         crate::output::contract::Format::Text,
         crate::output::contract::Format::Json,
+        crate::output::contract::Format::Csv,
     ];
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
@@ -34,7 +36,14 @@ impl super::Spec for Args {
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        crate::resources::declare!(settings, self, [top: Count @ ResultRetention]);
+        settings.declare(crate::resources::Field {
+            id: "top",
+            value: crate::resources::SettingValue::setting_value(&self.effective_top()),
+            unit: crate::resources::Unit::Count,
+            stage: crate::resources::Stage::ResultRetention,
+            enabled: (self.table != arguments::Table::Fragments).into(),
+            preset: None,
+        });
         self.limits.resources(
             settings,
             crate::command_options::AnalysisStages::with_tcp(false),
@@ -56,6 +65,19 @@ pub(super) fn run(
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     let table = Table::from(arguments.table);
+    if arguments.sort.is_some() && table == Table::Fragments {
+        return Err(CliError::new(
+            core::error::Kind::Usage,
+            "--sort is not supported for fragments",
+        ));
+    }
+    if format == Format::Csv && matches!(table, Table::Overview | Table::Fragments) {
+        return Err(CliError::new(
+            core::error::Kind::Usage,
+            "CSV supports only conversations, endpoints, protocols, ports, and io tables",
+        ));
+    }
+    let top = arguments.effective_top();
     let aggregation = analysis::stats::Table::from(arguments.table);
     let prepared = prepare(
         arguments.limits,
@@ -78,7 +100,9 @@ pub(super) fn run(
     .map_err(CliError::classified)?;
     let mut report = collector.finish(&summary);
     let frames_read = summary.frames_read;
-    let diagnostics = cap_table(&mut report, table, arguments.top);
+    crate::cancellation::check()?;
+    let diagnostics = selection::select(&mut report, table, top, arguments.sort);
+    crate::cancellation::check()?;
 
     match format {
         Format::Text => {
@@ -89,77 +113,12 @@ pub(super) fn run(
                 .map_err(CliError::classified)?;
             emit_aggregate(output::contract::Command::Stats, result, diagnostics)
         }
+        Format::Csv => {
+            let result = output::stats::Report::try_from((table, report, frames_read))
+                .map_err(CliError::classified)?;
+            csv::render(&result)?;
+            crate::rendering::render_diagnostics_stderr(&diagnostics)
+        }
         other => other.unreachable(),
-    }
-}
-
-fn cap_table(
-    report: &mut analysis::stats::Report,
-    table: Table,
-    top: Option<usize>,
-) -> Vec<core::diagnostic::Diagnostic> {
-    fn cap<T>(
-        rows: &mut Vec<T>,
-        limit: usize,
-        code: &'static str,
-        subject: &str,
-    ) -> Vec<core::diagnostic::Diagnostic> {
-        let omitted = u64::try_from(rows.len().saturating_sub(limit)).unwrap_or(u64::MAX);
-        rows.truncate(limit);
-        omitted_diagnostic(code, subject, omitted, "--top")
-    }
-    /// Stable, so equal volumes keep the collector's key order.
-    fn busiest_first<T>(rows: &mut [T], volume: impl Fn(&T) -> (u64, u64)) {
-        rows.sort_by_key(|row| std::cmp::Reverse(volume(row)));
-    }
-    let Some(limit) = top else {
-        return Vec::new();
-    };
-    match table {
-        Table::Conversations => {
-            busiest_first(&mut report.conversations, |row| {
-                (
-                    row.frames_a_to_b.saturating_add(row.frames_b_to_a),
-                    row.bytes_a_to_b.saturating_add(row.bytes_b_to_a),
-                )
-            });
-            cap(
-                &mut report.conversations,
-                limit,
-                "stats.conversations_omitted",
-                "conversation row(s)",
-            )
-        }
-        Table::Endpoints => {
-            busiest_first(&mut report.endpoints, |row| {
-                (
-                    row.tx_frames.saturating_add(row.rx_frames),
-                    row.tx_bytes.saturating_add(row.rx_bytes),
-                )
-            });
-            cap(
-                &mut report.endpoints,
-                limit,
-                "stats.endpoints_omitted",
-                "endpoint row(s)",
-            )
-        }
-        Table::Protocols => cap(
-            &mut report.protocols,
-            limit,
-            "stats.protocols_omitted",
-            "protocol row(s)",
-        ),
-        Table::Ports => {
-            busiest_first(&mut report.ports, |row| (row.frames, row.bytes));
-            cap(
-                &mut report.ports,
-                limit,
-                "stats.ports_omitted",
-                "port row(s)",
-            )
-        }
-        Table::Io => cap(&mut report.io, limit, "stats.io_omitted", "io bucket(s)"),
-        Table::Fragments => Vec::new(),
     }
 }

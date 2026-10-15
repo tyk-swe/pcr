@@ -58,6 +58,7 @@ mod resource_diagnostic_contracts;
 mod scan_payload_contracts;
 mod scanner_corpus_conformance;
 mod sctp_ip_protocol_contracts;
+mod stats_contracts;
 mod stdout_failure_contracts;
 mod target_planning_contracts;
 mod tcp_diagnostic_contracts;

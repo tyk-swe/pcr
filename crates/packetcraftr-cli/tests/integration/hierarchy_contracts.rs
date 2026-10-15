@@ -308,6 +308,17 @@ fn generated_documentation_covers_all_paths_and_five_shells() {
         for (group, _) in GROUPS {
             assert!(text.contains(group), "{file}: {group}");
         }
+        assert!(text.contains("overview"), "{file}: overview");
+        // These generators omit values for global options, including --output.
+        if !matches!(file, "packetcraftr.elv" | "_packetcraftr.ps1") {
+            assert!(text.contains("csv"), "{file}: csv");
+        }
+    }
+    for file in ["packetcraftr-analyze-stats.1", "packetcraftr-stats.1"] {
+        let text = std::fs::read_to_string(directory.path().join("man").join(file)).unwrap();
+        for value in ["overview", "csv", "\\-\\-sort", "frames", "bytes"] {
+            assert!(text.contains(value), "{file}: {value}");
+        }
     }
     for file in ["packetcraftr-network-scan.1", "packetcraftr-scan.1"] {
         let text = std::fs::read_to_string(directory.path().join("man").join(file)).unwrap();

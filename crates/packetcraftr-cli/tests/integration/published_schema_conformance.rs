@@ -19,10 +19,12 @@ fn rewrite_v2_validator() -> jsonschema::Validator {
 }
 
 fn identify_example() -> Value {
-    serde_json::from_str(include_str!(
+    let mut document: Value = serde_json::from_str(include_str!(
         "../../../../examples/documents/output-identify-success.json"
     ))
-    .expect("published identification example must be JSON")
+    .expect("published identification example must be JSON");
+    document["schema"] = packetcraftr_cli::output::contract::SCHEMA_V17.into();
+    document
 }
 
 #[test]
@@ -248,7 +250,7 @@ fn schema_accepts_based_source_reject_zero() {
         ),
         (
             schema_validator(),
-            packetcraftr_cli::output::contract::SCHEMA_V16,
+            packetcraftr_cli::output::contract::SCHEMA_V17,
         ),
     ] {
         let mut document = original.clone();
@@ -594,7 +596,8 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v16" => output_validator,
+            "packetcraftr.output/v17" => output_validator,
+            "packetcraftr.output/v16" => common::frozen_v16_schema_validator(),
             "packetcraftr.output/v15" => v15_validator,
             "packetcraftr.output/v14" => v14_validator,
             "packetcraftr.output/v11" => &v11_validator,

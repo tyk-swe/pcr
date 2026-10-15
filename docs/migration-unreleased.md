@@ -18,9 +18,9 @@ incomplete outcomes, and omission counts remain visible. Explicit detail
 selectors, including `--tree`, `--dissect`, and `--field`, remain effective.
 Reference output and requested packet bytes stay comprehensive.
 
-No scripts need to migrate: command identifiers, output/v16 and packet/v2,
-flags, defaults, exit codes, policy enforcement, and machine/byte output retain
-their contracts. Verbosity has no effect on machine/byte formats.
+Workflow grouping preserves command identifiers, existing flags, defaults, exit
+codes, policy enforcement, and packet/v2. Verbosity has no effect on machine/byte
+formats. Current producers use output/v17 for the statistics additions below.
 
 
 Net upgrade from 0.5.0-beta.3 to current `main`. See the [changelog](../CHANGELOG.md)
@@ -33,10 +33,23 @@ track `main`.
 | Contract | beta.3 | Current main |
 | --- | --- | --- |
 | Packet JSON/YAML | `packetcraftr.packet/v1` | `packetcraftr.packet/v2` |
-| Command JSON/NDJSON | `packetcraftr.output/v2` | `packetcraftr.output/v16` |
+| Command JSON/NDJSON | `packetcraftr.output/v2` | `packetcraftr.output/v17` |
 
-Older packet documents are rejected. Output v6–v15 schemas stay frozen for
+Older packet documents are rejected. Output v6–v16 schemas stay frozen for
 historical evidence; see the [consumer policy](consumer-compatibility.md).
+
+## Offline statistics (v17)
+
+Adopt `output::contract::SCHEMA_V17` for current producers. Core and output
+statistics `Table` gain `Overview`; output `TableData::Overview` contains total
+counts and protocol/endpoint/conversation rows. Core `stats::Report` adds
+`protocol_count`, `endpoint_count`, and `conversation_count` fields; update
+struct literals. `output::contract::Format` gains `Csv`; update exhaustive matches.
+
+CLI adds `--table overview`, `--sort frames|bytes`, and `--output csv` for flat
+statistics tables. Existing commands, defaults, aliases, and default ordering are
+unchanged. Overview defaults to five rows per leaderboard; `--top 0` keeps totals.
+See [statistics](statistics.md) for sorting, CSV headers/units, and limitations.
 
 ## Scanner, identification, and live workflows
 

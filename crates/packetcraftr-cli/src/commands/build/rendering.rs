@@ -33,7 +33,7 @@ pub(super) fn render_packet(
             output::contract::Command::Build,
             output::envelope::Published::<output::build::Report>::from(built),
         ),
-        Format::Ndjson | Format::Pcap | Format::PcapNg => Err(CliError::new(
+        Format::Csv | Format::Ndjson | Format::Pcap | Format::PcapNg => Err(CliError::new(
             Kind::Internal,
             "streaming and capture build output returned before packet rendering",
         )),

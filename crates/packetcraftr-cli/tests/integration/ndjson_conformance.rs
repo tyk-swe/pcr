@@ -588,6 +588,7 @@ fn dns_schema_reject_trunc_tcp_results() {
         include_str!("../../../../examples/documents/output-dns-complete.json"),
     ] {
         let mut document: Value = serde_json::from_str(document).unwrap();
+        document["schema"] = output::contract::SCHEMA_V17.into();
         document["result"]["outcome"] = json!("truncated");
         assert!(schema_validator().validate(&document).is_err());
     }
@@ -652,7 +653,7 @@ fn schema_reject_event_unknown_root_discs() {
             common::frozen_v10_schema_validator(),
             output::contract::SCHEMA_V10,
         ),
-        (schema_validator(), output::contract::SCHEMA_V16),
+        (schema_validator(), output::contract::SCHEMA_V17),
     ] {
         let mut document = original.clone();
         document["schema"] = family.into();
@@ -686,6 +687,7 @@ fn scan_traceroute_events_match_the_published_schema() {
         "../../../../examples/documents/output-scan-complete.json"
     ))
     .expect("published scan completion must parse");
+    complete["schema"] = output::contract::SCHEMA_V17.into();
     complete["result"]["traceroute"] = serde_json::to_value(Complete {
         plan: output::traceroute::hosts::Plan {
             first_hop: 1,

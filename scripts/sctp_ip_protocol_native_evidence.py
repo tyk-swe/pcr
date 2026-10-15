@@ -7,7 +7,7 @@ import re
 from native_platform_evidence import PROFILES, UNAVAILABLE_REASONS, status_of
 
 SCHEMA = "packetcraftr.sctp-ip-protocol-native-evidence/v1"
-OUTPUT_SCHEMAS = ("packetcraftr.output/v16",)
+OUTPUT_SCHEMAS = ("packetcraftr.output/v16", "packetcraftr.output/v17",)
 FAMILIES = ("ipv4", "ipv6")
 MODES = ("sctp-init", "sctp-cookie-echo", "ip-protocol")
 OUTPUTS = ("json", "ndjson")
@@ -161,7 +161,7 @@ def documents(run, output_mode, successful=True):
         doc.get("schema") not in OUTPUT_SCHEMAS or doc.get("command") != "scan"
         for doc in docs
     ):
-        raise ValueError("missing or incompatible output/v16 scan envelope")
+        raise ValueError("missing or incompatible output/v16 or v17 scan envelope")
     if output_mode == "ndjson":
         if [doc.get("sequence") for doc in docs] != list(range(len(docs))):
             raise ValueError("noncontiguous NDJSON sequence")

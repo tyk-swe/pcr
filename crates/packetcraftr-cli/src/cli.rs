@@ -20,6 +20,7 @@ use crate::errors::{CANCELLED_EXIT_CODE, KINDS, exit_code_description, exit_code
 const ROOT_HELP_FORMATS: &str = r"Output formats:
   text    Human-readable summaries and diagnostics.
   json    One aggregate JSON document.
+  csv     Flat statistics tables with a header (excluding overview/fragments).
   ndjson  One JSON record per streamed event.
   hex     Exact frame bytes as hexadecimal text.
   raw     Exact frame bytes without text framing.
@@ -177,6 +178,7 @@ pub(crate) struct Cli {
 pub(crate) enum Format {
     Text,
     Json,
+    Csv,
     Ndjson,
     Hex,
     Raw,
@@ -190,6 +192,7 @@ impl From<Format> for output::contract::Format {
         match value {
             Format::Text => Self::Text,
             Format::Json => Self::Json,
+            Format::Csv => Self::Csv,
             Format::Ndjson => Self::Ndjson,
             Format::Hex => Self::Hex,
             Format::Raw => Self::Raw,

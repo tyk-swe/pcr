@@ -27,7 +27,7 @@ Reader `max_interfaces` counts descriptions per PCAPNG section;
 | TCP state | `max_tcp_reassembly_bytes` covers retained payload/history, 4 KiB out-of-order page slack, and flow/segment metadata. |
 | HTTP/2 state | Bounded frames, streams, active streams per connection, frame payload, compressed/decoded headers, continuations, HPACK table bytes, pending SETTINGS, and body bytes alongside shared application/provenance limits. |
 | TLS state | `max_tls_sessions` bounds tracked slots; `max_tls_buffer_bytes` bounds logical handshake buffers (135,168-byte floor per direction) and alert charges. |
-| Stats | CLI allocates only the selected table; `--top` caps final rows (busiest by frames then bytes/name, or earliest `io` buckets). |
+| Stats | CLI retains only selected tables; overview collects protocols/endpoints/conversations together, defaulting to five rows each. `--sort` ranks before `--top`; totals precede truncation. See [statistics](statistics.md). |
 | Results | JSON retains selected rows/sessions/chunks up to command limits; NDJSON holds one line per encoder (at most 16 MiB including newline). |
 | Native/progress work | Live capture retains its bounded native queue; timed-out/cancelled workers retain permits until cleanup completes (`Runtime::snapshot()`). |
 

@@ -21,7 +21,7 @@ for replacement APIs.
   under `evidence: packetcraftr::evidence::Limits { max_frames, max_bytes, max_undecoded }`,
   preserving JSON and binary Serde representations.
 - Packet documents use `packetcraftr.packet/v2`; machine output uses
-  `packetcraftr.output/v16` (output v6–v15 remain frozen; see
+  `packetcraftr.output/v17` (output v6–v16 remain frozen; see
   [consumer compatibility](docs/consumer-compatibility.md)).
 - Live workflows run through `Client<P, K>` with explicit providers, policy,
   clock, cancellation, and runtime, taking `(request, sink)` and returning
@@ -42,6 +42,11 @@ for replacement APIs.
   list; `capture` uses capture-local interface IDs.
 
 ### Added
+
+- Offline statistics overview with capture totals and five-row traffic leaderboards,
+  explicit `--sort frames|bytes`, and CSV exports for flat statistics tables.
+  Publish output/v17 while preserving v16 schemas and historical fixtures.
+  See [statistics](docs/statistics.md) for ordering, limits, and CSV headers/units.
 
 - Raw SCTP `INIT` and `COOKIE-ECHO` scans (`scan::SctpScan`, `--transport sctp`,
   `--sctp-scan`, `sctp:` port prefixes), standalone IP-protocol (`0..=255`)

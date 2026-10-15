@@ -102,7 +102,7 @@ def documents(run, mode, successful=True):
         raise ValueError('missing/unbounded process evidence')
     docs = ([strict_json(run['stdout'])] if mode == 'json' else
             [strict_json(line) for line in run['stdout'].splitlines() if line.strip()])
-    if not docs or any(doc.get('schema') not in ('packetcraftr.output/v15', 'packetcraftr.output/v16') or doc.get('command') != 'scan' for doc in docs):
+    if not docs or any(doc.get('schema') not in ('packetcraftr.output/v15', 'packetcraftr.output/v16', 'packetcraftr.output/v17') or doc.get('command') != 'scan' for doc in docs):
         raise ValueError('missing/current-version scan evidence')
     if mode == 'ndjson':
         if [doc.get('sequence') for doc in docs] != list(range(len(docs))):

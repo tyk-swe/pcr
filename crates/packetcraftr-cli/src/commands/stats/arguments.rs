@@ -11,6 +11,9 @@ and the `fragments` table are computed capture-globally before `--filter`.
 
 Examples:
   packetcraftr analyze stats capture.pcapng --table conversations
+  packetcraftr analyze stats capture.pcapng --table overview
+  packetcraftr analyze stats capture.pcapng --table conversations --sort bytes --top 10
+  packetcraftr --output csv analyze stats capture.pcapng --table endpoints
   packetcraftr analyze stats capture.pcapng --table fragments
   packetcraftr analyze stats capture.pcapng --table protocols --filter 'ip.src in 10.0.0.0/8'
   packetcraftr --output json analyze stats capture.pcapng --table io --interval-ms 100";
@@ -29,14 +32,18 @@ pub(crate) struct Args {
     /// Bucket width of the io table in milliseconds.
     #[arg(long, default_value_t = 1_000)]
     pub(crate) interval_ms: u64,
-    /// Maximum rows kept for the protocols, conversations, endpoints, ports,
-    /// and io tables. Every table but io keeps its busiest rows by frame count,
-    /// breaking ties by bytes (protocols: by name); io keeps its first buckets
-    /// in time order. The fragments table stays bounded by --max-ip-outcomes
-    /// instead, because its accounting is capture-global. This caps final rows,
-    /// not the number of keys required for exact aggregation.
+    /// Maximum retained rows; overview defaults to five per leaderboard (zero
+    /// keeps totals only). Without --sort, tables preserve their usual ordering:
+    /// busiest frames then bytes for conversations/endpoints/ports, frames then
+    /// name for protocols, chronological for io. Fragments use --max-ip-outcomes.
+    /// Limits final rows, not keys needed for exact aggregation.
     #[arg(long, value_name = "N")]
     pub(crate) top: Option<usize>,
+    /// Rank rows by descending frames or bytes before --top, breaking ties by
+    /// the other metric then natural key. Overview defaults to frames.
+    /// Not supported for fragments.
+    #[arg(long, value_enum)]
+    pub(crate) sort: Option<Sort>,
     #[command(flatten)]
     pub(crate) decode: DecodeArgs,
     #[command(flatten)]
@@ -52,6 +59,7 @@ pub(crate) enum Table {
     Ports,
     Io,
     Fragments,
+    Overview,
 }
 
 impl From<Table> for output::stats::Table {
@@ -63,6 +71,7 @@ impl From<Table> for output::stats::Table {
             Table::Ports => Self::Ports,
             Table::Io => Self::Io,
             Table::Fragments => Self::Fragments,
+            Table::Overview => Self::Overview,
         }
     }
 }
@@ -76,6 +85,20 @@ impl From<Table> for packetcraftr_core::analysis::stats::Table {
             Table::Ports => Self::Ports,
             Table::Io => Self::Io,
             Table::Fragments => Self::Fragments,
+            Table::Overview => Self::Overview,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Sort {
+    Frames,
+    Bytes,
+}
+
+impl Args {
+    pub(crate) fn effective_top(&self) -> Option<usize> {
+        self.top
+            .or_else(|| (self.table == Table::Overview).then_some(5))
     }
 }

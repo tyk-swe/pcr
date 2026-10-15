@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Smoke-test an extracted release archive using only the Python standard library."""
 import argparse
+import csv
+import io
 import json
 import pathlib
 import re
@@ -26,9 +28,10 @@ ASSETS = (
     'schemas/packetcraftr.output.v14.schema.json',
     'schemas/packetcraftr.output.v15.schema.json',
     'schemas/packetcraftr.output.v16.schema.json',
+    'schemas/packetcraftr.output.v17.schema.json',
     'schemas/packetcraftr.os-fingerprints.v1.schema.json',
     'docs/verification-contract.md', 'docs/consumer-compatibility.md',
-    'docs/resource-presets.md', 'docs/tasks.md', 'docs/native-validation.md',
+    'docs/resource-presets.md', 'docs/statistics.md', 'docs/tasks.md', 'docs/native-validation.md',
     'examples/consumers/forwarding.py',
     'examples/consumers/fixtures/v6-forwarding.json',
     'examples/consumers/fixtures/v11-forwarding.json',
@@ -37,6 +40,7 @@ ASSETS = (
     'examples/consumers/fixtures/v14-forwarding.json',
     'examples/consumers/fixtures/v15-forwarding.json',
     'examples/consumers/fixtures/v16-forwarding.json',
+    'examples/consumers/fixtures/v17-forwarding.json',
     'docs/tcp-diagnostics.md',
     'examples/documents/output-scan-tcp-diagnostic.json',
     'examples/documents/output-scan-tcp-diagnostic-event.json',
@@ -71,6 +75,7 @@ ASSETS = (
     'crates/packetcraftr/data/service-exclusions.provenance.yaml',
     'examples/documents/packet-ipv4-udp.json',
     'examples/documents/output-stats-resources.json',
+    'examples/documents/output-stats-overview-success.json',
     'examples/documents/output-stats-clock.json',
     'examples/documents/output-stats-scopes.json',
     'examples/documents/output-read-resources.json',
@@ -142,7 +147,7 @@ def verify(root, version, commit, target, variant):
     if len(records) != expected_frames + 1:
         raise ValueError(f'packaged capture must produce {expected_frames} frames and one completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v16'
+        if (record.get('schema') != 'packetcraftr.output/v17'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):
@@ -164,13 +169,29 @@ def verify(root, version, commit, target, variant):
         expected = json.loads((root / 'examples/documents' / example).read_text(encoding='utf-8'))
         if expected.get('schema') != 'packetcraftr.output/v10':
             raise ValueError(f'{example} must preserve its released output/v10 family')
-        if actual.get('schema') != 'packetcraftr.output/v16':
-            raise ValueError(f'packaged stats output for {example} must use output/v16')
+        if actual.get('schema') != 'packetcraftr.output/v17':
+            raise ValueError(f'packaged stats output for {example} must use output/v17')
         # Preserve released examples and compare every other envelope/payload
         # field against the current producer without changing archived files.
         expected['schema'] = actual['schema']
         if actual != expected:
             raise ValueError(f'packaged stats output differs from {example}')
+
+    overview = json.loads(cli('--output', 'json', 'analyze', 'stats',
+                              'examples/captures/http-stream.pcap', '--table', 'overview'))
+    if overview.get('schema') != 'packetcraftr.output/v17' or overview['result']['table'] != 'overview':
+        raise ValueError('packaged overview must use output/v17')
+    for rows, count in (('protocols', 'protocol_count'), ('endpoints', 'endpoint_count'),
+                        ('conversations', 'conversation_count')):
+        if len(overview['result'][rows]) > min(5, overview['result'][count]):
+            raise ValueError(f'invalid overview leaderboard: {rows}')
+    exported = cli('--output', 'csv', 'analyze', 'stats',
+                   'examples/captures/http-stream.pcap', '--table', 'endpoints', '--sort', 'bytes')
+    records = list(csv.reader(io.StringIO(exported)))
+    if not records or records[0] != ['address', 'tx_frames', 'tx_bytes', 'rx_frames', 'rx_bytes']:
+        raise ValueError('packaged CSV has invalid endpoint headers')
+    if any(len(row) != 5 for row in records):
+        raise ValueError('packaged CSV must contain only endpoint records')
 
     # Discover canonical commands and retained aliases through registry-backed
     # help, then verify their packaged pages without a separate inventory file.

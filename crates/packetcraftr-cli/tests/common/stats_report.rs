@@ -36,6 +36,9 @@ pub(crate) fn report(
         bytes: 321,
         first_timestamp: Some(first),
         last_timestamp: Some(last),
+        protocol_count: 1,
+        endpoint_count: 1,
+        conversation_count: 1,
         protocols: vec![ProtocolStat {
             protocol: "ipv4".to_owned(),
             frames: 7,

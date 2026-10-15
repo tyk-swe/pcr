@@ -76,6 +76,12 @@ pub struct Report {
     pub bytes: u64,
     pub first_timestamp: Option<SystemTime>,
     pub last_timestamp: Option<SystemTime>,
+    /// Distinct protocols before any presentation limit is applied.
+    pub protocol_count: usize,
+    /// Distinct endpoints before any presentation limit is applied.
+    pub endpoint_count: usize,
+    /// Distinct scoped conversations before any presentation limit is applied.
+    pub conversation_count: usize,
     /// Sorted by frame count descending, then name, for stable reports.
     pub protocols: Vec<ProtocolStat>,
     pub conversations: Vec<ConversationStat>,

@@ -151,7 +151,7 @@ impl Drop for Running {
 }
 
 #[test]
-fn cancel_json_publish_keeps_document() {
+fn cancel_statistics_publication_keeps_json_and_stops_csv() {
     common::require_procfs();
     let mut capture = tempfile::NamedTempFile::new().unwrap();
     let builder = Builder::new(packetcraftr_core::protocol::builtin::registry());
@@ -179,11 +179,16 @@ fn cancel_json_publish_keeps_document() {
         }
         writer.flush().unwrap();
     }
-    for signal in ["INT", "TERM"] {
+    for (format, signal) in [
+        ("json", "INT"),
+        ("json", "TERM"),
+        ("csv", "INT"),
+        ("csv", "TERM"),
+    ] {
         let mut process = Running::start_with_stdout_pipe(
             &[
                 "--output",
-                "json",
+                format,
                 "stats",
                 common::path_text(capture.path()),
                 "--top",
@@ -201,15 +206,22 @@ fn cancel_json_publish_keeps_document() {
         process.signal_and_wait(signal);
         let output = process.finish();
         assert_eq!(output.status.code(), Some(130), "{signal}: {output:?}");
-        let document = common::parse_json(&output);
-        assert_eq!(
-            document["result"]["conversations"]
-                .as_array()
-                .unwrap()
-                .len(),
-            1000
-        );
-        assert!(document.get("error").is_none());
+        if format == "json" {
+            let document = common::parse_json(&output);
+            assert_eq!(
+                document["result"]["conversations"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1000
+            );
+            assert!(document.get("error").is_none());
+        } else {
+            assert!(output.stdout.starts_with(b"transport,stream,scope_id,"));
+            assert!(output.stdout.ends_with(b"\r\n"));
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("io.cancelled"));
+            assert!(output.stdout.iter().filter(|byte| **byte == b'\n').count() <= 1001);
+        }
         assert!(String::from_utf8_lossy(&output.stderr).contains("io.cancelled"));
     }
 }

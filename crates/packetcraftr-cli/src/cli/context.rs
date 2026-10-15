@@ -90,7 +90,9 @@ fn parse_machine_format(value: &str) -> Option<Option<MachineFormat>> {
     Some(match format {
         Format::Json => Some(MachineFormat::Json),
         Format::Ndjson => Some(MachineFormat::Ndjson),
-        Format::Text | Format::Hex | Format::Raw | Format::Pcap | Format::PcapNg => None,
+        Format::Text | Format::Csv | Format::Hex | Format::Raw | Format::Pcap | Format::PcapNg => {
+            None
+        }
     })
 }
 

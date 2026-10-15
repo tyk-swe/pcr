@@ -8,7 +8,7 @@ from discovery_isolated_fixture import addresses
 from native_platform_evidence import PROFILES, UNAVAILABLE_REASONS
 
 SCHEMA = 'packetcraftr.discovery-native-evidence/v1'
-OUTPUT_SCHEMAS = ('packetcraftr.output/v10', 'packetcraftr.output/v11', 'packetcraftr.output/v12', 'packetcraftr.output/v13', 'packetcraftr.output/v14', 'packetcraftr.output/v15', 'packetcraftr.output/v16')
+OUTPUT_SCHEMAS = ('packetcraftr.output/v10', 'packetcraftr.output/v11', 'packetcraftr.output/v12', 'packetcraftr.output/v13', 'packetcraftr.output/v14', 'packetcraftr.output/v15', 'packetcraftr.output/v16', 'packetcraftr.output/v17')
 HEX = re.compile(r'[0-9a-f]{64}')
 
 

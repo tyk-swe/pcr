@@ -26,6 +26,8 @@ packetcraftr --output hex packet build --packet 'raw(text=hello)'
 packetcraftr --output hex packet build --packet 'ipv4()/icmpv4(identifier=1)' \
   | packetcraftr packet dissect --link-type ipv4 --hex - --tree
 packetcraftr --output ndjson files read examples/captures/tls-handshake.pcapng --max-frames 100
+packetcraftr analyze stats examples/captures/http-stream.pcap --table overview
+packetcraftr --output csv analyze stats examples/captures/http-stream.pcap --table endpoints
 packetcraftr analyze tls examples/captures/tls-handshake.pcapng
 packetcraftr analyze http2 examples/captures/http2-multiplexed.pcapng
 ```

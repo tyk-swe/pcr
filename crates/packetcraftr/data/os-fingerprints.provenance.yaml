@@ -27,7 +27,7 @@ source:
 transforms:
   - step: "collect"
     detail: |
-      scripts/test-os-identification-native.py observes immediate real kernel
+      The original collection observed immediate real kernel
       replies across a documentation-address 1500-byte veth pair in distinct
       fresh source/peer network namespaces. Disable checksum offload; retain
       exact command outputs, frames, source/binary hashes and kernel identity.

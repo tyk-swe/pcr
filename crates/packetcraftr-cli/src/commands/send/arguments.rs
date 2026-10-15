@@ -23,21 +23,3 @@ pub(crate) struct Args {
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) rate: Option<u32>,
 }
-
-#[cfg(test)]
-mod tests {
-    use clap::Parser as _;
-
-    use crate::cli::Cli;
-
-    #[test]
-    fn send_rejects_zero_repeat_and_rate() {
-        for option in ["--repeat", "--rate"] {
-            assert!(
-                Cli::try_parse_from(["packetcraftr", "send", "--packet", "ipv4()", option, "0",])
-                    .is_err(),
-                "{option} 0 must be rejected"
-            );
-        }
-    }
-}

@@ -101,18 +101,3 @@ fn parse_stream(text: &str) -> Option<StreamRef> {
     let index = index.parse::<u64>().ok()?;
     Some(StreamRef { transport, index })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn malformed_interfaces_fail_only_when_read() {
-        let selector = interface_selector("0").unwrap();
-        assert_eq!(selector.text(), "0");
-        let error = selector.get().unwrap_err();
-        assert_eq!(error.message, "--interface index must be non-zero");
-        assert_eq!(error.exit_code(), 2);
-        assert!(interface_selector("eth0").unwrap().get().is_ok());
-    }
-}

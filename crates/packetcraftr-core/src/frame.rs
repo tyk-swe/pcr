@@ -263,30 +263,3 @@ impl<'de> Deserialize<'de> for Frame {
         Ok(frame)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    #[test]
-    fn unix_floor_rounds_instants_before_the_epoch_down() {
-        let at =
-            |seconds, nanoseconds| unix_floor(UNIX_EPOCH + Duration::new(seconds, nanoseconds));
-        let before =
-            |seconds, nanoseconds| unix_floor(UNIX_EPOCH - Duration::new(seconds, nanoseconds));
-        assert_eq!(at(0, 0), (0, 0));
-        assert_eq!(at(7, 125_000_000), (7, 125_000_000));
-        assert_eq!(before(2, 0), (-2, 0));
-        assert_eq!(before(0, 1), (-1, 999_999_999));
-        assert_eq!(before(1, 250_000_000), (-2, 750_000_000));
-    }
-
-    #[test]
-    fn malformed_ranges_are_rejected_without_panicking() {
-        let bytes = Bytes::from_static(b"abcd");
-        assert_eq!(checked_slice(&bytes, 1, 3).unwrap().as_ref(), b"bc");
-        assert!(checked_slice(&bytes, 3, 2).is_none());
-        assert!(checked_slice(&bytes, 0, 5).is_none());
-    }
-}

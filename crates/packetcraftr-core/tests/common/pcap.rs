@@ -40,27 +40,6 @@ pub(crate) fn put_i64(bytes: &mut Vec<u8>, endianness: Endianness, value: i64) {
     });
 }
 
-pub(crate) fn words(endianness: Endianness, values: &[u32]) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    for &value in values {
-        put_u32(&mut bytes, endianness, value);
-    }
-    bytes
-}
-
-pub(crate) fn option(endianness: Endianness, code: u16, value: &[u8]) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    put_u16(&mut bytes, endianness, code);
-    put_u16(
-        &mut bytes,
-        endianness,
-        u16::try_from(value.len()).expect("test option length fits u16"),
-    );
-    bytes.extend_from_slice(value);
-    bytes.resize(bytes.len().next_multiple_of(4), 0);
-    bytes
-}
-
 pub(crate) fn block(endianness: Endianness, block_type: u32, body: &[u8]) -> Vec<u8> {
     assert!(body.len().is_multiple_of(4));
     let length = u32::try_from(body.len() + 12).expect("test block length fits u32");
@@ -122,36 +101,6 @@ pub(crate) fn enhanced_packet_block(
     put_padded(&mut body, payload);
     body.extend_from_slice(options);
     block(endianness, 6, &body)
-}
-
-pub(crate) fn obsolete_packet_block(
-    endianness: Endianness,
-    drops: u16,
-    ticks: u64,
-    payload: &[u8],
-    options: &[u8],
-) -> Vec<u8> {
-    let length = u32::try_from(payload.len()).expect("small payload");
-    let mut body = Vec::new();
-    put_u16(&mut body, endianness, 0);
-    put_u16(&mut body, endianness, drops);
-    put_ticks(&mut body, endianness, ticks);
-    put_u32(&mut body, endianness, length);
-    put_u32(&mut body, endianness, length);
-    put_padded(&mut body, payload);
-    body.extend_from_slice(options);
-    block(endianness, 2, &body)
-}
-
-pub(crate) fn simple_packet_block(
-    endianness: Endianness,
-    original_length: u32,
-    captured: &[u8],
-) -> Vec<u8> {
-    let mut body = Vec::new();
-    put_u32(&mut body, endianness, original_length);
-    put_padded(&mut body, captured);
-    block(endianness, 3, &body)
 }
 
 fn put_ticks(bytes: &mut Vec<u8>, endianness: Endianness, ticks: u64) {

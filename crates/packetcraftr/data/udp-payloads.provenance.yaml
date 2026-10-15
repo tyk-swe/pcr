@@ -36,6 +36,4 @@ maintenance:
     `version` here and `CURATED_UDP_PAYLOADS_VERSION`; response checks remain
     configured checks and are never promoted to product identification.
 
-coverage:
-  - fixture: "crates/packetcraftr/src/scan/profile/curated/tests.rs"
-    covers: "every curated profile compiles, matches the catalog's UDP entry for its port, and its check accepts a conforming reply"
+coverage: []

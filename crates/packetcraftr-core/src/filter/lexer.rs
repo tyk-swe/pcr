@@ -292,37 +292,3 @@ fn read_escape(
 fn text_from(contents: Vec<u8>, offset: usize) -> Result<String, Error> {
     String::from_utf8(contents).map_err(|_| syntax(offset, "quoted text is not valid UTF-8"))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn only(source: &str) -> Token {
-        let mut tokens = tokenize(source).expect("fixture tokenizes");
-        assert_eq!(tokens.len(), 1, "{source}");
-        tokens.remove(0).token
-    }
-
-    fn kinds(source: &str) -> Vec<Token> {
-        tokenize(source)
-            .expect("fixture tokenizes")
-            .into_iter()
-            .map(|spanned| spanned.token)
-            .collect()
-    }
-
-    #[test]
-    fn a_b_is_a_byte_string_only_as_a_lone_word_before_a_quote() {
-        assert_eq!(only("b"), Token::Word("b".to_owned()));
-        assert_eq!(only("b.x"), Token::Word("b.x".to_owned()));
-        assert_eq!(only("ab"), Token::Word("ab".to_owned()));
-        assert_eq!(
-            kinds("ab\"x\""),
-            [Token::Word("ab".to_owned()), Token::Text("x".to_owned())]
-        );
-        assert_eq!(
-            kinds("b \"x\""),
-            [Token::Word("b".to_owned()), Token::Text("x".to_owned())]
-        );
-    }
-}

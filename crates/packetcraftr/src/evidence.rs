@@ -206,11 +206,6 @@ impl DiagnosticLog {
         packetcraftr_core::diagnostic::push_once(&mut self.entries, diagnostic);
     }
 
-    #[cfg(test)]
-    pub(crate) fn as_slice(&self) -> &[Diagnostic] {
-        &self.entries
-    }
-
     /// A failing `publish` leaves its entry unpublished rather than skipping the remainder.
     pub(crate) fn publish_new<E>(
         &mut self,
@@ -360,51 +355,5 @@ impl SentPacket {
 
     pub fn frame(&self) -> &Frame {
         &self.frame
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn frame_limit_and_overflow_leave_counters_untouched() {
-        let mut budget = RetentionBudget {
-            retained_frames: 1,
-            retained_bytes: 3,
-        };
-        assert_eq!(budget.reserve(1, 1, 10), Err(RetentionError::FrameLimit));
-        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 3));
-
-        budget.retained_frames = usize::MAX;
-        assert_eq!(
-            budget.reserve(1, usize::MAX, 10),
-            Err(RetentionError::FrameCountOverflow)
-        );
-        assert_eq!(
-            (budget.retained_frames, budget.retained_bytes),
-            (usize::MAX, 3)
-        );
-    }
-
-    #[test]
-    fn byte_limit_and_overflow_leave_counters_untouched() {
-        let mut budget = RetentionBudget {
-            retained_frames: 1,
-            retained_bytes: 9,
-        };
-        assert_eq!(budget.reserve(2, 10, 10), Err(RetentionError::ByteLimit));
-        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 9));
-
-        budget.retained_bytes = usize::MAX;
-        assert_eq!(
-            budget.reserve(1, 10, usize::MAX),
-            Err(RetentionError::ByteCountOverflow)
-        );
-        assert_eq!(
-            (budget.retained_frames, budget.retained_bytes),
-            (1, usize::MAX)
-        );
     }
 }

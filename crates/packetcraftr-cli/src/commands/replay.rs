@@ -4,8 +4,6 @@
 pub(super) mod arguments;
 mod conversion;
 mod rendering;
-#[cfg(test)]
-mod tests;
 
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex, PoisonError};

@@ -90,28 +90,3 @@ impl CaptureClock {
         due
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn capture_time_advances_from_the_first_frame_and_never_rewinds() {
-        let mut clock = CaptureClock::new();
-        let origin = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
-
-        let (first, regressed) = clock.at(origin, 1).expect("origin timestamp fits");
-        assert_eq!(regressed, None);
-        let (advanced, regressed) = clock
-            .at(origin + Duration::from_secs(3), 2)
-            .expect("later timestamp fits");
-        assert_eq!(regressed, None);
-        let (rewound, regressed) = clock
-            .at(origin + Duration::from_secs(1), 3)
-            .expect("out-of-order timestamp is clamped");
-
-        assert_eq!(advanced.duration_since(first), Duration::from_secs(3));
-        assert_eq!(rewound, advanced);
-        assert_eq!(regressed, Some(Duration::from_secs(2)));
-    }
-}

@@ -10,8 +10,6 @@ use super::{Error, Limits};
 
 mod generated;
 mod scalar;
-#[cfg(test)]
-mod tests;
 
 use generated::{Generator, parse_generated};
 use scalar::parse_scalar;

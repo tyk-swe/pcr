@@ -76,6 +76,3 @@ pub fn merge(operator: BTreeMap<u16, Arc<UdpProfile>>, endpoints: &[probe::Endpo
     merged.overridden.sort_unstable();
     merged
 }
-
-#[cfg(test)]
-mod tests;

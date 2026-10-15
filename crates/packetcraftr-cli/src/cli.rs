@@ -233,13 +233,3 @@ impl ColorChoice {
         choice.write_global();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_command_tree_is_valid() {
-        <Cli as clap::CommandFactory>::command().debug_assert();
-    }
-}

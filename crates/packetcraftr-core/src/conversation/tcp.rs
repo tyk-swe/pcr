@@ -203,13 +203,3 @@ impl Exchange<'_> {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn frame_count_never_wraps() {
-        assert!(frame_count(usize::MAX, usize::MAX, 1, 1, Close::Fin) > 4096);
-    }
-}

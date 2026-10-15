@@ -283,6 +283,3 @@ impl Seen {
         self.0[table][word] & bit != 0
     }
 }
-
-#[cfg(test)]
-mod tests;

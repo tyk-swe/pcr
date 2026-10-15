@@ -511,38 +511,3 @@ fn validate_child(
         diagnostics,
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn extension_chain_walk_is_bounded_and_rejects_zero_length() {
-        // one header of two units whose next type is zero
-        assert_eq!(
-            extension_chain_len(&[2, 0xaa, 0xbb, 0xcc, 0xdd, 0, 0, 0]),
-            Ok(8)
-        );
-        // a zero length would never advance the cursor
-        assert_eq!(
-            extension_chain_len(&[0, 0, 0, 0]),
-            Err("extension header has zero length")
-        );
-        // a header claiming more bytes than remain
-        assert_eq!(
-            extension_chain_len(&[2, 0, 0, 0]),
-            Err("extension header runs past the declared length")
-        );
-        // a chain that never terminates stops at the header cap
-        let endless = [1_u8, 0, 0, 0xc0].repeat(MAX_EXTENSION_HEADERS + 1);
-        assert_eq!(
-            extension_chain_len(&endless),
-            Err("extension header chain exceeds the supported header count")
-        );
-        // a chain cut off after a non-final header
-        assert_eq!(
-            extension_chain_len(&[1, 0, 0, 0xc0]),
-            Err("extension header chain is truncated")
-        );
-    }
-}

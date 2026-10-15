@@ -182,32 +182,3 @@ fn parse_option(
     option.finish()?;
     Ok(parsed)
 }
-
-#[cfg(test)]
-mod tests {
-    use bytes::Bytes;
-
-    use super::*;
-
-    #[test]
-    fn constructed_options_enforce_the_wire_limit_before_encoding() {
-        for options in [
-            vec![TcpOption::Trailing(Bytes::from(vec![0; 65_536]))],
-            vec![TcpOption::Nop; 41],
-            vec![TcpOption::Sack(Vec::new())],
-            vec![TcpOption::Sack(vec![
-                SackBlock {
-                    left_edge: 1,
-                    right_edge: 2,
-                };
-                5
-            ])],
-        ] {
-            assert!(serialize(&options).is_err());
-            assert!(parse_field(options_value(&options), tcp_schema(), "options").is_err());
-        }
-        assert_eq!(serialize(&vec![TcpOption::Nop; 40]).unwrap(), vec![1; 40]);
-        let raw = parse(&Bytes::from_static(&[5, 2]));
-        assert_eq!(serialize(&raw).unwrap(), [5, 2]);
-    }
-}

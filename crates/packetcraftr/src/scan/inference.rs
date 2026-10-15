@@ -548,6 +548,3 @@ fn conclude(attempts: impl Iterator<Item = (u64, Option<Rule>)>) -> Inference {
     }
     inference
 }
-
-#[cfg(test)]
-mod tests;

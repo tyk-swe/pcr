@@ -96,32 +96,3 @@ impl FrameSelector {
             .map(|decoded| decoded.is_some())
     }
 }
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    use crate::error::Classified;
-    use crate::filter::Limits;
-
-    use crate::protocol::builtin;
-
-    fn compile(source: &str, registry: &Registry) -> Filter {
-        Filter::compile(source, registry, Limits::default()).expect("fixture filter compiles")
-    }
-
-    #[test]
-    fn stream_index_filters_are_refused_rather_than_matching_nothing() {
-        let registry = builtin::registry();
-        for source in ["tcp.stream == 1", "udp.stream == 1"] {
-            let error = FrameSelector::new(Arc::clone(&registry), compile(source, &registry), 14)
-                .expect_err("frame-at-a-time selection assigns no conversation index");
-            assert!(matches!(error, Error::StreamIndexUnavailable), "{source}");
-            assert_eq!(
-                error.classification().code,
-                "cli.filter_unsupported_field",
-                "{source}"
-            );
-        }
-    }
-}

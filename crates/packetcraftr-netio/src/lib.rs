@@ -24,9 +24,7 @@ pub mod resources;
 pub mod route;
 #[forbid(unsafe_code)]
 pub mod tcp;
-#[cfg(test)]
-#[forbid(unsafe_code)]
-mod test_support;
+
 #[forbid(unsafe_code)]
 pub mod tls;
 #[forbid(unsafe_code)]

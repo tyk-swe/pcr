@@ -12,6 +12,7 @@ For a full Linux check:
 ```sh
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --no-default-features
 cargo test --locked --workspace --all-features
 ```
 
@@ -36,9 +37,10 @@ skipped checks and cross-compilation are not runtime evidence.
 - Preserve input validation, resource limits, and wire data. Authorize live
   operations before discovery or transmission. Use finite budgets and loopback,
   documentation addresses, or isolated networks in tests and examples.
-- Put unit tests beside their code and public regressions in
-  `crates/*/tests/integration/`, registered in `main.rs`. Test behavior and failure
-  paths; avoid source-layout checks and duplicate coverage.
+- Keep the retained public behavior tests in `crates/*/tests/integration/`,
+  registered in `main.rs`. The validation inventory has 46 Rust integration tests
+  and no inline or Python unit tests. Preserve fuzz targets, benchmarks,
+  documentation examples, and release packaging checks.
 - Keep schemas, examples, tests, and migration notes in sync with public contracts.
   Shared dependency updates must also update the fuzz manifest and lockfile.
 

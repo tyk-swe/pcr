@@ -383,25 +383,3 @@ impl Codec for TlsCodec {
         Ok(Box::new(layer))
     }
 }
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    use crate::protocol::application::tls::test_support::{TLS_1_2, record};
-
-    #[test]
-    fn a_truncated_first_record_yields_no_layer() {
-        let mut bytes = record(23, TLS_1_2, &[0; 40]);
-        bytes.truncate(20);
-        assert!(Tls::from_records(&Bytes::copy_from_slice(&bytes)).is_none());
-    }
-
-    #[test]
-    fn malformed_borrowed_records_do_not_retain_input() {
-        let wire = vec![0; 1 << 20];
-        assert!(
-            Tls::parse_records(&wire, |_| panic!("invalid input must not be copied")).is_none()
-        );
-    }
-}

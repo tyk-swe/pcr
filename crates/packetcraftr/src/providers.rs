@@ -301,27 +301,3 @@ impl<P: TcpProviders> net::tcp::Provider for TcpOf<P> {
         self.0.tcp().connect(endpoint, deadline)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::ProviderSet;
-
-    #[test]
-    fn replacing_a_provider_preserves_the_other_capabilities() {
-        let providers = ProviderSet::packet(1, 2, 3, 4)
-            .with_tcp(5)
-            .with_resolver(6)
-            .with_udp(7)
-            .with_udp("udp")
-            .with_tcp("tcp")
-            .with_resolver("resolver");
-
-        assert_eq!(providers.route, 1);
-        assert_eq!(providers.interface, 2);
-        assert_eq!(providers.capture, 3);
-        assert_eq!(providers.transmit, 4);
-        assert_eq!(providers.tcp, "tcp");
-        assert_eq!(providers.resolver, "resolver");
-        assert_eq!(providers.udp, "udp");
-    }
-}

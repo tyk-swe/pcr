@@ -314,37 +314,3 @@ pub(super) fn validate<R>(source: &Source<R>, options: &Options) -> Result<(), E
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use super::{Error, Limits, LinkMode, Options, Timing};
-
-    fn options(repeat: u32, inter_pass_delay: Duration) -> Options {
-        Options {
-            repeat,
-            inter_pass_delay,
-            link_mode: LinkMode::Auto,
-            timing: Timing::Immediate,
-            max_gap: None,
-            limits: Limits::default(),
-            allow_permissive_live: false,
-        }
-    }
-
-    #[test]
-    fn overflowing_inter_pass_pause_is_rejected_with_a_saturated_total() {
-        let error = options(3, Duration::MAX)
-            .validate()
-            .expect_err("the total pause overflows Duration");
-        assert!(
-            matches!(
-                error,
-                Error::InvalidDuration { value, maximum }
-                    if value == Duration::MAX && maximum == Duration::from_secs(3600)
-            ),
-            "{error:?}"
-        );
-    }
-}

@@ -1,23 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 
 use crate::capture_support;
 use crate::common;
-use crate::process_support;
 
 use capture_support::{TCP_CLIENT, UDP_CLIENT, UDP_SERVER, write_pcap_hex};
 use common::{assert_contiguous, parse_json, parse_ndjson, path_text, run};
-use process_support::decode_hex;
 
-/// `UDP_CLIENT` with its last payload byte flipped, so the UDP checksum fails.
-fn damaged_udp_client() -> Vec<u8> {
-    let mut frame = decode_hex(UDP_CLIENT);
-    *frame.last_mut().expect("UDP payload") ^= 1;
-    frame
-}
 const TCP_SERVER: &str =
     "450000280000000040068e99c6336402c0000201005030390000000a000000045012100083040000";
 const TCP_DATA: &str =

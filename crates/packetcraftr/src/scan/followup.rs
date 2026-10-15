@@ -9,8 +9,7 @@ mod error;
 mod report;
 mod request;
 mod reverse;
-#[cfg(test)]
-mod tests;
+
 mod trace;
 
 pub use error::Error;

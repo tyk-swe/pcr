@@ -194,26 +194,3 @@ impl Provider for SystemProvider {
         system::timestamp_types(interface, deadline)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use super::*;
-    use crate::deadline::MAX_WAIT;
-
-    #[test]
-    fn capture_waits_reject_timeouts_above_the_public_maximum() {
-        let frozen = Instant::now();
-        let fixed = |limit| Deadline::with_time_source(limit, move || frozen);
-        assert!(wait_end(&fixed(MAX_WAIT)).unwrap().is_some());
-        assert!(matches!(
-            wait_end(&fixed(MAX_WAIT + Duration::from_nanos(1))),
-            Err(Error::InvalidCaptureTimeout {
-                maximum: MAX_WAIT,
-                ..
-            })
-        ));
-        assert!(wait_end(&fixed(Duration::ZERO)).unwrap().is_none());
-    }
-}

@@ -25,9 +25,6 @@ fn main() {
         ("native_send", native_layer2 || native_layer3),
         ("pcap_backend", pcap_backend),
         ("npcap_backend", npcap_backend),
-        // The isolated native suite enters Linux network namespaces through procfs.
-        ("packetcraftr_test_netns", os == "linux"),
-        ("packetcraftr_test_host_loopback", os == "macos" || windows),
     ];
     for (name, enabled) in capabilities {
         println!("cargo::rustc-check-cfg=cfg({name})");

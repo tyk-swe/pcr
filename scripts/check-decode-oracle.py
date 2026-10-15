@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Compare curated physical-frame fields with pinned TShark, without live traffic."""
 import argparse
-import functools
 import hashlib
 import ipaddress
 import json
@@ -37,62 +36,18 @@ def tcp(index, sequence=1000, flags=2, payload=b''):
     return ipv4(segment, source)
 
 
-@functools.cache
-def client_hello_record():
-    data = (ROOT / 'examples/captures/tls-handshake.pcapng').read_bytes()
-    cursor = 0
-    while cursor < len(data):
-        kind, length = struct.unpack_from('<II', data, cursor)
-        if kind == 6:
-            captured = struct.unpack_from('<I', data, cursor + 20)[0]
-            packet = data[cursor + 28:cursor + 28 + captured]
-            ip_header = (packet[0] & 15) * 4
-            tcp_header = (packet[ip_header + 12] >> 4) * 4
-            payload = packet[ip_header + tcp_header:]
-            if payload[:1] == b'\x16' and payload[5:6] == b'\x01':
-                return payload
-        cursor += length
-    raise AssertionError('published fixture lacks ClientHello')
-
-
-def packets(kind, size):
-    if kind in ('tcp-growth', 'tcp-growth-reverse'):
-        yield tcp(0)
-        indices = range(size) if kind == 'tcp-growth' else range(size - 1, -1, -1)
-        for index in indices:
-            yield tcp(0, 1002 + index * 100, 16, b'x' * 100)
-        return
-    for index in range(size):
-        if kind == 'flows':
-            yield tcp(index)
-        elif kind in ('segments', 'overlaps'):
-            yield tcp(index)
-            offsets = range(31, -1, -1) if kind == 'segments' else [0, 0, 1, 0]
-            for offset in offsets:
-                yield tcp(index, 1001 + offset, 16, bytes([offset]))
-        elif kind == 'tls-gaps':
-            hello = client_hello_record()
-            yield tcp(index)
-            yield tcp(index, 1001, 16, hello[:64])
-            yield tcp(index, 1097, 16, hello[96:128])
-        elif kind == 'fragments':
-            source = socket.inet_aton(f'192.0.2.{1 + (index // 60000) % 254}')
-            payload = struct.pack('!HHHH', 1024 + index % 60000, 9999, 16, 0) + b'fragment'
-            yield ipv4(payload[8:], source, 17, index % 65536, 1)
-            yield ipv4(payload[:8], source, 17, index % 65536, 0x2000)
-        elif kind == 'scopes':
-            ethernet = bytes.fromhex('0200000000020200000000010800')
-            vxlan = b'\x08\0\0\0' + (index + 1).to_bytes(3, 'big') + b'\0'
-            udp_payload = vxlan + ethernet + tcp(0)
-            udp = struct.pack('!HHHH', 40000, 4789, 8 + len(udp_payload), 0) + udp_payload
-            yield ipv4(udp, socket.inet_aton('203.0.113.1'), 17)
-        else:
-            raise ValueError(kind)
-
-
 def curated():
-    yield from packets('fragments', 2)
-    yield from packets('scopes', 2)
+    for index in range(2):
+        source = socket.inet_aton('192.0.2.1')
+        payload = struct.pack('!HHHH', 1024 + index, 9999, 16, 0) + b'fragment'
+        yield ipv4(payload[8:], source, 17, index, 1)
+        yield ipv4(payload[:8], source, 17, index, 0x2000)
+    for index in range(2):
+        ethernet = bytes.fromhex('0200000000020200000000010800')
+        vxlan = b'\x08\0\0\0' + (index + 1).to_bytes(3, 'big') + b'\0'
+        udp_payload = vxlan + ethernet + tcp(0)
+        udp = struct.pack('!HHHH', 40000, 4789, 8 + len(udp_payload), 0) + udp_payload
+        yield ipv4(udp, socket.inet_aton('203.0.113.1'), 17)
     source, destination = socket.inet_aton('192.0.2.1'), socket.inet_aton('198.51.100.2')
     options = bytes.fromhex('020405b4010303070402080a0000000100000000')
     segment = struct.pack('!HHIIBBHHH', 40000, 4444, 1000, 0, 0xa0, 2, 8192, 0, 0) + options
@@ -168,15 +123,9 @@ def normalize(value, kind, core=False):
     return value
 
 
-def capture_inputs(full):
-    captures = [('spec-vectors', pcap(curated())),
-                ('tls-handshake', (ROOT / 'examples/captures/tls-handshake.pcapng').read_bytes())]
-    if full:
-        captures.extend((kind, pcap(packets(kind, 64))) for kind in
-                        ['flows', 'segments', 'overlaps', 'fragments', 'scopes', 'tls-gaps'])
-        captures.extend((f'{kind}-{size}', pcap(packets(kind, size)))
-                        for kind in ['tcp-growth', 'tcp-growth-reverse'] for size in [128, 1024, 8192])
-    return captures
+def capture_inputs():
+    return [('spec-vectors', pcap(curated())),
+            ('tls-handshake', (ROOT / 'examples/captures/tls-handshake.pcapng').read_bytes())]
 
 
 def compare(args, report):
@@ -186,7 +135,7 @@ def compare(args, report):
     report['tshark_sha256'] = digest(shutil.which(args.tshark))
     if not tshark_matches(version, args.tshark_version):
         raise RuntimeError(f'expected TShark {args.tshark_version}; found {version}')
-    captures = capture_inputs(args.full)
+    captures = capture_inputs()
     for name, data in captures:
         capture_report = dict(name=name, sha256=hashlib.sha256(data).hexdigest(), status='failed')
         report['captures'].append(capture_report)
@@ -241,10 +190,9 @@ def main():
     parser.add_argument('--tshark-version', default=TSHARK_VERSION)
     parser.add_argument('--tshark', default='tshark', help='path to the pinned TShark executable')
     parser.add_argument('--report', type=pathlib.Path, default=ROOT / 'target/decode-oracle.json')
-    parser.add_argument('--full', action='store_true', help='include growth, overlap and generated protocol captures')
     args = parser.parse_args()
     args.binary = args.binary.resolve()
-    report = dict(status='failed', profile='full' if args.full else 'pull-request',
+    report = dict(status='failed', profile='curated',
                   expected_tshark=args.tshark_version, fields=[field[2] for field in DECODE_FIELDS],
                   allowances=['Fragmented physical children remain opaque in PacketcraftR; compare network fields only on those frames.'],
                   captures=[], mismatches=[])

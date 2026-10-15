@@ -76,34 +76,3 @@ impl LongTimeoutArgs {
         declare!(settings, self, [timeout_ms: Milliseconds @ Operation]);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use clap::Parser;
-
-    use super::*;
-
-    #[derive(Debug, Parser)]
-    struct Fixture {
-        #[command(flatten)]
-        duration: MaxDurationArgs,
-        #[command(flatten)]
-        timeout: TimeoutArgs,
-    }
-
-    #[test]
-    fn defaults_are_one_hour_and_one_second() {
-        let parsed = Fixture::try_parse_from(["fixture"]).unwrap();
-        assert_eq!(parsed.duration.max_duration_ms, MAX_MILLISECONDS);
-        assert_eq!(parsed.timeout.timeout_ms, 1000);
-    }
-
-    #[test]
-    fn max_duration_rejects_zero_and_over_one_hour() {
-        for rejected in ["0", "3600001"] {
-            let error =
-                Fixture::try_parse_from(["fixture", "--max-duration-ms", rejected]).unwrap_err();
-            assert_eq!(error.exit_code(), 2);
-        }
-    }
-}

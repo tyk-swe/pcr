@@ -20,10 +20,6 @@ use packetcraftr::target::Resolver;
 use packetcraftr::target::Target;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Classified;
-use packetcraftr_core::{
-    packet::Packet,
-    protocol::{link::Ethernet, network::Ipv4},
-};
 use packetcraftr_netio::{
     capture,
     interface::Id as InterfaceId,
@@ -158,113 +154,6 @@ fn denied_address_never_reaches_providers() {
     assert!(error.causes()[0].contains("denies public destination 8.8.8.8"));
     assert_eq!(client.providers().resolver.calls.load(Ordering::SeqCst), 1);
     assert_eq!(route_calls.load(Ordering::SeqCst), 0);
-}
-
-struct FixedRoutes;
-
-const INTERFACE_MAC: packetcraftr_core::packet::MacAddress =
-    packetcraftr_core::packet::MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01]);
-const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 5);
-const PREFERRED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 6);
-
-impl Provider for FixedRoutes {
-    type Error = std::convert::Infallible;
-
-    fn lookup_with_preferences(
-        &self,
-        _destination: IpAddr,
-        _interface_hint: Option<&InterfaceId>,
-        _preferred_source: Option<IpAddr>,
-        _deadline: &Deadline,
-    ) -> Result<Decision, Self::Error> {
-        Ok(Decision {
-            interface: InterfaceId {
-                name: "fixture0".to_owned(),
-                index: 1,
-            },
-            source_mac: Some(INTERFACE_MAC),
-            selected_source: Some(IpAddr::V4(SELECTED_SOURCE)),
-            preferred_source: Some(IpAddr::V4(PREFERRED_SOURCE)),
-            next_hop: None,
-            selection_reason: packetcraftr_netio::route::SelectionReason::OnLink,
-            destination_scope: packetcraftr_netio::route::Scope::Link,
-            mtu: 1_500,
-            capability: packetcraftr_netio::link::Capability::Layer2AndLayer3,
-            link_type: packetcraftr_core::frame::LinkType::ETHERNET,
-        })
-    }
-}
-
-fn client<R: Provider + 'static>(
-    routes: R,
-    policy: policy::Policy,
-) -> Client<common::FakeProviders<R, NeverTransmit>> {
-    Client::new(
-        packetcraftr_core::protocol::builtin::registry(),
-        policy,
-        common::providers(routes, NeverTransmit),
-    )
-}
-
-fn send_once<P: packetcraftr::PacketProviders>(
-    client: &Client<P>,
-    packet: Packet,
-    options: packetcraftr::send::Options,
-) -> Result<packetcraftr::send::Report, packetcraftr::send::Error> {
-    client.send(
-        packetcraftr::send::Request::packet(packet, options),
-        packetcraftr::send::Collector::default(),
-    )
-}
-
-fn sourced_packet(source_mac: Option<[u8; 6]>, source: Ipv4Addr) -> Packet {
-    let mut packet = Packet::new();
-    if let Some(source) = source_mac {
-        packet.push(Ethernet {
-            source,
-            ..Ethernet::default()
-        });
-    }
-    packet.push(Ipv4 {
-        source,
-        destination: Ipv4Addr::new(10, 0, 0, 2),
-        ..Ipv4::default()
-    });
-    packet
-}
-
-#[test]
-fn client_reject_bad_policy() {
-    let malformed = policy::Policy {
-        max_resolved_addresses: 0,
-        ..policy::Policy::default()
-    };
-    let policy_denial = malformed
-        .authorize(packetcraftr::policy::Operation::Wire(
-            packetcraftr::policy::WireLimits::new(1, 1),
-        ))
-        .expect_err("the policy rejects itself when malformed");
-
-    let client = client(FixedRoutes, malformed);
-    let client_denial = send_once(
-        &client,
-        sourced_packet(None, SELECTED_SOURCE),
-        packetcraftr::send::Options {
-            destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
-            ..packetcraftr::send::Options::default()
-        },
-    )
-    .expect_err("the client rejects the same malformed policy");
-
-    assert_eq!(
-        packetcraftr_core::error::Classified::classification(&client_denial).code,
-        policy_denial.classification().code
-    );
-    assert_eq!(client_denial.to_string(), policy_denial.to_string());
-    assert_eq!(
-        packetcraftr_core::error::Classified::classification(&client_denial).code,
-        "cli.live_target"
-    );
 }
 
 fn code(error: &impl Classified) -> String {

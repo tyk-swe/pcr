@@ -1,6 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-#![allow(dead_code)]
 
 // Classic PCAP and pcapng fixtures and the file-versus-stdin parity runner. The
 // including test crate root must also declare `common` and `process_support`.

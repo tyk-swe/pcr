@@ -10,8 +10,7 @@ mod workflow;
 pub(crate) use admission::{
     DeclaredTargets, FamilyGate, admit_operation, admit_resolved_selection, admit_selection,
 };
-#[cfg(test)]
-pub(crate) use model::resolve_zone_from;
+
 pub use model::{
     Authorized, Error, Family, Hostname, ResolvedZone, Resolver, ScopedAddress, SelectedAddress,
     SystemResolver, Target, Zone, requires_scope,

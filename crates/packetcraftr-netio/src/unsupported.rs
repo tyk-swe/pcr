@@ -133,36 +133,3 @@ impl Classified for Unsupported {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{Mode, NativeCapability};
-
-    #[test]
-    fn build_checks_follow_the_emitted_capability_cfgs() {
-        let cases = [
-            (NativeCapability::Route, cfg!(native_route)),
-            (NativeCapability::InterfaceEnumeration, cfg!(native_route)),
-            (NativeCapability::Capture, cfg!(native_layer2)),
-            (
-                NativeCapability::Transmission(Mode::Layer2),
-                cfg!(native_layer2),
-            ),
-            (
-                NativeCapability::Transmission(Mode::Layer3),
-                cfg!(native_layer3),
-            ),
-            (
-                NativeCapability::Transmission(Mode::Auto),
-                cfg!(native_send),
-            ),
-        ];
-        for (capability, built) in cases {
-            let checked = capability.check();
-            assert_eq!(checked.is_ok(), built, "{capability:?}");
-            if let Err(error) = checked {
-                assert_eq!(error.capability, capability);
-            }
-        }
-    }
-}

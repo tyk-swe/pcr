@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#[cfg(test)]
-mod tests;
-
 use std::io::{Read, Write};
 
 use packetcraftr_core as core;

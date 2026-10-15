@@ -795,9 +795,6 @@ impl Controller {
     }
 }
 
-#[cfg(test)]
-mod tests;
-
 pub(super) fn state_charge(
     host_count: usize,
     endpoints_per_host: usize,

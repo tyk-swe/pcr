@@ -13,8 +13,6 @@ mod executor;
 mod plan;
 mod report;
 mod request;
-#[cfg(test)]
-mod tests;
 
 pub use error::Error;
 pub use executor::Preparation;

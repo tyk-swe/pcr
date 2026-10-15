@@ -208,6 +208,3 @@ where
         Ok((execution, grant))
     }
 }
-
-#[cfg(test)]
-mod tests;

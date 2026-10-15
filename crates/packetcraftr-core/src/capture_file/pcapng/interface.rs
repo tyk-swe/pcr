@@ -70,36 +70,3 @@ pub(in crate::capture_file) fn parse_interface_description(
     };
     Ok((interface, options))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parse(options: &[u8]) -> Result<(Interface, Vec<PcapNgOption>), Error> {
-        let mut body = vec![1, 0, 0, 0, 0xff, 0xff, 0, 0];
-        body.extend_from_slice(options);
-        parse_interface_description(&body, Endianness::Little, usize::MAX)
-    }
-
-    #[test]
-    fn a_malformed_option_list_is_reported_before_a_malformed_timestamp_option() {
-        let bad_resolution = vec![9, 0, 2, 0, 6, 6, 0, 0];
-        let repeated_offset = [[14, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0]; 2].concat();
-        for timestamp_error in [bad_resolution, repeated_offset] {
-            assert!(matches!(
-                parse(&[timestamp_error.as_slice(), &[1, 0]].concat()),
-                Err(Error::Truncated {
-                    context: "pcapng interface options",
-                    ..
-                })
-            ));
-            assert!(matches!(
-                parse(&[timestamp_error.as_slice(), &[0, 0, 0, 0, 1, 0, 0, 0]].concat()),
-                Err(Error::InvalidData {
-                    format: Format::PcapNg,
-                    reason: "non-zero bytes follow the end-of-options marker",
-                })
-            ));
-        }
-    }
-}

@@ -13,8 +13,6 @@ use self::neighbors::{ReachOutcome, discover_neighbors, reach_next_hop};
 use self::pacing::{Owed, settle};
 use self::pipelined::{StagePlan, add_stats, admit_pipelined, execute};
 
-#[cfg(test)]
-pub(super) use self::adaptive_execution::adaptive_batches;
 pub(crate) use self::adaptive_execution::adaptive_reservation;
 
 use std::collections::HashMap;

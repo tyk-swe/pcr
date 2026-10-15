@@ -1,6 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-#![allow(dead_code)]
 
 use std::io::{self, Write};
 use std::process::{ChildStdin, Command, Output, Stdio};

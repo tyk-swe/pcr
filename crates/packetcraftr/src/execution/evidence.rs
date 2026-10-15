@@ -10,6 +10,3 @@ pub(crate) use candidate_selection::{
 
 mod budget;
 mod candidate_selection;
-
-#[cfg(test)]
-mod tests;

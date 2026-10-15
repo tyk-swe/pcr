@@ -35,25 +35,6 @@ pub(super) struct Retained {
 }
 
 impl Retained {
-    /// Counts the retained evidence a complete aggregate describes: the
-    /// matched response frames, the undecoded frames, and the unattributed
-    /// frames. A host's probe references name the same discovery evidence and
-    /// are not counted again.
-    #[cfg(test)]
-    pub(super) fn of(scan: &scan::Aggregate) -> Self {
-        Self {
-            frames: scan
-                .discovery
-                .iter()
-                .chain(scan.endpoints.iter().flat_map(|endpoint| &endpoint.probes))
-                .filter(|probe| probe.response.is_some())
-                .count()
-                .saturating_add(scan.undecoded.len())
-                .saturating_add(scan.unattributed.len()),
-            undecoded: scan.undecoded.len(),
-        }
-    }
-
     /// Counts one published scan event's retained evidence: a probe's
     /// response frame, or one undecoded or unattributed frame. A metadata
     /// `reply` without a `response` frame holds none, and `Sent` and

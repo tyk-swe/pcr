@@ -58,28 +58,18 @@ maintenance:
     Review each proposed request against the cited standard and its read-only
     behavior. Re-review source redistribution terms and entry provenance;
     update entry dates and bump this independent version and the corpus
-    version together. Run core identification contracts and workflow fixtures;
+    version together. Run the service identification acceptance script;
     update schemas and examples if document syntax changes. New signatures
     require original, declared fixtures and retain unauthenticated confidence.
 
 coverage:
-  - fixture: "crates/packetcraftr-core/tests/integration/service_identification_contracts.rs"
+  - fixture: "scripts/test-service-identification.py"
     covers: |
-      SSH OpenSSH claim, HTTP nginx/Apache claims, DNS response and BIND TXT
-      claim; unknown and ambiguous identities, competing versions, misleading
-      banners, malformed replies, truncation, bounded extraction, and exact
-      deterministic reproduction. Product/version coverage is limited to these
-      original fixtures, with no accuracy or vulnerability claim.
+      HTTP and HTTPS nginx claims over IPv4 and IPv6 loopback, current-schema
+      NDJSON, exact request/response bytes, provenance, and TLS observations.
   - fixture: "crates/packetcraftr/data/service-probes.training.v1.json"
     covers: |
       smtp-postfix-training -> postfix-claim; smtp-exim-training -> exim-claim;
       ftp-vsftpd-training -> vsftpd-claim; ftp-proftpd-training -> proftpd-claim.
       These are the complete product-positive instances written against for
       the four SMTP and FTP rule additions.
-  - fixture: "crates/packetcraftr-core/tests/integration/service_corpus_contracts.rs"
-    covers: |
-      Declared training-instance replay, fragmented and multiline greeting
-      collection, CRLF/syntax and bounded-line failures, SMTP/FTP numeric-code
-      overlap, unknown products, invalid/conflicting hostname observations,
-      static CPE validation, absent unsupported device labels, and explicit
-      rule-backed metadata sources.

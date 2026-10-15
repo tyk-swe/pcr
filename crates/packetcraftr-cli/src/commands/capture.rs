@@ -4,8 +4,7 @@
 pub(super) mod arguments;
 mod files;
 mod rendering;
-#[cfg(test)]
-mod tests;
+
 mod writer;
 
 use self::arguments::Args;

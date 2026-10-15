@@ -644,21 +644,3 @@ fn write_uint(bytes: &mut [u8], range: ByteRange, value: u64) {
     let width = range.end - range.start;
     bytes[range.start..range.end].copy_from_slice(&value.to_be_bytes()[8 - width..]);
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn assignment_parsing_names_the_malformed_part() {
-        for (text, expected) in [
-            ("ipv4.ttl", "<field>=<value>"),
-            ("=5", "empty field path"),
-            ("ipv4.ttl =5", "contains a space"),
-            ("ipv4.ttl=x", "not unsigned"),
-        ] {
-            let error = text.parse::<FieldAssignment>().expect_err(text);
-            assert!(error.to_string().contains(expected), "{text}: {error}");
-        }
-    }
-}

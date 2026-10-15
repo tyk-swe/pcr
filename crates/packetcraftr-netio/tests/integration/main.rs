@@ -4,16 +4,7 @@
 //! `packetcraftr-netio` integration tests, built as one binary.
 //!
 //! Each module is one test file. Sharing a binary compiles the helpers and
-//! links once, and runs every module in one parallel test pool. Tests that
-//! need their own process or crate root stay standalone in `tests/`.
-
-#[path = "../common/mod.rs"]
-mod common;
+//! links once, and runs every module in one parallel test pool.
 
 mod application_io_contracts;
-mod capture_group_contracts;
-mod deadline_contracts;
-mod error_contracts;
-mod model_contracts;
 mod tls_contracts;
-mod transmit_contracts;

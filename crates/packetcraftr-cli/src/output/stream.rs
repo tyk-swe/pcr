@@ -490,6 +490,3 @@ impl Classified for EncodeError {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

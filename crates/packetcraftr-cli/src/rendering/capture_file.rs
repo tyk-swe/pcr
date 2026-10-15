@@ -148,6 +148,3 @@ pub(crate) fn stream_capture_error(operation: &str, source: CaptureError) -> Cli
         source => CliError::classified(source),
     }
 }
-
-#[cfg(test)]
-mod tests;

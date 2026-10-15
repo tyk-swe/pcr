@@ -88,25 +88,3 @@ impl FromStr for SniPattern {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn an_inner_wildcard_is_refused() {
-        for pattern in ["a*b", "*a*b*", "**x"] {
-            let error = pattern
-                .parse::<SniPattern>()
-                .expect_err("only the ends may be wildcards");
-            assert!(
-                matches!(&error, crate::analysis::Error::SniPattern { pattern: refused } if refused == pattern),
-                "{error:?}"
-            );
-            assert_eq!(
-                crate::error::Classified::classification(&error).code,
-                "cli.error"
-            );
-        }
-    }
-}

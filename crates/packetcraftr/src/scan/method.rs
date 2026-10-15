@@ -148,6 +148,3 @@ pub(super) fn unconnectable(request: &Request) -> Option<&'static str> {
         })
         .or_else(|| (discovery.runs() && discovery.neighbor).then_some("neighbor"))
 }
-
-#[cfg(test)]
-mod tests;

@@ -151,16 +151,3 @@ fn heading_style() -> Style {
 fn muted_style() -> Style {
     Style::new().dimmed()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn terminal_documents_strip_ansi_before_preserving_layout() {
-        assert_eq!(
-            terminal_document("\u{1b}[31merror:\u{1b}[0m\n\tvalue"),
-            "error:\n\\tvalue",
-        );
-    }
-}

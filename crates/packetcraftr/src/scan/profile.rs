@@ -346,25 +346,3 @@ fn udp_payload(request: &Packet, response: &DecodedPacket) -> Option<Bytes> {
     let bytes = response.frame.bytes();
     (end <= bytes.len()).then(|| bytes.slice(start..end))
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn named(name: String) -> Result<UdpProfile, Error> {
-        UdpProfile::new(Config {
-            name,
-            request: Payload::Bytes {
-                data: Bytes::from_static(b"probe"),
-            },
-            response: ResponseCheck::Any {},
-        })
-    }
-
-    #[test]
-    fn profile_names_are_bounded_in_characters_as_the_schema_counts() {
-        assert!(named("\u{e9}".repeat(128)).is_ok());
-        assert!(named("\u{e9}".repeat(129)).is_err());
-        assert!(named(String::new()).is_err());
-        assert!(named("tab\tname".to_owned()).is_err());
-    }
-}

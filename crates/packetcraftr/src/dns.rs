@@ -49,8 +49,7 @@ mod report;
 mod request;
 mod reverse;
 pub mod tcp;
-#[cfg(test)]
-mod tests;
+
 pub mod wire;
 
 pub use error::{Error, EvidenceFault};

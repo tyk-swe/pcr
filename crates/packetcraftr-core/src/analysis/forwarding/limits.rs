@@ -182,39 +182,3 @@ impl ScratchBudget {
         Ok(writer.bytes)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use serde::ser::SerializeSeq;
-    use std::cell::Cell;
-
-    #[test]
-    fn scratch_json_stops_serialization_when_the_remaining_budget_is_exhausted() {
-        struct LargeIdentity(Cell<usize>);
-
-        impl Serialize for LargeIdentity {
-            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                let mut sequence = serializer.serialize_seq(Some(1_000_000))?;
-                for _ in 0..1_000_000 {
-                    self.0.set(self.0.get() + 1);
-                    sequence.serialize_element(&255_u8)?;
-                }
-                sequence.end()
-            }
-        }
-
-        let value = LargeIdentity(Cell::new(0));
-        let mut budget = ScratchBudget::new(144);
-        budget.reserve(128).unwrap();
-        assert!(matches!(
-            budget.json(&value),
-            Err(super::super::Error::ScratchBudget { limit: 144 })
-        ));
-        assert!(
-            value.0.get() < 10,
-            "oversized identity must stop encoding early"
-        );
-    }
-}

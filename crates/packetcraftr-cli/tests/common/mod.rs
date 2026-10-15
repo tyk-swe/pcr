@@ -1,10 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-#![allow(dead_code)]
-
-pub(crate) mod application_output;
-pub(crate) mod http2_capture;
-pub(crate) mod trace_hosts;
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -12,30 +7,10 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
-use packetcraftr_cli::test_support;
-
-// Re-exported for the binaries that need them; an unused re-export warns
-// even though the definitions behind it are allowed to be dead.
-#[allow(unused_imports)]
-pub(crate) use packetcraftr_cli::test_support::{
-    SharedBuffer, assert_contiguous, output_schema, stream,
-};
-
 pub(crate) fn schema_validator() -> &'static jsonschema::Validator {
     static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
     VALIDATOR.get_or_init(|| {
         jsonschema::validator_for(output_schema()).expect("published output schema must compile")
-    })
-}
-
-pub(crate) fn frozen_v10_schema_validator() -> &'static jsonschema::Validator {
-    static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
-    VALIDATOR.get_or_init(|| {
-        let schema: Value = serde_json::from_str(include_str!(
-            "../../../../schemas/packetcraftr.output.v10.schema.json"
-        ))
-        .expect("frozen output/v10 schema must be JSON");
-        jsonschema::validator_for(&schema).expect("frozen output/v10 schema must compile")
     })
 }
 
@@ -113,7 +88,7 @@ pub(crate) fn parse_json(output: &Output) -> Value {
 }
 
 pub(crate) fn parse_ndjson(output: &Output) -> Vec<Value> {
-    let records = test_support::parse_ndjson(&output.stdout);
+    let records = parse_ndjson_bytes(&output.stdout);
     for record in &records {
         schema_validator().validate(record).unwrap_or_else(|error| {
             panic!("NDJSON record must match the published schema: {error}")
@@ -122,37 +97,36 @@ pub(crate) fn parse_ndjson(output: &Output) -> Vec<Value> {
     records
 }
 
-#[cfg(packetcraftr_test_procfs)]
-pub(crate) fn require_procfs() {
+fn parse_ndjson_bytes(bytes: &[u8]) -> Vec<Value> {
+    let text = std::str::from_utf8(bytes).expect("NDJSON output must be UTF-8");
     assert!(
-        std::fs::metadata("/proc/self/status").is_ok(),
-        "process cancellation contracts require a readable procfs at /proc"
+        text.is_empty() || text.ends_with('\n'),
+        "nonempty NDJSON output ends every record with a newline"
     );
-    assert!(
-        Command::new("kill")
-            .arg("-l")
-            .output()
-            .is_ok_and(|output| output.status.success()),
-        "process cancellation contracts require a `kill` signal utility"
-    );
+    text.lines()
+        .map(|line| {
+            serde_json::from_str(line)
+                .expect("each NDJSON line holds exactly one complete JSON value")
+        })
+        .collect()
 }
 
-#[cfg(packetcraftr_test_util_linux)]
-pub(crate) fn require_util_linux_script() {
-    let output = Command::new("script")
-        .arg("--version")
-        .output()
-        .expect("terminal process contracts require the util-linux `script` allocator");
-    assert!(
-        output.status.success() && String::from_utf8_lossy(&output.stdout).contains("util-linux"),
-        "terminal process contracts require util-linux `script`, got: {output:?}"
-    );
+pub(crate) fn assert_contiguous(records: &[Value]) {
+    for (expected, record) in records.iter().enumerate() {
+        assert_eq!(
+            record["sequence"].as_u64(),
+            u64::try_from(expected).ok(),
+            "record {expected} has the wrong stream sequence"
+        );
+    }
 }
 
-#[cfg(packetcraftr_test_dev_full)]
-pub(crate) fn require_dev_full() {
-    assert!(
-        std::fs::metadata("/dev/full").is_ok(),
-        "write-failure contracts require the /dev/full sink"
-    );
+pub(crate) fn output_schema() -> &'static Value {
+    static SCHEMA: OnceLock<Value> = OnceLock::new();
+    SCHEMA.get_or_init(|| {
+        serde_json::from_str(include_str!(
+            "../../../../schemas/packetcraftr.output.v17.schema.json"
+        ))
+        .expect("published output schema must be JSON")
+    })
 }

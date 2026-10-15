@@ -26,26 +26,3 @@ pub(super) fn read_u32(message: &[u8], offset: usize, field: &'static str) -> Re
         })?;
     Ok(u32::from_be_bytes(bytes))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn truncation_reports_the_minimum_message_extent() {
-        let error = read_u16(&[0; 4], 3, "test field").unwrap_err();
-        assert!(matches!(
-            error,
-            Error::TruncatedField {
-                offset: 3,
-                needed: 5,
-                ..
-            }
-        ));
-        assert_eq!(read_u16(&[0, 0, 0, 1, 2], 3, "test field").unwrap(), 0x0102);
-        assert_eq!(
-            read_u32(&[0, 1, 2, 3, 4], 1, "test field").unwrap(),
-            0x0102_0304
-        );
-    }
-}

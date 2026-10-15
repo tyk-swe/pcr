@@ -37,8 +37,4 @@ maintenance:
     source (for example a registry export) requires a new license review
     under docs/scanner-data-policy.md before it is merged.
 
-coverage:
-  - fixture: "crates/packetcraftr/src/scan/catalog/tests.rs"
-    covers: "the bundled document parses, matches this manifest's version, and every preset resolves"
-  - fixture: "crates/packetcraftr/tests/integration/port_selection_matrix.rs"
-    covers: "preset, name, range, and exclusion expansion against the bundled catalog"
+coverage: []

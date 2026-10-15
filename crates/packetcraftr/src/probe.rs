@@ -4,8 +4,6 @@
 mod limits;
 mod model;
 pub(crate) mod runner;
-#[cfg(test)]
-pub(crate) mod test_support;
 
 pub use crate::correlation::Transport;
 pub use model::{Endpoint, Status};

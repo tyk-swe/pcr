@@ -1,12 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::tls_frames::{
-    ClientHelloSpec, ServerHelloSpec, client_hello, handshake_record, server_hello, split,
-};
-use super::{
-    CLIENT, SERVER, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame,
-};
+use super::{TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame};
 use packetcraftr_core::analysis::tls::{
     Collector, Limits as TlsLimits, Session, Summary as TlsSummary,
 };
@@ -94,18 +89,6 @@ impl Capture {
         self.push(ack, b"");
     }
 
-    pub(crate) fn reopen(&mut self, stream: &mut Stream, base: u32) {
-        stream.client_sequence = base.wrapping_add(1);
-        stream.server_sequence = base.wrapping_add(9_000);
-        let mut syn = self.client_spec(stream, Tcp::SYN);
-        syn.acknowledgment = 0;
-        syn.sequence = base;
-        self.push(syn, b"");
-        let mut synack = self.server_spec(stream, Tcp::SYN | Tcp::ACK);
-        synack.sequence = stream.server_sequence.wrapping_sub(1);
-        self.push(synack, b"");
-    }
-
     pub(crate) fn client(&mut self, stream: &mut Stream, payload: &[u8]) {
         let spec = self.client_spec(stream, Tcp::ACK);
         self.push(spec, payload);
@@ -114,45 +97,12 @@ impl Capture {
             .wrapping_add(u32::try_from(payload.len()).expect("segment fits"));
     }
 
-    pub(crate) fn client_retransmit(&mut self, stream: &Stream, payload: &[u8]) {
-        let mut spec = self.client_spec(stream, Tcp::ACK);
-        spec.sequence = stream
-            .client_sequence
-            .wrapping_sub(u32::try_from(payload.len()).expect("segment fits"));
-        self.push(spec, payload);
-    }
-
-    pub(crate) fn server_beyond(&mut self, stream: &mut Stream, hole: u32, payload: &[u8]) {
-        let mut spec = self.server_spec(stream, Tcp::ACK);
-        spec.sequence = stream.server_sequence.wrapping_add(hole);
-        self.push(spec, payload);
-    }
-
     pub(crate) fn server(&mut self, stream: &mut Stream, payload: &[u8]) {
         let spec = self.server_spec(stream, Tcp::ACK);
         self.push(spec, payload);
         stream.server_sequence = stream
             .server_sequence
             .wrapping_add(u32::try_from(payload.len()).expect("segment fits"));
-    }
-
-    pub(crate) fn client_fin(&mut self, stream: &mut Stream) {
-        let spec = self.client_spec(stream, Tcp::FIN | Tcp::ACK);
-        self.push(spec, b"");
-        stream.client_sequence = stream.client_sequence.wrapping_add(1);
-    }
-
-    pub(crate) fn udp_443(&mut self) {
-        let timestamp = self.timestamp();
-        self.frames.push(udp_frame(
-            &self.registry,
-            timestamp,
-            CLIENT,
-            SERVER,
-            50_000,
-            443,
-            b"quic-initial",
-        ));
     }
 }
 
@@ -189,15 +139,4 @@ pub(crate) fn assemble(capture: &Capture, limits: TlsLimits) -> (Vec<Session>, T
 
 pub(crate) fn assemble_default(capture: &Capture) -> (Vec<Session>, TlsSummary) {
     assemble(capture, TlsLimits::default())
-}
-
-pub(crate) fn complete_handshake(capture: &mut Capture, stream: &mut Stream, segments: usize) {
-    let hello = handshake_record(&client_hello(&ClientHelloSpec::default()));
-    for segment in split(&hello, segments) {
-        capture.client(stream, &segment);
-    }
-    capture.server(
-        stream,
-        &handshake_record(&server_hello(&ServerHelloSpec::default())),
-    );
 }

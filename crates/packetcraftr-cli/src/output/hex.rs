@@ -67,24 +67,3 @@ impl Serialize for CompactHex<'_> {
 pub fn compact_hex(bytes: &[u8]) -> String {
     CompactHex(bytes).to_string()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chunked_encodings_match_per_byte_formatting() {
-        let bytes: Vec<u8> = (0..=u8::MAX).cycle().take(CHUNK * 2 + 3).collect();
-        for length in [0, 1, 2, CHUNK - 1, CHUNK, CHUNK + 1, bytes.len()] {
-            let input = &bytes[..length];
-            let compact: String = input.iter().map(|byte| format!("{byte:02x}")).collect();
-            let spaced = input
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<Vec<_>>()
-                .join(" ");
-            assert_eq!(CompactHex(input).to_string(), compact, "length {length}");
-            assert_eq!(SpacedHex(input).to_string(), spaced, "length {length}");
-        }
-    }
-}

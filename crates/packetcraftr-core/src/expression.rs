@@ -12,8 +12,7 @@ use crate::field;
 use crate::registry::Registry;
 
 mod syntax;
-#[cfg(test)]
-mod tests;
+
 mod value;
 
 use syntax::{split_assignment, split_top_level_bounded, trim_at};

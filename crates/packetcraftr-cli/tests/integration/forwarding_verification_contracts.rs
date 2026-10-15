@@ -1,6 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-#![allow(dead_code)]
 
 use crate::capture_support;
 use crate::common;
@@ -9,10 +8,6 @@ use crate::process_support;
 use capture_support::{Record, UDP_CLIENT, write_pcap_hex, write_records};
 use common::{parse_json, path_text, run};
 use process_support::decode_hex;
-
-/// `UDP_CLIENT` forwarded: TTL decremented to 63 with the checksum updated.
-const UDP_CLIENT_FORWARDED: &str =
-    "45000021000000003f118f95c0000201c633640230390009000d9f8868656c6c6f";
 
 fn write_snaplen_truncated_capture() -> tempfile::NamedTempFile {
     let ipv4_header_only = 20;

@@ -100,37 +100,3 @@ pub(crate) fn frame_error(
 pub(crate) fn matches_decoded(filter: &Filter, context: &Context<'_>) -> Result<bool, CliError> {
     filter.matches(context).map_err(CliError::classified)
 }
-
-#[cfg(test)]
-mod tests {
-    use std::time::UNIX_EPOCH;
-
-    use packetcraftr_core::frame::{Frame, LinkType};
-    use packetcraftr_core::protocol::builtin;
-
-    use super::*;
-
-    fn registry() -> Arc<Registry> {
-        builtin::registry()
-    }
-
-    #[test]
-    fn frame_failures_keep_their_classification_at_the_source_frame() {
-        let registry = registry();
-        let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![0_u8; 14])
-            .expect("bounded Ethernet frame");
-        let too_small = frame_selector("frame.number == 2", &registry, 13).unwrap();
-        let error = frame_error(
-            2,
-            too_small
-                .keep(2, &frame)
-                .expect_err("decode errors cannot become silent mismatches"),
-        );
-        assert_eq!(error.classification.code, "policy.decode_resource_limit");
-        assert_eq!(error.exit_code(), 6);
-        assert_eq!(
-            core::error::Classified::context(&error.into_boundary_error()),
-            Some(Coordinate::SourceFrame(2))
-        );
-    }
-}

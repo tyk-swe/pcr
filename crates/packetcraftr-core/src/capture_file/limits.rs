@@ -105,16 +105,6 @@ impl Budget {
         self.captured_bytes
     }
 
-    /// A budget that has already charged `frames` and `captured_bytes`.
-    #[cfg(test)]
-    pub(super) fn charged(limits: Limits, frames: u64, captured_bytes: u64) -> Self {
-        Self {
-            limits,
-            frames,
-            captured_bytes,
-        }
-    }
-
     /// Charges one frame of `frame_bytes` captured bytes.
     pub fn charge(&mut self, frame_bytes: u32) -> Result<(), Error> {
         *self = self.after(frame_bytes)?;

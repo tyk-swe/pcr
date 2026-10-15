@@ -4,8 +4,6 @@
 mod codec;
 mod model;
 mod reflection;
-#[cfg(test)]
-mod test_support;
 
 pub use codec::{Outcome, looks_like_record_start, parse_handshake, parse_record};
 pub(crate) use codec::{TlsCodec, escape_wire_bytes, escape_wire_text};

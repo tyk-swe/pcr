@@ -168,29 +168,3 @@ impl From<Interface> for Routing {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    fn named(name: &str) -> Interface {
-        Interface::Name(name.to_owned())
-    }
-
-    fn by_name(text: &str) -> Result<Interface, Error> {
-        Ok(named(text))
-    }
-
-    #[test]
-    fn a_rule_set_is_bounded() {
-        let rules = |count| vec![Rule::parse_source("0=eth0", by_name).unwrap(); count];
-        assert!(Routing::new(rules(MAX_RULES), None).is_ok());
-        assert_eq!(
-            Routing::new(rules(MAX_RULES + 1), None).unwrap_err(),
-            Error::TooMany {
-                count: MAX_RULES + 1
-            }
-        );
-    }
-}

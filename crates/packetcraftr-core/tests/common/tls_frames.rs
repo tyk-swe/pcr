@@ -6,7 +6,6 @@ use packetcraftr_core::protocol::application::tls::extension::{
     SUPPORTED_VERSIONS,
 };
 use packetcraftr_core::protocol::application::tls::{
-    CONTENT_TYPE_ALERT, CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC,
     CONTENT_TYPE_HANDSHAKE, HANDSHAKE_CLIENT_HELLO, HANDSHAKE_SERVER_HELLO,
     HELLO_RETRY_REQUEST_RANDOM,
 };
@@ -16,9 +15,7 @@ pub(crate) const TLS_1_3: u16 = 0x0304;
 pub(crate) const TLS_AES_128_GCM_SHA256: u16 = 0x1301;
 pub(crate) const TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: u16 = 0xc02f;
 pub(crate) const X25519: u16 = 0x001d;
-pub(crate) const ALERT_CLOSE_NOTIFY: u8 = 0;
-pub(crate) const ALERT_HANDSHAKE_FAILURE: u8 = 40;
-const HANDSHAKE_CERTIFICATE: u8 = 11;
+
 const EXTENSION_PADDING: u16 = 0x0015;
 
 #[derive(Clone, Debug)]
@@ -204,19 +201,6 @@ pub(crate) fn server_hello(spec: &ServerHelloSpec) -> Vec<u8> {
     handshake(HANDSHAKE_SERVER_HELLO, &body)
 }
 
-fn vector24(body: &[u8]) -> Vec<u8> {
-    let length = u32::try_from(body.len()).expect("24-bit vector fits");
-    let bytes = length.to_be_bytes();
-    let mut out = vec![bytes[1], bytes[2], bytes[3]];
-    out.extend_from_slice(body);
-    out
-}
-
-pub(crate) fn certificate(length: usize) -> Vec<u8> {
-    let entry = vector24(&vec![0x5a; length]);
-    handshake(HANDSHAKE_CERTIFICATE, &vector24(&entry))
-}
-
 pub(crate) fn handshake_record(message: &[u8]) -> Vec<u8> {
     record(CONTENT_TYPE_HANDSHAKE, message)
 }
@@ -226,18 +210,6 @@ pub(crate) fn handshake_records(message: &[u8], body: usize) -> Vec<u8> {
         .chunks(body.max(1))
         .flat_map(|chunk| record(CONTENT_TYPE_HANDSHAKE, chunk))
         .collect()
-}
-
-pub(crate) fn change_cipher_spec() -> Vec<u8> {
-    record(CONTENT_TYPE_CHANGE_CIPHER_SPEC, &[1])
-}
-
-pub(crate) fn alert(level: u8, description: u8) -> Vec<u8> {
-    record(CONTENT_TYPE_ALERT, &[level, description])
-}
-
-pub(crate) fn application_data(length: usize) -> Vec<u8> {
-    record(CONTENT_TYPE_APPLICATION_DATA, &vec![0xab; length])
 }
 
 pub(crate) fn unfinished_handshake(records: usize, body: usize) -> Vec<u8> {

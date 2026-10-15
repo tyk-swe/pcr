@@ -238,30 +238,3 @@ fn route_address(address: &RouteAddress) -> Option<IpAddr> {
         _ => None,
     }
 }
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn linux_route_type_preserves_broadcast_before_native_normalization() {
-        assert_eq!(
-            route_selection_reason(&RouteType::Broadcast, false),
-            Some(SelectionReason::Broadcast)
-        );
-        assert_eq!(
-            route_selection_reason(&RouteType::Unicast, false),
-            Some(SelectionReason::OnLink)
-        );
-        assert_eq!(
-            route_selection_reason(&RouteType::Unicast, true),
-            Some(SelectionReason::Gateway)
-        );
-        assert_eq!(
-            route_selection_reason(&RouteType::Multicast, false),
-            Some(SelectionReason::OnLink)
-        );
-        assert_eq!(route_selection_reason(&RouteType::Unreachable, false), None);
-    }
-}

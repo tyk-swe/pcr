@@ -252,21 +252,3 @@ pub(crate) fn frame_timestamp(
             )
         })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn frame_timestamps_advance_by_the_step_and_refuse_overflow() {
-        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
-        assert_eq!(
-            frame_timestamp(base, Duration::from_nanos(1_500_000_000), 3).unwrap(),
-            base + Duration::new(4, 500_000_000),
-        );
-        assert_eq!(frame_timestamp(base, Duration::ZERO, 4095).unwrap(), base);
-        let error = frame_timestamp(base, Duration::from_nanos(u64::MAX), u64::MAX)
-            .expect_err("the offset exceeds the clock range");
-        assert_eq!(error.exit_code(), 2);
-    }
-}

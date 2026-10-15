@@ -9,9 +9,6 @@ use super::{Error, Limit};
 
 mod huffman;
 
-#[cfg(test)]
-mod tests;
-
 const STATIC: &[(&[u8], &[u8])] = &[
     (b":authority", b""),
     (b":method", b"GET"),
@@ -222,11 +219,6 @@ impl Decoder {
             None => maximum,
         });
         Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn decode(&mut self, block: &Bytes, origin: u64) -> Result<Block, Error> {
-        self.decode_checked(block, origin, &mut || Ok(()))
     }
 
     pub(crate) fn decode_checked<E: From<Error>>(

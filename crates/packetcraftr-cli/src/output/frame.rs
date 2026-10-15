@@ -273,19 +273,3 @@ impl TryFrom<DecodedPacket> for Decoded {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn wire_serializes_hex_bytes_before_length() {
-        let wire = Wire::from(Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]));
-
-        assert_eq!(
-            serde_json::to_string(&wire).unwrap(),
-            r#"{"bytes_hex":"deadbeef","length":4}"#
-        );
-    }
-}

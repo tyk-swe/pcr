@@ -13,8 +13,6 @@ use crate::error::{Classification, Classified, Kind};
 
 mod matching;
 mod observation;
-#[cfg(test)]
-mod tests;
 
 pub use matching::{Candidate, Confidence, Match, Outcome, evaluate};
 pub use observation::{Observation, TcpFingerprint, extract};

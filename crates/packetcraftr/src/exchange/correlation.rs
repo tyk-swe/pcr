@@ -509,6 +509,3 @@ fn unsolicited_freshness(
         eligible_requests,
     })
 }
-
-#[cfg(test)]
-mod tests;

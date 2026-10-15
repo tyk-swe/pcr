@@ -35,33 +35,3 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
 }
-
-#[cfg(test)]
-mod tests {
-    use clap::Parser as _;
-
-    use crate::cli::Cli;
-    use crate::commands::CommandLine;
-
-    fn parse(extra: &[&str]) -> Result<super::Args, clap::Error> {
-        let mut command = vec!["packetcraftr", "dns-read", "capture.pcap"];
-        command.extend_from_slice(extra);
-        Cli::try_parse_from(command).map(|cli| match cli.command {
-            CommandLine::DnsRead(arguments) => arguments,
-            _ => panic!("fixture must select dns-read"),
-        })
-    }
-
-    #[test]
-    fn dns_read_rejects_port_zero_while_parsing() {
-        let error = parse(&["--dns-port", "0"]).unwrap_err();
-        assert_eq!(error.exit_code(), 2);
-        assert!(error.to_string().contains("--dns-port"));
-        assert_eq!(
-            parse(&["--dns-port", "5353", "--dns-port", "65535"])
-                .unwrap()
-                .dns_ports,
-            [5353, 65535]
-        );
-    }
-}

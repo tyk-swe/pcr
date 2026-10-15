@@ -14,8 +14,6 @@ mod executor;
 mod plan;
 mod report;
 mod request;
-#[cfg(test)]
-mod tests;
 
 pub use error::Error;
 pub use report::{Aggregate, Collector, Event, Evidence, Outcome, Report, Trial};

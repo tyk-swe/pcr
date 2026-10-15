@@ -230,23 +230,3 @@ where
         progress: Progress::Running,
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_saturated_budget_refuses_without_arithmetic_overflow() {
-        let budget = ConnectBudget {
-            state: Arc::new(BudgetState {
-                capacity: usize::MAX,
-                active: AtomicUsize::new(usize::MAX),
-            }),
-        };
-        let Err(Error::Capacity { limit }) = budget.lease() else {
-            panic!("a saturated budget refuses admission");
-        };
-        assert_eq!(limit, usize::MAX);
-        assert_eq!(budget.active(), usize::MAX);
-    }
-}

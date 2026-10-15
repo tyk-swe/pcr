@@ -195,29 +195,3 @@ mod optional_hex {
             .transpose()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hexadecimal_payloads_round_trip_and_stay_bounded() {
-        let config: Config = serde_json::from_value(serde_json::json!({
-            "name": "fixture",
-            "request": {"type": "bytes", "data": "00ffA0"},
-            "response": {"type": "bytes", "checks": [{"offset": 1, "data": "a0", "mask": "f0"}]}
-        }))
-        .expect("valid profile");
-        let Payload::Bytes { data } = &config.request else {
-            panic!("bytes payload");
-        };
-        assert_eq!(data.as_ref(), [0x00, 0xff, 0xa0]);
-        assert_eq!(
-            serde_json::to_value(&config).expect("serializes")["request"]["data"],
-            "00ffa0"
-        );
-        for invalid in ["0", "zz", &"00".repeat(MAX_PAYLOAD_BYTES + 1)] {
-            assert!(hex::decode(invalid).is_err(), "{}", invalid.len());
-        }
-    }
-}

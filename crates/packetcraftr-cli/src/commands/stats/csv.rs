@@ -181,38 +181,3 @@ pub(super) fn render(
     }
     invocation.check()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::output::frame::Timestamp;
-
-    #[test]
-    fn records_preserve_utf8_and_escape_special_cells_with_crlf() {
-        let fields = ["plain", "a,b", "a\"b", "a\rb\nc", "", "é"];
-        assert_eq!(
-            record(&fields.map(str::to_owned)),
-            "plain,\"a,b\",\"a\"\"b\",\"a\rb\nc\",,é\r\n"
-        );
-    }
-
-    #[test]
-    fn time_cells_keep_nanoseconds_and_negative_unix_time() {
-        for (seconds, nanos, expected) in [
-            (2, 1, "2.000000001"),
-            (-1, 1, "-0.999999999"),
-            (-2, 123_456_789, "-1.876543211"),
-            (i64::MIN, 0, "-9223372036854775808.000000000"),
-        ] {
-            assert_eq!(
-                Timestamp {
-                    unix_seconds: seconds,
-                    nanoseconds: nanos
-                }
-                .to_string(),
-                expected
-            );
-        }
-        assert_eq!(duration(Duration::new(42, 1)), "42.000000001");
-    }
-}

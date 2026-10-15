@@ -62,4 +62,4 @@ Output/v15 publishes `tcp_scan` (`{mode, flags}`) and `tcp_window`; see the
 [v15 contract](consumer-compatibility.md#output-family-v15),
 [aggregate fixture](../examples/documents/output-scan-tcp-diagnostic.json),
 [event fixture](../examples/documents/output-scan-tcp-diagnostic-event.json),
-and [native validation](native-validation.md#tcp-diagnostic-acceptance).
+and [native validation](native-validation.md).

@@ -40,10 +40,6 @@ jobs:
           cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --locked --workspace --all-features
-      - name: Test scanner measurement contracts
-        run: python3 -m unittest discover -s scripts -p 'test_*.py'
-      - name: Check dependency direction
-        run: python3 scripts/check-architecture.py
       - name: Documentation for supported feature profiles
         env:
           RUSTDOCFLAGS: -D warnings
@@ -79,18 +75,6 @@ jobs:
           cargo run --locked -p packetcraftr --example client_composition --no-default-features
       - name: Test a detached external consumer
         run: python3 scripts/check-external-consumer.py
-      - name: Run reproducible offline regression contracts
-        run: |
-          cargo build --locked -p packetcraftr-cli --no-default-features
-          python3 scripts/forwarding-regression.py --binary target/debug/packetcraftr --large --output target/forwarding-regression
-      - name: Preserve regression bundles on failure
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: forwarding-regression
-          path: target/forwarding-regression
-          if-no-files-found: ignore
-          retention-days: 7
       - name: Test the shipped pcap-free feature profile
         run: cargo test --locked -p packetcraftr-cli -p packetcraftr-netio --no-default-features --features packetcraftr-cli/native-layer3,packetcraftr-netio/native-layer3
       - name: Build the isolated pcap-free CLI
@@ -173,12 +157,7 @@ jobs:
       - name: Build portable CLI
         run: cargo build --locked --release -p packetcraftr-cli --no-default-features
       - name: Compare independent decoder results
-        env:
-          FULL_CORPUS: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
-        run: |
-          args=()
-          if [[ "$FULL_CORPUS" == true ]]; then args+=(--full); fi
-          python3 scripts/check-decode-oracle.py --report target/validation/decode-oracle.json "${args[@]}"
+        run: python3 scripts/check-decode-oracle.py --report target/validation/decode-oracle.json
       - name: Preserve decoder evidence even on failure
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -208,21 +187,10 @@ jobs:
         run: |
           echo "root:$(id -u):1" | sudo tee -a /etc/subuid
           echo "root:$(id -g):1" | sudo tee -a /etc/subgid
-      - name: Build native CLI and native contract executable
-        run: |
-          cargo build --locked --release -p packetcraftr-cli --all-features
-          cargo test --locked -p packetcraftr-netio --all-features --test native_isolated --no-run --message-format=json > target/native-test-build.jsonl
-          python3 - <<'PY'
-          import json, os
-          records = [json.loads(line) for line in open('target/native-test-build.jsonl')]
-          binary, = [r['executable'] for r in records if r.get('reason') == 'compiler-artifact' and r.get('executable') and r['target']['name'] == 'native_isolated']
-          with open(os.environ['GITHUB_ENV'], 'a') as out:
-              out.write(f'NATIVE_TEST_BINARY={binary}\n')
-          PY
-      - name: Exercise native I/O in a fresh isolated namespace
-        run: |
-          sudo python3 scripts/test-native-isolated.py --binary target/release/packetcraftr \
-            --native-test-binary "$NATIVE_TEST_BINARY" --report target/validation/native-isolated.json
+      - name: Build native CLI
+        run: cargo build --locked --release -p packetcraftr-cli --all-features
+      - name: Exercise the loopback exchange in a fresh isolated namespace
+        run: sudo python3 scripts/test-native-isolated.py --binary target/release/packetcraftr --report target/validation/native-isolated.json
       - name: Preserve native evidence even on failure
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

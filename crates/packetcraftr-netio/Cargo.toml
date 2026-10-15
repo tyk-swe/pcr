@@ -43,9 +43,6 @@ thiserror.workspace = true
 serde.workspace = true
 rustls.workspace = true
 
-[dev-dependencies]
-serde_json.workspace = true
-
 [target.'cfg(target_os = "linux")'.dependencies]
 futures-util = { workspace = true, optional = true }
 libc = { workspace = true, optional = true }

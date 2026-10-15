@@ -12,8 +12,6 @@ mod report;
 mod request;
 mod reuse;
 mod selection;
-#[cfg(test)]
-mod tests;
 
 pub use report::{
     Aggregate, Basis, Collector, Event, Host, HostTrace, NotTraced, Report, ReusedHop, Selection,

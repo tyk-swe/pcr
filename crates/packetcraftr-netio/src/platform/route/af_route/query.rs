@@ -383,29 +383,3 @@ fn write_sockaddr_field(bytes: &mut [u8], offset: usize, value: &[u8]) -> Result
         .copy_from_slice(value);
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-
-    use std::net::Ipv4Addr;
-
-    use super::*;
-
-    #[test]
-    fn a_route_write_refused_for_lack_of_a_route_reports_route_not_found() {
-        let destination = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1));
-        for errno in [libc::ESRCH, libc::ENETUNREACH] {
-            assert!(matches!(
-                route_write_error(destination, std::io::Error::from_raw_os_error(errno)),
-                route::Error::RouteNotFound { destination: actual } if actual == destination
-            ));
-        }
-        assert!(matches!(
-            route_write_error(destination, std::io::Error::from_raw_os_error(libc::EACCES)),
-            route::Error::OperatingSystem {
-                operation: "write RTM_GET",
-                ..
-            }
-        ));
-    }
-}

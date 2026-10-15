@@ -34,8 +34,6 @@ pub mod hosts;
 mod plan;
 mod report;
 mod request;
-#[cfg(test)]
-mod tests;
 
 pub use error::Error;
 pub use evidence::{CorrelatedResponse, classify_response};

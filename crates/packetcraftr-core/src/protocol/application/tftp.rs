@@ -414,24 +414,3 @@ impl Codec for TftpCodec {
         make_layer(Tftp::default(), fields)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn set_field_refuses_more_options_than_the_limit() {
-        let entry = || {
-            object([
-                ("name", Bytes::new().into()),
-                ("value", Bytes::new().into()),
-            ])
-        };
-        let mut layer = Tftp::default();
-        let refused = field::Value::List((0..=MAX_OPTIONS).map(|_| entry()).collect());
-        assert!(layer.set_field("options", refused).is_err());
-        let accepted = field::Value::List((0..MAX_OPTIONS).map(|_| entry()).collect());
-        layer.set_field("options", accepted).unwrap();
-        assert_eq!(layer.options.len(), MAX_OPTIONS);
-    }
-}

@@ -98,37 +98,3 @@ impl PacketLayout {
             .filter(|layout| layout.index == index)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::layer::Id;
-
-    fn layer() -> LayerLayout {
-        LayerLayout {
-            index: 3,
-            protocol: Id::new("fixture"),
-            range: ByteRange::new(2, 8),
-            fields: vec![FieldLayout {
-                name: "value",
-                range: ByteRange::new(4, 6),
-            }],
-        }
-    }
-
-    #[test]
-    fn packet_layout_lookup_is_positional_and_rejects_a_disagreeing_index() {
-        let mut expected = layer();
-        expected.index = 0;
-        let layout = PacketLayout::new(vec![expected.clone()]);
-
-        assert_eq!(layout.layer(0), Some(&expected));
-        assert_eq!(layout.layer(1), None);
-
-        let inconsistent = PacketLayout {
-            layers: vec![layer()],
-        };
-        assert_eq!(inconsistent.layer(0), None);
-        assert_eq!(inconsistent.layer(3), None);
-    }
-}

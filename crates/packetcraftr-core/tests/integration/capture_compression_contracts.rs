@@ -1,6 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-#![allow(dead_code)]
 
 use packetcraftr_core::capture_file::compression::{Error, Format, Input, Limits, Output};
 use std::io::{self, Cursor, Read, Write};
@@ -9,13 +8,6 @@ fn compressed(format: Format, bytes: &[u8]) -> Vec<u8> {
     let mut encoder = Output::new(Vec::new(), format).unwrap();
     encoder.write_all(bytes).unwrap();
     encoder.finish().unwrap()
-}
-struct OneByte(Cursor<Vec<u8>>);
-impl Read for OneByte {
-    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-        let length = bytes.len().min(1);
-        self.0.read(&mut bytes[..length])
-    }
 }
 
 fn compression_cause(error: &io::Error) -> Option<&Error> {

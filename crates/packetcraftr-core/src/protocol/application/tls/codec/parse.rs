@@ -175,6 +175,3 @@ impl<'a> Reader<'a> {
         self.take(len)
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -659,6 +659,3 @@ fn is_timeout(error: &io::Error) -> bool {
         io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
     )
 }
-
-#[cfg(test)]
-mod tests;

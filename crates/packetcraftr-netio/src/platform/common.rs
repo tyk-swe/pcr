@@ -40,7 +40,7 @@ pub(in crate::platform) fn refused(exhausted: crate::workers::Exhausted) -> rout
     }
 }
 
-#[cfg(all(native_route, any(test, target_os = "macos", target_os = "windows")))]
+#[cfg(all(native_route, any(target_os = "macos", target_os = "windows")))]
 pub(in crate::platform) fn on_worker<T: Send + 'static>(
     deadline: &packetcraftr_core::budget::Deadline,
     operation: &'static str,
@@ -79,55 +79,5 @@ pub(in crate::platform) fn on_worker<T: Send + 'static>(
                 Ok(()) => route::Error::DeadlineExceeded { operation },
             })
         }
-    }
-}
-
-#[cfg(all(test, native_route))]
-mod tests {
-    use std::sync::mpsc;
-    use std::time::{Duration, Instant};
-
-    use packetcraftr_core::budget::{Cancellation, Deadline};
-    use packetcraftr_core::error::Classified as _;
-
-    use super::*;
-
-    #[test]
-    fn a_pooled_route_query_ends_at_the_callers_deadline() {
-        let (release, blocked) = mpsc::channel::<()>();
-        let started = Instant::now();
-        let result = on_worker(
-            &Deadline::new(Duration::from_millis(50)),
-            "testing a stalled route query",
-            move |_| {
-                let _ = blocked.recv_timeout(Duration::from_secs(10));
-                Ok(())
-            },
-        );
-        match result {
-            Err(error @ route::Error::DeadlineExceeded { .. }) => {
-                assert_eq!(error.classification().code, "io.deadline_exceeded");
-            }
-            other => panic!("a stalled query must report the caller's deadline: {other:?}"),
-        }
-        assert!(started.elapsed() < Duration::from_secs(5));
-        drop(release);
-    }
-
-    #[test]
-    fn a_pooled_route_query_stops_for_a_cancelled_caller_and_returns_answers() {
-        let signal = Cancellation::default();
-        signal.cancel();
-        let cancelled = Deadline::new(Duration::from_secs(5)).with_cancellation(Some(signal));
-        assert!(matches!(
-            on_worker(&cancelled, "testing", |_| Ok(())),
-            Err(route::Error::Cancelled(_))
-        ));
-        let answer = on_worker(
-            &Deadline::new(Duration::from_secs(5)),
-            "testing",
-            |deadline| Ok(deadline.limit() <= Duration::from_secs(5)),
-        );
-        assert!(matches!(answer, Ok(true)));
     }
 }

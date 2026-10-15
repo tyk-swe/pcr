@@ -39,14 +39,11 @@ One invocation clock spans both captures, comparison, and publication. Opaque
 library `Observation` values bind to the exact compiled `Rules` instance and
 capture side; pass them to `verify` or `verify_with_limits`.
 
-## Reproduction bundle
+## Public behavior checks
+
+The retained CLI `forwarding_verification_contracts` integration module exercises
+forwarding verdicts with generated local captures. Run it with:
 
 ```sh
-cargo build --locked -p packetcraftr-cli --no-default-features
-python3 scripts/forwarding-regression.py --binary target/debug/packetcraftr \
-  --large --output target/regression-example
+cargo test --locked -p packetcraftr-cli --no-default-features --test integration forwarding_verification_contracts
 ```
-
-The destination must not exist. The harness generates checksummed captures and
-retains source/output hashes, effective arguments, diagnostics, tool identity,
-and expected versus observed verdicts (`execution=not_run` without `--binary`).

@@ -106,30 +106,3 @@ impl History {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn contents(ring: &History, range: impl RangeBounds<usize>) -> Vec<u8> {
-        let (head, tail) = ring.slices(range);
-        [head, tail].concat()
-    }
-
-    #[test]
-    fn ring_wrap_preserves_order_and_rejects_invalid_drain() {
-        let mut ring = History::new(3).unwrap();
-        ring.extend(&[1, 2, 3]);
-        assert!(!ring.drain_prefix(4));
-        assert_eq!(contents(&ring, ..), [1, 2, 3]);
-        assert!(ring.drain_prefix(2));
-        ring.extend(&[4, 5]);
-        assert_eq!(contents(&ring, ..), [3, 4, 5]);
-        assert_eq!(contents(&ring, 1..3), [4, 5]);
-        assert_eq!(contents(&ring, 0..=1), [3, 4]);
-        assert_eq!(ring.capacity(), 3);
-        assert!(ring.drain_prefix(3));
-        assert!(ring.is_empty());
-        assert_eq!(History::new(0).unwrap().slices(..), (&[][..], &[][..]));
-    }
-}

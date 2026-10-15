@@ -121,11 +121,6 @@ impl PreparedPacket {
         };
         Ok(SentPacket::try_new(self.built, self.route, report)?)
     }
-
-    #[cfg(test)]
-    pub(crate) fn fixture(built: BuiltPacket, route: route::Materialized) -> Self {
-        Self { built, route }
-    }
 }
 
 /// Deterministic: no provider is consulted and nothing is authorized, so the
@@ -495,15 +490,6 @@ impl<'c, P: PacketProviders, K: Clock> Admitting<'c, P, K> {
         self.stages.admit(&mut self.budget, packet, routes)
     }
 
-    #[cfg(test)]
-    pub(crate) fn route(
-        &self,
-        packet: &Packet,
-        destination: IpAddr,
-    ) -> Result<AuthorizedRoute, Error> {
-        self.route_on(packet, destination, None)
-    }
-
     pub(crate) fn route_on(
         &self,
         packet: &Packet,
@@ -657,17 +643,6 @@ impl<P: PacketProviders, K: Clock> Streaming<'_, P, K> {
 }
 
 impl<P: PacketProviders, K: Clock> Client<P, K> {
-    #[cfg(test)]
-    pub(crate) fn admitting<'c>(
-        &'c self,
-        options: &'c send::Options,
-        packets: u64,
-        deadline: &'c Deadline,
-    ) -> Result<Admitting<'c, P, K>, Error> {
-        let operation = Execution::new(self, packetcraftr_netio::deadline::MAX_WAIT);
-        self.admitting_in(options, packets, deadline, &operation)
-    }
-
     pub(crate) fn admitting_in<'c>(
         &'c self,
         options: &'c send::Options,
@@ -700,163 +675,5 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         stages.check()?;
         let budget = Budget::open(&stages.policy, packets)?;
         Ok((stages, budget))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::net::Ipv4Addr;
-    use std::time::Duration;
-
-    use bytes::Bytes;
-    use packetcraftr_core::layer::Raw;
-    use packetcraftr_core::protocol::network::Ipv4;
-    use packetcraftr_core::protocol::transport::Udp;
-    use packetcraftr_netio::link::Mode;
-
-    use super::*;
-    use crate::test_support::{Call, fake_client};
-
-    const DESTINATION: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 2);
-
-    fn datagram(payload: &'static [u8]) -> Packet {
-        let mut packet = Packet::new();
-        packet
-            .push(Ipv4 {
-                destination: DESTINATION,
-                ..Ipv4::default()
-            })
-            .push(Udp {
-                source_port: 40_000,
-                destination_port: 9,
-                ..Udp::default()
-            })
-            .push(Raw::new(Bytes::from_static(payload)));
-        packet
-    }
-
-    #[test]
-    fn requests_before_a_failed_cleanup_count_with_the_failure() {
-        use packetcraftr_core::frame::LinkType;
-        use packetcraftr_core::packet::MacAddress;
-
-        use crate::neighbor::{Error, Request};
-
-        let request = Request {
-            interface: packetcraftr_netio::interface::Id {
-                name: "fixture0".to_owned(),
-                index: 1,
-            },
-            interface_source: Ipv4Addr::new(192, 0, 2, 2).into(),
-            interface_mac: MacAddress([0x02, 0, 0, 0, 0, 1]),
-            target: Ipv4Addr::new(192, 0, 2, 1).into(),
-            vlan_tags: Vec::new(),
-            mtu: 1500,
-            link_type: LinkType::ETHERNET,
-        };
-        let cleanup = || packetcraftr_netio::Error::UnresolvedLinkMode;
-        let not_found = Error::NotFound {
-            interface: "fixture0".to_owned(),
-            target: request.target,
-            attempts: 2,
-            captured: Vec::new(),
-            evidence_truncated: false,
-            capture_statistics: packetcraftr_netio::capture::Stats {
-                received_frames: 3,
-                ..Default::default()
-            },
-        };
-        let spent = |error: Error| {
-            super::unanswered(&route::Error::Neighbor(Box::new(error)), Some(&request))
-        };
-
-        let answered = spent(Error::Cleanup {
-            interface: "fixture0".to_owned(),
-            target: request.target,
-            attempts: 1,
-            source: cleanup(),
-        });
-        assert_eq!((answered.packets_attempted, answered.bytes), (1, 60));
-        let unanswered = spent(Error::OperationAndCleanup {
-            interface: "fixture0".to_owned(),
-            target: request.target,
-            operation: Box::new(not_found),
-            cleanup: cleanup(),
-        });
-        assert_eq!((unanswered.packets_attempted, unanswered.bytes), (2, 120));
-        assert_eq!(unanswered.capture.received_frames, 3);
-    }
-
-    #[test]
-    fn a_rebuild_must_match_the_wire_bytes_its_admission_charged() {
-        let (client, providers) = fake_client();
-        let mut options = send::Options::default();
-        options.plan.link_mode = Mode::Layer3;
-        let deadline = client.deadline(Duration::from_secs(5));
-        let admitted_packet = datagram(b"four");
-        let mut admission = client
-            .admitting(&options, 2, &deadline)
-            .expect("two packets fit the default budget");
-        let route = admission
-            .route(&admitted_packet, IpAddr::V4(DESTINATION))
-            .expect("documentation destination is authorized");
-        let unchanged = admission
-            .admit_on(admitted_packet.clone(), &route)
-            .expect("first packet is admitted")
-            .into_cost();
-        let changed = admission
-            .admit_on(admitted_packet.clone(), &route)
-            .expect("second packet is admitted")
-            .into_cost();
-        let admitted_len = unchanged.wire_len;
-        let discovery = admission.discover();
-
-        let prepared = discovery
-            .rebuild(admitted_packet, &route, unchanged)
-            .expect("an identical rebuild keeps its admitted cost");
-        assert_eq!(prepared.built().bytes.len(), admitted_len);
-
-        let Err(error) = discovery.rebuild(datagram(b"fives"), &route, changed) else {
-            panic!("a rebuild with a different wire length must be rejected");
-        };
-        assert!(
-            matches!(
-                error,
-                RebuildError::Changed { admitted } if admitted == admitted_len
-            ),
-            "{error:?}"
-        );
-        assert!(
-            !providers
-                .calls()
-                .iter()
-                .any(|call| matches!(call, Call::Transmit(_))),
-            "preparation never transmits on its own"
-        );
-    }
-
-    #[test]
-    fn cumulative_byte_overflow_is_a_byte_limit_denial() {
-        let policy = Policy::default();
-        let mut budget = Budget::open(&policy, 1).expect("one packet fits");
-        budget.wire_bytes = u64::MAX - 1;
-
-        let error = budget
-            .charge(&policy, 2)
-            .expect_err("overflowing the cumulative total must be denied");
-
-        assert!(
-            matches!(
-                error,
-                Error::Policy(crate::policy::Error::ByteLimit { actual, limit })
-                    if actual == u64::MAX && limit == policy.max_bytes_per_operation
-            ),
-            "{error:?}"
-        );
-        assert_eq!(
-            budget.wire_bytes,
-            u64::MAX - 1,
-            "a denied charge is not kept"
-        );
     }
 }

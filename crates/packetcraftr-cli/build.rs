@@ -10,13 +10,7 @@ fn main() {
     let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
     let linux = os == "linux";
-    let capabilities = [
-        ("packetcraftr_test_procfs", linux),
-        ("packetcraftr_test_util_linux", linux),
-        ("packetcraftr_test_dev_full", linux),
-        ("packetcraftr_test_non_utf8_paths", linux),
-        ("packetcraftr_proc_fd_paths", linux),
-    ];
+    let capabilities = [("packetcraftr_proc_fd_paths", linux)];
     for (name, enabled) in capabilities {
         println!("cargo::rustc-check-cfg=cfg({name})");
         if enabled {

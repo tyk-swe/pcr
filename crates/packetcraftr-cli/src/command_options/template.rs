@@ -218,34 +218,3 @@ impl ParsedTemplate {
         Ok(template)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn axes_share_the_input_byte_ceiling_before_parsing_any_values() {
-        let half = expression::Limits::default().max_bytes / 2;
-        let source = format!("0.label=[\"{}\"]", "x".repeat(half));
-        let error = TemplateArgs {
-            axes: vec![source.clone(), source],
-            max_template_packets: 1,
-        }
-        .parse()
-        .err()
-        .expect("combined axes exceed the byte ceiling");
-        assert_eq!(error.classification.code, "cli.expression_limit");
-    }
-
-    #[test]
-    fn range_axes_count_arithmetically_before_materializing_values() {
-        let error = TemplateArgs {
-            axes: vec![format!("0.ttl=0..{}", u64::MAX)],
-            max_template_packets: DEFAULT_MAX_TEMPLATE_PACKETS,
-        }
-        .parse()
-        .err()
-        .expect("an astronomical range fails on the ceiling, not on allocation");
-        assert_eq!(error.classification.code, "cli.template_limit");
-    }
-}

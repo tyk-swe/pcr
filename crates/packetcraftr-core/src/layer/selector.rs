@@ -304,38 +304,3 @@ impl Classified for Error {
         )
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn malformed_selectors_are_typed_syntax_errors() {
-        for text in [
-            "",
-            "ttl",
-            ".ttl",
-            "ipv4.",
-            "ipv4 .ttl",
-            "*#2.ttl",
-            "99999999999999999999999.ttl",
-        ] {
-            assert!(
-                matches!(text.parse::<Selector>(), Err(Error::Syntax { .. })),
-                "{text:?}"
-            );
-        }
-        for (text, expected) in [
-            ("ipv4#0.ttl", OccurrenceFault::Zero),
-            ("ipv4#x.ttl", OccurrenceFault::NotNumber),
-            ("ipv4#.ttl", OccurrenceFault::NotNumber),
-            ("#2.ttl", OccurrenceFault::Malformed),
-            ("ipv4#1#2.ttl", OccurrenceFault::Malformed),
-        ] {
-            assert!(
-                matches!(text.parse::<Selector>(), Err(Error::Occurrence { fault, .. }) if fault == expected),
-                "{text:?}"
-            );
-        }
-    }
-}

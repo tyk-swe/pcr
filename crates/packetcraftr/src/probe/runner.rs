@@ -202,6 +202,3 @@ where
     context.enforce(last_sequence)?;
     Ok(context.into_stats())
 }
-
-#[cfg(test)]
-mod tests;

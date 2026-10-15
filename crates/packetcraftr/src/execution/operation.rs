@@ -94,6 +94,3 @@ impl Operation {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests;

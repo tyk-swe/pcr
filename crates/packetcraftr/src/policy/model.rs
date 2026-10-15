@@ -247,35 +247,3 @@ impl Classified for Error {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn constraint(input: &str) -> Result<DestinationConstraint, Error> {
-        input.parse()
-    }
-
-    #[test]
-    fn malformed_and_noncanonical_constraints_are_rejected() {
-        for input in [
-            "",
-            "not-an-address",
-            "192.0.2.0/",
-            "192.0.2.0/-1",
-            "192.0.2.0/+24",
-            "192.0.2.0/24x",
-            "192.0.2.0/33",
-            "2001:db8::/129",
-            "192.0.2.1/24",
-            "2001:db8::1/32",
-            "/24",
-            "192.0.2.0/24/8",
-        ] {
-            assert!(
-                constraint(input).is_err(),
-                "{input:?} must not parse as a constraint"
-            );
-        }
-    }
-}

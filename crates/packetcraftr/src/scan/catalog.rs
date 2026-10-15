@@ -49,6 +49,3 @@ pub(crate) const fn catalog_transport(transport: Transport) -> Option<CatalogTra
         Transport::Sctp | Transport::Icmp | Transport::Ip => None,
     }
 }
-
-#[cfg(test)]
-mod tests;

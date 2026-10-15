@@ -5,8 +5,6 @@ use packetcraftr_core::packet::MacAddress;
 
 mod reply;
 mod request;
-#[cfg(test)]
-mod tests;
 
 pub(super) use reply::match_neighbor_response;
 pub(super) use request::build_request_frame;

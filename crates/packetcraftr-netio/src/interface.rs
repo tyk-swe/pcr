@@ -115,20 +115,3 @@ fn validate_snapshot(interfaces: Vec<Info>) -> Result<Vec<Info>, Error> {
         source: Source::new(error),
     })
 }
-
-#[cfg(test)]
-mod tests {
-
-    use packetcraftr_core::error::Classified;
-
-    use super::*;
-
-    #[test]
-    fn a_spent_caller_is_refused_before_enumeration() {
-        let frozen = std::time::Instant::now();
-        let spent = Deadline::with_time_source(std::time::Duration::ZERO, move || frozen);
-        let error = SystemProvider.interfaces(&spent).unwrap_err();
-        assert!(matches!(error, Error::DeadlineExceeded { .. }));
-        assert_eq!(error.classification().code, "io.deadline_exceeded");
-    }
-}

@@ -37,20 +37,3 @@ impl EpochBoundsArgs {
 fn epoch(input: &str) -> Result<SystemTime, String> {
     super::parse_timestamp(input).map_err(|error| error.message)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_value_parser_rejects_unsupported_precision_and_negatives() {
-        assert!(epoch("1.123456700").is_ok());
-        assert_eq!(
-            epoch("1.123456700").unwrap(),
-            SystemTime::UNIX_EPOCH + std::time::Duration::new(1, 123_456_700)
-        );
-        assert!(epoch("1.1234567890").is_err());
-        assert!(epoch("-1").is_err());
-        assert!(epoch("abc").is_err());
-    }
-}

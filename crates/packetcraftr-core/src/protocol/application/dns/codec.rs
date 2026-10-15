@@ -276,38 +276,3 @@ impl Codec for DnsCodec {
         Ok(Box::new(layer))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn question(extra: &[u8]) -> Bytes {
-        let mut wire = vec![0; 12];
-        wire[4..6].copy_from_slice(&1_u16.to_be_bytes());
-        wire.extend_from_slice(extra);
-        wire.into()
-    }
-
-    #[test]
-    fn layer_errors_keep_the_extent_a_truncated_message_needs() {
-        let mut rdata = vec![0; 12];
-        rdata[6..8].copy_from_slice(&1_u16.to_be_bytes());
-        rdata.extend_from_slice(&[0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 4, 192, 0]);
-        for (wire, expected) in [
-            (Bytes::from(vec![0; 11]), 12),
-            (question(&[3, b'w', b'w']), 16),
-            (question(&[0, 0]), 15),
-            (rdata.into(), 27),
-        ] {
-            let available = wire.len();
-            assert!(
-                matches!(
-                    layer_from_wire(wire, false),
-                    Err(crate::codec::Error::Truncated { needed, available: actual, .. })
-                        if needed == expected && actual == available
-                ),
-                "needs {expected}"
-            );
-        }
-    }
-}

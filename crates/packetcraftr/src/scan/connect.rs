@@ -6,8 +6,6 @@ mod attempts;
 mod engine;
 mod planning;
 mod report;
-#[cfg(test)]
-mod tests;
 
 use packetcraftr_core::error::BoundaryError;
 

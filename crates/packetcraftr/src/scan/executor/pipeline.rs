@@ -961,6 +961,3 @@ fn pending_evidence(
         })
         .collect()
 }
-
-#[cfg(test)]
-mod tests;

@@ -304,13 +304,3 @@ fn classified(code: &'static str, kind: Kind, remediation: &'static str) -> Clas
 fn classified_cli(code: &'static str, remediation: &'static str) -> Classification {
     classified(code, Kind::Usage, remediation)
 }
-
-#[cfg(test)]
-pub(crate) mod test_support {
-    use super::Error;
-
-    #[track_caller]
-    pub(crate) fn assert_same_failure(actual: &Error, expected: &Error) {
-        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
-    }
-}

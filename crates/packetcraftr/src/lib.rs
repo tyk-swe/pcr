@@ -26,9 +26,6 @@
 
 #![forbid(unsafe_code)]
 
-#[cfg(test)]
-extern crate self as packetcraftr;
-
 mod address;
 pub mod capture;
 mod client;
@@ -61,9 +58,6 @@ pub mod send;
 mod stats;
 pub mod target;
 pub mod traceroute;
-
-#[cfg(test)]
-mod test_support;
 
 pub use client::Client;
 pub use error::{Error, NeighborSpent};

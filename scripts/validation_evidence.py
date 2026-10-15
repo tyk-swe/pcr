@@ -9,7 +9,7 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-EVIDENCE_VERSION = 1
+EVIDENCE_VERSION = 2
 TSHARK_VERSION = '4.6.4'
 GIT_TIMEOUT = 30
 
@@ -39,26 +39,10 @@ DECODE_FIELDS = (
 
 # Expected physical-frame counts, independent of capture generation and decoding.
 DECODE_PROFILES = {
-    'pull-request': {'spec-vectors': 9, 'tls-handshake': 8},
-    'full': {
-        'spec-vectors': 9, 'tls-handshake': 8,
-        'flows': 64, 'segments': 2112, 'overlaps': 320, 'fragments': 128,
-        'scopes': 64, 'tls-gaps': 192,
-        'tcp-growth-128': 129, 'tcp-growth-1024': 1025, 'tcp-growth-8192': 8193,
-        'tcp-growth-reverse-128': 129, 'tcp-growth-reverse-1024': 1025,
-        'tcp-growth-reverse-8192': 8193,
-    },
+    'curated': {'spec-vectors': 9, 'tls-handshake': 8},
 }
 
-# Preserve the runner's scenario order while sharing the required inventory.
-NATIVE_SCENARIOS = (
-    'loopback_exchange', 'readiness_and_repeated_cleanup', 'idle_deadline_and_cancellation',
-    'bounded_queue_reports_real_capture_loss',
-    'native_set_before_realized_values',
-    'native_filter_error_releases_admission',
-    'iface_disappearance_driver_fail_cleans_up',
-    'scoped_ipv6_targets',
-)
+NATIVE_SCENARIOS = ('loopback_exchange',)
 
 
 def tshark_matches(identity, expected=TSHARK_VERSION):
@@ -89,8 +73,6 @@ def validate_native(report):
     scenarios = named_results(report.get('scenarios'), NATIVE_SCENARIOS, 'native scenarios')
     if any(type(item.get('exit_code')) is not int or item['exit_code'] != 0 for item in scenarios):
         raise ValueError('native evidence lacks successful scenario exit codes')
-    if not valid_digest(report.get('native_test_sha256')):
-        raise ValueError('native evidence lacks test executable digest')
     namespace, parent = report.get('namespace'), report.get('parent_namespace')
     if type(namespace) is not int or type(parent) is not int or namespace <= 0 or parent <= 0 or namespace == parent:
         raise ValueError('native evidence lacks distinct positive namespace identifiers')

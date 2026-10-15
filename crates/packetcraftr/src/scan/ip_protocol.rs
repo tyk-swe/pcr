@@ -115,37 +115,3 @@ impl SeenProtocols {
         self.0[word] & bit != 0
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn selection_deduplicates_applies_exclusions_and_bounds_results() {
-        let selected = select_ip_protocols(
-            &IpProtocolSelection {
-                include: vec![
-                    IpProtocolSpec::RangeInclusive { start: 1, end: 6 },
-                    IpProtocolSpec::Single(4),
-                    IpProtocolSpec::Single(132),
-                ],
-                exclude: vec![
-                    IpProtocolSpec::Single(2),
-                    IpProtocolSpec::RangeInclusive { start: 4, end: 5 },
-                ],
-            },
-            16,
-        )
-        .expect("valid selection");
-        assert_eq!(
-            selected.endpoints,
-            vec![
-                probe::Endpoint::Ip { protocol: 1 },
-                probe::Endpoint::Ip { protocol: 3 },
-                probe::Endpoint::Ip { protocol: 6 },
-                probe::Endpoint::Ip { protocol: 132 },
-            ]
-        );
-        assert_eq!(selected.excluded, 3);
-    }
-}

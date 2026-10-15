@@ -354,26 +354,3 @@ fn typed(kind: u8, body: Bytes) -> TcpOption {
         _ => TcpOption::Raw { kind, data: body },
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::registry::Discriminator;
-
-    fn ports(source_port: u16, destination_port: u16) -> Vec<u64> {
-        child_discriminators([destination_port, source_port])
-            .into_iter()
-            .map(|Discriminator(value)| value)
-            .collect()
-    }
-
-    #[test]
-    fn the_destination_port_is_offered_before_the_source_port_and_the_fallback() {
-        assert_eq!(ports(40_000, 443), vec![443, 40_000, 0]);
-    }
-
-    #[test]
-    fn a_zero_port_never_shadows_the_raw_fallback() {
-        assert_eq!(ports(0, 0), vec![0]);
-    }
-}

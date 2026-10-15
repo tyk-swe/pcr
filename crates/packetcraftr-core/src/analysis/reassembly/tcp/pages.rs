@@ -31,8 +31,7 @@ pub(super) fn allocate() -> Result<Page, Error> {
             requested: PAGE_BYTES,
         })?;
     bytes.resize(PAGE_BYTES, 0);
-    #[cfg(test)]
-    test_support::record(|work| work.page_allocations += 1);
+
     Ok(Page {
         bytes: bytes.into_boxed_slice(),
         live: 0,
@@ -60,8 +59,6 @@ pub(super) fn equals(pages: &BTreeMap<u64, Page>, offset: u64, bytes: &[u8]) -> 
 }
 
 pub(super) fn copy_out(pages: &BTreeMap<u64, Page>, offset: u64, output: &mut [u8]) {
-    #[cfg(test)]
-    test_support::record(|work| work.retained_copies += output.len());
     let mut copied = 0;
     slices(offset..offset + output.len() as u64, |key, range| {
         let len = range.len();
@@ -72,8 +69,6 @@ pub(super) fn copy_out(pages: &BTreeMap<u64, Page>, offset: u64, output: &mut [u
 
 /// The caller supplies only previously uncovered bytes, after admission.
 pub(super) fn insert(pages: &mut BTreeMap<u64, Page>, offset: u64, bytes: &[u8]) {
-    #[cfg(test)]
-    test_support::record(|work| work.incoming_copies += bytes.len());
     let mut copied = 0;
     slices(offset..offset + bytes.len() as u64, |key, range| {
         let page = pages
@@ -121,26 +116,4 @@ pub(super) fn remaining_count(
         })
         .count();
     pages.len() - removed
-}
-
-#[cfg(test)]
-pub(super) mod test_support {
-    #![allow(dead_code)]
-    use std::cell::Cell;
-    #[derive(Clone, Copy, Default, Debug)]
-    pub(in crate::analysis::reassembly::tcp) struct Counts {
-        pub incoming_copies: usize,
-        pub retained_copies: usize,
-        pub page_allocations: usize,
-        pub output_allocations: usize,
-    }
-    thread_local! { static COUNTS: Cell<Counts> = Cell::new(Counts::default()); }
-
-    pub(in crate::analysis::reassembly::tcp) fn record(update: impl FnOnce(&mut Counts)) {
-        COUNTS.with(|cell| {
-            let mut value = cell.get();
-            update(&mut value);
-            cell.set(value);
-        });
-    }
 }

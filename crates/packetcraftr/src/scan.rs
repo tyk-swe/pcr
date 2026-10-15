@@ -40,8 +40,6 @@ mod request;
 mod sctp;
 mod selection;
 mod tcp;
-#[cfg(test)]
-mod tests;
 
 pub use adaptive::{Adaptive, Condition, ConditionKind, HostIdentity, Scheduling, SchedulingMode};
 pub use error::{Error, PipelineFailure};

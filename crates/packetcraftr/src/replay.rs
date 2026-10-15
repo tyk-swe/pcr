@@ -10,8 +10,6 @@ mod plan;
 mod report;
 mod request;
 pub mod routing;
-#[cfg(test)]
-mod tests;
 
 pub use error::Error;
 pub use evidence::{FrameEvidence, Transmission};

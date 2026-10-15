@@ -142,38 +142,3 @@ impl Codec for EapolCodec {
         make_layer(Eapol::default(), fields)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn decode(input: &[u8]) -> Result<Decoded, crate::codec::Error> {
-        let registry = crate::protocol::builtin::registry();
-        let context = DecodeContext {
-            parent: None,
-            registry: &registry,
-            network: None,
-            hop_limit: None,
-            discriminator: None,
-        };
-        EapolCodec.decode(Bytes::copy_from_slice(input), &context)
-    }
-
-    #[test]
-    fn a_declared_length_past_the_input_is_truncated() {
-        assert!(matches!(
-            decode(&[2, 0, 0, 5, 1, 2, 0, 5]),
-            Err(crate::codec::Error::Truncated {
-                needed: 9,
-                available: 8,
-                ..
-            })
-        ));
-        assert!(matches!(
-            decode(&[2, 0, 0]),
-            Err(crate::codec::Error::Truncated { .. })
-        ));
-        // the longest declared length never allocates or slices past the input
-        assert!(decode(&[2, 0, 0xff, 0xff]).is_err());
-    }
-}

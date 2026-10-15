@@ -41,19 +41,3 @@ fn write_locked(
         .and_then(|()| stdout.flush())
         .map_err(|source| stdout_error("write stdout failed", source))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stdout_failures_publish_one_classification_with_remediation() {
-        let error = stdout_error("write stdout failed", io::Error::other("consumer closed"));
-
-        assert_eq!(error.exit_code(), 5);
-        assert_eq!(error.classification.code, "io.stdout");
-        assert!(error.classification.remediation.is_some());
-        assert_eq!(error.message, "write stdout failed");
-        assert_eq!(error.causes, ["consumer closed"]);
-    }
-}

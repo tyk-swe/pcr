@@ -444,11 +444,7 @@ fn materialize_pending_merge(
             requested: plan.emitted_segment_bytes,
         })?;
     output.resize(plan.emitted_segment_bytes, 0);
-    #[cfg(test)]
-    pages::test_support::record(|work| {
-        work.output_allocations += 1;
-        work.incoming_copies += payload.len();
-    });
+
     let first = (offset - plan.union_start) as usize;
     output[first..first + payload.len()].copy_from_slice(payload);
     if let Some(first) = plan.first_affected {

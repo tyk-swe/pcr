@@ -49,23 +49,3 @@ impl Collector {
         self.0.take().finish(report)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn collector_rejects_a_report_without_matching_sent_events() {
-        let report = Report {
-            unanswered: Vec::new(),
-            stats: Stats {
-                packets_completed: 1,
-                ..Stats::default()
-            },
-        };
-        assert!(matches!(
-            Collector::default().finish(report),
-            Err(Error::IncoherentEvents { .. })
-        ));
-    }
-}

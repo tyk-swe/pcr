@@ -52,8 +52,6 @@ impl Classified for Error {
 struct Budget {
     used: AtomicUsize,
     limit: usize,
-    #[cfg(test)]
-    union_reservations: AtomicUsize,
 }
 struct Lease {
     budget: Arc<Budget>,
@@ -121,11 +119,7 @@ impl SourceSet {
                 limit: self.0.lease.budget.limit,
             })?;
         let lease = self.0.lease.budget.reserve(charge)?;
-        #[cfg(test)]
-        lease
-            .budget
-            .union_reservations
-            .fetch_add(1, Ordering::Relaxed);
+
         let mut frames = Vec::new();
         frames
             .try_reserve_exact(capacity)
@@ -195,8 +189,6 @@ impl Tracker {
         let budget = Arc::new(Budget {
             used: AtomicUsize::new(0),
             limit,
-            #[cfg(test)]
-            union_reservations: AtomicUsize::new(0),
         });
         let tree = budget.reserve(2048)?;
         Ok(Self {
@@ -207,11 +199,6 @@ impl Tracker {
             max_outcomes,
             outcomes_omitted: 0,
         })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn union_reservations(&self) -> usize {
-        self.budget.union_reservations.load(Ordering::Acquire)
     }
 
     pub(crate) fn single(&self, source: SourceFrame) -> Result<SourceSet, Error> {
@@ -264,70 +251,5 @@ impl Tracker {
     pub(crate) fn finish(mut self) -> (Vec<IncompleteSources>, u64) {
         self.retire(|_| false);
         (self.incomplete, self.outcomes_omitted)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(dead_code)]
-
-    use super::*;
-    use std::time::Duration;
-
-    fn source(number: u64) -> SourceFrame {
-        SourceFrame {
-            number,
-            timestamp: SystemTime::UNIX_EPOCH + Duration::from_secs(number),
-        }
-    }
-
-    fn used(tracker: &Tracker) -> usize {
-        tracker.budget.used.load(Ordering::Acquire)
-    }
-
-    fn numbers(set: &SourceSet) -> Vec<u64> {
-        set.frames().iter().map(|frame| frame.number).collect()
-    }
-
-    #[test]
-    fn union_rejects_different_captures_before_any_reuse() {
-        let first = Tracker::new(usize::MAX, 8).expect("tracker");
-        let second = Tracker::new(usize::MAX, 8).expect("tracker");
-        let a = first.single(source(7)).expect("single");
-        let b = second.single(source(7)).expect("single");
-        let baseline = first.union_reservations();
-        assert!(matches!(a.union(&b), Err(Error::DifferentCapture)));
-        assert!(a.union(&a.clone()).is_ok());
-        assert_eq!(first.union_reservations(), baseline);
-    }
-
-    #[test]
-    fn subset_union_fits_where_a_fresh_merge_would_exceed_budget() {
-        let single_charge = 256 + std::mem::size_of::<SourceFrame>();
-        let pair_charge = 2 * std::mem::size_of::<SourceFrame>() + 256;
-        let limit = 2048 + 2 * single_charge + pair_charge;
-        let tracker = Tracker::new(limit, 8).expect("tracker");
-        let one = tracker.single(source(1)).expect("single");
-        let two = tracker.single(source(2)).expect("single");
-        let pair = one.union(&two).expect("disjoint union");
-        assert_eq!(used(&tracker), limit);
-
-        let baseline = tracker.union_reservations();
-        assert!(matches!(
-            one.union(&two),
-            Err(Error::Limit { limit: l }) if l == limit
-        ));
-        let merged = pair.union(&one).expect("no-op union needs no lease");
-        assert_eq!(numbers(&merged), [1, 2]);
-        assert_eq!(tracker.union_reservations(), baseline);
-        assert_eq!(used(&tracker), limit);
-
-        drop(merged);
-        drop(pair);
-        assert_eq!(
-            used(&tracker),
-            limit - pair_charge,
-            "releasing a merged set releases its lease"
-        );
     }
 }

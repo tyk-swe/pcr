@@ -107,22 +107,3 @@ pub fn push_once(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
         diagnostics.push(diagnostic);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unrelated_diagnostic_codes_never_classify_as_integrity_failures() {
-        for code in [
-            "decode.tcp_checksum_hint",
-            "tcp.checksum",
-            "vendor.checksum_mismatch",
-            "decode.udp_length",
-        ] {
-            assert!(!Diagnostic::info(code, "unrelated").is_checksum_failure());
-            assert!(!Diagnostic::warning(code, "unrelated").is_checksum_failure());
-            assert!(!Diagnostic::error(code, "unrelated").is_checksum_failure());
-        }
-    }
-}

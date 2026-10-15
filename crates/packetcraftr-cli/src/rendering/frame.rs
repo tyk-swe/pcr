@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use packetcraftr_core::document;
 use packetcraftr_core::error::{Classification, Kind};
-use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::field;
 use packetcraftr_core::layer::FieldSchema;
 use packetcraftr_core::registry::Registry;
 
@@ -23,22 +23,25 @@ use super::{
 const MAX_TREE_DEPTH: usize = document::MAX_DOCUMENT_NESTING;
 
 pub(crate) fn render_frame_text(
+    invocation: &crate::invocation::Invocation,
     source_frame: output::frame::SourceFrame,
     frame: &output::frame::Captured,
     decoded: Option<&output::frame::Stack>,
     presentation: super::Presentation,
 ) -> Result<(), CliError> {
-    render_frame(source_frame, frame, decoded, None, presentation)
+    render_frame(invocation, source_frame, frame, decoded, None, presentation)
 }
 
 /// As [`render_frame_text`], listing each layer's fields in place of the DNS summary lines.
 pub(crate) fn render_frame_tree(
+    invocation: &crate::invocation::Invocation,
     source_frame: output::frame::SourceFrame,
     frame: &output::frame::Captured,
     decoded: Option<&output::frame::Stack>,
     tree: &mut FieldTree,
 ) -> Result<(), CliError> {
     render_frame(
+        invocation,
         source_frame,
         frame,
         decoded,
@@ -48,6 +51,7 @@ pub(crate) fn render_frame_tree(
 }
 
 fn render_frame(
+    invocation: &crate::invocation::Invocation,
     source_frame: output::frame::SourceFrame,
     frame: &output::frame::Captured,
     decoded: Option<&output::frame::Stack>,
@@ -55,41 +59,46 @@ fn render_frame(
     presentation: super::Presentation,
 ) -> Result<(), CliError> {
     match decoded {
-        None => write_stdout_line(format_args!(
-            "{source_frame}: {}",
-            frame_summary(frame, presentation)
-        )),
+        None => write_stdout_line(
+            invocation,
+            format_args!("{source_frame}: {}", frame_summary(frame, presentation)),
+        ),
         Some(decoded) => {
-            write_stdout_line(format_args!(
-                "{source_frame}: dlt={} caplen={} wirelen={} layers={} {}",
-                frame.link_type,
-                frame.captured_length,
-                frame.original_length,
-                decoded
-                    .packet
-                    .layers
-                    .iter()
-                    .map(|layer| layer.protocol.as_str())
-                    .collect::<Vec<_>>()
-                    .join("/"),
-                if presentation.verbose {
-                    format!("{}", spaced_hex(frame.bytes()))
-                } else {
-                    String::new()
-                }
-            ))?;
+            write_stdout_line(
+                invocation,
+                format_args!(
+                    "{source_frame}: dlt={} caplen={} wirelen={} layers={} {}",
+                    frame.link_type,
+                    frame.captured_length,
+                    frame.original_length,
+                    decoded
+                        .packet
+                        .layers
+                        .iter()
+                        .map(|layer| layer.protocol.as_str())
+                        .collect::<Vec<_>>()
+                        .join("/"),
+                    if presentation.verbose {
+                        format!("{}", spaced_hex(frame.bytes()))
+                    } else {
+                        String::new()
+                    }
+                ),
+            )?;
             match tree {
-                Some(tree) => tree.render_layers(&decoded.packet, |index, protocol| {
-                    format!("{source_frame}: {index}: {protocol}")
-                })?,
+                Some(tree) => {
+                    tree.render_layers(invocation, &decoded.packet, |index, protocol| {
+                        format!("{source_frame}: {index}: {protocol}")
+                    })?;
+                }
                 None => {
-                    render_dns_records(&decoded.packet)?;
-                    presentation.details("Decoded fields", &decoded.packet)?;
+                    render_dns_records(invocation, &decoded.packet)?;
+                    presentation.details(invocation, "Decoded fields", &decoded.packet)?;
                 }
             }
             if !decoded.diagnostics.is_empty() {
-                write_stdout_line(format_args!("{source_frame}: diagnostics:"))?;
-                render_diagnostics_text(&decoded.diagnostics)?;
+                write_stdout_line(invocation, format_args!("{source_frame}: diagnostics:"))?;
+                render_diagnostics_text(invocation, &decoded.diagnostics)?;
             }
             Ok(())
         }
@@ -125,6 +134,7 @@ impl FieldTree {
     /// checksums; the values shown are always the decoded wire values.
     pub(crate) fn render_layers(
         &mut self,
+        invocation: &crate::invocation::Invocation,
         packet: &document::Packet,
         header: impl Fn(usize, &str) -> String,
     ) -> Result<(), CliError> {
@@ -134,7 +144,7 @@ impl FieldTree {
             push_stdout_line(&mut block, format_args!("{line}"));
             Ok(())
         });
-        write_stdout_block(&block)?;
+        write_stdout_block(invocation, &block)?;
         walked
     }
 
@@ -172,7 +182,7 @@ impl FieldTree {
     fn field(
         &mut self,
         label: &str,
-        value: &FieldValue,
+        value: &field::Value,
         scope: Scope<'_>,
         depth: usize,
         emit: &mut Emit<'_>,
@@ -185,7 +195,7 @@ impl FieldTree {
         let indent = "  ".repeat(depth);
         let marker = if scope.derived { " (derived)" } else { "" };
         match value {
-            FieldValue::List(items) if !items.is_empty() => {
+            field::Value::List(items) if !items.is_empty() => {
                 self.line(&format!("{indent}{label}:{marker}"), emit)?;
                 let item_scope = Scope {
                     derived: false,
@@ -196,7 +206,7 @@ impl FieldTree {
                 }
                 Ok(())
             }
-            FieldValue::Object(members) if !members.is_empty() => {
+            field::Value::Object(members) if !members.is_empty() => {
                 self.line(&format!("{indent}{label}:{marker}"), emit)?;
                 for (name, member) in members {
                     let member_scope = scope
@@ -209,7 +219,7 @@ impl FieldTree {
                 Ok(())
             }
             scalar => {
-                if let FieldValue::Bytes(bytes) = scalar {
+                if let field::Value::Bytes(bytes) = scalar {
                     // The hex rendering costs two characters per byte; refuse
                     // before allocating it when the budget cannot carry it.
                     if self.remaining < bytes.len().saturating_mul(2) {
@@ -263,13 +273,13 @@ impl Scope<'_> {
 }
 
 /// Scalars print inline; empty lists and objects print as `[]` and `{}`, bytes with their count.
-fn scalar_text(value: &FieldValue) -> String {
+fn scalar_text(value: &field::Value) -> String {
     match value {
-        FieldValue::Bool(value) => value.to_string(),
-        FieldValue::Unsigned(value) => value.to_string(),
-        FieldValue::Signed(value) => value.to_string(),
-        FieldValue::Text(value) => format!("{value:?}"),
-        FieldValue::Bytes(bytes) => {
+        field::Value::Bool(value) => value.to_string(),
+        field::Value::Unsigned(value) => value.to_string(),
+        field::Value::Signed(value) => value.to_string(),
+        field::Value::Text(value) => format!("{value:?}"),
+        field::Value::Bytes(bytes) => {
             let count = bytes.len();
             let unit = if count == 1 { "byte" } else { "bytes" };
             if count == 0 {
@@ -282,28 +292,32 @@ fn scalar_text(value: &FieldValue) -> String {
             let _ = write!(text, " ({count} {unit})");
             text
         }
-        FieldValue::Ipv4(address) => address.to_string(),
-        FieldValue::Ipv6(address) => address.to_string(),
-        FieldValue::Mac([a, b, c, d, e, f]) => {
+        field::Value::Ipv4(address) => address.to_string(),
+        field::Value::Ipv6(address) => address.to_string(),
+        field::Value::Mac([a, b, c, d, e, f]) => {
             format!("{a:02x}:{b:02x}:{c:02x}:{d:02x}:{e:02x}:{f:02x}")
         }
-        FieldValue::List(_) => "[]".to_owned(),
-        FieldValue::Object(_) => "{}".to_owned(),
-        // `FieldValue` is non-exhaustive; a future kind must not print as nothing.
+        field::Value::List(_) => "[]".to_owned(),
+        field::Value::Object(_) => "{}".to_owned(),
+        // `field::Value` is non-exhaustive; a future kind must not print as nothing.
         _ => "<unprintable>".to_owned(),
     }
 }
 
 pub(crate) fn render_undecoded<'a>(
+    invocation: &crate::invocation::Invocation,
     rows: impl IntoIterator<Item = (Option<String>, &'a output::frame::Captured)>,
 ) -> Result<(), CliError> {
     for (label, frame) in rows {
         match label {
-            Some(label) => write_stdout_line(format_args!(
-                "undecoded {label} {}",
-                captured_frame_text(frame)
-            ))?,
-            None => write_stdout_line(format_args!("undecoded {}", captured_frame_text(frame)))?,
+            Some(label) => write_stdout_line(
+                invocation,
+                format_args!("undecoded {label} {}", captured_frame_text(frame)),
+            )?,
+            None => write_stdout_line(
+                invocation,
+                format_args!("undecoded {}", captured_frame_text(frame)),
+            )?,
         }
     }
     Ok(())
@@ -348,7 +362,7 @@ mod tests {
 
     use super::*;
 
-    fn packet(protocol: &str, fields: Vec<(&str, FieldValue)>) -> document::Packet {
+    fn packet(protocol: &str, fields: Vec<(&str, field::Value)>) -> document::Packet {
         document::Packet {
             schema: document::PACKET_DOCUMENT_SCHEMA_V2.to_owned(),
             layers: vec![document::Layer {
@@ -377,7 +391,7 @@ mod tests {
 
     #[test]
     fn exhausting_the_budget_is_a_typed_policy_error() {
-        let packet = packet("ipv4", vec![("ttl", FieldValue::Unsigned(64))]);
+        let packet = packet("ipv4", vec![("ttl", field::Value::Unsigned(64))]);
         let error = lines(&packet, 0).unwrap_err();
         assert_eq!(error.classification.code, "policy.tree_output_limit");
         assert_eq!(error.exit_code(), 6);
@@ -392,7 +406,7 @@ mod tests {
             "ipv4",
             vec![(
                 "options",
-                FieldValue::Bytes(Bytes::from_static(&[0xab; 64])),
+                field::Value::Bytes(Bytes::from_static(&[0xab; 64])),
             )],
         );
         // "0: ipv4" leaves 5; the field's 128-character hex dump cannot fit.

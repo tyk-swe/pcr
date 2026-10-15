@@ -8,7 +8,7 @@ use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use packetcraftr::probe::ProbeEndpoint;
+use packetcraftr::probe;
 use packetcraftr_core::build;
 use packetcraftr_core::codec;
 use packetcraftr_core::decode;
@@ -58,11 +58,11 @@ pub enum ScriptedReply {
 /// addressed and its attempt ordinal: a scan plan transmits one endpoint's
 /// attempts in attempt order, so a reply never depends on wall-clock timing.
 #[derive(Clone)]
-pub struct Scripts(Arc<Mutex<HashMap<ProbeEndpoint, VecDeque<ScriptedReply>>>>);
+pub struct Scripts(Arc<Mutex<HashMap<probe::Endpoint, VecDeque<ScriptedReply>>>>);
 
 impl Scripts {
     /// One script per endpoint, each holding one reply per authorized attempt.
-    pub fn new(scripts: impl IntoIterator<Item = (ProbeEndpoint, Vec<ScriptedReply>)>) -> Self {
+    pub fn new(scripts: impl IntoIterator<Item = (probe::Endpoint, Vec<ScriptedReply>)>) -> Self {
         Self(Arc::new(Mutex::new(
             scripts
                 .into_iter()
@@ -103,21 +103,21 @@ impl Scripts {
 }
 
 /// The endpoint a transmitted scan probe addressed.
-fn sent_endpoint(sent: &[u8]) -> Option<ProbeEndpoint> {
+fn sent_endpoint(sent: &[u8]) -> Option<probe::Endpoint> {
     let decoded = decode_frame(sent)?;
     let packet = &decoded.packet;
     if let Some(tcp) = packet.get::<Tcp>() {
-        return Some(ProbeEndpoint::Tcp {
+        return Some(probe::Endpoint::Tcp {
             port: tcp.destination_port,
         });
     }
     if let Some(udp) = packet.get::<Udp>() {
-        return Some(ProbeEndpoint::Udp {
+        return Some(probe::Endpoint::Udp {
             port: udp.destination_port,
         });
     }
     (packet.get::<Icmpv4>().is_some() || packet.get::<Icmpv6>().is_some())
-        .then_some(ProbeEndpoint::Icmp)
+        .then_some(probe::Endpoint::Icmp)
 }
 
 enum ReplyKind {
@@ -288,7 +288,11 @@ fn finish(
     }
     transport(&mut reply);
     build::Builder::new(builtin::registry())
-        .build(reply, codec::Context::default(), build::Options::default())
+        .build(
+            reply,
+            codec::Addresses::default(),
+            build::Options::default(),
+        )
         .expect("the fixture builds only valid replies")
         .bytes
         .to_vec()

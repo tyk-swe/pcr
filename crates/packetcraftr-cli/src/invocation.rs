@@ -1,96 +1,230 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::errors::CliError;
-use packetcraftr_core::budget::{Deadline, Interrupted};
-use std::cell::RefCell;
-use std::sync::Arc;
-use std::time::Duration;
+use crate::{
+    errors::CliError,
+    output::{contract::Format, envelope::Envelope},
+    rendering::StreamEncoder,
+    resources::Diagnostics,
+};
+use packetcraftr_core::budget::{Cancellation, Deadline, Interrupted};
+use std::{sync::Arc, time::Duration};
 
-thread_local! {
-    static CURRENT: RefCell<Option<Arc<Deadline>>> = const { RefCell::new(None) };
+/// One command's output, stop conditions, and optional resource diagnostics.
+/// Clones passed to workers share these bounds and diagnostics, never ambient state.
+#[derive(Clone)]
+pub(crate) struct Invocation {
+    pub(crate) format: Format,
+    pub(crate) output: StreamEncoder,
+    pub(crate) deadline: Option<Arc<Deadline>>,
+    pub(crate) cancellation: Cancellation,
+    pub(crate) diagnostics: Option<Arc<Diagnostics>>,
 }
 
-pub(crate) struct Guard {
-    previous: Option<Arc<Deadline>>,
-}
-
-pub(crate) fn enter(duration: Option<Duration>) -> Guard {
-    let next = duration.map(|duration| {
-        Arc::new(
-            Deadline::new(duration).with_cancellation(Some(crate::cancellation::signal().clone())),
-        )
-    });
-    enter_deadline(next)
-}
-
-pub(crate) fn enter_deadline(next: Option<Arc<Deadline>>) -> Guard {
-    Guard {
-        previous: CURRENT.with(|current| current.replace(next)),
-    }
-}
-
-impl Drop for Guard {
-    fn drop(&mut self) {
-        CURRENT.with(|current| {
-            current.replace(self.previous.take());
+impl Invocation {
+    pub(crate) fn new(
+        format: Format,
+        output: StreamEncoder,
+        duration: Option<Duration>,
+        cancellation: Cancellation,
+        diagnostics: Option<Arc<Diagnostics>>,
+    ) -> Self {
+        let deadline = duration.map(|duration| {
+            Arc::new(Deadline::new(duration).with_cancellation(Some(cancellation.clone())))
         });
+        let output = match &deadline {
+            Some(deadline) => output.with_deadline(deadline.clone()),
+            None => output,
+        };
+        let output = match &diagnostics {
+            Some(diagnostics) => {
+                let diagnostics = diagnostics.clone();
+                output.with_resource_diagnostics(move || diagnostics.snapshot())
+            }
+            None => output,
+        };
+        Self {
+            format,
+            output,
+            deadline,
+            cancellation,
+            diagnostics,
+        }
     }
-}
 
-pub(crate) fn deadline() -> Option<Arc<Deadline>> {
-    CURRENT.with(|current| current.borrow().clone())
-}
+    pub(crate) fn with_output(mut self, output: StreamEncoder) -> Self {
+        let output = match &self.deadline {
+            Some(deadline) => output.with_deadline(deadline.clone()),
+            None => output,
+        };
+        self.output = match &self.diagnostics {
+            Some(diagnostics) => {
+                let diagnostics = diagnostics.clone();
+                output.with_resource_diagnostics(move || diagnostics.snapshot())
+            }
+            None => output,
+        };
+        self
+    }
 
-pub(crate) fn passive_lookup() -> Deadline {
-    Deadline::new(packetcraftr::deadline::PASSIVE_LOOKUP_TIMEOUT)
-        .with_parent(deadline())
-        .with_cancellation(Some(crate::cancellation::signal().clone()))
-}
+    /// Terminal error cleanup is allowed after the execution/publication ceiling.
+    pub(crate) fn terminal(&self) -> Self {
+        Self {
+            deadline: None,
+            output: self.output.clone().terminal(),
+            cancellation: Cancellation::default(),
+            ..self.clone()
+        }
+    }
 
-pub(crate) fn check() -> Result<(), CliError> {
-    check_interrupted().map_err(interruption_error)
+    pub(crate) fn check_interrupted(&self) -> Result<(), Interrupted> {
+        self.cancellation.check()?;
+        if let Some(deadline) = &self.deadline {
+            deadline.enforce()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check(&self) -> Result<(), CliError> {
+        self.check_interrupted().map_err(interruption_error)
+    }
+
+    pub(crate) fn passive_lookup(&self) -> Deadline {
+        Deadline::new(packetcraftr::deadline::PASSIVE_LOOKUP_TIMEOUT)
+            .with_parent(self.deadline.clone())
+            .with_cancellation(Some(self.cancellation.clone()))
+    }
+
+    pub(crate) fn reader<R: std::io::Read>(
+        &self,
+        reader: packetcraftr_core::capture_file::Reader<R>,
+    ) -> packetcraftr_core::capture_file::Reader<R> {
+        let reader = reader.with_cancellation(self.cancellation.clone());
+        match &self.deadline {
+            Some(deadline) => reader.with_deadline(deadline.clone()),
+            None => reader,
+        }
+    }
+
+    pub(crate) fn decorate<T>(&self, envelope: Envelope<T>) -> Envelope<T> {
+        match &self.diagnostics {
+            Some(diagnostics) => envelope.with_resources(diagnostics.snapshot()),
+            None => envelope,
+        }
+    }
+
+    pub(crate) fn register_runtime(
+        &self,
+        name: &'static str,
+        runtime: &packetcraftr::runtime::Runtime,
+    ) {
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.register_runtime(name, runtime);
+        }
+    }
+
+    pub(crate) fn stream_index_needed(&self, needed: bool) {
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.stream_index_needed(needed);
+        }
+    }
 }
 
 pub(crate) fn interruption_error(error: Interrupted) -> CliError {
     CliError::classified(error)
 }
 
-pub(crate) fn check_interrupted() -> Result<(), Interrupted> {
-    if let Some(deadline) = deadline() {
-        deadline.enforce()?;
-    }
-    Ok(())
-}
-
-pub(crate) fn reader<R: std::io::Read>(
-    reader: packetcraftr_core::capture_file::Reader<R>,
-) -> packetcraftr_core::capture_file::Reader<R> {
-    match deadline() {
-        Some(deadline) => reader.with_deadline(deadline),
-        None => reader,
+impl std::fmt::Debug for Invocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Invocation")
+            .field("format", &self.format)
+            .field("deadline", &self.deadline)
+            .finish_non_exhaustive()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use packetcraftr_core::budget::{Cancelled, DeadlineExceeded};
+    use crate::{output::contract::Command, resources::Diagnostics};
     use packetcraftr_core::error::Classified;
 
+    fn invocation(diagnostics: bool) -> Invocation {
+        Invocation::new(
+            Format::Json,
+            StreamEncoder::new(Command::Scan, std::io::sink()),
+            None,
+            Cancellation::default(),
+            diagnostics.then(|| Arc::new(Diagnostics::new(Vec::new()))),
+        )
+    }
+
     #[test]
-    fn interruptions_publish_the_classification_their_library_owns() {
-        let exceeded = DeadlineExceeded {
-            actual: Duration::from_millis(2),
-            limit: Duration::from_millis(1),
-        };
-        for interrupted in [
-            Interrupted::Cancelled(Cancelled),
-            Interrupted::Exceeded(exceeded),
-        ] {
-            let error = interruption_error(interrupted);
-            assert_eq!(error.classification, interrupted.classification());
-            assert_eq!(error.message, interrupted.to_string());
-        }
+    fn invocations_isolate_cancellation_deadlines_and_diagnostics() {
+        let mut first = invocation(true);
+        let second = invocation(true);
+        first.register_runtime("first", &packetcraftr::runtime::Runtime::default());
+        first.cancellation.cancel();
+        first.deadline = Some(Arc::new(Deadline::new(Duration::ZERO)));
+        assert!(first.check().is_err());
+        assert!(second.check().is_ok());
+        assert!(
+            first
+                .diagnostics
+                .as_ref()
+                .unwrap()
+                .snapshot()
+                .workers
+                .iter()
+                .any(|worker| worker.name == "first")
+        );
+        assert!(
+            !second
+                .diagnostics
+                .as_ref()
+                .unwrap()
+                .snapshot()
+                .workers
+                .iter()
+                .any(|worker| worker.name == "first")
+        );
+        assert!(first.terminal().check().is_ok());
+    }
+
+    #[test]
+    fn terminal_error_publication_releases_an_expired_invocation_ceiling() {
+        let (stream, output) = crate::test_support::stream(Command::Scan);
+        let invocation = Invocation::new(
+            Format::Ndjson,
+            stream,
+            Some(Duration::ZERO),
+            Default::default(),
+            None,
+        );
+        assert!(invocation.check().is_err());
+        invocation
+            .terminal()
+            .output
+            .emit_error(
+                CliError::new(packetcraftr_core::error::Kind::Io, "expired operation")
+                    .output_error(),
+            )
+            .unwrap();
+        assert_eq!(output.records().len(), 1);
+        assert!(invocation.output.is_terminal());
+    }
+
+    #[test]
+    fn a_worker_keeps_its_invocation_deadline() {
+        let mut invocation = invocation(false);
+        invocation.deadline = Some(Arc::new(Deadline::new(Duration::ZERO)));
+        let mut emit = crate::commands::execution::emitter(&invocation, |_: (), _| {
+            panic!("expired worker published")
+        });
+        let error = std::thread::spawn(move || emit(()))
+            .join()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.classification().code, "policy.duration_limit");
     }
 }

@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::{FieldValue, WireValue},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -90,9 +90,9 @@ fn encode_options(
     next_header: &WireValue<u8>,
     options: &Bytes,
     layout: fn(usize) -> Vec<crate::layout::FieldLayout>,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     materialize: impl FnOnce(WireValue<u8>, Bytes) -> Box<dyn Layer>,
-) -> Result<EncodedLayer, crate::codec::Error> {
+) -> Result<Encoded, crate::codec::Error> {
     let mut diagnostics = Vec::new();
     let (next, materialized_next) =
         resolve_next_header(name, next_header, context, &mut diagnostics)?;
@@ -112,7 +112,7 @@ fn encode_options(
     prefix.resize(header_len, 0);
     let padded_options = Bytes::copy_from_slice(&prefix[2..header_len]);
     let materialized = materialize(materialized_next, padded_options);
-    Ok(EncodedLayer::header(prefix, materialized)
+    Ok(Encoded::header(prefix, materialized)
         .with_fields(layout(header_len))
         .with_diagnostics(diagnostics))
 }
@@ -122,7 +122,7 @@ fn decode_options<L>(
     input: Bytes,
     make: impl FnOnce(u8, Bytes) -> L,
     layout: fn(usize) -> Vec<crate::layout::FieldLayout>,
-) -> Result<DecodedLayer, crate::codec::Error>
+) -> Result<Decoded, crate::codec::Error>
 where
     L: Layer + 'static,
 {
@@ -139,7 +139,7 @@ where
     let options = input
         .get(2..header_len)
         .ok_or_else(|| truncated(name, header_len, input.len()))?;
-    Ok(DecodedLayer {
+    Ok(Decoded {
         layer: Box::new(make(header[0], input.slice_ref(options))),
         consumed: header_len,
         payload_len: input.len().saturating_sub(header_len),
@@ -151,7 +151,7 @@ where
     })
 }
 
-impl LayerCodec for HopByHopCodec {
+impl Codec for HopByHopCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &hop_schema().protocol
     }
@@ -160,8 +160,8 @@ impl LayerCodec for HopByHopCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<HopByHop>(HOP_NAME, layer)?;
         encode_options(
             HOP_NAME,
@@ -181,8 +181,8 @@ impl LayerCodec for HopByHopCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         decode_options(
             HOP_NAME,
             input,
@@ -196,13 +196,13 @@ impl LayerCodec for HopByHopCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(HopByHop::default(), fields)
     }
 }
 
-impl LayerCodec for DestinationOptionsCodec {
+impl Codec for DestinationOptionsCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &destination_schema().protocol
     }
@@ -211,8 +211,8 @@ impl LayerCodec for DestinationOptionsCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<DestinationOptions>(DESTINATION_NAME, layer)?;
         encode_options(
             DESTINATION_NAME,
@@ -232,8 +232,8 @@ impl LayerCodec for DestinationOptionsCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         decode_options(
             DESTINATION_NAME,
             input,
@@ -247,7 +247,7 @@ impl LayerCodec for DestinationOptionsCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(DestinationOptions::default(), fields)
     }

@@ -2,11 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use bytes::Bytes;
-use packetcraftr_core::codec::{
-    DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
-};
+use packetcraftr_core::codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded};
 use packetcraftr_core::diagnostic::Diagnostic;
-use packetcraftr_core::field::{FieldValue, WireValue};
+use packetcraftr_core::field::{self, WireValue};
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::layer::Layer;
 use packetcraftr_core::registry::Discriminator;
@@ -144,7 +142,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProbeCodec;
 
-impl LayerCodec for ProbeCodec {
+impl Codec for ProbeCodec {
     fn protocol_id(&self) -> &'static packetcraftr_core::layer::Id {
         &probe_schema().protocol
     }
@@ -153,15 +151,15 @@ impl LayerCodec for ProbeCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        _context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, packetcraftr_core::codec::Error> {
+        _context: &EncodeContext<'_>,
+    ) -> Result<Encoded, packetcraftr_core::codec::Error> {
         let probe = layer.downcast_ref::<Probe>().ok_or_else(|| {
             packetcraftr_core::codec::Error::WrongLayer {
                 expected: "probe".into(),
                 actual: *layer.protocol_id(),
             }
         })?;
-        let mut encoded = EncodedLayer::header(vec![probe.value], Box::new(probe.clone()));
+        let mut encoded = Encoded::header(vec![probe.value], Box::new(probe.clone()));
         encoded.fields = probe_layout();
         encoded
             .diagnostics
@@ -172,8 +170,8 @@ impl LayerCodec for ProbeCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, packetcraftr_core::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, packetcraftr_core::codec::Error> {
         let Some(value) = input.first().copied() else {
             return Err(packetcraftr_core::codec::Error::Truncated {
                 protocol: "probe".into(),
@@ -182,7 +180,7 @@ impl LayerCodec for ProbeCodec {
             });
         };
         let payload_len = input.len() - 1;
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Probe {
                 value,
                 ..Probe::default()
@@ -202,7 +200,7 @@ impl LayerCodec for ProbeCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, packetcraftr_core::codec::Error> {
         let mut layer = Probe::default();
         for (name, value) in fields {
@@ -215,7 +213,7 @@ impl LayerCodec for ProbeCodec {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ChildCodec;
 
-impl LayerCodec for ChildCodec {
+impl Codec for ChildCodec {
     fn protocol_id(&self) -> &'static packetcraftr_core::layer::Id {
         &child_schema().protocol
     }
@@ -224,15 +222,15 @@ impl LayerCodec for ChildCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        _context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, packetcraftr_core::codec::Error> {
+        _context: &EncodeContext<'_>,
+    ) -> Result<Encoded, packetcraftr_core::codec::Error> {
         let child = layer.downcast_ref::<Child>().ok_or_else(|| {
             packetcraftr_core::codec::Error::WrongLayer {
                 expected: "child".into(),
                 actual: *layer.protocol_id(),
             }
         })?;
-        let mut encoded = EncodedLayer::header(vec![child.value], Box::new(child.clone()));
+        let mut encoded = Encoded::header(vec![child.value], Box::new(child.clone()));
         encoded.fields = child_layout();
         Ok(encoded)
     }
@@ -240,8 +238,8 @@ impl LayerCodec for ChildCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, packetcraftr_core::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, packetcraftr_core::codec::Error> {
         let value =
             input
                 .first()
@@ -251,14 +249,14 @@ impl LayerCodec for ChildCodec {
                     needed: 1,
                     available: 0,
                 })?;
-        let mut decoded = DecodedLayer::terminal(Box::new(Child { value }), 1);
+        let mut decoded = Decoded::terminal(Box::new(Child { value }), 1);
         decoded.fields = child_layout();
         Ok(decoded)
     }
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, packetcraftr_core::codec::Error> {
         let mut layer = Child::default();
         for (name, value) in fields {

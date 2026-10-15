@@ -13,7 +13,7 @@ use crate::execution::rate_delay;
 use crate::probe::Transport;
 use crate::scan::Reply;
 use crate::target::{Family, Selection, Target};
-use crate::traceroute::error::Probes;
+use crate::traceroute::error::probe_error;
 use crate::traceroute::request::{Bounds, check_collection, check_destination_port, tcp_payload};
 use crate::traceroute::{Error, Limits, MAX_PROBES};
 
@@ -107,7 +107,7 @@ impl Request {
         if self.route.link_mode != packetcraftr_netio::link::Mode::Layer3
             && (self.strategy.is_some() || !self.observed.is_empty())
         {
-            let interval = rate_delay(&Probes, "probes_per_second", 1, self.probes_per_second)?;
+            let interval = rate_delay(probe_error, "probes_per_second", 1, self.probes_per_second)?;
             if interval >= self.timeout {
                 return Err(Error::InvalidLimit {
                     field: "probes_per_second",

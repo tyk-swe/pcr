@@ -7,11 +7,8 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use packetcraftr_core::budget::{DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
-
-use crate::StatsOverflow;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -231,48 +228,42 @@ impl fmt::Display for EvidenceFault {
     }
 }
 
-pub(super) struct Attempts;
-
-impl crate::execution::Errors for Attempts {
-    type Error = Error;
-    type Step = u32;
-
-    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Error {
-        Error::InvalidLimit {
+pub(crate) fn attempt_error(step: u64, failure: crate::execution::Failure) -> Error {
+    match failure {
+        crate::execution::Failure::InvalidLimit {
             field,
             value,
             reason,
+        } => Error::InvalidLimit {
+            field,
+            value,
+            reason,
+        },
+        crate::execution::Failure::Authorization(source) => Error::Authorization(source),
+        crate::execution::Failure::DurationLimit(source) => Error::from(source),
+        crate::execution::Failure::Interrupted(source) => Error::from(source),
+        crate::execution::Failure::Clock(source) => {
+            let attempt = step as u32;
+
+            Error::Clock { attempt, source }
         }
-    }
+        crate::execution::Failure::Execution(source) => {
+            let attempt = step as u32;
 
-    fn authorization(&self, source: BoundaryError) -> Error {
-        Error::Authorization(source)
-    }
-
-    fn duration_limit(&self, _: u32, source: DeadlineExceeded) -> Error {
-        Error::from(source)
-    }
-
-    fn interrupted(&self, _: u32, source: Interrupted) -> Error {
-        Error::from(source)
-    }
-
-    fn clock(&self, attempt: u32, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
-        Error::Clock { attempt, source }
-    }
-
-    fn execution(&self, attempt: u32, source: BoundaryError) -> Error {
-        Error::Execution { attempt, source }
-    }
-
-    fn invalid_evidence(&self, attempt: u32, source: crate::evidence::Error) -> Error {
-        Error::InvalidEvidence {
-            attempt,
-            fault: EvidenceFault::Exchange(source),
+            Error::Execution { attempt, source }
         }
-    }
+        crate::execution::Failure::InvalidEvidence(source) => {
+            let attempt = step as u32;
 
-    fn stats_overflow(&self, attempt: u32, _: StatsOverflow) -> Error {
-        Error::StatisticsOverflow { attempt }
+            Error::InvalidEvidence {
+                attempt,
+                fault: EvidenceFault::Exchange(source),
+            }
+        }
+        crate::execution::Failure::StatsOverflow(_) => {
+            let attempt = step as u32;
+
+            Error::StatisticsOverflow { attempt }
+        }
     }
 }

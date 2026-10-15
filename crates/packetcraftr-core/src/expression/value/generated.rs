@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::expression::Error;
-use crate::field::FieldValue;
+use crate::field;
 
 use super::super::syntax::{split_top_level_bounded, trim_at};
 use super::Parser;
@@ -43,7 +43,7 @@ pub(super) fn parse_generated(
     generator: Generator,
     body: &str,
     bounds: &mut Parser,
-) -> Result<FieldValue, Error> {
+) -> Result<field::Value, Error> {
     let name = generator.name();
     let arguments = body.strip_suffix(')').ok_or_else(|| Error::Syntax {
         offset: base,
@@ -68,7 +68,7 @@ pub(super) fn parse_generated(
     let integer = |index: usize| {
         let (part_base, text) = trim_at(parts[index].0, parts[index].1);
         match parse_scalar(part_base, text)? {
-            FieldValue::Unsigned(value) => Ok((part_base, value)),
+            field::Value::Unsigned(value) => Ok((part_base, value)),
             _ => Err(Error::Syntax {
                 offset: part_base,
                 message: format!("{name}() arguments must be unsigned integers"),
@@ -99,7 +99,7 @@ pub(super) fn parse_generated(
             cyclic_pattern(bounds.reserve_generated(length)?)
         }
     };
-    Ok(FieldValue::Bytes(bytes.into()))
+    Ok(field::Value::Bytes(bytes.into()))
 }
 
 /// The leading `length` bytes of the Metasploit-style pattern `Aa0Aa1Aa2...`,

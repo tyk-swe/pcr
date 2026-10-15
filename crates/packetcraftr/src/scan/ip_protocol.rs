@@ -6,7 +6,7 @@
 
 use super::Error;
 use super::selection::{MAX_PORT_TERMS, Selected};
-use crate::probe::ProbeEndpoint;
+use crate::probe;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IpProtocolSpec {
@@ -52,7 +52,7 @@ pub fn select_ip_protocols(
             if excluded.contains(protocol) {
                 removed += 1;
             } else {
-                endpoints.push(ProbeEndpoint::Ip { protocol });
+                endpoints.push(probe::Endpoint::Ip { protocol });
             }
         })?;
     }
@@ -140,10 +140,10 @@ mod tests {
         assert_eq!(
             selected.endpoints,
             vec![
-                ProbeEndpoint::Ip { protocol: 1 },
-                ProbeEndpoint::Ip { protocol: 3 },
-                ProbeEndpoint::Ip { protocol: 6 },
-                ProbeEndpoint::Ip { protocol: 132 },
+                probe::Endpoint::Ip { protocol: 1 },
+                probe::Endpoint::Ip { protocol: 3 },
+                probe::Endpoint::Ip { protocol: 6 },
+                probe::Endpoint::Ip { protocol: 132 },
             ]
         );
         assert_eq!(selected.excluded, 3);

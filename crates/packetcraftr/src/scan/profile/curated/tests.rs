@@ -8,7 +8,7 @@ use bytes::Bytes;
 use packetcraftr_core::document::udp_profiles::{Config, Payload, ResponseCheck};
 
 use super::{CURATED_UDP_PAYLOADS_VERSION, bundled, data_set, merge};
-use crate::probe::{ProbeEndpoint, Transport};
+use crate::probe::{self, Transport};
 use crate::scan::catalog;
 use crate::scan::profile::{Status, UdpProfile};
 
@@ -113,11 +113,11 @@ fn operator_profiles_win_and_only_planned_udp_ports_receive_curated_payloads() {
         .unwrap(),
     );
     let endpoints = [
-        ProbeEndpoint::Udp { port: 123 },
-        ProbeEndpoint::Udp { port: 53 },
-        ProbeEndpoint::Udp { port: 9 },
+        probe::Endpoint::Udp { port: 123 },
+        probe::Endpoint::Udp { port: 53 },
+        probe::Endpoint::Udp { port: 9 },
         // A TCP endpoint sharing a curated port number receives nothing.
-        ProbeEndpoint::Tcp { port: 161 },
+        probe::Endpoint::Tcp { port: 161 },
     ];
     let merged = merge(BTreeMap::from([(123, Arc::clone(&operator))]), &endpoints);
     assert_eq!(merged.overridden, [123]);

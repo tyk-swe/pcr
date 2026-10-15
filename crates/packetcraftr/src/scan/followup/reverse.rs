@@ -164,6 +164,7 @@ impl Lookup {
     pub(super) fn run<P, K>(
         &self,
         client: &Client<P, K>,
+        operation: &crate::execution::Operation,
         hosts: &[Host],
         started: Instant,
         last_sent: Option<Instant>,
@@ -172,7 +173,8 @@ impl Lookup {
         P: PacketProviders + TargetProviders + TcpProviders,
         K: Clock,
     {
-        let deadline = client.deadline(
+        let deadline = operation.deadline(
+            client,
             self.template
                 .limits
                 .max_duration
@@ -187,7 +189,7 @@ impl Lookup {
             .queries_per_second
             .and_then(|rate| Duration::from_secs(1).checked_div(rate))
             .unwrap_or_default();
-        let authorized = self.authorize(client, hosts);
+        let authorized = self.authorize(client, operation, hosts);
         // Questions the policy refused are never sent, so no batch waits for
         // them.
         let pause = if authorized.is_ok() {
@@ -195,6 +197,7 @@ impl Lookup {
         } else {
             Duration::ZERO
         };
+        let mut batch_operation = operation.clone();
         batched(
             hosts,
             pause,
@@ -213,7 +216,7 @@ impl Lookup {
                     })
             },
             |addresses, remaining| match &authorized {
-                Ok(()) => self.lookup(client, addresses, remaining),
+                Ok(()) => self.lookup(client, &mut batch_operation, addresses, remaining),
                 Err(error) => Ok((
                     addresses
                         .iter()
@@ -238,6 +241,7 @@ impl Lookup {
     pub(super) fn authorize<P, K>(
         &self,
         client: &Client<P, K>,
+        operation: &crate::execution::Operation,
         hosts: &[Host],
     ) -> Result<(), String>
     where
@@ -254,13 +258,13 @@ impl Lookup {
                     .ok()
             });
         let limits = client
-            .dns_limits(questions)
+            .dns_limits_in(questions, operation)
             .map_err(|error| error.to_string());
         if let Some(error) = failure {
             return Err(error);
         }
-        client
-            .policy()
+        operation
+            .policy(client.policy())
             .authorize(crate::policy::Operation::Dns(limits?))
             .map_err(|error| error.to_string())
     }
@@ -268,6 +272,7 @@ impl Lookup {
     pub(super) fn lookup<P, K>(
         &self,
         client: &Client<P, K>,
+        operation: &mut crate::execution::Operation,
         addresses: &[IpAddr],
         remaining: Duration,
     ) -> Result<(Vec<ReverseLookup>, Stats, Option<Instant>), dns::Error>
@@ -298,10 +303,17 @@ impl Lookup {
         };
         let collector = batch::Collector::default();
         match client
-            .dns_batch(batch::Request { questions }, collector.clone())
+            .dns_batch_in(batch::Request { questions }, collector.clone(), operation)
             .and_then(|report| collector.finish(report))
         {
             Ok(aggregate) => {
+                operation
+                    .spent
+                    .checked_add_assign(&aggregate.stats)
+                    .map_err(|source| {
+                        let _ = source;
+                        dns::Error::StatisticsOverflow { attempt: 1 }
+                    })?;
                 let sent = last_batch_send(&aggregate.questions, &aggregate.stats, client.now());
                 Ok((
                     aggregate
@@ -500,6 +512,7 @@ pub(super) fn retain_names(lookup: &mut ReverseLookup, budget: &mut usize) {
 pub(super) fn names<P, K>(
     lookup: Option<&Lookup>,
     client: &Client<P, K>,
+    operation: &crate::execution::Operation,
     hosts: &[Host],
     started: Instant,
     last_sent: Option<Instant>,
@@ -511,7 +524,7 @@ where
     let Some(lookup) = lookup else {
         return Ok(None);
     };
-    let (lookups, stats) = lookup.run(client, hosts, started, last_sent)?;
+    let (lookups, stats) = lookup.run(client, operation, hosts, started, last_sent)?;
     let looked_up = lookups.iter().any(Option::is_some);
     Ok(Some(ReverseLookups {
         lookups,

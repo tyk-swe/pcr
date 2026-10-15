@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use packetcraftr::probe::{ProbeEndpoint, Transport};
+use packetcraftr::probe::{self, Transport};
 use packetcraftr::scan::{
     self, PortSelection, PortSpec, Request, Selected, Selector, Term, catalog, select_endpoints,
 };
@@ -62,12 +62,12 @@ fn select(
     )
 }
 
-fn tcp(port: u16) -> ProbeEndpoint {
-    ProbeEndpoint::Tcp { port }
+fn tcp(port: u16) -> probe::Endpoint {
+    probe::Endpoint::Tcp { port }
 }
 
-fn udp(port: u16) -> ProbeEndpoint {
-    ProbeEndpoint::Udp { port }
+fn udp(port: u16) -> probe::Endpoint {
+    probe::Endpoint::Udp { port }
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn selections_expand_in_term_order_and_keep_transports_apart() {
         &'a [Transport],
         Terms<'a>,
         Terms<'a>,
-        Vec<ProbeEndpoint>,
+        Vec<probe::Endpoint>,
         usize,
     );
     let both = [Transport::Tcp, Transport::Udp];

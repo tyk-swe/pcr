@@ -14,60 +14,82 @@ use crate::rendering::{
 };
 
 pub(super) fn render_message(
+    invocation: &crate::invocation::Invocation,
     message: &wire::Message,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     let flow = &message.flow.flow;
-    write_stdout_line(format_args!(
-        "DNS {}:{} message={} status={} {} -> {} frames={}",
-        message.transport,
-        message.stream,
-        message.index,
-        message.status,
-        SocketAddr::new(flow.source, flow.source_port),
-        SocketAddr::new(flow.destination, flow.destination_port),
-        frames(&message.sources),
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "DNS {}:{} message={} status={} {} -> {} frames={}",
+            message.transport,
+            message.stream,
+            message.index,
+            message.status,
+            SocketAddr::new(flow.source, flow.source_port),
+            SocketAddr::new(flow.destination, flow.destination_port),
+            frames(&message.sources),
+        ),
+    )?;
     if let Some(fields) = &message.fields {
-        render_dns_fields(fields)?;
+        render_dns_fields(invocation, fields)?;
     }
     if presentation.verbose {
         for source in &message.sources {
-            write_stdout_line(format_args!("  source: {source:?}"))?;
+            write_stdout_line(invocation, format_args!("  source: {source:?}"))?;
         }
     }
     if let Some(error) = &message.error {
-        write_stdout_line(format_args!("  error: {error}"))?;
+        write_stdout_line(invocation, format_args!("  error: {error}"))?;
     }
     Ok(())
 }
 
-pub(super) fn render_transaction(transaction: &wire::Transaction) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "  transaction id={} status={} queries={} response={} latest_latency={}",
-        transaction.dns_id,
-        transaction.status,
-        or_none(comma_separated(&transaction.queries)),
-        optional_display(transaction.response),
-        optional_display(transaction.latest_query_latency.map(latency)),
-    ))
+pub(super) fn render_transaction(
+    invocation: &crate::invocation::Invocation,
+    transaction: &wire::Transaction,
+) -> Result<(), CliError> {
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "  transaction id={} status={} queries={} response={} latest_latency={}",
+            transaction.dns_id,
+            transaction.status,
+            or_none(comma_separated(&transaction.queries)),
+            optional_display(transaction.response),
+            optional_display(transaction.latest_query_latency.map(latency)),
+        ),
+    )
 }
 
-pub(super) fn render_issue(issue: &wire::Issue) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "  TCP stream={} frame={} status={}",
-        issue.stream, issue.number, issue.status,
-    ))
+pub(super) fn render_issue(
+    invocation: &crate::invocation::Invocation,
+    issue: &wire::Issue,
+) -> Result<(), CliError> {
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "  TCP stream={} frame={} status={}",
+            issue.stream, issue.number, issue.status,
+        ),
+    )
 }
 
-pub(super) fn render_complete(complete: &wire::Complete) -> Result<(), CliError> {
-    write_summary_line(format_args!(
-        "{} DNS messages; {} matched and {} unanswered transactions in {} captured frames",
-        complete.summary.messages,
-        complete.summary.matched_transactions,
-        complete.summary.unanswered_transactions,
-        complete.frames_read
-    ))
+pub(super) fn render_complete(
+    invocation: &crate::invocation::Invocation,
+    complete: &wire::Complete,
+) -> Result<(), CliError> {
+    write_summary_line(
+        invocation,
+        format_args!(
+            "{} DNS messages; {} matched and {} unanswered transactions in {} captured frames",
+            complete.summary.messages,
+            complete.summary.matched_transactions,
+            complete.summary.unanswered_transactions,
+            complete.frames_read
+        ),
+    )
 }
 
 fn frames(sources: &[crate::output::provenance::Source]) -> String {

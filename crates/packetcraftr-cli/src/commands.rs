@@ -8,7 +8,6 @@ use packetcraftr_core::error::Kind;
 use crate::command_options::Bounded;
 use crate::errors::CliError;
 use crate::output::contract::Format;
-use crate::rendering::StreamEncoder;
 use crate::resources::Settings;
 
 pub(crate) use dispatch::run;
@@ -23,7 +22,7 @@ mod dns;
 mod dns_read;
 mod documentation;
 mod exchange;
-mod execution;
+pub(crate) mod execution;
 mod expert;
 mod export;
 mod follow;
@@ -71,13 +70,17 @@ pub(crate) trait Spec: Sized {
 
     fn resources(&self, _settings: &mut Settings<'_>) {}
 
-    fn run(self, format: Format, stream: &StreamEncoder) -> Result<CommandExit, CliError>;
+    fn run(self, invocation: &crate::invocation::Invocation) -> Result<CommandExit, CliError>;
 }
 
 /// An unpublished command that writes files or static text itself, so it has
 /// no entry in the output schema or `Command::ALL`.
 pub(crate) trait Generate: Sized {
-    fn generate(self, format: Format) -> Result<(), CliError>;
+    fn generate(
+        self,
+        invocation: &crate::invocation::Invocation,
+        format: Format,
+    ) -> Result<(), CliError>;
 }
 
 pub(crate) struct CommandExit(u8);

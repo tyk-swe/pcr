@@ -12,7 +12,6 @@ use super::ResolveTarget;
 use super::selection::MAX_CANDIDATES;
 use super::workflow::{SelectedTargets, approve_operation, resolve_selected};
 use super::{Family, Selection, SelectionError, Specification, Target};
-use crate::execution::Errors;
 use crate::policy::{Authorizer, Operation};
 
 pub(crate) struct FamilyGate<E> {
@@ -57,20 +56,19 @@ pub(crate) struct DeclaredTargets<'a, E> {
 /// Admits one declared target for a live operation: authorized resolution,
 /// the empty/family gate, the workflow's budget plan over the admitted
 /// addresses, then [`approve_operation`].
-pub(crate) fn admit_operation<A, G, P, Plan, Build>(
+pub(crate) fn admit_operation<A, E, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,
-    gates: &G,
+    gates: fn(u64, crate::execution::Failure) -> E,
     target: &Target,
-    family: FamilyGate<G::Error>,
+    family: FamilyGate<E>,
     plan: Plan,
     operation: Build,
-) -> Result<(SelectedTargets, P), G::Error>
+) -> Result<(SelectedTargets, P), E>
 where
     A: Authorizer + ResolveTarget,
-    G: Errors,
-    Plan: FnOnce(&SelectedTargets) -> Result<P, G::Error>,
-    Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, G::Error>,
+    Plan: FnOnce(&SelectedTargets) -> Result<P, E>,
+    Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, E>,
 {
     let selected = resolve_selected(authorizer, target, family.family(), deadline, gates)?;
     admit_selected(
@@ -79,20 +77,19 @@ where
 }
 
 /// [`admit_operation`] over a declared [`Selection`].
-pub(crate) fn admit_selection<A, G, P, Plan, Build>(
+pub(crate) fn admit_selection<A, E, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,
-    gates: &G,
-    targets: DeclaredTargets<'_, G::Error>,
-    invalid: impl Fn(SelectionError) -> G::Error,
+    gates: fn(u64, crate::execution::Failure) -> E,
+    targets: DeclaredTargets<'_, E>,
+    invalid: impl Fn(SelectionError) -> E,
     plan: Plan,
     operation: Build,
-) -> Result<(SelectedTargets, P), G::Error>
+) -> Result<(SelectedTargets, P), E>
 where
     A: Authorizer + ResolveTarget,
-    G: Errors,
-    Plan: FnOnce(&SelectedTargets) -> Result<P, G::Error>,
-    Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, G::Error>,
+    Plan: FnOnce(&SelectedTargets) -> Result<P, E>,
+    Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, E>,
 {
     let family = targets.family;
     let selected = resolve_selection(authorizer, targets, deadline, gates, invalid)?;
@@ -101,20 +98,19 @@ where
     )
 }
 
-fn admit_selected<A, G, P, Plan, Build>(
+fn admit_selected<A, E, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,
-    gates: &G,
-    family: FamilyGate<G::Error>,
+    gates: fn(u64, crate::execution::Failure) -> E,
+    family: FamilyGate<E>,
     selected: SelectedTargets,
     plan: Plan,
     operation: Build,
-) -> Result<(SelectedTargets, P), G::Error>
+) -> Result<(SelectedTargets, P), E>
 where
     A: Authorizer + ResolveTarget,
-    G: Errors,
-    Plan: FnOnce(&SelectedTargets) -> Result<P, G::Error>,
-    Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, G::Error>,
+    Plan: FnOnce(&SelectedTargets) -> Result<P, E>,
+    Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, E>,
 {
     family.require(&selected.targets)?;
     let plan = plan(&selected)?;
@@ -129,21 +125,20 @@ where
 /// gates exclusions, family, and `max_targets` for the reported selection.
 /// No hostname reaches this path; the workflow validates the list first.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn admit_resolved_selection<A, G, P, Plan, Build>(
+pub(crate) fn admit_resolved_selection<A, E, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,
-    gates: &G,
-    targets: DeclaredTargets<'_, G::Error>,
+    gates: fn(u64, crate::execution::Failure) -> E,
+    targets: DeclaredTargets<'_, E>,
     resolved: &[Target],
-    invalid: impl Fn(SelectionError) -> G::Error,
+    invalid: impl Fn(SelectionError) -> E,
     plan: Plan,
     operation: Build,
-) -> Result<(SelectedTargets, P), G::Error>
+) -> Result<(SelectedTargets, P), E>
 where
     A: Authorizer + ResolveTarget,
-    G: Errors,
-    Plan: FnOnce(&SelectedTargets) -> Result<P, G::Error>,
-    Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, G::Error>,
+    Plan: FnOnce(&SelectedTargets) -> Result<P, E>,
+    Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, E>,
 {
     let DeclaredTargets {
         selection,
@@ -161,7 +156,7 @@ where
     let enforce = || {
         deadline
             .enforce()
-            .map_err(|source| gates.interrupted(G::Step::default(), source))
+            .map_err(|source| (gates)(0_u64, crate::execution::Failure::Interrupted(source)))
     };
     let mut selected = Vec::new();
     let mut seen = HashSet::<(IpAddr, Option<InterfaceId>)>::new();
@@ -207,16 +202,15 @@ where
     )
 }
 
-pub(crate) fn resolve_selection<A, G>(
+pub(crate) fn resolve_selection<A, E>(
     authorizer: &mut A,
-    targets: DeclaredTargets<'_, G::Error>,
+    targets: DeclaredTargets<'_, E>,
     deadline: &Deadline,
-    gates: &G,
-    invalid: impl Fn(SelectionError) -> G::Error,
-) -> Result<SelectedTargets, G::Error>
+    gates: fn(u64, crate::execution::Failure) -> E,
+    invalid: impl Fn(SelectionError) -> E,
+) -> Result<SelectedTargets, E>
 where
     A: Authorizer + ResolveTarget,
-    G: Errors,
 {
     let DeclaredTargets {
         selection,
@@ -229,7 +223,7 @@ where
     let enforce = || {
         deadline
             .enforce()
-            .map_err(|source| gates.interrupted(G::Step::default(), source))
+            .map_err(|source| (gates)(0_u64, crate::execution::Failure::Interrupted(source)))
     };
     let mut selected = Vec::new();
     let mut origins = Origins::default();
@@ -355,12 +349,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
-    use packetcraftr_core::budget::{Cancellation, Deadline, DeadlineExceeded, Interrupted};
+    use packetcraftr_core::budget::{Cancellation, Deadline};
     use packetcraftr_core::error::{Classification, Kind};
 
     use super::{DeclaredTargets, FamilyGate, admit_selection};
-    use crate::StatsOverflow;
-    use crate::execution::Errors;
+
     use crate::policy::{Authorizer, Operation};
     use crate::target::{Authorized, Family, Selection, SelectionError, Target, wire_limits};
     use packetcraftr_core::error::BoundaryError;
@@ -439,8 +432,6 @@ mod tests {
         )
     }
 
-    struct StubGates;
-
     #[derive(Debug, PartialEq, Eq)]
     enum StubError {
         DurationLimit,
@@ -452,40 +443,13 @@ mod tests {
         Step,
     }
 
-    impl Errors for StubGates {
-        type Error = StubError;
-        type Step = ();
-
-        fn invalid_limit(&self, field: &'static str, _: u64, _: String) -> StubError {
-            StubError::Limit(field)
-        }
-
-        fn authorization(&self, _: BoundaryError) -> StubError {
-            StubError::Authorization
-        }
-
-        fn duration_limit(&self, (): (), _: DeadlineExceeded) -> StubError {
-            StubError::DurationLimit
-        }
-
-        fn interrupted(&self, (): (), _: Interrupted) -> StubError {
-            StubError::Interrupted
-        }
-
-        fn clock(&self, (): (), _: Box<dyn std::error::Error + Send + Sync>) -> StubError {
-            StubError::Step
-        }
-
-        fn execution(&self, (): (), _: BoundaryError) -> StubError {
-            StubError::Step
-        }
-
-        fn invalid_evidence(&self, (): (), _: crate::evidence::Error) -> StubError {
-            StubError::Step
-        }
-
-        fn stats_overflow(&self, (): (), _: StatsOverflow) -> StubError {
-            StubError::Step
+    fn stub_error(_step: u64, failure: crate::execution::Failure) -> StubError {
+        match failure {
+            crate::execution::Failure::InvalidLimit { field, .. } => StubError::Limit(field),
+            crate::execution::Failure::Authorization(_) => StubError::Authorization,
+            crate::execution::Failure::DurationLimit(_) => StubError::DurationLimit,
+            crate::execution::Failure::Interrupted(_) => StubError::Interrupted,
+            _ => StubError::Step,
         }
     }
 
@@ -523,7 +487,7 @@ mod tests {
         let (selected, probes) = admit_selection(
             &mut authorizer,
             &Deadline::new(Duration::from_secs(60)),
-            &StubGates,
+            stub_error,
             DeclaredTargets {
                 selection: &selection,
                 family: gate(Family::Ipv4),
@@ -566,7 +530,7 @@ mod tests {
         let error = admit_selection(
             &mut authorizer,
             &Deadline::new(Duration::from_secs(60)),
-            &StubGates,
+            stub_error,
             DeclaredTargets {
                 selection: &selection,
                 family: gate(Family::Any),

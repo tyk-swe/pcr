@@ -3,7 +3,7 @@
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use crate::field::{FieldKind, FieldValue, Path};
+use crate::field::{self, Path};
 use crate::layer::Layer;
 use bytes::Bytes;
 
@@ -16,11 +16,11 @@ pub(super) fn mutation_value(
     strategy: Strategy,
     field: &ResolvedField,
     layer: &dyn Layer,
-    original: &FieldValue,
+    original: &field::Value,
     seed: u64,
     round: u64,
     limits: Limits,
-) -> FieldValue {
+) -> field::Value {
     let mut random = SplitMix64::new(seed ^ round.rotate_left(17));
     match strategy {
         Strategy::Boundary => boundary_value(field, layer, original, seed, round, limits),
@@ -33,15 +33,15 @@ pub(super) fn mutation_value(
 fn boundary_value(
     field: &ResolvedField,
     layer: &dyn Layer,
-    original: &FieldValue,
+    original: &field::Value,
     seed: u64,
     round: u64,
     limits: Limits,
-) -> FieldValue {
+) -> field::Value {
     let selector = seed.wrapping_add(round);
     match field.kind {
-        FieldKind::Bool => FieldValue::Bool(!original.as_bool().unwrap_or(false)),
-        FieldKind::Unsigned => {
+        field::Kind::Bool => field::Value::Bool(!original.as_bool().unwrap_or(false)),
+        field::Kind::Unsigned => {
             const FALLBACK: &[u64] = &[
                 0,
                 1,
@@ -52,13 +52,13 @@ fn boundary_value(
             ];
             let values = width_boundaries(layer, &field.path, limits);
             let values = values.as_deref().unwrap_or(FALLBACK);
-            FieldValue::Unsigned(values[index_from(selector, values.len())])
+            field::Value::Unsigned(values[index_from(selector, values.len())])
         }
-        FieldKind::Signed => {
+        field::Kind::Signed => {
             const VALUES: &[i64] = &[0, 1, -1, i8::MIN as i64, i8::MAX as i64, i64::MIN, i64::MAX];
-            FieldValue::Signed(VALUES[index_from(selector, VALUES.len())])
+            field::Value::Signed(VALUES[index_from(selector, VALUES.len())])
         }
-        FieldKind::Text => {
+        field::Kind::Text => {
             let mut values = vec![
                 String::new(),
                 "A".to_owned(),
@@ -67,49 +67,49 @@ fn boundary_value(
             ];
             values.retain(|value| value.len() <= limits.max_field_bytes);
             // the empty string always remains, so `values` is never empty
-            FieldValue::Text(values.swap_remove(index_from(selector, values.len())))
+            field::Value::Text(values.swap_remove(index_from(selector, values.len())))
         }
-        FieldKind::Bytes => {
+        field::Kind::Bytes => {
             let lengths = [0, 1, limits.max_field_bytes.min(64), limits.max_field_bytes];
             let length = lengths[index_from(selector, lengths.len())];
             let fill = if selector & 0b100 == 0 { 0x00 } else { 0xff };
-            FieldValue::Bytes(Bytes::from(vec![fill; length]))
+            field::Value::Bytes(Bytes::from(vec![fill; length]))
         }
-        FieldKind::Ipv4 => {
+        field::Kind::Ipv4 => {
             const VALUES: &[Ipv4Addr] = &[
                 Ipv4Addr::UNSPECIFIED,
                 Ipv4Addr::LOCALHOST,
                 Ipv4Addr::BROADCAST,
                 Ipv4Addr::new(192, 0, 2, 1),
             ];
-            FieldValue::Ipv4(VALUES[index_from(selector, VALUES.len())])
+            field::Value::Ipv4(VALUES[index_from(selector, VALUES.len())])
         }
-        FieldKind::Ipv6 => {
+        field::Kind::Ipv6 => {
             let values = [
                 Ipv6Addr::UNSPECIFIED,
                 Ipv6Addr::LOCALHOST,
                 "2001:db8::1".parse().expect("constant IPv6 address"),
                 Ipv6Addr::from(u128::MAX),
             ];
-            FieldValue::Ipv6(values[index_from(selector, values.len())])
+            field::Value::Ipv6(values[index_from(selector, values.len())])
         }
-        FieldKind::Mac => {
+        field::Kind::Mac => {
             let values = [[0; 6], [0xff; 6], [0x02, 0, 0, 0, 0, 1]];
-            FieldValue::Mac(values[index_from(selector, values.len())])
+            field::Value::Mac(values[index_from(selector, values.len())])
         }
-        FieldKind::Object => FieldValue::Object(Default::default()),
-        FieldKind::List => match original {
-            FieldValue::List(values) if selector & 1 == 1 => {
-                let candidate = FieldValue::List(values.first().cloned().into_iter().collect());
+        field::Kind::Object => field::Value::Object(Default::default()),
+        field::Kind::List => match original {
+            field::Value::List(values) if selector & 1 == 1 => {
+                let candidate = field::Value::List(values.first().cloned().into_iter().collect());
                 if bounded_value_size(&candidate, limits.max_field_bytes, limits.max_list_items)
                     .is_ok()
                 {
                     candidate
                 } else {
-                    FieldValue::List(Vec::new())
+                    field::Value::List(Vec::new())
                 }
             }
-            _ => FieldValue::List(Vec::new()),
+            _ => field::Value::List(Vec::new()),
         },
     }
 }
@@ -132,7 +132,7 @@ const MAX_WIDTH_PROBES: usize = 64;
 fn width_boundaries(layer: &dyn Layer, path: &Path, limits: Limits) -> Option<Vec<u64>> {
     // Every probe is an unsigned value, which the field budget has to admit.
     bounded_value_size(
-        &FieldValue::Unsigned(u64::MAX),
+        &field::Value::Unsigned(u64::MAX),
         limits.max_field_bytes,
         limits.max_list_items,
     )
@@ -171,7 +171,7 @@ impl WidthProber<'_> {
         self.attempts += 1;
         Some(
             self.layer
-                .set_field_path(self.path, FieldValue::Unsigned(value))
+                .set_field_path(self.path, field::Value::Unsigned(value))
                 .is_ok(),
         )
     }
@@ -225,16 +225,16 @@ fn width_mask(bits: u32) -> u64 {
 }
 
 pub(super) fn random_value(
-    kind: FieldKind,
-    original: &FieldValue,
+    kind: field::Kind,
+    original: &field::Value,
     random: &mut SplitMix64,
     limits: Limits,
-) -> FieldValue {
+) -> field::Value {
     match kind {
-        FieldKind::Bool => FieldValue::Bool(random.next_u64() & 1 != 0),
-        FieldKind::Unsigned => FieldValue::Unsigned(random.next_u64()),
-        FieldKind::Signed => FieldValue::Signed(random.next_u64() as i64),
-        FieldKind::Text => {
+        field::Kind::Bool => field::Value::Bool(random.next_u64() & 1 != 0),
+        field::Kind::Unsigned => field::Value::Unsigned(random.next_u64()),
+        field::Kind::Signed => field::Value::Signed(random.next_u64() as i64),
+        field::Kind::Text => {
             let length = bounded_length(random, limits.max_field_bytes.min(256));
             let mut value = String::with_capacity(length);
             for _ in 0..length {
@@ -246,25 +246,25 @@ pub(super) fn random_value(
                 };
                 value.push(character);
             }
-            FieldValue::Text(value)
+            field::Value::Text(value)
         }
-        FieldKind::Bytes => {
+        field::Kind::Bytes => {
             let length = bounded_length(random, limits.max_field_bytes);
-            FieldValue::Bytes(Bytes::from(random.bytes(length)))
+            field::Value::Bytes(Bytes::from(random.bytes(length)))
         }
-        FieldKind::Ipv4 => FieldValue::Ipv4(Ipv4Addr::from(random.next_u64() as u32)),
-        FieldKind::Ipv6 => {
+        field::Kind::Ipv4 => field::Value::Ipv4(Ipv4Addr::from(random.next_u64() as u32)),
+        field::Kind::Ipv6 => {
             let value = (u128::from(random.next_u64()) << 64) | u128::from(random.next_u64());
-            FieldValue::Ipv6(Ipv6Addr::from(value))
+            field::Value::Ipv6(Ipv6Addr::from(value))
         }
-        FieldKind::Mac => {
+        field::Kind::Mac => {
             let mut value = [0_u8; 6];
             value.copy_from_slice(&random.bytes(6));
-            FieldValue::Mac(value)
+            field::Value::Mac(value)
         }
-        FieldKind::Object => FieldValue::Object(Default::default()),
-        FieldKind::List => match original {
-            FieldValue::List(values) if !values.is_empty() => {
+        field::Kind::Object => field::Value::Object(Default::default()),
+        field::Kind::List => match original {
+            field::Value::List(values) if !values.is_empty() => {
                 let count = bounded_length(random, limits.max_list_items.min(values.len()));
                 let mut output = Vec::with_capacity(count);
                 let mut bytes = 0_usize;
@@ -292,9 +292,9 @@ pub(super) fn random_value(
                     output.push(value.clone());
                     bytes = next_bytes;
                 }
-                FieldValue::List(output)
+                field::Value::List(output)
             }
-            _ => FieldValue::List(Vec::new()),
+            _ => field::Value::List(Vec::new()),
         },
     }
 }
@@ -307,7 +307,7 @@ pub(super) enum ValueLimit {
 }
 
 pub(super) fn bounded_value_size(
-    value: &FieldValue,
+    value: &field::Value,
     remaining: usize,
     max_list_items: usize,
 ) -> Result<usize, ValueLimit> {
@@ -315,7 +315,7 @@ pub(super) fn bounded_value_size(
 }
 
 fn bounded_size_at(
-    value: &FieldValue,
+    value: &field::Value,
     remaining: usize,
     max_list_items: usize,
     depth: usize,
@@ -324,14 +324,14 @@ fn bounded_size_at(
         return Err(ValueLimit::Nesting);
     }
     let size = match value {
-        FieldValue::Bool(_) => 1,
-        FieldValue::Unsigned(_) | FieldValue::Signed(_) => 8,
-        FieldValue::Text(value) => value.len(),
-        FieldValue::Bytes(value) => value.len(),
-        FieldValue::Ipv4(_) => 4,
-        FieldValue::Ipv6(_) => 16,
-        FieldValue::Mac(_) => 6,
-        FieldValue::Object(values) => {
+        field::Value::Bool(_) => 1,
+        field::Value::Unsigned(_) | field::Value::Signed(_) => 8,
+        field::Value::Text(value) => value.len(),
+        field::Value::Bytes(value) => value.len(),
+        field::Value::Ipv4(_) => 4,
+        field::Value::Ipv6(_) => 16,
+        field::Value::Mac(_) => 6,
+        field::Value::Object(values) => {
             if values.len() > max_list_items {
                 return Err(ValueLimit::Items {
                     items: values.len(),
@@ -354,7 +354,7 @@ fn bounded_size_at(
             }
             total
         }
-        FieldValue::List(values) => {
+        field::Value::List(values) => {
             if values.len() > max_list_items {
                 return Err(ValueLimit::Items {
                     items: values.len(),
@@ -387,36 +387,40 @@ fn bounded_size_at(
     }
 }
 
-fn bit_flip_value(original: &FieldValue, random: &mut SplitMix64, maximum: usize) -> FieldValue {
-    let FieldValue::Bytes(bytes) = original else {
+fn bit_flip_value(
+    original: &field::Value,
+    random: &mut SplitMix64,
+    maximum: usize,
+) -> field::Value {
+    let field::Value::Bytes(bytes) = original else {
         return original.clone();
     };
     if bytes.is_empty() {
-        return FieldValue::Bytes(Bytes::from_static(&[1]));
+        return field::Value::Bytes(Bytes::from_static(&[1]));
     }
     let kept = bytes.len().min(maximum);
     if kept == 0 {
-        return FieldValue::Bytes(Bytes::new());
+        return field::Value::Bytes(Bytes::new());
     }
     let mut value = bytes[..kept].to_vec();
     let index = index_below(random, kept);
     value[index] ^= 1 << (random.next_u64() % 8);
-    FieldValue::Bytes(Bytes::from(value))
+    field::Value::Bytes(Bytes::from(value))
 }
 
 fn malformed_value(
-    kind: FieldKind,
-    original: &FieldValue,
+    kind: field::Kind,
+    original: &field::Value,
     random: &mut SplitMix64,
     round: u64,
     limits: Limits,
-) -> FieldValue {
-    if kind == FieldKind::Unsigned {
+) -> field::Value {
+    if kind == field::Kind::Unsigned {
         if limits.max_field_bytes == 0 || round & 1 == 0 {
-            return FieldValue::Unsigned(random.next_u64() & u16::MAX as u64);
+            return field::Value::Unsigned(random.next_u64() & u16::MAX as u64);
         }
         let length = 1 + index_below(random, limits.max_field_bytes.min(4));
-        return FieldValue::Bytes(Bytes::from(random.bytes(length)));
+        return field::Value::Bytes(Bytes::from(random.bytes(length)));
     }
     random_value(kind, original, random, limits)
 }
@@ -442,56 +446,56 @@ fn index_below(random: &mut SplitMix64, exclusive_maximum: usize) -> usize {
     index_from(random.next_u64(), exclusive_maximum)
 }
 
-pub(super) fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValue> {
+pub(super) fn shrink_values(value: &field::Value, maximum: usize) -> Vec<field::Value> {
     let mut values = Vec::new();
-    let mut push = |candidate: FieldValue| {
+    let mut push = |candidate: field::Value| {
         if values.len() < maximum && &candidate != value && !values.contains(&candidate) {
             values.push(candidate);
         }
     };
     match value {
-        FieldValue::Bool(_) => push(FieldValue::Bool(false)),
-        FieldValue::Unsigned(value) => {
-            push(FieldValue::Unsigned(0));
+        field::Value::Bool(_) => push(field::Value::Bool(false)),
+        field::Value::Unsigned(value) => {
+            push(field::Value::Unsigned(0));
             if *value > 1 {
-                push(FieldValue::Unsigned(1));
-                push(FieldValue::Unsigned(*value / 2));
+                push(field::Value::Unsigned(1));
+                push(field::Value::Unsigned(*value / 2));
             }
         }
-        FieldValue::Signed(value) => {
-            push(FieldValue::Signed(0));
+        field::Value::Signed(value) => {
+            push(field::Value::Signed(0));
             if value.unsigned_abs() > 1 {
-                push(FieldValue::Signed(value.signum()));
-                push(FieldValue::Signed(*value / 2));
+                push(field::Value::Signed(value.signum()));
+                push(field::Value::Signed(*value / 2));
             }
         }
-        FieldValue::Text(value) => {
-            push(FieldValue::Text(String::new()));
+        field::Value::Text(value) => {
+            push(field::Value::Text(String::new()));
             if value.len() > 1 {
-                push(FieldValue::Text(
+                push(field::Value::Text(
                     value.chars().take(value.chars().count() / 2).collect(),
                 ));
             }
         }
-        FieldValue::Bytes(value) => {
-            push(FieldValue::Bytes(Bytes::new()));
+        field::Value::Bytes(value) => {
+            push(field::Value::Bytes(Bytes::new()));
             if value.len() > 1
                 && let Some(shrunk) = crate::frame::checked_slice(value, 0, value.len() / 2)
             {
-                push(FieldValue::Bytes(shrunk));
+                push(field::Value::Bytes(shrunk));
             }
             if !value.is_empty() {
-                push(FieldValue::Bytes(Bytes::from(vec![0; value.len()])));
+                push(field::Value::Bytes(Bytes::from(vec![0; value.len()])));
             }
         }
-        FieldValue::Ipv4(_) => push(FieldValue::Ipv4(Ipv4Addr::UNSPECIFIED)),
-        FieldValue::Ipv6(_) => push(FieldValue::Ipv6(Ipv6Addr::UNSPECIFIED)),
-        FieldValue::Mac(_) => push(FieldValue::Mac([0; 6])),
-        FieldValue::Object(_) => push(FieldValue::Object(Default::default())),
-        FieldValue::List(value) => {
-            push(FieldValue::List(Vec::new()));
+        field::Value::Ipv4(_) => push(field::Value::Ipv4(Ipv4Addr::UNSPECIFIED)),
+        field::Value::Ipv6(_) => push(field::Value::Ipv6(Ipv6Addr::UNSPECIFIED)),
+        field::Value::Mac(_) => push(field::Value::Mac([0; 6])),
+        field::Value::Object(_) => push(field::Value::Object(Default::default())),
+        field::Value::List(value) => {
+            push(field::Value::List(Vec::new()));
             if value.len() > 1 {
-                push(FieldValue::List(value[..value.len() / 2].to_vec()));
+                push(field::Value::List(value[..value.len() / 2].to_vec()));
             }
         }
     }
@@ -508,7 +512,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    fn resolved(kind: FieldKind) -> ResolvedField {
+    fn resolved(kind: field::Kind) -> ResolvedField {
         ResolvedField {
             target: Target {
                 layer: 0,
@@ -597,7 +601,7 @@ mod tests {
                 fields: &[crate::layer::FieldSchema {
                     name: "word",
                     aliases: &[],
-                    kind: FieldKind::Unsigned,
+                    kind: field::Kind::Unsigned,
                     derived: false,
                     required: false,
                     description: "A counted unsigned word",
@@ -611,14 +615,18 @@ mod tests {
             Box::new(self.clone())
         }
 
-        fn field(&self, name: &str) -> Option<FieldValue> {
-            (name == "word").then_some(FieldValue::Unsigned(self.value))
+        fn field(&self, name: &str) -> Option<field::Value> {
+            (name == "word").then_some(field::Value::Unsigned(self.value))
         }
 
-        fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), crate::field::Error> {
+        fn set_field(
+            &mut self,
+            name: &str,
+            value: field::Value,
+        ) -> Result<(), crate::field::Error> {
             self.attempts.fetch_add(1, Ordering::SeqCst);
             match (name, value) {
-                ("word", FieldValue::Unsigned(value)) if value <= self.maximum => {
+                ("word", field::Value::Unsigned(value)) if value <= self.maximum => {
                     self.value = value;
                     Ok(())
                 }
@@ -632,21 +640,21 @@ mod tests {
 
     #[test]
     fn a_zero_field_budget_leaves_bit_flip_and_malformed_mutations_bounded() {
-        let bytes = resolved(FieldKind::Bytes);
+        let bytes = resolved(field::Kind::Bytes);
         assert_eq!(
             mutation_value(
                 Strategy::BitFlip,
                 &bytes,
                 &Raw::default(),
-                &FieldValue::Bytes(Bytes::from_static(b"abc")),
+                &field::Value::Bytes(Bytes::from_static(b"abc")),
                 5,
                 0,
                 limits(0, 2),
             ),
-            FieldValue::Bytes(Bytes::new())
+            field::Value::Bytes(Bytes::new())
         );
 
-        let unsigned = resolved(FieldKind::Unsigned);
+        let unsigned = resolved(field::Kind::Unsigned);
         for round in 0..4 {
             assert!(
                 matches!(
@@ -654,12 +662,12 @@ mod tests {
                         Strategy::Malformed,
                         &unsigned,
                         &Raw::default(),
-                        &FieldValue::Unsigned(1),
+                        &field::Value::Unsigned(1),
                         5,
                         round,
                         limits(0, 2),
                     ),
-                    FieldValue::Unsigned(0..=65_535)
+                    field::Value::Unsigned(0..=65_535)
                 ),
                 "round {round}"
             );
@@ -670,12 +678,12 @@ mod tests {
                 Strategy::Random,
                 &bytes,
                 &Raw::default(),
-                &FieldValue::Bytes(Bytes::from_static(b"abc")),
+                &field::Value::Bytes(Bytes::from_static(b"abc")),
                 5,
                 0,
                 limits(0, 2),
             ),
-            FieldValue::Bytes(Bytes::new())
+            field::Value::Bytes(Bytes::new())
         );
     }
 }

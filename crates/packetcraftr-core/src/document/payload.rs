@@ -4,7 +4,7 @@
 use bytes::Bytes;
 
 use crate::error::{Classification, Classified, Kind, Source};
-use crate::field::{self, FieldValue};
+use crate::field;
 use crate::layer::selector::{self, Selector};
 
 /// The empty bytes field a payload file fills, named by zero-based layer index.
@@ -77,7 +77,7 @@ impl Target {
             field: self.field.clone(),
         };
         let path = self.field.parse::<field::Path>().map_err(|_| unknown())?;
-        let FieldValue::Bytes(current) = layer.field_path(&path).ok_or_else(unknown)? else {
+        let field::Value::Bytes(current) = layer.field_path(&path).ok_or_else(unknown)? else {
             return Err(Error::NotBytes {
                 layer: self.layer,
                 field: self.field.clone(),
@@ -93,7 +93,7 @@ impl Target {
         }
         let bytes = load()?;
         layer
-            .set_field_path(&path, FieldValue::Bytes(bytes))
+            .set_field_path(&path, field::Value::Bytes(bytes))
             .map_err(|source| {
                 Error::Set {
                     layer: self.layer,

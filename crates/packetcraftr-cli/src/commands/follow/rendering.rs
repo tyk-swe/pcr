@@ -32,28 +32,35 @@ impl State {
 }
 
 pub(super) fn render_record(
+    invocation: &crate::invocation::Invocation,
     format: Format,
     chunk: Chunk,
     state: &mut State,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     match format {
-        Format::Text => write_stdout_line(format_args!(
-            "{} #{} generation={} {}",
-            direction_marker(&chunk),
-            chunk.number,
-            chunk.direction_generation,
-            chunk.bytes.escape_ascii()
-        )),
-        Format::Hex => {
-            let rendered = output::follow::Chunk::from(chunk.clone());
-            write_stdout_line(format_args!(
+        Format::Text => write_stdout_line(
+            invocation,
+            format_args!(
                 "{} #{} generation={} {}",
                 direction_marker(&chunk),
-                rendered.frame,
-                rendered.direction_generation,
-                rendered.bytes_hex
-            ))
+                chunk.number,
+                chunk.direction_generation,
+                chunk.bytes.escape_ascii()
+            ),
+        ),
+        Format::Hex => {
+            let rendered = output::follow::Chunk::from(chunk.clone());
+            write_stdout_line(
+                invocation,
+                format_args!(
+                    "{} #{} generation={} {}",
+                    direction_marker(&chunk),
+                    rendered.frame,
+                    rendered.direction_generation,
+                    rendered.bytes_hex
+                ),
+            )
         }
         Format::Raw => write_raw(&chunk.bytes),
         Format::Json => {
@@ -73,42 +80,47 @@ pub(super) fn render_written(written: &[super::write::Written]) -> Result<(), Cl
 }
 
 pub(super) fn render_text(
+    invocation: &crate::invocation::Invocation,
     selector: StreamRef,
     summary: &Summary,
     written: &[super::write::Written],
 ) -> Result<(), CliError> {
-    crate::rendering::render_clock(&summary.clock)?;
+    crate::rendering::render_clock(invocation, &summary.clock)?;
     if let Some(scope) = &summary.scope {
-        crate::rendering::render_scope(scope)?;
+        crate::rendering::render_scope(invocation, scope)?;
     }
     let transport = selector.transport.as_str();
     match &summary.client_flow {
-        Some(flow) => write_stdout_line(format_args!(
-            "followed {transport} stream {}: client {} sent {} byte(s), \
+        Some(flow) => write_stdout_line(
+            invocation,
+            format_args!(
+                "followed {transport} stream {}: client {} sent {} byte(s), \
              server {} sent {} byte(s), {} byte(s) undelivered in {} frame(s)",
-            selector.index,
-            SocketAddr::new(flow.source, flow.source_port),
-            summary.client_bytes,
-            SocketAddr::new(flow.destination, flow.destination_port),
-            summary.server_bytes,
-            summary.undelivered_bytes,
-            summary.frames,
-        )),
-        None => write_stdout_line(format_args!(
-            "followed {transport} stream {}: no frames",
-            selector.index
-        )),
+                selector.index,
+                SocketAddr::new(flow.source, flow.source_port),
+                summary.client_bytes,
+                SocketAddr::new(flow.destination, flow.destination_port),
+                summary.server_bytes,
+                summary.undelivered_bytes,
+                summary.frames,
+            ),
+        ),
+        None => write_stdout_line(
+            invocation,
+            format_args!("followed {transport} stream {}: no frames", selector.index),
+        ),
     }?;
     for file in written {
-        write_stdout_line(format_args!(
-            "wrote {} byte(s) to {}",
-            file.bytes, file.path
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!("wrote {} byte(s) to {}", file.bytes, file.path),
+        )?;
     }
     Ok(())
 }
 
 pub(super) fn render_aggregate(
+    invocation: &crate::invocation::Invocation,
     selector: StreamRef,
     summary: Summary,
     state: State,
@@ -132,7 +144,12 @@ pub(super) fn render_aggregate(
             .collect(),
     ))
     .map_err(CliError::classified)?;
-    emit_aggregate(output::contract::Command::Follow, report, diagnostics)
+    emit_aggregate(
+        invocation,
+        output::contract::Command::Follow,
+        report,
+        diagnostics,
+    )
 }
 
 pub(super) fn render_stream(

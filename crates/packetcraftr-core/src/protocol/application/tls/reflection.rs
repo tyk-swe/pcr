@@ -6,7 +6,7 @@ use bytes::Bytes;
 use super::codec::NAME;
 use super::{Extension, Hello, HelloKind, MAX_ALPN, MAX_CIPHER_SUITES, MAX_EXTENSIONS, Tls, hex};
 use crate::{
-    field::{self, FieldKind, FieldValue},
+    field,
     layer::{FieldSchema, reflective_layer},
     protocol::common::{
         out_of_range, protocol, read_only,
@@ -16,7 +16,7 @@ use crate::{
 };
 
 impl Tls {
-    fn set_hello(&mut self, value: FieldValue) -> Result<(), crate::field::Error> {
+    fn set_hello(&mut self, value: field::Value) -> Result<(), crate::field::Error> {
         let hello = Hello::from_value(value)?;
         let replacement = Self::try_from(hello)
             .map_err(|_| crate::protocol::common::out_of_range(tls_schema(), "hello"))?;
@@ -26,7 +26,7 @@ impl Tls {
 }
 
 impl Hello {
-    fn value(&self) -> FieldValue {
+    fn value(&self) -> field::Value {
         object([
             (
                 "kind",
@@ -43,7 +43,7 @@ impl Hello {
             ("session_id", self.session_id.clone().into()),
             (
                 "cipher_suites",
-                FieldValue::List(self.cipher_suites.iter().map(|v| (*v).into()).collect()),
+                field::Value::List(self.cipher_suites.iter().map(|v| (*v).into()).collect()),
             ),
             (
                 "compression",
@@ -51,7 +51,7 @@ impl Hello {
             ),
             (
                 "extensions",
-                FieldValue::List(
+                field::Value::List(
                     self.extensions
                         .iter()
                         .map(|e| object([("type", e.kind.into()), ("data", e.data.clone().into())]))
@@ -60,7 +60,7 @@ impl Hello {
             ),
         ])
     }
-    fn from_value(value: FieldValue) -> Result<Self, field::Error> {
+    fn from_value(value: field::Value) -> Result<Self, field::Error> {
         let mut o = Object::new(value, tls_schema(), "hello")?;
         let mut hello = Self::default();
         hello.kind = match o.value("kind", "client".to_owned())?.as_str() {
@@ -97,7 +97,7 @@ impl Hello {
             for value in list(value, MAX_EXTENSIONS, tls_schema(), "hello.extensions")? {
                 let mut e = Object::new(value, tls_schema(), "hello.extensions")?;
                 let extension = if let Some(value) = e.take("server_name") {
-                    let FieldValue::Text(name) = value else {
+                    let field::Value::Text(name) = value else {
                         return Err(out_of_range(tls_schema(), "server_name"));
                     };
                     Extension::server_name(name)
@@ -108,7 +108,7 @@ impl Hello {
                         .map(|value| {
                             let mut bytes = Bytes::new();
                             match value {
-                                FieldValue::Text(text) => bytes = Bytes::from(text),
+                                field::Value::Text(text) => bytes = Bytes::from(text),
                                 value => crate::layer::reflect_set(
                                     &mut bytes,
                                     tls_schema(),
@@ -135,11 +135,11 @@ impl Hello {
     }
 }
 
-fn optional_list(values: &[String]) -> Option<FieldValue> {
+fn optional_list(values: &[String]) -> Option<field::Value> {
     (!values.is_empty()).then(|| text_list(values))
 }
 
-fn optional_codes(values: &[u16]) -> Option<FieldValue> {
+fn optional_codes(values: &[u16]) -> Option<field::Value> {
     (!values.is_empty()).then(|| unsigned_list(values))
 }
 
@@ -148,20 +148,20 @@ reflective_layer! {
     impl Tls {
         "hello" => { kind: Object, derived: false, required: false, description: "Complete hello fixture; extension type/data retain exact unknown bodies", children: HELLO_FIELDS, get |layer| layer.hello.as_ref().map(Hello::value), set |layer, value, _name| layer.set_hello(value) },
         "wire" => { kind: Bytes, derived: false, required: false, description: "Retained TLS record bytes", get |layer| Some(layer.wire.clone().into()), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "content_type" => { kind: Unsigned, derived: false, required: false, description: "Record content type of the first record", get |layer| Some(FieldValue::from(layer.content_type)), set |_layer, _value, name| read_only(tls_schema(), name), layout: (0, 1) },
-        "version" => { kind: Unsigned, derived: false, required: false, description: "Legacy record version of the first record", get |layer| Some(FieldValue::from(layer.version)), set |_layer, _value, name| read_only(tls_schema(), name), layout: (1, 3) },
-        "record_count" => { kind: Unsigned, derived: false, required: false, description: "Complete records in this segment", get |layer| Some(FieldValue::from(layer.record_count)), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "handshake_type" => { kind: Unsigned, derived: false, required: false, description: "Handshake message type, when the whole message is in this segment", get |layer| layer.handshake_type.map(FieldValue::from), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "cipher_suite" => { kind: Unsigned, derived: false, required: false, description: "Cipher suite selected by a ServerHello", get |layer| layer.cipher_suite.map(FieldValue::from), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "selected_version" => { kind: Unsigned, derived: false, required: false, description: "Version selected by a ServerHello", get |layer| layer.selected_version.map(FieldValue::from), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "key_share_group" => { kind: Unsigned, derived: false, required: false, description: "Named group of a ServerHello key share", get |layer| layer.key_share_group.map(FieldValue::from), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "incomplete" => { kind: Bool, derived: false, required: false, description: "Whether a record continues past this segment", get |layer| Some(FieldValue::from(layer.incomplete)), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "ech" => { kind: Bool, derived: false, required: false, description: "Whether a ClientHello offered encrypted client hello", get |layer| Some(FieldValue::from(layer.ech)), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "sni" => { kind: Text, derived: false, required: false, description: "Validated server name offered by a ClientHello", get |layer| layer.sni.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "sni_raw" => { kind: Text, derived: false, required: false, description: "Verbatim server name bytes in hexadecimal", get |layer| layer.sni_raw.as_ref().map(|raw| FieldValue::Text(hex(raw))), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "ja3" => { kind: Text, derived: false, required: false, description: "Advisory JA3 fingerprint of a ClientHello (MD5 digest)", get |layer| layer.ja3.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "ja3_raw" => { kind: Text, derived: false, required: false, description: "Advisory JA3 fingerprint of a ClientHello before hashing", get |layer| layer.ja3_raw.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "ja4" => { kind: Text, derived: false, required: false, description: "Advisory JA4 fingerprint of a ClientHello", get |layer| layer.ja4.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(tls_schema(), name) },
+        "content_type" => { kind: Unsigned, derived: false, required: false, description: "Record content type of the first record", get |layer| Some(field::Value::from(layer.content_type)), set |_layer, _value, name| read_only(tls_schema(), name), layout: (0, 1) },
+        "version" => { kind: Unsigned, derived: false, required: false, description: "Legacy record version of the first record", get |layer| Some(field::Value::from(layer.version)), set |_layer, _value, name| read_only(tls_schema(), name), layout: (1, 3) },
+        "record_count" => { kind: Unsigned, derived: false, required: false, description: "Complete records in this segment", get |layer| Some(field::Value::from(layer.record_count)), set |_layer, _value, name| read_only(tls_schema(), name) },
+        "handshake_type" => { kind: Unsigned, derived: false, required: false, description: "Handshake message type, when the whole message is in this segment", get |layer| layer.handshake_type.map(field::Value::from), set |_layer, _value, name| read_only(tls_schema(), name) },
+        "cipher_suite" => { kind: Unsigned, derived: false, required: false, description: "Cipher suite selected by a ServerHello", get |layer| layer.cipher_suite.map(field::Value::from), set |_layer, _value, name| read_only(tls_schema(), name) },
+        "selected_version" => { kind: Unsigned, derived: false, required: false, description: "Version selected by a ServerHello", get |layer| layer.selected_version.map(field::Value::from), set |_layer, _value, name| read_only(tls_schema(), name) },
+        "key_share_group" => { kind: Unsigned, derived: false, required: false, description: "Named group of a ServerHello key share", get |layer| layer.key_share_group.map(field::Value::from), set |_layer, _value, name| read_only(tls_schema(), name) },
+        "incomplete" => { kind: Bool, derived: false, required: false, description: "Whether a record continues past this segment", get |layer| Some(field::Value::from(layer.incomplete)), set |_layer, _value, name| read_only(tls_schema(), name) },
+        "ech" => { kind: Bool, derived: false, required: false, description: "Whether a ClientHello offered encrypted client hello", get |layer| Some(field::Value::from(layer.ech)), set |_layer, _value, name| read_only(tls_schema(), name) },
+        "sni" => { kind: Text, derived: false, required: false, description: "Validated server name offered by a ClientHello", get |layer| layer.sni.clone().map(field::Value::Text), set |_layer, _value, name| read_only(tls_schema(), name) },
+        "sni_raw" => { kind: Text, derived: false, required: false, description: "Verbatim server name bytes in hexadecimal", get |layer| layer.sni_raw.as_ref().map(|raw| field::Value::Text(hex(raw))), set |_layer, _value, name| read_only(tls_schema(), name) },
+        "ja3" => { kind: Text, derived: false, required: false, description: "Advisory JA3 fingerprint of a ClientHello (MD5 digest)", get |layer| layer.ja3.clone().map(field::Value::Text), set |_layer, _value, name| read_only(tls_schema(), name) },
+        "ja3_raw" => { kind: Text, derived: false, required: false, description: "Advisory JA3 fingerprint of a ClientHello before hashing", get |layer| layer.ja3_raw.clone().map(field::Value::Text), set |_layer, _value, name| read_only(tls_schema(), name) },
+        "ja4" => { kind: Text, derived: false, required: false, description: "Advisory JA4 fingerprint of a ClientHello", get |layer| layer.ja4.clone().map(field::Value::Text), set |_layer, _value, name| read_only(tls_schema(), name) },
         "alpn" => { kind: List, derived: false, required: false, description: "Application protocols offered or selected", get |layer| optional_list(&layer.alpn), set |_layer, _value, name| read_only(tls_schema(), name) },
         "cipher_suites" => { kind: List, derived: false, required: false, description: "Cipher suites offered by a ClientHello", get |layer| optional_codes(&layer.cipher_suites), set |_layer, _value, name| read_only(tls_schema(), name) },
         "supported_versions" => { kind: List, derived: false, required: false, description: "Versions offered by a ClientHello", get |layer| optional_codes(&layer.supported_versions), set |_layer, _value, name| read_only(tls_schema(), name) },
@@ -171,16 +171,16 @@ reflective_layer! {
 }
 
 const EXTENSION_FIELDS: &[FieldSchema] = &[
-    member("type", FieldKind::Unsigned, &[]),
-    member("data", FieldKind::Bytes, &[]),
+    member("type", field::Kind::Unsigned, &[]),
+    member("data", field::Kind::Bytes, &[]),
 ];
 const HELLO_FIELDS: &[FieldSchema] = &[
-    member("kind", FieldKind::Text, &[]),
-    member("record_version", FieldKind::Unsigned, &[]),
-    member("legacy_version", FieldKind::Unsigned, &[]),
-    member("random", FieldKind::Bytes, &[]),
-    member("session_id", FieldKind::Bytes, &[]),
-    member("cipher_suites", FieldKind::List, &[]),
-    member("compression", FieldKind::Bytes, &[]),
-    member("extensions", FieldKind::List, EXTENSION_FIELDS),
+    member("kind", field::Kind::Text, &[]),
+    member("record_version", field::Kind::Unsigned, &[]),
+    member("legacy_version", field::Kind::Unsigned, &[]),
+    member("random", field::Kind::Bytes, &[]),
+    member("session_id", field::Kind::Bytes, &[]),
+    member("cipher_suites", field::Kind::List, &[]),
+    member("compression", field::Kind::Bytes, &[]),
+    member("extensions", field::Kind::List, EXTENSION_FIELDS),
 ];

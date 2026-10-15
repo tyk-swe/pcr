@@ -4,22 +4,25 @@
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
-use packetcraftr_core::{document::Packet, field::FieldValue};
+use packetcraftr_core::{document::Packet, field};
 
 use super::write_stdout_line;
 use crate::errors::CliError;
 
 pub(crate) fn render_dns_question(
+    invocation: &crate::invocation::Invocation,
     name: impl Display,
     query_type: impl Display,
     class: impl Display,
 ) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "  dns question: {name} type={query_type} class={class}"
-    ))
+    write_stdout_line(
+        invocation,
+        format_args!("  dns question: {name} type={query_type} class={class}"),
+    )
 }
 
 pub(crate) fn render_dns_record(
+    invocation: &crate::invocation::Invocation,
     section: impl Display,
     owner: impl Display,
     record_type: impl Display,
@@ -27,30 +30,37 @@ pub(crate) fn render_dns_record(
     ttl: impl Display,
     data: impl Display,
 ) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "  dns {section}: {owner} type={record_type} class={class} ttl={ttl} {data}"
-    ))
+    write_stdout_line(
+        invocation,
+        format_args!("  dns {section}: {owner} type={record_type} class={class} ttl={ttl} {data}"),
+    )
 }
 
-pub(crate) fn render_dns_records(packet: &Packet) -> Result<(), CliError> {
+pub(crate) fn render_dns_records(
+    invocation: &crate::invocation::Invocation,
+    packet: &Packet,
+) -> Result<(), CliError> {
     for layer in &packet.layers {
         if layer.protocol.as_str() == "dns" {
-            render_dns_fields(&layer.fields)?;
+            render_dns_fields(invocation, &layer.fields)?;
         }
     }
     Ok(())
 }
 
-pub(crate) fn render_dns_fields(fields: &BTreeMap<String, FieldValue>) -> Result<(), CliError> {
-    if let Some(FieldValue::List(questions)) = fields.get("questions") {
+pub(crate) fn render_dns_fields(
+    invocation: &crate::invocation::Invocation,
+    fields: &BTreeMap<String, field::Value>,
+) -> Result<(), CliError> {
+    if let Some(field::Value::List(questions)) = fields.get("questions") {
         for question in questions {
-            let FieldValue::Object(parts) = question else {
+            let field::Value::Object(parts) = question else {
                 continue;
             };
             if let (Some(name), Some(query_type), Some(class)) =
                 (parts.get("name"), parts.get("type"), parts.get("class"))
             {
-                render_dns_question(name, query_type, class)?;
+                render_dns_question(invocation, name, query_type, class)?;
             }
         }
     }
@@ -59,11 +69,11 @@ pub(crate) fn render_dns_fields(fields: &BTreeMap<String, FieldValue>) -> Result
         ("authorities", "authority"),
         ("additionals", "additional"),
     ] {
-        let Some(FieldValue::List(records)) = fields.get(field) else {
+        let Some(field::Value::List(records)) = fields.get(field) else {
             continue;
         };
         for record in records {
-            let FieldValue::Object(parts) = record else {
+            let field::Value::Object(parts) = record else {
                 continue;
             };
             if let (Some(owner), Some(type_code), Some(class), Some(ttl), Some(data)) = (
@@ -73,7 +83,7 @@ pub(crate) fn render_dns_fields(fields: &BTreeMap<String, FieldValue>) -> Result
                 parts.get("ttl"),
                 parts.get("value"),
             ) {
-                render_dns_record(section, owner, type_code, class, ttl, data)?;
+                render_dns_record(invocation, section, owner, type_code, class, ttl, data)?;
             }
         }
     }

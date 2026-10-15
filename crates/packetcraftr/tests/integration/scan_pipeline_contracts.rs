@@ -54,7 +54,7 @@ fn request() -> Request {
         targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
         address_family: packetcraftr::target::Family::Any,
         endpoints: [80, 81, 82, 83]
-            .map(|port| packetcraftr::probe::ProbeEndpoint::Tcp { port })
+            .map(|port| packetcraftr::probe::Endpoint::Tcp { port })
             .to_vec(),
         discovery: Default::default(),
         attempts: 1,
@@ -202,7 +202,7 @@ fn scans_stop_undecoded_limit_diagnosed() {
         let mut request = request();
         request.max_in_flight = max_in_flight;
         request.endpoints = (80..=84)
-            .map(|port| packetcraftr::probe::ProbeEndpoint::Tcp { port })
+            .map(|port| packetcraftr::probe::Endpoint::Tcp { port })
             .collect();
         request.limits.evidence.max_undecoded = 2;
         request.collection.decode.limits.max_packet_size = 39;
@@ -418,12 +418,12 @@ fn a_duplicate_cannot_take_the_winners_last_evidence_slot() {
 
 #[test]
 fn tcp_and_udp_on_one_port_share_one_budget_and_never_merge() {
-    use packetcraftr::probe::{ProbeEndpoint, Transport};
+    use packetcraftr::probe::{self, Transport};
 
     let mut request = request();
     request.endpoints = vec![
-        ProbeEndpoint::Tcp { port: 53 },
-        ProbeEndpoint::Udp { port: 53 },
+        probe::Endpoint::Tcp { port: 53 },
+        probe::Endpoint::Udp { port: 53 },
     ];
     request.attempts = 2;
     for max_in_flight in [1, 2] {
@@ -498,16 +498,16 @@ fn tcp_and_udp_on_one_port_share_one_budget_and_never_merge() {
 
 #[test]
 fn serial_direct_tcp_and_udp_response_limit_rejects_use_bounded_evidence() {
-    use packetcraftr::probe::ProbeEndpoint;
+    use packetcraftr::probe;
 
     for (endpoint, classification, frame_bytes) in [
         (
-            ProbeEndpoint::Tcp { port: 80 },
+            probe::Endpoint::Tcp { port: 80 },
             scan::Classification::Closed,
             40,
         ),
         (
-            ProbeEndpoint::Udp { port: 9999 },
+            probe::Endpoint::Udp { port: 9999 },
             scan::Classification::Open,
             28,
         ),
@@ -573,7 +573,7 @@ fn serial_direct_tcp_and_udp_response_limit_rejects_use_bounded_evidence() {
 fn serial_in_window_reply_rejected_by_response_limit_is_a_duplicate() {
     let mut request = request();
     request.max_in_flight = 1;
-    request.endpoints = vec![packetcraftr::probe::ProbeEndpoint::Udp { port: 53 }];
+    request.endpoints = vec![packetcraftr::probe::Endpoint::Udp { port: 53 }];
     request.timeout = Duration::from_secs(1);
     request.collection.max_responses = 1;
     request
@@ -632,7 +632,7 @@ fn serial_sole_on_time_reply_in_final_drain_is_late() {
         .unwrap();
     let aggregate = collector.finish(report).unwrap();
     let probe = &aggregate.endpoints[0].probes[0];
-    assert_eq!(probe.status, packetcraftr::probe::ProbeStatus::Timeout);
+    assert_eq!(probe.status, packetcraftr::probe::Status::Timeout);
     assert!(probe.response.is_none());
     let [capture] = aggregate.unattributed.as_slice() else {
         panic!("the sole queued reply must be retained");
@@ -728,12 +728,12 @@ fn a_reply_after_a_definitive_outcome_is_retained_as_late() {
 
 #[test]
 fn settled_packets_stay_within_the_preparation_budget() {
-    use packetcraftr::{evidence::SentPacket, probe::ProbeEndpoint};
+    use packetcraftr::{evidence::SentPacket, probe};
     use std::sync::Weak;
 
     let mut request = request();
     request.endpoints = (45000..=45511)
-        .map(|port| ProbeEndpoint::Udp { port })
+        .map(|port| probe::Endpoint::Udp { port })
         .collect();
     request.max_in_flight = 512;
     request.udp_payload = bytes::Bytes::from(vec![0; 1400]);
@@ -835,10 +835,10 @@ fn pre_send_frames_delivered_after_settlement_are_not_late_evidence() {
 
 #[test]
 fn adaptive_replies_release_their_unstarted_attempt_reservations() {
-    use packetcraftr::probe::ProbeEndpoint;
+    use packetcraftr::probe;
 
     let mut request = request();
-    request.endpoints = [80, 81].map(|port| ProbeEndpoint::Tcp { port }).to_vec();
+    request.endpoints = [80, 81].map(|port| probe::Endpoint::Tcp { port }).to_vec();
     request.attempts = 3;
     request.max_in_flight = 2;
     request.timeout = Duration::from_millis(20);

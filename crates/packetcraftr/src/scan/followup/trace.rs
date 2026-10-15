@@ -242,9 +242,11 @@ impl Stage {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn stream<P, K>(
         &self,
         client: &Client<P, K>,
+        operation: &crate::execution::Operation,
         scan: &scan::Aggregate,
         retained: Retained,
         started: Instant,
@@ -262,16 +264,19 @@ impl Stage {
         let mut emit = emit;
         // The trace runs in the policy allowance the scan left over, not a
         // fresh one.
-        let client = client.with_remaining_budget(&scan.stats);
-        let report = client.trace_hosts(request, move |event: hosts::Event| {
-            // The probe's wall-clock sent_at is evidence, not a pacing
-            // marker: the monotonic marker is when its event settled.
-            if let hosts::Event::Probe(_) = &event {
-                let mut latest = observed.lock().unwrap_or_else(PoisonError::into_inner);
-                *latest = Some(settled.now());
-            }
-            emit(event)
-        })?;
+        let report = client.trace_hosts_in(
+            request,
+            move |event: hosts::Event| {
+                // The probe's wall-clock sent_at is evidence, not a pacing
+                // marker: the monotonic marker is when its event settled.
+                if let hosts::Event::Probe(_) = &event {
+                    let mut latest = observed.lock().unwrap_or_else(PoisonError::into_inner);
+                    *latest = Some(settled.now());
+                }
+                emit(event)
+            },
+            operation,
+        )?;
         let last_sent = *latest.lock().unwrap_or_else(PoisonError::into_inner);
         Ok(Streamed { report, last_sent })
     }

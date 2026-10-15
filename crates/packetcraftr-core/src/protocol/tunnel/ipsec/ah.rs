@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
     protocol::{BuiltinProtocol, network::ip_protocol},
     registry::Discriminator,
@@ -81,7 +81,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct AhCodec;
 
-impl LayerCodec for AhCodec {
+impl Codec for AhCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &ah_schema().protocol
     }
@@ -90,8 +90,8 @@ impl LayerCodec for AhCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Ah>(NAME, layer)?;
         let header_len = AH_FIXED_LEN
             .checked_add(layer.icv.len())
@@ -161,7 +161,7 @@ impl LayerCodec for AhCodec {
         let mut materialized = layer.clone();
         materialized.next_header = materialized_next_header;
         materialized.payload_length = materialized_payload_length;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(ah_layout(header_len))
             .with_diagnostics(diagnostics))
     }
@@ -169,8 +169,8 @@ impl LayerCodec for AhCodec {
     fn decode(
         &self,
         input: Bytes,
-        context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(fixed) = input.first_chunk::<AH_FIXED_LEN>() else {
             return Err(truncated(NAME, AH_FIXED_LEN, input.len()));
         };
@@ -222,7 +222,7 @@ impl LayerCodec for AhCodec {
             );
         }
         let payload_len = input.len().saturating_sub(header_len);
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: ah_layout(header_len),
             layer: Box::new(Ah {
                 next_header: WireValue::Exact(next_header),
@@ -247,7 +247,7 @@ impl LayerCodec for AhCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Ah::default(), fields)
     }
@@ -256,7 +256,7 @@ impl LayerCodec for AhCodec {
 fn validate_context(
     layer: &Ah,
     header_len: usize,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
 ) -> Result<(Option<bool>, Vec<Diagnostic>), crate::codec::Error> {
     let mut diagnostics = Vec::new();
     if layer.spi == 0 {

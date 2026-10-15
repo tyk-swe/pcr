@@ -91,7 +91,7 @@ impl Projector {
     pub(crate) fn emit(
         &mut self,
         source_frame: u64,
-        values: Vec<Option<core::field::FieldValue>>,
+        values: Vec<Option<core::field::Value>>,
         stream: &StreamEncoder,
     ) -> Result<(), CliError> {
         let row = Row::try_from((source_frame, values)).map_err(CliError::classified)?;
@@ -131,6 +131,7 @@ impl Projector {
     }
     pub(crate) fn finish(
         mut self,
+        invocation: &crate::invocation::Invocation,
         frames_read: u64,
         captured_bytes_read: u64,
         stream: &StreamEncoder,
@@ -144,6 +145,7 @@ impl Projector {
         ));
         match self.format {
             Format::Json => emit_aggregate(
+                invocation,
                 self.command,
                 output::projection::Report::from((summary, self.rows)),
                 Vec::new(),

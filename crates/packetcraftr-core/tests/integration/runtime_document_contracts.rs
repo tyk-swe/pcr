@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::field;
 use packetcraftr_core::{packet::Packet, template};
 
 #[test]
@@ -19,7 +19,7 @@ fn template_aliases_errors_reject_before_iteration() {
     let invalid = template::Template::new(base).axis(
         0,
         "sport",
-        vec![1_u16.into(), FieldValue::Unsigned(65_536)],
+        vec![1_u16.into(), field::Value::Unsigned(65_536)],
     );
     assert!(matches!(
         invalid.expand(2),

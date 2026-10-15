@@ -12,7 +12,7 @@ use packetcraftr_netio::deadline::MAX_WAIT;
 use crate::execution::limits::{EvidenceLimits, check_rate, duration_violation};
 use crate::{exchange, route, send};
 
-use super::error::{CaseErrors, Error};
+use super::error::{Error, case_error};
 
 #[derive(Clone, Debug)]
 pub struct Request {
@@ -61,7 +61,7 @@ impl Request {
                 maximum: MAX_WAIT,
             });
         }
-        check_rate(&CaseErrors, "cases_per_second", self.cases_per_second)?;
+        check_rate(case_error, "cases_per_second", self.cases_per_second)?;
         self.campaign.validate()?;
         Ok(())
     }

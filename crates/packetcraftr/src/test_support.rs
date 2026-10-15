@@ -443,10 +443,10 @@ pub(crate) fn sent_packet_over(packet: Packet, route: crate::route::Materialized
 
 fn built_packet(packet: Packet) -> BuiltPacket {
     use packetcraftr_core::build::{Builder, Options};
-    use packetcraftr_core::codec::Context;
+    use packetcraftr_core::codec::Addresses;
 
     Builder::new(packetcraftr_core::protocol::builtin::registry())
-        .build(packet, Context::default(), Options::default())
+        .build(packet, Addresses::default(), Options::default())
         .expect("sent-packet fixture must build")
 }
 
@@ -520,35 +520,17 @@ pub(crate) enum Failure {
     StatsOverflow(u64, StatsOverflow),
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct TestErrors;
-
-impl crate::execution::Errors for TestErrors {
-    type Error = Failure;
-    type Step = u64;
-
-    fn invalid_limit(&self, field: &'static str, _: u64, _: String) -> Failure {
-        Failure::InvalidLimit(field)
-    }
-    fn authorization(&self, _: BoundaryError) -> Failure {
-        Failure::Authorization
-    }
-    fn duration_limit(&self, step: u64, source: DeadlineExceeded) -> Failure {
-        Failure::DurationLimit(step, source)
-    }
-    fn interrupted(&self, step: u64, source: Interrupted) -> Failure {
-        Failure::Interrupted(step, source)
-    }
-    fn clock(&self, step: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Failure {
-        Failure::Clock(step, source)
-    }
-    fn execution(&self, step: u64, source: BoundaryError) -> Failure {
-        Failure::Execution(step, source)
-    }
-    fn invalid_evidence(&self, step: u64, source: crate::evidence::Error) -> Failure {
-        Failure::InvalidEvidence(step, source)
-    }
-    fn stats_overflow(&self, step: u64, source: StatsOverflow) -> Failure {
-        Failure::StatsOverflow(step, source)
+pub(crate) fn test_error(step: u64, failure: crate::execution::Failure) -> Failure {
+    match failure {
+        crate::execution::Failure::InvalidLimit { field, .. } => Failure::InvalidLimit(field),
+        crate::execution::Failure::Authorization(_) => Failure::Authorization,
+        crate::execution::Failure::DurationLimit(source) => Failure::DurationLimit(step, source),
+        crate::execution::Failure::Interrupted(source) => Failure::Interrupted(step, source),
+        crate::execution::Failure::Clock(source) => Failure::Clock(step, source),
+        crate::execution::Failure::Execution(source) => Failure::Execution(step, source),
+        crate::execution::Failure::InvalidEvidence(source) => {
+            Failure::InvalidEvidence(step, source)
+        }
+        crate::execution::Failure::StatsOverflow(source) => Failure::StatsOverflow(step, source),
     }
 }

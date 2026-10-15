@@ -73,10 +73,11 @@ impl Selection<'_> {
 }
 
 pub(super) fn account_frame(
+    invocation: &crate::invocation::Invocation,
     budget: &mut capture::Budget,
     frame: &core::frame::Frame,
 ) -> Result<u64, CliError> {
-    crate::cancellation::check()?;
+    invocation.check()?;
     budget
         .charge(frame.captured_length())
         .map_err(CliError::classified)?;

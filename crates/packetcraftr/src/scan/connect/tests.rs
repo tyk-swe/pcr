@@ -165,7 +165,7 @@ fn scan_with_fault(fault: Fault) -> (Result<Aggregate, Error>, usize) {
         udp_profiles: Default::default(),
         address_family: crate::target::Family::Any,
         endpoints: [80, 81, 82]
-            .map(|port| crate::probe::ProbeEndpoint::Tcp { port })
+            .map(|port| crate::probe::Endpoint::Tcp { port })
             .to_vec(),
         discovery: Default::default(),
         attempts: 1,
@@ -265,7 +265,7 @@ fn connect_reaches_the_provider_with_the_scoped_socket() {
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: crate::target::Family::Any,
-        endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 443 }],
+        endpoints: vec![crate::probe::Endpoint::Tcp { port: 443 }],
         discovery: Default::default(),
         attempts: 1,
         adaptive: None,
@@ -310,7 +310,7 @@ fn adaptive_request(endpoints: Vec<u16>, attempts: u32, host_timeout: Duration) 
         address_family: crate::target::Family::Any,
         endpoints: endpoints
             .into_iter()
-            .map(|port| crate::probe::ProbeEndpoint::Tcp { port })
+            .map(|port| crate::probe::Endpoint::Tcp { port })
             .collect(),
         discovery: Default::default(),
         attempts,

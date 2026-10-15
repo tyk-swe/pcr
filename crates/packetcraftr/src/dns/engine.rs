@@ -26,7 +26,7 @@ use crate::target::{FamilyGate, approve_operation, resolve_selected};
 use crate::{Client, Sink, Stats};
 
 use super::EVIDENCE_DIAGNOSTICS;
-use super::error::{Attempts, Error, EvidenceFault};
+use super::error::{Error, EvidenceFault, attempt_error};
 use super::evidence::validate_dns_execution;
 use super::evidence::{
     ResponseClassification, candidate_evidence, classify_response, timeout_evidence,
@@ -49,15 +49,35 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     where
         S: Sink<Event, Ack = ()>,
     {
-        let mut deadline = self.deadline(request.limits.max_duration);
-        let publish = publisher(&self.runtime, sink, Error::from, |source| Error::Output {
-            source,
+        let operation = crate::execution::Operation::new(self, request.limits.max_duration);
+        self.dns_in(request, sink, &operation)
+    }
+
+    pub(crate) fn dns_in<S>(
+        &self,
+        request: Request,
+        sink: S,
+        operation: &crate::execution::Operation,
+    ) -> Result<Report, Error>
+    where
+        S: Sink<Event, Ack = ()>,
+    {
+        let policy = operation.policy(&self.policy);
+        let mut admission = crate::execution::Admission::new(&policy, self.providers.resolver());
+        let mut deadline = operation.deadline(self, request.limits.max_duration);
+        let publish = publisher(&operation.runtime, sink, Error::from, |source| {
+            Error::Output { source }
         })?;
         run(
             &request,
-            &mut self.admission(),
-            &self.registry,
-            &mut ExchangeExecutor::new(self, send_options(&request), request.collection.clone()),
+            &mut admission,
+            &operation.registry,
+            &mut ExchangeExecutor::new(
+                self,
+                operation,
+                send_options(&request),
+                request.collection.clone(),
+            ),
             &mut self.clock.clone(),
             &mut deadline,
             publish,
@@ -80,22 +100,50 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
         batch::limits(questions, u64::from(self.neighbors.max_attempts()))
     }
 
+    pub(crate) fn dns_limits_in<Q: std::borrow::Borrow<Request>>(
+        &self,
+        questions: impl IntoIterator<Item = Q>,
+        operation: &crate::execution::Operation,
+    ) -> Result<DnsOperation, Error> {
+        batch::limits(questions, u64::from(operation.neighbors.max_attempts()))
+    }
+
     /// Runs DNS questions in input order under one deadline: the shortest `limits.max_duration`.
     /// Question failures are reported in the returned [`batch::Report`], not as errors.
     pub fn dns_batch<S>(&self, request: batch::Request, sink: S) -> Result<batch::Report, Error>
     where
         S: Sink<batch::Event, Ack = ()>,
     {
-        let mut deadline = self.deadline(request.max_duration()?);
-        let publish = publisher(&self.runtime, sink, Error::from, |source| Error::Output {
-            source,
+        let operation = crate::execution::Operation::new(self, request.max_duration()?);
+        self.dns_batch_in(request, sink, &operation)
+    }
+
+    pub(crate) fn dns_batch_in<S>(
+        &self,
+        request: batch::Request,
+        sink: S,
+        operation: &crate::execution::Operation,
+    ) -> Result<batch::Report, Error>
+    where
+        S: Sink<batch::Event, Ack = ()>,
+    {
+        let policy = operation.policy(&self.policy);
+        let mut admission = crate::execution::Admission::new(&policy, self.providers.resolver());
+        let mut deadline = operation.deadline(self, request.max_duration()?);
+        let publish = publisher(&operation.runtime, sink, Error::from, |source| {
+            Error::Output { source }
         })?;
         let first = &request.questions[0];
         batch::run(
             &request,
-            &mut self.admission(),
-            &self.registry,
-            &mut ExchangeExecutor::new(self, send_options(first), first.collection.clone()),
+            &mut admission,
+            &operation.registry,
+            &mut ExchangeExecutor::new(
+                self,
+                operation,
+                send_options(first),
+                first.collection.clone(),
+            ),
             &mut self.clock.clone(),
             &mut deadline,
             publish,
@@ -132,7 +180,7 @@ where
         authorizer,
         Operation::Dns(prepared.limits),
         deadline,
-        &Attempts,
+        attempt_error,
     )?;
     prepared.execute(authorizer, registry, executor, clock, deadline, emit)?;
     Ok(prepared.report)
@@ -211,7 +259,7 @@ impl<'a> PreparedOperation<'a> {
             authorizer,
             registry,
             executor,
-            execution: Context::new(deadline, clock, Attempts),
+            execution: Context::new(deadline, clock, attempt_error),
             query: self.query.clone(),
             delay: self.delay,
             context,
@@ -228,7 +276,7 @@ struct Retries<'a, A, E, C, F> {
     authorizer: &'a mut A,
     registry: &'a Registry,
     executor: &'a mut E,
-    execution: Context<'a, C, Attempts>,
+    execution: Context<'a, C, Error>,
     query: Bytes,
     delay: Duration,
     context: Arc<EventContext>,
@@ -287,7 +335,7 @@ where
                 break;
             }
         }
-        self.execution.enforce(last_attempt)?;
+        self.execution.enforce(u64::from(last_attempt))?;
         self.report.completion.validate()?;
         Ok(())
     }
@@ -312,7 +360,7 @@ where
             &mut execution,
             self.request.limits,
             timeout,
-            || self.execution.enforce(attempt),
+            || self.execution.enforce(u64::from(attempt)),
         )?;
         let udp = match best {
             Some(candidate) => candidate_evidence(&probe, sent_at, candidate, &mut self.evidence),
@@ -372,19 +420,19 @@ where
         if attempt == 1 {
             return Ok(());
         }
-        self.execution.pace(attempt, self.delay)
+        self.execution.pace(u64::from(attempt), self.delay)
     }
 
     fn prepare_probe(&mut self, attempt: u32) -> Result<Probe, Error> {
-        self.execution.enforce(attempt)?;
+        self.execution.enforce(u64::from(attempt))?;
         let resolved = resolve_selected(
             self.authorizer,
             &self.request.server,
             self.request.address_family,
             self.execution.deadline(),
-            &Attempts,
+            attempt_error,
         );
-        self.execution.enforce(attempt)?;
+        self.execution.enforce(u64::from(attempt))?;
         let resolved = resolved?;
         if resolved.targets.iter().any(|target| target.scope.is_some()) {
             return Err(Error::ScopedServer {
@@ -434,7 +482,7 @@ where
         let started = self.execution.now();
         let mut spent = None;
         let stepped = self.execution.step(
-            probe.attempt,
+            u64::from(probe.attempt),
             self.request.timeout,
             &mut *self.executor,
             |executor, grant| {
@@ -460,7 +508,8 @@ where
                 // and their wait.
                 if let Some(mut neighbor) = spent {
                     neighbor.elapsed = self.execution.now().saturating_duration_since(started);
-                    self.execution.account(probe.attempt, &neighbor)?;
+                    self.execution
+                        .account(u64::from(probe.attempt), &neighbor)?;
                 }
                 return Err(error);
             }
@@ -477,7 +526,8 @@ where
                     attempt: probe.attempt,
                     source: BoundaryError::from_error(source),
                 })?;
-        self.execution.account(probe.attempt, &neighbor)?;
+        self.execution
+            .account(u64::from(probe.attempt), &neighbor)?;
         Ok(ProbeAttempt {
             execution,
             timeout: grant.timeout,
@@ -559,7 +609,7 @@ where
 
     fn publish(&mut self, attempt: u32, event: Event) -> Result<(), Error> {
         (self.emit)(event, self.execution.deadline())?;
-        self.execution.enforce(attempt)
+        self.execution.enforce(u64::from(attempt))
     }
 
     fn retain_undecoded(&mut self, attempt: u32, frames: Vec<Frame>) -> Result<(), Error> {
@@ -586,13 +636,13 @@ where
                 emit: &mut *self.emit,
             },
         )?;
-        self.execution.enforce(attempt)
+        self.execution.enforce(u64::from(attempt))
     }
 }
 
 struct AttemptEvents<'e, 'a, C, F> {
     attempt: u32,
-    execution: &'e Context<'a, C, Attempts>,
+    execution: &'e Context<'a, C, Error>,
     emit: &'e mut F,
 }
 
@@ -618,7 +668,7 @@ where
     }
 
     fn check(&mut self) -> Result<(), Error> {
-        self.execution.enforce(self.attempt)
+        self.execution.enforce(u64::from(self.attempt))
     }
 }
 

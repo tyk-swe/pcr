@@ -10,7 +10,7 @@ use super::super::{ClientExecutor, PipelineEvent, PipelineOptions, Pipelined};
 use crate::Stats;
 use crate::clock::Clock;
 use crate::evidence::ExecutionPermit;
-use crate::probe::{Batch, ProbeEndpoint};
+use crate::probe::{self, Batch};
 use crate::scan::{Probe, Request, Stage};
 use crate::test_support::{Call, fake_client};
 use packetcraftr_core::budget::Deadline;
@@ -26,7 +26,7 @@ fn request() -> Request {
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: crate::target::Family::Any,
-        endpoints: vec![ProbeEndpoint::Tcp { port: 80 }],
+        endpoints: vec![probe::Endpoint::Tcp { port: 80 }],
         discovery: Default::default(),
         attempts: 1,
         adaptive: None,
@@ -47,7 +47,7 @@ fn batch(address: u8, sequence: u64) -> Batch<Probe> {
             stage: Stage::Scan,
             address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, address)),
             scope: None,
-            endpoint: ProbeEndpoint::Tcp { port: 80 },
+            endpoint: probe::Endpoint::Tcp { port: 80 },
             attempt: 1,
             udp_payload: bytes::Bytes::new(),
             udp_profile: None,
@@ -108,7 +108,11 @@ fn a_spent_host_deadline_omits_without_traffic_or_evidence() {
     let batches = [batch(2, 0), batch(3, 1)];
     let spent = Instant::now() - Duration::from_millis(1);
     let mut events = Vec::new();
-    let mut executor = ClientExecutor::new(&client, &request());
+    let mut executor = ClientExecutor::new(
+        &client,
+        &request(),
+        &crate::execution::Operation::new(&client, Duration::from_secs(60)),
+    );
     let stats = executor
         .execute_pipeline(
             &batches,
@@ -143,7 +147,11 @@ fn a_spent_host_deadline_omits_without_traffic_or_evidence() {
 fn a_mismatched_host_deadline_vector_fails_before_any_provider_call() {
     let (client, providers) = fake_client();
     let batches = [batch(2, 0), batch(3, 1)];
-    let mut executor = ClientExecutor::new(&client, &request());
+    let mut executor = ClientExecutor::new(
+        &client,
+        &request(),
+        &crate::execution::Operation::new(&client, Duration::from_secs(60)),
+    );
     let error = executor
         .execute_pipeline(
             &batches,
@@ -163,7 +171,11 @@ fn a_deadline_spent_before_transmit_omits_that_entry() {
     let client = fake_client().0.with_clock(clock.clone());
     let batches = [batch(2, 0)];
     let mut sent_marker = None;
-    let mut executor = ClientExecutor::new(&client, &request);
+    let mut executor = ClientExecutor::new(
+        &client,
+        &request,
+        &crate::execution::Operation::new(&client, Duration::from_secs(60)),
+    );
     executor
         .execute_pipeline(&batches, options(vec![None]), &mut |event| {
             if matches!(event, PipelineEvent::Sent { .. }) {
@@ -178,7 +190,11 @@ fn a_deadline_spent_before_transmit_omits_that_entry() {
     let (client, providers) = fake_client();
     let client = client.with_clock(clock);
     let mut events = Vec::new();
-    let mut executor = ClientExecutor::new(&client, &request);
+    let mut executor = ClientExecutor::new(
+        &client,
+        &request,
+        &crate::execution::Operation::new(&client, Duration::from_secs(60)),
+    );
     let stats = executor
         .execute_pipeline(
             &batches,
@@ -209,7 +225,11 @@ fn a_completed_adaptive_wave_reports_its_sends() {
     let batches = [batch(2, 0)];
     let far = Instant::now() + Duration::from_secs(60);
     let mut events = Vec::new();
-    let mut executor = ClientExecutor::new(&client, &request());
+    let mut executor = ClientExecutor::new(
+        &client,
+        &request(),
+        &crate::execution::Operation::new(&client, Duration::from_secs(60)),
+    );
     let stats = executor
         .execute_pipeline(&batches, options(vec![Some(far)]), &mut |event| {
             events.push(event);

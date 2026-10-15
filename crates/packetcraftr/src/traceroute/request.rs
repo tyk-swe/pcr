@@ -19,7 +19,7 @@ use crate::target::Family;
 use crate::target::Target;
 
 use super::Error;
-use super::error::Probes;
+use super::error::probe_error;
 use crate::probe::Transport;
 use crate::probe::check_collection_evidence;
 use crate::traceroute::{
@@ -196,7 +196,7 @@ impl Bounds<'_> {
                 maximum: MAX_WAIT,
             });
         }
-        check_rate(&Probes, "probes_per_second", self.probes_per_second)?;
+        check_rate(probe_error, "probes_per_second", self.probes_per_second)?;
         if self.payload_size > MAX_PAYLOAD_SIZE {
             return Err(Error::InvalidLimit {
                 field: "payload_size",
@@ -220,7 +220,7 @@ pub(super) fn check_collection(
     limits: &Limits,
     probes_per_hop: u32,
 ) -> Result<(), Error> {
-    check_collection_evidence(&Probes, collection, limits.evidence)?;
+    check_collection_evidence(probe_error, collection, limits.evidence)?;
     let hop_probes = usize::try_from(probes_per_hop).unwrap_or(usize::MAX);
     if collection.max_responses < hop_probes {
         return Err(Error::InvalidLimit {

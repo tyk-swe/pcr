@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::{
-    codec::LayerEncodeContext,
+    codec::EncodeContext,
     diagnostic::Diagnostic,
     field::WireValue,
     protocol::{BuiltinProtocol, network::ip_protocol},
@@ -14,7 +14,7 @@ use super::errors::{binding_protocol, child_is_opaque, invalid, protocol, unsupp
 pub(crate) fn validate_ipv6_routing_child(
     name: &'static str,
     next_header: u8,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
     let raw_routing_header = next_header == ip_protocol::ROUTING
@@ -40,7 +40,7 @@ pub(crate) fn validate_ipv6_routing_child(
 pub(crate) fn validate_raw_child_discriminator(
     parent: &'static str,
     discriminator: u64,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
     let Some(bound) = context
@@ -94,7 +94,7 @@ pub(crate) fn validate_raw_child_discriminator(
 pub(crate) fn validate_typed_child_discriminator(
     parent: &'static str,
     discriminator: u64,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
     let Some(child) = context.child else {
@@ -127,7 +127,7 @@ pub(crate) fn validate_auto_raw_discriminator<T>(
     name: &'static str,
     field: &'static str,
     value: &WireValue<T>,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
     if !matches!(value, WireValue::Auto)
@@ -155,7 +155,7 @@ pub(crate) fn strict_or_diagnostic(
     code: &'static str,
     field: &'static str,
     message: impl Into<String>,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
     let message = message.into();
@@ -171,7 +171,7 @@ pub(crate) fn strict_or_diagnostic_error(
     code: &'static str,
     field: &'static str,
     error: impl std::error::Error + Send + Sync + 'static,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
     if context.mode == crate::codec::Mode::Strict {
@@ -211,7 +211,7 @@ pub(crate) fn pad_options_to_four_bytes(
 pub(crate) fn ensure_encode_budget(
     name: &'static str,
     contribution: usize,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
 ) -> Result<(), crate::codec::Error> {
     context.ensure_room(protocol(name), contribution)
 }

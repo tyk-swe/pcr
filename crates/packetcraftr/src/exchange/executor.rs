@@ -36,6 +36,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub(super) fn arm_capture(
         &self,
         prepared: Prepared,
+        operation: &crate::execution::Operation,
     ) -> Result<Transaction<CaptureSession<P>>, Error> {
         let Some(first_packet) = prepared.packets.first() else {
             return Err(crate::Error::Template {
@@ -58,7 +59,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             prepared.window.deadline(),
         )?;
         Ok(Transaction::new(
-            Arc::clone(&self.registry),
+            Arc::clone(&operation.registry),
             capture,
             prepared,
         ))

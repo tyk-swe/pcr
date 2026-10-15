@@ -32,14 +32,16 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream.presentation()).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream.presentation()).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
     arguments: Args,
     format: Format,
     presentation: crate::rendering::Presentation,
@@ -49,7 +51,7 @@ pub(super) fn run(
         .as_ref()
         .map(crate::command_options::Selector::get)
         .transpose()?;
-    let mut interfaces = crate::system::interfaces(selector.as_ref())?;
+    let mut interfaces = crate::system::interfaces(invocation, selector.as_ref())?;
     // Enumerate timestamp types in published order, so the first failure is
     // the one for the first interface a reader would see.
     interfaces.sort_by(|left, right| {
@@ -60,21 +62,25 @@ pub(super) fn run(
         .map(|info| {
             let timestamp_types = arguments
                 .timestamp_types
-                .then(|| crate::system::timestamp_types(&info.id))
+                .then(|| crate::system::timestamp_types(invocation, &info.id))
                 .transpose()?;
             Ok((info, timestamp_types))
         })
         .collect::<Result<Vec<_>, CliError>>()?;
     let result = output::interfaces::Report::from(interfaces);
     if format == Format::Text && !presentation.verbose && !arguments.timestamp_types {
-        crate::rendering::table_row(&[
-            ("INTERFACE", 16),
-            ("INDEX", 5),
-            ("CAPABILITY", 12),
-            ("ADDRESSES", 0),
-        ])?;
+        crate::rendering::table_row(
+            invocation,
+            &[
+                ("INTERFACE", 16),
+                ("INDEX", 5),
+                ("CAPABILITY", 12),
+                ("ADDRESSES", 0),
+            ],
+        )?;
     }
     crate::rendering::render_aggregate_rows(
+        invocation,
         output::contract::Command::Interfaces,
         format,
         &result,

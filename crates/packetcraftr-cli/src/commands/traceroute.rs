@@ -11,7 +11,6 @@ use packetcraftr_netio as net;
 use crate::output;
 
 use self::arguments::Args;
-use super::execution;
 use crate::command_options::parse_target;
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
@@ -43,14 +42,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let queue_limits = arguments.limits.clone().into_limits();
     let request = prepare_request(&arguments, queue_limits)?;
     let workflow = prepare_workflow(
@@ -59,44 +64,60 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         request.timeout,
         queue_limits,
     )?;
-    let client = workflow.client(Runtime::Workflow);
+    let client = workflow.client(invocation, Runtime::Workflow);
     let request = packetcraftr::traceroute::Request {
         route: workflow.route,
         collection: workflow.collection,
         ..request
     };
-    execution::run_workflow(
-        format,
-        stream,
-        crate::cancellation::signal(),
-        execution::Hooks {
-            command: output::contract::Command::Traceroute,
-            run: Box::new(|| {
+    match format {
+        Format::Ndjson => {
+            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
+            let summary = {
+                let emit = emit;
+
+                client
+                    .traceroute(request.clone(), emit)
+                    .map_err(CliError::classified)
+            }?;
+            invocation.check()?;
+            (rendering::emit_complete)(summary, stream)
+        }
+        format => {
+            let report = (|| -> Result<_, CliError> {
                 let collector = packetcraftr::traceroute::Collector::default();
                 let report = client
                     .traceroute(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
                 collector.finish(report).map_err(CliError::classified)
-            }),
-            run_with_events: Box::new(|emit| {
-                client
-                    .traceroute(request.clone(), emit)
-                    .map_err(CliError::classified)
-            }),
-            on_event: rendering::emit_event,
-            into_result: Box::new(|report| {
-                output::envelope::Published::<output::traceroute::Report>::try_from(report)
-                    .map_err(CliError::classified)
-            }),
-            render: Box::new(|report, _| {
-                rendering::render_text(
-                    output::envelope::Published::try_from(report).map_err(CliError::classified)?,
-                    stream.presentation(),
+            })()?;
+            invocation.check()?;
+            if format == Format::Json {
+                crate::rendering::emit_published(
+                    invocation,
+                    output::contract::Command::Traceroute,
+                    {
+                        let report = report;
+
+                        output::envelope::Published::<output::traceroute::Report>::try_from(report)
+                            .map_err(CliError::classified)
+                    }?,
                 )
-            }),
-            complete: rendering::emit_complete,
-        },
-    )
+            } else {
+                {
+                    let report = report;
+                    let _ = format;
+
+                    rendering::render_text(
+                        invocation,
+                        output::envelope::Published::try_from(report)
+                            .map_err(CliError::classified)?,
+                        stream.presentation(),
+                    )
+                }
+            }
+        }
+    }
 }
 
 fn prepare_request(

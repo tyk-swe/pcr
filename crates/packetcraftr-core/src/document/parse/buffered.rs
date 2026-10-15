@@ -8,7 +8,7 @@ use bytes::Bytes;
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Unexpected, Visitor};
 
 use crate::document::types::Limit;
-use crate::field::FieldValue;
+use crate::field;
 
 use super::budget::{
     BOOL_PAYLOAD_BYTES, Budget, INTEGER_PAYLOAD_BYTES, IPV4_PAYLOAD_BYTES, IPV6_PAYLOAD_BYTES,
@@ -25,8 +25,8 @@ pub(super) enum Buffered {
     Text(String),
     Empty,
     Bytes(Vec<u8>),
-    List(Vec<FieldValue>),
-    Object(BTreeMap<String, FieldValue>),
+    List(Vec<field::Value>),
+    Object(BTreeMap<String, field::Value>),
 }
 
 impl Buffered {
@@ -35,61 +35,61 @@ impl Buffered {
         tag: Tag,
         budget: &Budget<'_>,
         depth: usize,
-    ) -> Result<FieldValue, E> {
+    ) -> Result<field::Value, E> {
         let value = match (tag, self) {
-            (Tag::Bool, Self::Bool(value)) => FieldValue::Bool(value),
-            (Tag::Unsigned, Self::Unsigned(value)) => FieldValue::Unsigned(value),
-            (Tag::Signed, Self::Signed(value)) => FieldValue::Signed(value),
+            (Tag::Bool, Self::Bool(value)) => field::Value::Bool(value),
+            (Tag::Unsigned, Self::Unsigned(value)) => field::Value::Unsigned(value),
+            (Tag::Signed, Self::Signed(value)) => field::Value::Signed(value),
             (Tag::Signed, Self::Unsigned(value)) => {
-                FieldValue::Signed(i64::try_from(value).map_err(|_| {
+                field::Value::Signed(i64::try_from(value).map_err(|_| {
                     E::invalid_value(Unexpected::Unsigned(value), &"a signed integer")
                 })?)
             }
             (Tag::Text, Self::Text(value)) => {
                 budget.check_width(value.len(), Limit::TextBytes)?;
-                FieldValue::Text(value)
+                field::Value::Text(value)
             }
-            (Tag::Ipv4, Self::Text(value)) => FieldValue::Ipv4(
+            (Tag::Ipv4, Self::Text(value)) => field::Value::Ipv4(
                 value
                     .parse()
                     .map_err(|_| E::invalid_value(Unexpected::Str(&value), &"an IPv4 address"))?,
             ),
-            (Tag::Ipv6, Self::Text(value)) => FieldValue::Ipv6(
+            (Tag::Ipv6, Self::Text(value)) => field::Value::Ipv6(
                 value
                     .parse()
                     .map_err(|_| E::invalid_value(Unexpected::Str(&value), &"an IPv6 address"))?,
             ),
             (Tag::Bytes, Self::Bytes(value)) => {
                 budget.check_width(value.len(), Limit::ByteValueBytes)?;
-                FieldValue::Bytes(Bytes::from(value))
+                field::Value::Bytes(Bytes::from(value))
             }
-            (Tag::Bytes, Self::Empty) => FieldValue::Bytes(Bytes::new()),
+            (Tag::Bytes, Self::Empty) => field::Value::Bytes(Bytes::new()),
             (Tag::Mac, Self::Bytes(value)) => {
-                FieldValue::Mac(value.try_into().map_err(|value: Vec<u8>| {
+                field::Value::Mac(value.try_into().map_err(|value: Vec<u8>| {
                     E::invalid_length(value.len(), &"6 MAC address bytes")
                 })?)
             }
             (Tag::List, Self::List(value)) => {
                 budget.enter_list(depth)?;
-                FieldValue::List(value)
+                field::Value::List(value)
             }
             (Tag::List, Self::Empty) => {
                 budget.enter_list(depth)?;
-                FieldValue::List(Vec::new())
+                field::Value::List(Vec::new())
             }
-            (Tag::Object, Self::Object(value)) => FieldValue::Object(value),
+            (Tag::Object, Self::Object(value)) => field::Value::Object(value),
             (tag, other) => return Err(E::invalid_type(other.unexpected(), &tag.expected())),
         };
         let width = match &value {
-            FieldValue::Bool(_) => BOOL_PAYLOAD_BYTES,
-            FieldValue::Unsigned(_) | FieldValue::Signed(_) => INTEGER_PAYLOAD_BYTES,
-            FieldValue::Text(value) => value.len(),
-            FieldValue::Bytes(value) => value.len(),
-            FieldValue::Ipv4(_) => IPV4_PAYLOAD_BYTES,
-            FieldValue::Ipv6(_) => IPV6_PAYLOAD_BYTES,
-            FieldValue::Mac(_) => MAC_PAYLOAD_BYTES,
+            field::Value::Bool(_) => BOOL_PAYLOAD_BYTES,
+            field::Value::Unsigned(_) | field::Value::Signed(_) => INTEGER_PAYLOAD_BYTES,
+            field::Value::Text(value) => value.len(),
+            field::Value::Bytes(value) => value.len(),
+            field::Value::Ipv4(_) => IPV4_PAYLOAD_BYTES,
+            field::Value::Ipv6(_) => IPV6_PAYLOAD_BYTES,
+            field::Value::Mac(_) => MAC_PAYLOAD_BYTES,
             // Children were charged when their tags were resolved.
-            FieldValue::List(_) | FieldValue::Object(_) => 0,
+            field::Value::List(_) | field::Value::Object(_) => 0,
         };
         budget.charge_payload(width)?;
         Ok(value)
@@ -164,7 +164,7 @@ impl<'de> Visitor<'de> for BufferedSeed<'_, '_> {
             self.budget.charge_list_item()?;
             self.budget.charge_payload(name.len())?;
             self.budget
-                .charge_temporary(name.len() + std::mem::size_of::<(String, FieldValue)>())?;
+                .charge_temporary(name.len() + std::mem::size_of::<(String, field::Value)>())?;
             let value = map.next_value_seed(FieldValueSeed {
                 budget: self.budget,
                 depth: self.depth + 1,
@@ -201,7 +201,7 @@ impl<'de> Visitor<'de> for BufferedSeed<'_, '_> {
         })? {
             if count == 0 {
                 self.budget
-                    .charge_temporary(std::mem::size_of::<FieldValue>())?;
+                    .charge_temporary(std::mem::size_of::<field::Value>())?;
             }
             match (&mut result, item) {
                 (Buffered::Empty, Item::Byte(value)) => result = Buffered::Bytes(vec![value]),
@@ -242,7 +242,7 @@ fn grow<T, E: de::Error>(values: &mut Vec<T>, budget: &Budget<'_>) -> Result<(),
 
 enum Item {
     Byte(u8),
-    Value(FieldValue),
+    Value(field::Value),
 }
 struct ItemSeed<'b, 'l> {
     parent: BufferedSeed<'b, 'l>,

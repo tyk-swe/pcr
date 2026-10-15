@@ -7,12 +7,9 @@ use std::net::{IpAddr, Ipv6Addr};
 use bytes::Bytes;
 
 use crate::{
-    codec::{
-        DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
-        NetworkEnvelope,
-    },
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded, NetworkEnvelope},
     diagnostic::Diagnostic,
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -62,7 +59,7 @@ reflective_layer! {
         "last_entry" => { kind: Unsigned, derived: true, required: false, description: "Highest segment-list index", reflect: last_entry, layout: (4, 5) },
         "flags" => { kind: Unsigned, derived: false, required: false, description: "SRH flags", reflect: flags, layout: (5, 6) },
         "tag" => { kind: Unsigned, derived: false, required: false, description: "SRH tag", reflect: tag, layout: (6, 8) },
-        "segments" | "segs" => { kind: List, derived: false, required: true, description: "Segments in visit order", get |layer| Some(FieldValue::List(layer.segments.iter().copied().map(FieldValue::Ipv6).collect())), set |layer, value, name| match value { FieldValue::List(values) => { layer.segments = values.into_iter().map(|value| match value { FieldValue::Ipv6(value) => Ok(value), FieldValue::Text(value) => value.parse().map_err(|_| wrong_type(srh_schema(), name, "list of IPv6 addresses")), _ => Err(wrong_type(srh_schema(), name, "list of IPv6 addresses")) }).collect::<Result<Vec<_>, _>>()?; Ok(()) }, _ => Err(wrong_type(srh_schema(), name, "list")) }, layout: (8, segments_end) },
+        "segments" | "segs" => { kind: List, derived: false, required: true, description: "Segments in visit order", get |layer| Some(field::Value::List(layer.segments.iter().copied().map(field::Value::Ipv6).collect())), set |layer, value, name| match value { field::Value::List(values) => { layer.segments = values.into_iter().map(|value| match value { field::Value::Ipv6(value) => Ok(value), field::Value::Text(value) => value.parse().map_err(|_| wrong_type(srh_schema(), name, "list of IPv6 addresses")), _ => Err(wrong_type(srh_schema(), name, "list of IPv6 addresses")) }).collect::<Result<Vec<_>, _>>()?; Ok(()) }, _ => Err(wrong_type(srh_schema(), name, "list")) }, layout: (8, segments_end) },
         "tlvs" => { kind: Bytes, derived: false, required: false, description: "TLV bytes following the segment list, including padding", reflect: tlvs, layout: (segments_end, header_len) },
     }
     layout pub(crate) fn srh_layout(segments_end: usize, header_len: usize);
@@ -71,7 +68,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SegmentRoutingHeaderCodec;
 
-impl LayerCodec for SegmentRoutingHeaderCodec {
+impl Codec for SegmentRoutingHeaderCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &srh_schema().protocol
     }
@@ -80,8 +77,8 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<SegmentRoutingHeader>(NAME, layer)?;
         if layer.segments.is_empty() || layer.segments.len() > 127 {
             return Err(invalid(NAME, "SRH requires 1..=127 segments"));
@@ -145,7 +142,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         materialized.last_entry = materialized_last;
         let tlvs = Bytes::copy_from_slice(&prefix[segments_end..]);
         materialized.tlvs = tlvs;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(srh_layout(segments_end, header_len))
             .with_diagnostics(diagnostics))
     }
@@ -153,8 +150,8 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
     fn decode(
         &self,
         input: Bytes,
-        context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<8>() else {
             return Err(truncated(NAME, 8, input.len()));
         };
@@ -209,7 +206,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             source: network.source,
             destination: IpAddr::V6(final_destination),
         });
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(SegmentRoutingHeader {
                 next_header: WireValue::Exact(header[0]),
                 segments_left: WireValue::Exact(header[3]),
@@ -231,7 +228,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(SegmentRoutingHeader::default(), fields)
     }

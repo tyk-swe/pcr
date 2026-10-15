@@ -1,13 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::field::{self, FieldKind, FieldValue};
+use crate::field;
 use crate::layer::{FieldSchema, ReflectiveField, Schema};
 use std::collections::BTreeMap;
 
 pub(crate) const fn member(
     name: &'static str,
-    kind: FieldKind,
+    kind: field::Kind,
     children: &'static [FieldSchema],
 ) -> FieldSchema {
     FieldSchema {
@@ -21,8 +21,8 @@ pub(crate) const fn member(
     }
 }
 
-pub(crate) fn object<const N: usize>(fields: [(&str, FieldValue); N]) -> FieldValue {
-    FieldValue::Object(
+pub(crate) fn object<const N: usize>(fields: [(&str, field::Value); N]) -> field::Value {
+    field::Value::Object(
         fields
             .into_iter()
             .map(|(name, value)| (name.to_owned(), value))
@@ -31,7 +31,7 @@ pub(crate) fn object<const N: usize>(fields: [(&str, FieldValue); N]) -> FieldVa
 }
 
 pub(crate) struct Object {
-    values: BTreeMap<String, FieldValue>,
+    values: BTreeMap<String, field::Value>,
     schema: &'static Schema,
     field: String,
 }
@@ -41,11 +41,11 @@ impl Object {
         self.values.contains_key(name)
     }
     pub(crate) fn new(
-        value: FieldValue,
+        value: field::Value,
         schema: &'static Schema,
         field: &str,
     ) -> Result<Self, field::Error> {
-        let FieldValue::Object(values) = value else {
+        let field::Value::Object(values) = value else {
             return Err(super::wrong_type(schema, field, "object"));
         };
         if values.len() > 256 {
@@ -57,10 +57,10 @@ impl Object {
             field: field.to_owned(),
         })
     }
-    pub(crate) fn take(&mut self, name: &str) -> Option<FieldValue> {
+    pub(crate) fn take(&mut self, name: &str) -> Option<field::Value> {
         self.values.remove(name)
     }
-    pub(crate) fn required(&mut self, name: &str) -> Result<FieldValue, field::Error> {
+    pub(crate) fn required(&mut self, name: &str) -> Result<field::Value, field::Error> {
         self.take(name)
             .ok_or_else(|| field::Error::MissingRequired {
                 protocol: self.schema.protocol,
@@ -124,14 +124,14 @@ impl Object {
 }
 
 pub(crate) fn list(
-    value: FieldValue,
+    value: field::Value,
     maximum: usize,
     schema: &'static Schema,
     field: &str,
-) -> Result<Vec<FieldValue>, field::Error> {
+) -> Result<Vec<field::Value>, field::Error> {
     match value {
-        FieldValue::List(values) if values.len() <= maximum => Ok(values),
-        FieldValue::List(_) => Err(super::out_of_range(schema, field)),
+        field::Value::List(values) if values.len() <= maximum => Ok(values),
+        field::Value::List(_) => Err(super::out_of_range(schema, field)),
         _ => Err(super::wrong_type(schema, field, "list")),
     }
 }

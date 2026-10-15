@@ -10,7 +10,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use packetcraftr::probe::ProbeEndpoint;
+use packetcraftr::probe;
 use packetcraftr::target::{Family, Selection, Specification, Target};
 use packetcraftr::{Client, scan};
 use packetcraftr_core::error::Classified;
@@ -70,7 +70,7 @@ fn run(scenario: &str, family: &str, mode: &str) -> Result<Value, String> {
             Family::Ipv6
         },
         endpoints: (9000..9000 + ports)
-            .map(|port| ProbeEndpoint::Tcp { port })
+            .map(|port| probe::Endpoint::Tcp { port })
             .collect(),
         discovery: Default::default(),
         attempts,

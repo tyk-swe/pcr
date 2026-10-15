@@ -4,7 +4,7 @@
 use bytes::Bytes;
 
 use super::super::describe;
-use crate::field::FieldKind;
+use crate::field;
 use crate::filter::error::Error;
 use crate::filter::lexer::{Spanned, Token};
 use crate::filter::literal::{self, Literal};
@@ -76,11 +76,11 @@ fn range_or_literal(field: &FieldRef, word: &str, offset: usize) -> Result<Optio
         || field.specs.iter().any(|spec| {
             matches!(
                 spec.kind,
-                FieldKind::Unsigned
-                    | FieldKind::Signed
-                    | FieldKind::Ipv4
-                    | FieldKind::Ipv6
-                    | FieldKind::List
+                field::Kind::Unsigned
+                    | field::Kind::Signed
+                    | field::Kind::Ipv4
+                    | field::Kind::Ipv6
+                    | field::Kind::List
             )
         });
     let range = if ranged {
@@ -137,7 +137,7 @@ pub(super) fn incompatible(field: &FieldRef, value: &Literal, offset: usize) -> 
             field
                 .specs
                 .first()
-                .map_or(FieldKind::Bytes, |spec| spec.kind),
+                .map_or(field::Kind::Bytes, |spec| spec.kind),
         ),
         literal: value.to_string(),
     }

@@ -8,9 +8,9 @@ use memchr::memmem::Finder;
 
 use super::lexer::CompareOperator;
 use super::literal::{Literal, Range};
-use crate::field::FieldValue;
+use crate::field;
 
-pub(super) fn matches(value: &FieldValue, operator: CompareOperator, literal: &Literal) -> bool {
+pub(super) fn matches(value: &field::Value, operator: CompareOperator, literal: &Literal) -> bool {
     if let Some(contained) = containment(value, literal) {
         // Prefix literals describe a set, so only membership is meaningful.
         return match operator {
@@ -19,7 +19,7 @@ pub(super) fn matches(value: &FieldValue, operator: CompareOperator, literal: &L
             _ => false,
         };
     }
-    if let FieldValue::List(values) = value {
+    if let field::Value::List(values) = value {
         return values
             .iter()
             .any(|element| matches(element, operator, literal));
@@ -37,13 +37,13 @@ pub(super) fn matches(value: &FieldValue, operator: CompareOperator, literal: &L
     }
 }
 
-fn containment(value: &FieldValue, literal: &Literal) -> Option<bool> {
+fn containment(value: &field::Value, literal: &Literal) -> Option<bool> {
     match (value, literal) {
-        (FieldValue::Ipv4(address), Literal::Ipv4Net(network, prefix)) => {
+        (field::Value::Ipv4(address), Literal::Ipv4Net(network, prefix)) => {
             let mask = prefix_mask_u32(*prefix);
             Some(u32::from(*address) & mask == u32::from(*network) & mask)
         }
-        (FieldValue::Ipv6(address), Literal::Ipv6Net(network, prefix)) => {
+        (field::Value::Ipv6(address), Literal::Ipv6Net(network, prefix)) => {
             let mask = prefix_mask_u128(*prefix);
             Some(u128::from(*address) & mask == u128::from(*network) & mask)
         }
@@ -53,16 +53,16 @@ fn containment(value: &FieldValue, literal: &Literal) -> Option<bool> {
 }
 
 /// None when the value is not of the range's kind, so `!=` rejects it as it does a prefix.
-fn in_range(value: &FieldValue, range: &Range) -> Option<bool> {
+fn in_range(value: &field::Value, range: &Range) -> Option<bool> {
     match (value, range) {
-        (FieldValue::Unsigned(value), Range::Unsigned(low, high)) => {
+        (field::Value::Unsigned(value), Range::Unsigned(low, high)) => {
             Some((*low..=*high).contains(value))
         }
-        (FieldValue::Signed(value), Range::Unsigned(low, high)) => {
+        (field::Value::Signed(value), Range::Unsigned(low, high)) => {
             Some(u64::try_from(*value).is_ok_and(|value| (*low..=*high).contains(&value)))
         }
-        (FieldValue::Ipv4(value), Range::Ipv4(low, high)) => Some((*low..=*high).contains(value)),
-        (FieldValue::Ipv6(value), Range::Ipv6(low, high)) => Some((*low..=*high).contains(value)),
+        (field::Value::Ipv4(value), Range::Ipv4(low, high)) => Some((*low..=*high).contains(value)),
+        (field::Value::Ipv6(value), Range::Ipv6(low, high)) => Some((*low..=*high).contains(value)),
         _ => None,
     }
 }
@@ -83,46 +83,52 @@ fn prefix_mask_u128(prefix: u8) -> u128 {
     }
 }
 
-fn compare(value: &FieldValue, literal: &Literal) -> Option<Ordering> {
+fn compare(value: &field::Value, literal: &Literal) -> Option<Ordering> {
     match (value, literal) {
-        (FieldValue::Bool(left), Literal::Bool(right)) => Some(left.cmp(right)),
-        (FieldValue::Bool(left), Literal::Unsigned(right)) => Some(u64::from(*left).cmp(right)),
-        (FieldValue::Unsigned(left), Literal::Unsigned(right)) => Some(left.cmp(right)),
-        (FieldValue::Unsigned(left), Literal::Signed(right)) => {
+        (field::Value::Bool(left), Literal::Bool(right)) => Some(left.cmp(right)),
+        (field::Value::Bool(left), Literal::Unsigned(right)) => Some(u64::from(*left).cmp(right)),
+        (field::Value::Unsigned(left), Literal::Unsigned(right)) => Some(left.cmp(right)),
+        (field::Value::Unsigned(left), Literal::Signed(right)) => {
             Some(i128::from(*left).cmp(&i128::from(*right)))
         }
-        (FieldValue::Signed(left), Literal::Signed(right)) => Some(left.cmp(right)),
-        (FieldValue::Signed(left), Literal::Unsigned(right)) => {
+        (field::Value::Signed(left), Literal::Signed(right)) => Some(left.cmp(right)),
+        (field::Value::Signed(left), Literal::Unsigned(right)) => {
             Some(i128::from(*left).cmp(&i128::from(*right)))
         }
-        (FieldValue::Text(left), Literal::Text(right)) => Some(left.as_str().cmp(right.as_str())),
-        (FieldValue::Bytes(left), Literal::Bytes(right)) => Some(left.as_ref().cmp(right.as_ref())),
-        (FieldValue::Bytes(left), Literal::Mac(right)) => Some(left.as_ref().cmp(right.as_slice())),
-        (FieldValue::Bytes(left), Literal::Text(right)) => {
+        (field::Value::Text(left), Literal::Text(right)) => Some(left.as_str().cmp(right.as_str())),
+        (field::Value::Bytes(left), Literal::Bytes(right)) => {
+            Some(left.as_ref().cmp(right.as_ref()))
+        }
+        (field::Value::Bytes(left), Literal::Mac(right)) => {
+            Some(left.as_ref().cmp(right.as_slice()))
+        }
+        (field::Value::Bytes(left), Literal::Text(right)) => {
             Some(left.as_ref().cmp(right.as_bytes()))
         }
-        (FieldValue::Bytes(left), Literal::Unsigned(right)) => match left.as_ref() {
+        (field::Value::Bytes(left), Literal::Unsigned(right)) => match left.as_ref() {
             [only] => Some(u64::from(*only).cmp(right)),
             _ => None,
         },
-        (FieldValue::Mac(left), Literal::Mac(right)) => Some(left.cmp(right)),
-        (FieldValue::Mac(left), Literal::Bytes(right)) => Some(left.as_slice().cmp(right.as_ref())),
-        (FieldValue::Ipv4(left), Literal::Ipv4(right)) => Some(left.cmp(right)),
-        (FieldValue::Ipv6(left), Literal::Ipv6(right)) => Some(left.cmp(right)),
+        (field::Value::Mac(left), Literal::Mac(right)) => Some(left.cmp(right)),
+        (field::Value::Mac(left), Literal::Bytes(right)) => {
+            Some(left.as_slice().cmp(right.as_ref()))
+        }
+        (field::Value::Ipv4(left), Literal::Ipv4(right)) => Some(left.cmp(right)),
+        (field::Value::Ipv6(left), Literal::Ipv6(right)) => Some(left.cmp(right)),
         _ => None,
     }
 }
 
 /// Tests `value & mask` against `expected`; only unsigned values have bits to mask.
 pub(super) fn masked(
-    value: &FieldValue,
+    value: &field::Value,
     mask: u64,
     operator: CompareOperator,
     expected: u64,
 ) -> bool {
     match value {
-        FieldValue::Unsigned(value) => matches(
-            &FieldValue::Unsigned(value & mask),
+        field::Value::Unsigned(value) => matches(
+            &field::Value::Unsigned(value & mask),
             operator,
             &Literal::Unsigned(expected),
         ),
@@ -192,25 +198,25 @@ fn needle_bytes(literal: &Literal) -> Option<&[u8]> {
     }
 }
 
-fn haystack_bytes(value: &FieldValue) -> Option<&[u8]> {
+fn haystack_bytes(value: &field::Value) -> Option<&[u8]> {
     match value {
-        FieldValue::Bytes(bytes) => Some(bytes.as_ref()),
-        FieldValue::Text(text) => Some(text.as_bytes()),
-        FieldValue::Mac(mac) => Some(mac.as_slice()),
+        field::Value::Bytes(bytes) => Some(bytes.as_ref()),
+        field::Value::Text(text) => Some(text.as_bytes()),
+        field::Value::Mac(mac) => Some(mac.as_slice()),
         _ => None,
     }
 }
 
-pub(super) fn contains(value: &FieldValue, needle: &Needle) -> bool {
-    if let FieldValue::List(values) = value {
+pub(super) fn contains(value: &field::Value, needle: &Needle) -> bool {
+    if let field::Value::List(values) = value {
         return values.iter().any(|element| contains(element, needle));
     }
     haystack_bytes(value).is_some_and(|haystack| needle.find(haystack))
 }
 
 /// Lists match when any element does. Folded searches lower the haystack once, so the cost stays linear.
-pub(super) fn text_match(value: &FieldValue, needle: &Needle, mode: TextMode) -> bool {
-    if let FieldValue::List(values) = value {
+pub(super) fn text_match(value: &field::Value, needle: &Needle, mode: TextMode) -> bool {
+    if let field::Value::List(values) = value {
         return values
             .iter()
             .any(|element| text_match(element, needle, mode));

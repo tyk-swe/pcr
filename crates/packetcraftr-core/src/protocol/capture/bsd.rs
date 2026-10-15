@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::FieldValue,
+    field,
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -68,7 +68,7 @@ reflective_layer! {
     fn null_schema() => { protocol: protocol(NULL_NAME), name: "BSD NULL" }
     impl BsdNull {
         "family" => { kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", reflect: family, layout: (0, 4) },
-        "byte_order" => { kind: Text, derived: false, required: true, description: "Host byte order used by the captured NULL header", get |layer| Some(FieldValue::Text(match layer.byte_order { ByteOrder::Little => "little", ByteOrder::Big => "big" }.to_owned())), set |layer, value, name| match value { FieldValue::Text(value) if value.eq_ignore_ascii_case("little") => { layer.byte_order = ByteOrder::Little; Ok(()) }, FieldValue::Text(value) if value.eq_ignore_ascii_case("big") => { layer.byte_order = ByteOrder::Big; Ok(()) }, FieldValue::Text(_) => Err(out_of_range(null_schema(), name)), _ => Err(wrong_type(null_schema(), name, "text")) }, layout: (0, 4) }
+        "byte_order" => { kind: Text, derived: false, required: true, description: "Host byte order used by the captured NULL header", get |layer| Some(field::Value::Text(match layer.byte_order { ByteOrder::Little => "little", ByteOrder::Big => "big" }.to_owned())), set |layer, value, name| match value { field::Value::Text(value) if value.eq_ignore_ascii_case("little") => { layer.byte_order = ByteOrder::Little; Ok(()) }, field::Value::Text(value) if value.eq_ignore_ascii_case("big") => { layer.byte_order = ByteOrder::Big; Ok(()) }, field::Value::Text(_) => Err(out_of_range(null_schema(), name)), _ => Err(wrong_type(null_schema(), name, "text")) }, layout: (0, 4) }
     }
     layout pub(crate) fn null_layout();
 }
@@ -99,7 +99,7 @@ pub(crate) fn family_discriminator(family: u32) -> u64 {
 pub(crate) fn validate_family_binding(
     parent: &'static str,
     family: u32,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
 ) -> Result<Vec<Diagnostic>, crate::codec::Error> {
     let mut diagnostics = Vec::new();
     validate_raw_child_discriminator(
@@ -138,7 +138,7 @@ pub(crate) fn validate_family_binding(
     Ok(diagnostics)
 }
 
-impl LayerCodec for BsdNullCodec {
+impl Codec for BsdNullCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &null_schema().protocol
     }
@@ -147,37 +147,35 @@ impl LayerCodec for BsdNullCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<BsdNull>(NULL_NAME, layer)?;
         let prefix = match layer.byte_order {
             ByteOrder::Little => layer.family.to_le_bytes(),
             ByteOrder::Big => layer.family.to_be_bytes(),
         };
-        Ok(
-            EncodedLayer::header(prefix.to_vec(), Box::new(layer.clone()))
-                .with_fields(null_layout())
-                .with_diagnostics(validate_family_binding(NULL_NAME, layer.family, context)?),
-        )
+        Ok(Encoded::header(prefix.to_vec(), Box::new(layer.clone()))
+            .with_fields(null_layout())
+            .with_diagnostics(validate_family_binding(NULL_NAME, layer.family, context)?))
     }
 
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         decode_family(&input, FamilyHeader::Null)
     }
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(BsdNull::default(), fields)
     }
 }
 
-impl LayerCodec for BsdLoopCodec {
+impl Codec for BsdLoopCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &loop_schema().protocol
     }
@@ -186,11 +184,11 @@ impl LayerCodec for BsdLoopCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<BsdLoop>(LOOP_NAME, layer)?;
         Ok(
-            EncodedLayer::header(layer.family.to_be_bytes().to_vec(), Box::new(layer.clone()))
+            Encoded::header(layer.family.to_be_bytes().to_vec(), Box::new(layer.clone()))
                 .with_fields(loop_layout())
                 .with_diagnostics(validate_family_binding(LOOP_NAME, layer.family, context)?),
         )
@@ -199,14 +197,14 @@ impl LayerCodec for BsdLoopCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         decode_family(&input, FamilyHeader::Loop)
     }
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(BsdLoop::default(), fields)
     }
@@ -215,7 +213,7 @@ impl LayerCodec for BsdLoopCodec {
 pub(crate) fn decode_family(
     input: &[u8],
     header: FamilyHeader,
-) -> Result<DecodedLayer, crate::codec::Error> {
+) -> Result<Decoded, crate::codec::Error> {
     let name = match header {
         FamilyHeader::Null => NULL_NAME,
         FamilyHeader::Loop => LOOP_NAME,
@@ -235,7 +233,7 @@ pub(crate) fn decode_family(
         FamilyHeader::Loop => Box::new(BsdLoop { family }),
         FamilyHeader::Null => Box::new(BsdNull { family, byte_order }),
     };
-    Ok(DecodedLayer {
+    Ok(Decoded {
         layer,
         consumed: 4,
         payload_len: input.len().saturating_sub(4),

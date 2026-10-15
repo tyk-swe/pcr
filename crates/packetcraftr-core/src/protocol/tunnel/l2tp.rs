@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::FieldValue,
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field,
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -46,7 +46,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct L2tpv3Codec;
 
-impl LayerCodec for L2tpv3Codec {
+impl Codec for L2tpv3Codec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &l2tpv3_schema().protocol
     }
@@ -55,8 +55,8 @@ impl LayerCodec for L2tpv3Codec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<L2tpv3>(NAME, layer)?;
         ensure_encode_budget(NAME, L2TPV3_LEN, context)?;
         let mut diagnostics = Vec::new();
@@ -75,7 +75,7 @@ impl LayerCodec for L2tpv3Codec {
                 &mut diagnostics,
             )?;
         }
-        Ok(EncodedLayer::header(
+        Ok(Encoded::header(
             layer.session_id.to_be_bytes().to_vec(),
             Box::new(layer.clone()),
         )
@@ -86,13 +86,13 @@ impl LayerCodec for L2tpv3Codec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<L2TPV3_LEN>() else {
             return Err(truncated(NAME, L2TPV3_LEN, input.len()));
         };
         let payload_len = input.len().saturating_sub(L2TPV3_LEN);
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: l2tpv3_layout(),
             layer: Box::new(L2tpv3 {
                 session_id: u32::from_be_bytes(*header),
@@ -108,7 +108,7 @@ impl LayerCodec for L2tpv3Codec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(L2tpv3::default(), fields)
     }

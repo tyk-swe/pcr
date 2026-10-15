@@ -66,49 +66,49 @@ impl Classified for Error {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct Probes;
+pub(crate) fn probe_error(step: u64, failure: crate::execution::Failure) -> Error {
+    match failure {
+        crate::execution::Failure::InvalidLimit {
+            field,
+            value,
+            reason,
+        } => Error::Invalid(format!("{field}={value}: {reason}")),
+        crate::execution::Failure::Authorization(source) => Error::Authorization(source),
+        crate::execution::Failure::DurationLimit(source) => source.into(),
+        crate::execution::Failure::Interrupted(source) => source.into(),
+        crate::execution::Failure::Clock(source) => {
+            let sequence = step;
 
-impl crate::execution::Errors for Probes {
-    type Error = Error;
-    type Step = u64;
+            Error::Execution {
+                sequence,
+                source: BoundaryError::with_source(
+                    "OS probe clock failed",
+                    Classification::new("io.identify_os_clock", Kind::Io, None),
+                    Vec::new(),
+                    std::io::Error::other(source),
+                ),
+            }
+        }
+        crate::execution::Failure::Execution(source) => {
+            let sequence = step;
 
-    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Error {
-        Error::Invalid(format!("{field}={value}: {reason}"))
-    }
-    fn authorization(&self, source: BoundaryError) -> Error {
-        Error::Authorization(source)
-    }
-    fn duration_limit(&self, _: u64, source: DeadlineExceeded) -> Error {
-        source.into()
-    }
-    fn interrupted(&self, _: u64, source: Interrupted) -> Error {
-        source.into()
-    }
-    fn clock(&self, sequence: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
-        Error::Execution {
-            sequence,
-            source: BoundaryError::with_source(
-                "OS probe clock failed",
-                Classification::new("io.identify_os_clock", Kind::Io, None),
-                Vec::new(),
-                std::io::Error::other(source),
-            ),
+            Error::Execution { sequence, source }
         }
-    }
-    fn execution(&self, sequence: u64, source: BoundaryError) -> Error {
-        Error::Execution { sequence, source }
-    }
-    fn invalid_evidence(&self, sequence: u64, source: crate::evidence::Error) -> Error {
-        Error::Evidence {
-            sequence,
-            message: crate::probe::Workflow::Os.describe_evidence(&source),
+        crate::execution::Failure::InvalidEvidence(source) => {
+            let sequence = step;
+
+            Error::Evidence {
+                sequence,
+                message: crate::probe::Workflow::Os.describe_evidence(&source),
+            }
         }
-    }
-    fn stats_overflow(&self, sequence: u64, _: crate::StatsOverflow) -> Error {
-        Error::Evidence {
-            sequence,
-            message: "statistics overflow".into(),
+        crate::execution::Failure::StatsOverflow(_) => {
+            let sequence = step;
+
+            Error::Evidence {
+                sequence,
+                message: "statistics overflow".into(),
+            }
         }
     }
 }

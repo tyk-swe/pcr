@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::probe::ProbeEndpoint;
+use packetcraftr::probe;
 use packetcraftr::target::{Family, Selection, Specification, Target};
 use packetcraftr::{Client, scan, traceroute};
 use serde::Serialize;
@@ -160,11 +160,11 @@ fn scan_request(arguments: &Arguments) -> scan::Request {
             IpAddr::V6(_) => Family::Ipv6,
         },
         endpoints: vec![match arguments.transport {
-            packetcraftr::probe::Transport::Tcp => ProbeEndpoint::Tcp { port: PORT },
-            packetcraftr::probe::Transport::Udp => ProbeEndpoint::Udp { port: PORT },
-            packetcraftr::probe::Transport::Sctp => ProbeEndpoint::Sctp { port: PORT },
-            packetcraftr::probe::Transport::Icmp => ProbeEndpoint::Icmp,
-            packetcraftr::probe::Transport::Ip => ProbeEndpoint::Ip { protocol: 47 },
+            packetcraftr::probe::Transport::Tcp => probe::Endpoint::Tcp { port: PORT },
+            packetcraftr::probe::Transport::Udp => probe::Endpoint::Udp { port: PORT },
+            packetcraftr::probe::Transport::Sctp => probe::Endpoint::Sctp { port: PORT },
+            packetcraftr::probe::Transport::Icmp => probe::Endpoint::Icmp,
+            packetcraftr::probe::Transport::Ip => probe::Endpoint::Ip { protocol: 47 },
         }],
         discovery: Default::default(),
         attempts: 1,

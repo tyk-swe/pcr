@@ -3,7 +3,7 @@
 
 use super::super::describe;
 use super::{Subject, parse_subject, record_requirements};
-use crate::field::FieldKind;
+use crate::field;
 use crate::filter::ast::{Measure, Predicate};
 use crate::filter::error::Error;
 use crate::filter::eval;
@@ -169,10 +169,14 @@ fn check_measurable(field: &FieldRef, measure: Measure, offset: usize) -> Result
     }
     let measurable = match measure {
         Measure::Len => field.specs.iter().any(|spec| {
-            eval::byte_addressable(spec.kind) || (spec.kind == FieldKind::List && !spec.structured)
+            eval::byte_addressable(spec.kind)
+                || (spec.kind == field::Kind::List && !spec.structured)
         }),
         Measure::Count => {
-            field.specs.iter().any(|spec| spec.kind == FieldKind::List)
+            field
+                .specs
+                .iter()
+                .any(|spec| spec.kind == field::Kind::List)
                 && field.slice.is_none()
                 && !field.reads_list_elements()
         }

@@ -18,20 +18,22 @@ pub(crate) const OUTPUT_TIMEOUT_MS: u64 = 1000;
 const OUTPUT_TIMEOUT: Duration = Duration::from_millis(OUTPUT_TIMEOUT_MS);
 
 pub(crate) fn stdout_stream(
+    invocation: &crate::invocation::Invocation,
     command: output::contract::Command,
     timeout: Duration,
 ) -> Result<StreamEncoder, CliError> {
-    let runtime = crate::system::runtime(crate::system::Runtime::OutputWriter);
+    let runtime = crate::system::runtime(invocation, crate::system::Runtime::OutputWriter);
     output::stream::StreamEncoder::new_bounded(command, io::stdout(), &runtime, timeout)
         .map(|stream| StreamEncoder::from(stream).with_terminal_error_timeout(OUTPUT_TIMEOUT))
         .map_err(CliError::classified)
 }
 
 pub(crate) fn write_unattributed_error(
+    invocation: &crate::invocation::Invocation,
     command: Option<output::contract::Command>,
     error: output::envelope::Error,
 ) -> Result<(), CliError> {
-    let runtime = crate::system::runtime(crate::system::Runtime::OutputWriter);
+    let runtime = crate::system::runtime(invocation, crate::system::Runtime::OutputWriter);
     let sink = Worker::new_in(&runtime, move |error| {
         output::stream::write_unattributed_error(io::stdout(), command, error)
             .map_err(|error| CliError::from(error).into_boundary_error())

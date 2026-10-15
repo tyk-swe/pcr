@@ -52,14 +52,16 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream.presentation()).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream.presentation()).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
     arguments: Args,
     format: Format,
     presentation: crate::rendering::Presentation,
@@ -90,9 +92,9 @@ pub(super) fn run(
     )
     .map_err(CliError::classified)?;
 
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
+    let mut reader = open_capture(invocation, &arguments.path, arguments.limits.capture.reader)?;
 
-    let options = prepared.options();
+    let options = prepared.options(invocation);
     let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
         collector.observe(&record);
         Ok(())
@@ -100,23 +102,33 @@ pub(super) fn run(
     .map_err(CliError::classified)?;
     let mut report = collector.finish(&summary);
     let frames_read = summary.frames_read;
-    crate::cancellation::check()?;
+    invocation.check()?;
     let diagnostics = selection::select(&mut report, table, top, arguments.sort);
-    crate::cancellation::check()?;
+    invocation.check()?;
 
     match format {
-        Format::Text => {
-            rendering::render_text(table, &report, frames_read, &diagnostics, presentation)
-        }
+        Format::Text => rendering::render_text(
+            invocation,
+            table,
+            &report,
+            frames_read,
+            &diagnostics,
+            presentation,
+        ),
         Format::Json => {
             let result = output::stats::Report::try_from((table, report, frames_read))
                 .map_err(CliError::classified)?;
-            emit_aggregate(output::contract::Command::Stats, result, diagnostics)
+            emit_aggregate(
+                invocation,
+                output::contract::Command::Stats,
+                result,
+                diagnostics,
+            )
         }
         Format::Csv => {
             let result = output::stats::Report::try_from((table, report, frames_read))
                 .map_err(CliError::classified)?;
-            csv::render(&result)?;
+            csv::render(invocation, &result)?;
             crate::rendering::render_diagnostics_stderr(&diagnostics)
         }
         other => other.unreachable(),

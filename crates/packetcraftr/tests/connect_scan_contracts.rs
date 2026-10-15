@@ -202,7 +202,7 @@ fn request() -> scan::Request {
         udp_profiles: Default::default(),
         address_family: Family::Any,
         endpoints: (1..=32)
-            .map(|port| packetcraftr::probe::ProbeEndpoint::Tcp { port })
+            .map(|port| packetcraftr::probe::Endpoint::Tcp { port })
             .collect(),
         discovery: Default::default(),
         attempts: 1,
@@ -312,7 +312,7 @@ fn route_overrides_reject_before_tcp_connect() {
         ProviderSet::tcp(CountConnects(Arc::clone(&calls)), SystemResolver),
     );
     let request = scan::Request {
-        endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
+        endpoints: vec![packetcraftr::probe::Endpoint::Tcp { port: 80 }],
         max_in_flight: 1,
         timeout: WATCHDOG,
         ..request()

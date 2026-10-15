@@ -28,13 +28,14 @@ fn record(fields: &[String]) -> String {
     record
 }
 
-fn write(fields: &[String]) -> Result<(), CliError> {
-    crate::cancellation::check()?;
+fn write(invocation: &crate::invocation::Invocation, fields: &[String]) -> Result<(), CliError> {
+    invocation.check()?;
     crate::rendering::write_raw(record(fields).as_bytes())
 }
 
-fn header(fields: &[&str]) -> Result<(), CliError> {
+fn header(invocation: &crate::invocation::Invocation, fields: &[&str]) -> Result<(), CliError> {
     write(
+        invocation,
         &fields
             .iter()
             .map(|field| (*field).to_owned())
@@ -42,116 +43,143 @@ fn header(fields: &[&str]) -> Result<(), CliError> {
     )
 }
 
-pub(super) fn render(report: &Report) -> Result<(), CliError> {
+pub(super) fn render(
+    invocation: &crate::invocation::Invocation,
+    report: &Report,
+) -> Result<(), CliError> {
     match &report.table {
         TableData::Conversations { conversations } => {
-            header(&[
-                "transport",
-                "stream",
-                "scope_id",
-                "scope_interface",
-                "scope_encapsulation",
-                "address_a",
-                "port_a",
-                "address_b",
-                "port_b",
-                "frames_a_to_b",
-                "bytes_a_to_b",
-                "frames_b_to_a",
-                "bytes_b_to_a",
-                "first_timestamp",
-                "last_timestamp",
-                "duration",
-            ])?;
+            header(
+                invocation,
+                &[
+                    "transport",
+                    "stream",
+                    "scope_id",
+                    "scope_interface",
+                    "scope_encapsulation",
+                    "address_a",
+                    "port_a",
+                    "address_b",
+                    "port_b",
+                    "frames_a_to_b",
+                    "bytes_a_to_b",
+                    "frames_b_to_a",
+                    "bytes_b_to_a",
+                    "first_timestamp",
+                    "last_timestamp",
+                    "duration",
+                ],
+            )?;
             for row in conversations {
-                write(&[
-                    row.transport.to_string(),
-                    row.stream.to_string(),
-                    row.scope.id.to_string(),
-                    row.scope
-                        .interface
-                        .map(|id| id.to_string())
-                        .unwrap_or_default(),
-                    serde_json::to_string(&row.scope.encapsulation).map_err(|error| {
-                        CliError::new(
-                            packetcraftr_core::error::Kind::Internal,
-                            format!("encode scope encapsulation failed: {error}"),
-                        )
-                    })?,
-                    row.address_a.to_string(),
-                    row.port_a.to_string(),
-                    row.address_b.to_string(),
-                    row.port_b.to_string(),
-                    row.frames_a_to_b.to_string(),
-                    row.bytes_a_to_b.to_string(),
-                    row.frames_b_to_a.to_string(),
-                    row.bytes_b_to_a.to_string(),
-                    row.first_timestamp.to_string(),
-                    row.last_timestamp.to_string(),
-                    duration(row.duration),
-                ])?;
+                write(
+                    invocation,
+                    &[
+                        row.transport.to_string(),
+                        row.stream.to_string(),
+                        row.scope.id.to_string(),
+                        row.scope
+                            .interface
+                            .map(|id| id.to_string())
+                            .unwrap_or_default(),
+                        serde_json::to_string(&row.scope.encapsulation).map_err(|error| {
+                            CliError::new(
+                                packetcraftr_core::error::Kind::Internal,
+                                format!("encode scope encapsulation failed: {error}"),
+                            )
+                        })?,
+                        row.address_a.to_string(),
+                        row.port_a.to_string(),
+                        row.address_b.to_string(),
+                        row.port_b.to_string(),
+                        row.frames_a_to_b.to_string(),
+                        row.bytes_a_to_b.to_string(),
+                        row.frames_b_to_a.to_string(),
+                        row.bytes_b_to_a.to_string(),
+                        row.first_timestamp.to_string(),
+                        row.last_timestamp.to_string(),
+                        duration(row.duration),
+                    ],
+                )?;
             }
         }
         TableData::Endpoints { endpoints } => {
-            header(&["address", "tx_frames", "tx_bytes", "rx_frames", "rx_bytes"])?;
+            header(
+                invocation,
+                &["address", "tx_frames", "tx_bytes", "rx_frames", "rx_bytes"],
+            )?;
             for row in endpoints {
-                write(&[
-                    row.address.to_string(),
-                    row.tx_frames.to_string(),
-                    row.tx_bytes.to_string(),
-                    row.rx_frames.to_string(),
-                    row.rx_bytes.to_string(),
-                ])?;
+                write(
+                    invocation,
+                    &[
+                        row.address.to_string(),
+                        row.tx_frames.to_string(),
+                        row.tx_bytes.to_string(),
+                        row.rx_frames.to_string(),
+                        row.rx_bytes.to_string(),
+                    ],
+                )?;
             }
         }
         TableData::Protocols { protocols } => {
-            header(&["protocol", "frames", "bytes"])?;
+            header(invocation, &["protocol", "frames", "bytes"])?;
             for row in protocols {
-                write(&[
-                    row.protocol.clone(),
-                    row.frames.to_string(),
-                    row.bytes.to_string(),
-                ])?;
+                write(
+                    invocation,
+                    &[
+                        row.protocol.clone(),
+                        row.frames.to_string(),
+                        row.bytes.to_string(),
+                    ],
+                )?;
             }
         }
         TableData::Ports { ports } => {
-            header(&["transport", "port", "frames", "bytes"])?;
+            header(invocation, &["transport", "port", "frames", "bytes"])?;
             for row in ports {
-                write(&[
-                    row.transport.to_string(),
-                    row.port.to_string(),
-                    row.frames.to_string(),
-                    row.bytes.to_string(),
-                ])?;
+                write(
+                    invocation,
+                    &[
+                        row.transport.to_string(),
+                        row.port.to_string(),
+                        row.frames.to_string(),
+                        row.bytes.to_string(),
+                    ],
+                )?;
             }
         }
         TableData::Io { io } => {
-            header(&[
-                "origin",
-                "underflow_frames",
-                "interval",
-                "offset",
-                "frames",
-                "bytes",
-            ])?;
+            header(
+                invocation,
+                &[
+                    "origin",
+                    "underflow_frames",
+                    "interval",
+                    "offset",
+                    "frames",
+                    "bytes",
+                ],
+            )?;
             for row in &io.buckets {
-                write(&[
-                    io.origin
-                        .map(|origin| origin.to_string())
-                        .unwrap_or_default(),
-                    io.underflow_frames.to_string(),
-                    duration(io.interval),
-                    duration(row.offset),
-                    row.frames.to_string(),
-                    row.bytes.to_string(),
-                ])?;
+                write(
+                    invocation,
+                    &[
+                        io.origin
+                            .map(|origin| origin.to_string())
+                            .unwrap_or_default(),
+                        io.underflow_frames.to_string(),
+                        duration(io.interval),
+                        duration(row.offset),
+                        row.frames.to_string(),
+                        row.bytes.to_string(),
+                    ],
+                )?;
             }
         }
         TableData::Overview { .. } | TableData::Fragments { .. } => {
             unreachable!("CSV table was validated before opening the capture")
         }
     }
-    crate::cancellation::check()
+    invocation.check()
 }
 
 #[cfg(test)]

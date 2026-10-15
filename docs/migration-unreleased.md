@@ -28,6 +28,38 @@ for additions, the [path tables](#renamed-and-removed-paths) for mechanical Rust
 replacements, and [the provider cleanup](#callers-tracking-main) if you already
 track `main`.
 
+## Execution ownership and Rust names
+
+Direct `Client` calls still take a request and a sink. Use
+`client.with_deadline(deadline)` to consume a configured client and narrow its
+absolute ceiling. Repeated calls cannot widen an earlier ceiling. The removed
+`with_parent_deadline`, `with_scan_neighbors`, `with_neighbor_request_authorization`,
+and `with_remaining_budget` helpers have no aliases. Use
+`scan_with_followups` or `scan_connect_with_followups` to compose stages under one
+remaining deadline and budget. Preparation mode and pacing are private operation
+state; reusable providers, caches, policy, and worker capacity stay on the client.
+
+Update extension implementations and imports directly:
+
+| Previous name | Replacement |
+| --- | --- |
+| `codec::LayerCodec` | `codec::Codec` |
+| `codec::LayerEncodeContext` | `codec::EncodeContext` |
+| `codec::LayerDecodeContext` | `codec::DecodeContext` |
+| `codec::EncodedLayer` | `codec::Encoded` |
+| `codec::DecodedLayer` | `codec::Decoded` |
+| `codec::Context` | `codec::Addresses` |
+| `field::FieldKind` | `field::Kind` |
+| `output::protocols::FieldKind` | `output::protocols::Kind` |
+| `field::FieldValue` | `field::Value` |
+| `probe::ProbeEndpoint` | `probe::Endpoint` |
+| `probe::ProbeStatus` | `probe::Status` |
+
+`analysis::Session::new(registry, options, collector)` now uses `options.stream`;
+remove the separate selector argument. Stream numbering remains capture-wide,
+with selection and filters applied after indexing. CLI output formats, error
+codes, packet semantics, and historical schemas are unchanged.
+
 ## Contract versions
 
 | Contract | beta.3 | Current main |
@@ -57,7 +89,7 @@ See [statistics](statistics.md) for sorting, CSV headers/units, and limitations.
   `scan::Request` and `scan::Probe` gain `sctp_scan: scan::SctpScan` (default `Init`);
   `scan::ProbeEvidence` gains `ip_protocol: Option<u8>`, `icmp_request: Option<&'static str>`,
   and `sctp_scan: Option<SctpScan>`; `scan::Endpoint` gains `ip_protocol: Option<u8>`;
-  `probe::Transport` gains `Sctp` and `Ip`; `probe::ProbeEndpoint` gains `Sctp`, `Ip`,
+  `probe::Transport` gains `Sctp` and `Ip`; `probe::Endpoint` gains `Sctp`, `Ip`,
   `TcpAck`, `IcmpTimestamp`, and `IcmpNetmask`; `scan::Reply` and `scan::Rule` gain
   SCTP, IP-protocol, and ICMP timestamp/netmask/protocol-unreachable variants.
   CLI adds `--transport sctp|ip`, `--sctp-scan`, `--ip-protocols`,
@@ -81,7 +113,7 @@ See [statistics](statistics.md) for sorting, CSV headers/units, and limitations.
 - **Target, port, discovery, adaptive, and traceroute plans (v7–v11):**
   - `Request::targets: target::Selection` replaces `target`; handle `Target::ScopedAddress`
     and `Authorized::selected()`.
-  - `Request::endpoints: Vec<probe::ProbeEndpoint>` and `planned_endpoints()`
+  - `Request::endpoints: Vec<probe::Endpoint>` and `planned_endpoints()`
     replace transport/port fields (`select_endpoints` expands catalog terms).
     `Request::udp_payload: Bytes` and `udp_profiles` configure UDP probes; reports
     gain `rtt: Rtt`.
@@ -169,8 +201,8 @@ also drops `Clone`).
 ## Core, limits, providers, and client model
 
 - **Core conventions:** Registry APIs take `LinkType` and `impl Into<Discriminator>`;
-  frame constructors take `frame::Lengths { captured, original }`; `LayerCodec::decode`
-  takes `Bytes` and `LayerDecodeContext` gains `parent`/`hop_limit`. Use inherent
+  frame constructors take `frame::Lengths { captured, original }`; `codec::Codec::decode`
+  takes `Bytes` and `codec::DecodeContext` gains `parent`/`hop_limit`. Use inherent
   `Layer::{downcast_ref, downcast_mut, is}` and `decoded.frame.bytes()`.
   `BuiltPacket` exposes `contains_malformed()` / `contains_network_trailer()`, while
   workflow `policy::requires_live_opt_in(&built)` owns live policy.
@@ -307,8 +339,8 @@ for a row are in the sections above.
 | `SentPacket` | `evidence::SentPacket` |
 | `progress::{Runtime, RuntimeSnapshot, MAX_WORKER_CAPACITY}` | `runtime::{Runtime, RuntimeSnapshot, MAX_WORKER_CAPACITY}` |
 | `progress::Sink<T>`, `progress::EmitError` | `runtime::Worker<T, A = ()>`, `runtime::Error` (implements `Classified`) |
-| `scan::ProbeEndpoint`, `traceroute::ProbeTarget` | `probe::ProbeEndpoint` |
-| `scan::ProbeStatus`, `traceroute::ProbeStatus` | `probe::ProbeStatus` |
+| `scan::ProbeEndpoint`, `traceroute::ProbeTarget` | `probe::Endpoint` |
+| `scan::ProbeStatus`, `traceroute::ProbeStatus` | `probe::Status` |
 | `scan::Transport`, `traceroute::Strategy` | `probe::Transport` |
 | `probe::Error { workflow, kind }`, `probe::ErrorKind`, `probe::Workflow` | `scan::Error` and `traceroute::Error`, whose variants are the former kinds |
 | `probe::{EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port}` | no longer public; the dynamic range starts at 49152 (IANA), so choose source ports in your own code |

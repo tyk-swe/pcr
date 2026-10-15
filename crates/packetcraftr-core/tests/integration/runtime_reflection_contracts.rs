@@ -5,7 +5,7 @@ use crate::common;
 
 use bytes::Bytes;
 use common::probe::{Child, Probe, probe_layout};
-use packetcraftr_core::field::{self, FieldValue};
+use packetcraftr_core::field;
 use packetcraftr_core::layer::{Layer, Raw};
 use packetcraftr_core::layout::{ByteRange, FieldLayout};
 use packetcraftr_core::packet::Packet;
@@ -29,21 +29,24 @@ fn reflected_cover_fail_closed() {
         .set_field("mac", "00-11-22-33-44-55".into())
         .expect("MAC text");
     layer
-        .set_field("token", FieldValue::Bytes(Bytes::from_static(b"12345678")))
+        .set_field(
+            "token",
+            field::Value::Bytes(Bytes::from_static(b"12345678")),
+        )
         .expect("eight-byte token");
     layer
         .set_field("wire", "AUTO".into())
         .expect("auto wire value");
     assert_eq!(
         layer.field("wire"),
-        Some(FieldValue::Text("auto".to_owned()))
+        Some(field::Value::Text("auto".to_owned()))
     );
     layer
         .set_field("wire", 65_535_u64.into())
         .expect("exact wire value");
     assert_eq!(layer.wire.exact(), Some(&65_535));
     layer
-        .set_field("wire", FieldValue::Bytes(Bytes::from_static(b"raw")))
+        .set_field("wire", field::Value::Bytes(Bytes::from_static(b"raw")))
         .expect("raw wire value");
 
     assert!(matches!(

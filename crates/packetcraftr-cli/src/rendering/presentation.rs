@@ -17,6 +17,7 @@ pub(crate) struct Presentation {
 impl Presentation {
     pub(crate) fn details(
         self,
+        invocation: &crate::invocation::Invocation,
         label: &str,
         value: &impl serde::Serialize,
     ) -> Result<(), crate::errors::CliError> {
@@ -29,8 +30,8 @@ impl Presentation {
                 format!("cannot render {label}: {error}"),
             )
         })?;
-        super::write_stdout_line(format_args!("{label}:"))?;
-        super::emit_stdout_document(&text)
+        super::write_stdout_line(invocation, format_args!("{label}:"))?;
+        super::emit_stdout_document(invocation, &text)
     }
 }
 
@@ -43,6 +44,11 @@ pub(crate) struct StreamEncoder {
 }
 
 impl StreamEncoder {
+    pub(crate) fn terminal(mut self) -> Self {
+        self.encoder = self.encoder.terminal();
+        self
+    }
+
     pub(crate) fn new(
         command: output::contract::Command,
         writer: impl std::io::Write + Send + 'static,
@@ -96,7 +102,10 @@ impl Deref for StreamEncoder {
 
 /// Minimum column widths, not ceilings: identifiers and values never truncate.
 /// Each row is written immediately; this does not buffer streams to size columns.
-pub(crate) fn table_row(cells: &[(&str, usize)]) -> Result<(), crate::errors::CliError> {
+pub(crate) fn table_row(
+    invocation: &crate::invocation::Invocation,
+    cells: &[(&str, usize)],
+) -> Result<(), crate::errors::CliError> {
     let mut row = String::new();
     for (index, (value, width)) in cells.iter().enumerate() {
         use std::fmt::Write as _;
@@ -106,5 +115,5 @@ pub(crate) fn table_row(cells: &[(&str, usize)]) -> Result<(), crate::errors::Cl
         let value = super::style::terminal_safe(value);
         let _ = write!(row, "{value:<width$}");
     }
-    super::write_stdout_line(format_args!("{}", row.trim_end()))
+    super::write_stdout_line(invocation, format_args!("{}", row.trim_end()))
 }

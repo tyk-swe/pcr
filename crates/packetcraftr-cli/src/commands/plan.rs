@@ -61,58 +61,74 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream.presentation()).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream.presentation()).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
     arguments: Args,
     format: Format,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     let Args { route, policy } = arguments;
-    let plan = prepare_plan(route, policy.into_policy())?;
+    let plan = prepare_plan(invocation, route, policy.into_policy())?;
     let route = plan
         .client
         .plan(
             &plan.packet,
             plan.destination,
             &plan.route,
-            &crate::invocation::passive_lookup(),
+            &invocation.passive_lookup(),
         )
         .map_err(CliError::classified)?;
     let result = output::plan::Report::from(route);
     match format {
         Format::Text => {
-            render_text(&result.plan)?;
-            presentation.details("Route decision", &result.plan)
+            render_text(invocation, &result.plan)?;
+            presentation.details(invocation, "Route decision", &result.plan)
         }
-        Format::Json => emit_aggregate(output::contract::Command::Plan, result, Vec::new()),
+        Format::Json => emit_aggregate(
+            invocation,
+            output::contract::Command::Plan,
+            result,
+            Vec::new(),
+        ),
         other => other.unreachable(),
     }
 }
 
-fn render_text(route: &output::network::Plan) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "interface={} index={} mode={} mtu={} link_type={}",
-        route.decision.interface.name,
-        route.decision.interface.index,
-        route.mode,
-        route.decision.mtu,
-        route.decision.link_type
-    ))?;
-    write_stdout_line(format_args!(
-        "lookup_destination={} final_destination={} source={} next_hop={} destination_mac={}",
-        optional_display(route.lookup_destination),
-        optional_display(route.final_destination),
-        optional_display(route.packet_source),
-        optional_display(route.decision.next_hop),
-        route
-            .destination_mac
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "unresolved".to_owned())
-    ))
+fn render_text(
+    invocation: &crate::invocation::Invocation,
+    route: &output::network::Plan,
+) -> Result<(), CliError> {
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "interface={} index={} mode={} mtu={} link_type={}",
+            route.decision.interface.name,
+            route.decision.interface.index,
+            route.mode,
+            route.decision.mtu,
+            route.decision.link_type
+        ),
+    )?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "lookup_destination={} final_destination={} source={} next_hop={} destination_mac={}",
+            optional_display(route.lookup_destination),
+            optional_display(route.final_destination),
+            optional_display(route.packet_source),
+            optional_display(route.decision.next_hop),
+            route
+                .destination_mac
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unresolved".to_owned())
+        ),
+    )
 }

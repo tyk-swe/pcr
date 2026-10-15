@@ -35,7 +35,7 @@ impl<T> WireValue<T> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
-pub enum FieldKind {
+pub enum Kind {
     Bool,
     Unsigned,
     Signed,
@@ -48,7 +48,7 @@ pub enum FieldKind {
     Object,
 }
 
-impl FieldKind {
+impl Kind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Bool => "bool",
@@ -65,7 +65,7 @@ impl FieldKind {
     }
 }
 
-display_via_as_str!(FieldKind);
+display_via_as_str!(Kind);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -75,7 +75,7 @@ display_via_as_str!(FieldKind);
     rename_all = "snake_case",
     deny_unknown_fields
 )]
-pub enum FieldValue {
+pub enum Value {
     Bool(bool),
     Unsigned(u64),
     Signed(i64),
@@ -123,19 +123,19 @@ mod bytes_as_array {
     }
 }
 
-impl FieldValue {
-    pub const fn kind(&self) -> FieldKind {
+impl Value {
+    pub const fn kind(&self) -> Kind {
         match self {
-            Self::Bool(_) => FieldKind::Bool,
-            Self::Unsigned(_) => FieldKind::Unsigned,
-            Self::Signed(_) => FieldKind::Signed,
-            Self::Text(_) => FieldKind::Text,
-            Self::Bytes(_) => FieldKind::Bytes,
-            Self::Ipv4(_) => FieldKind::Ipv4,
-            Self::Ipv6(_) => FieldKind::Ipv6,
-            Self::Mac(_) => FieldKind::Mac,
-            Self::List(_) => FieldKind::List,
-            Self::Object(_) => FieldKind::Object,
+            Self::Bool(_) => Kind::Bool,
+            Self::Unsigned(_) => Kind::Unsigned,
+            Self::Signed(_) => Kind::Signed,
+            Self::Text(_) => Kind::Text,
+            Self::Bytes(_) => Kind::Bytes,
+            Self::Ipv4(_) => Kind::Ipv4,
+            Self::Ipv6(_) => Kind::Ipv6,
+            Self::Mac(_) => Kind::Mac,
+            Self::List(_) => Kind::List,
+            Self::Object(_) => Kind::Object,
         }
     }
 
@@ -154,7 +154,7 @@ impl FieldValue {
     }
 }
 
-impl From<bool> for FieldValue {
+impl From<bool> for Value {
     fn from(value: bool) -> Self {
         Self::Bool(value)
     }
@@ -162,7 +162,7 @@ impl From<bool> for FieldValue {
 
 macro_rules! unsigned_field_value {
     ($($ty:ty),+ $(,)?) => {
-        $(impl From<$ty> for FieldValue {
+        $(impl From<$ty> for Value {
             fn from(value: $ty) -> Self {
                 Self::Unsigned(value as u64)
             }
@@ -172,43 +172,43 @@ macro_rules! unsigned_field_value {
 
 unsigned_field_value!(u8, u16, u32, u64, usize);
 
-impl From<String> for FieldValue {
+impl From<String> for Value {
     fn from(value: String) -> Self {
         Self::Text(value)
     }
 }
 
-impl From<&str> for FieldValue {
+impl From<&str> for Value {
     fn from(value: &str) -> Self {
         Self::Text(value.to_owned())
     }
 }
 
-impl From<Bytes> for FieldValue {
+impl From<Bytes> for Value {
     fn from(value: Bytes) -> Self {
         Self::Bytes(value)
     }
 }
 
-impl From<Vec<u8>> for FieldValue {
+impl From<Vec<u8>> for Value {
     fn from(value: Vec<u8>) -> Self {
         Self::Bytes(Bytes::from(value))
     }
 }
 
-impl From<Ipv4Addr> for FieldValue {
+impl From<Ipv4Addr> for Value {
     fn from(value: Ipv4Addr) -> Self {
         Self::Ipv4(value)
     }
 }
 
-impl From<Ipv6Addr> for FieldValue {
+impl From<Ipv6Addr> for Value {
     fn from(value: Ipv6Addr) -> Self {
         Self::Ipv6(value)
     }
 }
 
-impl fmt::Display for FieldValue {
+impl fmt::Display for Value {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Bool(value) => write!(formatter, "{value}"),

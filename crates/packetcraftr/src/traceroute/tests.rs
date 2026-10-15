@@ -19,16 +19,16 @@ use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::P
 
 use super::DEFAULT_UDP_PORT;
 use super::engine;
-use super::error::Probes;
+use super::error::probe_error;
 use super::plan::packet::probe_packet;
 use super::{Aggregate, Collector, Event, Limits, Probe, Report, Request};
 use crate::Sink;
 use crate::clock::Clock;
-use crate::execution::{Errors as _, Executor, publisher};
+use crate::execution::{Executor, publisher};
 use crate::policy::Authorizer;
 use crate::policy::Operation;
 use crate::probe::Batch;
-use crate::probe::{Evidence, ProbeEndpoint, Transport};
+use crate::probe::{self, Evidence, Transport};
 use crate::target::Authorized;
 use crate::target::ResolveTarget;
 use crate::target::Target;
@@ -85,7 +85,7 @@ where
     let publish = publisher(
         runtime,
         sink,
-        |error| Probes.duration_limit(0, error),
+        |error| (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error)),
         |source| Error::Output { source },
     )?;
     engine::run(
@@ -403,7 +403,7 @@ fn traceroute_rejects_zero_source_port() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
-fn shaped_probe(address: IpAddr, target: ProbeEndpoint) -> Probe {
+fn shaped_probe(address: IpAddr, target: probe::Endpoint) -> Probe {
     Probe {
         sequence: 3,
         address,

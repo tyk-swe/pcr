@@ -8,6 +8,7 @@ use crate::system::{Client, Runtime, client};
 use crate::{errors::CliError, rendering::StreamEncoder};
 
 pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
     request: followup::ConnectRequest,
     plan: output::scan::plan::Plan,
     policy: crate::command_options::HostnamePolicyArgs,
@@ -17,89 +18,48 @@ pub(super) fn run(
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     let client: Client = client(
+        invocation,
         packetcraftr_core::protocol::builtin::registry(),
         policy,
         Runtime::ScanConnect,
     );
-    crate::commands::execution::run_workflow(
-        format,
-        stream,
-        crate::cancellation::signal(),
-        crate::commands::execution::Hooks {
-            command: output::contract::Command::Scan,
-            run: Box::new(|| {
-                let collector = connect::Collector::default();
-                let report = client
-                    .scan_connect_with_followups(request.clone(), collector.clone())
+    match format {
+        Format::Ndjson => {
+            let emit = crate::commands::execution::emitter(invocation, emit_event);
+            let summary = {
+                let plan = plan.clone();
+                let client = &client;
+                let request = &request;
+
+                let emit = emit;
+
+                let mut report = client
+                    .scan_connect_with_followups(request.clone(), emit)
                     .map_err(super::followup_error)?;
-                let mut aggregate = collector
-                    .finish(report.scan)
-                    .map_err(CliError::classified)?;
                 let lookups = report
                     .reverse_dns
                     .as_ref()
                     .and_then(|lookups| lookups.stats.clone());
-                let names = super::reverse_dns_hosts(report.reverse_dns);
                 // Socket statistics have no packet counters for the
                 // lookups' exchanges, which publish their own; their time
                 // still counts in elapsed.
                 if let Some(lookups) = &lookups {
-                    aggregate.report.stats.elapsed = aggregate
-                        .report
-                        .stats
-                        .elapsed
-                        .saturating_add(lookups.elapsed);
+                    report.scan.stats.elapsed =
+                        report.scan.stats.elapsed.saturating_add(lookups.elapsed);
                 }
-                Ok((aggregate, names, lookups))
-            }),
-            run_with_events: Box::new({
-                let plan = plan.clone();
-                let client = &client;
-                let request = &request;
-                move |emit| {
-                    let mut report = client
-                        .scan_connect_with_followups(request.clone(), emit)
-                        .map_err(super::followup_error)?;
-                    let lookups = report
-                        .reverse_dns
-                        .as_ref()
-                        .and_then(|lookups| lookups.stats.clone());
-                    // Socket statistics have no packet counters for the
-                    // lookups' exchanges, which publish their own; their time
-                    // still counts in elapsed.
-                    if let Some(lookups) = &lookups {
-                        report.scan.stats.elapsed =
-                            report.scan.stats.elapsed.saturating_add(lookups.elapsed);
-                    }
-                    Ok(Streamed {
-                        report: report.scan,
-                        endpoints: report.endpoints,
-                        plan,
-                        reverse_dns: super::reverse_dns_hosts(report.reverse_dns),
-                        reverse_dns_stats: lookups,
-                    })
-                }
-            }),
-            on_event: emit_event,
-            into_result: Box::new({
-                let plan = plan.clone();
-                move |(mut aggregate, names, lookups)| {
-                    let diagnostics = std::mem::take(&mut aggregate.report.diagnostics);
-                    output::scan::connect::Report::publish(aggregate, plan, names, lookups)
-                        .map(|report| output::envelope::Published::new(report, diagnostics))
-                        .map_err(CliError::classified)
-                }
-            }),
-            render: Box::new(move |(mut aggregate, names, lookups), _| {
-                let diagnostics = std::mem::take(&mut aggregate.report.diagnostics);
-                super::rendering::render_connect_text(
-                    &output::scan::connect::Report::publish(aggregate, plan, names, lookups)
-                        .map_err(CliError::classified)?,
-                    stream.presentation(),
-                )?;
-                crate::rendering::render_diagnostics_text(&diagnostics)
-            }),
-            complete: |streamed, stream| {
+                Ok::<_, CliError>(Streamed {
+                    report: report.scan,
+                    endpoints: report.endpoints,
+                    plan,
+                    reverse_dns: super::reverse_dns_hosts(report.reverse_dns),
+                    reverse_dns_stats: lookups,
+                })
+            }?;
+            invocation.check()?;
+            {
+                let streamed = summary;
+                let stream: &StreamEncoder = stream;
+
                 let Streamed {
                     mut report,
                     endpoints,
@@ -125,9 +85,63 @@ pub(super) fn run(
                         diagnostics,
                     )
                     .map_err(CliError::from)
-            },
-        },
-    )
+            }
+        }
+        format => {
+            let report = (|| -> Result<_, CliError> {
+                let collector = connect::Collector::default();
+                let report = client
+                    .scan_connect_with_followups(request.clone(), collector.clone())
+                    .map_err(super::followup_error)?;
+                let mut aggregate = collector
+                    .finish(report.scan)
+                    .map_err(CliError::classified)?;
+                let lookups = report
+                    .reverse_dns
+                    .as_ref()
+                    .and_then(|lookups| lookups.stats.clone());
+                let names = super::reverse_dns_hosts(report.reverse_dns);
+                // Socket statistics have no packet counters for the
+                // lookups' exchanges, which publish their own; their time
+                // still counts in elapsed.
+                if let Some(lookups) = &lookups {
+                    aggregate.report.stats.elapsed = aggregate
+                        .report
+                        .stats
+                        .elapsed
+                        .saturating_add(lookups.elapsed);
+                }
+                Ok((aggregate, names, lookups))
+            })()?;
+            invocation.check()?;
+            if format == Format::Json {
+                crate::rendering::emit_published(invocation, output::contract::Command::Scan, {
+                    let plan = plan.clone();
+
+                    let (mut aggregate, names, lookups) = report;
+
+                    let diagnostics = std::mem::take(&mut aggregate.report.diagnostics);
+                    output::scan::connect::Report::publish(aggregate, plan, names, lookups)
+                        .map(|report| output::envelope::Published::new(report, diagnostics))
+                        .map_err(CliError::classified)
+                }?)
+            } else {
+                {
+                    let (mut aggregate, names, lookups) = report;
+                    let _ = format;
+
+                    let diagnostics = std::mem::take(&mut aggregate.report.diagnostics);
+                    super::rendering::render_connect_text(
+                        invocation,
+                        &output::scan::connect::Report::publish(aggregate, plan, names, lookups)
+                            .map_err(CliError::classified)?,
+                        stream.presentation(),
+                    )?;
+                    crate::rendering::render_diagnostics_text(invocation, &diagnostics)
+                }
+            }
+        }
+    }
 }
 
 struct Streamed {

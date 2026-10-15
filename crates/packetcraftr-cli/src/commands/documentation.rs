@@ -20,7 +20,11 @@ pub(crate) struct Args {
 }
 
 impl super::Generate for Args {
-    fn generate(self, _format: Format) -> Result<(), CliError> {
+    fn generate(
+        self,
+        _invocation: &crate::invocation::Invocation,
+        _format: Format,
+    ) -> Result<(), CliError> {
         run(&self)
     }
 }

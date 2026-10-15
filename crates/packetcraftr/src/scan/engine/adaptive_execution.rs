@@ -6,7 +6,6 @@ use std::time::Duration;
 use packetcraftr_core::budget::Deadline;
 
 use crate::clock::Clock;
-use crate::execution::Errors as _;
 use crate::execution::pause;
 use crate::probe::Batch;
 use crate::probe::runner::BatchEvidence;
@@ -15,9 +14,9 @@ use crate::target::SelectedAddress;
 use super::approval::ApprovedScan;
 use super::pacing::{Owed, settle};
 use super::pipelined::{add_stats, drive_pipeline, pipeline_options};
-use crate::probe::{ProbeEndpoint, enforce_deadline};
+use crate::probe::{self, enforce_deadline};
 use crate::scan::Error;
-use crate::scan::error::Probes;
+use crate::scan::error::probe_error;
 use crate::scan::evidence::ProbeClassifier;
 use crate::scan::executor::Pipelined;
 use crate::scan::plan::{Stage, probe_count};
@@ -26,7 +25,7 @@ use crate::scan::{Event, Probe, Request};
 pub(in crate::scan) fn adaptive_batches<'r>(
     request: &'r Request,
     targets: &'r [SelectedAddress],
-    endpoints: &'r [ProbeEndpoint],
+    endpoints: &'r [probe::Endpoint],
     stage: Stage,
     first_sequence: u64,
 ) -> impl Iterator<Item = Batch<Probe>> + 'r {
@@ -157,11 +156,11 @@ pub(super) fn execute_adaptive<E, C, F>(
     executor: &mut E,
     clock: &mut C,
     deadline: &mut Deadline,
-    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
+    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
     controller: &mut crate::scan::adaptive::Controller,
     stage: Stage,
     targets: &[SelectedAddress],
-    endpoints: &[ProbeEndpoint],
+    endpoints: &[probe::Endpoint],
     first_sequence: u64,
     owed: &mut Owed,
     reservation: usize,
@@ -175,7 +174,7 @@ where
     if targets.is_empty() || endpoints.is_empty() {
         return Ok(stats);
     }
-    enforce_deadline(&Probes, deadline)?;
+    enforce_deadline(probe_error, deadline)?;
     let mut work = controller.open_stage(
         targets,
         endpoints.len(),
@@ -185,11 +184,11 @@ where
     );
     let state_charge = reservation;
     loop {
-        enforce_deadline(&Probes, deadline)?;
+        enforce_deadline(probe_error, deadline)?;
         let now = clock.now();
-        let remaining = deadline
-            .remaining()
-            .map_err(|error| Probes.duration_limit(0, error))?;
+        let remaining = deadline.remaining().map_err(|error| {
+            (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error))
+        })?;
         let operation_end = now.checked_add(remaining).ok_or(Error::DurationLimit {
             actual: Duration::MAX,
             limit: request.limits.max_duration,
@@ -207,7 +206,7 @@ where
                     ready.saturating_duration_since(now)
                 })
                 .min(Duration::from_millis(5));
-            pause(deadline, clock, wait).map_err(|paused| paused.into_error(&Probes, 0))?;
+            pause(deadline, clock, wait).map_err(|paused| paused.into_error(probe_error, 0))?;
             add_stats(
                 &mut stats,
                 &crate::Stats {
@@ -329,7 +328,7 @@ where
 }
 
 pub(super) fn take_feedback<F>(
-    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
+    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
 ) -> Vec<crate::scan::evidence::Feedback>
 where
     F: FnMut(Event, &Deadline) -> Result<(), Error>,

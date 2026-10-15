@@ -7,7 +7,7 @@ use std::time::Instant;
 use packetcraftr_core::budget::{Cancellation, Cancelled};
 
 use super::*;
-use crate::test_support::{Failure, RecordingClock, TestErrors};
+use crate::test_support::{Failure, RecordingClock, test_error};
 
 #[derive(Debug, thiserror::Error)]
 #[error("pacing timer failed")]
@@ -82,7 +82,7 @@ impl Receipt for Evidence {
 }
 
 fn run_step(
-    context: &mut Context<'_, impl Clock, TestErrors>,
+    context: &mut Context<'_, impl Clock, Failure>,
     timeout: Duration,
     stats: Stats,
     during: impl FnOnce(),
@@ -113,7 +113,7 @@ fn cancel_sleep_stops_before_charge_work() {
         cancel: Some(signal),
         ..ScriptedClock::new(&time)
     };
-    let mut context = Context::new(&mut deadline, &mut clock, TestErrors);
+    let mut context = Context::new(&mut deadline, &mut clock, test_error);
 
     let error = context
         .pace(1, Duration::from_millis(250))
@@ -141,7 +141,7 @@ fn delay_past_budget_reject_before_sleeping() {
     let time = Time::new();
     let mut deadline = time.deadline(Duration::from_secs(1));
     let mut clock = RecordingClock::default();
-    let mut context = Context::new(&mut deadline, &mut clock, TestErrors);
+    let mut context = Context::new(&mut deadline, &mut clock, test_error);
     context
         .pace(1, Duration::from_millis(600))
         .expect("delay fits the budget");

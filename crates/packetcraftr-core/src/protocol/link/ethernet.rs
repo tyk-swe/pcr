@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::{FieldValue, WireValue},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
 };
 
@@ -58,7 +58,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct EthernetCodec;
 
-impl LayerCodec for EthernetCodec {
+impl Codec for EthernetCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &ethernet_schema().protocol
     }
@@ -67,8 +67,8 @@ impl LayerCodec for EthernetCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Ethernet>(NAME, layer)?;
         let (ether_type, materialized_type, diagnostics) =
             resolve_ether_type(NAME, &layer.ether_type, payload, context)?;
@@ -78,7 +78,7 @@ impl LayerCodec for EthernetCodec {
         header.extend_from_slice(&ether_type.to_be_bytes());
         let mut materialized = layer.clone();
         materialized.ether_type = materialized_type;
-        Ok(EncodedLayer::header(header, Box::new(materialized))
+        Ok(Encoded::header(header, Box::new(materialized))
             .with_fields(ethernet_layout())
             .with_diagnostics(diagnostics))
     }
@@ -86,8 +86,8 @@ impl LayerCodec for EthernetCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let (Some(destination), Some(source), Some(ether_type)) = (
             ethernet_chunk::<MAC_LEN>(&input, 0),
             ethernet_chunk::<MAC_LEN>(&input, MAC_LEN),
@@ -102,7 +102,7 @@ impl LayerCodec for EthernetCodec {
             input.len().saturating_sub(ETHERNET_LEN),
             ETHERNET_LEN,
         )?;
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Ethernet {
                 destination,
                 source,
@@ -120,7 +120,7 @@ impl LayerCodec for EthernetCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Ethernet::default(), fields)
     }

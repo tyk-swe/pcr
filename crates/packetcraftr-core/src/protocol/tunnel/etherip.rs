@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::FieldValue,
+    field,
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -56,7 +56,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct EtheripCodec;
 
-impl LayerCodec for EtheripCodec {
+impl Codec for EtheripCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &etherip_schema().protocol
     }
@@ -65,8 +65,8 @@ impl LayerCodec for EtheripCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Etherip>(NAME, layer)?;
         ensure_encode_budget(NAME, ETHERIP_LEN, context)?;
         if layer.version > VERSION_MAX || layer.reserved > RESERVED_MAX {
@@ -98,7 +98,7 @@ impl LayerCodec for EtheripCodec {
 
         let [reserved_hi, reserved_lo] = layer.reserved.to_be_bytes();
         let prefix = vec![(layer.version << 4) | reserved_hi, reserved_lo];
-        Ok(EncodedLayer::header(prefix, Box::new(layer.clone()))
+        Ok(Encoded::header(prefix, Box::new(layer.clone()))
             .with_fields(etherip_layout())
             .with_diagnostics(diagnostics))
     }
@@ -106,8 +106,8 @@ impl LayerCodec for EtheripCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<ETHERIP_LEN>() else {
             return Err(truncated(NAME, ETHERIP_LEN, input.len()));
         };
@@ -136,7 +136,7 @@ impl LayerCodec for EtheripCodec {
             );
         }
         let payload_len = input.len().saturating_sub(ETHERIP_LEN);
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: etherip_layout(),
             layer: Box::new(layer),
             consumed: ETHERIP_LEN,
@@ -150,7 +150,7 @@ impl LayerCodec for EtheripCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Etherip::default(), fields)
     }

@@ -2,23 +2,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::output::{contract::Format, stream::StreamRecord};
-use crate::{
-    errors::CliError,
-    rendering::{StreamEncoder, bounded_json_len},
-};
+use crate::{errors::CliError, rendering::bounded_json_len};
 use packetcraftr_core::error::Kind;
 
 pub(crate) struct EventOutput<'a> {
     format: Format,
-    stream: &'a StreamEncoder,
+    invocation: &'a crate::invocation::Invocation,
     remaining: usize,
 }
 
 impl<'a> EventOutput<'a> {
-    pub(crate) fn new(format: Format, stream: &'a StreamEncoder, maximum: usize) -> Self {
+    pub(crate) fn new(invocation: &'a crate::invocation::Invocation, maximum: usize) -> Self {
         Self {
-            format,
-            stream,
+            format: invocation.format,
+            invocation,
             remaining: maximum,
         }
     }
@@ -27,7 +24,7 @@ impl<'a> EventOutput<'a> {
         &mut self,
         value: T,
         retained: &mut Vec<T>,
-        render_text: impl FnOnce(&T) -> Result<(), CliError>,
+        render_text: impl FnOnce(&crate::invocation::Invocation, &T) -> Result<(), CliError>,
     ) -> Result<(), CliError> {
         let bytes = bounded_json_len(&value, self.remaining).map_err(|error| {
             error.into_cli_error(|| {
@@ -41,10 +38,11 @@ impl<'a> EventOutput<'a> {
         match self.format {
             Format::Json => retained.push(value),
             Format::Ndjson => self
-                .stream
+                .invocation
+                .output
                 .emit_data(value, Vec::new())
                 .map_err(CliError::from)?,
-            Format::Text => render_text(&value)?,
+            Format::Text => render_text(self.invocation, &value)?,
             other => other.unreachable(),
         }
         Ok(())
@@ -66,6 +64,7 @@ mod tests {
     use crate::test_support::{SharedBuffer, TestRecord};
 
     use super::*;
+    use crate::rendering::StreamEncoder;
 
     struct FailingSerialization;
 
@@ -103,20 +102,29 @@ mod tests {
 
     #[test]
     fn the_budget_is_shared_across_record_types_and_retention_vectors() {
+        let _invocation = &crate::test_support::invocation();
+
         let buffer = SharedBuffer::default();
         let stream = StreamEncoder::new(Command::Http, buffer);
-        let mut output = EventOutput::new(Format::Json, &stream, 5);
+        let invocation = crate::invocation::Invocation::new(
+            Format::Json,
+            stream,
+            None,
+            Default::default(),
+            None,
+        );
+        let mut output = EventOutput::new(&invocation, 5);
         let mut strings: Vec<TestRecord<&str>> = Vec::new();
         let mut numbers: Vec<TestRecord<u64>> = Vec::new();
         let rendered = Cell::new(false);
         output
-            .emit(TestRecord("ab"), &mut strings, |_| {
+            .emit(TestRecord("ab"), &mut strings, |_, _| {
                 rendered.set(true);
                 Ok(())
             })
             .unwrap();
         output
-            .emit(TestRecord(1), &mut numbers, |_| {
+            .emit(TestRecord(1), &mut numbers, |_, _| {
                 rendered.set(true);
                 Ok(())
             })
@@ -125,7 +133,7 @@ mod tests {
         assert_eq!(numbers.len(), 1);
         assert!(!rendered.get());
         let error = output
-            .emit(TestRecord(2), &mut numbers, |_| {
+            .emit(TestRecord(2), &mut numbers, |_, _| {
                 rendered.set(true);
                 Ok(())
             })
@@ -136,12 +144,21 @@ mod tests {
 
     #[test]
     fn stream_write_failures_keep_their_io_classification() {
+        let _invocation = &crate::test_support::invocation();
+
         let stream = StreamEncoder::new(Command::Http, BrokenPipe);
-        let mut output = EventOutput::new(Format::Ndjson, &stream, usize::MAX);
+        let invocation = crate::invocation::Invocation::new(
+            Format::Ndjson,
+            stream,
+            None,
+            Default::default(),
+            None,
+        );
+        let mut output = EventOutput::new(&invocation, usize::MAX);
         let mut retained = Vec::new();
         let rendered = Cell::new(false);
         let error = output
-            .emit(TestRecord("ab"), &mut retained, |_| {
+            .emit(TestRecord("ab"), &mut retained, |_, _| {
                 rendered.set(true);
                 Ok(())
             })

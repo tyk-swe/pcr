@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::FieldValue,
+    field,
     layer::{Layer, reflective_layer},
     layout::FieldLayout,
 };
@@ -308,7 +308,7 @@ fn split_bridge_id(id: [u8; 8]) -> (u8, u16, [u8; 6]) {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct StpCodec;
 
-impl LayerCodec for StpCodec {
+impl Codec for StpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &stp_schema().protocol
     }
@@ -317,8 +317,8 @@ impl LayerCodec for StpCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Stp>(NAME, layer)?;
         let kind = BpduKind::of(layer.bpdu_type);
         ensure_encode_budget(NAME, kind.wire_len(), context)?;
@@ -374,7 +374,7 @@ impl LayerCodec for StpCodec {
             prefix.push(layer.version_1_length);
         }
         let fields = stp_layout(prefix.len());
-        Ok(EncodedLayer::header(prefix, Box::new(layer.clone()))
+        Ok(Encoded::header(prefix, Box::new(layer.clone()))
             .with_fields(fields)
             .with_diagnostics(diagnostics))
     }
@@ -382,8 +382,8 @@ impl LayerCodec for StpCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<STP_HEADER_LEN>() else {
             return Err(truncated(NAME, STP_HEADER_LEN, input.len()));
         };
@@ -438,7 +438,7 @@ impl LayerCodec for StpCodec {
             })
             .collect();
         let consumed = kind.wire_len();
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: stp_layout(consumed),
             layer: Box::new(layer),
             consumed,
@@ -452,7 +452,7 @@ impl LayerCodec for StpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Stp::default(), fields)
     }
@@ -463,11 +463,11 @@ mod tests {
     use super::*;
     use crate::packet::Packet;
 
-    fn encode(layer: &Stp, mode: crate::codec::Mode) -> Result<EncodedLayer, crate::codec::Error> {
+    fn encode(layer: &Stp, mode: crate::codec::Mode) -> Result<Encoded, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
         let packet = Packet::new();
-        let build_context = crate::codec::Context::default();
-        let context = LayerEncodeContext {
+        let build_context = crate::codec::Addresses::default();
+        let context = EncodeContext {
             packet: &packet,
             index: 0,
             build_context: &build_context,
@@ -479,9 +479,9 @@ mod tests {
         StpCodec.encode(layer, &[], &context)
     }
 
-    fn decode(input: &[u8]) -> Result<DecodedLayer, crate::codec::Error> {
+    fn decode(input: &[u8]) -> Result<Decoded, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
-        let context = LayerDecodeContext {
+        let context = DecodeContext {
             parent: None,
             registry: &registry,
             network: None,

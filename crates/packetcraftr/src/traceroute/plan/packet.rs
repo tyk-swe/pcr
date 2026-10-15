@@ -18,7 +18,7 @@ use crate::correlation::{
 use crate::traceroute::MAX_DSCP;
 
 use super::Probe;
-use crate::probe::ProbeEndpoint;
+use crate::probe;
 
 pub(in crate::traceroute) fn probe_packet(probe: &Probe) -> Packet {
     let mut packet = Packet::new();
@@ -46,7 +46,7 @@ pub(in crate::traceroute) fn probe_packet(probe: &Probe) -> Packet {
         }
     }
     match probe.target {
-        ProbeEndpoint::Udp { port } => {
+        probe::Endpoint::Udp { port } => {
             packet.push(Udp {
                 source_port: probe.source_port,
                 destination_port: port,
@@ -56,7 +56,7 @@ pub(in crate::traceroute) fn probe_packet(probe: &Probe) -> Packet {
                 packet.push(Raw::new(vec![0_u8; usize::from(probe.payload_size)]));
             }
         }
-        ProbeEndpoint::Tcp { port } => {
+        probe::Endpoint::Tcp { port } => {
             packet.push(Tcp {
                 source_port: probe.source_port,
                 destination_port: port,
@@ -65,7 +65,7 @@ pub(in crate::traceroute) fn probe_packet(probe: &Probe) -> Packet {
                 ..Tcp::default()
             });
         }
-        ProbeEndpoint::Icmp => match probe.address {
+        probe::Endpoint::Icmp => match probe.address {
             IpAddr::V4(_) => {
                 packet.push(Icmpv4 {
                     body: icmp_body(probe),
@@ -79,11 +79,11 @@ pub(in crate::traceroute) fn probe_packet(probe: &Probe) -> Packet {
                 });
             }
         },
-        ProbeEndpoint::TcpAck { .. }
-        | ProbeEndpoint::Sctp { .. }
-        | ProbeEndpoint::IcmpTimestamp
-        | ProbeEndpoint::IcmpNetmask
-        | ProbeEndpoint::Ip { .. } => {}
+        probe::Endpoint::TcpAck { .. }
+        | probe::Endpoint::Sctp { .. }
+        | probe::Endpoint::IcmpTimestamp
+        | probe::Endpoint::IcmpNetmask
+        | probe::Endpoint::Ip { .. } => {}
     }
     packet
 }
@@ -117,18 +117,18 @@ pub(in crate::traceroute) fn sent_probe_matches(probe: &Probe, sent: &Packet) ->
         BuiltinProtocol::Ipv6
     };
     let transport_protocol = match probe.target {
-        ProbeEndpoint::Tcp { .. } => BuiltinProtocol::Tcp,
-        ProbeEndpoint::Udp { .. } => BuiltinProtocol::Udp,
-        ProbeEndpoint::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
-        ProbeEndpoint::Icmp => BuiltinProtocol::Icmpv6,
-        ProbeEndpoint::TcpAck { .. }
-        | ProbeEndpoint::Sctp { .. }
-        | ProbeEndpoint::IcmpTimestamp
-        | ProbeEndpoint::IcmpNetmask
-        | ProbeEndpoint::Ip { .. } => return false,
+        probe::Endpoint::Tcp { .. } => BuiltinProtocol::Tcp,
+        probe::Endpoint::Udp { .. } => BuiltinProtocol::Udp,
+        probe::Endpoint::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
+        probe::Endpoint::Icmp => BuiltinProtocol::Icmpv6,
+        probe::Endpoint::TcpAck { .. }
+        | probe::Endpoint::Sctp { .. }
+        | probe::Endpoint::IcmpTimestamp
+        | probe::Endpoint::IcmpNetmask
+        | probe::Endpoint::Ip { .. } => return false,
     };
     let expected = [network_protocol, transport_protocol];
-    let udp_payload = matches!(probe.target, ProbeEndpoint::Udp { .. }) && probe.payload_size > 0;
+    let udp_payload = matches!(probe.target, probe::Endpoint::Udp { .. }) && probe.payload_size > 0;
     let shape_matches = if udp_payload {
         packet_shape_with_payload_matches(sent, &expected)
     } else {
@@ -181,16 +181,16 @@ pub(in crate::traceroute) fn sent_probe_matches(probe: &Probe, sent: &Packet) ->
         return false;
     }
     match probe.target {
-        ProbeEndpoint::Udp { port } => sent.get::<Udp>().is_some_and(|udp| {
+        probe::Endpoint::Udp { port } => sent.get::<Udp>().is_some_and(|udp| {
             udp.source_port == probe.source_port && udp.destination_port == port
         }),
-        ProbeEndpoint::Tcp { port } => sent.get::<Tcp>().is_some_and(|tcp| {
+        probe::Endpoint::Tcp { port } => sent.get::<Tcp>().is_some_and(|tcp| {
             tcp.source_port == probe.source_port
                 && tcp.destination_port == port
                 && tcp.sequence == probe.sequence as u32
                 && tcp.flags == Tcp::SYN
         }),
-        ProbeEndpoint::Icmp => match probe.address {
+        probe::Endpoint::Icmp => match probe.address {
             IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
                 icmp.icmp_type == 8 && icmp.code == 0 && icmp.body == icmp_body(probe)
             }),
@@ -198,10 +198,10 @@ pub(in crate::traceroute) fn sent_probe_matches(probe: &Probe, sent: &Packet) ->
                 icmp.icmp_type == 128 && icmp.code == 0 && icmp.body == icmp_body(probe)
             }),
         },
-        ProbeEndpoint::TcpAck { .. }
-        | ProbeEndpoint::Sctp { .. }
-        | ProbeEndpoint::IcmpTimestamp
-        | ProbeEndpoint::IcmpNetmask
-        | ProbeEndpoint::Ip { .. } => false,
+        probe::Endpoint::TcpAck { .. }
+        | probe::Endpoint::Sctp { .. }
+        | probe::Endpoint::IcmpTimestamp
+        | probe::Endpoint::IcmpNetmask
+        | probe::Endpoint::Ip { .. } => false,
     }
 }

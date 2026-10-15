@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
 use crate::document::types::{Layer, Limit, Packet};
-use crate::field::FieldValue;
+use crate::field;
 
 use super::budget::Budget;
 use super::buffered::{Buffered, BufferedSeed};
@@ -241,7 +241,7 @@ struct FieldsSeed<'b, 'l> {
 }
 
 impl<'de> DeserializeSeed<'de> for FieldsSeed<'_, '_> {
-    type Value = BTreeMap<String, FieldValue>;
+    type Value = BTreeMap<String, field::Value>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -252,7 +252,7 @@ impl<'de> DeserializeSeed<'de> for FieldsSeed<'_, '_> {
 }
 
 impl<'de> Visitor<'de> for FieldsSeed<'_, '_> {
-    type Value = BTreeMap<String, FieldValue>;
+    type Value = BTreeMap<String, field::Value>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("a map of unique reflective field names")
@@ -339,19 +339,19 @@ pub(super) struct FieldValueSeed<'b, 'l> {
 }
 
 impl<'de> DeserializeSeed<'de> for FieldValueSeed<'_, '_> {
-    type Value = FieldValue;
+    type Value = field::Value;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         self.budget.charge_node()?;
-        deserializer.deserialize_struct("FieldValue", &["type", "value"], self)
+        deserializer.deserialize_struct("field::Value", &["type", "value"], self)
     }
 }
 
 impl<'de> Visitor<'de> for FieldValueSeed<'_, '_> {
-    type Value = FieldValue;
+    type Value = field::Value;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("a tagged field value object with `type` and `value`")

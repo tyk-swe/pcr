@@ -8,9 +8,9 @@ use bytes::Bytes;
 use super::reflection::reflective_layer;
 use super::{Id, Layer};
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::{self, FieldValue},
+    field,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -31,9 +31,9 @@ impl Raw {
         raw_layout(length)
     }
 
-    pub(crate) fn decoded(input: Bytes) -> DecodedLayer {
+    pub(crate) fn decoded(input: Bytes) -> Decoded {
         let length = input.len();
-        let mut decoded = DecodedLayer::terminal(Box::new(Self::new(input)), length);
+        let mut decoded = Decoded::terminal(Box::new(Self::new(input)), length);
         decoded.fields = raw_layout(length);
         decoded
     }
@@ -94,9 +94,9 @@ reflective_layer! {
         "outside_layer" => {
             kind: Unsigned, derived: false, required: false,
             description: "First layer index whose declared length excludes the padding",
-            get |layer| layer.outside_layer.map(FieldValue::from),
+            get |layer| layer.outside_layer.map(field::Value::from),
             set |layer, value, name| match value {
-                FieldValue::Unsigned(value) => {
+                field::Value::Unsigned(value) => {
                     layer.outside_layer = Some(usize::try_from(value).map_err(|_| field::Error::OutOfRange {
                         protocol: Padding::ID, field: name.to_owned(),
                     })?);
@@ -140,9 +140,9 @@ reflective_layer! {
         "protocol" => {
             kind: Text, derived: false, required: false,
             description: "Intended protocol identifier",
-            get |layer| layer.intended_protocol.clone().map(FieldValue::Text),
+            get |layer| layer.intended_protocol.clone().map(field::Value::Text),
             set |layer, value, name| match value {
-                FieldValue::Text(value) => { layer.intended_protocol = Some(value); Ok(()) }
+                field::Value::Text(value) => { layer.intended_protocol = Some(value); Ok(()) }
                 _ => Err(field::Error::WrongType { protocol: Malformed::ID, field: name.to_owned(), expected: "text" }),
             }
         },
@@ -205,7 +205,7 @@ fn hex_nibble(value: u8) -> Option<u8> {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RawCodec;
 
-impl LayerCodec for RawCodec {
+impl Codec for RawCodec {
     fn protocol_id(&self) -> &'static Id {
         &raw_schema().protocol
     }
@@ -214,14 +214,14 @@ impl LayerCodec for RawCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = layer
             .downcast_ref::<Raw>()
             .ok_or_else(|| crate::codec::Error::wrong_layer(Raw::ID, layer))?;
         context.ensure_room(Raw::ID, layer.bytes.len())?;
         Ok(
-            EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()))
+            Encoded::header(layer.bytes.to_vec(), Box::new(layer.clone()))
                 .with_fields(raw_layout(layer.bytes.len())),
         )
     }
@@ -229,14 +229,14 @@ impl LayerCodec for RawCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         Ok(Raw::decoded(input))
     }
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         with_fields(Raw::default(), raw_fields(fields, Raw::ID)?)
     }
@@ -248,7 +248,7 @@ pub(crate) struct PaddingCodec;
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct MalformedCodec;
 
-impl LayerCodec for MalformedCodec {
+impl Codec for MalformedCodec {
     fn protocol_id(&self) -> &'static Id {
         &malformed_schema().protocol
     }
@@ -257,14 +257,14 @@ impl LayerCodec for MalformedCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = layer
             .downcast_ref::<Malformed>()
             .ok_or_else(|| crate::codec::Error::wrong_layer(Malformed::ID, layer))?;
         context.ensure_room(Malformed::ID, layer.bytes.len())?;
         Ok(
-            EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()))
+            Encoded::header(layer.bytes.to_vec(), Box::new(layer.clone()))
                 .with_fields(malformed_layout(layer.bytes.len()))
                 .with_diagnostics(vec![Diagnostic::warning(
                     "build.malformed_layer",
@@ -276,9 +276,9 @@ impl LayerCodec for MalformedCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
-        let mut decoded = DecodedLayer::terminal(
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
+        let mut decoded = Decoded::terminal(
             Box::new(Malformed::new(
                 None,
                 input.clone(),
@@ -292,7 +292,7 @@ impl LayerCodec for MalformedCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         with_fields(
             Malformed::new(None, Bytes::new(), "explicit malformed bytes"),
@@ -301,7 +301,7 @@ impl LayerCodec for MalformedCodec {
     }
 }
 
-impl LayerCodec for PaddingCodec {
+impl Codec for PaddingCodec {
     fn protocol_id(&self) -> &'static Id {
         &padding_schema().protocol
     }
@@ -310,14 +310,14 @@ impl LayerCodec for PaddingCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = layer
             .downcast_ref::<Padding>()
             .ok_or_else(|| crate::codec::Error::wrong_layer(Padding::ID, layer))?;
         context.ensure_room(Padding::ID, layer.bytes.len())?;
         Ok(
-            EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()))
+            Encoded::header(layer.bytes.to_vec(), Box::new(layer.clone()))
                 .with_fields(padding_layout(layer.bytes.len())),
         )
     }
@@ -325,46 +325,45 @@ impl LayerCodec for PaddingCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
-        let mut decoded =
-            DecodedLayer::terminal(Box::new(Padding::new(input.clone())), input.len());
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
+        let mut decoded = Decoded::terminal(Box::new(Padding::new(input.clone())), input.len());
         decoded.fields = padding_layout(input.len());
         Ok(decoded)
     }
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         with_fields(Padding::default(), raw_fields(fields, Padding::ID)?)
     }
 }
 
 fn raw_fields(
-    fields: &BTreeMap<String, FieldValue>,
+    fields: &BTreeMap<String, field::Value>,
     name: Id,
-) -> Result<BTreeMap<String, FieldValue>, crate::codec::Error> {
+) -> Result<BTreeMap<String, field::Value>, crate::codec::Error> {
     let mut normalized = fields.clone();
     let derived = match normalized.remove("hex") {
         Some(value) => {
-            let FieldValue::Text(value) = value else {
+            let field::Value::Text(value) = value else {
                 return Err(crate::codec::Error::invalid(
                     name,
                     "hex must be a quoted hexadecimal string",
                 ));
             };
-            Some(FieldValue::Bytes(parse_hex(&value)?))
+            Some(field::Value::Bytes(parse_hex(&value)?))
         }
         None => match normalized.remove("text") {
             Some(value) => {
-                let FieldValue::Text(value) = value else {
+                let field::Value::Text(value) = value else {
                     return Err(crate::codec::Error::invalid(
                         name,
                         "text must be a quoted string",
                     ));
                 };
-                Some(FieldValue::Bytes(Bytes::from(value.into_bytes())))
+                Some(field::Value::Bytes(Bytes::from(value.into_bytes())))
             }
             None => None,
         },
@@ -382,7 +381,7 @@ fn raw_fields(
 
 fn with_fields<L: Layer>(
     mut layer: L,
-    fields: BTreeMap<String, FieldValue>,
+    fields: BTreeMap<String, field::Value>,
 ) -> Result<Box<dyn Layer>, crate::codec::Error> {
     for (name, value) in fields {
         layer.set_field(&name, value)?;
@@ -393,20 +392,20 @@ fn with_fields<L: Layer>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codec::{Context, Error, Mode};
+    use crate::codec::{Addresses, Error, Mode};
 
     use crate::packet::Packet;
     use crate::registry::Registry;
 
     fn encode(
-        codec: &dyn LayerCodec,
+        codec: &dyn Codec,
         layer: &dyn Layer,
         remaining_packet_bytes: usize,
-    ) -> Result<EncodedLayer, Error> {
+    ) -> Result<Encoded, Error> {
         let registry = Registry::default();
         let packet = Packet::new();
-        let build_context = Context::default();
-        let context = LayerEncodeContext {
+        let build_context = Addresses::default();
+        let context = EncodeContext {
             packet: &packet,
             index: 0,
             build_context: &build_context,
@@ -420,7 +419,7 @@ mod tests {
 
     #[test]
     fn opaque_layers_over_the_packet_size_budget_are_refused() {
-        let cases: [(&dyn LayerCodec, Box<dyn Layer>, Id); 3] = [
+        let cases: [(&dyn Codec, Box<dyn Layer>, Id); 3] = [
             (&RawCodec, Box::new(Raw::new(vec![0; 4])), Raw::ID),
             (
                 &PaddingCodec,

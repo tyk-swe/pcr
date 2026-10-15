@@ -140,10 +140,10 @@ pub(super) fn unconnectable(request: &Request) -> Option<&'static str> {
         .iter()
         .chain(probes)
         .find_map(|endpoint| match endpoint {
-            crate::probe::ProbeEndpoint::Tcp { .. } => None,
-            crate::probe::ProbeEndpoint::TcpAck { .. } => Some("tcp-ack"),
-            crate::probe::ProbeEndpoint::IcmpTimestamp => Some("icmp-timestamp"),
-            crate::probe::ProbeEndpoint::IcmpNetmask => Some("icmp-netmask"),
+            crate::probe::Endpoint::Tcp { .. } => None,
+            crate::probe::Endpoint::TcpAck { .. } => Some("tcp-ack"),
+            crate::probe::Endpoint::IcmpTimestamp => Some("icmp-timestamp"),
+            crate::probe::Endpoint::IcmpNetmask => Some("icmp-netmask"),
             other => Some(other.transport().as_str()),
         })
         .or_else(|| (discovery.runs() && discovery.neighbor).then_some("neighbor"))

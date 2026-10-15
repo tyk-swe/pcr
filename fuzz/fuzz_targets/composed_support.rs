@@ -13,7 +13,7 @@ use packetcraftr_core::{
     analysis::{self, forwarding},
     build::{Builder, Options as BuildOptions},
     capture_file,
-    codec::Context,
+    codec::Addresses,
     error::BoundaryError,
     frame::{Frame, LinkType},
     layer::Raw,
@@ -67,7 +67,7 @@ fn finish(mut packet: Packet, payload: &[u8]) -> Frame {
         packet.push(Raw::new(payload.to_vec()));
     }
     let built = Builder::new(builtin::registry())
-        .build(packet, Context::default(), BuildOptions::default())
+        .build(packet, Addresses::default(), BuildOptions::default())
         .expect("bounded generated packet");
     Frame::new(
         UNIX_EPOCH + Duration::from_secs(1),

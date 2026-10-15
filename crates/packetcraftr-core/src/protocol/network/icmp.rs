@@ -7,9 +7,9 @@ use std::net::Ipv4Addr;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM},
-    field::{self, FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, Schema, reflective_layer},
     layout::{ByteRange, FieldLayout},
 };
@@ -66,17 +66,17 @@ impl Default for Icmpv6 {
     }
 }
 
-fn body_unsigned(body: &Bytes, start: usize, width: usize) -> Option<FieldValue> {
+fn body_unsigned(body: &Bytes, start: usize, width: usize) -> Option<field::Value> {
     let bytes = body.get(start..start.checked_add(width)?)?;
     let mut value = 0_u64;
     for byte in bytes {
         value = (value << 8) | u64::from(*byte);
     }
-    Some(FieldValue::Unsigned(value))
+    Some(field::Value::Unsigned(value))
 }
 
-fn body_rest(body: &Bytes) -> Option<FieldValue> {
-    (body.len() >= 4).then(|| FieldValue::Bytes(body.slice(4..)))
+fn body_rest(body: &Bytes) -> Option<field::Value> {
+    (body.len() >= 4).then(|| field::Value::Bytes(body.slice(4..)))
 }
 
 fn patch_body(body: &mut Bytes, start: usize, bytes: &[u8]) {
@@ -101,10 +101,10 @@ fn set_body_unsigned(
     start: usize,
     width: usize,
     schema: &'static Schema,
-    value: FieldValue,
+    value: field::Value,
     name: &str,
 ) -> Result<(), field::Error> {
-    let FieldValue::Unsigned(value) = value else {
+    let field::Value::Unsigned(value) = value else {
         return Err(wrong_type(schema, name, "unsigned"));
     };
     let bytes = value.to_be_bytes();
@@ -119,11 +119,11 @@ fn set_body_unsigned(
 fn set_rest(
     body: &mut Bytes,
     schema: &'static Schema,
-    value: FieldValue,
+    value: field::Value,
     name: &str,
 ) -> Result<(), field::Error> {
     match value {
-        FieldValue::Bytes(value) => {
+        field::Value::Bytes(value) => {
             patch_body_rest(body, &value);
             Ok(())
         }
@@ -197,7 +197,7 @@ reflective_layer! {
             kind: Ipv4, derived: false, required: false,
             description: "Gateway address (redirect)",
             get |layer| layer.body.get(..4).and_then(|bytes| {
-                <[u8; 4]>::try_from(bytes).ok().map(|bytes| FieldValue::Ipv4(Ipv4Addr::from(bytes)))
+                <[u8; 4]>::try_from(bytes).ok().map(|bytes| field::Value::Ipv4(Ipv4Addr::from(bytes)))
             }),
             set |layer, value, name| layer.set_gateway(value, name)
         },
@@ -234,10 +234,10 @@ fn icmpv4_layout(body_len: usize) -> Vec<FieldLayout> {
 }
 
 impl Icmpv4 {
-    fn set_gateway(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
+    fn set_gateway(&mut self, value: field::Value, name: &str) -> Result<(), field::Error> {
         let address = match value {
-            FieldValue::Ipv4(address) => address,
-            FieldValue::Text(value) => value
+            field::Value::Ipv4(address) => address,
+            field::Value::Text(value) => value
                 .parse::<Ipv4Addr>()
                 .map_err(|_| wrong_type(icmpv4_schema(), name, "ipv4"))?,
             _ => return Err(wrong_type(icmpv4_schema(), name, "ipv4")),
@@ -320,7 +320,7 @@ fn icmpv6_layout(body_len: usize) -> Vec<FieldLayout> {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Icmpv4Codec;
 
-impl LayerCodec for Icmpv4Codec {
+impl Codec for Icmpv4Codec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &icmpv4_schema().protocol
     }
@@ -329,8 +329,8 @@ impl LayerCodec for Icmpv4Codec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Icmpv4>(V4_NAME, layer)?;
         let contribution = ICMP_MIN_LEN
             .checked_add(layer.body.len())
@@ -355,7 +355,7 @@ impl LayerCodec for Icmpv4Codec {
         }
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(icmpv4_layout(layer.body.len()))
             .with_diagnostics(diagnostics))
     }
@@ -363,8 +363,8 @@ impl LayerCodec for Icmpv4Codec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<ICMP_MIN_LEN>() else {
             return Err(truncated(V4_NAME, ICMP_MIN_LEN, input.len()));
         };
@@ -377,7 +377,7 @@ impl LayerCodec for Icmpv4Codec {
                     .at_field("checksum"),
             );
         }
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Icmpv4 {
                 icmp_type: header[0],
                 code: header[1],
@@ -396,7 +396,7 @@ impl LayerCodec for Icmpv4Codec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Icmpv4::default(), fields)
     }
@@ -405,7 +405,7 @@ impl LayerCodec for Icmpv4Codec {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Icmpv6Codec;
 
-impl LayerCodec for Icmpv6Codec {
+impl Codec for Icmpv6Codec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &icmpv6_schema().protocol
     }
@@ -414,8 +414,8 @@ impl LayerCodec for Icmpv6Codec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Icmpv6>(V6_NAME, layer)?;
         let contribution = ICMP_MIN_LEN
             .checked_add(layer.body.len())
@@ -445,7 +445,7 @@ impl LayerCodec for Icmpv6Codec {
         }
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(icmpv6_layout(layer.body.len()))
             .with_diagnostics(diagnostics))
     }
@@ -453,8 +453,8 @@ impl LayerCodec for Icmpv6Codec {
     fn decode(
         &self,
         input: Bytes,
-        context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<ICMP_MIN_LEN>() else {
             return Err(truncated(V6_NAME, ICMP_MIN_LEN, input.len()));
         };
@@ -469,7 +469,7 @@ impl LayerCodec for Icmpv6Codec {
                     .at_field("checksum"),
             );
         }
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Icmpv6 {
                 icmp_type: header[0],
                 code: header[1],
@@ -488,7 +488,7 @@ impl LayerCodec for Icmpv6Codec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Icmpv6::default(), fields)
     }

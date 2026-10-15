@@ -18,9 +18,9 @@ use std::net::Ipv6Addr;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -83,7 +83,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Ipv6Codec;
 
-impl LayerCodec for Ipv6Codec {
+impl Codec for Ipv6Codec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &ipv6_schema().protocol
     }
@@ -91,8 +91,8 @@ impl LayerCodec for Ipv6Codec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Ipv6>(NAME, layer)?;
         if layer.flow_label > 0x000f_ffff {
             return Err(invalid(NAME, "flow label exceeds 20 bits"));
@@ -124,7 +124,7 @@ impl LayerCodec for Ipv6Codec {
         materialized.next_header = materialized_next;
         materialized.source = source;
         materialized.destination = destination;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(ipv6_layout())
             .with_diagnostics(diagnostics))
     }
@@ -132,8 +132,8 @@ impl LayerCodec for Ipv6Codec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IPV6_LEN>() else {
             return Err(truncated(NAME, IPV6_LEN, input.len()));
         };
@@ -171,7 +171,7 @@ impl LayerCodec for Ipv6Codec {
             .ok_or_else(|| truncated(NAME, IPV6_LEN, input.len()))?;
         let destination = Ipv6Addr::from(*destination_bytes);
         let next = header[6];
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Ipv6 {
                 traffic_class: ((first >> 20) & 0xff) as u8,
                 flow_label: first & 0x000f_ffff,
@@ -197,7 +197,7 @@ impl LayerCodec for Ipv6Codec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Ipv6::default(), fields)
     }
@@ -234,7 +234,7 @@ fn has_jumbo_option(payload: &[u8]) -> bool {
 fn resolve_next_header(
     name: &'static str,
     value: &WireValue<u8>,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(u8, WireValue<u8>), crate::codec::Error> {
     let expectation = expected_discriminator(name, context, ip_protocol::NO_NEXT_HEADER, value);
@@ -261,7 +261,7 @@ fn resolve_next_header(
 
 fn resolve_addresses(
     layer: &Ipv6,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
 ) -> Result<(Ipv6Addr, Ipv6Addr, Vec<Diagnostic>), crate::codec::Error> {
     let (source, inherited_destination) =
         ipv6_endpoints(layer, context.packet, context.index, context.build_context);

@@ -18,7 +18,10 @@ use crate::rendering::{
 };
 use crate::system::{Prepared, placeholder, prepare_live};
 
-fn prepare(arguments: Args) -> Result<Prepared<packetcraftr::send::Request>, CliError> {
+fn prepare(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+) -> Result<Prepared<packetcraftr::send::Request>, CliError> {
     let Args {
         send,
         template,
@@ -31,7 +34,7 @@ fn prepare(arguments: Args) -> Result<Prepared<packetcraftr::send::Request>, Cli
         max_template_packets: template.max_template_packets,
         ..packetcraftr::send::Request::new(placeholder(), packetcraftr::send::Options::default())
     };
-    prepare_live(send, template, request)
+    prepare_live(invocation, send, template, request)
 }
 
 fn writing(
@@ -71,20 +74,22 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream.presentation()).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream.presentation()).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
     arguments: Args,
     format: Format,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     let compression = arguments.send.compression.for_output(format)?;
-    let prepared = prepare(arguments)?;
+    let prepared = prepare(invocation, arguments)?;
     match format {
         Format::Text => {
             let diagnostics = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -93,53 +98,69 @@ pub(super) fn run(
                 .client
                 .send(
                     prepared.request,
-                    writing(move |frame| {
-                        let mut collected = collected
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        for diagnostic in &frame.packet.built().diagnostics {
-                            core::diagnostic::push_once(&mut collected, diagnostic.clone());
+                    writing({
+                        let invocation = invocation.clone();
+                        move |frame| {
+                            let invocation = &invocation;
+                            let mut collected = collected
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            for diagnostic in &frame.packet.built().diagnostics {
+                                core::diagnostic::push_once(&mut collected, diagnostic.clone());
+                            }
+                            write_summary_line(invocation, format_args!("{}", sent_line(frame)))?;
+                            let route = frame.packet.route();
+                            if let Some(neighbor) = &route.neighbor_resolution
+                                && neighbor.evidence_truncated
+                            {
+                                crate::rendering::write_stdout_line(
+                                    invocation,
+                                    format_args!("warning: neighbor evidence truncated"),
+                                )?;
+                            }
+                            if presentation.verbose {
+                                let route =
+                                    output::send::MaterializedRoute::try_from(route.clone())
+                                        .map_err(CliError::classified)?;
+                                presentation.details(
+                                    invocation,
+                                    "Route and neighbor evidence",
+                                    &route,
+                                )?;
+                                crate::rendering::write_stdout_line(
+                                    invocation,
+                                    format_args!(
+                                        "bytes: {}",
+                                        crate::rendering::spaced_hex(frame.packet.wire_bytes())
+                                    ),
+                                )?;
+                            }
+                            Ok(())
                         }
-                        write_summary_line(format_args!("{}", sent_line(frame)))?;
-                        let route = frame.packet.route();
-                        if let Some(neighbor) = &route.neighbor_resolution
-                            && neighbor.evidence_truncated
-                        {
-                            crate::rendering::write_stdout_line(format_args!(
-                                "warning: neighbor evidence truncated"
-                            ))?;
-                        }
-                        if presentation.verbose {
-                            let route = output::send::MaterializedRoute::try_from(route.clone())
-                                .map_err(CliError::classified)?;
-                            presentation.details("Route and neighbor evidence", &route)?;
-                            crate::rendering::write_stdout_line(format_args!(
-                                "bytes: {}",
-                                crate::rendering::spaced_hex(frame.packet.wire_bytes())
-                            ))?;
-                        }
-                        Ok(())
                     }),
                 )
                 .map_err(CliError::classified)?;
             if report.stats.packets_completed > 1 {
-                write_summary_line(format_args!(
-                    "sent {} frame(s), {} byte(s) across {} pass(es)",
-                    report.stats.packets_completed, report.stats.bytes, report.passes_completed
-                ))?;
+                write_summary_line(
+                    invocation,
+                    format_args!(
+                        "sent {} frame(s), {} byte(s) across {} pass(es)",
+                        report.stats.packets_completed, report.stats.bytes, report.passes_completed
+                    ),
+                )?;
             }
             let diagnostics = std::mem::take(
                 &mut *diagnostics
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner),
             );
-            render_diagnostics_text(&diagnostics)
+            render_diagnostics_text(invocation, &diagnostics)
         }
         Format::Json => {
             let report = collect(prepared)?;
             let published = output::envelope::Published::<output::send::Report>::try_from(report)
                 .map_err(CliError::classified)?;
-            emit_published(output::contract::Command::Send, published)
+            emit_published(invocation, output::contract::Command::Send, published)
         }
         Format::Hex => prepared
             .client

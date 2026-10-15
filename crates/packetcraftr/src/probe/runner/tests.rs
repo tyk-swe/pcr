@@ -13,7 +13,7 @@ use super::*;
 use crate::evidence::ExecutionPermit;
 use crate::execution::limits::EvidenceLimits;
 use crate::probe::Workflow;
-use crate::test_support::{Failure, RecordingClock, TestErrors};
+use crate::test_support::{Failure, RecordingClock, test_error};
 use crate::test_support::{decoded_packet, evidence_frame};
 use packetcraftr_core::error::BoundaryError;
 
@@ -242,7 +242,7 @@ fn run(
     let mut events = Vec::new();
     let mut evidence = BatchEvidence::new(
         workflow,
-        TestErrors,
+        test_error,
         limits,
         classifier,
         |event, _: &Deadline| {
@@ -299,7 +299,7 @@ fn ev_another_reject_before_anything_published() {
     let mut events = Vec::new();
     let mut evidence = BatchEvidence::new(
         Workflow::Scan,
-        TestErrors,
+        test_error,
         LIMITS,
         TestClassifier::default(),
         |event, _: &Deadline| {
@@ -383,7 +383,7 @@ fn plan_run(
     let mut events = Vec::new();
     let mut evidence = BatchEvidence::new(
         Workflow::Traceroute,
-        TestErrors,
+        test_error,
         LIMITS,
         TestClassifier::default(),
         |event, _: &Deadline| {

@@ -11,7 +11,7 @@ use super::request::push_vlan;
 use super::{build_request_frame, match_neighbor_response};
 use crate::neighbor::{MAX_VLAN_TAGS, Request as NeighborRequest};
 use packetcraftr_core::build::{Builder, Options};
-use packetcraftr_core::codec::{Context, Mode};
+use packetcraftr_core::codec::{Addresses, Mode};
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Raw};
@@ -108,7 +108,7 @@ fn capture(bytes: impl Into<Bytes>) -> Frame {
 
 fn build(packet: Packet) -> Vec<u8> {
     Builder::new(builtin::registry())
-        .build(packet, Context::default(), Options::default())
+        .build(packet, Addresses::default(), Options::default())
         .expect("fixture builds")
         .bytes
         .to_vec()
@@ -253,7 +253,7 @@ fn advertisement_message(request: &NeighborRequest) -> Vec<u8> {
             .expect("advertisement encodes"),
     );
     let built = Builder::new(builtin::registry())
-        .build(packet, Context::default(), Options::default())
+        .build(packet, Addresses::default(), Options::default())
         .expect("advertisement builds");
     let start = built.layout.layer(1).expect("ICMPv6 layer").range.start;
     built.bytes[start..].to_vec()
@@ -277,7 +277,7 @@ fn opaque_payload_frame(
     Builder::new(builtin::registry())
         .build(
             packet,
-            Context::default(),
+            Addresses::default(),
             Options {
                 mode: Mode::Permissive,
                 ..Options::default()

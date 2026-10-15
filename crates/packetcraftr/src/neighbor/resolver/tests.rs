@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::build::{self, Builder};
-use packetcraftr_core::codec::Context;
+use packetcraftr_core::codec::Addresses;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::{MacAddress, Packet};
@@ -509,7 +509,7 @@ fn arp_response(request: &Request, sender: MacAddress) -> Frame {
         ..Arp::default()
     });
     let bytes = Builder::new(builtin::registry())
-        .build(reply, Context::default(), build::Options::default())
+        .build(reply, Addresses::default(), build::Options::default())
         .expect("ARP response fixture builds")
         .bytes;
     let mut frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, bytes)

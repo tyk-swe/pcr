@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::codec::{Context, LayerEncodeContext, Mode};
+use crate::codec::{Addresses, EncodeContext, Mode};
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
 use crate::packet::Packet;
 use crate::registry::Registry;
@@ -39,7 +39,7 @@ impl Builder {
     pub fn build(
         &self,
         packet: Packet,
-        context: Context,
+        context: Addresses,
         options: Options,
     ) -> Result<BuiltPacket, Error> {
         let (diagnostics, pass_through_bytes) = self.validate_packet(&packet, &options)?;
@@ -92,7 +92,7 @@ impl Builder {
     fn encode_layers(
         &self,
         packet: &Packet,
-        context: &Context,
+        context: &Addresses,
         options: &Options,
         mut bytes: PacketBuffer,
         mut diagnostics: Vec<crate::diagnostic::Diagnostic>,
@@ -114,7 +114,7 @@ impl Builder {
                 .encode(
                     layer,
                     bytes.as_slice(),
-                    &LayerEncodeContext {
+                    &EncodeContext {
                         packet,
                         index,
                         build_context: context,

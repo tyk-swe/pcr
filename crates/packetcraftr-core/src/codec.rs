@@ -13,7 +13,7 @@ use crate::packet::Packet;
 
 use crate::diagnostic::Diagnostic;
 use crate::error::{Classification, Classified, Kind, Source};
-use crate::field::{self, FieldValue};
+use crate::field;
 use crate::layer::{Id, Layer, Schema};
 use crate::layout::FieldLayout;
 use crate::registry::{Discriminator, Registry};
@@ -30,7 +30,7 @@ pub enum Mode {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Context {
+pub struct Addresses {
     pub source: Option<IpAddr>,
     pub destination: Option<IpAddr>,
 }
@@ -119,10 +119,10 @@ impl Classified for Error {
     }
 }
 
-pub struct LayerEncodeContext<'a> {
+pub struct EncodeContext<'a> {
     pub packet: &'a Packet,
     pub index: usize,
-    pub build_context: &'a Context,
+    pub build_context: &'a Addresses,
     pub mode: Mode,
     pub registry: &'a Registry,
     pub child: Option<&'a dyn Layer>,
@@ -130,7 +130,7 @@ pub struct LayerEncodeContext<'a> {
     pub remaining_packet_bytes: usize,
 }
 
-impl LayerEncodeContext<'_> {
+impl EncodeContext<'_> {
     pub(crate) fn ensure_room(&self, protocol: Id, contribution: usize) -> Result<(), Error> {
         if contribution > self.remaining_packet_bytes {
             return Err(Error::invalid(
@@ -145,7 +145,7 @@ impl LayerEncodeContext<'_> {
     }
 }
 
-pub struct EncodedLayer {
+pub struct Encoded {
     pub prefix: Vec<u8>,
     pub suffix: Vec<u8>,
     pub materialized: Box<dyn Layer>,
@@ -153,7 +153,7 @@ pub struct EncodedLayer {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-impl EncodedLayer {
+impl Encoded {
     pub fn header(prefix: Vec<u8>, materialized: Box<dyn Layer>) -> Self {
         Self {
             prefix,
@@ -177,7 +177,7 @@ impl EncodedLayer {
     }
 }
 
-pub struct LayerDecodeContext<'a> {
+pub struct DecodeContext<'a> {
     pub parent: Option<Id>,
     pub registry: &'a Registry,
     pub network: Option<NetworkEnvelope>,
@@ -192,7 +192,7 @@ pub struct NetworkEnvelope {
     pub destination: IpAddr,
 }
 
-pub struct DecodedLayer {
+pub struct Decoded {
     pub layer: Box<dyn Layer>,
     pub consumed: usize,
     pub payload_len: usize,
@@ -203,7 +203,7 @@ pub struct DecodedLayer {
     pub network: Option<NetworkEnvelope>,
 }
 
-impl DecodedLayer {
+impl Decoded {
     pub fn terminal(layer: Box<dyn Layer>, consumed: usize) -> Self {
         Self {
             layer,
@@ -218,7 +218,7 @@ impl DecodedLayer {
     }
 }
 
-pub trait LayerCodec: Send + Sync + fmt::Debug {
+pub trait Codec: Send + Sync + fmt::Debug {
     fn protocol_id(&self) -> &'static Id;
 
     fn accepts_decoded_protocol(&self, protocol: &Id) -> bool {
@@ -234,13 +234,12 @@ pub trait LayerCodec: Send + Sync + fmt::Debug {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, Error>;
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, Error>;
 
-    fn decode(&self, input: Bytes, context: &LayerDecodeContext<'_>)
-    -> Result<DecodedLayer, Error>;
+    fn decode(&self, input: Bytes, context: &DecodeContext<'_>) -> Result<Decoded, Error>;
 
-    fn make_layer(&self, fields: &BTreeMap<String, FieldValue>) -> Result<Box<dyn Layer>, Error>;
+    fn make_layer(&self, fields: &BTreeMap<String, field::Value>) -> Result<Box<dyn Layer>, Error>;
 }
 
 #[cfg(test)]
@@ -252,8 +251,8 @@ mod tests {
     fn ensure_room(remaining_packet_bytes: usize, contribution: usize) -> Result<(), Error> {
         let registry = Registry::default();
         let packet = Packet::new();
-        let build_context = Context::default();
-        LayerEncodeContext {
+        let build_context = Addresses::default();
+        EncodeContext {
             packet: &packet,
             index: 0,
             build_context: &build_context,

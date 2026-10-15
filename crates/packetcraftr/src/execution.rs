@@ -7,15 +7,17 @@ mod errors;
 pub(crate) mod evidence;
 mod executor;
 pub(crate) mod limits;
+mod operation;
 mod shared;
 mod sink;
 pub(crate) mod validation;
 
 pub(crate) use admission::Admission;
 pub(crate) use context::{Context, Grant, Paused, Receipt, pause, rate_delay};
-pub(crate) use errors::Errors;
+pub(crate) use errors::Failure;
 pub(crate) use executor::{ExchangeExecutor, Executor, Step};
 pub(crate) use executor::{ExecutorFault, WorkflowOverrides};
+pub(crate) use operation::{NeighborMode, Operation};
 pub(crate) use shared::Shared;
 pub use sink::Sink;
 pub(crate) use sink::publisher;

@@ -42,7 +42,7 @@ fn permissive() -> build::Options {
 
 fn build_with(packet: Packet, options: build::Options) -> build::BuiltPacket {
     build::Builder::new(registry())
-        .build(packet, codec::Context::default(), options)
+        .build(packet, codec::Addresses::default(), options)
         .expect("fixture builds")
 }
 

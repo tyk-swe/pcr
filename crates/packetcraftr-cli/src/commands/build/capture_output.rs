@@ -111,7 +111,7 @@ impl CaptureOutput {
             .expect("registered capture root has a codec")
             .decode(
                 built.bytes.clone(),
-                &packetcraftr_core::codec::LayerDecodeContext {
+                &packetcraftr_core::codec::DecodeContext {
                     parent: None,
                     registry: &registry,
                     network: None,

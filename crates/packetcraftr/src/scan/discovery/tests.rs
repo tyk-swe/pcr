@@ -11,7 +11,7 @@ use super::{
     Basis, Composer, Evidence, Host, Link, Mode, Neighbor, NeighborOutcome, NextHop, Observation,
     Options, ReasonKind, Scan, State, Unresponsive,
 };
-use crate::probe::ProbeEndpoint;
+use crate::probe;
 use crate::scan::{Error, Reply};
 use crate::target::SelectedAddress;
 
@@ -296,7 +296,7 @@ fn validate(options: &Options) -> Result<(), Error> {
 
 #[test]
 fn options_reject_probes_that_would_not_run_or_cannot_be_bounded() {
-    let tcp = ProbeEndpoint::Tcp { port: 80 };
+    let tcp = probe::Endpoint::Tcp { port: 80 };
     let running = Options {
         mode: Mode::Before,
         probes: vec![tcp],
@@ -339,7 +339,7 @@ fn options_reject_probes_that_would_not_run_or_cannot_be_bounded() {
         );
     }
     let wide = Options {
-        probes: (1..=9).map(|port| ProbeEndpoint::Tcp { port }).collect(),
+        probes: (1..=9).map(|port| probe::Endpoint::Tcp { port }).collect(),
         ..running.clone()
     };
     assert!(matches!(

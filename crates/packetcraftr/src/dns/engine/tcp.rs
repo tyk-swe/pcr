@@ -16,7 +16,7 @@ use crate::policy::Authorizer;
 use crate::target::ResolveTarget;
 use crate::target::{Family, Target, resolve_selected};
 
-use super::super::error::{Attempts, Error, EvidenceFault};
+use super::super::error::{Error, EvidenceFault, attempt_error};
 use super::super::evidence::{
     ClassifiedAttempt, classify_tcp_response, tcp_failure_evidence, tcp_timeout_evidence,
 };
@@ -56,7 +56,7 @@ where
         let framed_query_bytes = probe.framed_query_bytes();
         let max_message_bytes = self.request.limits.message.max_message_bytes;
         let (attempt, grant) = self.execution.step(
-            probe.attempt,
+            u64::from(probe.attempt),
             requested,
             &mut *self.executor,
             |executor, grant| {
@@ -145,9 +145,9 @@ where
             &target,
             Family::Any,
             self.execution.deadline(),
-            &Attempts,
+            attempt_error,
         );
-        self.execution.enforce(probe.attempt)?;
+        self.execution.enforce(u64::from(probe.attempt))?;
         if attempt_deadline.check().is_err() {
             return Ok(false);
         }

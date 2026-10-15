@@ -13,7 +13,6 @@ use packetcraftr_core::packet::Packet;
 
 use super::{Batch, Evidence, Sequenced, UnsolicitedCapture};
 use crate::evidence::SentPacket;
-use crate::execution::Errors;
 use crate::execution::evidence::{EvidenceSink, EvidenceState, Passed, ResponseSelector};
 use crate::execution::limits::EvidenceLimits;
 use crate::execution::validation::{
@@ -88,18 +87,18 @@ pub(crate) struct Reply<O> {
     pub(crate) frame: Option<Frame>,
 }
 
-pub(crate) struct BatchEvidence<K, F, G> {
-    errors: G,
+pub(crate) struct BatchEvidence<K, F, E> {
+    errors: fn(u64, crate::execution::Failure) -> E,
     validation_limits: EvidenceLimits,
     state: EvidenceState,
     classifier: K,
     emit: F,
 }
 
-impl<K, F, G: Copy> BatchEvidence<K, F, G> {
+impl<K, F, E> BatchEvidence<K, F, E> {
     pub(crate) fn new(
         workflow: Workflow,
-        errors: G,
+        errors: fn(u64, crate::execution::Failure) -> E,
         limits: EvidenceLimits,
         classifier: K,
         emit: F,
@@ -111,7 +110,7 @@ impl<K, F, G: Copy> BatchEvidence<K, F, G> {
     /// preparation has consumed part (or all) of the operation retention budget.
     pub(crate) fn new_with_retention_limits(
         workflow: Workflow,
-        errors: G,
+        errors: fn(u64, crate::execution::Failure) -> E,
         validation_limits: EvidenceLimits,
         retention_limits: EvidenceLimits,
         classifier: K,
@@ -126,7 +125,7 @@ impl<K, F, G: Copy> BatchEvidence<K, F, G> {
         }
     }
 
-    pub(crate) const fn errors(&self) -> G {
+    pub(crate) const fn errors(&self) -> fn(u64, crate::execution::Failure) -> E {
         self.errors
     }
 
@@ -151,19 +150,14 @@ impl<K, F, G: Copy> BatchEvidence<K, F, G> {
     }
 }
 
-impl<K, F, G> BatchEvidence<K, F, G>
+impl<K, F, E> BatchEvidence<K, F, E>
 where
     K: Classifier,
-    F: FnMut(K::Event, &Deadline) -> Result<(), G::Error>,
-    G: Errors<Step = u64>,
+    F: FnMut(K::Event, &Deadline) -> Result<(), E>,
 {
-    pub(crate) fn validate(
-        &self,
-        batch: &Batch<K::Probe>,
-        execution: &Evidence,
-    ) -> Result<(), G::Error> {
+    pub(crate) fn validate(&self, batch: &Batch<K::Probe>, execution: &Evidence) -> Result<(), E> {
         validate_batch_evidence(
-            &self.errors,
+            self.errors,
             &batch.probes,
             batch.timeout,
             execution,
@@ -172,7 +166,7 @@ where
         )
     }
 
-    pub(crate) fn emit(&mut self, event: K::Event, deadline: &Deadline) -> Result<(), G::Error> {
+    pub(crate) fn emit(&mut self, event: K::Event, deadline: &Deadline) -> Result<(), E> {
         (self.emit)(event, deadline)
     }
 
@@ -182,7 +176,7 @@ where
         batch: &Batch<K::Probe>,
         execution: Evidence,
         deadline: &Deadline,
-    ) -> Result<ControlFlow<()>, G::Error> {
+    ) -> Result<ControlFlow<()>, E> {
         self.enforce(deadline)?;
         let Evidence {
             permit,
@@ -194,9 +188,10 @@ where
             stats: _,
         } = execution;
         if permit != batch.permit {
-            return Err(self
-                .errors
-                .invalid_evidence(batch.sequence, crate::evidence::Error::PermitMismatch));
+            return Err((self.errors)(
+                batch.sequence,
+                crate::execution::Failure::InvalidEvidence(crate::evidence::Error::PermitMismatch),
+            ));
         }
         self.record_diagnostics(diagnostics, deadline)?;
         self.enforce(deadline)?;
@@ -219,7 +214,7 @@ where
                 |response| classifier.classify(probe, sent, response),
                 |observation| classifier.rank(observation),
                 |observation| classifier.responder(observation),
-                || enforce_deadline(errors, deadline),
+                || enforce_deadline(*errors, deadline),
                 &mut passed,
             )?;
             has_response.push(best.is_some());
@@ -295,7 +290,7 @@ where
         frame: &Frame,
         event: impl FnOnce(Frame) -> K::Event,
         deadline: &Deadline,
-    ) -> Result<(), G::Error> {
+    ) -> Result<(), E> {
         let Self {
             state,
             classifier,
@@ -313,7 +308,7 @@ where
         probes: &[K::Probe],
         frames: Vec<Frame>,
         deadline: &Deadline,
-    ) -> Result<(), G::Error> {
+    ) -> Result<(), E> {
         let Self {
             errors,
             state,
@@ -324,7 +319,7 @@ where
         state.retain_undecoded(
             frames,
             &mut Events {
-                errors,
+                errors: *errors,
                 classifier,
                 emit,
                 probes,
@@ -337,7 +332,7 @@ where
         &mut self,
         diagnostics: Vec<Diagnostic>,
         deadline: &Deadline,
-    ) -> Result<(), G::Error> {
+    ) -> Result<(), E> {
         let Self {
             errors,
             state,
@@ -348,7 +343,7 @@ where
         state.record_diagnostics(
             diagnostics,
             &mut Events {
-                errors,
+                errors: *errors,
                 classifier,
                 emit,
                 probes: &[],
@@ -357,36 +352,35 @@ where
         )
     }
 
-    fn enforce(&self, deadline: &Deadline) -> Result<(), G::Error> {
-        enforce_deadline(&self.errors, deadline)
+    fn enforce(&self, deadline: &Deadline) -> Result<(), E> {
+        enforce_deadline(self.errors, deadline)
     }
 }
 
-struct Events<'e, K: Classifier, F, G> {
-    errors: &'e G,
+struct Events<'e, K: Classifier, F, E> {
+    errors: fn(u64, crate::execution::Failure) -> E,
     classifier: &'e K,
     emit: &'e mut F,
     probes: &'e [K::Probe],
     deadline: &'e Deadline,
 }
 
-impl<K, F, G> EvidenceSink for Events<'_, K, F, G>
+impl<K, F, E> EvidenceSink for Events<'_, K, F, E>
 where
     K: Classifier,
-    F: FnMut(K::Event, &Deadline) -> Result<(), G::Error>,
-    G: Errors,
+    F: FnMut(K::Event, &Deadline) -> Result<(), E>,
 {
-    type Error = G::Error;
+    type Error = E;
 
-    fn undecoded(&mut self, frame: Frame) -> Result<(), G::Error> {
+    fn undecoded(&mut self, frame: Frame) -> Result<(), E> {
         (self.emit)(self.classifier.undecoded(self.probes, frame), self.deadline)
     }
 
-    fn diagnostic(&mut self, diagnostic: Diagnostic) -> Result<(), G::Error> {
+    fn diagnostic(&mut self, diagnostic: Diagnostic) -> Result<(), E> {
         (self.emit)(self.classifier.diagnostic(diagnostic), self.deadline)
     }
 
-    fn check(&mut self) -> Result<(), G::Error> {
+    fn check(&mut self) -> Result<(), E> {
         enforce_deadline(self.errors, self.deadline)
     }
 }
@@ -445,14 +439,14 @@ where
     Ok(())
 }
 
-pub(crate) fn validate_batch_evidence<P: Sequenced, G: Errors<Step = u64>>(
-    errors: &G,
+pub(crate) fn validate_batch_evidence<P: Sequenced, E>(
+    errors: fn(u64, crate::execution::Failure) -> E,
     probes: &[P],
     timeout: Duration,
     execution: &Evidence,
     limits: EvidenceLimits,
     sent_packet_matches: impl FnMut(&P, &Packet) -> bool,
-) -> Result<(), G::Error> {
+) -> Result<(), E> {
     validate_batch_exchange_evidence(
         probes,
         timeout,
@@ -467,6 +461,6 @@ pub(crate) fn validate_batch_evidence<P: Sequenced, G: Errors<Step = u64>>(
             .and_then(|index| probes.get(index))
             .or_else(|| probes.first())
             .map_or(0, Sequenced::sequence);
-        errors.invalid_evidence(sequence, error)
+        (errors)(sequence, crate::execution::Failure::InvalidEvidence(error))
     })
 }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use crate::field::FieldValue;
+use crate::field;
 use crate::frame::LinkType;
 
 use super::limits::json_bytes;
@@ -61,9 +61,9 @@ pub struct Observation {
     pub(super) link_type: LinkType,
     pub(super) incomplete: Option<Incomplete>,
     pub(super) diagnostics: Vec<&'static str>,
-    pub(super) key_cells: Vec<Option<FieldValue>>,
+    pub(super) key_cells: Vec<Option<field::Value>>,
     pub(super) key_states: Vec<ValueState>,
-    pub(super) preserved: Vec<Option<FieldValue>>,
+    pub(super) preserved: Vec<Option<field::Value>>,
     pub(super) preserved_states: Vec<ValueState>,
     pub(super) expectations: Vec<ExpectationOutcome>,
     pub(super) retained_bytes: usize,
@@ -74,7 +74,7 @@ pub struct Observation {
 impl Observation {
     /// The complete, readable identity key. This clones values; use
     /// `is_keyed` when only testing whether a key exists.
-    pub fn key(&self) -> Option<Vec<FieldValue>> {
+    pub fn key(&self) -> Option<Vec<field::Value>> {
         self.is_keyed().then(|| {
             self.key_cells
                 .iter()
@@ -92,10 +92,10 @@ impl Observation {
             && self.key_cells.iter().all(Option::is_some)
     }
 
-    pub fn key_cells(&self) -> &[Option<FieldValue>] {
+    pub fn key_cells(&self) -> &[Option<field::Value>] {
         &self.key_cells
     }
-    pub fn preserved(&self) -> &[Option<FieldValue>] {
+    pub fn preserved(&self) -> &[Option<field::Value>] {
         &self.preserved
     }
     pub fn expectations(&self) -> &[ExpectationOutcome] {
@@ -109,7 +109,7 @@ pub struct ExpectationOutcome {
     /// Whether the declared `field == value` predicate held on this frame.
     pub satisfied: bool,
     /// The field's observed value, for violation evidence.
-    pub actual: Option<FieldValue>,
+    pub actual: Option<field::Value>,
     pub state: ValueState,
 }
 
@@ -118,7 +118,7 @@ pub(super) const MAX_OBSERVATION_DIAGNOSTICS: usize = 8;
 /// Conservative per-observation structural charge on top of encoded cells.
 const OBSERVATION_OVERHEAD_BYTES: usize = 256;
 
-fn encoded_len(values: &[Option<FieldValue>]) -> usize {
+fn encoded_len(values: &[Option<field::Value>]) -> usize {
     values.iter().fold(0usize, |total, cell| {
         total.saturating_add(match cell {
             Some(value) => json_bytes(value),

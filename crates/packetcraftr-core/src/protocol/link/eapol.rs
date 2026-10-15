@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::{FieldValue, WireValue},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -60,7 +60,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct EapolCodec;
 
-impl LayerCodec for EapolCodec {
+impl Codec for EapolCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &eapol_schema().protocol
     }
@@ -69,8 +69,8 @@ impl LayerCodec for EapolCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Eapol>(NAME, layer)?;
         ensure_encode_budget(NAME, EAPOL_LEN, context)?;
         let covered_payload = payload_without_padding(NAME, payload, context)?;
@@ -93,7 +93,7 @@ impl LayerCodec for EapolCodec {
         prefix.extend_from_slice(&length.to_be_bytes());
         let mut materialized = layer.clone();
         materialized.length = materialized_length;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(eapol_layout())
             .with_diagnostics(diagnostics))
     }
@@ -101,8 +101,8 @@ impl LayerCodec for EapolCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<EAPOL_LEN>() else {
             return Err(truncated(NAME, EAPOL_LEN, input.len()));
         };
@@ -115,7 +115,7 @@ impl LayerCodec for EapolCodec {
                 input.len(),
             ));
         }
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: eapol_layout(),
             layer: Box::new(Eapol {
                 version: header[0],
@@ -137,7 +137,7 @@ impl LayerCodec for EapolCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Eapol::default(), fields)
     }
@@ -147,9 +147,9 @@ impl LayerCodec for EapolCodec {
 mod tests {
     use super::*;
 
-    fn decode(input: &[u8]) -> Result<DecodedLayer, crate::codec::Error> {
+    fn decode(input: &[u8]) -> Result<Decoded, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
-        let context = LayerDecodeContext {
+        let context = DecodeContext {
             parent: None,
             registry: &registry,
             network: None,

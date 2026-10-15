@@ -23,6 +23,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
+        let operation = crate::execution::Operation::new(self, std::time::Duration::MAX);
         let stop = request.stop;
         let collection = self.deadline(request.timeout);
         // Post-window events get one more finite allowance; they cannot fall inside the window.
@@ -35,11 +36,11 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             .map_err(|source| Error::Output {
                 source: Box::new(source),
             })?;
-        let prepared = self.prepare_exchange(request)?;
+        let prepared = self.prepare_exchange(request, &operation)?;
         let mut answered = AnsweredRequests::new(prepared.packets.len());
         let mut stop_predicate =
             |request_index: usize, _: &Packet, _: &DecodedPacket| answered.record(request_index);
-        let transaction = self.arm_capture(prepared)?;
+        let transaction = self.arm_capture(prepared, &operation)?;
         transaction
             .execute(
                 self.providers.transmit(),
@@ -61,11 +62,13 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub(crate) fn exchange_hooked(
         &self,
         request: Request,
+        operation: &crate::execution::Operation,
         workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
         stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
     ) -> Result<super::WorkflowEvidence, Error> {
         let mut observed = Observed::default();
-        let transaction = self.arm_capture(self.prepare_exchange(request)?)?;
+        let transaction =
+            self.arm_capture(self.prepare_exchange(request, operation)?, operation)?;
         let response_deadline = transaction.window.ends_at();
         let (report, unsolicited_ingress) = transaction.execute(
             self.providers.transmit(),

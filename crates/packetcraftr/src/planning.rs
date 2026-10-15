@@ -45,10 +45,12 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             options,
             self.providers.route(),
             deadline,
+            &self.interfaces,
             || Ok(()),
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn authorize_and_plan<R: packetcraftr_netio::route::Provider>(
         &self,
         packet: &Packet,
@@ -56,6 +58,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         options: &Options,
         routes: &R,
         deadline: &Deadline,
+        interfaces: &crate::route::ResolvedInterface,
         before_lookup: impl FnOnce() -> Result<(), Error>,
     ) -> Result<Plan, Error> {
         self.policy.validate()?;
@@ -67,9 +70,11 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         // so provider-derived selections cannot bypass policy either.
         self.policy.authorize_packet_destinations(packet)?;
         before_lookup()?;
-        let options = self.resolve_interface(options, deadline)?;
-        let plan = plan_route(packet, destination, &options, routes, deadline)
-            .inspect_err(|error| self.forget_rejected_interface(&options, error, deadline))?;
+        let options = self.resolve_interface(options, deadline, interfaces)?;
+        let plan =
+            plan_route(packet, destination, &options, routes, deadline).inspect_err(|error| {
+                self.forget_rejected_interface(&options, error, deadline, interfaces);
+            })?;
         self.policy.authorize_packet_sources(packet, &plan)?;
         for destination in &plan.visited_destinations {
             self.policy.authorize_destination(*destination)?;
@@ -84,6 +89,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         options: &Options,
         error: &RouteError,
         deadline: &Deadline,
+        interfaces: &crate::route::ResolvedInterface,
     ) {
         let rejected = matches!(
             error,
@@ -95,7 +101,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             && deadline.enforce().is_ok()
             && let Some(id) = options.interface.as_ref().and_then(Interface::id)
         {
-            self.interfaces.forget(id);
+            interfaces.forget(id);
         }
     }
 
@@ -103,6 +109,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         &self,
         options: &'o Options,
         deadline: &Deadline,
+        interfaces: &crate::route::ResolvedInterface,
     ) -> Result<Cow<'o, Options>, Error> {
         let Some(selector) = options
             .interface
@@ -111,9 +118,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         else {
             return Ok(Cow::Borrowed(options));
         };
-        let id = self
-            .interfaces
-            .resolve(selector, self.providers.interface(), deadline)?;
+        let id = interfaces.resolve(selector, self.providers.interface(), deadline)?;
         Ok(Cow::Owned(Options {
             interface: Some(id.into()),
             ..options.clone()

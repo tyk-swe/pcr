@@ -128,7 +128,7 @@ mod tests {
             stage: crate::scan::Stage::Scan,
             address: "192.0.2.1".parse().unwrap(),
             scope: None,
-            endpoint: crate::probe::ProbeEndpoint::Tcp { port: 80 },
+            endpoint: crate::probe::Endpoint::Tcp { port: 80 },
             tcp_scan: mode,
             sctp_scan: Default::default(),
             attempt: 1,

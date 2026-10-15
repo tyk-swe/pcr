@@ -16,7 +16,7 @@ use crate::execution::limits::{check_limits, check_rate, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
-use crate::dns::error::{Attempts, Error};
+use crate::dns::error::{Error, attempt_error};
 use crate::dns::wire::{self, canonical_query_name};
 use crate::dns::{
     DEFAULT_MAX_NAME_POINTERS, DEFAULT_MAX_RECORDS, DEFAULT_MAX_REJECTED_RECORDS,
@@ -301,7 +301,7 @@ impl Request {
                 maximum: MAX_WAIT,
             });
         }
-        check_rate(&Attempts, "queries_per_second", self.queries_per_second)?;
+        check_rate(attempt_error, "queries_per_second", self.queries_per_second)?;
         canonical_query_name(&self.query_name).map_err(Error::Query)?;
         Ok(())
     }

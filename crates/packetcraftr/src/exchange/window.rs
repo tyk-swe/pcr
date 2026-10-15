@@ -40,6 +40,11 @@ impl Window {
         })
     }
 
+    pub(crate) fn with_parent(mut self, parent: Arc<Deadline>) -> Self {
+        self.deadline = self.deadline.with_parent(Some(parent));
+        self
+    }
+
     pub(crate) fn deadline(&self) -> &Deadline {
         &self.deadline
     }

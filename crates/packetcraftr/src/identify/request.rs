@@ -53,7 +53,7 @@ impl Endpoint {
     }
 }
 
-/// Attempts and application bytes available within one budget scope.
+/// attempt_error and application bytes available within one budget scope.
 /// A TCP connection is used for exactly one probe attempt; retransmissions
 /// are fresh connections and consume the enclosing host and probe budgets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

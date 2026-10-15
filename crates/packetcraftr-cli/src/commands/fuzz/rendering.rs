@@ -11,6 +11,7 @@ use crate::rendering::{
 };
 
 pub(super) fn render_text(
+    invocation: &crate::invocation::Invocation,
     published: output::envelope::Published<output::fuzz::Report>,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
@@ -20,45 +21,63 @@ pub(super) fn render_text(
         stats,
     } = published;
     let stats = stats.unwrap_or_default();
-    write_stdout_line(format_args!(
-        "mode={} seed={} first_case={} generated={} built={} rejected={}",
-        result.mode.as_str(),
-        result.seed,
-        result.first_case,
-        result.cases_generated,
-        result.cases_built,
-        result.cases_rejected,
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "mode={} seed={} first_case={} generated={} built={} rejected={}",
+            result.mode.as_str(),
+            result.seed,
+            result.first_case,
+            result.cases_generated,
+            result.cases_built,
+            result.cases_rejected,
+        ),
+    )?;
     for case in &result.cases {
-        crate::cancellation::check()?;
-        write_stdout_line(format_args!(
-            "case={} seed={} strategy={} target={}.{} outcome={} length={} reproduce=--seed {} --first-case {} --cases 1",
-            case.index,
-            case.seed,
-            case.mutation.strategy,
-            case.mutation.layer,
-            case.mutation.field,
-            case.outcome.as_str(),
-            case.frame.as_ref().map(|frame| frame.length).unwrap_or(0),
-            case.reproduction.operation_seed,
-            case.reproduction.case_index,
-        ))?;
+        invocation.check()?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "case={} seed={} strategy={} target={}.{} outcome={} length={} reproduce=--seed {} --first-case {} --cases 1",
+                case.index,
+                case.seed,
+                case.mutation.strategy,
+                case.mutation.layer,
+                case.mutation.field,
+                case.outcome.as_str(),
+                case.frame.as_ref().map(|frame| frame.length).unwrap_or(0),
+                case.reproduction.operation_seed,
+                case.reproduction.case_index,
+            ),
+        )?;
         let original = mutation_json(&case.mutation.original)?;
         let value = mutation_json(&case.mutation.value)?;
-        write_stdout_line(format_args!("  original={original} value={value}"))?;
+        write_stdout_line(
+            invocation,
+            format_args!("  original={original} value={value}"),
+        )?;
         if let Some(frame) = &case.frame {
-            write_stdout_line(format_args!("  frame {}", spaced_hex(frame.bytes())))?;
+            write_stdout_line(
+                invocation,
+                format_args!("  frame {}", spaced_hex(frame.bytes())),
+            )?;
         }
         if let Some(error) = &case.error {
-            write_stdout_line(format_args!(
-                "  error kind={} code={} message={}",
-                error.kind.as_str(),
-                error.code,
-                error.message,
-            ))?;
+            write_stdout_line(
+                invocation,
+                format_args!(
+                    "  error kind={} code={} message={}",
+                    error.kind.as_str(),
+                    error.code,
+                    error.message,
+                ),
+            )?;
         }
         if let Some(sent) = &case.sent {
-            write_stdout_line(format_args!("  sent {}", captured_frame_text(sent)))?;
+            write_stdout_line(
+                invocation,
+                format_args!("  sent {}", captured_frame_text(sent)),
+            )?;
         }
         for (kind, frames) in [
             ("response", &case.responses),
@@ -66,18 +85,24 @@ pub(super) fn render_text(
             ("undecoded", &case.undecoded),
         ] {
             for frame in frames {
-                write_stdout_line(format_args!("  {kind} {}", captured_frame_text(frame)))?;
+                write_stdout_line(
+                    invocation,
+                    format_args!("  {kind} {}", captured_frame_text(frame)),
+                )?;
             }
         }
-        render_diagnostics_text(&case.diagnostics)?;
-        presentation.details("Case evidence", case)?;
+        render_diagnostics_text(invocation, &case.diagnostics)?;
+        presentation.details(invocation, "Case evidence", case)?;
     }
-    crate::cancellation::check()?;
-    write_stdout_line(format_args!(
-        "fuzz completed {} case(s), {} packet operation(s), {} byte(s)",
-        result.cases_generated, stats.packets_completed, stats.bytes
-    ))?;
-    render_diagnostics_text(&diagnostics)
+    invocation.check()?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "fuzz completed {} case(s), {} packet operation(s), {} byte(s)",
+            result.cases_generated, stats.packets_completed, stats.bytes
+        ),
+    )?;
+    render_diagnostics_text(invocation, &diagnostics)
 }
 
 pub(super) fn render_offline_complete(

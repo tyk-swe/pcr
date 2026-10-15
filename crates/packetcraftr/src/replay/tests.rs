@@ -539,7 +539,7 @@ mod client {
         Builder::new(packetcraftr_core::protocol::builtin::registry())
             .build(
                 packet,
-                packetcraftr_core::codec::Context::default(),
+                packetcraftr_core::codec::Addresses::default(),
                 packetcraftr_core::build::Options::default(),
             )
             .expect("replay fixture builds")

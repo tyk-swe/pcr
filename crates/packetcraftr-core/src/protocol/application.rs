@@ -21,12 +21,12 @@ pub(crate) use tls::TlsCodec;
 /// Raw byte-string fields also accept text, taken as its UTF-8 bytes.
 pub(crate) fn byte_string_field(
     schema: &'static crate::layer::Schema,
-    value: crate::field::FieldValue,
+    value: crate::field::Value,
     name: &str,
 ) -> Result<bytes::Bytes, crate::field::Error> {
     match value {
-        crate::field::FieldValue::Bytes(value) => Ok(value),
-        crate::field::FieldValue::Text(value) => Ok(bytes::Bytes::from(value.into_bytes())),
+        crate::field::Value::Bytes(value) => Ok(value),
+        crate::field::Value::Text(value) => Ok(bytes::Bytes::from(value.into_bytes())),
         _ => Err(crate::protocol::common::wrong_type(
             schema,
             name,

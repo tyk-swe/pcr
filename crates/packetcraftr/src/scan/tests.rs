@@ -18,14 +18,14 @@ use packetcraftr_core::protocol::{
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet};
 
 use super::engine;
-use super::error::Probes;
+use super::error::probe_error;
 use super::executor::{PipelineEvent, PipelineOptions, Pipelined};
 use super::plan::packet::probe_packet;
 use super::{Aggregate, Collector, Event, Limits, Probe, Report, Request};
 use crate::Sink;
 use crate::clock::Clock;
 use crate::execution::Admission;
-use crate::execution::{Errors as _, Executor, publisher};
+use crate::execution::{Executor, publisher};
 use crate::policy::Authorizer;
 use crate::probe::Batch;
 use crate::probe::Evidence;
@@ -182,7 +182,7 @@ where
     let publish = publisher(
         runtime,
         sink,
-        |error| Probes.duration_limit(0, error),
+        |error| (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error)),
         |source| Error::Output { source },
     )?;
     engine::run(
@@ -204,7 +204,7 @@ fn tcp_scan_request(target: Target) -> Request {
         max_in_flight: 1,
         targets: target.into(),
         address_family: Family::Any,
-        endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
+        endpoints: vec![crate::probe::Endpoint::Tcp { port: 80 }],
         discovery: Default::default(),
         attempts: 1,
         adaptive: None,
@@ -285,7 +285,7 @@ fn udp_payload_reject() {
     use packetcraftr_core::error::Classified as _;
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let mut request = tcp_scan_request(Target::Address(address));
-    request.endpoints = vec![crate::probe::ProbeEndpoint::Udp { port: 80 }];
+    request.endpoints = vec![crate::probe::Endpoint::Udp { port: 80 }];
     request.udp_payload = bytes::Bytes::from_static(b"payload");
     let mut policy = private_policy();
     policy.max_bytes_per_operation = super::IPV4_PROBE_BYTES;
@@ -332,7 +332,7 @@ fn udp_payload_reject() {
     request.udp_payload = vec![0; super::MAX_UDP_PAYLOAD_BYTES + 1].into();
     assert!(request.validate().is_err());
     request.udp_payload = bytes::Bytes::from_static(b"x");
-    request.endpoints = vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }];
+    request.endpoints = vec![crate::probe::Endpoint::Tcp { port: 80 }];
     assert!(request.validate().is_err());
 }
 
@@ -408,7 +408,7 @@ fn unsolicited_duplicate_requires_a_winner_and_active_correlation() {
         stage: super::Stage::Scan,
         address: remote.into(),
         scope: None,
-        endpoint: crate::probe::ProbeEndpoint::Tcp { port: 80 },
+        endpoint: crate::probe::Endpoint::Tcp { port: 80 },
         attempt: 1,
         udp_payload: Default::default(),
         udp_profile: None,
@@ -524,7 +524,7 @@ impl crate::policy::Authorizer for TargetSetAuthorizer {
 
 fn icmp_scan_request(target: Target, attempts: u32, timeout: Duration) -> Request {
     Request {
-        endpoints: vec![crate::probe::ProbeEndpoint::Icmp],
+        endpoints: vec![crate::probe::Endpoint::Icmp],
         attempts,
         timeout,
         ..tcp_scan_request(target)
@@ -540,7 +540,7 @@ struct EchoReplyExecutor {
 impl Executor<Batch<Probe>> for EchoReplyExecutor {
     fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
-        let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
+        let (IpAddr::V4(remote), crate::probe::Endpoint::Icmp) =
             (batch.probes[0].address, batch.probes[0].endpoint)
         else {
             return Ok(execution);
@@ -574,7 +574,7 @@ impl Executor<Batch<Probe>> for EveryOtherEchoExecutor {
             return Ok(execution);
         }
         let latency = Duration::from_micros(250 + 250 * (batch.probes[0].sequence / 2));
-        let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
+        let (IpAddr::V4(remote), crate::probe::Endpoint::Icmp) =
             (batch.probes[0].address, batch.probes[0].endpoint)
         else {
             return Ok(execution);
@@ -618,7 +618,7 @@ struct StaleEchoExecutor {
 impl Executor<Batch<Probe>> for StaleEchoExecutor {
     fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
-        let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
+        let (IpAddr::V4(remote), crate::probe::Endpoint::Icmp) =
             (batch.probes[0].address, batch.probes[0].endpoint)
         else {
             return Ok(execution);
@@ -669,7 +669,7 @@ fn scoped_request(targets: crate::target::Selection, max_in_flight: usize) -> Re
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: Family::Any,
-        endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 443 }],
+        endpoints: vec![crate::probe::Endpoint::Tcp { port: 443 }],
         discovery: Default::default(),
         attempts: 1,
         adaptive: None,
@@ -980,7 +980,7 @@ fn discovery_composes_one_record_per_family_and_scans_only_responders() {
     };
     request.discovery = Options {
         mode: Mode::Before,
-        probes: vec![crate::probe::ProbeEndpoint::Icmp],
+        probes: vec![crate::probe::Endpoint::Icmp],
         ..Options::default()
     };
     // Only IPv4 echoes draw a reply from this fixture.
@@ -1099,15 +1099,15 @@ fn neighbor_requests_are_paced_retried_and_counted_like_probes() {
 #[test]
 fn icmp_discovery_pairs_with_a_multi_port_scan() {
     use super::discovery::{Mode, Options};
-    use crate::probe::ProbeEndpoint;
+    use crate::probe;
     let mut request = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))));
     request.endpoints = vec![
-        ProbeEndpoint::Tcp { port: 22 },
-        ProbeEndpoint::Tcp { port: 80 },
+        probe::Endpoint::Tcp { port: 22 },
+        probe::Endpoint::Tcp { port: 80 },
     ];
     request.discovery = Options {
         mode: Mode::Before,
-        probes: vec![ProbeEndpoint::Icmp],
+        probes: vec![probe::Endpoint::Icmp],
         ..Options::default()
     };
     request
@@ -1115,19 +1115,19 @@ fn icmp_discovery_pairs_with_a_multi_port_scan() {
         .expect("ICMP discovery before a two-port scan");
 
     // The scan's own portless ICMP endpoint still stands alone.
-    request.endpoints.insert(0, ProbeEndpoint::Icmp);
+    request.endpoints.insert(0, probe::Endpoint::Icmp);
     assert!(matches!(request.validate(), Err(Error::InvalidPort { .. })));
 }
 
 #[test]
 fn discovery_and_scan_endpoints_share_the_port_budget() {
     use super::discovery::{Mode, Options};
-    use crate::probe::ProbeEndpoint;
+    use crate::probe;
     let mut request = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))));
-    request.endpoints = vec![ProbeEndpoint::Udp { port: 80 }];
+    request.endpoints = vec![probe::Endpoint::Udp { port: 80 }];
     request.discovery = Options {
         mode: Mode::Before,
-        probes: vec![ProbeEndpoint::Tcp { port: 80 }],
+        probes: vec![probe::Endpoint::Tcp { port: 80 }],
         ..Options::default()
     };
     // Each list fits alone; their distinct union does not.
@@ -1308,7 +1308,7 @@ fn multicast_and_broadcast_targets_budget_and_bound_no_neighbor_request() {
 #[test]
 fn explicit_neighbor_discovery_budgets_no_request_for_a_multicast_or_broadcast_target() {
     use super::discovery::{Mode, NeighborOutcome, Options};
-    use crate::probe::ProbeEndpoint;
+    use crate::probe;
     for target in [
         IpAddr::V4(Ipv4Addr::new(233, 252, 0, 1)),
         IpAddr::V4(Ipv4Addr::BROADCAST),
@@ -1317,7 +1317,7 @@ fn explicit_neighbor_discovery_budgets_no_request_for_a_multicast_or_broadcast_t
         request.discovery = Options {
             mode: Mode::Only,
             neighbor: true,
-            probes: vec![ProbeEndpoint::Icmp],
+            probes: vec![probe::Endpoint::Icmp],
             ..Options::default()
         };
         request.endpoints.clear();
@@ -1353,13 +1353,13 @@ fn explicit_neighbor_discovery_budgets_no_request_for_a_multicast_or_broadcast_t
 #[test]
 fn explicit_neighbor_limits_bind_only_a_target_whose_neighbor_resolves() {
     use super::discovery::{Mode, NeighborOutcome, Options};
-    use crate::probe::ProbeEndpoint;
+    use crate::probe;
     fn run_on(target: IpAddr) -> Result<(), Error> {
         let mut request = tcp_scan_request(Target::Address(target));
         request.discovery = Options {
             mode: Mode::Only,
             neighbor: true,
-            probes: vec![ProbeEndpoint::Icmp],
+            probes: vec![probe::Endpoint::Icmp],
             ..Options::default()
         };
         request.endpoints.clear();
@@ -1459,7 +1459,7 @@ impl Executor<Batch<Probe>> for SkippedHostExecutor {
 #[test]
 fn skipped_hosts_release_their_evidence_reservation() {
     use super::discovery::{Mode, Options, State};
-    use crate::probe::ProbeEndpoint;
+    use crate::probe;
     let answered = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     let silent = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11));
     let mut request = tcp_scan_request(Target::Address(answered));
@@ -1471,7 +1471,7 @@ fn skipped_hosts_release_their_evidence_reservation() {
     };
     request.discovery = Options {
         mode: Mode::Before,
-        probes: vec![ProbeEndpoint::Icmp],
+        probes: vec![probe::Endpoint::Icmp],
         ..Options::default()
     };
     // Exactly the scanned probe's slot plus one captured frame fits. A
@@ -1554,7 +1554,7 @@ impl Pipelined for NeighborAwareExecutor {
 #[test]
 fn a_silent_neighbor_sends_no_ip_probes_and_is_never_scanned() {
     use super::discovery::{Link, Mode, NeighborOutcome, Options, Scan, State, Unresponsive};
-    use crate::probe::ProbeEndpoint;
+    use crate::probe;
     let silent = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     let answered = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11));
     let mut request = tcp_scan_request(Target::Address(answered));
@@ -1569,7 +1569,7 @@ fn a_silent_neighbor_sends_no_ip_probes_and_is_never_scanned() {
     request.discovery = Options {
         mode: Mode::Before,
         neighbor: true,
-        probes: vec![ProbeEndpoint::Icmp],
+        probes: vec![probe::Endpoint::Icmp],
         unresponsive: Unresponsive::Scan,
     };
     let mut executor = NeighborAwareExecutor {
@@ -1683,7 +1683,7 @@ impl Pipelined for LateEchoNeighbors {
 #[test]
 fn a_silent_neighbors_skipped_probes_release_their_evidence_reservation() {
     use super::discovery::{Link, Mode, NeighborOutcome, Options, State};
-    use crate::probe::ProbeEndpoint;
+    use crate::probe;
     let silent = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     let answered = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11));
     let mut request = tcp_scan_request(Target::Address(answered));
@@ -1696,7 +1696,7 @@ fn a_silent_neighbors_skipped_probes_release_their_evidence_reservation() {
     request.discovery = Options {
         mode: Mode::Only,
         neighbor: true,
-        probes: vec![ProbeEndpoint::Icmp],
+        probes: vec![probe::Endpoint::Icmp],
         ..Options::default()
     };
     request.endpoints.clear();
@@ -2055,7 +2055,7 @@ fn a_next_hop_silent_past_the_deadline_fails_the_scan() {
     request.endpoints = Vec::new();
     request.discovery = Options {
         mode: Mode::Only,
-        probes: vec![crate::probe::ProbeEndpoint::Icmp],
+        probes: vec![crate::probe::Endpoint::Icmp],
         ..Options::default()
     };
     let mut clock = crate::test_support::RecordingClock::default();
@@ -2161,13 +2161,13 @@ fn an_implicit_neighbor_request_paces_like_a_probe() {
 #[test]
 fn explicit_neighbor_discovery_covers_the_implicit_resolution_budget() {
     use super::discovery::{Link, Mode, NeighborOutcome, Options};
-    use crate::probe::ProbeEndpoint;
+    use crate::probe;
     let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     let mut request = tcp_scan_request(Target::Address(target));
     request.discovery = Options {
         mode: Mode::Only,
         neighbor: true,
-        probes: vec![ProbeEndpoint::Icmp],
+        probes: vec![probe::Endpoint::Icmp],
         ..Options::default()
     };
     request.endpoints.clear();
@@ -2331,8 +2331,8 @@ fn a_fixed_operation_reports_fixed_scheduling_and_never_omits() {
     let mut request = tcp_scan_request(Target::Address(target));
     request.max_in_flight = 4;
     request.endpoints = vec![
-        crate::probe::ProbeEndpoint::Tcp { port: 80 },
-        crate::probe::ProbeEndpoint::Tcp { port: 443 },
+        crate::probe::Endpoint::Tcp { port: 80 },
+        crate::probe::Endpoint::Tcp { port: 443 },
     ];
     let mut executor = WaveExecutor {
         omit: [0usize].into_iter().collect(),
@@ -2418,8 +2418,8 @@ fn a_slow_output_callback_omits_the_expired_wave_entry() {
     request.max_in_flight = 2;
     request.attempts = 1;
     request.endpoints = vec![
-        crate::probe::ProbeEndpoint::Tcp { port: 80 },
-        crate::probe::ProbeEndpoint::Tcp { port: 443 },
+        crate::probe::Endpoint::Tcp { port: 80 },
+        crate::probe::Endpoint::Tcp { port: 443 },
     ];
     request.timeout = Duration::from_millis(20);
     request.adaptive = Some(super::Adaptive {
@@ -2475,8 +2475,8 @@ fn an_unsettled_wave_entry_fails_the_scan() {
     let mut request = tcp_scan_request(Target::Address(target));
     request.max_in_flight = 2;
     request.endpoints = vec![
-        crate::probe::ProbeEndpoint::Tcp { port: 80 },
-        crate::probe::ProbeEndpoint::Tcp { port: 443 },
+        crate::probe::Endpoint::Tcp { port: 80 },
+        crate::probe::Endpoint::Tcp { port: 443 },
     ];
     request.timeout = Duration::from_millis(20);
     request.adaptive = Some(adaptive_config());
@@ -2588,8 +2588,8 @@ fn adaptive_preflight_interleaves_hosts_before_attempts() {
         crate::target::SelectedAddress::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))),
     ];
     let endpoints = [
-        crate::probe::ProbeEndpoint::Tcp { port: 80 },
-        crate::probe::ProbeEndpoint::Tcp { port: 81 },
+        crate::probe::Endpoint::Tcp { port: 80 },
+        crate::probe::Endpoint::Tcp { port: 81 },
     ];
     let mut request = tcp_scan_request(Target::Address(targets[0].address));
     request.targets.include = targets
@@ -2775,7 +2775,7 @@ struct OrdinalsSpy {
     wave: WaveExecutor,
     echo: Option<Ipv4Addr>,
     probed: Vec<(super::Stage, u64, u32)>,
-    admitted: std::collections::BTreeMap<u64, (IpAddr, crate::probe::ProbeEndpoint, u32, String)>,
+    admitted: std::collections::BTreeMap<u64, (IpAddr, crate::probe::Endpoint, u32, String)>,
 }
 
 impl Executor<Batch<Probe>> for OrdinalsSpy {
@@ -2808,7 +2808,7 @@ impl Pipelined for OrdinalsSpy {
             self.probed
                 .push((probe.stage, probe.sequence, probe.attempt));
             let (sent, mut execution) = self.wave.evidence_for(batch)?;
-            let echoes = matches!(probe.endpoint, crate::probe::ProbeEndpoint::Icmp)
+            let echoes = matches!(probe.endpoint, crate::probe::Endpoint::Icmp)
                 && matches!(
                     (probe.address, self.echo),
                     (IpAddr::V4(address), Some(echo)) if address == echo
@@ -2882,7 +2882,7 @@ fn ordinals_request(
     silent: Ipv4Addr,
     answered: Ipv4Addr,
     neighbors: Vec<super::discovery::NeighborOutcome>,
-    endpoints: Vec<crate::probe::ProbeEndpoint>,
+    endpoints: Vec<crate::probe::Endpoint>,
     dns: bool,
 ) -> (Request, OrdinalsSpy, AddressListAuthorizer) {
     use super::discovery::{Mode, Options, Unresponsive};
@@ -2898,7 +2898,7 @@ fn ordinals_request(
     request.discovery = Options {
         mode: Mode::Before,
         neighbor: true,
-        probes: vec![crate::probe::ProbeEndpoint::Icmp],
+        probes: vec![crate::probe::Endpoint::Icmp],
         unresponsive: Unresponsive::Skip,
     };
     request.endpoints = endpoints;
@@ -2956,7 +2956,7 @@ fn adaptive_sequences_keep_a_neighbor_skipped_hosts_original_ordinals() {
         silent,
         answered,
         vec![NeighborOutcome::Silent, NeighborOutcome::Silent, resolved],
-        vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
+        vec![crate::probe::Endpoint::Tcp { port: 80 }],
         false,
     );
     let mut clock = crate::test_support::RecordingClock::default();
@@ -3009,7 +3009,7 @@ fn adaptive_sequences_stay_stable_when_discovery_filters_a_host() {
         silent,
         answered,
         vec![routed(), routed()],
-        vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
+        vec![crate::probe::Endpoint::Tcp { port: 80 }],
         false,
     );
     let mut clock = crate::test_support::RecordingClock::default();
@@ -3043,7 +3043,7 @@ fn adaptive_sequences_stay_stable_when_discovery_filters_a_host() {
 #[derive(Default)]
 struct PreflightSpy {
     wave: WaveExecutor,
-    admitted: std::collections::BTreeMap<u64, (IpAddr, crate::probe::ProbeEndpoint, u32, String)>,
+    admitted: std::collections::BTreeMap<u64, (IpAddr, crate::probe::Endpoint, u32, String)>,
 }
 
 impl Executor<Batch<Probe>> for PreflightSpy {
@@ -3125,9 +3125,9 @@ fn adaptive_preflight_admits_the_exact_probes_it_later_sends() {
         .map(|address| crate::target::Specification::Target(Target::Address(*address)))
         .collect();
     request.endpoints = vec![
-        crate::probe::ProbeEndpoint::Tcp { port: 80 },
-        crate::probe::ProbeEndpoint::Udp { port: 53 },
-        crate::probe::ProbeEndpoint::Udp { port: 123 },
+        crate::probe::Endpoint::Tcp { port: 80 },
+        crate::probe::Endpoint::Udp { port: 53 },
+        crate::probe::Endpoint::Udp { port: 123 },
     ];
     request.udp_profiles.insert(
         53,
@@ -3187,8 +3187,8 @@ fn adaptive_sequences_stay_stable_when_discovery_filters_a_host_with_dns() {
         answered,
         vec![routed(), routed()],
         vec![
-            crate::probe::ProbeEndpoint::Tcp { port: 80 },
-            crate::probe::ProbeEndpoint::Udp { port: 53 },
+            crate::probe::Endpoint::Tcp { port: 80 },
+            crate::probe::Endpoint::Udp { port: 53 },
         ],
         true,
     );

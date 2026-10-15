@@ -22,22 +22,34 @@ pub(crate) fn ip_event_sink(
     }
 }
 
-pub(crate) fn render_scope(scope: &analysis::scope::Definition) -> Result<(), CliError> {
+pub(crate) fn render_scope(
+    invocation: &crate::invocation::Invocation,
+    scope: &analysis::scope::Definition,
+) -> Result<(), CliError> {
     let scope = crate::output::analysis::Scope::try_from(scope.clone())?;
-    crate::rendering::write_stdout_line(format_args!(
-        "scope {}: interface {}, encapsulation {}",
-        scope.id,
-        crate::rendering::optional_display(scope.interface),
-        crate::rendering::encapsulation_text(&scope.encapsulation)
-    ))
+    crate::rendering::write_stdout_line(
+        invocation,
+        format_args!(
+            "scope {}: interface {}, encapsulation {}",
+            scope.id,
+            crate::rendering::optional_display(scope.interface),
+            crate::rendering::encapsulation_text(&scope.encapsulation)
+        ),
+    )
 }
 
-pub(crate) fn render_clock(clock: &analysis::ClockReport) -> Result<(), CliError> {
-    crate::rendering::write_stdout_line(format_args!(
-        "capture clock: {} regressing frame(s), largest rollback {}, largest forward step {} at frame {}; expiry follows the high-water mark",
-        clock.regressions,
-        crate::rendering::duration_text(clock.max_regression),
-        crate::rendering::duration_text(clock.max_forward_step),
-        crate::rendering::optional_display(clock.max_forward_step_frame),
-    ))
+pub(crate) fn render_clock(
+    invocation: &crate::invocation::Invocation,
+    clock: &analysis::ClockReport,
+) -> Result<(), CliError> {
+    crate::rendering::write_stdout_line(
+        invocation,
+        format_args!(
+            "capture clock: {} regressing frame(s), largest rollback {}, largest forward step {} at frame {}; expiry follows the high-water mark",
+            clock.regressions,
+            crate::rendering::duration_text(clock.max_regression),
+            crate::rendering::duration_text(clock.max_forward_step),
+            crate::rendering::optional_display(clock.max_forward_step_frame),
+        ),
+    )
 }

@@ -10,11 +10,10 @@ use bytes::Bytes;
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::build::Options;
 use packetcraftr_core::codec::{
-    DecodedLayer, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-    LayerEncodeContext, Mode,
+    Codec, DecodeContext, Decoded, EncodeContext, Encoded, Error as CodecError, Mode,
 };
 use packetcraftr_core::diagnostic::{Diagnostic, Severity};
-use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::field;
 use packetcraftr_core::fuzz::{
     Campaign, Error as FuzzError, Limits, Report, Request, Strategy, run as fuzz,
 };
@@ -61,7 +60,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug)]
 struct DriftCodec;
 
-impl LayerCodec for DriftCodec {
+impl Codec for DriftCodec {
     fn protocol_id(&self) -> &'static Id {
         &drift_schema().protocol
     }
@@ -70,8 +69,8 @@ impl LayerCodec for DriftCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        _context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+        _context: &EncodeContext<'_>,
+    ) -> Result<Encoded, CodecError> {
         let drift = layer
             .downcast_ref::<Drift>()
             .ok_or_else(|| CodecError::WrongLayer {
@@ -85,16 +84,12 @@ impl LayerCodec for DriftCodec {
             });
         }
         Ok(
-            EncodedLayer::header(vec![drift.value, drift.quirk], Box::new(drift.clone()))
+            Encoded::header(vec![drift.value, drift.quirk], Box::new(drift.clone()))
                 .with_fields(drift_layout()),
         )
     }
 
-    fn decode(
-        &self,
-        input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, CodecError> {
+    fn decode(&self, input: Bytes, _context: &DecodeContext<'_>) -> Result<Decoded, CodecError> {
         let [value, quirk, ..] = input[..] else {
             return Err(CodecError::Truncated {
                 protocol: *self.protocol_id(),
@@ -111,14 +106,14 @@ impl LayerCodec for DriftCodec {
             quirk,
             unbuildable: quirk == QUIRK_UNBUILDABLE,
         };
-        let mut decoded = DecodedLayer::terminal(Box::new(layer), 2);
+        let mut decoded = Decoded::terminal(Box::new(layer), 2);
         decoded.fields = drift_layout();
         Ok(decoded)
     }
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, CodecError> {
         let mut layer = Drift::default();
         for (name, value) in fields {
@@ -236,7 +231,7 @@ fn rebuild_bounded_by_byte_budget_nothing() {
 #[derive(Debug)]
 struct CancelOnMutatedDecode(Cancellation, Arc<AtomicUsize>);
 
-impl LayerCodec for CancelOnMutatedDecode {
+impl Codec for CancelOnMutatedDecode {
     fn protocol_id(&self) -> &'static Id {
         DriftCodec.protocol_id()
     }
@@ -245,17 +240,13 @@ impl LayerCodec for CancelOnMutatedDecode {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, CodecError> {
         self.1.fetch_add(1, Ordering::SeqCst);
         DriftCodec.encode(layer, payload, context)
     }
 
-    fn decode(
-        &self,
-        input: Bytes,
-        context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, CodecError> {
+    fn decode(&self, input: Bytes, context: &DecodeContext<'_>) -> Result<Decoded, CodecError> {
         if input.first() != Some(&0x10) {
             self.0.cancel();
         }
@@ -264,7 +255,7 @@ impl LayerCodec for CancelOnMutatedDecode {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, CodecError> {
         DriftCodec.make_layer(fields)
     }

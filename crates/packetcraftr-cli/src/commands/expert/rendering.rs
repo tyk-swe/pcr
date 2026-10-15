@@ -31,6 +31,7 @@ impl State {
 }
 
 pub(super) fn render_record(
+    invocation: &crate::invocation::Invocation,
     format: Format,
     finding: output::expert::Finding,
     state: &mut State,
@@ -38,21 +39,27 @@ pub(super) fn render_record(
 ) -> Result<(), CliError> {
     match format {
         Format::Text => match (finding.transport, finding.stream) {
-            (Some(transport), Some(stream)) => write_stdout_line(format_args!(
-                "#{} {} {} ({} stream {stream}): {}",
-                finding.frame,
-                finding.severity.as_str(),
-                finding.code,
-                transport.as_str(),
-                finding.message
-            )),
-            _ => write_stdout_line(format_args!(
-                "#{} {} {}: {}",
-                finding.frame,
-                finding.severity.as_str(),
-                finding.code,
-                finding.message
-            )),
+            (Some(transport), Some(stream)) => write_stdout_line(
+                invocation,
+                format_args!(
+                    "#{} {} {} ({} stream {stream}): {}",
+                    finding.frame,
+                    finding.severity.as_str(),
+                    finding.code,
+                    transport.as_str(),
+                    finding.message
+                ),
+            ),
+            _ => write_stdout_line(
+                invocation,
+                format_args!(
+                    "#{} {} {}: {}",
+                    finding.frame,
+                    finding.severity.as_str(),
+                    finding.code,
+                    finding.message
+                ),
+            ),
         },
         Format::Json => {
             state.retained.push(|| finding);
@@ -63,24 +70,35 @@ pub(super) fn render_record(
     }
 }
 
-pub(super) fn render_text(summary: &analysis::Summary, state: &State) -> Result<(), CliError> {
-    crate::rendering::render_clock(&summary.clock)?;
+pub(super) fn render_text(
+    invocation: &crate::invocation::Invocation,
+    summary: &analysis::Summary,
+    state: &State,
+) -> Result<(), CliError> {
+    crate::rendering::render_clock(invocation, &summary.clock)?;
     let selected = &state.selected;
     for (code, findings) in &selected.codes {
-        write_stdout_line(format_args!("code={code} findings={findings}"))?;
+        write_stdout_line(invocation, format_args!("code={code} findings={findings}"))?;
     }
-    write_stdout_line(format_args!(
-        "found {} finding(s) ({} error(s), {} warning(s), {} note(s)) in {} of {} frame(s)",
-        selected.findings,
-        selected.errors,
-        selected.warnings,
-        selected.notes,
-        summary.frames_matched,
-        summary.frames_read,
-    ))
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "found {} finding(s) ({} error(s), {} warning(s), {} note(s)) in {} of {} frame(s)",
+            selected.findings,
+            selected.errors,
+            selected.warnings,
+            selected.notes,
+            summary.frames_matched,
+            summary.frames_read,
+        ),
+    )
 }
 
-pub(super) fn render_aggregate(summary: &analysis::Summary, state: State) -> Result<(), CliError> {
+pub(super) fn render_aggregate(
+    invocation: &crate::invocation::Invocation,
+    summary: &analysis::Summary,
+    state: State,
+) -> Result<(), CliError> {
     let diagnostics = omitted_diagnostic(
         "expert.findings_omitted",
         "finding(s)",
@@ -88,6 +106,7 @@ pub(super) fn render_aggregate(summary: &analysis::Summary, state: State) -> Res
         "--max-frames",
     );
     emit_aggregate(
+        invocation,
         output::contract::Command::Expert,
         result(summary, state),
         diagnostics,

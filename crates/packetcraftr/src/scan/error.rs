@@ -3,13 +3,12 @@
 
 use std::time::Duration;
 
-use packetcraftr_core::budget::{Cancelled, DeadlineExceeded, Interrupted};
+use packetcraftr_core::budget::Cancelled;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 use super::Probe;
 use super::WORKFLOW;
 use super::report::PendingEvidence;
-use crate::StatsOverflow;
 use crate::target::{Family, SelectionError};
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_netio::{Error as LiveIoError, capture};
@@ -218,49 +217,50 @@ impl Classified for Error {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Probes;
-
-impl crate::execution::Errors for Probes {
-    type Error = Error;
-    type Step = u64;
-
-    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Error {
-        Error::InvalidLimit {
+pub(crate) fn probe_error(step: u64, failure: crate::execution::Failure) -> Error {
+    match failure {
+        crate::execution::Failure::InvalidLimit {
             field,
             value,
             reason,
+        } => Error::InvalidLimit {
+            field,
+            value,
+            reason,
+        },
+        crate::execution::Failure::Authorization(source) => Error::Authorization(source),
+        crate::execution::Failure::DurationLimit(source) => {
+            let _sequence = step;
+
+            source.into()
         }
-    }
+        crate::execution::Failure::Interrupted(source) => {
+            let _sequence = step;
 
-    fn authorization(&self, source: BoundaryError) -> Error {
-        Error::Authorization(source)
-    }
-
-    fn duration_limit(&self, _sequence: u64, source: DeadlineExceeded) -> Error {
-        source.into()
-    }
-
-    fn interrupted(&self, _sequence: u64, source: Interrupted) -> Error {
-        source.into()
-    }
-
-    fn clock(&self, sequence: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
-        Error::Clock { sequence, source }
-    }
-
-    fn execution(&self, sequence: u64, source: BoundaryError) -> Error {
-        Error::Execution { sequence, source }
-    }
-
-    fn invalid_evidence(&self, sequence: u64, source: crate::evidence::Error) -> Error {
-        Error::InvalidEvidence {
-            sequence,
-            message: WORKFLOW.describe_evidence(&source),
+            source.into()
         }
-    }
+        crate::execution::Failure::Clock(source) => {
+            let sequence = step;
 
-    fn stats_overflow(&self, sequence: u64, _source: StatsOverflow) -> Error {
-        Error::StatisticsOverflow { sequence }
+            Error::Clock { sequence, source }
+        }
+        crate::execution::Failure::Execution(source) => {
+            let sequence = step;
+
+            Error::Execution { sequence, source }
+        }
+        crate::execution::Failure::InvalidEvidence(source) => {
+            let sequence = step;
+
+            Error::InvalidEvidence {
+                sequence,
+                message: WORKFLOW.describe_evidence(&source),
+            }
+        }
+        crate::execution::Failure::StatsOverflow(_source) => {
+            let sequence = step;
+
+            Error::StatisticsOverflow { sequence }
+        }
     }
 }

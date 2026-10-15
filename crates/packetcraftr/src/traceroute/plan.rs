@@ -10,15 +10,15 @@ use packetcraftr_core::packet::Packet;
 
 use super::Error;
 use super::Request;
-use super::error::Probes;
+use super::error::probe_error;
 use crate::execution::rate_delay;
-use crate::probe::{Batch, ProbeEndpoint, Transport};
+use crate::probe::{self, Batch, Transport};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Probe {
     pub sequence: u64,
     pub address: IpAddr,
-    pub target: ProbeEndpoint,
+    pub target: probe::Endpoint,
     pub hop_limit: u8,
     pub attempt: u32,
     pub source_port: u16,
@@ -88,7 +88,7 @@ pub(super) fn build_batches(
     Ok(batches)
 }
 
-pub(super) fn probe_target(request: &Request, sequence: u64) -> Result<ProbeEndpoint, Error> {
+pub(super) fn probe_target(request: &Request, sequence: u64) -> Result<probe::Endpoint, Error> {
     let declared_port = || {
         request.destination_port.ok_or_else(|| Error::InvalidPort {
             message: format!(
@@ -109,12 +109,12 @@ pub(super) fn probe_target(request: &Request, sequence: u64) -> Result<ProbeEndp
                         u16::MAX
                     ),
                 })?;
-            Ok(ProbeEndpoint::Udp { port })
+            Ok(probe::Endpoint::Udp { port })
         }
-        Transport::Tcp => Ok(ProbeEndpoint::Tcp {
+        Transport::Tcp => Ok(probe::Endpoint::Tcp {
             port: declared_port()?,
         }),
-        Transport::Icmp => Ok(ProbeEndpoint::Icmp),
+        Transport::Icmp => Ok(probe::Endpoint::Icmp),
         Transport::Sctp | Transport::Ip => Err(Error::InvalidProbeOption {
             option: "strategy",
             reason: "traceroute supports UDP, TCP, and ICMP strategies".to_owned(),
@@ -132,7 +132,7 @@ pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> 
     };
     let exchange = request.timeout.checked_mul(hops).ok_or_else(&overflow)?;
     let delay = rate_delay(
-        &Probes,
+        probe_error,
         "probes_per_second",
         usize::try_from(request.probes_per_hop).unwrap_or(usize::MAX),
         request.probes_per_second,

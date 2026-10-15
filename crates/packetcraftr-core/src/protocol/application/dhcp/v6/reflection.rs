@@ -3,7 +3,7 @@
 use super::super::{MAX_NESTING, MAX_OPTIONS};
 use super::{Dhcpv6, Duid, Option6, Value6};
 use crate::{
-    field::{self, FieldKind, FieldValue},
+    field,
     layer::{FieldSchema, reflect_set, reflective_layer},
     protocol::{
         BuiltinProtocol,
@@ -18,16 +18,16 @@ use bytes::Bytes;
 use std::net::Ipv6Addr;
 
 const DUID_FIELDS: &[FieldSchema] = &[
-    member("type", FieldKind::Unsigned, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("hardware_type", FieldKind::Unsigned, &[]),
-    member("time", FieldKind::Unsigned, &[]),
-    member("link_address", FieldKind::Bytes, &[]),
-    member("enterprise", FieldKind::Unsigned, &[]),
-    member("identifier", FieldKind::Bytes, &[]),
-    member("uuid", FieldKind::Bytes, &[]),
+    member("type", field::Kind::Unsigned, &[]),
+    member("data", field::Kind::Bytes, &[]),
+    member("hardware_type", field::Kind::Unsigned, &[]),
+    member("time", field::Kind::Unsigned, &[]),
+    member("link_address", field::Kind::Bytes, &[]),
+    member("enterprise", field::Kind::Unsigned, &[]),
+    member("identifier", field::Kind::Bytes, &[]),
+    member("uuid", field::Kind::Bytes, &[]),
 ];
-fn duid_value(duid: &Duid) -> FieldValue {
+fn duid_value(duid: &Duid) -> field::Value {
     let mut fields = std::collections::BTreeMap::from([("type".to_owned(), duid.kind.into())]);
     let data = &duid.data;
     match (duid.kind, data.len()) {
@@ -63,9 +63,9 @@ fn duid_value(duid: &Duid) -> FieldValue {
             fields.insert("data".to_owned(), data.clone().into());
         }
     }
-    FieldValue::Object(fields)
+    field::Value::Object(fields)
 }
-fn parse_duid(value: FieldValue, field: &str) -> Result<Duid, field::Error> {
+fn parse_duid(value: field::Value, field: &str) -> Result<Duid, field::Error> {
     let mut object = Object::new(value, schema(), field)?;
     let kind = object.required_value::<u16>("type")?;
     let duid = if object.contains("data") {
@@ -105,8 +105,8 @@ fn parse_duid(value: FieldValue, field: &str) -> Result<Duid, field::Error> {
     object.finish()?;
     Ok(duid)
 }
-fn options_value(options: &[Option6]) -> FieldValue {
-    FieldValue::List(
+fn options_value(options: &[Option6]) -> field::Value {
+    field::Value::List(
         options
             .iter()
             .map(|option| {
@@ -157,7 +157,9 @@ fn options_value(options: &[Option6]) -> FieldValue {
                             ]),
                             Value6::Requested(codes) => object([(
                                 "codes",
-                                FieldValue::List(codes.iter().map(|code| (*code).into()).collect()),
+                                field::Value::List(
+                                    codes.iter().map(|code| (*code).into()).collect(),
+                                ),
                             )]),
                             Value6::Byte(value) => object([("number", (*value).into())]),
                             Value6::Number(value) => object([("number", (*value).into())]),
@@ -169,7 +171,7 @@ fn options_value(options: &[Option6]) -> FieldValue {
                             ]),
                             Value6::Addresses(addresses) => object([(
                                 "addresses",
-                                FieldValue::List(
+                                field::Value::List(
                                     addresses.iter().map(|address| (*address).into()).collect(),
                                 ),
                             )]),
@@ -182,7 +184,7 @@ fn options_value(options: &[Option6]) -> FieldValue {
             .collect(),
     )
 }
-fn message_value(message: &Dhcpv6) -> FieldValue {
+fn message_value(message: &Dhcpv6) -> field::Value {
     let mut fields = std::collections::BTreeMap::from([
         ("message_type".to_owned(), message.message_type.into()),
         ("options".to_owned(), options_value(&message.options)),
@@ -194,7 +196,7 @@ fn message_value(message: &Dhcpv6) -> FieldValue {
     } else {
         fields.insert("transaction_id".to_owned(), message.transaction_id.into());
     }
-    FieldValue::Object(fields)
+    field::Value::Object(fields)
 }
 fn nested(
     value: &mut Object,
@@ -209,7 +211,7 @@ fn nested(
         .map(Option::unwrap_or_default)
 }
 fn parse_message(
-    value: FieldValue,
+    value: field::Value,
     field: &str,
     depth: usize,
     count: &mut usize,
@@ -238,7 +240,7 @@ fn parse_message(
     Ok(message)
 }
 fn parse_options(
-    value: FieldValue,
+    value: field::Value,
     field: &str,
     depth: usize,
     count: &mut usize,
@@ -343,40 +345,40 @@ const fn value_fields(
     message: &'static [FieldSchema],
 ) -> [FieldSchema; 18] {
     [
-        member("duid", FieldKind::Object, DUID_FIELDS),
-        member("iaid", FieldKind::Unsigned, &[]),
-        member("t1", FieldKind::Unsigned, &[]),
-        member("t2", FieldKind::Unsigned, &[]),
-        member("address", FieldKind::Ipv6, &[]),
-        member("prefix", FieldKind::Ipv6, &[]),
-        member("prefix_length", FieldKind::Unsigned, &[]),
-        member("preferred_lifetime", FieldKind::Unsigned, &[]),
-        member("valid_lifetime", FieldKind::Unsigned, &[]),
-        member("codes", FieldKind::List, &[]),
-        member("number", FieldKind::Unsigned, &[]),
-        member("seconds", FieldKind::Unsigned, &[]),
-        member("status", FieldKind::Unsigned, &[]),
-        member("message_text", FieldKind::Bytes, &[]),
-        member("addresses", FieldKind::List, &[]),
-        member("data", FieldKind::Bytes, &[]),
-        member("options", FieldKind::List, options),
-        member("message", FieldKind::Object, message),
+        member("duid", field::Kind::Object, DUID_FIELDS),
+        member("iaid", field::Kind::Unsigned, &[]),
+        member("t1", field::Kind::Unsigned, &[]),
+        member("t2", field::Kind::Unsigned, &[]),
+        member("address", field::Kind::Ipv6, &[]),
+        member("prefix", field::Kind::Ipv6, &[]),
+        member("prefix_length", field::Kind::Unsigned, &[]),
+        member("preferred_lifetime", field::Kind::Unsigned, &[]),
+        member("valid_lifetime", field::Kind::Unsigned, &[]),
+        member("codes", field::Kind::List, &[]),
+        member("number", field::Kind::Unsigned, &[]),
+        member("seconds", field::Kind::Unsigned, &[]),
+        member("status", field::Kind::Unsigned, &[]),
+        member("message_text", field::Kind::Bytes, &[]),
+        member("addresses", field::Kind::List, &[]),
+        member("data", field::Kind::Bytes, &[]),
+        member("options", field::Kind::List, options),
+        member("message", field::Kind::Object, message),
     ]
 }
 const fn options_fields(value: &'static [FieldSchema]) -> [FieldSchema; 2] {
     [
-        member("code", FieldKind::Unsigned, &[]),
-        member("value", FieldKind::Object, value),
+        member("code", field::Kind::Unsigned, &[]),
+        member("value", field::Kind::Object, value),
     ]
 }
 const fn message_fields(options: &'static [FieldSchema]) -> [FieldSchema; 6] {
     [
-        member("message_type", FieldKind::Unsigned, &[]),
-        member("transaction_id", FieldKind::Unsigned, &[]),
-        member("hop_count", FieldKind::Unsigned, &[]),
-        member("link_address", FieldKind::Ipv6, &[]),
-        member("peer_address", FieldKind::Ipv6, &[]),
-        member("options", FieldKind::List, options),
+        member("message_type", field::Kind::Unsigned, &[]),
+        member("transaction_id", field::Kind::Unsigned, &[]),
+        member("hop_count", field::Kind::Unsigned, &[]),
+        member("link_address", field::Kind::Ipv6, &[]),
+        member("peer_address", field::Kind::Ipv6, &[]),
+        member("options", field::Kind::List, options),
     ]
 }
 

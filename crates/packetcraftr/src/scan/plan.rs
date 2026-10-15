@@ -12,9 +12,9 @@ use packetcraftr_core::packet::Packet;
 
 use super::Error;
 use super::Request;
-use super::error::Probes;
+use super::error::probe_error;
 use crate::execution::rate_delay;
-use crate::probe::{Batch, ProbeEndpoint};
+use crate::probe::{self, Batch};
 use packetcraftr_core::error::BoundaryError;
 
 /// The workflow stage a probe belongs to. Discovery probes come first and
@@ -31,7 +31,7 @@ pub struct Probe {
     pub stage: Stage,
     pub address: IpAddr,
     pub scope: Option<crate::target::ResolvedZone>,
-    pub endpoint: ProbeEndpoint,
+    pub endpoint: probe::Endpoint,
     pub tcp_scan: super::TcpScan,
     pub sctp_scan: super::SctpScan,
     pub attempt: u32,
@@ -94,7 +94,7 @@ pub(super) fn probe_count(
 pub(super) fn build_batches<'a>(
     request: &'a Request,
     targets: &'a [crate::target::SelectedAddress],
-    endpoints: &'a [ProbeEndpoint],
+    endpoints: &'a [probe::Endpoint],
     stage: Stage,
     first_sequence: u64,
 ) -> impl Iterator<Item = Batch<Probe>> + 'a {
@@ -121,13 +121,13 @@ pub(super) fn planned_probe(
     sequence: u64,
     stage: Stage,
     target: &crate::target::SelectedAddress,
-    endpoint: ProbeEndpoint,
+    endpoint: probe::Endpoint,
     attempt: u32,
 ) -> Probe {
     // Payloads and profiles are UDP-only; a TCP endpoint sharing the
     // port number must not inherit them.
     let (udp_profile, udp_payload) = match endpoint {
-        ProbeEndpoint::Udp { port } => {
+        probe::Endpoint::Udp { port } => {
             let profile = request.udp_profiles.get(&port);
             let payload = profile.map_or_else(
                 || request.udp_payload.clone(),
@@ -135,21 +135,21 @@ pub(super) fn planned_probe(
             );
             (profile.cloned(), payload)
         }
-        ProbeEndpoint::Tcp { .. }
-        | ProbeEndpoint::TcpAck { .. }
-        | ProbeEndpoint::Sctp { .. }
-        | ProbeEndpoint::Icmp
-        | ProbeEndpoint::IcmpTimestamp
-        | ProbeEndpoint::IcmpNetmask
-        | ProbeEndpoint::Ip { .. } => (None, bytes::Bytes::new()),
+        probe::Endpoint::Tcp { .. }
+        | probe::Endpoint::TcpAck { .. }
+        | probe::Endpoint::Sctp { .. }
+        | probe::Endpoint::Icmp
+        | probe::Endpoint::IcmpTimestamp
+        | probe::Endpoint::IcmpNetmask
+        | probe::Endpoint::Ip { .. } => (None, bytes::Bytes::new()),
     };
     let tcp_scan = match (stage, endpoint) {
-        (Stage::Scan, ProbeEndpoint::Tcp { .. }) => request.tcp_scan,
-        (Stage::Discovery, ProbeEndpoint::TcpAck { .. }) => super::TcpScan::Ack,
+        (Stage::Scan, probe::Endpoint::Tcp { .. }) => request.tcp_scan,
+        (Stage::Discovery, probe::Endpoint::TcpAck { .. }) => super::TcpScan::Ack,
         _ => super::TcpScan::default(),
     };
     let sctp_scan = match (stage, endpoint) {
-        (Stage::Scan, ProbeEndpoint::Sctp { .. }) => request.sctp_scan,
+        (Stage::Scan, probe::Endpoint::Sctp { .. }) => request.sctp_scan,
         _ => super::SctpScan::default(),
     };
     Probe {
@@ -189,7 +189,7 @@ pub(super) fn ip_worst_case_duration(
     request: &Request,
     batch_count: usize,
     targets: &[crate::target::SelectedAddress],
-    endpoints: &[ProbeEndpoint],
+    endpoints: &[probe::Endpoint],
 ) -> Result<Duration, Error> {
     if batch_count == 0 {
         return Ok(Duration::ZERO);
@@ -227,9 +227,14 @@ fn duration_with_windows(
     let delay = if delay_count == 0 {
         Duration::ZERO
     } else {
-        rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?
-            .checked_mul(delay_count)
-            .ok_or_else(&overflow)?
+        rate_delay(
+            probe_error,
+            "probes_per_second",
+            1,
+            request.probes_per_second,
+        )?
+        .checked_mul(delay_count)
+        .ok_or_else(&overflow)?
     };
     exchange_time.checked_add(delay).ok_or_else(overflow)
 }
@@ -260,9 +265,14 @@ pub(super) fn adaptive_worst_case_duration(
     let delay = if delay_count == 0 {
         Duration::ZERO
     } else {
-        rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?
-            .checked_mul(delay_count)
-            .ok_or_else(&overflow)?
+        rate_delay(
+            probe_error,
+            "probes_per_second",
+            1,
+            request.probes_per_second,
+        )?
+        .checked_mul(delay_count)
+        .ok_or_else(&overflow)?
     };
     let distinct = batch_count_u32
         .checked_div(request.attempts.max(1))
@@ -301,7 +311,7 @@ mod tests {
             max_in_flight: 1,
             targets: Target::Address("192.0.2.1".parse().expect("documentation address")).into(),
             address_family: Family::Any,
-            endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
+            endpoints: vec![crate::probe::Endpoint::Tcp { port: 80 }],
             discovery: Default::default(),
             attempts: 1,
             adaptive: None,

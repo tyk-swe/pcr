@@ -9,8 +9,8 @@ use super::binding::{FilterFieldBinding, ReverseBinding};
 use super::error::Error;
 use super::hasher::FixedState;
 
-use crate::codec::LayerCodec;
-use crate::field::FieldKind;
+use crate::codec::Codec;
+use crate::field;
 
 impl super::builder::Builder {
     pub fn build(mut self) -> Result<super::lookup::Registry, Error> {
@@ -130,7 +130,7 @@ fn reject_canonical_filter_path(
 fn validate_filter_field(
     path: &str,
     binding: &FilterFieldBinding,
-    codecs: &BTreeMap<crate::layer::Id, Arc<dyn LayerCodec>>,
+    codecs: &BTreeMap<crate::layer::Id, Arc<dyn Codec>>,
     schemas: &BTreeMap<crate::layer::Id, &'static crate::layer::Schema>,
 ) -> Result<(), Error> {
     let protocol = binding.protocol();
@@ -152,7 +152,7 @@ fn validate_filter_field(
             });
         };
         if matches!(binding, FilterFieldBinding::Bits { .. })
-            && declared.kind != FieldKind::Unsigned
+            && declared.kind != field::Kind::Unsigned
         {
             return Err(Error::InvalidFilterField {
                 path: path.to_owned(),

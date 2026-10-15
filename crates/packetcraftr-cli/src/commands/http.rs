@@ -41,14 +41,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+fn run(
+    invocation: &crate::invocation::Invocation,
+    args: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     args.application.validate_output()?;
     let mut ports = args.http_ports;
     ports.extend([80, 8080]);
@@ -57,6 +63,7 @@ fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliErro
     let selector = require_tcp_stream(args.stream.as_ref(), "HTTP/1")?;
     let (mut messages, mut issues) = (Vec::new(), Vec::new());
     let outcome = inspect(
+        invocation,
         Inspection {
             path: &args.path,
             limits: args.limits,
@@ -71,7 +78,9 @@ fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliErro
             Event::Message(message) => output.emit(
                 wire::Message::try_from(*message).map_err(CliError::classified)?,
                 &mut messages,
-                |message| rendering::render_message(message, stream.presentation()),
+                |invocation, message| {
+                    rendering::render_message(invocation, message, stream.presentation())
+                },
             ),
             Event::Issue(issue) => output.emit(
                 wire::Issue::from(issue),
@@ -83,6 +92,7 @@ fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliErro
     let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
         .map_err(CliError::classified)?;
     complete_application(
+        invocation,
         Command::Http,
         format,
         stream,

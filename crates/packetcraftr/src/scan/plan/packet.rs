@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bytes::Bytes;
-use packetcraftr_core::codec::{self, DecodedLayer, LayerDecodeContext};
+use packetcraftr_core::codec::{self, DecodeContext, Decoded};
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Raw};
@@ -26,7 +26,7 @@ use crate::correlation::{
 };
 
 use super::Probe;
-use crate::probe::ProbeEndpoint;
+use crate::probe;
 
 fn scan_udp_source_port(attempt: u32) -> u16 {
     ephemeral_source_port(
@@ -60,7 +60,7 @@ pub(in crate::scan) fn probe_packet(probe: &Probe) -> Packet {
         }
     }
     match probe.endpoint {
-        ProbeEndpoint::Tcp { port } | ProbeEndpoint::TcpAck { port } => {
+        probe::Endpoint::Tcp { port } | probe::Endpoint::TcpAck { port } => {
             packet.push(Tcp {
                 destination_port: port,
                 sequence: probe.sequence as u32,
@@ -69,7 +69,7 @@ pub(in crate::scan) fn probe_packet(probe: &Probe) -> Packet {
                 ..Tcp::default()
             });
         }
-        ProbeEndpoint::Udp { port } => {
+        probe::Endpoint::Udp { port } => {
             packet.push(Udp {
                 source_port: scan_udp_source_port(probe.attempt),
                 destination_port: port,
@@ -89,7 +89,7 @@ pub(in crate::scan) fn probe_packet(probe: &Probe) -> Packet {
                 push_udp_payload(&mut packet, port, &probe.udp_payload);
             }
         }
-        ProbeEndpoint::Sctp { port } => {
+        probe::Endpoint::Sctp { port } => {
             packet.push(Sctp {
                 destination_port: port,
                 verification_tag: probe.sctp_scan.verification_tag(probe.sequence),
@@ -97,7 +97,7 @@ pub(in crate::scan) fn probe_packet(probe: &Probe) -> Packet {
             });
             packet.push(Raw::new(probe.sctp_scan.chunk_bytes(probe.sequence)));
         }
-        ProbeEndpoint::Icmp | ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask => {
+        probe::Endpoint::Icmp | probe::Endpoint::IcmpTimestamp | probe::Endpoint::IcmpNetmask => {
             let (icmp_type, body) =
                 icmp_probe_fields(probe.endpoint, probe.address, probe.sequence);
             match probe.address {
@@ -117,20 +117,20 @@ pub(in crate::scan) fn probe_packet(probe: &Probe) -> Packet {
                 }
             }
         }
-        ProbeEndpoint::Ip { .. } => {}
+        probe::Endpoint::Ip { .. } => {}
     }
     packet
 }
 
-fn icmp_probe_fields(endpoint: ProbeEndpoint, address: IpAddr, sequence: u64) -> (u8, Bytes) {
+fn icmp_probe_fields(endpoint: probe::Endpoint, address: IpAddr, sequence: u64) -> (u8, Bytes) {
     let identity = icmp_identity(ICMP_IDENTITY_TAG, sequence);
     match (endpoint, address) {
-        (ProbeEndpoint::IcmpTimestamp, _) => {
+        (probe::Endpoint::IcmpTimestamp, _) => {
             let mut body = identity.to_vec();
             body.resize(16, 0);
             (13, Bytes::from(body))
         }
-        (ProbeEndpoint::IcmpNetmask, _) => {
+        (probe::Endpoint::IcmpNetmask, _) => {
             let mut body = identity.to_vec();
             body.resize(8, 0);
             (17, Bytes::from(body))
@@ -204,12 +204,12 @@ fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
     packet.push(Raw::new(payload.clone()));
 }
 
-fn decode_layer(registry: &Registry, protocol: &str, payload: &[u8]) -> Option<DecodedLayer> {
+fn decode_layer(registry: &Registry, protocol: &str, payload: &[u8]) -> Option<Decoded> {
     registry
         .codec(protocol)?
         .decode(
             Bytes::copy_from_slice(payload),
-            &LayerDecodeContext {
+            &DecodeContext {
                 parent: None,
                 registry,
                 network: None,
@@ -329,7 +329,7 @@ fn sent_payload_matches(
         suffix.push_boxed(layer.clone_box());
     }
     let expected = match probe.endpoint {
-        ProbeEndpoint::Sctp { .. } => probe.sctp_scan.chunk_bytes(probe.sequence),
+        probe::Endpoint::Sctp { .. } => probe.sctp_scan.chunk_bytes(probe.sequence),
         _ => probe.udp_payload.clone(),
     };
     payload_bytes(&suffix).is_some_and(|bytes| bytes == expected)
@@ -342,7 +342,7 @@ fn payload_bytes(payload: &Packet) -> Option<Bytes> {
     build::Builder::new(builtin::registry())
         .build(
             payload.clone(),
-            codec::Context::default(),
+            codec::Addresses::default(),
             build::Options::default(),
         )
         .ok()
@@ -358,7 +358,7 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
     }
     if matches!(
         probe.endpoint,
-        ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask
+        probe::Endpoint::IcmpTimestamp | probe::Endpoint::IcmpNetmask
     ) && probe.address.is_ipv6()
     {
         return false;
@@ -369,18 +369,18 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
         BuiltinProtocol::Ipv6
     };
     let transport_protocol = match probe.endpoint {
-        ProbeEndpoint::Tcp { .. } | ProbeEndpoint::TcpAck { .. } => Some(BuiltinProtocol::Tcp),
-        ProbeEndpoint::Udp { .. } => Some(BuiltinProtocol::Udp),
-        ProbeEndpoint::Sctp { .. } => Some(BuiltinProtocol::Sctp),
-        ProbeEndpoint::Icmp | ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask
+        probe::Endpoint::Tcp { .. } | probe::Endpoint::TcpAck { .. } => Some(BuiltinProtocol::Tcp),
+        probe::Endpoint::Udp { .. } => Some(BuiltinProtocol::Udp),
+        probe::Endpoint::Sctp { .. } => Some(BuiltinProtocol::Sctp),
+        probe::Endpoint::Icmp | probe::Endpoint::IcmpTimestamp | probe::Endpoint::IcmpNetmask
             if probe.address.is_ipv4() =>
         {
             Some(BuiltinProtocol::Icmpv4)
         }
-        ProbeEndpoint::Icmp | ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask => {
+        probe::Endpoint::Icmp | probe::Endpoint::IcmpTimestamp | probe::Endpoint::IcmpNetmask => {
             Some(BuiltinProtocol::Icmpv6)
         }
-        ProbeEndpoint::Ip { .. } => None,
+        probe::Endpoint::Ip { .. } => None,
     };
     if !sent_payload_matches(probe, sent, network_protocol, transport_protocol) {
         return false;
@@ -400,9 +400,9 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
         return false;
     }
     match probe.endpoint {
-        ProbeEndpoint::Tcp { port } | ProbeEndpoint::TcpAck { port } => {
+        probe::Endpoint::Tcp { port } | probe::Endpoint::TcpAck { port } => {
             let expected_mode = match (probe.stage, probe.endpoint) {
-                (super::Stage::Discovery, ProbeEndpoint::TcpAck { .. }) => {
+                (super::Stage::Discovery, probe::Endpoint::TcpAck { .. }) => {
                     crate::scan::TcpScan::Ack
                 }
                 _ => probe.tcp_scan,
@@ -415,16 +415,16 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
                     && tcp.options.is_empty()
             })
         }
-        ProbeEndpoint::Udp { port } => sent.get::<Udp>().is_some_and(|udp| {
+        probe::Endpoint::Udp { port } => sent.get::<Udp>().is_some_and(|udp| {
             udp.source_port == scan_udp_source_port(probe.attempt) && udp.destination_port == port
         }),
-        ProbeEndpoint::Sctp { port } => sent.get::<Sctp>().is_some_and(|sctp| {
+        probe::Endpoint::Sctp { port } => sent.get::<Sctp>().is_some_and(|sctp| {
             port != 0
                 && sctp.source_port == Sctp::default().source_port
                 && sctp.destination_port == port
                 && sctp.verification_tag == probe.sctp_scan.verification_tag(probe.sequence)
         }),
-        ProbeEndpoint::Icmp | ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask => {
+        probe::Endpoint::Icmp | probe::Endpoint::IcmpTimestamp | probe::Endpoint::IcmpNetmask => {
             let (expected_type, expected_body) =
                 icmp_probe_fields(probe.endpoint, probe.address, probe.sequence);
             match probe.address {
@@ -436,7 +436,7 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
                 }),
             }
         }
-        ProbeEndpoint::Ip { protocol } => match probe.address {
+        probe::Endpoint::Ip { protocol } => match probe.address {
             IpAddr::V4(_) => sent
                 .get::<Ipv4>()
                 .is_some_and(|ipv4| ipv4.protocol == WireValue::Exact(protocol)),

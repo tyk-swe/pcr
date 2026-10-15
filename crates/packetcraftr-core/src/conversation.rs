@@ -14,7 +14,7 @@ use bytes::Bytes;
 use thiserror::Error;
 
 use crate::build;
-use crate::codec::Context;
+use crate::codec::Addresses;
 use crate::error::{Classification, Classified, Kind};
 use crate::field::WireValue;
 use crate::layer::{Id, Layer, Raw};
@@ -238,7 +238,7 @@ impl Conversation {
                     packet.push_boxed(layer.clone_box());
                 }
                 let built = build::Builder::new(Arc::clone(&self.registry))
-                    .build(packet, Context::default(), self.build.clone())
+                    .build(packet, Addresses::default(), self.build.clone())
                     .map_err(Error::Payload)?;
                 let transport_end = built
                     .layout

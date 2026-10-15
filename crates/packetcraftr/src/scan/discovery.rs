@@ -14,7 +14,7 @@ pub use host::{
 pub(super) use host::{Composer, Observation, check_probes};
 
 use super::Error;
-use crate::probe::ProbeEndpoint;
+use crate::probe;
 
 /// Whether and how a scan request discovers hosts. Discovery never runs
 /// unless selected, so a scan sends no probe its request did not name.
@@ -48,7 +48,7 @@ pub struct Options {
     pub mode: Mode,
     /// The probes each target receives, in order, after neighbor discovery.
     /// Unlike scan endpoints, ICMP echo combines with TCP and UDP ports.
-    pub probes: Vec<ProbeEndpoint>,
+    pub probes: Vec<probe::Endpoint>,
     /// Resolve each target's link address with ARP or NDP first. Routed
     /// targets resolve their next hop instead, which is never host evidence.
     pub neighbor: bool,
@@ -88,7 +88,7 @@ impl Options {
         if self.probes.is_empty() && !self.neighbor {
             return invalid("discovery needs at least one probe");
         }
-        if self.probes.contains(&ProbeEndpoint::Sctp { port: 0 }) {
+        if self.probes.contains(&probe::Endpoint::Sctp { port: 0 }) {
             return Err(Error::InvalidPort {
                 message: "SCTP discovery probes require a non-zero destination port".to_owned(),
             });
@@ -97,7 +97,7 @@ impl Options {
             && self.probes.iter().any(|probe| {
                 matches!(
                     probe,
-                    ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask
+                    probe::Endpoint::IcmpTimestamp | probe::Endpoint::IcmpNetmask
                 )
             })
         {

@@ -26,23 +26,30 @@ pub(super) fn frame_line(
 }
 
 pub(super) fn render_summary(
+    invocation: &crate::invocation::Invocation,
     report: &packetcraftr::replay::Report,
     filtered: bool,
 ) -> Result<(), CliError> {
     if filtered {
-        write_summary_line(format_args!(
-            "replayed {} of {} frame(s), {} byte(s), scheduled delay {}",
-            report.frames_transmitted,
-            report.frames_read,
-            report.bytes_transmitted,
-            duration_text(report.scheduled_duration)
-        ))
+        write_summary_line(
+            invocation,
+            format_args!(
+                "replayed {} of {} frame(s), {} byte(s), scheduled delay {}",
+                report.frames_transmitted,
+                report.frames_read,
+                report.bytes_transmitted,
+                duration_text(report.scheduled_duration)
+            ),
+        )
     } else {
-        write_summary_line(format_args!(
-            "replayed {} frame(s), {} byte(s), scheduled delay {}",
-            report.frames_transmitted,
-            report.bytes_transmitted,
-            duration_text(report.scheduled_duration)
-        ))
+        write_summary_line(
+            invocation,
+            format_args!(
+                "replayed {} frame(s), {} byte(s), scheduled delay {}",
+                report.frames_transmitted,
+                report.bytes_transmitted,
+                duration_text(report.scheduled_duration)
+            ),
+        )
     }
 }

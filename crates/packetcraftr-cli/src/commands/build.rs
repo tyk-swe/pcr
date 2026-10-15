@@ -43,14 +43,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let capture = arguments.capture.resolve(format)?;
     let maximum = arguments.template.max_template_packets;
     let axes = arguments.template.parse()?;
@@ -95,11 +101,11 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     .map(|capture| capture.dry_run_writer(limits))
                     .transpose()?;
                 for (ordinal, frame) in frames.iter().enumerate() {
-                    crate::cancellation::check()?;
+                    invocation.check()?;
                     let built = builder
                         .build(
                             frame.clone(),
-                            core::codec::Context::default(),
+                            core::codec::Addresses::default(),
                             build_options.clone(),
                         )
                         .map_err(build_error)?;
@@ -141,15 +147,15 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let mut diagnostics = Vec::new();
     let result = (|| {
         for packet in packets {
-            crate::cancellation::check()?;
+            invocation.check()?;
             let built = builder
                 .build(
                     packet?,
-                    core::codec::Context::default(),
+                    core::codec::Addresses::default(),
                     build_options.clone(),
                 )
                 .map_err(build_error)?;
-            crate::cancellation::check()?;
+            invocation.check()?;
             let bytes = u64::try_from(built.bytes.len())
                 .map_err(|_| CliError::new(Kind::Internal, "built byte count overflowed"))?;
             summary.bytes_built = summary
@@ -177,7 +183,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     )),
                 )?;
             } else {
-                rendering::render_packet(built, format, stream.presentation())?;
+                rendering::render_packet(invocation, built, format, stream.presentation())?;
             }
             summary.packets_built =
                 super::increment_counter(summary.packets_built, "built packets")?;
@@ -200,7 +206,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     }
     // Startup handles cancellation after JSON publication without a second document.
     if format != Format::Json {
-        crate::cancellation::check()?;
+        invocation.check()?;
     }
     if format == Format::Ndjson {
         stream.complete(summary, Vec::new())?;

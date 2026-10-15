@@ -45,14 +45,16 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
     arguments: Args,
     format: Format,
     stream: &crate::rendering::StreamEncoder,
@@ -127,17 +129,23 @@ pub(super) fn run(
                 .map_err(CliError::classified)?;
             projector.emit(1, values, stream)?;
         }
-        return projector.finish(1, u64::from(decoded.frame.captured_length()), stream);
+        return projector.finish(
+            invocation,
+            1,
+            u64::from(decoded.frame.captured_length()),
+            stream,
+        );
     }
     // An unmatched frame keeps byte-oriented stdout empty on success.
     if !kept && !matches!(format, Format::Json) {
         return emit_stderr_message("frame did not match the filter");
     }
     match format {
-        Format::Text => render_text(&decoded, tree.as_mut(), stream.presentation()),
+        Format::Text => render_text(invocation, &decoded, tree.as_mut(), stream.presentation()),
         Format::Hex => write_hex_line(decoded.frame.bytes()),
         Format::Raw => write_raw(decoded.frame.bytes()),
         Format::Json => emit_published(
+            invocation,
             output::contract::Command::Dissect,
             output::envelope::Published::<output::dissect::AggregateResult>::from((kept, decoded)),
         ),
@@ -150,29 +158,35 @@ pub(super) fn run(
 }
 
 fn render_text(
+    invocation: &crate::invocation::Invocation,
     decoded: &DecodedPacket,
     tree: Option<&mut FieldTree>,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
-    write_summary_line(format_args!(
-        "decoded {} bytes into {} layer(s)",
-        decoded.frame.bytes().len(),
-        decoded.packet.len()
-    ))?;
+    write_summary_line(
+        invocation,
+        format_args!(
+            "decoded {} bytes into {} layer(s)",
+            decoded.frame.bytes().len(),
+            decoded.packet.len()
+        ),
+    )?;
     let packet = core::document::Packet::from_packet(&decoded.packet);
     match tree {
         Some(tree) => {
-            tree.render_layers(&packet, |index, protocol| format!("{index}: {protocol}"))?;
+            tree.render_layers(invocation, &packet, |index, protocol| {
+                format!("{index}: {protocol}")
+            })?;
         }
         None => {
             for (index, layer) in decoded.packet.iter().enumerate() {
-                write_stdout_line(format_args!("{index}: {}", layer.protocol_id()))?;
+                write_stdout_line(invocation, format_args!("{index}: {}", layer.protocol_id()))?;
             }
-            render_dns_records(&packet)?;
-            presentation.details("Decoded fields", &packet)?;
+            render_dns_records(invocation, &packet)?;
+            presentation.details(invocation, "Decoded fields", &packet)?;
         }
     }
-    render_diagnostics_text(&decoded.diagnostics)
+    render_diagnostics_text(invocation, &decoded.diagnostics)
 }
 
 fn parse_hex_text(text: &str) -> Result<bytes::Bytes, CliError> {

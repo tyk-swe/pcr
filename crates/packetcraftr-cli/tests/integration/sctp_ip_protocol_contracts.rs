@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr::Sink;
-use packetcraftr::probe::{ProbeStatus, Transport};
+use packetcraftr::probe::{self, Transport};
 use packetcraftr::scan::{self, Classification, Reply, SctpScan};
 use packetcraftr_cli::output;
 use serde_json::json;
@@ -398,7 +398,7 @@ fn synthetic_sctp_and_ip_protocol_reports_conform_to_output_v17_in_json_and_ndjs
         sctp_scan: None,
         tcp_window: Some(0),
         attempt: 1,
-        status: ProbeStatus::Response,
+        status: probe::Status::Response,
         classification: Classification::Closed,
         reply: Some(Reply::TcpReset),
         responder: Some(address),
@@ -422,7 +422,7 @@ fn synthetic_sctp_and_ip_protocol_reports_conform_to_output_v17_in_json_and_ndjs
         sctp_scan: Some(SctpScan::CookieEcho),
         tcp_window: None,
         attempt: 1,
-        status: ProbeStatus::Response,
+        status: probe::Status::Response,
         classification: Classification::Closed,
         reply: Some(Reply::SctpAbort),
         responder: Some(address),
@@ -502,7 +502,7 @@ fn synthetic_sctp_and_ip_protocol_reports_conform_to_output_v17_in_json_and_ndjs
         discovery: output::scan::plan::Discovery::new(
             &scan::discovery::Options {
                 mode: scan::discovery::Mode::Before,
-                probes: vec![packetcraftr::probe::ProbeEndpoint::TcpAck { port: 80 }],
+                probes: vec![packetcraftr::probe::Endpoint::TcpAck { port: 80 }],
                 neighbor: false,
                 unresponsive: scan::discovery::Unresponsive::Skip,
             },

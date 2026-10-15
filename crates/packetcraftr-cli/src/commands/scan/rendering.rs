@@ -16,6 +16,7 @@ use crate::rendering::{
 };
 
 pub(super) fn render_text(
+    invocation: &crate::invocation::Invocation,
     published: output::envelope::Published<output::scan::Report>,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
@@ -25,16 +26,19 @@ pub(super) fn render_text(
         stats,
     } = published;
     let stats = stats.unwrap_or_default();
-    write_stdout_line(format_args!(
-        "target={} resolved={}",
-        result.target,
-        comma_separated(&result.resolved_addresses)
-    ))?;
-    write_stdout_line(format_args!(
-        "{}",
-        throughput_text(result.planned_duration, &stats)
-    ))?;
-    render_plan_text(&result.plan)?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "target={} resolved={}",
+            result.target,
+            comma_separated(&result.resolved_addresses)
+        ),
+    )?;
+    write_stdout_line(
+        invocation,
+        format_args!("{}", throughput_text(result.planned_duration, &stats)),
+    )?;
+    render_plan_text(invocation, &result.plan)?;
     for endpoint in &result.endpoints {
         let endpoint_name = match endpoint.transport {
             packetcraftr::probe::Transport::Icmp => endpoint.transport.to_string(),
@@ -51,155 +55,191 @@ pub(super) fn render_text(
                 format!("{}/{}", endpoint.transport, optional_display(endpoint.port))
             }
         };
-        write_stdout_line(format_args!(
-            "{}",
-            endpoint_text(
-                endpoint.address,
-                endpoint.scope.as_ref(),
-                &endpoint_name,
-                endpoint.classification,
-            )
-        ))?;
-        render_inference_text(endpoint.port_hint, endpoint.inference.as_ref())?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "{}",
+                endpoint_text(
+                    endpoint.address,
+                    endpoint.scope.as_ref(),
+                    &endpoint_name,
+                    endpoint.classification,
+                )
+            ),
+        )?;
+        render_inference_text(invocation, endpoint.port_hint, endpoint.inference.as_ref())?;
         for evidence in visible_probes(&endpoint.probes, presentation) {
-            render_probe_text("  ", evidence, presentation)?;
+            render_probe_text(invocation, "  ", evidence, presentation)?;
         }
     }
-    render_undecoded(result.undecoded.iter().map(|frame| (None, frame)))?;
+    render_undecoded(
+        invocation,
+        result.undecoded.iter().map(|frame| (None, frame)),
+    )?;
     for unattributed in &result.unattributed {
-        write_stdout_line(format_args!(
-            "unattributed attribution={} sequence={} frame {}",
-            unattributed.attribution,
-            optional_display(unattributed.sequence),
-            captured_frame_text(&unattributed.frame)
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "unattributed attribution={} sequence={} frame {}",
+                unattributed.attribution,
+                optional_display(unattributed.sequence),
+                captured_frame_text(&unattributed.frame)
+            ),
+        )?;
     }
-    render_hosts_text(&result.plan, &result.hosts, |probe| {
-        render_probe_text("  probe ", probe, presentation)
+    render_hosts_text(invocation, &result.plan, &result.hosts, |probe| {
+        render_probe_text(invocation, "  probe ", probe, presentation)
     })?;
     let rtt = result.rtt;
-    write_summary_line(format_args!(
-        // The totals span discovery, neighbor requests, and enrichment too.
-        "scanned {} endpoint(s); the operation completed {} packet(s), {} byte(s)",
-        result.endpoints.len(),
-        stats.packets_completed,
-        stats.bytes
-    ))?;
-    write_summary_line(format_args!(
-        "probes sent={} received={} lost={} rtt min/avg/max={}/{}/{}",
-        rtt.sent,
-        rtt.received,
-        rtt.lost,
-        optional_duration(rtt.min),
-        optional_duration(rtt.avg),
-        optional_duration(rtt.max),
-    ))?;
-    render_scheduling_text(&result.scheduling)?;
+    write_summary_line(
+        invocation,
+        format_args!(
+            // The totals span discovery, neighbor requests, and enrichment too.
+            "scanned {} endpoint(s); the operation completed {} packet(s), {} byte(s)",
+            result.endpoints.len(),
+            stats.packets_completed,
+            stats.bytes
+        ),
+    )?;
+    write_summary_line(
+        invocation,
+        format_args!(
+            "probes sent={} received={} lost={} rtt min/avg/max={}/{}/{}",
+            rtt.sent,
+            rtt.received,
+            rtt.lost,
+            optional_duration(rtt.min),
+            optional_duration(rtt.avg),
+            optional_duration(rtt.max),
+        ),
+    )?;
+    render_scheduling_text(invocation, &result.scheduling)?;
     if let Some(trace) = &result.traceroute {
-        render_traceroute_text(trace, presentation)?;
+        render_traceroute_text(invocation, trace, presentation)?;
     }
-    render_diagnostics_text(&diagnostics)
+    render_diagnostics_text(invocation, &diagnostics)
 }
 
-fn render_scheduling_text(scheduling: &output::scan::Scheduling) -> Result<(), CliError> {
+fn render_scheduling_text(
+    invocation: &crate::invocation::Invocation,
+    scheduling: &output::scan::Scheduling,
+) -> Result<(), CliError> {
     let ceilings = match (scheduling.operation_ceiling, scheduling.process_ceiling) {
         (Some(operation), Some(process)) => {
             format!(" operation-ceiling={operation} process-ceiling={process}")
         }
         _ => String::new(),
     };
-    write_summary_line(format_args!(
-        "scheduling={} peak-window={} retries={}{}",
-        scheduling.mode, scheduling.observed_peak_window, scheduling.retries_started, ceilings,
-    ))?;
+    write_summary_line(
+        invocation,
+        format_args!(
+            "scheduling={} peak-window={} retries={}{}",
+            scheduling.mode, scheduling.observed_peak_window, scheduling.retries_started, ceilings,
+        ),
+    )?;
     for condition in &scheduling.conditions {
         let host = match &condition.host.scope {
             Some(scope) => format!("{}%{}", condition.host.address, scope.zone),
             None => condition.host.address.to_string(),
         };
-        write_summary_line(format_args!(
-            "condition {} host={} responder={} completed={} replies={} losses={} controls={} silent={} ({})",
-            condition.kind,
-            host,
-            condition.control_responder,
-            condition.completed,
-            condition.replies,
-            condition.losses,
-            listed(&condition.control_sequences),
-            listed(&condition.loss_sequences),
-            condition.caveat,
-        ))?;
+        write_summary_line(
+            invocation,
+            format_args!(
+                "condition {} host={} responder={} completed={} replies={} losses={} controls={} silent={} ({})",
+                condition.kind,
+                host,
+                condition.control_responder,
+                condition.completed,
+                condition.replies,
+                condition.losses,
+                listed(&condition.control_sequences),
+                listed(&condition.loss_sequences),
+                condition.caveat,
+            ),
+        )?;
     }
     for host in &scheduling.incomplete {
         let host = match &host.scope {
             Some(scope) => format!("{}%{}", host.address, scope.zone),
             None => host.address.to_string(),
         };
-        write_summary_line(format_args!("host {host} scan=incomplete"))?;
+        write_summary_line(invocation, format_args!("host {host} scan=incomplete"))?;
     }
     Ok(())
 }
 
-pub(super) fn render_plan_text(plan: &output::scan::plan::Plan) -> Result<(), CliError> {
+pub(super) fn render_plan_text(
+    invocation: &crate::invocation::Invocation,
+    plan: &output::scan::plan::Plan,
+) -> Result<(), CliError> {
     let method = &plan.method;
-    write_stdout_line(format_args!(
-        "method={} requested={}{} port-catalog={}/{} excluded-endpoints={}",
-        method.selected,
-        method.requested,
-        method
-            .reason
-            .as_ref()
-            .map_or_else(String::new, |reason| format!(" reason=\"{reason}\"")),
-        plan.port_catalog.name,
-        plan.port_catalog.version,
-        plan.excluded_endpoints,
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "method={} requested={}{} port-catalog={}/{} excluded-endpoints={}",
+            method.selected,
+            method.requested,
+            method
+                .reason
+                .as_ref()
+                .map_or_else(String::new, |reason| format!(" reason=\"{reason}\"")),
+            plan.port_catalog.name,
+            plan.port_catalog.version,
+            plan.excluded_endpoints,
+        ),
+    )?;
     if let Some(tcp_scan) = plan.tcp_scan {
-        write_stdout_line(format_args!("{}", tcp_scan_text(tcp_scan)))?;
+        write_stdout_line(invocation, format_args!("{}", tcp_scan_text(tcp_scan)))?;
     }
     if let Some(sctp_scan) = plan.sctp_scan {
-        write_stdout_line(format_args!("{}", sctp_scan_text(sctp_scan)))?;
+        write_stdout_line(invocation, format_args!("{}", sctp_scan_text(sctp_scan)))?;
     }
     let discovery = &plan.discovery;
-    write_stdout_line(format_args!(
-        "discovery={} probes={} neighbor={} unresponsive={} reverse-dns={}",
-        discovery.mode,
-        listed(
-            &discovery
-                .probes
-                .iter()
-                .map(|probe| {
-                    if let Some(port) = probe.port {
-                        if probe.tcp_scan.is_some_and(|scan| scan.mode == "ack") {
-                            format!("tcp-ack/{port}")
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "discovery={} probes={} neighbor={} unresponsive={} reverse-dns={}",
+            discovery.mode,
+            listed(
+                &discovery
+                    .probes
+                    .iter()
+                    .map(|probe| {
+                        if let Some(port) = probe.port {
+                            if probe.tcp_scan.is_some_and(|scan| scan.mode == "ack") {
+                                format!("tcp-ack/{port}")
+                            } else {
+                                format!("{}/{port}", probe.transport)
+                            }
+                        } else if let Some(protocol) = probe.ip_protocol {
+                            format!("ip/{protocol}")
+                        } else if let Some(kind) = probe.icmp_request {
+                            format!("icmp-{kind}")
                         } else {
-                            format!("{}/{port}", probe.transport)
+                            probe.transport.to_string()
                         }
-                    } else if let Some(protocol) = probe.ip_protocol {
-                        format!("ip/{protocol}")
-                    } else if let Some(kind) = probe.icmp_request {
-                        format!("icmp-{kind}")
-                    } else {
-                        probe.transport.to_string()
-                    }
-                })
-                .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>()
+            ),
+            discovery.neighbor,
+            discovery.unresponsive,
+            discovery.reverse_dns.as_ref().map_or_else(
+                || "-".to_owned(),
+                |server| format!("{}:{}", server.server, server.port)
+            ),
         ),
-        discovery.neighbor,
-        discovery.unresponsive,
-        discovery.reverse_dns.as_ref().map_or_else(
-            || "-".to_owned(),
-            |server| format!("{}:{}", server.server, server.port)
-        ),
-    ))?;
+    )?;
     if let Some(curated) = &plan.curated_udp_payloads {
-        write_stdout_line(format_args!(
-            "curated-udp-payloads={}/{} applied={} overridden={}",
-            curated.data_set.name,
-            curated.data_set.version,
-            listed(&curated.applied),
-            listed(&curated.overridden),
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "curated-udp-payloads={}/{} applied={} overridden={}",
+                curated.data_set.name,
+                curated.data_set.version,
+                listed(&curated.applied),
+                listed(&curated.overridden),
+            ),
+        )?;
     }
     Ok(())
 }
@@ -238,7 +278,7 @@ fn visible_probes(
 ) -> impl Iterator<Item = &output::scan::Probe> {
     probes.iter().filter(move |evidence| {
         presentation.verbose
-            || evidence.status == packetcraftr::probe::ProbeStatus::Timeout
+            || evidence.status == packetcraftr::probe::Status::Timeout
             || evidence.application.as_ref().is_some_and(|application| {
                 application.status == output::scan::ApplicationStatus::Rejected
             })
@@ -248,67 +288,89 @@ fn visible_probes(
 /// A raw probe's evidence line after `lead`, with any application and frame
 /// lines beneath it.
 fn render_probe_text(
+    invocation: &crate::invocation::Invocation,
     lead: &str,
     evidence: &output::scan::Probe,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "{lead}sequence={} attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
-        evidence.sequence,
-        evidence.attempt,
-        evidence.status.as_str(),
-        evidence.classification.as_str(),
-        evidence.sent_at,
-        optional_display(evidence.received_at),
-        optional_display(evidence.responder),
-        optional_duration(evidence.latency),
-        evidence.reason,
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "{lead}sequence={} attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
+            evidence.sequence,
+            evidence.attempt,
+            evidence.status.as_str(),
+            evidence.classification.as_str(),
+            evidence.sent_at,
+            optional_display(evidence.received_at),
+            optional_display(evidence.responder),
+            optional_duration(evidence.latency),
+            evidence.reason,
+        ),
+    )?;
     let nested = " ".repeat(lead.len() + 2);
     if let Some(tcp_scan) = evidence.tcp_scan.filter(|scan| scan.mode != "syn") {
-        write_stdout_line(format_args!(
-            "{nested}tcp-scan={} flags={:#05x} tcp-window={}",
-            tcp_scan.mode,
-            tcp_scan.flags,
-            optional_display(evidence.tcp_window),
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "{nested}tcp-scan={} flags={:#05x} tcp-window={}",
+                tcp_scan.mode,
+                tcp_scan.flags,
+                optional_display(evidence.tcp_window),
+            ),
+        )?;
     }
     if let Some(sctp_scan) = evidence.sctp_scan.filter(|scan| scan.mode != "init") {
-        write_stdout_line(format_args!(
-            "{nested}sctp-scan={} chunk-type={}",
-            sctp_scan.mode, sctp_scan.chunk_type,
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "{nested}sctp-scan={} chunk-type={}",
+                sctp_scan.mode, sctp_scan.chunk_type,
+            ),
+        )?;
     }
     if let Some(application) = &evidence.application {
-        write_stdout_line(format_args!(
-            "{nested}profile={} validation={}: {}",
-            application.profile,
-            application.status.as_str(),
-            application.reason
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "{nested}profile={} validation={}: {}",
+                application.profile,
+                application.status.as_str(),
+                application.reason
+            ),
+        )?;
     }
     if let Some(frame) = &evidence.frame
         && presentation.verbose
     {
-        write_stdout_line(format_args!("{nested}frame {}", captured_frame_text(frame)))?;
+        write_stdout_line(
+            invocation,
+            format_args!("{nested}frame {}", captured_frame_text(frame)),
+        )?;
     }
     Ok(())
 }
 
 /// A connect discovery probe's evidence line.
-fn connect_probe_text(probe: &output::scan::connect::Probe) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "  probe sequence={} port={} attempt={} outcome={} classification={} scheduled={} finished={} elapsed={} error={}",
-        probe.sequence,
-        probe.port,
-        probe.attempt,
-        probe.outcome,
-        probe.classification,
-        probe.scheduled_at,
-        optional_display(probe.finished_at.as_ref()),
-        duration_text(probe.elapsed),
-        optional_display(probe.error.as_ref().map(|error| &error.kind)),
-    ))
+fn connect_probe_text(
+    invocation: &crate::invocation::Invocation,
+    probe: &output::scan::connect::Probe,
+) -> Result<(), CliError> {
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "  probe sequence={} port={} attempt={} outcome={} classification={} scheduled={} finished={} elapsed={} error={}",
+            probe.sequence,
+            probe.port,
+            probe.attempt,
+            probe.outcome,
+            probe.classification,
+            probe.scheduled_at,
+            optional_display(probe.finished_at.as_ref()),
+            duration_text(probe.elapsed),
+            optional_display(probe.error.as_ref().map(|error| &error.kind)),
+        ),
+    )
 }
 
 /// The scan's planned duration against the operation's achieved packet rate,
@@ -330,22 +392,26 @@ fn throughput_text(planned: std::time::Duration, stats: &output::envelope::Stats
 /// The inference line beneath an endpoint; the hint is labelled as such so
 /// it never reads as an identified service.
 pub(super) fn render_inference_text(
+    invocation: &crate::invocation::Invocation,
     port_hint: Option<&str>,
     inference: Option<&output::scan::plan::Inference>,
 ) -> Result<(), CliError> {
     let Some(inference) = inference else {
         return Ok(());
     };
-    write_stdout_line(format_args!(
-        "  inferred={} rule={} supporting={} conflicting={} unanswered={} failed={} port-hint={}",
-        inference.state.unwrap_or("undetermined"),
-        inference.rule,
-        listed(&inference.supporting),
-        listed(&inference.conflicting),
-        listed(&inference.unanswered),
-        listed(&inference.failed),
-        port_hint.unwrap_or("-"),
-    ))
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "  inferred={} rule={} supporting={} conflicting={} unanswered={} failed={} port-hint={}",
+            inference.state.unwrap_or("undetermined"),
+            inference.rule,
+            listed(&inference.supporting),
+            listed(&inference.conflicting),
+            listed(&inference.unanswered),
+            listed(&inference.failed),
+            port_hint.unwrap_or("-"),
+        ),
+    )
 }
 
 /// A comma-separated list, or `-` when empty so every key keeps a value.
@@ -358,46 +424,56 @@ fn listed<T: std::fmt::Display>(values: &[T]) -> String {
 }
 
 pub(super) fn render_connect_text(
+    invocation: &crate::invocation::Invocation,
     report: &output::scan::connect::Report,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
-    render_plan_text(&report.summary.plan)?;
+    render_plan_text(invocation, &report.summary.plan)?;
     for endpoint in &report.endpoints {
-        write_stdout_line(format_args!(
-            "{}",
-            endpoint_text(
-                endpoint.address,
-                endpoint.scope.as_ref(),
-                &format!("tcp-connect/{}", endpoint.port),
-                endpoint.classification,
-            )
-        ))?;
-        render_inference_text(endpoint.port_hint, Some(&endpoint.inference))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "{}",
+                endpoint_text(
+                    endpoint.address,
+                    endpoint.scope.as_ref(),
+                    &format!("tcp-connect/{}", endpoint.port),
+                    endpoint.classification,
+                )
+            ),
+        )?;
+        render_inference_text(invocation, endpoint.port_hint, Some(&endpoint.inference))?;
     }
-    render_hosts_text(&report.summary.plan, &report.hosts, |probe| {
+    render_hosts_text(invocation, &report.summary.plan, &report.hosts, |probe| {
         if presentation.verbose || probe.error.is_some() {
-            connect_probe_text(probe)
+            connect_probe_text(invocation, probe)
         } else {
             Ok(())
         }
     })?;
-    write_stdout_line(format_args!(
-        "{} socket connections attempted; {} succeeded; elapsed {}",
-        report.summary.socket_stats.connections_attempted,
-        report.summary.socket_stats.connections_succeeded,
-        duration_text(report.summary.socket_stats.elapsed)
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "{} socket connections attempted; {} succeeded; elapsed {}",
+            report.summary.socket_stats.connections_attempted,
+            report.summary.socket_stats.connections_succeeded,
+            duration_text(report.summary.socket_stats.elapsed)
+        ),
+    )?;
     let rtt = &report.summary.socket_stats.rtt;
-    write_stdout_line(format_args!(
-        "probes sent={} received={} lost={} rtt min/avg/max={}/{}/{}",
-        rtt.sent,
-        rtt.received,
-        rtt.lost,
-        optional_duration(rtt.min),
-        optional_duration(rtt.avg),
-        optional_duration(rtt.max),
-    ))?;
-    render_scheduling_text(&report.summary.scheduling)
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "probes sent={} received={} lost={} rtt min/avg/max={}/{}/{}",
+            rtt.sent,
+            rtt.received,
+            rtt.lost,
+            optional_duration(rtt.min),
+            optional_duration(rtt.avg),
+            optional_duration(rtt.max),
+        ),
+    )?;
+    render_scheduling_text(invocation, &report.summary.scheduling)
 }
 
 fn endpoint_text(
@@ -424,7 +500,7 @@ mod tests {
     #[test]
     fn compact_output_keeps_rejected_udp_checks_and_timeouts() {
         use output::scan::{ApplicationEvidence, ApplicationStatus, Probe, Protocol, Stage};
-        use packetcraftr::probe::ProbeStatus;
+        use packetcraftr::probe;
 
         let probes = [
             (Some(ApplicationStatus::Confirmed), "dns", "DNS ID matched"),
@@ -451,9 +527,9 @@ mod tests {
                 sctp_scan: None,
                 attempt: 1,
                 status: if timeout {
-                    ProbeStatus::Timeout
+                    probe::Status::Timeout
                 } else {
-                    ProbeStatus::Response
+                    probe::Status::Response
                 },
                 classification: if timeout {
                     Classification::Timeout

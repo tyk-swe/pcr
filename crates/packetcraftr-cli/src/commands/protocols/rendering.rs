@@ -18,41 +18,59 @@ pub(super) fn protocol_line(protocol: &output::protocols::Summary) -> String {
     )
 }
 
-pub(super) fn render_detail(protocol: &output::protocols::Detail) -> Result<(), CliError> {
+pub(super) fn render_detail(
+    invocation: &crate::invocation::Invocation,
+    protocol: &output::protocols::Detail,
+) -> Result<(), CliError> {
     let summary = &protocol.summary;
-    write_stdout_line(format_args!("protocol: {}", summary.protocol))?;
-    write_stdout_line(format_args!("aliases: [{}]", summary.aliases.join(", ")))?;
-    write_stdout_line(format_args!("build: {}", summary.build))?;
-    write_stdout_line(format_args!("dissect: {}", summary.dissect))?;
-    write_stdout_line(format_args!(
-        "exact_round_trip: {}",
-        summary.exact_round_trip
-    ))?;
-    write_stdout_line(format_args!("matcher: {}", summary.matcher))?;
-    write_stdout_line(format_args!("decode_only: {}", summary.decode_only))?;
-    write_stdout_line(format_args!("bindings:"))?;
+    write_stdout_line(invocation, format_args!("protocol: {}", summary.protocol))?;
+    write_stdout_line(
+        invocation,
+        format_args!("aliases: [{}]", summary.aliases.join(", ")),
+    )?;
+    write_stdout_line(invocation, format_args!("build: {}", summary.build))?;
+    write_stdout_line(invocation, format_args!("dissect: {}", summary.dissect))?;
+    write_stdout_line(
+        invocation,
+        format_args!("exact_round_trip: {}", summary.exact_round_trip),
+    )?;
+    write_stdout_line(invocation, format_args!("matcher: {}", summary.matcher))?;
+    write_stdout_line(
+        invocation,
+        format_args!("decode_only: {}", summary.decode_only),
+    )?;
+    write_stdout_line(invocation, format_args!("bindings:"))?;
     for binding in &protocol.bindings {
-        write_stdout_line(format_args!(
-            "  {} discriminator={}",
-            binding.parent, binding.discriminator
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "  {} discriminator={}",
+                binding.parent, binding.discriminator
+            ),
+        )?;
     }
-    write_stdout_line(format_args!("fields:"))?;
+    write_stdout_line(invocation, format_args!("fields:"))?;
     for field in &protocol.fields {
-        write_stdout_line(format_args!(
-            "  {} kind={} required={} derived={} description={}",
-            field.name,
-            field.kind.as_str(),
-            field.required,
-            field.derived,
-            field.description
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "  {} kind={} required={} derived={} description={}",
+                field.name,
+                field.kind.as_str(),
+                field.required,
+                field.derived,
+                field.description
+            ),
+        )?;
     }
     if !protocol.filter_fields.is_empty() {
         let fields = &protocol.filter_fields;
-        write_stdout_line(format_args!("filter_fields:"))?;
+        write_stdout_line(invocation, format_args!("filter_fields:"))?;
         for field in fields {
-            write_stdout_line(format_args!("  {}: {}", field.path, field.description))?;
+            write_stdout_line(
+                invocation,
+                format_args!("  {}: {}", field.path, field.description),
+            )?;
         }
     }
     Ok(())

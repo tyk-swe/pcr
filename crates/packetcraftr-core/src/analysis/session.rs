@@ -7,7 +7,6 @@ use std::io::Read;
 use std::sync::Arc;
 
 use crate::error::BoundaryError;
-use crate::filter::{Filter, Requirements};
 use crate::registry::Registry;
 
 use super::scope::Definition;
@@ -99,43 +98,17 @@ pub struct Session<'a, C> {
     collector: C,
     options: Options<'a>,
     registry: Arc<Registry>,
-    selector: Option<StreamRef>,
 }
 
 impl<'a, C: Collector> Session<'a, C> {
     /// `max_flows` bounds each transport capture-wide, so a plan that indexes at all indexes both.
-    pub fn new(
-        registry: Arc<Registry>,
-        mut options: Options<'a>,
-        collector: C,
-        selector: Option<StreamRef>,
-    ) -> Self {
-        let requirements = options
-            .filter
-            .map_or_else(Requirements::default, Filter::requirements);
+    pub fn new(registry: Arc<Registry>, mut options: Options<'a>, collector: C) -> Self {
         let needs = collector.needs();
-        if selector.is_some() {
-            options.stream = selector;
-        }
-        let indexed = requirements.tcp_stream
-            || requirements.udp_stream
-            || needs.tcp_stream
-            || needs.udp_stream
-            || options.stream.is_some();
-        options.plan = if indexed {
-            Plan::default()
-        } else {
-            Plan {
-                ip_reassembly: needs.ip_reassembly,
-                tcp_index: false,
-                udp_index: false,
-            }
-        };
+        options.plan = Plan::for_collector(needs, options.filter, options.stream);
         options.tcp_events |= needs.tcp_events;
         options.track_sources |= needs.track_sources;
         Self {
             collector,
-            selector: options.stream,
             options,
             registry,
         }
@@ -178,7 +151,133 @@ impl<'a, C: Collector> Session<'a, C> {
         Ok(Pass {
             run,
             collector,
-            selector: self.selector,
+            selector: self.options.stream,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        build, capture_file, expression,
+        frame::{Frame, LinkType},
+        protocol::builtin,
+    };
+    use std::{
+        io::Cursor,
+        time::{Duration, UNIX_EPOCH},
+    };
+
+    struct Records {
+        fail: bool,
+    }
+    impl Collector for Records {
+        type Event = u64;
+        type Summary = ();
+        fn needs(&self) -> CollectorNeeds {
+            CollectorNeeds::default()
+        }
+        fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<u64>, BoundaryError> {
+            if self.fail {
+                return Err(BoundaryError::new(
+                    "collector refused frame",
+                    crate::error::Classification::new(
+                        "test.collector",
+                        crate::error::Kind::Internal,
+                        None,
+                    ),
+                    Vec::new(),
+                ));
+            }
+            Ok(vec![record.number])
+        }
+        fn finish(self, _: &Summary) -> Result<(Vec<u64>, ()), BoundaryError> {
+            Ok((Vec::new(), ()))
+        }
+    }
+
+    fn capture() -> Reader<Cursor<Vec<u8>>> {
+        let registry = builtin::registry();
+        let mut bytes = Vec::new();
+        {
+            let mut writer =
+                capture_file::Writer::new(&mut bytes, capture_file::Format::Pcap, LinkType::IPV4)
+                    .unwrap();
+            for (index, port) in [9, 80, 9].into_iter().enumerate() {
+                let packet = expression::parse(
+                    &format!("ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=12345,dport={port})/raw(text=fixture)"),
+                    &registry, expression::Limits::default(),
+                ).unwrap();
+                let built = build::Builder::new(registry.clone())
+                    .build(packet, Default::default(), Default::default())
+                    .unwrap();
+                writer
+                    .write_frame(
+                        &Frame::new(
+                            UNIX_EPOCH + Duration::from_secs(index as u64),
+                            LinkType::IPV4,
+                            built.bytes,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+            }
+        }
+        Reader::new(Cursor::new(bytes)).unwrap()
+    }
+
+    #[test]
+    fn selection_comes_from_options_after_capture_wide_indexing() {
+        let registry = builtin::registry();
+        let filter =
+            crate::filter::Filter::compile("udp.stream == 1", &registry, Default::default())
+                .unwrap();
+        let options = Options {
+            stream: Some(StreamRef {
+                transport: super::super::StreamTransport::Udp,
+                index: 1,
+            }),
+            filter: Some(&filter),
+            ..Default::default()
+        };
+        let mut records = Vec::new();
+        let outcome = Session::new(registry, options, Records { fail: false })
+            .run(
+                &mut capture(),
+                |_| Ok(()),
+                |number| {
+                    records.push(number);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(records, [2]);
+        assert_eq!(outcome.run.frames_read, 3);
+        assert!(!outcome.selected_absent());
+    }
+
+    #[test]
+    fn missing_stream_is_reported_and_reader_deadline_is_restored_on_both_paths() {
+        for fail in [false, true] {
+            let parent = Arc::new(crate::budget::Deadline::new(Duration::from_secs(30)));
+            let mut reader = capture().with_deadline(parent.clone());
+            let result = Session::new(builtin::registry(), Options::default(), Records { fail })
+                .run(&mut reader, |_| Ok(()), |_| Ok(()));
+            assert_eq!(result.is_err(), fail);
+            assert!(Arc::ptr_eq(&reader.deadline().unwrap(), &parent));
+        }
+        let options = Options {
+            stream: Some(StreamRef {
+                transport: super::super::StreamTransport::Udp,
+                index: 9,
+            }),
+            ..Default::default()
+        };
+        let outcome = Session::new(builtin::registry(), options, Records { fail: false })
+            .run(&mut capture(), |_| Ok(()), |_| Ok(()))
+            .unwrap();
+        assert!(outcome.selected_absent());
+        assert_eq!(outcome.run.frames_matched, 0);
     }
 }

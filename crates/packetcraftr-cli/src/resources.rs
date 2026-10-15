@@ -8,93 +8,76 @@ pub(crate) use settings::{
 };
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Mutex, PoisonError};
 
 use packetcraftr::runtime::Runtime;
 
-use crate::output::{
-    envelope::Envelope,
-    resources::{Report, Setting, Worker},
-};
+use crate::output::resources::{Report, Setting, Worker};
 
-struct Context {
+pub(crate) struct Diagnostics {
     settings: Vec<(Setting, Enabled)>,
     stream_index: AtomicBool,
     runtimes: Mutex<Vec<(&'static str, Runtime)>>,
 }
-static CONTEXT: OnceLock<Context> = OnceLock::new();
-
-pub(crate) fn configure(settings: Vec<(Setting, Enabled)>) {
-    let _ = CONTEXT.set(Context {
-        settings,
-        stream_index: AtomicBool::new(true),
-        runtimes: Mutex::new(Vec::new()),
-    });
-}
-
-pub(crate) fn stream_index_needed(needed: bool) {
-    if let Some(context) = CONTEXT.get() {
-        context.stream_index.store(needed, Ordering::Relaxed);
-    }
-}
-
-pub(crate) fn register_runtime(name: &'static str, runtime: &Runtime) {
-    if let Some(context) = CONTEXT.get() {
-        let mut runtimes = context
-            .runtimes
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        // A CLI invocation constructs at most one runtime per assembly owner.
-        // Keep the diagnostic registry bounded even if future commands change.
-        if runtimes.len() < 16 {
-            runtimes.push((name, runtime.clone()));
+impl Diagnostics {
+    pub(crate) fn new(settings: Vec<(Setting, Enabled)>) -> Self {
+        Self {
+            settings,
+            stream_index: AtomicBool::new(true),
+            runtimes: Mutex::new(Vec::new()),
         }
     }
-}
 
-pub(crate) fn snapshot() -> Option<Report> {
-    let context = CONTEXT.get()?;
-    let mut workers = vec![
-        Worker::from((
-            "native_process",
-            packetcraftr_netio::resources::native_snapshot(),
-        )),
-        Worker::from((
-            "tcp_connect_process",
-            packetcraftr_netio::resources::tcp_connect_snapshot(),
-        )),
-    ];
-    workers.extend(
-        context
-            .runtimes
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+    pub(crate) fn stream_index_needed(&self, needed: bool) {
+        self.stream_index.store(needed, Ordering::Relaxed);
+    }
+
+    pub(crate) fn register_runtime(&self, name: &'static str, runtime: &Runtime) {
+        {
+            let mut runtimes = self.runtimes.lock().unwrap_or_else(PoisonError::into_inner);
+            // A CLI invocation constructs at most one runtime per assembly owner.
+            // Keep the diagnostic registry bounded even if future commands change.
+            if runtimes.len() < 16 {
+                runtimes.push((name, runtime.clone()));
+            }
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> Report {
+        let mut workers = vec![
+            Worker::from((
+                "native_process",
+                packetcraftr_netio::resources::native_snapshot(),
+            )),
+            Worker::from((
+                "tcp_connect_process",
+                packetcraftr_netio::resources::tcp_connect_snapshot(),
+            )),
+        ];
+        workers.extend(
+            self.runtimes
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .iter()
+                .map(|(name, runtime)| Worker::from((*name, runtime.snapshot()))),
+        );
+        let stream_index = self.stream_index.load(Ordering::Relaxed);
+        let settings = self
+            .settings
             .iter()
-            .map(|(name, runtime)| Worker::from((*name, runtime.snapshot()))),
-    );
-    let stream_index = context.stream_index.load(Ordering::Relaxed);
-    let settings = context
-        .settings
-        .iter()
-        .map(|(setting, enabled)| Setting {
-            enabled: match enabled {
-                Enabled::Fixed(enabled) => *enabled,
-                Enabled::StreamIndex => stream_index,
-            },
-            ..setting.clone()
-        })
-        .collect();
-    Some(Report {
-        settings,
-        workers,
-        cooperative_deadlines: true,
-        hard_rss_limit: false,
-    })
-}
-
-pub(crate) fn decorate<T>(envelope: Envelope<T>) -> Envelope<T> {
-    match snapshot() {
-        Some(resources) => envelope.with_resources(resources),
-        None => envelope,
+            .map(|(setting, enabled)| Setting {
+                enabled: match enabled {
+                    Enabled::Fixed(enabled) => *enabled,
+                    Enabled::StreamIndex => stream_index,
+                },
+                ..setting.clone()
+            })
+            .collect();
+        Report {
+            settings,
+            workers,
+            cooperative_deadlines: true,
+            hard_rss_limit: false,
+        }
     }
 }

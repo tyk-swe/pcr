@@ -3,8 +3,6 @@
 
 use std::time::Duration;
 
-use super::Errors;
-
 pub(crate) const MAX_RATE: u32 = 1_000_000;
 
 pub(crate) fn check_limits<E>(
@@ -31,16 +29,19 @@ pub(crate) fn check_limits<E>(
 
 pub(crate) use crate::evidence::Limits as EvidenceLimits;
 
-pub(crate) fn check_rate<R: Errors>(
-    errors: &R,
+pub(crate) fn check_rate<E>(
+    errors: fn(u64, crate::execution::Failure) -> E,
     field: &'static str,
     rate: Option<u32>,
-) -> Result<(), R::Error> {
+) -> Result<(), E> {
     match rate {
-        Some(rate) if rate == 0 || rate > MAX_RATE => Err(errors.invalid_limit(
-            field,
-            u64::from(rate),
-            format!("must be within 1..={MAX_RATE}"),
+        Some(rate) if rate == 0 || rate > MAX_RATE => Err((errors)(
+            0_u64,
+            crate::execution::Failure::InvalidLimit {
+                field,
+                value: u64::from(rate),
+                reason: format!("must be within 1..={MAX_RATE}"),
+            },
         )),
         _ => Ok(()),
     }
@@ -56,41 +57,17 @@ fn widen(value: usize) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use packetcraftr_core::budget::{DeadlineExceeded, Interrupted};
-    use packetcraftr_core::error::BoundaryError;
 
     use super::*;
-    use crate::StatsOverflow;
 
-    struct Recorder;
-
-    impl Errors for Recorder {
-        type Error = (&'static str, u64, String);
-        type Step = ();
-
-        fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Self::Error {
-            (field, value, reason)
-        }
-        fn authorization(&self, _: BoundaryError) -> Self::Error {
-            unreachable!("check_rate reports only invalid limits")
-        }
-        fn duration_limit(&self, (): (), _: DeadlineExceeded) -> Self::Error {
-            unreachable!("check_rate reports only invalid limits")
-        }
-        fn interrupted(&self, (): (), _: Interrupted) -> Self::Error {
-            unreachable!("check_rate reports only invalid limits")
-        }
-        fn clock(&self, (): (), _: Box<dyn std::error::Error + Send + Sync>) -> Self::Error {
-            unreachable!("check_rate reports only invalid limits")
-        }
-        fn execution(&self, (): (), _: BoundaryError) -> Self::Error {
-            unreachable!("check_rate reports only invalid limits")
-        }
-        fn invalid_evidence(&self, (): (), _: crate::evidence::Error) -> Self::Error {
-            unreachable!("check_rate reports only invalid limits")
-        }
-        fn stats_overflow(&self, (): (), _: StatsOverflow) -> Self::Error {
-            unreachable!("check_rate reports only invalid limits")
+    fn record_error(_step: u64, failure: crate::execution::Failure) -> (&'static str, u64, String) {
+        match failure {
+            crate::execution::Failure::InvalidLimit {
+                field,
+                value,
+                reason,
+            } => (field, value, reason),
+            _ => unreachable!("check_rate reports only invalid limits"),
         }
     }
 
@@ -98,7 +75,7 @@ mod tests {
     fn rate_check_rejects_zero_and_over_ceiling() {
         for rate in [0, MAX_RATE + 1, u32::MAX] {
             assert_eq!(
-                check_rate(&Recorder, "probes_per_second", Some(rate)),
+                check_rate(record_error, "probes_per_second", Some(rate)),
                 Err((
                     "probes_per_second",
                     u64::from(rate),

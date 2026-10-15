@@ -7,14 +7,14 @@ use std::sync::Arc;
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding};
 use super::error::Error;
 use super::hasher::FixedState;
-use crate::codec::LayerCodec;
+use crate::codec::Codec;
 use crate::frame::LinkType;
 
 use crate::matcher::ResponseMatcher;
 
 #[derive(Default)]
 pub struct Builder {
-    pub(super) codecs: BTreeMap<crate::layer::Id, Arc<dyn LayerCodec>>,
+    pub(super) codecs: BTreeMap<crate::layer::Id, Arc<dyn Codec>>,
     pub(super) aliases: HashMap<String, crate::layer::Id>,
     pub(super) roots: HashMap<LinkType, crate::layer::Id>,
     pub(super) bindings: HashMap<
@@ -35,9 +35,9 @@ impl Builder {
     /// Registers a codec with its canonical name and caller-owned aliases.
     pub fn register_codec<C>(&mut self, codec: C, aliases: &[&str]) -> Result<&mut Self, Error>
     where
-        C: LayerCodec + 'static,
+        C: Codec + 'static,
     {
-        let codec: Arc<dyn LayerCodec> = Arc::new(codec);
+        let codec: Arc<dyn Codec> = Arc::new(codec);
         let protocol = *codec.protocol_id();
         if self.codecs.contains_key(&protocol) {
             return Err(Error::DuplicateProtocol { protocol });

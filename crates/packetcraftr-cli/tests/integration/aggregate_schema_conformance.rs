@@ -72,7 +72,7 @@ fn built_packet() -> build::BuiltPacket {
     build::Builder::new(builtin::registry())
         .build(
             udp_packet(),
-            codec::Context::default(),
+            codec::Addresses::default(),
             build::Options::default(),
         )
         .expect("representative packet builds")

@@ -10,7 +10,7 @@ use std::time::SystemTime;
 
 use bytes::Bytes;
 use packetcraftr_core::document;
-use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::field;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::link::Ethernet;
@@ -45,7 +45,11 @@ fn dissect(source_port: u16, destination_port: u16, payload: &[u8]) -> decode::D
     packet.push(Raw::new(Bytes::copy_from_slice(payload)));
     let builder = build::Builder::new(Arc::clone(&registry));
     let built = builder
-        .build(packet, codec::Context::default(), build::Options::default())
+        .build(
+            packet,
+            codec::Addresses::default(),
+            build::Options::default(),
+        )
         .expect("segment builds");
     let frame = Frame::new(
         SystemTime::UNIX_EPOCH,
@@ -59,7 +63,7 @@ fn dissect(source_port: u16, destination_port: u16, payload: &[u8]) -> decode::D
     let rebuilt = builder
         .build(
             decoded.packet.clone(),
-            codec::Context::default(),
+            codec::Addresses::default(),
             build::Options::default(),
         )
         .expect("dissected segment rebuilds");
@@ -87,7 +91,7 @@ fn pkt_reject_non_boolean_partial_flag() {
         .find(|layer| layer.protocol == "tls")
         .expect("a tls layer")
         .fields
-        .insert("incomplete".to_owned(), FieldValue::from("yes"));
+        .insert("incomplete".to_owned(), field::Value::from("yes"));
     assert!(matches!(
         document.to_packet(&registry(), 8),
         Err(document::Error::Layer {

@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_core::budget::{DeadlineExceeded, Interrupted};
+use packetcraftr_core::budget::DeadlineExceeded;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use thiserror::Error;
 
@@ -119,49 +119,50 @@ pub(super) fn duration_limit(error: DeadlineExceeded) -> Error {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(super) struct CaseErrors;
-
-impl crate::execution::Errors for CaseErrors {
-    type Error = Error;
-    type Step = u64;
-
-    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Error {
-        Error::InvalidLimit {
+pub(crate) fn case_error(step: u64, failure: crate::execution::Failure) -> Error {
+    match failure {
+        crate::execution::Failure::InvalidLimit {
             field,
             value,
             reason,
+        } => Error::InvalidLimit {
+            field,
+            value,
+            reason,
+        },
+        crate::execution::Failure::Authorization(source) => Error::Authorization(source),
+        crate::execution::Failure::DurationLimit(source) => {
+            let _case_index = step;
+
+            duration_limit(source)
         }
-    }
+        crate::execution::Failure::Interrupted(source) => {
+            let _case_index = step;
 
-    fn authorization(&self, source: packetcraftr_core::error::BoundaryError) -> Error {
-        Error::Authorization(source)
-    }
-
-    fn duration_limit(&self, _case_index: u64, source: DeadlineExceeded) -> Error {
-        duration_limit(source)
-    }
-
-    fn interrupted(&self, _case_index: u64, source: Interrupted) -> Error {
-        source.into_error()
-    }
-
-    fn clock(&self, case_index: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
-        Error::Clock { case_index, source }
-    }
-
-    fn execution(&self, case_index: u64, source: packetcraftr_core::error::BoundaryError) -> Error {
-        Error::Execution { case_index, source }
-    }
-
-    fn invalid_evidence(&self, case_index: u64, source: crate::evidence::Error) -> Error {
-        Error::InvalidEvidence {
-            case_index,
-            message: source.describe("case", "fuzz"),
+            source.into_error()
         }
-    }
+        crate::execution::Failure::Clock(source) => {
+            let case_index = step;
 
-    fn stats_overflow(&self, case_index: u64, _source: crate::StatsOverflow) -> Error {
-        Error::StatisticsOverflow { case_index }
+            Error::Clock { case_index, source }
+        }
+        crate::execution::Failure::Execution(source) => {
+            let case_index = step;
+
+            Error::Execution { case_index, source }
+        }
+        crate::execution::Failure::InvalidEvidence(source) => {
+            let case_index = step;
+
+            Error::InvalidEvidence {
+                case_index,
+                message: source.describe("case", "fuzz"),
+            }
+        }
+        crate::execution::Failure::StatsOverflow(_source) => {
+            let case_index = step;
+
+            Error::StatisticsOverflow { case_index }
+        }
     }
 }

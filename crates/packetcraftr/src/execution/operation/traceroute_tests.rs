@@ -1,6 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use crate::common;
+use super::common;
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
@@ -13,7 +13,7 @@ use common::clock::VirtualClock;
 use common::responder::{Arrival, Io, Path, Routes, State};
 use packetcraftr::clock::Clock;
 use packetcraftr::policy::{DestinationConstraint, Policy};
-use packetcraftr::probe::{ProbeStatus, Transport};
+use packetcraftr::probe::{self, Transport};
 use packetcraftr::scan::{self, Reply};
 use packetcraftr::target::{Family, Selection};
 use packetcraftr::traceroute::hosts::{
@@ -164,7 +164,7 @@ fn hosts_end_as_complete_or_incomplete_with_one_plan() {
         ]
     );
     let silent = &aggregate.hosts[0].hops[1].probes[0];
-    assert_eq!(silent.status, ProbeStatus::Timeout);
+    assert_eq!(silent.status, probe::Status::Timeout);
     assert_eq!(aggregate.stats.packets_attempted, 11);
     assert_eq!(state.lock().unwrap().sends, 11);
     assert_true_hops(&state, &aggregate);
@@ -191,7 +191,7 @@ fn scan_observations_choose_each_hosts_probe() {
             transport: Transport::Icmp,
             port: None,
             attempt: 1,
-            status: ProbeStatus::Response,
+            status: probe::Status::Response,
             classification: scan::Classification::Open,
             reply: Some(scan::Reply::IcmpEchoReply),
             responder: Some(IpAddr::V4(host(11))),
@@ -372,7 +372,7 @@ fn reuse_sends_fewer_probes_and_never_reports_a_wrong_hop() {
     }
 }
 
-const CORPUS: &str = include_str!("../../../../docs/scanner-corpus.v1.json");
+const CORPUS: &str = include_str!("../../../../../docs/scanner-corpus.v1.json");
 
 #[derive(serde::Deserialize)]
 struct Corpus {
@@ -563,7 +563,7 @@ fn a_real_scan_selects_the_probe_its_host_answered() {
         max_in_flight: 1,
         targets: packetcraftr::target::Target::Address(IpAddr::V4(host(11))).into(),
         address_family: Family::Any,
-        endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
+        endpoints: vec![packetcraftr::probe::Endpoint::Tcp { port: 80 }],
         discovery: Default::default(),
         adaptive: None,
         udp_payload: Default::default(),
@@ -738,7 +738,7 @@ fn an_adaptive_scan_still_selects_the_probe_its_host_answered() {
         max_in_flight: 4,
         targets: packetcraftr::target::Target::Address(IpAddr::V4(host(11))).into(),
         address_family: Family::Any,
-        endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
+        endpoints: vec![packetcraftr::probe::Endpoint::Tcp { port: 80 }],
         discovery: Default::default(),
         adaptive: Some(scan::Adaptive {
             min_timeout: Duration::from_millis(1),
@@ -948,7 +948,7 @@ fn a_trace_spends_only_what_the_scan_left_of_the_policy() {
         max_in_flight: 1,
         targets: packetcraftr::target::Target::Address(IpAddr::V4(host(11))).into(),
         address_family: Family::Any,
-        endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
+        endpoints: vec![packetcraftr::probe::Endpoint::Tcp { port: 80 }],
         discovery: Default::default(),
         adaptive: None,
         udp_payload: Default::default(),
@@ -985,12 +985,16 @@ fn a_trace_spends_only_what_the_scan_left_of_the_policy() {
     plan.max_hops = 1;
     plan.timeout = Duration::from_millis(500);
     plan.observed = hosts::observed(&scanned);
-    let view = capped.with_remaining_budget(&scanned.stats);
+    let mut operation = crate::execution::Operation::new(&capped, plan.limits.max_duration);
+    operation.spent = scanned.stats.clone();
     // The narrowed view reads the remainder; the client keeps the full cap.
-    assert_eq!(view.policy().max_packets_per_operation, 0);
+    assert_eq!(
+        operation.policy(capped.policy()).max_packets_per_operation,
+        0
+    );
     assert_eq!(capped.policy().max_packets_per_operation, 1);
-    let error = view
-        .trace_hosts(plan.clone(), Collector::default())
+    let error = capped
+        .trace_hosts_in(plan.clone(), Collector::default(), &operation)
         .expect_err("the scan spent the whole packet budget");
     assert_eq!(error.classification().code, "policy.packet_limit");
     assert_eq!(state.lock().unwrap().sends, 1, "no trace traffic at all");
@@ -1010,9 +1014,10 @@ fn a_trace_spends_only_what_the_scan_left_of_the_policy() {
     let scanned = collector.finish(report).expect("the scan aggregates");
     assert_eq!(state.lock().unwrap().sends, 2, "the second scan's probe");
     let collector = Collector::default();
+    let mut operation = crate::execution::Operation::new(&generous, plan.limits.max_duration);
+    operation.spent = scanned.stats.clone();
     let report = generous
-        .with_remaining_budget(&scanned.stats)
-        .trace_hosts(plan.clone(), collector.clone())
+        .trace_hosts_in(plan.clone(), collector.clone(), &operation)
         .expect("one packet remains for the trace");
     collector.finish(report).expect("the trace aggregates");
     assert_eq!(
@@ -1034,10 +1039,16 @@ fn a_trace_spends_only_what_the_scan_left_of_the_policy() {
         bytes: 1_000 - 73,
         ..Stats::default()
     };
-    let view = byte_capped.with_remaining_budget(&spent);
-    assert_eq!(view.policy().max_bytes_per_operation, 73);
-    let error = view
-        .trace_hosts(plan, Collector::default())
+    let mut operation = crate::execution::Operation::new(&byte_capped, plan.limits.max_duration);
+    operation.spent = spent;
+    assert_eq!(
+        operation
+            .policy(byte_capped.policy())
+            .max_bytes_per_operation,
+        73
+    );
+    let error = byte_capped
+        .trace_hosts_in(plan, Collector::default(), &operation)
         .expect_err("73 bytes cannot fit a 74-byte probe");
     assert_eq!(error.classification().code, "policy.byte_limit");
     assert_eq!(state.lock().unwrap().sends, 3, "still no trace traffic");
@@ -1107,10 +1118,10 @@ fn a_tcp_observation_rejects_payload_before_hostname_resolution() {
         let providers = packetcraftr::ProviderSet {
             udp: (),
             route: Routes,
-            interface: crate::common::Interfaces::default(),
+            interface: super::common::Interfaces::default(),
             capture: Io(Arc::clone(&state)),
             transmit: Io(Arc::clone(&state)),
-            tcp: crate::common::ScriptedTcp::default(),
+            tcp: super::common::ScriptedTcp::default(),
             resolver: resolver.clone(),
         };
         let client = Client::new(
@@ -1355,12 +1366,11 @@ fn a_parent_deadline_caps_the_trace_whatever_the_plan_allows() {
     // The clock is attached after the parent and a narrower-budget view is
     // attached after that: every view composition keeps the bound.
     let expired = client(&state, Policy::default())
-        .with_parent_deadline(packetcraftr_core::budget::Deadline::with_time_source(
+        .with_deadline(packetcraftr_core::budget::Deadline::with_time_source(
             Duration::from_secs(1),
             move || source.now(),
         ))
-        .with_clock(clock.clone())
-        .with_remaining_budget(&Stats::default());
+        .with_clock(clock.clone());
     let mut plan = request(&[11]);
     plan.max_hops = 1;
     clock.advance(Duration::from_secs(2));
@@ -1376,11 +1386,10 @@ fn a_parent_deadline_caps_the_trace_whatever_the_plan_allows() {
     // A wider parent attached afterwards cannot extend the earlier bound:
     // the spent parent stays composed underneath.
     let source = clock.clone();
-    let widening = expired.with_parent_deadline(
-        packetcraftr_core::budget::Deadline::with_time_source(Duration::from_secs(3), move || {
-            source.now()
-        }),
-    );
+    let widening = expired.with_deadline(packetcraftr_core::budget::Deadline::with_time_source(
+        Duration::from_secs(3),
+        move || source.now(),
+    ));
     let error = widening
         .trace_hosts(plan.clone(), |_| Ok(()))
         .expect_err("the narrow parent still holds");
@@ -1398,7 +1407,7 @@ fn a_parent_deadline_caps_the_trace_whatever_the_plan_allows() {
     let source = clock.clone();
     let parented = client(&state, Policy::default())
         .with_clock(clock.clone())
-        .with_parent_deadline(packetcraftr_core::budget::Deadline::with_time_source(
+        .with_deadline(packetcraftr_core::budget::Deadline::with_time_source(
             Duration::from_secs(1),
             move || source.now(),
         ));

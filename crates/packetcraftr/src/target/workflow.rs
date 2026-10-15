@@ -9,7 +9,6 @@ use packetcraftr_netio::interface::Id as InterfaceId;
 use super::{Family, ResolveTarget, SelectedAddress, Target};
 use packetcraftr_core::budget::Deadline;
 
-use crate::execution::Errors;
 use crate::policy::{Authorizer, Operation, WireLimits};
 
 #[derive(Debug)]
@@ -26,22 +25,22 @@ impl SelectedTargets {
     }
 }
 
-pub(crate) fn resolve_selected<A, G>(
+pub(crate) fn resolve_selected<A, E>(
     authorizer: &mut A,
     target: &Target,
     family: Family,
     deadline: &Deadline,
-    gates: &G,
-) -> Result<SelectedTargets, G::Error>
+    gates: fn(u64, crate::execution::Failure) -> E,
+) -> Result<SelectedTargets, E>
 where
     A: ResolveTarget,
-    G: Errors,
 {
     let check = || check_deadline(deadline, gates);
     check()?;
     let resolved = authorizer.resolve_and_authorize(target, deadline);
     check()?;
-    let resolved = resolved.map_err(|source| gates.authorization(source))?;
+    let resolved = resolved
+        .map_err(|source| (gates)(0_u64, crate::execution::Failure::Authorization(source)))?;
 
     let declared = resolved.declared.to_string();
     let mut targets = Vec::with_capacity(resolved.selected.len());
@@ -60,26 +59,28 @@ where
     })
 }
 
-pub(crate) fn approve_operation<A, G>(
+pub(crate) fn approve_operation<A, E>(
     authorizer: &mut A,
     operation: Operation<'_>,
     deadline: &Deadline,
-    gates: &G,
-) -> Result<(), G::Error>
+    gates: fn(u64, crate::execution::Failure) -> E,
+) -> Result<(), E>
 where
     A: Authorizer,
-    G: Errors,
 {
     check_deadline(deadline, gates)?;
     let approval = authorizer.authorize_operation(operation);
     check_deadline(deadline, gates)?;
-    approval.map_err(|source| gates.authorization(source))
+    approval.map_err(|source| (gates)(0_u64, crate::execution::Failure::Authorization(source)))
 }
 
-fn check_deadline<G: Errors>(deadline: &Deadline, gates: &G) -> Result<(), G::Error> {
+fn check_deadline<E>(
+    deadline: &Deadline,
+    gates: fn(u64, crate::execution::Failure) -> E,
+) -> Result<(), E> {
     deadline
         .check()
-        .map_err(|source| gates.duration_limit(G::Step::default(), source))
+        .map_err(|source| (gates)(0_u64, crate::execution::Failure::DurationLimit(source)))
 }
 
 pub(crate) const fn wire_limits(packets: u64, maximum_wire_bytes: u64) -> Operation<'static> {

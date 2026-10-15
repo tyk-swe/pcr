@@ -50,11 +50,6 @@ fn remove_staged() {
     }
 }
 
-pub(crate) fn check() -> Result<(), CliError> {
-    signal().check().map_err(CliError::classified)?;
-    crate::invocation::check()
-}
-
 pub(crate) fn install() -> Result<(), CliError> {
     let signal = signal().clone();
     ctrlc::set_handler(move || {

@@ -45,14 +45,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(crate) fn run(
+    invocation: &crate::invocation::Invocation,
+    args: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     args.limits.validate()?;
     let checksum_mode = args
         .checksum_mode
@@ -131,11 +137,14 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     let mut staged = if args.dry_run {
         None
     } else {
-        Some(crate::staged_output::StagedFile::stage(&args.write)?)
+        Some(crate::staged_output::StagedFile::stage(
+            invocation,
+            &args.write,
+        )?)
     };
     let deadline = Deadline::new(args.duration.max_duration())
-        .with_cancellation(Some(crate::cancellation::signal().clone()));
-    let mut reader = crate::input::open_capture(&args.path, args.limits.reader)?;
+        .with_cancellation(Some(invocation.cancellation.clone()));
+    let mut reader = crate::input::open_capture(invocation, &args.path, args.limits.reader)?;
     let limits = capture_file::Limits {
         max_frames: args.limits.max_frames,
         max_bytes: args.limits.max_bytes,
@@ -203,46 +212,60 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         changes_omitted,
     ));
     match format {
-        Format::Json => emit_aggregate(Command::Rewrite, report, Vec::new()),
+        Format::Json => emit_aggregate(invocation, Command::Rewrite, report, Vec::new()),
         Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
         Format::Text => {
-            stream.presentation().details("Rewrite evidence", &report)?;
-            render_text(&report)
+            stream
+                .presentation()
+                .details(invocation, "Rewrite evidence", &report)?;
+            render_text(invocation, &report)
         }
         other => other.unreachable(),
     }
 }
 
-fn render_text(report: &output::rewrite::Report) -> Result<(), CliError> {
+fn render_text(
+    invocation: &crate::invocation::Invocation,
+    report: &output::rewrite::Report,
+) -> Result<(), CliError> {
     for change in &report.changes {
-        crate::rendering::write_stdout_line(format_args!(
-            "frame={} layer={} field={} {} -> {} origin={}",
-            change.frame,
-            change.layer,
-            change.field,
-            change.old,
-            change.new,
-            change.origin.as_str()
-        ))?;
+        crate::rendering::write_stdout_line(
+            invocation,
+            format_args!(
+                "frame={} layer={} field={} {} -> {} origin={}",
+                change.frame,
+                change.layer,
+                change.field,
+                change.old,
+                change.new,
+                change.origin.as_str()
+            ),
+        )?;
     }
     if report.dry_run {
-        write_summary_line(format_args!(
-            "dry-run: {} of {} frames would change across {} interfaces; \
+        write_summary_line(
+            invocation,
+            format_args!(
+                "dry-run: {} of {} frames would change across {} interfaces; \
              {} changes reported, {} omitted",
-            report.capture.frames_changed,
-            report.capture.frames_read,
-            report.capture.interfaces,
-            report.changes.len(),
-            report.changes_omitted
-        ))
+                report.capture.frames_changed,
+                report.capture.frames_read,
+                report.capture.interfaces,
+                report.changes.len(),
+                report.changes_omitted
+            ),
+        )
     } else {
-        write_summary_line(format_args!(
-            "rewrote {} of {} frames across {} interfaces into {}",
-            report.capture.frames_changed,
-            report.capture.frames_read,
-            report.capture.interfaces,
-            report.path
-        ))
+        write_summary_line(
+            invocation,
+            format_args!(
+                "rewrote {} of {} frames across {} interfaces into {}",
+                report.capture.frames_changed,
+                report.capture.frames_read,
+                report.capture.interfaces,
+                report.path
+            ),
+        )
     }
 }
 
@@ -259,6 +282,8 @@ mod tests {
 
     #[test]
     fn the_address_table_accepts_4096_arguments_and_refuses_one_more() {
+        let invocation = &crate::test_support::invocation();
+
         // The argument vector is exercised in-process: a command line long
         // enough to hold this many entries cannot spawn on every platform.
         let entries = |count: usize| {
@@ -292,7 +317,7 @@ mod tests {
         AddressMap::new(&full.map_ips, &full.map_macs).expect("the table holds 4096");
         let over = rewrite(&entries(transform::MAX_ADDRESS_MAP_ENTRIES + 1));
         let (stream, _) = crate::test_support::stream(Command::Rewrite);
-        let error = run(over, Format::Text, &stream).expect_err("one more is refused");
+        let error = run(invocation, over, Format::Text, &stream).expect_err("one more is refused");
         assert_eq!(error.exit_code(), 2);
         assert!(error.to_string().contains("address map entries=4096"));
     }

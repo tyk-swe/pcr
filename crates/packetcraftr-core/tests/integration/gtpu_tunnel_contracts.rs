@@ -75,13 +75,17 @@ fn protocols(decoded: &decode::DecodedPacket) -> Vec<&str> {
 fn round_trip(packet: Packet) -> (Bytes, decode::DecodedPacket) {
     let builder = build::Builder::new(registry());
     let built = builder
-        .build(packet, codec::Context::default(), build::Options::default())
+        .build(
+            packet,
+            codec::Addresses::default(),
+            build::Options::default(),
+        )
         .expect("fixture builds strictly");
     let decoded = dissect(built.bytes.clone());
     let rebuilt = builder
         .build(
             decoded.packet.clone(),
-            codec::Context::default(),
+            codec::Addresses::default(),
             build::Options::default(),
         )
         .expect("dissected fixture rebuilds strictly");
@@ -94,7 +98,7 @@ fn declared_length_beyond_datagram_bad_kept() {
     let built = build::Builder::new(registry())
         .build(
             tunnel(Gtpu::default()),
-            codec::Context::default(),
+            codec::Addresses::default(),
             build::Options::default(),
         )
         .unwrap();

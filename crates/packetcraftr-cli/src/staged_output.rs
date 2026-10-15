@@ -181,6 +181,7 @@ pub(crate) struct StagedFile {
     file_name: OsString,
     /// The requested path, for messages and reports.
     destination: PathBuf,
+    invocation: crate::invocation::Invocation,
     /// Declared last so the file is unlinked before its path is deregistered.
     _registration: StagedRegistration,
 }
@@ -189,8 +190,11 @@ impl StagedFile {
     /// Refuses a destination that already exists — including a dangling
     /// symlink — or that names a directory rather than a file, before any
     /// input is read. The parent directory is bound at this point.
-    pub(crate) fn stage(destination: &Path) -> Result<Self, CliError> {
-        crate::cancellation::check()?;
+    pub(crate) fn stage(
+        invocation: &crate::invocation::Invocation,
+        destination: &Path,
+    ) -> Result<Self, CliError> {
+        invocation.check()?;
         let Some(file_name) = file_name(destination) else {
             return Err(CliError::from_classification(
                 CLASSIFICATION,
@@ -228,6 +232,7 @@ impl StagedFile {
             parent,
             file_name: file_name.to_owned(),
             destination: destination.to_owned(),
+            invocation: invocation.clone(),
             _registration: registration,
         })
     }
@@ -240,19 +245,19 @@ impl StagedFile {
     /// after this potentially blocking operation, before persisting. Callers
     /// publishing several files sync every file before persisting any.
     pub(crate) fn sync(&self) -> Result<(), CliError> {
-        crate::cancellation::check()?;
+        self.invocation.check()?;
         self.file
             .as_file()
             .sync_all()
             .map_err(|source| output("sync", &self.destination, source))?;
-        crate::cancellation::check()
+        self.invocation.check()
     }
 
     /// Publishes into the directory bound at staging without overwriting.
     pub(crate) fn persist(self) -> Result<Published, CliError> {
         // This is the commit boundary. Expiry after a successful rename must
         // not claim that the already-published artifact was rolled back.
-        crate::cancellation::check()?;
+        self.invocation.check()?;
         self.parent.verify_unchanged(&self.destination)?;
         // `parent` is bound before `file` so it drops after it: a failed
         // rename unlinks the staged file through the still-open handle.
@@ -262,6 +267,7 @@ impl StagedFile {
             file_name,
             destination,
             _registration,
+            ..
         } = self;
         file.persist_noclobber(parent.join(&file_name))
             .map_err(|error| output("publish", &destination, error.error))?;
@@ -327,6 +333,8 @@ fn output(action: &'static str, destination: &Path, source: std::io::Error) -> C
 #[cfg(test)]
 mod tests {
     use std::io::Write;
+    #[cfg(packetcraftr_test_non_utf8_paths)]
+    use std::os::unix::ffi::OsStringExt;
 
     use super::*;
 
@@ -345,11 +353,14 @@ mod tests {
 
     #[test]
     fn stage_rejects_an_existing_destination_without_staging() {
+        let invocation = &crate::test_support::invocation();
+
         let directory = tempfile::tempdir().expect("destination dir");
         let occupied = directory.path().join("occupied.pcapng");
         std::fs::write(&occupied, b"mine").expect("occupying file");
 
-        let error = StagedFile::stage(&occupied).expect_err("occupied destination fails");
+        let error =
+            StagedFile::stage(invocation, &occupied).expect_err("occupied destination fails");
         assert_eq!(error.classification.code, "io.output_file");
         assert_eq!(error.exit_code(), 5);
         assert!(error.message.contains("already exists"));
@@ -361,11 +372,14 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn stage_rejects_a_dangling_symlink_without_staging() {
+        let invocation = &crate::test_support::invocation();
+
         let directory = tempfile::tempdir().expect("destination dir");
         let destination = directory.path().join("dangling.pcapng");
         std::os::unix::fs::symlink("missing-target", &destination).expect("dangling symlink");
 
-        let error = StagedFile::stage(&destination).expect_err("dangling symlink fails");
+        let error =
+            StagedFile::stage(invocation, &destination).expect_err("dangling symlink fails");
         assert_eq!(error.classification.code, "io.output_file");
         assert!(error.message.contains("already exists"));
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
@@ -373,9 +387,12 @@ mod tests {
 
     #[test]
     fn a_destination_appearing_after_staging_fails_publish_without_clobbering() {
+        let invocation = &crate::test_support::invocation();
+
         let directory = tempfile::tempdir().expect("destination dir");
         let destination = directory.path().join("out.pcapng");
-        let staged = StagedFile::stage(&destination).expect("absent destination stages");
+        let staged =
+            StagedFile::stage(invocation, &destination).expect("absent destination stages");
         std::fs::write(&destination, b"someone else").expect("colliding file");
 
         staged.sync().expect("sync succeeds");
@@ -389,9 +406,11 @@ mod tests {
 
     #[test]
     fn a_staged_file_publishes_under_its_requested_name() {
+        let invocation = &crate::test_support::invocation();
+
         let directory = tempfile::tempdir().expect("destination dir");
         let destination = directory.path().join("out.pcapng");
-        let mut staged = StagedFile::stage(&destination).expect("stage");
+        let mut staged = StagedFile::stage(invocation, &destination).expect("stage");
         staged.as_file_mut().write_all(b"payload").unwrap();
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
 
@@ -406,10 +425,12 @@ mod tests {
 
     #[test]
     fn a_missing_parent_directory_is_refused_at_staging() {
+        let invocation = &crate::test_support::invocation();
+
         let directory = tempfile::tempdir().expect("destination dir");
         let destination = directory.path().join("missing").join("out.pcapng");
 
-        let error = StagedFile::stage(&destination).expect_err("missing parent fails");
+        let error = StagedFile::stage(invocation, &destination).expect_err("missing parent fails");
 
         assert_eq!(error.classification.code, "io.output_file");
         assert!(error.message.starts_with("stage output "));
@@ -419,13 +440,16 @@ mod tests {
 
     #[test]
     fn unresolved_directory_suffixes_are_refused_before_staging() {
+        let invocation = &crate::test_support::invocation();
+
         for suffix in ["/", "/."] {
             let directory = tempfile::tempdir().expect("destination directory");
             let mut name = directory.path().join("out").into_os_string();
             name.push(suffix);
             let destination = PathBuf::from(name);
 
-            let error = StagedFile::stage(&destination).expect_err("directory suffix fails");
+            let error =
+                StagedFile::stage(invocation, &destination).expect_err("directory suffix fails");
 
             assert_eq!(error.classification.code, "io.output_file");
             assert!(error.message.contains("requires a file name"));
@@ -436,9 +460,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn collision_retarget_preserves_files_cleans_staging() {
+        let invocation = &crate::test_support::invocation();
+
         let (_root, original, replacement, alias) = aliased_directories();
         let destination = alias.join("out.pcapng");
-        let mut staged = StagedFile::stage(&destination).expect("stage through alias");
+        let mut staged = StagedFile::stage(invocation, &destination).expect("stage through alias");
         staged
             .as_file_mut()
             .write_all(b"new capture")
@@ -470,9 +496,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn empty_directory_retarget_refused() {
+        let invocation = &crate::test_support::invocation();
+
         let (_root, original, replacement, alias) = aliased_directories();
         let destination = alias.join("out.pcapng");
-        let mut staged = StagedFile::stage(&destination).expect("stage through alias");
+        let mut staged = StagedFile::stage(invocation, &destination).expect("stage through alias");
         staged
             .as_file_mut()
             .write_all(b"new capture")
@@ -498,6 +526,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_renamed_and_replaced_parent_is_refused_without_publishing() {
+        let invocation = &crate::test_support::invocation();
+
         let root = tempfile::tempdir().expect("root directory");
         let original = root.path().join("original");
         let replacement = root.path().join("replacement");
@@ -508,7 +538,7 @@ mod tests {
         std::fs::write(replacement.join("out.pcapng"), b"replacement sentinel")
             .expect("replacement sentinel");
         let destination = original.join("out.pcapng");
-        let mut staged = StagedFile::stage(&destination).expect("stage in original");
+        let mut staged = StagedFile::stage(invocation, &destination).expect("stage in original");
         staged
             .as_file_mut()
             .write_all(b"new capture")
@@ -541,12 +571,14 @@ mod tests {
     #[cfg(packetcraftr_proc_fd_paths)]
     #[test]
     fn publication_binds_to_the_directory_handle_when_the_requested_path_moves() {
+        let invocation = &crate::test_support::invocation();
+
         let root = tempfile::tempdir().expect("root directory");
         let original = root.path().join("original");
         let moved = root.path().join("moved");
         std::fs::create_dir(&original).expect("original directory");
         let destination = original.join("out.pcapng");
-        let mut staged = StagedFile::stage(&destination).expect("stage in original");
+        let mut staged = StagedFile::stage(invocation, &destination).expect("stage in original");
         staged.as_file_mut().write_all(b"payload").unwrap();
         assert!(staged.file.path().starts_with("/proc/self/fd/"));
         std::fs::rename(&original, &moved).expect("move the real directory away");
@@ -565,9 +597,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn published_remove_unlinks_exactly_the_published_file() {
+        let invocation = &crate::test_support::invocation();
+
         let (_root, original, replacement, alias) = aliased_directories();
         let destination = alias.join("out.pcapng");
-        let mut staged = StagedFile::stage(&destination).expect("stage through alias");
+        let mut staged = StagedFile::stage(invocation, &destination).expect("stage through alias");
         staged.as_file_mut().write_all(b"payload").unwrap();
         let published = staged.persist().expect("publish through alias");
         assert_eq!(
@@ -601,13 +635,14 @@ mod tests {
     #[cfg(packetcraftr_test_non_utf8_paths)]
     #[test]
     fn a_non_utf8_destination_is_published_losslessly() {
-        use std::os::unix::ffi::OsStringExt;
+        let invocation = &crate::test_support::invocation();
 
         let directory = tempfile::tempdir().expect("destination directory");
         let destination = directory
             .path()
             .join(OsString::from_vec(b"capture-\xff.pcap".to_vec()));
-        let mut staged = StagedFile::stage(&destination).expect("stage non-UTF8 destination");
+        let mut staged =
+            StagedFile::stage(invocation, &destination).expect("stage non-UTF8 destination");
         staged.as_file_mut().write_all(b"payload").unwrap();
 
         staged.persist().expect("publish lossless destination");

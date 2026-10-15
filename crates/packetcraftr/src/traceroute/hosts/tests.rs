@@ -23,7 +23,7 @@ use super::{
 use crate::clock::Clock;
 use crate::execution::Executor;
 use crate::policy::{Authorizer, Operation};
-use crate::probe::{Batch, Evidence, ProbeStatus, Transport};
+use crate::probe::{self, Batch, Evidence, Transport};
 use crate::scan::{self, Classification as ScanClassification, Reply, Stage};
 use crate::target::{
     Authorized, Family, ResolveTarget, ResolvedZone, SelectedAddress, Selection, Target,
@@ -512,10 +512,10 @@ fn silent_hops_time_out_and_the_trace_continues() {
     assert_eq!(
         statuses,
         [
-            ProbeStatus::Response,
-            ProbeStatus::Timeout,
-            ProbeStatus::Response,
-            ProbeStatus::Response
+            probe::Status::Response,
+            probe::Status::Timeout,
+            probe::Status::Response,
+            probe::Status::Response
         ]
     );
     let aggregate = traced.aggregate();
@@ -603,9 +603,9 @@ fn scan_probe(
         port,
         attempt: 1,
         status: if reply.is_some() {
-            ProbeStatus::Response
+            probe::Status::Response
         } else {
-            ProbeStatus::Timeout
+            probe::Status::Timeout
         },
         classification: ScanClassification::Open,
         reply,
@@ -1787,7 +1787,7 @@ fn udp_scan_probe(target: IpAddr, attempt: u32) -> scan::Probe {
         stage: Stage::Scan,
         address: target,
         scope: None,
-        endpoint: crate::probe::ProbeEndpoint::Udp { port: 33_434 },
+        endpoint: crate::probe::Endpoint::Udp { port: 33_434 },
         attempt,
         udp_payload: Bytes::new(),
         udp_profile: None,
@@ -1851,7 +1851,7 @@ fn a_replayed_scan_udp_response_cannot_terminate_a_trace_hop() {
         let mut packet = probe_packet(&Probe {
             sequence: 1,
             address,
-            target: crate::probe::ProbeEndpoint::Udp { port: 33_434 },
+            target: crate::probe::Endpoint::Udp { port: 33_434 },
             hop_limit: 1,
             attempt: 1,
             source_port,

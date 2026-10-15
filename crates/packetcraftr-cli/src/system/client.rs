@@ -31,23 +31,31 @@ impl Runtime {
     }
 }
 
-pub(crate) fn runtime(runtime: Runtime) -> packetcraftr::runtime::Runtime {
+pub(crate) fn runtime(
+    invocation: &crate::invocation::Invocation,
+    runtime: Runtime,
+) -> packetcraftr::runtime::Runtime {
     let instance = match runtime {
         Runtime::OutputWriter => {
             packetcraftr::runtime::Runtime::new(1).expect("a capacity of one is within the ceiling")
         }
         _ => packetcraftr::runtime::Runtime::default(),
     };
-    crate::resources::register_runtime(runtime.name(), &instance);
+    invocation.register_runtime(runtime.name(), &instance);
     instance
 }
 
 pub(crate) fn client(
+    invocation: &crate::invocation::Invocation,
     registry: Arc<core::registry::Registry>,
     policy: impl Into<Arc<packetcraftr::policy::Policy>>,
     runtime: Runtime,
 ) -> Client {
-    Client::new(registry, policy, SystemProviders)
-        .with_runtime(self::runtime(runtime))
-        .with_cancellation(crate::cancellation::signal().clone())
+    let client = Client::new(registry, policy, SystemProviders)
+        .with_runtime(self::runtime(invocation, runtime))
+        .with_cancellation(invocation.cancellation.clone());
+    match &invocation.deadline {
+        Some(deadline) => client.with_deadline((**deadline).clone()),
+        None => client,
+    }
 }

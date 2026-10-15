@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use packetcraftr::Client;
 use packetcraftr::policy::{DestinationConstraint, Policy};
-use packetcraftr::probe::ProbeEndpoint;
+use packetcraftr::probe;
 use packetcraftr::scan::discovery::{
     Basis, Evidence, Mode, NeighborOutcome, Options, ReasonKind, Scan, State, Unresponsive,
 };
@@ -28,8 +28,8 @@ use packetcraftr_netio::interface::Id;
 use packetcraftr_netio::link::{Capability, Mode as LinkMode};
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
 
-use crate::common::responder::{Io, Routes, State as Responder};
-use crate::common::{
+use super::common::responder::{Io, Routes, State as Responder};
+use super::common::{
     self, FixedRoutes, INTERFACE_MAC, NEIGHBOR_MAC, RecordingTransmit, SELECTED_SOURCE,
     ScriptedResolver, ScriptedTcp, Step, Steps,
 };
@@ -43,11 +43,11 @@ fn address(text: &str) -> IpAddr {
     text.parse().unwrap()
 }
 
-fn tcp(port: u16) -> ProbeEndpoint {
-    ProbeEndpoint::Tcp { port }
+fn tcp(port: u16) -> probe::Endpoint {
+    probe::Endpoint::Tcp { port }
 }
 
-fn discovery(mode: Mode, probes: Vec<ProbeEndpoint>) -> Options {
+fn discovery(mode: Mode, probes: Vec<probe::Endpoint>) -> Options {
     Options {
         mode,
         probes,
@@ -55,7 +55,7 @@ fn discovery(mode: Mode, probes: Vec<ProbeEndpoint>) -> Options {
     }
 }
 
-fn request(targets: &[&str], endpoints: Vec<ProbeEndpoint>, discovery: Options) -> Request {
+fn request(targets: &[&str], endpoints: Vec<probe::Endpoint>, discovery: Options) -> Request {
     Request {
         tcp_scan: Default::default(),
         sctp_scan: Default::default(),
@@ -158,7 +158,7 @@ fn udp_discovery_counts_a_port_unreachable_from_the_host() {
         request(
             &[FIRST],
             Vec::new(),
-            discovery(Mode::Only, vec![ProbeEndpoint::Udp { port: 53 }]),
+            discovery(Mode::Only, vec![probe::Endpoint::Udp { port: 53 }]),
         ),
         Responder::default(),
     );
@@ -347,7 +347,7 @@ fn a_pipelined_stage_over_its_preparation_limit_sends_no_neighbor_request() {
     let mut request = request(
         &[FIRST, SECOND],
         Vec::new(),
-        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+        discovery(Mode::Only, vec![probe::Endpoint::Icmp]),
     );
     request.route = route::Options {
         link_mode: LinkMode::Layer2,
@@ -373,7 +373,7 @@ fn explicit_neighbor_discovery_waits_for_the_preparation_limit() {
     for max_prepared_bytes in [64, 4096] {
         let (client, steps) = layer2_client(Policy::default());
         let mut request = neighbor_only(&[FIRST, SECOND]);
-        request.discovery.probes = vec![ProbeEndpoint::Icmp];
+        request.discovery.probes = vec![probe::Endpoint::Icmp];
         request.max_in_flight = 2;
         request.limits.max_prepared_bytes = max_prepared_bytes;
         let result = client.scan(request, scan::Collector::default());
@@ -411,7 +411,7 @@ fn a_pipeline_failure_reports_the_traffic_before_it() {
     let mut request = request(
         &[FIRST],
         Vec::new(),
-        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+        discovery(Mode::Only, vec![probe::Endpoint::Icmp]),
     );
     request.route = route::Options {
         link_mode: LinkMode::Layer2,
@@ -601,7 +601,7 @@ fn a_route_moved_after_its_stage_resolved_sends_no_unaccounted_neighbor_request(
     let mut request = request(
         &[FIRST],
         Vec::new(),
-        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+        discovery(Mode::Only, vec![probe::Endpoint::Icmp]),
     );
     request.route = route::Options {
         link_mode: LinkMode::Layer2,
@@ -631,7 +631,7 @@ fn a_route_moved_between_stages_sends_no_second_neighbor_request() {
         let mut request = request(
             &[FIRST],
             vec![tcp(443)],
-            discovery(Mode::Before, vec![ProbeEndpoint::Icmp]),
+            discovery(Mode::Before, vec![probe::Endpoint::Icmp]),
         );
         request.discovery.unresponsive = Unresponsive::Scan;
         request.route = route::Options {
@@ -689,7 +689,7 @@ fn a_probe_through_a_denied_gateway_sends_no_neighbor_request() {
     let mut request = request(
         &[FIRST],
         Vec::new(),
-        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+        discovery(Mode::Only, vec![probe::Endpoint::Icmp]),
     );
     request.route = route::Options {
         link_mode: LinkMode::Layer2,
@@ -776,7 +776,7 @@ fn a_stage_resolves_its_gateway_before_any_capture_and_counts_the_request() {
     let mut request = request(
         &[FIRST, SECOND],
         Vec::new(),
-        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+        discovery(Mode::Only, vec![probe::Endpoint::Icmp]),
     );
     request.route = route::Options {
         link_mode: LinkMode::Layer2,
@@ -830,7 +830,7 @@ fn query_through_gateway<K: packetcraftr::clock::Clock>(
     let mut scan = request(
         &[FIRST],
         Vec::new(),
-        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+        discovery(Mode::Only, vec![probe::Endpoint::Icmp]),
     );
     scan.route = route::Options {
         link_mode: LinkMode::Layer2,
@@ -842,9 +842,11 @@ fn query_through_gateway<K: packetcraftr::clock::Clock>(
         Policy::default(),
         common::providers(GatewayRoutes, transmit),
     )
-    .with_clock(clock)
-    .with_scan_neighbors(&scan)
-    .expect("the scan's neighbor bounds are valid");
+    .with_clock(clock);
+    let mut operation = crate::execution::Operation::new(&client, scan.limits.max_duration);
+    operation
+        .scan_neighbors(&scan)
+        .expect("the scan's neighbor bounds are valid");
     let question = packetcraftr::dns::Request {
         server: packetcraftr::target::Target::Address(address(FIRST)),
         transport: packetcraftr::dns::TransportMode::Udp,
@@ -852,11 +854,12 @@ fn query_through_gateway<K: packetcraftr::clock::Clock>(
         ..common::dns::tcp_request("example.test")
     };
     client
-        .dns_batch(
+        .dns_batch_in(
             packetcraftr::dns::batch::Request {
                 questions: vec![question],
             },
             packetcraftr::dns::batch::Collector::default(),
+            &operation,
         )
         .expect("a failed question leaves the batch's report")
 }
@@ -889,7 +892,9 @@ fn a_failed_query_counts_the_neighbor_request_its_route_sent() {
 
 #[test]
 fn a_client_bounded_by_a_scan_paces_a_neighbor_request_like_a_probe() {
-    let send_echo = |client: &Client<_, common::clock::VirtualClock>, plan: &route::Options| {
+    let send_echo = |client: &Client<_, common::clock::VirtualClock>,
+                     plan: &route::Options,
+                     operation: &crate::execution::Operation| {
         let mut packet = Packet::new();
         packet.push(Ipv4 {
             destination: FIRST.parse().unwrap(),
@@ -900,7 +905,7 @@ fn a_client_bounded_by_a_scan_paces_a_neighbor_request_like_a_probe() {
             ..Icmpv4::default()
         });
         client
-            .send(
+            .send_in(
                 packetcraftr::send::Request::packet(
                     packet,
                     packetcraftr::send::Options {
@@ -909,13 +914,14 @@ fn a_client_bounded_by_a_scan_paces_a_neighbor_request_like_a_probe() {
                     },
                 ),
                 packetcraftr::send::Collector::default(),
+                operation,
             )
             .expect("the gateway answers");
     };
     let mut scan = request(
         &[FIRST],
         Vec::new(),
-        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+        discovery(Mode::Only, vec![probe::Endpoint::Icmp]),
     );
     scan.route = route::Options {
         link_mode: LinkMode::Layer2,
@@ -932,15 +938,14 @@ fn a_client_bounded_by_a_scan_paces_a_neighbor_request_like_a_probe() {
             common::providers(GatewayRoutes, RecordingTransmit::new(steps.clone())),
         )
         .with_clock(clock.clone());
-        let client = if bounded {
-            client
-                .with_scan_neighbors(&scan)
-                .expect("the scan's evidence limits hold a reply")
-        } else {
-            client
-        };
-        send_echo(&client, &scan.route);
-        send_echo(&client, &scan.route);
+        let mut operation = crate::execution::Operation::new(&client, scan.limits.max_duration);
+        if bounded {
+            operation
+                .scan_neighbors(&scan)
+                .expect("the scan's evidence limits hold a reply");
+        }
+        send_echo(&client, &scan.route, &operation);
+        send_echo(&client, &scan.route, &operation);
         assert!(
             matches!(
                 steps.take().as_slice(),
@@ -972,15 +977,16 @@ fn a_client_bounded_by_a_scan_sends_one_request_to_a_silent_gateway() {
     let mut scan = request(
         &[FIRST],
         Vec::new(),
-        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+        discovery(Mode::Only, vec![probe::Endpoint::Icmp]),
     );
     scan.route = route::Options {
         link_mode: LinkMode::Layer2,
         ..route::Options::default()
     };
     scan.timeout = Duration::from_millis(20);
-    let client = client
-        .with_scan_neighbors(&scan)
+    let mut operation = crate::execution::Operation::new(&client, scan.limits.max_duration);
+    operation
+        .scan_neighbors(&scan)
         .expect("the scan's evidence limits hold a reply");
 
     let mut packet = Packet::new();
@@ -993,7 +999,7 @@ fn a_client_bounded_by_a_scan_sends_one_request_to_a_silent_gateway() {
         ..Icmpv4::default()
     });
     client
-        .send(
+        .send_in(
             packetcraftr::send::Request::packet(
                 packet,
                 packetcraftr::send::Options {
@@ -1002,6 +1008,7 @@ fn a_client_bounded_by_a_scan_sends_one_request_to_a_silent_gateway() {
                 },
             ),
             packetcraftr::send::Collector::default(),
+            &operation,
         )
         .expect_err("the gateway never answers");
     assert_eq!(
@@ -1056,7 +1063,7 @@ fn a_cached_gateway_needs_no_authorization_to_scan_through() {
     let mut request = request(
         &[FIRST],
         Vec::new(),
-        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+        discovery(Mode::Only, vec![probe::Endpoint::Icmp]),
     );
     request.route = route;
     client
@@ -1078,7 +1085,8 @@ fn a_client_authorizing_neighbor_requests_denies_any_workflows_gateway() {
             common::providers(GatewayRoutes, RecordingTransmit::new(steps.clone())),
         )
     };
-    let send = |client: &Client<common::FakeProviders<GatewayRoutes, RecordingTransmit>>| {
+    let send = |client: &Client<common::FakeProviders<GatewayRoutes, RecordingTransmit>>,
+                operation: &crate::execution::Operation| {
         let mut packet = Packet::new();
         packet.push(Ipv4 {
             destination: FIRST.parse().unwrap(),
@@ -1088,7 +1096,7 @@ fn a_client_authorizing_neighbor_requests_denies_any_workflows_gateway() {
             icmp_type: 8,
             ..Icmpv4::default()
         });
-        client.send(
+        client.send_in(
             packetcraftr::send::Request::packet(
                 packet,
                 packetcraftr::send::Options {
@@ -1100,11 +1108,15 @@ fn a_client_authorizing_neighbor_requests_denies_any_workflows_gateway() {
                 },
             ),
             packetcraftr::send::Collector::default(),
+            operation,
         )
     };
 
-    let error = send(&client().with_neighbor_request_authorization())
-        .expect_err("the policy denies the gateway the send resolves");
+    let authorized = client();
+    let mut operation = crate::execution::Operation::new(&authorized, Duration::from_secs(5));
+    operation.neighbor_mode = crate::execution::NeighborMode::Authorized;
+    let error =
+        send(&authorized, &operation).expect_err("the policy denies the gateway the send resolves");
     assert_eq!(
         error.classification().code,
         "policy.destination_not_allowed",
@@ -1112,7 +1124,9 @@ fn a_client_authorizing_neighbor_requests_denies_any_workflows_gateway() {
     );
     assert!(steps.take().is_empty());
 
-    send(&client()).expect("other clients resolve the gateway as before");
+    let ordinary = client();
+    let operation = crate::execution::Operation::new(&ordinary, Duration::from_secs(5));
+    send(&ordinary, &operation).expect("other clients resolve the gateway as before");
     assert!(matches!(
         steps.take().as_slice(),
         [Step::Neighbor(gateway), Step::Transmit(_)] if *gateway == address(GATEWAY)
@@ -1174,8 +1188,8 @@ fn ordinary_sockets_publish_socket_observations() {
 #[test]
 fn ordinary_sockets_refuse_raw_discovery_probes_before_connecting() {
     for options in [
-        discovery(Mode::Before, vec![ProbeEndpoint::Icmp]),
-        discovery(Mode::Before, vec![ProbeEndpoint::Udp { port: 53 }]),
+        discovery(Mode::Before, vec![probe::Endpoint::Icmp]),
+        discovery(Mode::Before, vec![probe::Endpoint::Udp { port: 53 }]),
         Options {
             neighbor: true,
             ..discovery(Mode::Before, Vec::new())
@@ -1202,7 +1216,7 @@ fn a_silent_next_hop_leaves_its_host_unresponsive_and_unscanned() {
         let mut request = request(
             &[FIRST, SECOND],
             endpoints,
-            discovery(mode, vec![ProbeEndpoint::Icmp]),
+            discovery(mode, vec![probe::Endpoint::Icmp]),
         );
         if mode == Mode::Before {
             // Even a request that scans unresponsive hosts cannot frame a

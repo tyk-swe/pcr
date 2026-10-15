@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -116,7 +116,7 @@ fn nonzero_reserved_field(reserved1: u8, reserved2: u8) -> Option<&'static str> 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct GeneveCodec;
 
-impl LayerCodec for GeneveCodec {
+impl Codec for GeneveCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &geneve_schema().protocol
     }
@@ -125,8 +125,8 @@ impl LayerCodec for GeneveCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Geneve>(NAME, layer)?;
         let (header_len, mut diagnostics) = validate_geneve(layer, context)?;
         validate_auto_raw_discriminator(
@@ -167,7 +167,7 @@ impl LayerCodec for GeneveCodec {
 
         let mut materialized = layer.clone();
         materialized.protocol_type = materialized_protocol_type;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(geneve_layout(header_len))
             .with_diagnostics(diagnostics))
     }
@@ -175,8 +175,8 @@ impl LayerCodec for GeneveCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<GENEVE_BASE_LEN>() else {
             return Err(truncated(NAME, GENEVE_BASE_LEN, input.len()));
         };
@@ -251,7 +251,7 @@ impl LayerCodec for GeneveCodec {
             options,
         };
         let payload_len = input.len().saturating_sub(header_len);
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: geneve_layout(header_len),
             layer: Box::new(layer),
             consumed: header_len,
@@ -265,7 +265,7 @@ impl LayerCodec for GeneveCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Geneve::default(), fields)
     }
@@ -273,7 +273,7 @@ impl LayerCodec for GeneveCodec {
 
 fn validate_geneve(
     layer: &Geneve,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
 ) -> Result<(usize, Vec<Diagnostic>), crate::codec::Error> {
     let header_len = GENEVE_BASE_LEN
         .checked_add(layer.options.len())
@@ -329,7 +329,7 @@ fn validate_geneve(
 fn validate_option_chain(
     layer: &Geneve,
     chain: OptionChain,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
     if chain.critical != layer.critical {
@@ -360,9 +360,9 @@ mod tests {
 
     use super::*;
 
-    fn decode(input: &[u8]) -> Result<DecodedLayer, crate::codec::Error> {
+    fn decode(input: &[u8]) -> Result<Decoded, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
-        let context = LayerDecodeContext {
+        let context = DecodeContext {
             parent: None,
             registry: &registry,
             network: None,

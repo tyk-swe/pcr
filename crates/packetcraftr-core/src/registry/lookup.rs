@@ -8,14 +8,14 @@ use std::sync::Arc;
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding, ReverseBinding};
 use super::builder::Builder;
 use super::hasher::FixedState;
-use crate::codec::LayerCodec;
+use crate::codec::Codec;
 use crate::frame::LinkType;
 
 use crate::matcher::ResponseMatcher;
 
 #[derive(Clone, Default)]
 pub struct Registry {
-    pub(super) codecs: BTreeMap<crate::layer::Id, Arc<dyn LayerCodec>>,
+    pub(super) codecs: BTreeMap<crate::layer::Id, Arc<dyn Codec>>,
     pub(super) aliases: HashMap<String, crate::layer::Id>,
     pub(super) roots: HashMap<LinkType, crate::layer::Id>,
     pub(super) bindings: HashMap<
@@ -66,12 +66,12 @@ impl Registry {
     }
 
     /// The codec registered under a canonical protocol name.
-    pub fn codec(&self, protocol: &str) -> Option<&Arc<dyn LayerCodec>> {
+    pub fn codec(&self, protocol: &str) -> Option<&Arc<dyn Codec>> {
         self.codecs.get(protocol)
     }
 
     /// The codec a canonical name or alias resolves to, ignoring case.
-    pub fn codec_named(&self, name: &str) -> Option<&Arc<dyn LayerCodec>> {
+    pub fn codec_named(&self, name: &str) -> Option<&Arc<dyn Codec>> {
         self.codecs.get(&self.protocol_named(name)?)
     }
 

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::field::FieldKind;
+use crate::field;
 use crate::filter::ast::Predicate;
 use crate::filter::comparison::Needle;
 use crate::filter::error::Error;
@@ -251,7 +251,7 @@ fn parse_masked(
         && !field
             .specs
             .iter()
-            .all(|spec| spec.kind == FieldKind::Unsigned)
+            .all(|spec| spec.kind == field::Kind::Unsigned)
     {
         return Err(Error::MaskedField {
             offset: operator_offset,
@@ -261,8 +261,8 @@ fn parse_masked(
                     .specs
                     .iter()
                     .map(|spec| spec.kind)
-                    .find(|kind| *kind != FieldKind::Unsigned)
-                    .unwrap_or(FieldKind::Unsigned),
+                    .find(|kind| *kind != field::Kind::Unsigned)
+                    .unwrap_or(field::Kind::Unsigned),
             ),
         });
     }

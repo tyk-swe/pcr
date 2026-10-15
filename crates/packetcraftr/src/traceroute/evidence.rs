@@ -15,7 +15,7 @@ use super::plan::packet::sent_probe_matches;
 use super::{Event, Probe, ProbeEvidence, ResponseKind, Termination, UndecodedEvidence};
 use crate::correlation::{self, Correlation, Transport};
 use crate::evidence::SentPacket;
-use crate::probe::ProbeStatus;
+use crate::probe;
 use crate::probe::runner::{Classifier, NO_RESPONSE_REASON, Outcome};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,7 +87,7 @@ pub(super) fn probe_evidence(
         destination: probe.address,
         strategy: probe.target.transport(),
         destination_port: probe.target.port(),
-        status: ProbeStatus::Timeout,
+        status: probe::Status::Timeout,
         response_kind: None,
         responder: None,
         sent_at: sent.timing().freshness_marker().wall_clock(),
@@ -97,7 +97,7 @@ pub(super) fn probe_evidence(
         reason: NO_RESPONSE_REASON.to_owned(),
     };
     if let Outcome::Reply(reply) = outcome {
-        evidence.status = ProbeStatus::Response;
+        evidence.status = probe::Status::Response;
         evidence.response_kind = Some(reply.observation.kind);
         evidence.responder = Some(reply.observation.responder);
         evidence.received_at = reply.received_at;
@@ -125,7 +125,7 @@ impl ProbeClassifier<'_> {
 pub(super) fn fold_termination(
     termination: Termination,
     kind: Option<ResponseKind>,
-    status: ProbeStatus,
+    status: probe::Status,
 ) -> Termination {
     match (termination, kind, status) {
         (_, Some(ResponseKind::DestinationReached), _)
@@ -133,7 +133,7 @@ pub(super) fn fold_termination(
         (_, Some(ResponseKind::Unreachable), _) | (Termination::Unreachable, _, _) => {
             Termination::Unreachable
         }
-        (_, _, ProbeStatus::Response) => Termination::MaximumHops,
+        (_, _, probe::Status::Response) => Termination::MaximumHops,
         (termination, _, _) => termination,
     }
 }

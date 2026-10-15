@@ -26,6 +26,9 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+extern crate self as packetcraftr;
+
 mod address;
 pub mod capture;
 mod client;

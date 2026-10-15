@@ -26,6 +26,18 @@ pub(crate) fn run() -> ExitCode {
 }
 
 fn parse_error_exit(context: &Context, error: &clap::Error) -> ExitCode {
+    let invocation = &crate::invocation::Invocation::new(
+        crate::output::contract::Format::Text,
+        crate::rendering::StreamEncoder::new(
+            context
+                .command
+                .unwrap_or(crate::output::contract::Command::Protocols),
+            std::io::stdout(),
+        ),
+        None,
+        Default::default(),
+        None,
+    );
     let code = u8::try_from(error.exit_code()).unwrap_or(exit_code_for(Kind::Internal));
     let raw_message = error.to_string();
     let message = terminal_document(&raw_message);
@@ -41,12 +53,12 @@ fn parse_error_exit(context: &Context, error: &clap::Error) -> ExitCode {
         };
         let error = CliError::new(kind, message);
         let emitted = match format {
-            MachineFormat::Json => emit_json(&output::envelope::Envelope::<()>::error(
-                context.command,
-                error.output_error(),
-            )),
+            MachineFormat::Json => emit_json(
+                invocation,
+                &output::envelope::Envelope::<()>::error(context.command, error.output_error()),
+            ),
             MachineFormat::Ndjson => {
-                write_unattributed_error(context.command, error.output_error())
+                write_unattributed_error(invocation, context.command, error.output_error())
             }
         };
         return match emitted {
@@ -60,7 +72,7 @@ fn parse_error_exit(context: &Context, error: &clap::Error) -> ExitCode {
     let emitted = if error.use_stderr() {
         emit_stderr_document(&raw_message)
     } else {
-        emit_stdout_document(&raw_message)
+        emit_stdout_document(invocation, &raw_message)
     };
     match emitted {
         Ok(()) => ExitCode::from(code),

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::{
-    codec::LayerEncodeContext, diagnostic::Diagnostic, field::WireValue, registry::Discriminator,
+    codec::EncodeContext, diagnostic::Diagnostic, field::WireValue, registry::Discriminator,
 };
 
 use super::llc::{LLC_FRAME_DISCRIMINATOR, MAX_FRAME_LENGTH};
@@ -47,7 +47,7 @@ pub(super) fn resolve_ether_type(
     name: &'static str,
     value: &WireValue<u16>,
     payload: &[u8],
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
 ) -> Result<(u16, WireValue<u16>, Vec<Diagnostic>), crate::codec::Error> {
     let covered_payload = payload_without_padding(name, payload, context)?;
     let expectation = link_type_expectation(name, context, value, covered_payload.len())?;
@@ -74,7 +74,7 @@ pub(super) fn resolve_ether_type(
 
 fn link_type_expectation(
     name: &'static str,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     value: &WireValue<u16>,
     covered_payload_len: usize,
 ) -> Result<ValueExpectation<u16>, crate::codec::Error> {
@@ -107,7 +107,7 @@ fn validate_link_length_form(
     name: &'static str,
     ether_type: u16,
     covered_payload_len: usize,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
     if ether_type > MAX_FRAME_LENGTH

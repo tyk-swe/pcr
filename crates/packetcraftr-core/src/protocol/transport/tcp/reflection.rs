@@ -8,7 +8,7 @@ use super::model::{
 };
 use super::{SackBlock, Tcp, TcpOption};
 use crate::{
-    field::{self, FieldKind, FieldValue},
+    field,
     layer::{FieldSchema, Schema, reflective_layer},
     protocol::common::{
         out_of_range, protocol,
@@ -48,32 +48,32 @@ reflective_layer! {
 }
 
 const SACK_EDGE_FIELDS: &[FieldSchema] = &[
-    member("left_edge", FieldKind::Unsigned, &[]),
-    member("right_edge", FieldKind::Unsigned, &[]),
+    member("left_edge", field::Kind::Unsigned, &[]),
+    member("right_edge", field::Kind::Unsigned, &[]),
 ];
 
 const OPTION_FIELDS: &[FieldSchema] = &[
-    member("kind", FieldKind::Unsigned, &[]),
-    member("mss", FieldKind::Unsigned, &[]),
-    member("window_scale", FieldKind::Unsigned, &[]),
-    member("sack", FieldKind::List, SACK_EDGE_FIELDS),
-    member("tsval", FieldKind::Unsigned, &[]),
-    member("tsecr", FieldKind::Unsigned, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("trailing", FieldKind::Bytes, &[]),
+    member("kind", field::Kind::Unsigned, &[]),
+    member("mss", field::Kind::Unsigned, &[]),
+    member("window_scale", field::Kind::Unsigned, &[]),
+    member("sack", field::Kind::List, SACK_EDGE_FIELDS),
+    member("tsval", field::Kind::Unsigned, &[]),
+    member("tsecr", field::Kind::Unsigned, &[]),
+    member("data", field::Kind::Bytes, &[]),
+    member("trailing", field::Kind::Bytes, &[]),
 ];
 
-fn option_value(option: &TcpOption) -> FieldValue {
+fn option_value(option: &TcpOption) -> field::Value {
     let mut fields = Vec::with_capacity(3);
     if let Some(kind) = option.kind() {
-        fields.push(("kind", FieldValue::Unsigned(u64::from(kind))));
+        fields.push(("kind", field::Value::Unsigned(u64::from(kind))));
     }
     match option {
         TcpOption::Mss(value) => fields.push(("mss", (*value).into())),
         TcpOption::WindowScale(shift) => fields.push(("window_scale", (*shift).into())),
         TcpOption::Sack(blocks) => fields.push((
             "sack",
-            FieldValue::List(
+            field::Value::List(
                 blocks
                     .iter()
                     .map(|block| {
@@ -93,15 +93,15 @@ fn option_value(option: &TcpOption) -> FieldValue {
         TcpOption::Trailing(bytes) => fields.push(("trailing", bytes.clone().into())),
         TcpOption::End | TcpOption::Nop | TcpOption::SackPermitted => {}
     }
-    FieldValue::Object(fields.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
+    field::Value::Object(fields.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
 }
 
-fn options_value(options: &[TcpOption]) -> FieldValue {
-    FieldValue::List(options.iter().map(option_value).collect())
+fn options_value(options: &[TcpOption]) -> field::Value {
+    field::Value::List(options.iter().map(option_value).collect())
 }
 
 fn sack_blocks(
-    value: FieldValue,
+    value: field::Value,
     schema: &'static Schema,
     field: &str,
 ) -> Result<Vec<SackBlock>, field::Error> {
@@ -120,11 +120,11 @@ fn sack_blocks(
 }
 
 fn parse_field(
-    value: FieldValue,
+    value: field::Value,
     schema: &'static Schema,
     field: &str,
 ) -> Result<Vec<TcpOption>, field::Error> {
-    if let FieldValue::Bytes(bytes) = value {
+    if let field::Value::Bytes(bytes) = value {
         // Decoded input is bounded by the data offset, but a constructed value
         // carries no header, so bound it here.
         if bytes.len() > MAX_OPTION_BYTES {
@@ -142,14 +142,14 @@ fn parse_field(
 }
 
 fn parse_option(
-    value: FieldValue,
+    value: field::Value,
     schema: &'static Schema,
     field: &str,
 ) -> Result<TcpOption, field::Error> {
     let mut option = Object::new(value, schema, field)?;
     if let Some(trailing) = option.take("trailing") {
         let bytes = match trailing {
-            FieldValue::Bytes(bytes) => bytes,
+            field::Value::Bytes(bytes) => bytes,
             _ => return Err(wrong_type(schema, field, "trailing bytes")),
         };
         option.finish()?;
@@ -157,7 +157,7 @@ fn parse_option(
     }
     let kind: u8 = option.required_value("kind")?;
     let data = match option.take("data") {
-        Some(FieldValue::Bytes(bytes)) => Some(bytes),
+        Some(field::Value::Bytes(bytes)) => Some(bytes),
         Some(_) => return Err(wrong_type(schema, field, "option data bytes")),
         None => None,
     };

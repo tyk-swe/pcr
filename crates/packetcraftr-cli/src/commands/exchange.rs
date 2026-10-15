@@ -12,7 +12,6 @@ use packetcraftr_core::error::Kind;
 use crate::output;
 
 use self::arguments::Args;
-use super::execution;
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
 use crate::system::{Prepared, placeholder, prepare_live};
@@ -40,14 +39,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let compression = arguments.send.compression.for_output(format)?;
     let stop = arguments.stop();
     let Args {
@@ -76,45 +81,57 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         )
     };
     request.collection.decode.limits.max_packet_size = limits.snap_length;
-    let Prepared { request, client } = prepare_live(send, template, request)?;
-    execution::run_workflow(
-        format,
-        stream,
-        crate::cancellation::signal(),
-        execution::Hooks {
-            command: output::contract::Command::Exchange,
-            run: Box::new(|| {
+    let Prepared { request, client } = prepare_live(invocation, send, template, request)?;
+    match format {
+        Format::Ndjson => {
+            let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
+            let summary = {
+                let emit = emit;
+
+                client
+                    .exchange(request.clone(), emit)
+                    .map_err(CliError::classified)
+            }?;
+            invocation.check()?;
+            (rendering::render_complete)(summary, stream)
+        }
+        format => {
+            let report = (|| -> Result<_, CliError> {
                 let collector = packetcraftr::exchange::Collector::default();
                 let report = client
                     .exchange(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
                 collector.finish(report).map_err(CliError::classified)
-            }),
-            run_with_events: Box::new(|emit| {
-                client
-                    .exchange(request.clone(), emit)
-                    .map_err(CliError::classified)
-            }),
-            on_event: rendering::emit_event,
-            into_result: Box::new(|report| {
-                output::envelope::Published::<output::exchange::Report>::try_from(report)
-                    .map_err(CliError::classified)
-            }),
-            render: Box::new(move |report, format| match format {
-                Format::Text => rendering::render_text(&report, stream.presentation()),
-                Format::Pcap => {
-                    rendering::render_capture(&report, capture::Format::Pcap, compression)
+            })()?;
+            invocation.check()?;
+            if format == Format::Json {
+                crate::rendering::emit_published(invocation, output::contract::Command::Exchange, {
+                    let report = report;
+
+                    output::envelope::Published::<output::exchange::Report>::try_from(report)
+                        .map_err(CliError::classified)
+                }?)
+            } else {
+                {
+                    let report = report;
+                    match format {
+                        Format::Text => {
+                            rendering::render_text(invocation, &report, stream.presentation())
+                        }
+                        Format::Pcap => {
+                            rendering::render_capture(&report, capture::Format::Pcap, compression)
+                        }
+                        Format::PcapNg => {
+                            rendering::render_capture(&report, capture::Format::PcapNg, compression)
+                        }
+                        Format::Json | Format::Ndjson => Err(CliError::new(
+                            Kind::Internal,
+                            "exchange machine formats dispatch before text rendering",
+                        )),
+                        other => other.unreachable(),
+                    }
                 }
-                Format::PcapNg => {
-                    rendering::render_capture(&report, capture::Format::PcapNg, compression)
-                }
-                Format::Json | Format::Ndjson => Err(CliError::new(
-                    Kind::Internal,
-                    "exchange machine formats dispatch before text rendering",
-                )),
-                other => other.unreachable(),
-            }),
-            complete: rendering::render_complete,
-        },
-    )
+            }
+        }
+    }
 }

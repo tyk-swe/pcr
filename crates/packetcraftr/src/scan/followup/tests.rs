@@ -26,7 +26,7 @@ fn scan_request() -> scan::Request {
         max_in_flight: 1,
         targets: Target::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))).into(),
         target_sources: Vec::new(),
-        endpoints: vec![crate::probe::ProbeEndpoint::Icmp],
+        endpoints: vec![crate::probe::Endpoint::Icmp],
         discovery: Default::default(),
         adaptive: None,
         udp_payload: Default::default(),
@@ -106,9 +106,9 @@ fn probe_evidence(
         port,
         attempt: 1,
         status: if reply.is_some() {
-            crate::probe::ProbeStatus::Response
+            crate::probe::Status::Response
         } else {
-            crate::probe::ProbeStatus::Timeout
+            crate::probe::Status::Timeout
         },
         classification: scan::Classification::Open,
         reply,
@@ -483,6 +483,10 @@ fn the_trace_spends_only_the_policy_allowance_the_scan_left() {
     let error = stage
         .stream(
             &packet_capped,
+            &crate::execution::Operation {
+                spent: scan.stats.clone(),
+                ..crate::execution::Operation::new(&packet_capped, Duration::from_secs(60))
+            },
             &scan,
             Retained::of(&scan),
             Instant::now(),
@@ -506,6 +510,10 @@ fn the_trace_spends_only_the_policy_allowance_the_scan_left() {
     let error = stage
         .stream(
             &byte_capped,
+            &crate::execution::Operation {
+                spent: scan.stats.clone(),
+                ..crate::execution::Operation::new(&byte_capped, Duration::from_secs(60))
+            },
             &scan,
             Retained::of(&scan),
             Instant::now(),
@@ -529,6 +537,10 @@ fn the_trace_spends_only_the_policy_allowance_the_scan_left() {
     let streamed = stage
         .stream(
             &packet_capped,
+            &crate::execution::Operation {
+                spent: scan.stats.clone(),
+                ..crate::execution::Operation::new(&packet_capped, Duration::from_secs(60))
+            },
             &scan,
             Retained::of(&scan),
             Instant::now(),
@@ -891,10 +903,14 @@ fn a_lookup_runs_in_the_allowance_the_scan_and_trace_left() {
         packets_attempted: 2,
         ..Stats::default()
     };
-    let view = client.with_remaining_budget(&spent);
-    assert_eq!(view.policy().max_packets_per_operation, 0);
+    let mut operation = crate::execution::Operation::new(&client, Duration::from_secs(60));
+    operation.spent = spent;
+    assert_eq!(
+        operation.policy(client.policy()).max_packets_per_operation,
+        0
+    );
     let (records, stats) = lookup
-        .run(&view, &responding(1), Instant::now(), None)
+        .run(&client, &operation, &responding(1), Instant::now(), None)
         .unwrap();
     assert_eq!(records.len(), 1);
     let record = records[0].as_ref().expect("the host keeps a record");
@@ -907,13 +923,21 @@ fn every_batch_of_lookups_shares_one_policy_budget() {
     let lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
     let client = budget_client(batch::MAX_QUESTIONS, 3);
     assert_eq!(
-        lookup.authorize(&client, &responding(batch::MAX_QUESTIONS)),
+        lookup.authorize(
+            &client,
+            &crate::execution::Operation::new(&client, Duration::from_secs(60)),
+            &responding(batch::MAX_QUESTIONS)
+        ),
         Ok(())
     );
     // Two batches, each within the budget alone, exceed it together.
     assert!(
         lookup
-            .authorize(&client, &responding(2 * batch::MAX_QUESTIONS))
+            .authorize(
+                &client,
+                &crate::execution::Operation::new(&client, Duration::from_secs(60)),
+                &responding(2 * batch::MAX_QUESTIONS)
+            )
             .is_err()
     );
 }
@@ -926,12 +950,22 @@ fn link_layer_lookups_budget_every_neighbor_attempt_per_query() {
     for (attempts, fits) in [(1, budget / 2), (3, budget / 4)] {
         let client = budget_client(budget, attempts);
         assert_eq!(
-            lookup.authorize(&client, &responding(fits)),
+            lookup.authorize(
+                &client,
+                &crate::execution::Operation::new(&client, Duration::from_secs(60)),
+                &responding(fits)
+            ),
             Ok(()),
             "{attempts}"
         );
         assert!(
-            lookup.authorize(&client, &responding(fits + 1)).is_err(),
+            lookup
+                .authorize(
+                    &client,
+                    &crate::execution::Operation::new(&client, Duration::from_secs(60)),
+                    &responding(fits + 1)
+                )
+                .is_err(),
             "{attempts}"
         );
     }
@@ -951,6 +985,7 @@ fn hosts_that_never_responded_report_no_lookup_statistics() {
     let result = names(
         Some(&lookup),
         &client,
+        &crate::execution::Operation::new(&client, Duration::from_secs(60)),
         &silent,
         Instant::now(),
         Some(Instant::now()),
@@ -963,6 +998,7 @@ fn hosts_that_never_responded_report_no_lookup_statistics() {
     let result = names(
         Some(&lookup),
         &client,
+        &crate::execution::Operation::new(&client, Duration::from_secs(60)),
         &responding(1),
         Instant::now(),
         Some(Instant::now()),
@@ -982,6 +1018,7 @@ fn refused_lookups_wait_for_no_batch() {
     let (names, stats) = lookup
         .run(
             &client,
+            &crate::execution::Operation::new(&client, Duration::from_secs(60)),
             &responding(batch::MAX_QUESTIONS + 1),
             Instant::now(),
             Some(Instant::now()),
@@ -1083,7 +1120,12 @@ fn a_window_too_short_for_one_question_leaves_its_lookups_unattempted() {
     let client = budget_client(batch::MAX_QUESTIONS, 1);
     let addresses = [IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))];
     let (records, stats, sent) = lookup
-        .lookup(&client, &addresses, Duration::from_millis(1))
+        .lookup(
+            &client,
+            &mut crate::execution::Operation::new(&client, Duration::from_secs(60)),
+            &addresses,
+            Duration::from_millis(1),
+        )
         .unwrap();
     assert_eq!(
         records[0].status,

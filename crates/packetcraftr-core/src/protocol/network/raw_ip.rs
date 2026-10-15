@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::FieldValue,
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field,
     layer::Layer,
 };
 
@@ -22,7 +22,7 @@ const NAME: &str = BuiltinProtocol::RawIp.as_str();
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RawIpCodec;
 
-impl LayerCodec for RawIpCodec {
+impl Codec for RawIpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         const PROTOCOL: &crate::layer::Id = &protocol(NAME);
         PROTOCOL
@@ -34,8 +34,8 @@ impl LayerCodec for RawIpCodec {
         &self,
         _layer: &dyn Layer,
         _payload: &[u8],
-        _context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        _context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         Err(unsupported(
             NAME,
             "raw_ip is a decode-only link root; build IPv4 or IPv6 directly",
@@ -45,8 +45,8 @@ impl LayerCodec for RawIpCodec {
     fn decode(
         &self,
         input: Bytes,
-        context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(version) = input.first().map(|byte| byte >> 4) else {
             return Err(truncated(NAME, 1, 0));
         };
@@ -62,7 +62,7 @@ impl LayerCodec for RawIpCodec {
 
     fn make_layer(
         &self,
-        _fields: &BTreeMap<String, FieldValue>,
+        _fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         Err(unsupported(NAME, "raw_ip has no constructible layer"))
     }

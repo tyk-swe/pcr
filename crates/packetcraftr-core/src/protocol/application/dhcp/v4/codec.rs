@@ -11,8 +11,8 @@ use super::super::{Error, Limit, Limits};
 use super::reflection::{layout, schema};
 use super::{Dhcpv4, Kind4, Option4, Value4};
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::FieldValue,
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field,
     layer::{Id, Layer, Raw, Schema},
     layout::FieldLayout,
     protocol::BuiltinProtocol,
@@ -339,7 +339,7 @@ impl Message for Dhcpv4 {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Dhcpv4Codec;
 
-impl LayerCodec for Dhcpv4Codec {
+impl Codec for Dhcpv4Codec {
     fn protocol_id(&self) -> &'static Id {
         &schema().protocol
     }
@@ -356,16 +356,16 @@ impl LayerCodec for Dhcpv4Codec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         shared::encode::<Dhcpv4>(layer, payload, context)
     }
 
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         if input.get(236..240) != Some(MAGIC_COOKIE.as_slice()) {
             return Ok(Raw::decoded(input));
         }
@@ -374,7 +374,7 @@ impl LayerCodec for Dhcpv4Codec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         shared::make_layer::<Dhcpv4>(fields)
     }

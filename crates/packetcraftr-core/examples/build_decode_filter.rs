@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use packetcraftr_core::build::{Builder, Options as BuildOptions};
-use packetcraftr_core::codec::Context as BuildContext;
+use packetcraftr_core::codec::Addresses as BuildContext;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::expression;
 use packetcraftr_core::filter::{Context as FilterContext, Filter, Limits as FilterLimits};

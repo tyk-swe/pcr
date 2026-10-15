@@ -14,9 +14,9 @@ use super::{
     Handshake, Hello, ServerHello, Tls, Transport, ja3, ja4,
 };
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::FieldValue,
+    field,
     layer::{Layer, Raw},
     protocol::{
         BuiltinProtocol,
@@ -300,7 +300,7 @@ impl From<Error> for crate::codec::Error {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct TlsCodec;
 
-impl LayerCodec for TlsCodec {
+impl Codec for TlsCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &tls_schema().protocol
     }
@@ -318,22 +318,19 @@ impl LayerCodec for TlsCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Tls>(NAME, layer)?;
         layer.validate_wire_consistency()?;
         ensure_encode_budget(NAME, layer.wire.len(), context)?;
-        Ok(
-            EncodedLayer::header(layer.wire.to_vec(), Box::new(layer.clone()))
-                .with_fields(tls_layout()),
-        )
+        Ok(Encoded::header(layer.wire.to_vec(), Box::new(layer.clone())).with_fields(tls_layout()))
     }
 
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let dissection = looks_like_record_start(&input)
             .then(|| Tls::from_records(&input))
             .flatten();
@@ -345,7 +342,7 @@ impl LayerCodec for TlsCodec {
         else {
             return Ok(Raw::decoded(input));
         };
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(layer),
             consumed: input.len().saturating_sub(remainder),
             payload_len: remainder,
@@ -363,10 +360,10 @@ impl LayerCodec for TlsCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         let mut layer = match fields.get("wire") {
-            Some(FieldValue::Bytes(wire)) => Tls::try_from(wire.as_ref())?,
+            Some(field::Value::Bytes(wire)) => Tls::try_from(wire.as_ref())?,
             Some(_) => return Err(invalid(NAME, "wire must be bytes")),
             None => Tls::try_from(Hello::default())?,
         };
@@ -375,7 +372,7 @@ impl LayerCodec for TlsCodec {
                 continue;
             }
             if name == "incomplete" {
-                let FieldValue::Bool(incomplete) = value else {
+                let field::Value::Bool(incomplete) = value else {
                     return Err(wrong_type(tls_schema(), name, "bool").into());
                 };
                 layer.incomplete = *incomplete;

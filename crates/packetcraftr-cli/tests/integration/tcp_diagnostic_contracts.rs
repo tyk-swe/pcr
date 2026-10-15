@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr::Sink;
-use packetcraftr::probe::{ProbeStatus, Transport};
+use packetcraftr::probe::{self, Transport};
 use packetcraftr::scan::{self, Classification, Reply, TcpScan};
 use packetcraftr_cli::output;
 use serde_json::{Value, json};
@@ -222,9 +222,9 @@ fn evidence(
         sctp_scan: None,
         attempt: 1,
         status: if answered {
-            ProbeStatus::Response
+            probe::Status::Response
         } else {
-            ProbeStatus::Timeout
+            probe::Status::Timeout
         },
         classification,
         reply,

@@ -153,7 +153,8 @@ pub(crate) struct ClientExecutor<'c, P, K> {
     reply_history: reply_history::ReplyHistory,
     client: &'c Client<P, K>,
     bindings: Vec<(u16, packetcraftr_core::layer::Id)>,
-    configured: Option<Client<P, K>>,
+    operation: crate::execution::Operation,
+    configured: Option<crate::execution::Operation>,
     send: crate::send::Options,
     collection: crate::exchange::Collection,
     neighbors: NeighborBounds,
@@ -227,11 +228,16 @@ impl NeighborBounds {
 }
 
 impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
-    pub(crate) fn new(client: &'c Client<P, K>, request: &Request) -> Self {
+    pub(crate) fn new(
+        client: &'c Client<P, K>,
+        request: &Request,
+        operation: &crate::execution::Operation,
+    ) -> Self {
         Self {
             reply_history: reply_history::ReplyHistory::new(request.has_ip_probes()),
             client,
             bindings: registry::bindings(request),
+            operation: operation.clone(),
             configured: None,
             send: crate::send::Options {
                 destination: None,
@@ -248,25 +254,31 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
 
     fn exchange(&mut self) -> Result<ExchangeExecutor<'_, P, K>, BoundaryError> {
         let (send, collection) = (self.send.clone(), self.collection.clone());
-        Ok(ExchangeExecutor::new(self.configured()?, send, collection))
+        let client = self.client;
+        Ok(ExchangeExecutor::new(
+            client,
+            self.configured()?,
+            send,
+            collection,
+        ))
     }
 
     /// The client every exchange and neighbor resolution of the operation
     /// shares.
-    fn configured(&mut self) -> Result<&Client<P, K>, BoundaryError> {
+    fn configured(&mut self) -> Result<&crate::execution::Operation, BoundaryError> {
         Ok(match &mut self.configured {
             Some(client) => client,
             configured => {
                 let registry: Arc<Registry> =
                     registry::configured(self.client.registry(), &self.bindings)?;
-                let mut client = self.client.view_with_registry(registry);
+                let mut client = self.operation.clone();
+                client.registry = registry;
                 // A probe's next hop may be a gateway no target authorized,
                 // so its neighbor request is authorized like the explicit one.
-                client.authorize_neighbor_requests = true;
                 // A stage resolves each probe's link-layer neighbor before
                 // its exchanges, through the resolver they all share, so a
                 // probe whose route now needs another sends it no request.
-                client.neighbors_resolved_ahead = true;
+                client.neighbor_mode = crate::execution::NeighborMode::Cached;
                 client.neighbors = self
                     .neighbors
                     .narrow(&client.neighbors)
@@ -293,12 +305,13 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
             return Ok(pending);
         }
         let base = self.send.clone();
+        let services = self.client;
         let client = self.configured()?;
         let packet = route_probe(target).packet();
         let interface = target.interface();
         let route_with = |send: &crate::send::Options| {
-            client
-                .admitting(send, 1, deadline)
+            services
+                .admitting_in(send, 1, deadline, client)
                 .and_then(|admitting| admitting.route_on(&packet, target.address, interface))
                 .map_err(BoundaryError::from_error)
         };
@@ -369,7 +382,7 @@ fn route_probe(target: &SelectedAddress) -> Probe {
         stage: super::Stage::Discovery,
         address: target.address,
         scope: target.scope.clone(),
-        endpoint: crate::probe::ProbeEndpoint::Icmp,
+        endpoint: crate::probe::Endpoint::Icmp,
         tcp_scan: super::TcpScan::default(),
         sctp_scan: super::SctpScan::default(),
         attempt: 1,
@@ -485,22 +498,27 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             ..
         } = self.neighbors;
         // The operation's client keeps every answer for its probes.
+        let services = self.client;
         let client = self.configured()?;
         // The resolver sends exactly this frame, so its final bytes are checked
         // like a prepared packet's.
-        crate::preparation::authorize_neighbor_request(&client.policy, &request, plan)
-            .map_err(BoundaryError::from_error)?;
+        crate::preparation::authorize_neighbor_request(
+            &client.policy(&services.policy),
+            &request,
+            plan,
+        )
+        .map_err(BoundaryError::from_error)?;
         let frame = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
         let state = client
             .neighbors
             .single_attempt(timeout, max_frames, max_bytes, snap_length)
             .map_err(BoundaryError::from_error)?;
-        let providers = &client.providers;
-        let started = client.now();
+        let providers = &services.providers;
+        let started = services.now();
         let resolved = state
             .over(providers.transmit(), providers.capture())
             .resolve(&request, deadline);
-        let elapsed = client.now().saturating_duration_since(started);
+        let elapsed = services.now().saturating_duration_since(started);
         let (link, attempts, capture, observed_at) = match resolved {
             Ok(resolution) => {
                 // A fresh reply was observed when it was captured, which a
@@ -555,6 +573,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             return Ok(NextHopResolution::default());
         };
         let plan = &*plan;
+        let _services = self.client;
         let client = self.configured()?;
         if client
             .neighbors
@@ -572,17 +591,22 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
                 },
             ));
         }
+        let services = self.client;
         let client = self.configured()?;
-        crate::preparation::authorize_neighbor_request(&client.policy, &request, plan)
-            .map_err(BoundaryError::from_error)?;
+        crate::preparation::authorize_neighbor_request(
+            &client.policy(&services.policy),
+            &request,
+            plan,
+        )
+        .map_err(BoundaryError::from_error)?;
         let frame = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
-        let providers = &client.providers;
-        let started = client.now();
+        let providers = &services.providers;
+        let started = services.now();
         let resolved = client
             .neighbors
             .over(providers.transmit(), providers.capture())
             .resolve(&request, deadline);
-        let elapsed = client.now().saturating_duration_since(started);
+        let elapsed = services.now().saturating_duration_since(started);
         let (attempts, capture, silence) = match resolved {
             Ok(resolution) => (resolution.attempts, resolution.capture_statistics, None),
             Err(error) => {
@@ -627,6 +651,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             return Ok(false);
         };
         // An answer the operation already holds is reported without a request.
+        let _services = self.client;
         let client = self.configured()?;
         Ok(client
             .neighbors
@@ -664,7 +689,7 @@ mod tests {
             udp_payload: bytes::Bytes::new(),
             udp_profiles: Default::default(),
             address_family: Family::Any,
-            endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
+            endpoints: vec![crate::probe::Endpoint::Tcp { port: 80 }],
             discovery: Default::default(),
             attempts: 1,
             adaptive: None,
@@ -681,9 +706,13 @@ mod tests {
             sequence: 0,
         };
 
-        let error = ClientExecutor::new(&client, &request)
-            .execute(&reshaped)
-            .expect_err("a scan batch without its probe must be rejected");
+        let error = ClientExecutor::new(
+            &client,
+            &request,
+            &crate::execution::Operation::new(&client, request.limits.max_duration),
+        )
+        .execute(&reshaped)
+        .expect_err("a scan batch without its probe must be rejected");
 
         assert_eq!(error.classification().code, "cli.scan_executor");
         assert!(providers.calls().is_empty());

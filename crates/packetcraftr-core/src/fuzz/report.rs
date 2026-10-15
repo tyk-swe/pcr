@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Classification, Classified};
 use crate::{
-    build::BuiltPacket, decode::DecodedPacket, diagnostic::Diagnostic, field::FieldValue,
-    packet::Packet,
+    build::BuiltPacket, decode::DecodedPacket, diagnostic::Diagnostic, field, packet::Packet,
 };
 
 use super::request::Strategy;
@@ -26,8 +25,8 @@ pub struct Mutation {
     pub protocol: String,
     pub field: String,
     pub strategy: Strategy,
-    pub original: FieldValue,
-    pub value: FieldValue,
+    pub original: field::Value,
+    pub value: field::Value,
 }
 
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
@@ -65,7 +64,7 @@ pub struct Case {
     pub index: u64,
     pub seed: u64,
     pub mutation: Mutation,
-    pub shrink_values: Vec<FieldValue>,
+    pub shrink_values: Vec<field::Value>,
     pub recipe: Packet,
     pub built: Option<BuiltPacket>,
     pub decoded: Option<DecodedPacket>,

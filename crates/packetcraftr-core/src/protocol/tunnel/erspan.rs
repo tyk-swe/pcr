@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::FieldValue,
+    field,
     layer::{Layer, reflect_get, reflect_set_bounded, reflective_layer},
     registry::Discriminator,
 };
@@ -77,10 +77,10 @@ reflective_layer! {
         "truncated" => { kind: Bool, derived: false, required: false, description: "The mirrored frame was truncated by the session MTU", reflect: truncated, layout: (2, 4) },
         "session_id" => { kind: Unsigned, derived: false, required: true, description: "10-bit monitoring-session identifier", reflect_bounded: session_id, 0x3ff_u64, layout: (2, 4) },
         "index_word" => { kind: Unsigned, derived: false, required: false, description: "Type II reserved bits and port index, packed as the final word", reflect: index_word, layout: (4, 8) },
-        "timestamp" => { kind: Unsigned, derived: false, required: false, description: "Type III wire-format timestamp", get |layer| layer.type3.as_ref().map(|type3| FieldValue::from(type3.timestamp)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.type3.get_or_insert_with(ErspanType3::default).timestamp = u32::try_from(value).map_err(|_| out_of_range(erspan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) } },
-        "sgt" => { kind: Unsigned, derived: false, required: false, description: "Type III security group tag", get |layer| layer.type3.as_ref().map(|type3| FieldValue::from(type3.sgt)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.type3.get_or_insert_with(ErspanType3::default).sgt = u16::try_from(value).map_err(|_| out_of_range(erspan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) } },
-        "flags" => { kind: Unsigned, derived: false, required: false, description: "Type III flag half-word: P bit, frame type, hardware ID, direction, granularity, and the subheader O bit", get |layer| layer.type3.as_ref().map(|type3| FieldValue::from(type3.flags)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.type3.get_or_insert_with(ErspanType3::default).flags = u16::try_from(value).map_err(|_| out_of_range(erspan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) } },
-        "subheader" => { kind: Bytes, derived: false, required: false, description: "Type III 8-byte platform-specific subheader", get |layer| layer.type3.as_ref().and_then(|type3| type3.subheader.clone()).map(FieldValue::Bytes), set |layer, value, name| match value { FieldValue::Bytes(value) => { layer.type3.get_or_insert_with(ErspanType3::default).subheader = Some(value); Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "bytes")) } }
+        "timestamp" => { kind: Unsigned, derived: false, required: false, description: "Type III wire-format timestamp", get |layer| layer.type3.as_ref().map(|type3| field::Value::from(type3.timestamp)), set |layer, value, name| match value { field::Value::Unsigned(value) => { layer.type3.get_or_insert_with(ErspanType3::default).timestamp = u32::try_from(value).map_err(|_| out_of_range(erspan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) } },
+        "sgt" => { kind: Unsigned, derived: false, required: false, description: "Type III security group tag", get |layer| layer.type3.as_ref().map(|type3| field::Value::from(type3.sgt)), set |layer, value, name| match value { field::Value::Unsigned(value) => { layer.type3.get_or_insert_with(ErspanType3::default).sgt = u16::try_from(value).map_err(|_| out_of_range(erspan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) } },
+        "flags" => { kind: Unsigned, derived: false, required: false, description: "Type III flag half-word: P bit, frame type, hardware ID, direction, granularity, and the subheader O bit", get |layer| layer.type3.as_ref().map(|type3| field::Value::from(type3.flags)), set |layer, value, name| match value { field::Value::Unsigned(value) => { layer.type3.get_or_insert_with(ErspanType3::default).flags = u16::try_from(value).map_err(|_| out_of_range(erspan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) } },
+        "subheader" => { kind: Bytes, derived: false, required: false, description: "Type III 8-byte platform-specific subheader", get |layer| layer.type3.as_ref().and_then(|type3| type3.subheader.clone()).map(field::Value::Bytes), set |layer, value, name| match value { field::Value::Bytes(value) => { layer.type3.get_or_insert_with(ErspanType3::default).subheader = Some(value); Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "bytes")) } }
     }
     layout pub(crate) fn erspan_static_layout();
 }
@@ -88,7 +88,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ErspanCodec;
 
-impl LayerCodec for ErspanCodec {
+impl Codec for ErspanCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &erspan_schema().protocol
     }
@@ -97,8 +97,8 @@ impl LayerCodec for ErspanCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Erspan>(NAME, layer)?;
         let header_len = validate_shape(layer, context)?;
         let diagnostics = validate_parent(layer, context)?;
@@ -121,7 +121,7 @@ impl LayerCodec for ErspanCodec {
         } else {
             prefix.extend_from_slice(&layer.index_word.to_be_bytes());
         }
-        Ok(EncodedLayer::header(prefix, Box::new(layer.clone()))
+        Ok(Encoded::header(prefix, Box::new(layer.clone()))
             .with_fields(erspan_layout(layer))
             .with_diagnostics(diagnostics))
     }
@@ -129,8 +129,8 @@ impl LayerCodec for ErspanCodec {
     fn decode(
         &self,
         input: Bytes,
-        context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(base) = input.first_chunk::<ERSPAN_II_LEN>() else {
             return Err(truncated(NAME, ERSPAN_II_LEN, input.len()));
         };
@@ -213,7 +213,7 @@ impl LayerCodec for ErspanCodec {
         };
         let payload_len = input.len().saturating_sub(header_len);
         let fields = erspan_layout(&layer);
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields,
             layer: Box::new(layer),
             consumed: header_len,
@@ -227,7 +227,7 @@ impl LayerCodec for ErspanCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Erspan::default(), fields)
     }
@@ -235,7 +235,7 @@ impl LayerCodec for ErspanCodec {
 
 fn validate_shape(
     layer: &Erspan,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
 ) -> Result<usize, crate::codec::Error> {
     let header_len = match layer.version {
         1 => ERSPAN_II_LEN,
@@ -289,7 +289,7 @@ fn validate_shape(
 
 fn validate_parent(
     layer: &Erspan,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
 ) -> Result<Vec<Diagnostic>, crate::codec::Error> {
     let mut diagnostics = Vec::new();
     if layer.version == 2 && layer.index_word != 0 {
@@ -312,10 +312,10 @@ fn validate_parent(
         .checked_sub(1)
         .and_then(|index| context.packet.layer(index));
     let protocol_type_disagrees = match parent.and_then(|layer| layer.field("protocol_type")) {
-        Some(FieldValue::Unsigned(value @ (TYPE_II_PROTOCOL | TYPE_III_PROTOCOL))) => {
+        Some(field::Value::Unsigned(value @ (TYPE_II_PROTOCOL | TYPE_III_PROTOCOL))) => {
             value != expected_protocol_type
         }
-        Some(FieldValue::Text(_)) => layer.version != 1,
+        Some(field::Value::Text(_)) => layer.version != 1,
         _ => false,
     };
     if protocol_type_disagrees {
@@ -383,12 +383,12 @@ mod tests {
         layer: &Erspan,
         mode: crate::codec::Mode,
         remaining_packet_bytes: usize,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+    ) -> Result<Encoded, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
         let packet = Packet::new();
-        let build_context = crate::codec::Context::default();
+        let build_context = crate::codec::Addresses::default();
         let child = Ethernet::default();
-        let context = LayerEncodeContext {
+        let context = EncodeContext {
             packet: &packet,
             index: 0,
             build_context: &build_context,
@@ -400,12 +400,9 @@ mod tests {
         ErspanCodec.encode(layer, &[], &context)
     }
 
-    fn decode(
-        input: &[u8],
-        discriminator: Option<u64>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+    fn decode(input: &[u8], discriminator: Option<u64>) -> Result<Decoded, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
-        let context = LayerDecodeContext {
+        let context = DecodeContext {
             parent: None,
             registry: &registry,
             network: None,

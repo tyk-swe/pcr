@@ -38,11 +38,11 @@ pub(super) trait OsExecutor: Executor<Batch<PlannedProbe>> {
 }
 
 pub(super) struct Native<'a, P, K> {
-    pub client: &'a mut Client<P, K>,
+    pub client: &'a Client<P, K>,
+    pub operation: &'a mut crate::execution::Operation,
     pub preparation_timeout: Duration,
     pub send: crate::send::Options,
     pub collection: crate::exchange::Collection,
-    pub spent: Stats,
 }
 
 impl<P: PacketProviders, K: Clock> OsExecutor for Native<'_, P, K> {
@@ -53,7 +53,7 @@ impl<P: PacketProviders, K: Clock> OsExecutor for Native<'_, P, K> {
     ) -> Result<Preparation, BoundaryError> {
         let mut admission = self
             .client
-            .admitting(&self.send, 2, deadline)
+            .admitting_in(&self.send, 2, deadline, self.operation)
             .map_err(BoundaryError::from_error)?;
         let route = admission
             .route_on(&probe.packet(), probe.address, probe.interface.as_ref())
@@ -68,7 +68,7 @@ impl<P: PacketProviders, K: Clock> OsExecutor for Native<'_, P, K> {
         }
         let request = crate::route::neighbor_request(plan).map_err(BoundaryError::from_error)?;
         if self
-            .client
+            .operation
             .neighbors
             .cached(&request)
             .map_err(BoundaryError::from_error)?
@@ -78,8 +78,8 @@ impl<P: PacketProviders, K: Clock> OsExecutor for Native<'_, P, K> {
         }
         // Apply neighbor-specific capture minima only to routes that need
         // resolution, retaining the one answer for all later exchanges.
-        self.client.neighbors = self
-            .client
+        self.operation.neighbors = self
+            .operation
             .neighbors
             .one_attempt(
                 self.preparation_timeout,
@@ -89,12 +89,16 @@ impl<P: PacketProviders, K: Clock> OsExecutor for Native<'_, P, K> {
                 1,
             )
             .map_err(BoundaryError::from_error)?;
-        crate::preparation::authorize_neighbor_request(&self.client.policy, &request, plan)
-            .map_err(BoundaryError::from_error)?;
+        crate::preparation::authorize_neighbor_request(
+            &self.operation.policy(&self.client.policy),
+            &request,
+            plan,
+        )
+        .map_err(BoundaryError::from_error)?;
         let bytes = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
         let started = self.client.now();
         let resolution = self
-            .client
+            .operation
             .neighbors
             .over(
                 self.client.providers.transmit(),
@@ -111,7 +115,10 @@ impl<P: PacketProviders, K: Clock> OsExecutor for Native<'_, P, K> {
             self.client.now().saturating_duration_since(started),
             resolution.capture_statistics,
         );
-        self.spent.checked_add_assign(&stats).map_err(failure)?;
+        self.operation
+            .spent
+            .checked_add_assign(&stats)
+            .map_err(failure)?;
         Ok(Preparation {
             stats,
             captured: resolution.captured,
@@ -127,8 +134,13 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<PlannedProbe>> for Native<'_, 
         let [probe] = batch.probes.as_slice() else {
             return Err(FAULT.invalid("OS batches contain exactly one probe"));
         };
-        let client = self.client.with_remaining_budget(&self.spent);
-        let executor = ExchangeExecutor::new(&client, self.send.clone(), self.collection.clone());
+        let client = self.client;
+        let executor = ExchangeExecutor::new(
+            client,
+            self.operation,
+            self.send.clone(),
+            self.collection.clone(),
+        );
         let aggregate = executor.exchange_for_workflow(
             Template::new(probe.packet()),
             WorkflowOverrides {
@@ -141,7 +153,8 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<PlannedProbe>> for Native<'_, 
             &mut |_, sent, response| classify(client.registry(), probe, sent, response).is_some(),
             None,
         )?;
-        self.spent
+        self.operation
+            .spent
             .checked_add_assign(&aggregate.aggregate.stats)
             .map_err(failure)?;
         Ok(Evidence::from_exchange(batch.permit, aggregate))

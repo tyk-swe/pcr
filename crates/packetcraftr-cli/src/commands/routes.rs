@@ -36,21 +36,25 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        _stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        run(invocation, self, format).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
-    let interfaces = crate::system::interfaces(None)?;
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+) -> Result<(), CliError> {
+    let interfaces = crate::system::interfaces(invocation, None)?;
     let mut routes = Vec::new();
     for interface in interfaces
         .into_iter()
         .filter(|interface| arguments.includes(interface))
     {
-        if let Some(route) = crate::system::interface_route(&interface.id)? {
+        if let Some(route) = crate::system::interface_route(invocation, &interface.id)? {
             routes.push(route);
         }
     }
@@ -58,6 +62,7 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     routes.dedup_by(|left, right| left.interface == right.interface);
     let result = output::routes::Report::from(routes);
     crate::rendering::render_aggregate_rows(
+        invocation,
         output::contract::Command::Routes,
         format,
         &result,

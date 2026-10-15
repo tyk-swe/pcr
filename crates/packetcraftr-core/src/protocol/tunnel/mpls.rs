@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::FieldValue,
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field,
     layer::{Layer, Malformed, reflective_layer},
     registry::Discriminator,
 };
@@ -62,7 +62,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct MplsCodec;
 
-impl LayerCodec for MplsCodec {
+impl Codec for MplsCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &mpls_schema().protocol
     }
@@ -71,8 +71,8 @@ impl LayerCodec for MplsCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Mpls>(NAME, layer)?;
         ensure_encode_budget(NAME, MPLS_LEN, context)?;
         if layer.label > LABEL_MAX || layer.traffic_class > 7 {
@@ -107,7 +107,7 @@ impl LayerCodec for MplsCodec {
             | (u32::from(layer.bottom_of_stack) << 8)
             | u32::from(layer.ttl);
         Ok(
-            EncodedLayer::header(word.to_be_bytes().to_vec(), Box::new(layer.clone()))
+            Encoded::header(word.to_be_bytes().to_vec(), Box::new(layer.clone()))
                 .with_fields(mpls_layout())
                 .with_diagnostics(diagnostics),
         )
@@ -116,8 +116,8 @@ impl LayerCodec for MplsCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<MPLS_LEN>() else {
             return Err(truncated(NAME, MPLS_LEN, input.len()));
         };
@@ -140,7 +140,7 @@ impl LayerCodec for MplsCodec {
         } else {
             Vec::new()
         };
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: mpls_layout(),
             layer: Box::new(layer),
             consumed: MPLS_LEN,
@@ -154,7 +154,7 @@ impl LayerCodec for MplsCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Mpls::default(), fields)
     }

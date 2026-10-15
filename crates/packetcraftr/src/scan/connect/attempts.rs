@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider, Stream as _};
 
-use super::super::error::Probes;
+use super::super::error::probe_error;
 use super::super::{Error, Request, Stage};
 use super::planning::StagePlan;
 use super::{Outcome, ProbeEvidence, execution};
@@ -58,7 +58,12 @@ where
     let final_endpoints = [endpoint];
     let operation = SocketOperation::new(&final_endpoints, *stage.limits)
         .map_err(|source| execution(sequence, source))?;
-    approve_operation(authorizer, Operation::Socket(operation), deadline, &Probes)?;
+    approve_operation(
+        authorizer,
+        Operation::Socket(operation),
+        deadline,
+        probe_error,
+    )?;
     let timeout = deadline.bounded_timeout(request.timeout)?;
     let admitted = clock.now();
     let scheduled_at = SystemTime::now();

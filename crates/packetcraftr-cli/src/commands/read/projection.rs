@@ -8,7 +8,12 @@ use crate::errors::CliError;
 use crate::output::contract::{Command, Format};
 use crate::rendering::{Projector, StreamEncoder};
 
-pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    args: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     args.limits.validate()?;
     let bounds = args.epoch.resolve()?;
     let selection = args.selection.resolve()?;
@@ -32,7 +37,7 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             )
         })
         .transpose()?;
-    let mut reader = crate::input::open_capture(&args.path, args.limits.reader)?;
+    let mut reader = crate::input::open_capture(invocation, &args.path, args.limits.reader)?;
     let mut frames = 0u64;
     let mut bytes = 0u64;
     if projector.projection.requirements().stream_index
@@ -45,7 +50,7 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             registry,
             &core::analysis::Options {
                 time_bounds: bounds,
-                cancellation: Some(crate::cancellation::signal().clone()),
+                cancellation: Some(invocation.cancellation.clone()),
                 limits: core::analysis::Limits {
                     max_frames: args.limits.max_frames,
                     max_bytes: args.limits.max_bytes,
@@ -114,5 +119,5 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             projector.emit(frames, values, stream)?;
         }
     }
-    projector.finish(frames, bytes, stream)
+    projector.finish(invocation, frames, bytes, stream)
 }

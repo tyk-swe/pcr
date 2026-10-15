@@ -7,7 +7,6 @@
 mod engine;
 mod error;
 mod evidence;
-mod executor;
 mod plan;
 mod report;
 mod request;

@@ -28,12 +28,15 @@ pub(super) struct AnalysisSetup {
 }
 
 impl AnalysisSetup {
-    pub(super) fn options(&self) -> analysis::Options<'_> {
+    pub(super) fn options(
+        &self,
+        invocation: &crate::invocation::Invocation,
+    ) -> analysis::Options<'_> {
         analysis::Options {
             plan: analysis::Plan::default(),
-            deadline: crate::invocation::deadline(),
+            deadline: invocation.deadline.clone(),
             track_sources: false,
-            cancellation: Some(crate::cancellation::signal().clone()),
+            cancellation: Some(invocation.cancellation.clone()),
             filter: self.filter.as_ref(),
             stream: None,
             time_bounds: self.time_bounds,
@@ -103,6 +106,7 @@ pub(super) struct Inspection<'a> {
 }
 
 pub(super) fn inspect<C: analysis::Collector>(
+    invocation: &crate::invocation::Invocation,
     inspection: Inspection<'_>,
     collector: C,
     format: Format,
@@ -118,10 +122,16 @@ pub(super) fn inspect<C: analysis::Collector>(
     } = inspection;
     let setup = prepare(limits, None, decode)?;
     // The session raises the TCP/source-tracking flags from the collector's declared needs.
-    let session =
-        analysis::Session::new(setup.registry.clone(), setup.options(), collector, selector);
-    let mut reader = crate::input::open_capture(path, limits.capture.reader)?;
-    let mut output = EventOutput::new(format, stream, application.max_application_output_bytes);
+    let session = analysis::Session::new(
+        setup.registry.clone(),
+        analysis::Options {
+            stream: selector,
+            ..setup.options(invocation)
+        },
+        collector,
+    );
+    let mut reader = crate::input::open_capture(invocation, path, limits.capture.reader)?;
+    let mut output = EventOutput::new(invocation, application.max_application_output_bytes);
     let outcome = session
         .run(&mut reader, ip_event_sink(format, stream), |event| {
             publish(&mut output, event).map_err(CliError::into_boundary_error)
@@ -148,21 +158,22 @@ pub(super) fn require_tcp_stream(
 }
 
 pub(super) fn complete_application<C, R>(
+    invocation: &crate::invocation::Invocation,
     command: Command,
     format: Format,
     stream: &StreamEncoder,
     complete: C,
     report: impl FnOnce(C) -> R,
-    render: impl FnOnce(&C) -> Result<(), CliError>,
+    render: impl FnOnce(&crate::invocation::Invocation, &C) -> Result<(), CliError>,
 ) -> Result<(), CliError>
 where
     C: serde::Serialize,
     R: serde::Serialize,
 {
     match format {
-        Format::Json => emit_aggregate(command, report(complete), Vec::new()),
+        Format::Json => emit_aggregate(invocation, command, report(complete), Vec::new()),
         Format::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
-        Format::Text => render(&complete),
+        Format::Text => render(invocation, &complete),
         other => other.unreachable(),
     }
 }

@@ -43,26 +43,11 @@ where
         // The same absolute deadline parents the streamed scan, trace, and
         // lookups, so their setup cannot extend its expiry; it starts before
         // the `started` marker so it cannot end later.
-        let operation_deadline = self.deadline(scan.limits.max_duration);
-        // Reverse-DNS lookups can share the scan's next hop, so their neighbor
-        // requests are authorized like its probes'. They resolve any next hop
-        // within the scan's bounds, reusing its answers; without them the scan
-        // bounds its own resolutions.
-        let mut scan_client = self
-            .view_with_registry(Arc::clone(&self.registry))
-            .with_neighbor_request_authorization();
+        let mut operation = crate::execution::Operation::new(self, scan.limits.max_duration);
+        operation.neighbor_mode = crate::execution::NeighborMode::Authorized;
         if lookup.is_some() {
-            scan_client = scan_client.with_scan_neighbors(&scan)?;
+            operation.scan_neighbors(&scan)?;
         }
-        let scan_client = scan_client.with_parent_deadline(operation_deadline.clone());
-        let trace_client = stage.is_some().then(|| {
-            let mut view = self.independent_view();
-            if let Some(runtime) = trace.as_ref().and_then(|trace| trace.runtime.clone()) {
-                view.runtime = runtime;
-            }
-            view.with_neighbor_request_authorization()
-                .with_parent_deadline(operation_deadline.clone())
-        });
         let started = self.now();
         let sink = Arc::new(Mutex::new(sink));
         // Events stream as they settle; the tracker keeps each attempt
@@ -74,26 +59,30 @@ where
         let retained = Arc::new(Mutex::new(Retained::default()));
         let observing = Arc::clone(&retained);
         let scan_sink = Arc::clone(&sink);
-        let scan_report = scan_client.scan(scan, move |event: scan::Event| {
-            observing
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .observe(&event);
-            if let scan::Event::Probe { target, probe } = &event {
-                let probe = scan::ProbeEvidence {
-                    response: None,
-                    ..probe.clone()
-                };
-                Sink::publish(
-                    &mut tracked,
-                    scan::Event::Probe {
-                        target: target.clone(),
-                        probe,
-                    },
-                )?;
-            }
-            publish(&scan_sink, Event::Scan(event))
-        })?;
+        let scan_report = self.scan_in(
+            scan,
+            move |event: scan::Event| {
+                observing
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .observe(&event);
+                if let scan::Event::Probe { target, probe } = &event {
+                    let probe = scan::ProbeEvidence {
+                        response: None,
+                        ..probe.clone()
+                    };
+                    Sink::publish(
+                        &mut tracked,
+                        scan::Event::Probe {
+                            target: target.clone(),
+                            probe,
+                        },
+                    )?;
+                }
+                publish(&scan_sink, Event::Scan(event))
+            },
+            &operation,
+        )?;
         let aggregate = tracker.finish(scan_report.clone())?;
         // A scan that sent anything marks now: its probes' wall-clock
         // `sent_at` is evidence, not a pacing input.
@@ -105,11 +94,17 @@ where
         let mut stats = scan_report.stats.clone();
         let mut trace_report = None;
         let mut trace_sent = None;
-        if let (Some(stage), Some(trace_client)) = (&stage, &trace_client) {
+        operation.spent = stats.clone();
+        if let Some(stage) = &stage {
+            let mut trace_operation = operation.isolated();
+            if let Some(runtime) = trace.as_ref().and_then(|trace| trace.runtime.clone()) {
+                trace_operation.runtime = runtime;
+            }
             let retained = *retained.lock().unwrap_or_else(PoisonError::into_inner);
             let trace_sink = Arc::clone(&sink);
             let streamed = stage.stream(
-                trace_client,
+                self,
+                &trace_operation,
                 &aggregate,
                 retained,
                 started,
@@ -122,10 +117,11 @@ where
         }
         // The lookups' sends, bytes, and time count in this scan's reported
         // statistics, and run in the allowance the scan and trace left over.
-        let lookups_client = scan_client.with_remaining_budget(&stats);
+        operation.spent = stats.clone();
         let reverse_dns = names(
             lookup.as_ref(),
-            &lookups_client,
+            self,
+            &operation,
             &scan_report.hosts,
             started,
             last_transmission(
@@ -166,30 +162,33 @@ where
             .as_ref()
             .map(|reverse| Lookup::new(reverse, &scan))
             .transpose()?;
-        let mut client = self.with_parent_deadline(self.deadline(scan.limits.max_duration));
+        let mut operation = crate::execution::Operation::new(self, scan.limits.max_duration);
         if reverse_dns
             .as_ref()
             .is_some_and(|reverse| reverse.transport != crate::dns::TransportMode::Tcp)
         {
-            client = client
-                .with_neighbor_request_authorization()
-                .with_scan_neighbors(&scan)?;
+            operation.scan_neighbors(&scan)?;
         }
-        let started = client.now();
+        let started = self.now();
         // Probe events stream as they settle; the tracker keeps only what
         // each endpoint's inference needs.
         let tracker = connect::Collector::default();
         let mut tracked = tracker.clone();
-        let report = client.scan_connect(scan, move |event: connect::Event| {
-            Sink::publish(&mut tracked, event.clone())?;
-            sink.publish(event)
-        })?;
+        let report = self.scan_connect_in(
+            scan,
+            move |event: connect::Event| {
+                Sink::publish(&mut tracked, event.clone())?;
+                sink.publish(event)
+            },
+            &operation,
+        )?;
         let aggregate = tracker.finish(report.clone())?;
         // Wall-clock `scheduled_at` is evidence, never pacing: any attempted
         // connection conservatively marks now.
         let reverse_dns = names(
             lookup.as_ref(),
-            &client,
+            self,
+            &operation,
             &report.hosts,
             started,
             last_transmission(

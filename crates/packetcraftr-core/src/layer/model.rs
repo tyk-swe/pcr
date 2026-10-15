@@ -7,7 +7,7 @@ use std::fmt;
 
 use serde::Serialize;
 
-use crate::field::{self, FieldKind, FieldValue, Path};
+use crate::field::{self, Path};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
@@ -48,7 +48,7 @@ pub struct FieldSchema {
     pub name: &'static str,
     /// Aliases are conveniences, never a second name in the published contract.
     pub aliases: &'static [&'static str],
-    pub kind: FieldKind,
+    pub kind: field::Kind,
     pub derived: bool,
     pub required: bool,
     pub description: &'static str,
@@ -66,10 +66,10 @@ pub struct Schema {
 pub trait Layer: Any + Send + Sync + fmt::Debug {
     fn schema(&self) -> &'static Schema;
     fn clone_box(&self) -> Box<dyn Layer>;
-    fn field(&self, name: &str) -> Option<FieldValue>;
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), field::Error>;
+    fn field(&self, name: &str) -> Option<field::Value>;
+    fn set_field(&mut self, name: &str, value: field::Value) -> Result<(), field::Error>;
 
-    fn field_path(&self, path: &Path) -> Option<FieldValue> {
+    fn field_path(&self, path: &Path) -> Option<field::Value> {
         if !path.is_nested() {
             return self.field(path.root());
         }
@@ -77,7 +77,7 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
         path.get(&self.field(path.root())?).cloned()
     }
 
-    fn set_field_path(&mut self, path: &Path, value: FieldValue) -> Result<(), field::Error> {
+    fn set_field_path(&mut self, path: &Path, value: field::Value) -> Result<(), field::Error> {
         let unknown = || field::Error::UnknownField {
             protocol: *self.protocol_id(),
             field: path.to_string(),

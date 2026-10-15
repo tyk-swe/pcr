@@ -44,8 +44,8 @@ fn unqualified_terms_expand_per_transport_and_stay_distinct() {
     assert_eq!(
         selected.endpoints,
         [
-            ProbeEndpoint::Tcp { port: 53 },
-            ProbeEndpoint::Udp { port: 53 }
+            probe::Endpoint::Tcp { port: 53 },
+            probe::Endpoint::Udp { port: 53 }
         ]
     );
 }
@@ -59,7 +59,7 @@ fn names_resolve_only_where_the_catalog_has_them() {
         8,
     )
     .expect("ssh has a TCP entry");
-    assert_eq!(selected.endpoints, [ProbeEndpoint::Tcp { port: 22 }]);
+    assert_eq!(selected.endpoints, [probe::Endpoint::Tcp { port: 22 }]);
     let error = select(
         &[Transport::Udp],
         vec![term(None, Selector::Name("ssh".into()))],
@@ -82,8 +82,8 @@ fn exclusions_apply_after_expansion_and_before_the_port_bound() {
     assert_eq!(
         selected.endpoints,
         [
-            ProbeEndpoint::Tcp { port: 1 },
-            ProbeEndpoint::Tcp { port: 2 }
+            probe::Endpoint::Tcp { port: 1 },
+            probe::Endpoint::Tcp { port: 2 }
         ]
     );
     assert_eq!(selected.excluded, 1022);
@@ -109,17 +109,17 @@ fn qualified_exclusions_leave_the_other_transport_alone() {
     assert!(
         selected
             .endpoints
-            .contains(&ProbeEndpoint::Tcp { port: 53 })
+            .contains(&probe::Endpoint::Tcp { port: 53 })
     );
     assert!(
         !selected
             .endpoints
-            .contains(&ProbeEndpoint::Udp { port: 53 })
+            .contains(&probe::Endpoint::Udp { port: 53 })
     );
     assert!(
         selected
             .endpoints
-            .contains(&ProbeEndpoint::Udp { port: 5353 })
+            .contains(&probe::Endpoint::Udp { port: 5353 })
     );
     assert_eq!(selected.excluded, 1);
 }

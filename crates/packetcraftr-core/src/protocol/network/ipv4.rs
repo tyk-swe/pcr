@@ -7,9 +7,9 @@ use std::net::Ipv4Addr;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, IPV4_CHECKSUM},
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
     protocol::semantics::ipv4_source_route_destination,
     registry::Discriminator,
@@ -90,7 +90,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Ipv4Codec;
 
-impl LayerCodec for Ipv4Codec {
+impl Codec for Ipv4Codec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &ipv4_schema().protocol
     }
@@ -99,8 +99,8 @@ impl LayerCodec for Ipv4Codec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Ipv4>(NAME, layer)?;
         let (source, destination) =
             ipv4_endpoints(layer, context.packet, context.index, context.build_context);
@@ -187,7 +187,7 @@ impl LayerCodec for Ipv4Codec {
         materialized.source = source;
         materialized.destination = destination;
         materialized.options = Bytes::from(options);
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(ipv4_layout(header_len))
             .with_diagnostics(diagnostics))
     }
@@ -195,8 +195,8 @@ impl LayerCodec for Ipv4Codec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IPV4_MIN_LEN>() else {
             return Err(truncated(NAME, IPV4_MIN_LEN, input.len()));
         };
@@ -253,7 +253,7 @@ impl LayerCodec for Ipv4Codec {
             );
         }
         let payload_len = total_length.saturating_sub(header_len);
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Ipv4 {
                 dscp_ecn: header[1],
                 total_length: WireValue::Exact(total_length_field),
@@ -290,7 +290,7 @@ impl LayerCodec for Ipv4Codec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Ipv4::default(), fields)
     }
@@ -299,7 +299,7 @@ impl LayerCodec for Ipv4Codec {
 fn prepare_payload(
     layer: &Ipv4,
     payload: &[u8],
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
 ) -> Result<(Vec<u8>, usize, Vec<Diagnostic>), crate::codec::Error> {
     if layer.fragment_offset > 0x1fff {
         return Err(invalid(NAME, "fragment offset exceeds 13 bits"));

@@ -17,9 +17,9 @@ use super::request::Request;
 use super::reuse::{Cache, Intermediate};
 use crate::evidence::SentPacket;
 use crate::probe::runner::{BatchEvidence, Classifier, Outcome as ProbeOutcome};
-use crate::probe::{Batch, ProbeEndpoint, ProbeStatus, Transport, enforce_deadline};
+use crate::probe::{self, Batch, Transport, enforce_deadline};
 use crate::target::ResolvedZone;
-use crate::traceroute::error::Probes;
+use crate::traceroute::error::probe_error;
 use crate::traceroute::evidence::{fold_termination, probe_evidence};
 use crate::traceroute::plan::packet::sent_probe_matches;
 use crate::traceroute::{
@@ -29,7 +29,7 @@ use crate::traceroute::{
 #[derive(Clone, Debug)]
 pub(super) struct Outcome {
     sequence: u64,
-    status: ProbeStatus,
+    status: probe::Status,
     kind: Option<ResponseKind>,
     responder: Option<IpAddr>,
     received_at: Option<SystemTime>,
@@ -186,7 +186,7 @@ impl<'r> Planner<'r> {
     /// host's anchor and reuse decisions must see it.
     pub(super) fn next<F>(
         &mut self,
-        evidence: &mut BatchEvidence<HostsClassifier<'_>, F, Probes>,
+        evidence: &mut BatchEvidence<HostsClassifier<'_>, F, Error>,
         mut now: impl FnMut() -> Instant,
         deadline: &Deadline,
     ) -> Result<Option<Batch<Probe>>, Error>
@@ -204,7 +204,7 @@ impl<'r> Planner<'r> {
             }
         }
         loop {
-            enforce_deadline(&Probes, deadline)?;
+            enforce_deadline(probe_error, deadline)?;
             let now = now();
             if self.current.is_none() {
                 let Some(slot) = self.slots.get(self.next_slot) else {
@@ -452,9 +452,9 @@ impl Current {
                 (Transport::Udp, Some(base)) => u16::try_from(self.sent)
                     .ok()
                     .and_then(|offset| base.checked_add(offset))
-                    .map(|port| ProbeEndpoint::Udp { port }),
-                (Transport::Tcp, Some(port)) => Some(ProbeEndpoint::Tcp { port }),
-                (Transport::Icmp, None) => Some(ProbeEndpoint::Icmp),
+                    .map(|port| probe::Endpoint::Udp { port }),
+                (Transport::Tcp, Some(port)) => Some(probe::Endpoint::Tcp { port }),
+                (Transport::Icmp, None) => Some(probe::Endpoint::Icmp),
                 _ => None,
             }
             .ok_or_else(|| Error::InvalidPort {

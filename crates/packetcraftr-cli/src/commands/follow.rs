@@ -47,14 +47,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let selector = arguments.stream.get()?;
     if format == Format::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
@@ -70,6 +76,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         .as_deref()
         .map(|directory| {
             write::DirectionFiles::stage(
+                invocation,
                 directory,
                 selector,
                 arguments.direction,
@@ -77,14 +84,16 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             )
         })
         .transpose()?;
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
+    let mut reader = open_capture(invocation, &arguments.path, arguments.limits.capture.reader)?;
 
     // Indices stay capture-global, so the index stats reports is the index extracted here.
     let session = analysis::Session::new(
         prepared.registry.clone(),
-        prepared.options(),
+        analysis::Options {
+            stream: Some(selector),
+            ..prepared.options(invocation)
+        },
         Collector::new(selector),
-        Some(selector),
     );
     let direction = arguments.direction;
     let mut state = State::new(arguments.limits.capture.retention_ceiling());
@@ -93,7 +102,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             if let Some(files) = files.as_mut() {
                 files.write(&chunk).map_err(CliError::into_boundary_error)?;
             }
-            rendering::render_record(format, chunk, &mut state, stream)
+            rendering::render_record(invocation, format, chunk, &mut state, stream)
                 .map_err(CliError::into_boundary_error)?;
         }
         Ok(())
@@ -125,8 +134,9 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         .unwrap_or_default();
 
     match format {
-        Format::Text => rendering::render_text(selector, &summary, &written),
+        Format::Text => rendering::render_text(invocation, selector, &summary, &written),
         Format::Json => rendering::render_aggregate(
+            invocation,
             selector,
             summary,
             state,

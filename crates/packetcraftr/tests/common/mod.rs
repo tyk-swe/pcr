@@ -20,7 +20,7 @@ use packetcraftr::ProviderSet;
 use packetcraftr::target::{Hostname, Resolver};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::build::{self, Builder};
-use packetcraftr_core::codec::Context;
+use packetcraftr_core::codec::Addresses;
 use packetcraftr_core::decode::{self, Dissector};
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -392,7 +392,7 @@ fn ndp_reply(request: &[u8]) -> Option<(IpAddr, Bytes)> {
         .ok()?,
     );
     let wire = Builder::new(builtin::registry())
-        .build(packet, Context::default(), build::Options::default())
+        .build(packet, Addresses::default(), build::Options::default())
         .ok()?;
     Some((IpAddr::V6(solicitation.target), wire.bytes))
 }
@@ -428,7 +428,7 @@ fn arp_reply(request: &[u8]) -> Option<(Ipv4Addr, Bytes)> {
     });
     reply.push(Padding::new(vec![0_u8; 18]));
     let reply = Builder::new(builtin::registry())
-        .build(reply, Context::default(), build::Options::default())
+        .build(reply, Addresses::default(), build::Options::default())
         .ok()?;
     Some((arp.target_protocol, reply.bytes))
 }

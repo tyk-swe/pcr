@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::{FieldValue, WireValue},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -98,7 +98,7 @@ pub(crate) struct LinuxSllCodec;
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct LinuxSll2Codec;
 
-impl LayerCodec for LinuxSllCodec {
+impl Codec for LinuxSllCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &linux_sll_schema().protocol
     }
@@ -107,8 +107,8 @@ impl LayerCodec for LinuxSllCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<LinuxSll>(SLL_NAME, layer)?;
         let mut diagnostics = Vec::new();
         let (protocol_value, materialized_protocol) = resolve_u16_discriminator(
@@ -126,7 +126,7 @@ impl LayerCodec for LinuxSllCodec {
         prefix.extend_from_slice(&protocol_value.to_be_bytes());
         let mut materialized = layer.clone();
         materialized.protocol = materialized_protocol;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(linux_sll_layout())
             .with_diagnostics(diagnostics))
     }
@@ -134,8 +134,8 @@ impl LayerCodec for LinuxSllCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<16>() else {
             return Err(truncated(SLL_NAME, 16, input.len()));
         };
@@ -143,7 +143,7 @@ impl LayerCodec for LinuxSllCodec {
         let mut address = [0; 8];
         address.copy_from_slice(&header[6..14]);
         let protocol_value = u16::from_be_bytes([header[14], header[15]]);
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(LinuxSll {
                 packet_type: u16::from_be_bytes([header[0], header[1]]),
                 arp_hardware_type: u16::from_be_bytes([header[2], header[3]]),
@@ -163,13 +163,13 @@ impl LayerCodec for LinuxSllCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(LinuxSll::default(), fields)
     }
 }
 
-impl LayerCodec for LinuxSll2Codec {
+impl Codec for LinuxSll2Codec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &linux_sll2_schema().protocol
     }
@@ -178,8 +178,8 @@ impl LayerCodec for LinuxSll2Codec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<LinuxSll2>(SLL2_NAME, layer)?;
         let mut diagnostics = Vec::new();
         let (protocol_value, materialized_protocol) = resolve_u16_discriminator(
@@ -199,7 +199,7 @@ impl LayerCodec for LinuxSll2Codec {
         prefix.extend_from_slice(&layer.address);
         let mut materialized = layer.clone();
         materialized.protocol = materialized_protocol;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(linux_sll2_layout())
             .with_diagnostics(diagnostics))
     }
@@ -207,8 +207,8 @@ impl LayerCodec for LinuxSll2Codec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<20>() else {
             return Err(truncated(SLL2_NAME, 20, input.len()));
         };
@@ -218,7 +218,7 @@ impl LayerCodec for LinuxSll2Codec {
         let protocol_value = u16::from_be_bytes([header[0], header[1]]);
         let mut address = [0; 8];
         address.copy_from_slice(&header[12..20]);
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(LinuxSll2 {
                 protocol: WireValue::Exact(protocol_value),
                 interface_index: u32::from_be_bytes([header[4], header[5], header[6], header[7]]),
@@ -239,7 +239,7 @@ impl LayerCodec for LinuxSll2Codec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(LinuxSll2::default(), fields)
     }

@@ -12,6 +12,7 @@ use crate::rendering::{
 };
 
 pub(super) fn render_text(
+    invocation: &crate::invocation::Invocation,
     published: output::envelope::Published<output::traceroute::Report>,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
@@ -21,34 +22,41 @@ pub(super) fn render_text(
         stats,
     } = published;
     let stats = stats.unwrap_or_default();
-    write_stdout_line(format_args!(
-        "target={} resolved={} destination={} strategy={} port={}",
-        result.target,
-        comma_separated(&result.resolved_addresses),
-        result.destination,
-        result.strategy,
-        optional_display(result.destination_port),
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "target={} resolved={} destination={} strategy={} port={}",
+            result.target,
+            comma_separated(&result.resolved_addresses),
+            result.destination,
+            result.strategy,
+            optional_display(result.destination_port),
+        ),
+    )?;
     for hop in &result.hops {
-        write_stdout_line(format_args!("hop={}", hop.hop_limit))?;
+        write_stdout_line(invocation, format_args!("hop={}", hop.hop_limit))?;
         for probe in &hop.probes {
-            render_probe_text("  ", probe, presentation)?;
+            render_probe_text(invocation, "  ", probe, presentation)?;
         }
     }
     render_undecoded(
+        invocation,
         result
             .undecoded
             .iter()
             .map(|evidence| (Some(format!("hop={}", evidence.hop_limit)), &evidence.frame)),
     )?;
-    write_stdout_line(format_args!(
-        "trace completion={} hops={} probes={} bytes={}",
-        result.completion.as_str(),
-        result.hops.len(),
-        stats.packets_completed,
-        stats.bytes
-    ))?;
-    render_diagnostics_text(&diagnostics)
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "trace completion={} hops={} probes={} bytes={}",
+            result.completion.as_str(),
+            result.hops.len(),
+            stats.packets_completed,
+            stats.bytes
+        ),
+    )?;
+    render_diagnostics_text(invocation, &diagnostics)
 }
 
 pub(super) fn emit_event(
@@ -71,29 +79,36 @@ pub(super) fn emit_complete(
 
 /// One probe's evidence line after `lead`, with its frame beneath.
 pub(in crate::commands) fn render_probe_text(
+    invocation: &crate::invocation::Invocation,
     lead: &str,
     probe: &output::traceroute::Probe,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "{lead}sequence={} attempt={} status={} response={} sent={} received={} responder={} latency={} port={} reason={}",
-        probe.sequence,
-        probe.attempt,
-        probe.status.as_str(),
-        probe
-            .response_kind
-            .map_or("none", output::traceroute::ResponseKind::as_str),
-        probe.sent_at,
-        optional_display(probe.received_at),
-        optional_display(probe.responder),
-        optional_duration(probe.latency),
-        optional_display(probe.destination_port),
-        probe.reason,
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "{lead}sequence={} attempt={} status={} response={} sent={} received={} responder={} latency={} port={} reason={}",
+            probe.sequence,
+            probe.attempt,
+            probe.status.as_str(),
+            probe
+                .response_kind
+                .map_or("none", output::traceroute::ResponseKind::as_str),
+            probe.sent_at,
+            optional_display(probe.received_at),
+            optional_display(probe.responder),
+            optional_duration(probe.latency),
+            optional_display(probe.destination_port),
+            probe.reason,
+        ),
+    )?;
     if let Some(frame) = &probe.frame
         && presentation.verbose
     {
-        write_stdout_line(format_args!("{lead}  frame {}", captured_frame_text(frame)))?;
+        write_stdout_line(
+            invocation,
+            format_args!("{lead}  frame {}", captured_frame_text(frame)),
+        )?;
     }
     Ok(())
 }

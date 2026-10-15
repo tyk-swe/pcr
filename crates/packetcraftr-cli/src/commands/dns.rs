@@ -12,7 +12,6 @@ use packetcraftr_netio as net;
 use crate::output;
 
 use self::arguments::Args;
-use super::execution;
 use crate::command_options::parse_target;
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
@@ -48,14 +47,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     if !arguments.udp_only && !arguments.route.supports_kernel_tcp() {
         return Err(CliError::new(
             core::error::Kind::Usage,
@@ -74,79 +79,101 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         request.route = workflow.route.clone();
         request.collection = workflow.collection.clone();
     }
-    let client = &workflow.client(Runtime::Workflow);
+    let client = &workflow.client(invocation, Runtime::Workflow);
     // A lone question keeps the single-query contract.
     if let [request] = requests.as_slice() {
-        return execution::run_workflow(
-            format,
-            stream,
-            crate::cancellation::signal(),
-            execution::Hooks {
-                command: output::contract::Command::Dns,
-                run: Box::new(|| {
+        return match format {
+            Format::Ndjson => {
+                let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
+                let summary = {
+                    let emit = emit;
+
+                    client
+                        .dns(request.clone(), emit)
+                        .map_err(CliError::classified)
+                }?;
+                invocation.check()?;
+                (rendering::emit_complete)(summary, stream)
+            }
+            format => {
+                let report = (|| -> Result<_, CliError> {
                     let collector = packetcraftr::dns::Collector::default();
                     let report = client
                         .dns(request.clone(), collector.clone())
                         .map_err(CliError::classified)?;
                     collector.finish(report).map_err(CliError::classified)
-                }),
-                run_with_events: Box::new(|emit| {
-                    client
-                        .dns(request.clone(), emit)
-                        .map_err(CliError::classified)
-                }),
-                on_event: rendering::emit_event,
-                into_result: Box::new(|aggregate| {
-                    output::envelope::Published::<output::dns::Report>::try_from(aggregate)
-                        .map_err(CliError::classified)
-                }),
-                render: Box::new(|aggregate, _| {
-                    rendering::render_text(
-                        output::envelope::Published::try_from(aggregate)
-                            .map_err(CliError::classified)?,
-                        stream.presentation(),
-                    )
-                }),
-                complete: rendering::emit_complete,
-            },
-        );
+                })()?;
+                invocation.check()?;
+                if format == Format::Json {
+                    crate::rendering::emit_published(invocation, output::contract::Command::Dns, {
+                        let aggregate = report;
+
+                        output::envelope::Published::<output::dns::Report>::try_from(aggregate)
+                            .map_err(CliError::classified)
+                    }?)
+                } else {
+                    {
+                        let aggregate = report;
+                        let _ = format;
+
+                        rendering::render_text(
+                            invocation,
+                            output::envelope::Published::try_from(aggregate)
+                                .map_err(CliError::classified)?,
+                            stream.presentation(),
+                        )
+                    }
+                }
+            }
+        };
     }
     let request = packetcraftr::dns::batch::Request {
         questions: requests,
     };
-    execution::run_workflow(
-        format,
-        stream,
-        crate::cancellation::signal(),
-        execution::Hooks {
-            command: output::contract::Command::Dns,
-            run: Box::new(|| {
+    match format {
+        Format::Ndjson => {
+            let emit = crate::commands::execution::emitter(invocation, rendering::emit_batch_event);
+            let summary = {
+                let emit = emit;
+
+                client
+                    .dns_batch(request.clone(), emit)
+                    .map_err(CliError::classified)
+            }?;
+            invocation.check()?;
+            (rendering::emit_batch_complete)(summary, stream)
+        }
+        format => {
+            let report = (|| -> Result<_, CliError> {
                 let collector = packetcraftr::dns::batch::Collector::default();
                 let report = client
                     .dns_batch(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
                 collector.finish(report).map_err(CliError::classified)
-            }),
-            run_with_events: Box::new(|emit| {
-                client
-                    .dns_batch(request.clone(), emit)
-                    .map_err(CliError::classified)
-            }),
-            on_event: rendering::emit_batch_event,
-            into_result: Box::new(|aggregate| {
-                output::envelope::Published::<output::dns::BatchResult>::try_from(aggregate)
-                    .map_err(CliError::classified)
-            }),
-            render: Box::new(|aggregate, _| {
-                rendering::render_batch_text(
-                    output::envelope::Published::try_from(aggregate)
-                        .map_err(CliError::classified)?,
-                    stream.presentation(),
-                )
-            }),
-            complete: rendering::emit_batch_complete,
-        },
-    )
+            })()?;
+            invocation.check()?;
+            if format == Format::Json {
+                crate::rendering::emit_published(invocation, output::contract::Command::Dns, {
+                    let aggregate = report;
+
+                    output::envelope::Published::<output::dns::BatchResult>::try_from(aggregate)
+                        .map_err(CliError::classified)
+                }?)
+            } else {
+                {
+                    let aggregate = report;
+                    let _ = format;
+
+                    rendering::render_batch_text(
+                        invocation,
+                        output::envelope::Published::try_from(aggregate)
+                            .map_err(CliError::classified)?,
+                        stream.presentation(),
+                    )
+                }
+            }
+        }
+    }
 }
 
 fn prepare_requests(

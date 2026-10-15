@@ -12,7 +12,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use bytes::Bytes;
 use packetcraftr_core::decode::DecodedPacket;
-use packetcraftr_core::field::{self, FieldValue};
+use packetcraftr_core::field;
 use packetcraftr_core::filter::{Context, Error, Filter, Limits, MAX_FILTER_TERMS, Projection};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Raw, Schema};
@@ -118,11 +118,11 @@ impl Layer for CountedLayer {
             reads: Arc::clone(&self.reads),
         })
     }
-    fn field(&self, name: &str) -> Option<FieldValue> {
+    fn field(&self, name: &str) -> Option<field::Value> {
         self.reads.lock().expect("reads lock").push(name.to_owned());
         self.inner.field(name)
     }
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), field::Error> {
+    fn set_field(&mut self, name: &str, value: field::Value) -> Result<(), field::Error> {
         self.inner.set_field(name, value)
     }
 }
@@ -352,7 +352,7 @@ fn proj_budget_enforced_exact_cell_boundaries() {
     let row = escaped
         .values(&context(&text), 8)
         .expect("escaped text fits its exact size");
-    assert_eq!(row, vec![Some(FieldValue::Text("a\"b\n".to_owned()))]);
+    assert_eq!(row, vec![Some(field::Value::Text("a\"b\n".to_owned()))]);
     assert!(matches!(
         escaped.values(&context(&text), 7),
         Err(Error::ProjectionLimit { .. })

@@ -7,7 +7,7 @@
 use super::Error;
 use super::catalog::{Catalog, catalog_transport};
 use super::request::PortSpec;
-use crate::probe::{ProbeEndpoint, Transport};
+use crate::probe::{self, Transport};
 
 /// Bounds the expansion work one selection can request.
 pub const MAX_PORT_TERMS: usize = 1024;
@@ -38,7 +38,7 @@ pub struct PortSelection {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Selected {
-    pub endpoints: Vec<ProbeEndpoint>,
+    pub endpoints: Vec<probe::Endpoint>,
     /// Distinct expanded endpoints removed by exclusions.
     pub excluded: usize,
 }
@@ -133,7 +133,7 @@ fn expand(
     term: &Term,
     transports: &[Transport],
     catalog: &Catalog,
-    mut visit: impl FnMut(ProbeEndpoint),
+    mut visit: impl FnMut(probe::Endpoint),
 ) -> Result<(), Error> {
     let applies: Vec<Transport> = match term.transport {
         Some(transport) if transports.contains(&transport) => vec![transport],
@@ -215,11 +215,11 @@ fn expand(
     Ok(())
 }
 
-fn endpoint(transport: Transport, port: u16) -> ProbeEndpoint {
+fn endpoint(transport: Transport, port: u16) -> probe::Endpoint {
     match transport {
-        Transport::Tcp => ProbeEndpoint::Tcp { port },
-        Transport::Udp => ProbeEndpoint::Udp { port },
-        Transport::Sctp => ProbeEndpoint::Sctp { port },
+        Transport::Tcp => probe::Endpoint::Tcp { port },
+        Transport::Udp => probe::Endpoint::Udp { port },
+        Transport::Sctp => probe::Endpoint::Sctp { port },
         Transport::Icmp | Transport::Ip => {
             unreachable!("port selections are validated to TCP, UDP, and SCTP")
         }
@@ -254,15 +254,15 @@ impl Default for Seen {
 }
 
 impl Seen {
-    fn slot(endpoint: ProbeEndpoint) -> (usize, usize, u64) {
+    fn slot(endpoint: probe::Endpoint) -> (usize, usize, u64) {
         let (table, port) = match endpoint {
-            ProbeEndpoint::Tcp { port } | ProbeEndpoint::TcpAck { port } => (0, port),
-            ProbeEndpoint::Udp { port } => (1, port),
-            ProbeEndpoint::Sctp { port } => (2, port),
-            ProbeEndpoint::Icmp
-            | ProbeEndpoint::IcmpTimestamp
-            | ProbeEndpoint::IcmpNetmask
-            | ProbeEndpoint::Ip { .. } => {
+            probe::Endpoint::Tcp { port } | probe::Endpoint::TcpAck { port } => (0, port),
+            probe::Endpoint::Udp { port } => (1, port),
+            probe::Endpoint::Sctp { port } => (2, port),
+            probe::Endpoint::Icmp
+            | probe::Endpoint::IcmpTimestamp
+            | probe::Endpoint::IcmpNetmask
+            | probe::Endpoint::Ip { .. } => {
                 unreachable!("port selections expand only TCP, UDP, and SCTP")
             }
         };
@@ -271,14 +271,14 @@ impl Seen {
     }
 
     /// Returns whether the endpoint was not yet present.
-    fn insert(&mut self, endpoint: ProbeEndpoint) -> bool {
+    fn insert(&mut self, endpoint: probe::Endpoint) -> bool {
         let (table, word, bit) = Self::slot(endpoint);
         let fresh = self.0[table][word] & bit == 0;
         self.0[table][word] |= bit;
         fresh
     }
 
-    fn contains(&self, endpoint: ProbeEndpoint) -> bool {
+    fn contains(&self, endpoint: probe::Endpoint) -> bool {
         let (table, word, bit) = Self::slot(endpoint);
         self.0[table][word] & bit != 0
     }

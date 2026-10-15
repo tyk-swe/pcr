@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::field::FieldKind;
+use crate::field;
 use crate::layer::{FieldSchema, Schema};
 
 use super::error::Error;
@@ -79,14 +79,14 @@ pub(super) enum FieldSource {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct FieldSpec {
-    pub(super) kind: FieldKind,
+    pub(super) kind: field::Kind,
     pub(super) derived: bool,
     /// The schema gives the field's elements named children, so they are objects rather than scalars.
     pub(super) structured: bool,
 }
 
 impl FieldSpec {
-    pub(super) fn synthetic(kind: FieldKind) -> Self {
+    pub(super) fn synthetic(kind: field::Kind) -> Self {
         Self {
             kind,
             derived: false,
@@ -127,7 +127,7 @@ impl FieldRef {
         {
             return true;
         }
-        !self.specs.is_empty() && self.specs.iter().all(|spec| spec.kind == FieldKind::Bool)
+        !self.specs.is_empty() && self.specs.iter().all(|spec| spec.kind == field::Kind::Bool)
     }
 
     /// `[*]` gathers every selected element, so a projection reports them as one list.
@@ -163,7 +163,7 @@ impl FieldRef {
             && self
                 .specs
                 .iter()
-                .all(|spec| matches!(spec.kind, FieldKind::Bytes | FieldKind::Mac))
+                .all(|spec| matches!(spec.kind, field::Kind::Bytes | field::Kind::Mac))
     }
 }
 
@@ -294,7 +294,7 @@ fn resolve_selection<'a>(
         .parse::<crate::field::Path>()
         .map_err(|_| unknown())?;
     let declared = list.schema(schema).ok_or_else(&unknown)?;
-    if declared.kind != FieldKind::List || before.ends_with(']') {
+    if declared.kind != field::Kind::List || before.ends_with(']') {
         return Err(syntax(format!(
             "`{path}` selects list elements, but `{before}` is not a list"
         )));
@@ -438,11 +438,11 @@ fn resolve_synthetic(
         })?;
         reject_occurrence(head)?;
         let kind = match field {
-            FrameField::TimeEpoch => FieldKind::Signed,
-            FrameField::Direction => FieldKind::Text,
-            FrameField::Truncated => FieldKind::Bool,
-            FrameField::Protocols => FieldKind::List,
-            _ => FieldKind::Unsigned,
+            FrameField::TimeEpoch => field::Kind::Signed,
+            FrameField::Direction => field::Kind::Text,
+            FrameField::Truncated => field::Kind::Bool,
+            FrameField::Protocols => field::Kind::List,
+            _ => field::Kind::Unsigned,
         };
         return Ok(Some(Resolved::Field(FieldRef {
             source: FieldSource::Frame(field),
@@ -463,7 +463,7 @@ fn resolve_synthetic(
     Ok(Some(Resolved::Field(FieldRef {
         source: FieldSource::Stream(transport),
         slice: None,
-        specs: vec![FieldSpec::synthetic(FieldKind::Unsigned)],
+        specs: vec![FieldSpec::synthetic(field::Kind::Unsigned)],
         path: path.to_owned(),
     })))
 }
@@ -530,7 +530,7 @@ pub(super) fn attach_slice(
         return Err(unsliceable());
     }
     field.slice = Some(slice);
-    field.specs = vec![FieldSpec::synthetic(FieldKind::Bytes)];
+    field.specs = vec![FieldSpec::synthetic(field::Kind::Bytes)];
     field.path = format!("{}[{contents}]", field.path);
     Ok(())
 }

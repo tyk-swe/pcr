@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::{self, FieldValue},
+    field,
     layer::{Layer, Raw, reflective_layer},
     layout::{ByteRange, FieldLayout},
     protocol::{
@@ -163,12 +163,12 @@ impl Syslog {
     }
 }
 
-fn format_value(format: SyslogFormat) -> FieldValue {
-    FieldValue::Text(format.as_str().to_owned())
+fn format_value(format: SyslogFormat) -> field::Value {
+    field::Value::Text(format.as_str().to_owned())
 }
 
-fn set_format(layer: &mut Syslog, value: FieldValue, name: &str) -> Result<(), field::Error> {
-    let FieldValue::Text(text) = value else {
+fn set_format(layer: &mut Syslog, value: field::Value, name: &str) -> Result<(), field::Error> {
+    let field::Value::Text(text) = value else {
         return Err(wrong_type(syslog_schema(), name, "rfc5424 or rfc3164"));
     };
     let format = match text.to_ascii_lowercase().as_str() {
@@ -183,7 +183,7 @@ fn set_format(layer: &mut Syslog, value: FieldValue, name: &str) -> Result<(), f
     Ok(())
 }
 
-fn byte_string(value: FieldValue, name: &str) -> Result<Bytes, field::Error> {
+fn byte_string(value: field::Value, name: &str) -> Result<Bytes, field::Error> {
     byte_string_field(syslog_schema(), value, name)
 }
 
@@ -201,49 +201,49 @@ reflective_layer! {
         "version" => {
             kind: Bytes, derived: false, required: false,
             description: "RFC 5424 version digits",
-            get |layer| Some(FieldValue::Bytes(layer.version.clone())),
+            get |layer| Some(field::Value::Bytes(layer.version.clone())),
             set |layer, value, name| { layer.version = byte_string(value, name)?; Ok(()) }
         },
         "timestamp" => {
             kind: Bytes, derived: false, required: false,
             description: "RFC 5424 timestamp, verbatim",
-            get |layer| Some(FieldValue::Bytes(layer.timestamp.clone())),
+            get |layer| Some(field::Value::Bytes(layer.timestamp.clone())),
             set |layer, value, name| { layer.timestamp = byte_string(value, name)?; Ok(()) }
         },
         "hostname" => {
             kind: Bytes, derived: false, required: false,
             description: "RFC 5424 hostname",
-            get |layer| Some(FieldValue::Bytes(layer.hostname.clone())),
+            get |layer| Some(field::Value::Bytes(layer.hostname.clone())),
             set |layer, value, name| { layer.hostname = byte_string(value, name)?; Ok(()) }
         },
         "app_name" => {
             kind: Bytes, derived: false, required: false,
             description: "RFC 5424 application name",
-            get |layer| Some(FieldValue::Bytes(layer.app_name.clone())),
+            get |layer| Some(field::Value::Bytes(layer.app_name.clone())),
             set |layer, value, name| { layer.app_name = byte_string(value, name)?; Ok(()) }
         },
         "procid" => {
             kind: Bytes, derived: false, required: false,
             description: "RFC 5424 process identifier",
-            get |layer| Some(FieldValue::Bytes(layer.procid.clone())),
+            get |layer| Some(field::Value::Bytes(layer.procid.clone())),
             set |layer, value, name| { layer.procid = byte_string(value, name)?; Ok(()) }
         },
         "msgid" => {
             kind: Bytes, derived: false, required: false,
             description: "RFC 5424 message identifier",
-            get |layer| Some(FieldValue::Bytes(layer.msgid.clone())),
+            get |layer| Some(field::Value::Bytes(layer.msgid.clone())),
             set |layer, value, name| { layer.msgid = byte_string(value, name)?; Ok(()) }
         },
         "structured_data" => {
             kind: Bytes, derived: false, required: false,
             description: "RFC 5424 structured data: - or bracketed elements, verbatim",
-            get |layer| Some(FieldValue::Bytes(layer.structured_data.clone())),
+            get |layer| Some(field::Value::Bytes(layer.structured_data.clone())),
             set |layer, value, name| { layer.structured_data = byte_string(value, name)?; Ok(()) }
         },
         "message" => {
             kind: Bytes, derived: false, required: false,
             description: "RFC 5424 message, or the whole RFC 3164 text after the priority",
-            get |layer| layer.message.clone().map(FieldValue::Bytes),
+            get |layer| layer.message.clone().map(field::Value::Bytes),
             set |layer, value, name| { layer.message = Some(byte_string(value, name)?); Ok(()) }
         },
     }
@@ -436,7 +436,7 @@ fn parse(input: &Bytes) -> Option<Syslog> {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SyslogCodec;
 
-impl LayerCodec for SyslogCodec {
+impl Codec for SyslogCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &syslog_schema().protocol
     }
@@ -449,8 +449,8 @@ impl LayerCodec for SyslogCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         if !payload.is_empty() {
             return Err(invalid(NAME, "syslog is a complete UDP payload"));
         }
@@ -499,7 +499,7 @@ impl LayerCodec for SyslogCodec {
         }
         let message = encoder.finish();
         ensure_encode_budget(NAME, message.len(), context)?;
-        Ok(EncodedLayer::header(message, Box::new(layer.clone()))
+        Ok(Encoded::header(message, Box::new(layer.clone()))
             .with_fields(syslog_layout(layer))
             .with_diagnostics(diagnostics))
     }
@@ -507,8 +507,8 @@ impl LayerCodec for SyslogCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(layer) = parse(&input) else {
             return Ok(Raw::decoded(input));
         };
@@ -524,7 +524,7 @@ impl LayerCodec for SyslogCodec {
                 );
             }
         }
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: syslog_layout(&layer),
             layer: Box::new(layer),
             consumed: input.len(),
@@ -538,7 +538,7 @@ impl LayerCodec for SyslogCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Syslog::default(), fields)
     }
@@ -546,7 +546,7 @@ impl LayerCodec for SyslogCodec {
 
 fn encode_rfc5424(
     layer: &Syslog,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
     encoder: &mut Encoder,
 ) -> Result<(), crate::codec::Error> {

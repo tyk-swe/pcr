@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr::policy::Policy;
-use packetcraftr::probe::ProbeEndpoint;
+use packetcraftr::probe;
 use packetcraftr::scan::discovery::{
     Basis, Evidence, Mode, Options, ReasonKind, Scan, State, Unresponsive,
 };
@@ -57,7 +57,7 @@ enum Then {
 struct Wire {
     state: Arc<Mutex<Responder>>,
     host: Host,
-    sent: Arc<Mutex<Vec<(IpAddr, ProbeEndpoint)>>>,
+    sent: Arc<Mutex<Vec<(IpAddr, probe::Endpoint)>>>,
 }
 
 fn frame(packet: Packet) -> Frame {
@@ -104,7 +104,7 @@ fn icmp(packet: &mut Packet, v4: bool, (v4_type, v6_type): (u8, u8), code: u8, b
 }
 
 impl Wire {
-    fn replies(&self, wire: &Bytes) -> (IpAddr, ProbeEndpoint, Vec<Frame>) {
+    fn replies(&self, wire: &Bytes) -> (IpAddr, probe::Endpoint, Vec<Frame>) {
         let decoded = Dissector::new(builtin::registry())
             .decode(
                 Frame::new(SystemTime::now(), LinkType::RAW, wire.clone()).unwrap(),
@@ -121,13 +121,13 @@ impl Wire {
         let tcp = packet.get::<Tcp>();
         let udp = packet.get::<Udp>();
         let endpoint = match (tcp, udp) {
-            (Some(tcp), _) => ProbeEndpoint::Tcp {
+            (Some(tcp), _) => probe::Endpoint::Tcp {
                 port: tcp.destination_port,
             },
-            (None, Some(udp)) => ProbeEndpoint::Udp {
+            (None, Some(udp)) => probe::Endpoint::Udp {
                 port: udp.destination_port,
             },
-            (None, None) => ProbeEndpoint::Icmp,
+            (None, None) => probe::Endpoint::Icmp,
         };
         // ICMP errors quote the whole probe, well within both minimums.
         let quoted = || {
@@ -147,7 +147,7 @@ impl Wire {
                 // Host unreachable (ICMPv4) and address unreachable (ICMPv6).
                 icmp(&mut reply, v4, (3, 1), if v4 { 1 } else { 3 }, quoted());
             }
-            (Host::Answers | Host::Responsive, ProbeEndpoint::Tcp { .. }) => {
+            (Host::Answers | Host::Responsive, probe::Endpoint::Tcp { .. }) => {
                 let tcp = tcp.unwrap();
                 ip(&mut reply, destination, source);
                 reply.push(Tcp {
@@ -163,7 +163,7 @@ impl Wire {
                     ..Default::default()
                 });
             }
-            (Host::Responsive, ProbeEndpoint::Udp { .. }) => {
+            (Host::Responsive, probe::Endpoint::Udp { .. }) => {
                 let udp = udp.unwrap();
                 ip(&mut reply, destination, source);
                 reply.push(Udp {
@@ -172,11 +172,11 @@ impl Wire {
                     ..Default::default()
                 });
             }
-            (Host::Answers, ProbeEndpoint::Udp { .. }) => {
+            (Host::Answers, probe::Endpoint::Udp { .. }) => {
                 ip(&mut reply, destination, source);
                 icmp(&mut reply, v4, (3, 1), if v4 { 3 } else { 4 }, quoted());
             }
-            (Host::Answers | Host::Responsive, ProbeEndpoint::Icmp) => {
+            (Host::Answers | Host::Responsive, probe::Endpoint::Icmp) => {
                 let body = match (packet.get::<Icmpv4>(), packet.get::<Icmpv6>()) {
                     (Some(echo), _) => echo.body.clone(),
                     (None, Some(echo)) => echo.body.clone(),
@@ -187,11 +187,11 @@ impl Wire {
             }
             (
                 Host::Answers | Host::Responsive,
-                ProbeEndpoint::TcpAck { .. }
-                | ProbeEndpoint::Sctp { .. }
-                | ProbeEndpoint::IcmpTimestamp
-                | ProbeEndpoint::IcmpNetmask
-                | ProbeEndpoint::Ip { .. },
+                probe::Endpoint::TcpAck { .. }
+                | probe::Endpoint::Sctp { .. }
+                | probe::Endpoint::IcmpTimestamp
+                | probe::Endpoint::IcmpNetmask
+                | probe::Endpoint::Ip { .. },
             ) => unreachable!("matrix uses TCP SYN, UDP, and ICMP echo"),
         }
         (destination, endpoint, vec![frame(reply)])
@@ -220,17 +220,17 @@ impl transmit::Provider for Wire {
     }
 }
 
-fn request(target: IpAddr, probe: ProbeEndpoint, then: Then) -> Request {
+fn request(target: IpAddr, probe: probe::Endpoint, then: Then) -> Request {
     let (mode, unresponsive, endpoints) = match then {
         Then::ScanResponders => (
             Mode::Before,
             Unresponsive::Skip,
-            vec![ProbeEndpoint::Tcp { port: SCAN_PORT }],
+            vec![probe::Endpoint::Tcp { port: SCAN_PORT }],
         ),
         Then::ScanEveryHost => (
             Mode::Before,
             Unresponsive::Scan,
-            vec![ProbeEndpoint::Tcp { port: SCAN_PORT }],
+            vec![probe::Endpoint::Tcp { port: SCAN_PORT }],
         ),
         Then::Nothing => (Mode::Only, Unresponsive::Skip, Vec::new()),
     };
@@ -281,7 +281,7 @@ fn run(
     host: Host,
 ) -> (
     Result<scan::Aggregate, scan::Error>,
-    Vec<(IpAddr, ProbeEndpoint)>,
+    Vec<(IpAddr, probe::Endpoint)>,
 ) {
     let state = Arc::new(Mutex::new(Responder::default()));
     let sent = Arc::new(Mutex::new(Vec::new()));
@@ -318,9 +318,9 @@ fn discovery_states_follow_the_host_in_both_families() {
     let corpus = corpus();
     let cases = corpus["discovery_scenarios"].as_array().unwrap();
     let probes = [
-        (ProbeEndpoint::Icmp, "icmp"),
-        (ProbeEndpoint::Tcp { port: 22 }, "tcp"),
-        (ProbeEndpoint::Udp { port: 53 }, "udp"),
+        (probe::Endpoint::Icmp, "icmp"),
+        (probe::Endpoint::Tcp { port: 22 }, "tcp"),
+        (probe::Endpoint::Udp { port: 53 }, "udp"),
     ];
     for v4 in [true, false] {
         let [_, target, router] = family_addresses(v4);
@@ -416,7 +416,7 @@ fn discovery_states_follow_the_host_in_both_families() {
                     assert_eq!(record.scan, scanned, "{case}");
                     let mut expected = vec![(target, probe)];
                     if scanned == Scan::Scanned {
-                        expected.push((target, ProbeEndpoint::Tcp { port: SCAN_PORT }));
+                        expected.push((target, probe::Endpoint::Tcp { port: SCAN_PORT }));
                     }
                     assert_eq!(sent, expected, "{case}: only requested probes are sent");
                     assert_eq!(report.endpoints.len(), expected.len() - 1, "{case}");

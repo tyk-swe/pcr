@@ -18,11 +18,24 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
+        let operation = crate::execution::Operation::new(self, std::time::Duration::MAX);
+        self.send_in(request, sink, &operation)
+    }
+
+    pub(crate) fn send_in<S>(
+        &self,
+        request: Request,
+        sink: S,
+        operation: &crate::execution::Operation,
+    ) -> Result<Report, Error>
+    where
+        S: Sink<Event, Ack = ()>,
+    {
         let plan = super::plan::Plan::try_from(&request)?;
         let started = self.now();
-        let mut stream = self.streaming(&request.send, plan.packet_count)?;
+        let mut stream = self.streaming_in(&request.send, plan.packet_count, operation)?;
         let mut publish = crate::execution::publisher(
-            &self.runtime,
+            &operation.runtime,
             sink,
             |deadline| Error::Output {
                 source: BoundaryError::from_error(deadline),
@@ -38,12 +51,17 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
                 .expand(request.max_template_packets)
                 .map_err(crate::Error::from)?;
             for (offset, expanded) in expansion.into_iter().enumerate() {
-                let packet = super::executor::send(
-                    self,
-                    &mut stream,
-                    expanded,
-                    (completed > 0).then_some(plan.delay),
-                )?;
+                stream.check()?;
+                let prepared = stream.prepare(expanded.map_err(crate::Error::from)?)?;
+                if completed > 0 {
+                    stream.check()?;
+                    self.clock
+                        .sleep(plan.delay, &operation.deadline(self, MAX_WAIT))
+                        .map_err(|source| Error::Clock {
+                            source: Box::new(source),
+                        })?;
+                }
+                let packet = stream.transmit(prepared)?;
                 completed += 1;
                 bytes =
                     bytes.saturating_add(u64::try_from(packet.bytes_sent()).unwrap_or(u64::MAX));
@@ -53,7 +71,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
                         index: offset as u64,
                         packet,
                     }),
-                    &self.deadline(MAX_WAIT),
+                    &operation.deadline(self, MAX_WAIT),
                 )?;
             }
         }

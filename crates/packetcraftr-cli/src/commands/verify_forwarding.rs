@@ -56,14 +56,16 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream)
     }
 }
 
 pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
     arguments: Args,
     format: Format,
     stream: &StreamEncoder,
@@ -95,7 +97,7 @@ pub(super) fn run(
     .map_err(CliError::classified)?;
     let ingress_filter = compile_selection(arguments.ingress_filter.as_deref(), &prepared)?;
     let egress_filter = compile_selection(arguments.egress_filter.as_deref(), &prepared)?;
-    crate::resources::stream_index_needed(
+    invocation.stream_index_needed(
         rules.requirements().stream_index
             || [&ingress_filter, &egress_filter]
                 .into_iter()
@@ -104,6 +106,7 @@ pub(super) fn run(
     );
 
     let (ingress, ingress_source) = collect(
+        invocation,
         &prepared,
         &arguments.ingress,
         arguments.limits.capture.reader,
@@ -113,6 +116,7 @@ pub(super) fn run(
         arguments.max_evidence_bytes,
     )?;
     let (egress, egress_source) = collect(
+        invocation,
         &prepared,
         &arguments.egress,
         arguments.limits.capture.reader,
@@ -121,7 +125,7 @@ pub(super) fn run(
         &rules,
         arguments.max_evidence_bytes,
     )?;
-    let deadline = crate::invocation::deadline();
+    let deadline = invocation.deadline.clone();
     let report = forwarding::verify_with_limits(
         &rules,
         ingress,
@@ -131,7 +135,7 @@ pub(super) fn run(
             max_detail_bytes: arguments.max_detail_bytes,
             max_scratch_bytes: arguments.max_scratch_bytes,
         },
-        Some(crate::cancellation::signal()),
+        Some(&invocation.cancellation),
         deadline.as_deref(),
     )
     .map_err(CliError::classified)?;
@@ -142,6 +146,7 @@ pub(super) fn run(
         }
     };
     rendering::render(
+        invocation,
         format,
         stream,
         &report,
@@ -165,7 +170,9 @@ fn compile_selection(
         .transpose()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect(
+    invocation: &crate::invocation::Invocation,
     prepared: &AnalysisSetup,
     path: &Path,
     bounds: CaptureReaderBoundsArgs,
@@ -174,10 +181,10 @@ fn collect(
     rules: &forwarding::Rules,
     max_evidence_bytes: usize,
 ) -> Result<(forwarding::SideInput, CaptureSource), CliError> {
-    let (mut reader, fingerprint) = open_capture_hashed(path, bounds)?;
+    let (mut reader, fingerprint) = open_capture_hashed(invocation, path, bounds)?;
     // Select physical packets in the callback: pipeline filters also see
     // reconstructed datagrams, whose provenance this report cannot represent.
-    let mut options = prepared.options();
+    let mut options = prepared.options(invocation);
     let mut requirements = rules.requirements();
     if let Some(filter) = filter {
         requirements = requirements.union(filter.requirements());
@@ -197,7 +204,7 @@ fn collect(
             .map_err(|error| CliError::classified(error).into_boundary_error())
     })
     .map_err(CliError::classified)?;
-    crate::cancellation::check()?;
+    invocation.check()?;
     Ok((
         forwarding::SideInput {
             frames_read: summary.frames_read,

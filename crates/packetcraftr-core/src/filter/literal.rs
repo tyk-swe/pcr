@@ -7,7 +7,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 
 use super::path::FieldSpec;
-use crate::field::FieldKind;
+use crate::field;
 
 const AUTO_WIRE_VALUE: &str = "auto";
 
@@ -207,46 +207,46 @@ impl Literal {
     }
 }
 
-pub(super) fn kind_name(kind: FieldKind) -> &'static str {
+pub(super) fn kind_name(kind: field::Kind) -> &'static str {
     match kind {
-        FieldKind::Bool => "a boolean",
-        FieldKind::Unsigned => "an unsigned number",
-        FieldKind::Signed => "a signed number",
-        FieldKind::Text => "text",
-        FieldKind::Bytes => "bytes",
-        FieldKind::Ipv4 => "an IPv4 address",
-        FieldKind::Ipv6 => "an IPv6 address",
-        FieldKind::Mac => "a MAC address",
-        FieldKind::List => "a list",
-        FieldKind::Object => "an object",
+        field::Kind::Bool => "a boolean",
+        field::Kind::Unsigned => "an unsigned number",
+        field::Kind::Signed => "a signed number",
+        field::Kind::Text => "text",
+        field::Kind::Bytes => "bytes",
+        field::Kind::Ipv4 => "an IPv4 address",
+        field::Kind::Ipv6 => "an IPv6 address",
+        field::Kind::Mac => "a MAC address",
+        field::Kind::List => "a list",
+        field::Kind::Object => "an object",
     }
 }
 
 pub(super) fn compatible(spec: FieldSpec, literal: &Literal) -> bool {
     match spec.kind {
-        FieldKind::Bool => matches!(literal, Literal::Bool(_) | Literal::Unsigned(0 | 1)),
-        FieldKind::Unsigned | FieldKind::Signed => match literal {
+        field::Kind::Bool => matches!(literal, Literal::Bool(_) | Literal::Unsigned(0 | 1)),
+        field::Kind::Unsigned | field::Kind::Signed => match literal {
             Literal::Unsigned(_) | Literal::Signed(_) | Literal::Range(Range::Unsigned(..)) => true,
             Literal::Text(text) => spec.derived && text == AUTO_WIRE_VALUE,
             _ => false,
         },
-        FieldKind::Text => matches!(literal, Literal::Text(_)),
-        FieldKind::Bytes => match literal {
+        field::Kind::Text => matches!(literal, Literal::Text(_)),
+        field::Kind::Bytes => match literal {
             Literal::Bytes(_) | Literal::Mac(_) | Literal::Text(_) => true,
             Literal::Unsigned(value) => *value <= u64::from(u8::MAX),
             _ => false,
         },
-        FieldKind::Ipv4 => matches!(
+        field::Kind::Ipv4 => matches!(
             literal,
             Literal::Ipv4(_) | Literal::Ipv4Net(..) | Literal::Range(Range::Ipv4(..))
         ),
-        FieldKind::Ipv6 => matches!(
+        field::Kind::Ipv6 => matches!(
             literal,
             Literal::Ipv6(_) | Literal::Ipv6Net(..) | Literal::Range(Range::Ipv6(..))
         ),
-        FieldKind::Mac => matches!(literal, Literal::Mac(_) | Literal::Bytes(_)),
-        FieldKind::List => true,
-        FieldKind::Object => false,
+        field::Kind::Mac => matches!(literal, Literal::Mac(_) | Literal::Bytes(_)),
+        field::Kind::List => true,
+        field::Kind::Object => false,
     }
 }
 
@@ -256,8 +256,8 @@ pub(super) fn compatible(spec: FieldSpec, literal: &Literal) -> bool {
 /// and never matches. Only lists of objects, which no search can match, are refused.
 pub(super) fn searchable(spec: FieldSpec) -> bool {
     match spec.kind {
-        FieldKind::Bytes | FieldKind::Text | FieldKind::Mac => true,
-        FieldKind::List => !spec.structured,
+        field::Kind::Bytes | field::Kind::Text | field::Kind::Mac => true,
+        field::Kind::List => !spec.structured,
         _ => false,
     }
 }

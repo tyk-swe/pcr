@@ -4,18 +4,18 @@
 use packetcraftr_netio::{NativeCapability, Unsupported};
 
 use super::{Capabilities, Method, Requested, select};
-use crate::probe::ProbeEndpoint;
+use crate::probe;
 use crate::scan::discovery::{self, Mode};
 use crate::scan::{Error, Limits, Request};
 use crate::target::{Family, Target};
 
-const TCP: &[ProbeEndpoint] = &[ProbeEndpoint::Tcp { port: 443 }];
-const MIXED: &[ProbeEndpoint] = &[
-    ProbeEndpoint::Tcp { port: 53 },
-    ProbeEndpoint::Udp { port: 53 },
+const TCP: &[probe::Endpoint] = &[probe::Endpoint::Tcp { port: 443 }];
+const MIXED: &[probe::Endpoint] = &[
+    probe::Endpoint::Tcp { port: 53 },
+    probe::Endpoint::Udp { port: 53 },
 ];
 
-fn request(endpoints: &[ProbeEndpoint]) -> Request {
+fn request(endpoints: &[probe::Endpoint]) -> Request {
     Request {
         tcp_scan: Default::default(),
         sctp_scan: Default::default(),
@@ -37,7 +37,7 @@ fn request(endpoints: &[ProbeEndpoint]) -> Request {
     }
 }
 
-fn discovering(probes: &[ProbeEndpoint], neighbor: bool) -> Request {
+fn discovering(probes: &[probe::Endpoint], neighbor: bool) -> Request {
     Request {
         discovery: discovery::Options {
             mode: Mode::Before,
@@ -149,25 +149,25 @@ fn discovery_probes_take_part_in_the_selection() {
     // Discovery probes the connection cannot send rule it out exactly as
     // scan endpoints do; neighbor discovery needs crafted frames.
     for (request, probe) in [
-        (discovering(&[ProbeEndpoint::Icmp], false), "icmp"),
+        (discovering(&[probe::Endpoint::Icmp], false), "icmp"),
         (
-            discovering(&[ProbeEndpoint::IcmpTimestamp], false),
+            discovering(&[probe::Endpoint::IcmpTimestamp], false),
             "icmp-timestamp",
         ),
         (
-            discovering(&[ProbeEndpoint::IcmpNetmask], false),
+            discovering(&[probe::Endpoint::IcmpNetmask], false),
             "icmp-netmask",
         ),
         (
-            discovering(&[ProbeEndpoint::TcpAck { port: 80 }], false),
+            discovering(&[probe::Endpoint::TcpAck { port: 80 }], false),
             "tcp-ack",
         ),
         (
-            discovering(&[ProbeEndpoint::Sctp { port: 80 }], false),
+            discovering(&[probe::Endpoint::Sctp { port: 80 }], false),
             "sctp",
         ),
         (
-            discovering(&[ProbeEndpoint::Ip { protocol: 47 }], false),
+            discovering(&[probe::Endpoint::Ip { protocol: 47 }], false),
             "ip",
         ),
         (discovering(TCP, true), "neighbor"),
@@ -180,7 +180,7 @@ fn discovery_probes_take_part_in_the_selection() {
         assert_eq!(selected.method, Method::Raw);
         assert!(selected.reason.unwrap().contains(probe));
     }
-    let tcp = discovering(&[ProbeEndpoint::Tcp { port: 80 }], false);
+    let tcp = discovering(&[probe::Endpoint::Tcp { port: 80 }], false);
     let selected = select(Requested::Automatic, &tcp, capabilities(false, false)).unwrap();
     assert_eq!(selected.method, Method::Connect);
 }

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr::CaptureProviders;
-use packetcraftr::probe::{ProbeEndpoint, Transport};
+use packetcraftr::probe::{self, Transport};
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_netio::capture;
 use packetcraftr_netio::capture::Session as _;
@@ -186,13 +186,13 @@ fn transport(name: &str) -> Transport {
     }
 }
 
-fn endpoint(transport: Transport) -> ProbeEndpoint {
+fn endpoint(transport: Transport) -> probe::Endpoint {
     match transport {
-        Transport::Tcp => ProbeEndpoint::Tcp { port: PORT },
-        Transport::Udp => ProbeEndpoint::Udp { port: PORT },
-        Transport::Sctp => ProbeEndpoint::Sctp { port: PORT },
-        Transport::Icmp => ProbeEndpoint::Icmp,
-        Transport::Ip => ProbeEndpoint::Ip { protocol: 47 },
+        Transport::Tcp => probe::Endpoint::Tcp { port: PORT },
+        Transport::Udp => probe::Endpoint::Udp { port: PORT },
+        Transport::Sctp => probe::Endpoint::Sctp { port: PORT },
+        Transport::Icmp => probe::Endpoint::Icmp,
+        Transport::Ip => probe::Endpoint::Ip { protocol: 47 },
     }
 }
 
@@ -532,7 +532,7 @@ fn window_two_publishes_sent_before_the_probe_event() {
                 udp_payload: bytes::Bytes::new(),
                 udp_profiles: Default::default(),
                 address_family: Family::Ipv4,
-                endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: PORT }],
+                endpoints: vec![packetcraftr::probe::Endpoint::Tcp { port: PORT }],
                 discovery: Default::default(),
                 attempts: 1,
                 adaptive: None,
@@ -653,12 +653,12 @@ fn scripted_reply(name: &str) -> ScriptedReply {
     }
 }
 
-fn authored_endpoint(endpoint: &InferenceEndpoint) -> ProbeEndpoint {
+fn authored_endpoint(endpoint: &InferenceEndpoint) -> probe::Endpoint {
     match endpoint.transport.as_str() {
-        "tcp" => ProbeEndpoint::Tcp {
+        "tcp" => probe::Endpoint::Tcp {
             port: endpoint.port,
         },
-        "udp" => ProbeEndpoint::Udp {
+        "udp" => probe::Endpoint::Udp {
             port: endpoint.port,
         },
         other => panic!("corpus inference transport {other}"),

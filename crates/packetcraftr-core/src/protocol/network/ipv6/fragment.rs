@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -72,7 +72,7 @@ fn nonzero_reserved_fields(reserved: u8, reserved_bits: u8) -> impl Iterator<Ite
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct FragmentCodec;
 
-impl LayerCodec for FragmentCodec {
+impl Codec for FragmentCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &fragment_schema().protocol
     }
@@ -81,8 +81,8 @@ impl LayerCodec for FragmentCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Fragment>(NAME, layer)?;
         if layer.fragment_offset > 0x1fff {
             return Err(invalid(NAME, "fragment offset exceeds 13 bits"));
@@ -161,7 +161,7 @@ impl LayerCodec for FragmentCodec {
         prefix.extend_from_slice(&layer.identification.to_be_bytes());
         let mut materialized = layer.clone();
         materialized.next_header = materialized_next;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(fragment_layout())
             .with_diagnostics(diagnostics))
     }
@@ -169,8 +169,8 @@ impl LayerCodec for FragmentCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<8>() else {
             return Err(truncated(NAME, 8, input.len()));
         };
@@ -186,7 +186,7 @@ impl LayerCodec for FragmentCodec {
                 .at_field(field)
             })
             .collect();
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Fragment {
                 next_header: WireValue::Exact(header[0]),
                 reserved: header[1],
@@ -211,7 +211,7 @@ impl LayerCodec for FragmentCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Fragment::default(), fields)
     }

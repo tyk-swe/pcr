@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::{self, FieldKind, FieldValue},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field,
     layer::{FieldSchema, Layer, Raw, reflective_layer},
     layout::{ByteRange, FieldLayout},
     protocol::{
@@ -36,8 +36,8 @@ const ERROR: u16 = 5;
 const OACK: u16 = 6;
 
 const OPTION_FIELDS: &[FieldSchema] = &[
-    member("name", FieldKind::Bytes, &[]),
-    member("value", FieldKind::Bytes, &[]),
+    member("name", field::Kind::Bytes, &[]),
+    member("value", field::Kind::Bytes, &[]),
 ];
 
 /// One option name and value of an RRQ, WRQ or OACK (RFC 2347), kept as the
@@ -78,12 +78,12 @@ impl Default for Tftp {
     }
 }
 
-fn byte_string(value: FieldValue, name: &str) -> Result<Bytes, field::Error> {
+fn byte_string(value: field::Value, name: &str) -> Result<Bytes, field::Error> {
     byte_string_field(tftp_schema(), value, name)
 }
 
-fn options_value(options: &[TftpOption]) -> FieldValue {
-    FieldValue::List(
+fn options_value(options: &[TftpOption]) -> field::Value {
+    field::Value::List(
         options
             .iter()
             .map(|option| {
@@ -96,7 +96,7 @@ fn options_value(options: &[TftpOption]) -> FieldValue {
     )
 }
 
-fn set_options(layer: &mut Tftp, value: FieldValue, name: &str) -> Result<(), field::Error> {
+fn set_options(layer: &mut Tftp, value: field::Value, name: &str) -> Result<(), field::Error> {
     let mut options = Vec::new();
     for entry in list(value, MAX_OPTIONS, tftp_schema(), name)? {
         let mut entry = Object::new(entry, tftp_schema(), name)?;
@@ -118,13 +118,13 @@ reflective_layer! {
         "filename" => {
             kind: Bytes, derived: false, required: false,
             description: "RRQ/WRQ file name, raw bytes without the NUL terminator",
-            get |layer| Some(FieldValue::Bytes(layer.filename.clone())),
+            get |layer| Some(field::Value::Bytes(layer.filename.clone())),
             set |layer, value, name| { layer.filename = byte_string(value, name)?; Ok(()) }
         },
         "mode" => {
             kind: Bytes, derived: false, required: false,
             description: "RRQ/WRQ transfer mode, raw bytes without the NUL terminator",
-            get |layer| Some(FieldValue::Bytes(layer.mode.clone())),
+            get |layer| Some(field::Value::Bytes(layer.mode.clone())),
             set |layer, value, name| { layer.mode = byte_string(value, name)?; Ok(()) }
         },
         "options" => {
@@ -140,7 +140,7 @@ reflective_layer! {
         "error_message" => {
             kind: Bytes, derived: false, required: false,
             description: "ERROR message, raw bytes without the NUL terminator",
-            get |layer| Some(FieldValue::Bytes(layer.error_message.clone())),
+            get |layer| Some(field::Value::Bytes(layer.error_message.clone())),
             set |layer, value, name| { layer.error_message = byte_string(value, name)?; Ok(()) }
         },
     }
@@ -329,7 +329,7 @@ fn encode_options(
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct TftpCodec;
 
-impl LayerCodec for TftpCodec {
+impl Codec for TftpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &tftp_schema().protocol
     }
@@ -342,8 +342,8 @@ impl LayerCodec for TftpCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         if !payload.is_empty() {
             return Err(invalid(NAME, "TFTP is a complete UDP payload"));
         }
@@ -384,18 +384,18 @@ impl LayerCodec for TftpCodec {
         }
         let message = encoder.finish();
         ensure_encode_budget(NAME, message.len(), context)?;
-        Ok(EncodedLayer::header(message, Box::new(layer.clone())).with_fields(tftp_layout(layer)))
+        Ok(Encoded::header(message, Box::new(layer.clone())).with_fields(tftp_layout(layer)))
     }
 
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(layer) = parse(&input) else {
             return Ok(Raw::decoded(input));
         };
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: tftp_layout(&layer),
             layer: Box::new(layer),
             consumed: input.len(),
@@ -409,7 +409,7 @@ impl LayerCodec for TftpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Tftp::default(), fields)
     }
@@ -428,9 +428,9 @@ mod tests {
             ])
         };
         let mut layer = Tftp::default();
-        let refused = FieldValue::List((0..=MAX_OPTIONS).map(|_| entry()).collect());
+        let refused = field::Value::List((0..=MAX_OPTIONS).map(|_| entry()).collect());
         assert!(layer.set_field("options", refused).is_err());
-        let accepted = FieldValue::List((0..MAX_OPTIONS).map(|_| entry()).collect());
+        let accepted = field::Value::List((0..MAX_OPTIONS).map(|_| entry()).collect());
         layer.set_field("options", accepted).unwrap();
         assert_eq!(layer.options.len(), MAX_OPTIONS);
     }

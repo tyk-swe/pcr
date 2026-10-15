@@ -12,7 +12,7 @@ use packetcraftr_core::{
     build::Builder,
     decode::Dissector,
     error::{BoundaryError, Classification, Classified, Kind},
-    field::FieldValue,
+    field,
     frame::{Frame, LinkType},
     layer::Raw,
     packet::Packet,
@@ -264,8 +264,8 @@ fn cartesian_xchg_denies_whole_set_before_tx() {
             0,
             "source",
             vec![
-                FieldValue::Ipv4(common::SELECTED_SOURCE),
-                FieldValue::Ipv4("192.0.2.99".parse().unwrap()),
+                field::Value::Ipv4(common::SELECTED_SOURCE),
+                field::Value::Ipv4("192.0.2.99".parse().unwrap()),
             ],
         )
         .axis(0, "ttl", vec![1_u8.into(), 64_u8.into()]);
@@ -469,7 +469,7 @@ fn scan_port_80(
     collection: exchange::Collection,
 ) -> (
     Result<packetcraftr::scan::Report, packetcraftr::scan::Error>,
-    Vec<packetcraftr::probe::ProbeStatus>,
+    Vec<packetcraftr::probe::Status>,
 ) {
     use packetcraftr::{
         scan,
@@ -483,7 +483,7 @@ fn scan_port_80(
         max_in_flight: 1,
         targets: Target::Address("10.0.0.2".parse().unwrap()).into(),
         address_family: Family::Any,
-        endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
+        endpoints: vec![packetcraftr::probe::Endpoint::Tcp { port: 80 }],
         discovery: Default::default(),
         attempts: 1,
         adaptive: None,
@@ -528,7 +528,7 @@ fn port_template(ports: &[u16]) -> Template {
         "destination_port",
         ports
             .iter()
-            .map(|port| FieldValue::Unsigned(u64::from(*port)))
+            .map(|port| field::Value::Unsigned(u64::from(*port)))
             .collect(),
     )
 }

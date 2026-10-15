@@ -24,7 +24,7 @@ use std::time::SystemTime;
 use packetcraftr_core::analysis::{self, application};
 use packetcraftr_core::build::{Builder, Options};
 use packetcraftr_core::capture_file::{Reader, Writer};
-use packetcraftr_core::codec::Context;
+use packetcraftr_core::codec::Addresses;
 use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_core::frame::{Frame, Lengths, LinkType};
 use packetcraftr_core::layer::Raw;
@@ -108,7 +108,7 @@ pub(crate) fn tcp_frame(
         packet.push(Raw::new(payload.to_vec()));
     }
     let built = Builder::new(Arc::clone(registry))
-        .build(packet, Context::default(), Options::default())
+        .build(packet, Addresses::default(), Options::default())
         .expect("TCP fixture must build");
     Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("TCP fixture frame must be valid")
 }
@@ -137,7 +137,7 @@ pub(crate) fn udp_frame(
         packet.push(Raw::new(payload.to_vec()));
     }
     let built = Builder::new(Arc::clone(registry))
-        .build(packet, Context::default(), Options::default())
+        .build(packet, Addresses::default(), Options::default())
         .expect("UDP fixture must build");
     Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("UDP fixture frame must be valid")
 }

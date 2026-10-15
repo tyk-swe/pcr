@@ -185,7 +185,7 @@ fn a_scans_neighbor_wait_is_measured_by_the_clients_clock() {
         endpoints: Vec::new(),
         discovery: scan::discovery::Options {
             mode: scan::discovery::Mode::Only,
-            probes: vec![packetcraftr::probe::ProbeEndpoint::Icmp],
+            probes: vec![packetcraftr::probe::Endpoint::Icmp],
             ..scan::discovery::Options::default()
         },
         attempts: 1,

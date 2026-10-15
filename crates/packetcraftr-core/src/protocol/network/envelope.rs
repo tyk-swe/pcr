@@ -4,7 +4,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::{
-    codec::{Context, LayerEncodeContext, Mode, NetworkEnvelope},
+    codec::{Addresses, EncodeContext, Mode, NetworkEnvelope},
     layer::Layer,
     packet::Packet,
     protocol::BuiltinProtocol,
@@ -21,7 +21,7 @@ pub(super) fn is_ipv6_extension_layer(layer: &dyn Layer) -> bool {
 
 pub(crate) fn resolve_envelope(
     name: &'static str,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
 ) -> Result<NetworkEnvelope, crate::codec::Error> {
     for index in (0..context.index).rev() {
         let Some(layer) = context.packet.layer(index) else {
@@ -100,7 +100,7 @@ pub(super) fn ipv4_endpoints(
     layer: &Ipv4,
     packet: &Packet,
     index: usize,
-    build_context: &Context,
+    build_context: &Addresses,
 ) -> (Ipv4Addr, Ipv4Addr) {
     let inherit = is_outer_network_layer(packet, index);
     let source = match build_context.source {
@@ -120,7 +120,7 @@ pub(super) fn ipv6_endpoints(
     layer: &Ipv6,
     packet: &Packet,
     index: usize,
-    build_context: &Context,
+    build_context: &Addresses,
 ) -> (Ipv6Addr, Ipv6Addr) {
     let inherit = is_outer_network_layer(packet, index);
     let source = match build_context.source {

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bytes::Bytes;
-use packetcraftr::probe::{ProbeEndpoint, Transport};
+use packetcraftr::probe::{self, Transport};
 use packetcraftr::scan::{
     MAX_UDP_PAYLOAD_BYTES, discovery,
     profile::{self, UdpProfile},
@@ -82,18 +82,18 @@ pub(super) fn discovery_options(
                 options.neighbor = true;
             }
             arguments::DiscoveryProbe::Icmp => {
-                if !portless_icmp.contains(&ProbeEndpoint::Icmp) {
-                    portless_icmp.push(ProbeEndpoint::Icmp);
+                if !portless_icmp.contains(&probe::Endpoint::Icmp) {
+                    portless_icmp.push(probe::Endpoint::Icmp);
                 }
             }
             arguments::DiscoveryProbe::IcmpTimestamp => {
-                if !portless_icmp.contains(&ProbeEndpoint::IcmpTimestamp) {
-                    portless_icmp.push(ProbeEndpoint::IcmpTimestamp);
+                if !portless_icmp.contains(&probe::Endpoint::IcmpTimestamp) {
+                    portless_icmp.push(probe::Endpoint::IcmpTimestamp);
                 }
             }
             arguments::DiscoveryProbe::IcmpNetmask => {
-                if !portless_icmp.contains(&ProbeEndpoint::IcmpNetmask) {
-                    portless_icmp.push(ProbeEndpoint::IcmpNetmask);
+                if !portless_icmp.contains(&probe::Endpoint::IcmpNetmask) {
+                    portless_icmp.push(probe::Endpoint::IcmpNetmask);
                 }
             }
             arguments::DiscoveryProbe::Tcp => {
@@ -178,12 +178,12 @@ pub(super) fn discovery_options(
         );
         for endpoint in selected.endpoints {
             match endpoint {
-                ProbeEndpoint::Tcp { port } => {
+                probe::Endpoint::Tcp { port } => {
                     for &is_ack in &tcp_modes {
                         options.probes.push(if is_ack {
-                            ProbeEndpoint::TcpAck { port }
+                            probe::Endpoint::TcpAck { port }
                         } else {
-                            ProbeEndpoint::Tcp { port }
+                            probe::Endpoint::Tcp { port }
                         });
                     }
                 }
@@ -247,7 +247,7 @@ pub(super) fn select_endpoints(
             ));
         }
         return Ok(packetcraftr::scan::Selected {
-            endpoints: vec![ProbeEndpoint::Icmp],
+            endpoints: vec![probe::Endpoint::Icmp],
             excluded: 0,
         });
     }

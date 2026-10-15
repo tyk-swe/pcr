@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, IGMP_CHECKSUM},
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
 };
 
@@ -77,7 +77,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct IgmpCodec;
 
-impl LayerCodec for IgmpCodec {
+impl Codec for IgmpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &igmp_schema().protocol
     }
@@ -86,8 +86,8 @@ impl LayerCodec for IgmpCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Igmp>(NAME, layer)?;
         let contribution = IGMP_HEADER_LEN
             .checked_add(layer.body.len())
@@ -119,7 +119,7 @@ impl LayerCodec for IgmpCodec {
 
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(igmp_layout(layer.body.len()))
             .with_diagnostics(diagnostics))
     }
@@ -127,8 +127,8 @@ impl LayerCodec for IgmpCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IGMP_MIN_LEN>() else {
             return Err(truncated(NAME, IGMP_MIN_LEN, input.len()));
         };
@@ -141,7 +141,7 @@ impl LayerCodec for IgmpCodec {
         let body = input
             .get(IGMP_HEADER_LEN..)
             .ok_or_else(|| truncated(NAME, IGMP_MIN_LEN, input.len()))?;
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Igmp {
                 igmp_type: header[0],
                 code: header[1],
@@ -160,7 +160,7 @@ impl LayerCodec for IgmpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Igmp::default(), fields)
     }

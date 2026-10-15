@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::FieldValue,
+    field,
     layer::{Layer, reflective_layer},
 };
 
@@ -197,7 +197,7 @@ fn scan(chain: &[u8]) -> Scan {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct LldpCodec;
 
-impl LayerCodec for LldpCodec {
+impl Codec for LldpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &lldp_schema().protocol
     }
@@ -206,8 +206,8 @@ impl LayerCodec for LldpCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Lldp>(NAME, layer)?;
         let tlvs_end = layer.tlvs.len();
         let total = tlvs_end
@@ -241,7 +241,7 @@ impl LayerCodec for LldpCodec {
         let mut prefix = Vec::with_capacity(total);
         prefix.extend_from_slice(&layer.tlvs);
         prefix.extend_from_slice(&layer.trailing);
-        Ok(EncodedLayer::header(prefix, Box::new(layer.clone()))
+        Ok(Encoded::header(prefix, Box::new(layer.clone()))
             .with_fields(lldp_layout(tlvs_end, total))
             .with_diagnostics(diagnostics))
     }
@@ -249,8 +249,8 @@ impl LayerCodec for LldpCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         if input.is_empty() {
             return Err(truncated(NAME, TLV_HEADER_LEN, 0));
         }
@@ -268,7 +268,7 @@ impl LayerCodec for LldpCodec {
             })
             .collect();
         let consumed = input.len();
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: lldp_layout(tlvs_end, consumed),
             layer: Box::new(layer),
             consumed,
@@ -282,7 +282,7 @@ impl LayerCodec for LldpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Lldp::default(), fields)
     }
@@ -295,11 +295,11 @@ mod tests {
     use super::*;
     use crate::packet::Packet;
 
-    fn encode(layer: &Lldp, mode: crate::codec::Mode) -> Result<EncodedLayer, crate::codec::Error> {
+    fn encode(layer: &Lldp, mode: crate::codec::Mode) -> Result<Encoded, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
         let packet = Packet::new();
-        let build_context = crate::codec::Context::default();
-        let context = LayerEncodeContext {
+        let build_context = crate::codec::Addresses::default();
+        let context = EncodeContext {
             packet: &packet,
             index: 0,
             build_context: &build_context,
@@ -311,9 +311,9 @@ mod tests {
         LldpCodec.encode(layer, &[], &context)
     }
 
-    fn decode(input: &[u8]) -> Result<DecodedLayer, crate::codec::Error> {
+    fn decode(input: &[u8]) -> Result<Decoded, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
-        let context = LayerDecodeContext {
+        let context = DecodeContext {
             parent: None,
             registry: &registry,
             network: None,

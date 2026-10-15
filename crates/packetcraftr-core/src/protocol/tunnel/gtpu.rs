@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
     layout::{ByteRange, FieldLayout},
     registry::Discriminator,
@@ -175,7 +175,7 @@ fn extension_chain_len(data: &[u8]) -> Result<usize, &'static str> {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct GtpuCodec;
 
-impl LayerCodec for GtpuCodec {
+impl Codec for GtpuCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &gtpu_schema().protocol
     }
@@ -184,8 +184,8 @@ impl LayerCodec for GtpuCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Gtpu>(NAME, layer)?;
         if layer.version > VERSION_MAX {
             return Err(invalid(NAME, "version exceeds its three-bit field"));
@@ -258,7 +258,7 @@ impl LayerCodec for GtpuCodec {
 
         let mut materialized = layer.clone();
         materialized.length = materialized_length;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(gtpu_layout(layer))
             .with_diagnostics(diagnostics))
     }
@@ -266,8 +266,8 @@ impl LayerCodec for GtpuCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<GTPU_BASE_LEN>() else {
             return Err(truncated(NAME, GTPU_BASE_LEN, input.len()));
         };
@@ -377,7 +377,7 @@ impl LayerCodec for GtpuCodec {
             ],
             _ => vec![Discriminator(GTPU_OTHER_PAYLOAD)],
         };
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: gtpu_layout(&layer),
             layer: Box::new(layer),
             consumed: header_len,
@@ -391,7 +391,7 @@ impl LayerCodec for GtpuCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Gtpu::default(), fields)
     }
@@ -399,7 +399,7 @@ impl LayerCodec for GtpuCodec {
 
 fn validate_header(
     layer: &Gtpu,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
     if layer.version != GTPU_VERSION {
@@ -481,7 +481,7 @@ fn validate_header(
 /// information elements as opaque bytes.
 fn validate_child(
     layer: &Gtpu,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
     let Some(child) = context.child else {

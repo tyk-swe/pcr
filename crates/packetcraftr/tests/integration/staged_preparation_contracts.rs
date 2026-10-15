@@ -14,7 +14,7 @@ use packetcraftr::runtime::Runtime;
 use packetcraftr::{Client, ProviderSet, exchange, route, send};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Classified;
-use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::field;
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
@@ -106,7 +106,7 @@ fn template(destinations: &[Ipv4Addr]) -> Template {
         "destination",
         destinations
             .iter()
-            .map(|destination| FieldValue::Ipv4(*destination))
+            .map(|destination| field::Value::Ipv4(*destination))
             .collect(),
     )
 }

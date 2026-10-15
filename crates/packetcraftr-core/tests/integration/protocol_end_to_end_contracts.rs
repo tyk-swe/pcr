@@ -40,14 +40,18 @@ fn round_trip(packet: Packet, root: &'static str) -> (build::BuiltPacket, decode
     let registry = rooted_registry(root);
     let builder = build::Builder::new(Arc::clone(&registry));
     let built = builder
-        .build(packet, codec::Context::default(), build::Options::default())
+        .build(
+            packet,
+            codec::Addresses::default(),
+            build::Options::default(),
+        )
         .unwrap_or_else(|error| panic!("{root} build: {error}"));
     let decoded = decode_from_root(&registry, built.bytes.clone(), decode::Options::default())
         .unwrap_or_else(|error| panic!("{root} decode: {error}"));
     let rebuilt = builder
         .build(
             decoded.packet.clone(),
-            codec::Context::default(),
+            codec::Addresses::default(),
             build::Options::default(),
         )
         .unwrap_or_else(|error| panic!("{root} rebuild: {error}"));
@@ -94,7 +98,11 @@ fn empty_ipv6_hop_by_hop_probes_round_trip_link_padding_without_accepting_jumbog
     ));
     let registry = rooted_registry("ethernet");
     let built = build::Builder::new(Arc::clone(&registry))
-        .build(packet, codec::Context::default(), build::Options::default())
+        .build(
+            packet,
+            codec::Addresses::default(),
+            build::Options::default(),
+        )
         .unwrap();
     let decoded = decode_from_root(&registry, built.bytes, decode::Options::default()).unwrap();
     assert!(decoded.packet.get::<Malformed>().is_some());
@@ -108,7 +116,11 @@ fn ipv6_empty_protocol_probes_do_not_exempt_extension_child_validation() {
     let mut probe = base.clone();
     probe.get_mut::<Ipv6>().unwrap().next_header = WireValue::Exact(6);
     builder
-        .build(probe, codec::Context::default(), build::Options::default())
+        .build(
+            probe,
+            codec::Addresses::default(),
+            build::Options::default(),
+        )
         .expect("header-only IPv6 protocol probe");
     for extension in [
         Box::new(HopByHop {
@@ -129,7 +141,11 @@ fn ipv6_empty_protocol_probes_do_not_exempt_extension_child_validation() {
         let mut packet = base.clone();
         packet.push_boxed(extension);
         let error = builder
-            .build(packet, codec::Context::default(), build::Options::default())
+            .build(
+                packet,
+                codec::Addresses::default(),
+                build::Options::default(),
+            )
             .expect_err("extension headers must include the declared TCP child");
         let build::Error::Codec { source, .. } = error else {
             panic!("{error}")
@@ -301,7 +317,11 @@ fn corrupted_builtin_integrity_fails() {
 
     for (code, root, packet, corrupted_offset) in cases {
         let built = builder
-            .build(packet, codec::Context::default(), build::Options::default())
+            .build(
+                packet,
+                codec::Addresses::default(),
+                build::Options::default(),
+            )
             .unwrap_or_else(|error| panic!("{code} build: {error}"));
         let mut bytes = built.bytes.to_vec();
         bytes[corrupted_offset] ^= 0xff;

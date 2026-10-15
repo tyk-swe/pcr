@@ -43,6 +43,7 @@ impl State {
 }
 
 pub(super) fn render_session(
+    invocation: &crate::invocation::Invocation,
     format: Format,
     session: analysis::tls::Session,
     state: &mut State,
@@ -51,10 +52,10 @@ pub(super) fn render_session(
     state.select();
     let session = Session::try_from(session).map_err(CliError::classified)?;
     match format {
-        Format::Text => write_stdout_line(format_args!(
-            "{}",
-            session_line_with(&session, stream.presentation())
-        )),
+        Format::Text => write_stdout_line(
+            invocation,
+            format_args!("{}", session_line_with(&session, stream.presentation())),
+        ),
         Format::Json => {
             state.retained.push(|| session);
             Ok(())
@@ -65,27 +66,36 @@ pub(super) fn render_session(
 }
 
 pub(super) fn render_text(
+    invocation: &crate::invocation::Invocation,
     state: &State,
     summary: &Summary,
     registry: &core::registry::Registry,
 ) -> Result<(), CliError> {
     if state.selected == 0 {
         match unmatched_note(summary) {
-            Some(note) => write_stdout_line(format_args!("{note}"))?,
-            None => render_empty(summary, registry)?,
+            Some(note) => write_stdout_line(invocation, format_args!("{note}"))?,
+            None => render_empty(invocation, summary, registry)?,
         }
     }
-    write_stdout_line(format_args!(
-        "{} clock_regressions={} max_rollback={} max_forward_step={}",
-        summary_line(summary),
-        summary.clock.regressions,
-        duration_text(summary.clock.max_regression),
-        duration_text(summary.clock.max_forward_step)
-    ))
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "{} clock_regressions={} max_rollback={} max_forward_step={}",
+            summary_line(summary),
+            summary.clock.regressions,
+            duration_text(summary.clock.max_regression),
+            duration_text(summary.clock.max_forward_step)
+        ),
+    )
 }
 
-pub(super) fn render_aggregate(state: State, summary: Summary) -> Result<(), CliError> {
+pub(super) fn render_aggregate(
+    invocation: &crate::invocation::Invocation,
+    state: State,
+    summary: Summary,
+) -> Result<(), CliError> {
     emit_aggregate(
+        invocation,
         output::contract::Command::Tls,
         output::tls::Report::from((state.retained.into_items(), summary)),
         Vec::new(),
@@ -105,11 +115,18 @@ fn unmatched_note(summary: &Summary) -> Option<String> {
     })
 }
 
-fn render_empty(summary: &Summary, registry: &core::registry::Registry) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "no TLS sessions assembled: {} frame(s) read, {} matched, {} TCP conversation(s)",
-        summary.frames_read, summary.frames_matched, summary.tcp_streams,
-    ))?;
+fn render_empty(
+    invocation: &crate::invocation::Invocation,
+    summary: &Summary,
+    registry: &core::registry::Registry,
+) -> Result<(), CliError> {
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "no TLS sessions assembled: {} frame(s) read, {} matched, {} TCP conversation(s)",
+            summary.frames_read, summary.frames_matched, summary.tcp_streams,
+        ),
+    )?;
     let mut ports: Vec<u16> = registry
         .parent_bindings("tls")
         .into_iter()
@@ -118,20 +135,29 @@ fn render_empty(summary: &Summary, registry: &core::registry::Registry) -> Resul
         .collect();
     ports.sort_unstable();
     ports.dedup();
-    write_stdout_line(format_args!(
-        "session assembly reads every TCP stream, so a handshake on any port is found; \
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "session assembly reads every TCP stream, so a handshake on any port is found; \
          the per-frame tls layer is bound to ports {} (add --tls-port PORT for another)",
-        comma_separated(&ports)
-    ))?;
+            comma_separated(&ports)
+        ),
+    )?;
     if summary.udp_443_frames > 0 {
-        write_stdout_line(format_args!(
-            "note: {} UDP frame(s) on port 443 are most likely QUIC, whose handshake this command does not read",
-            summary.udp_443_frames
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "note: {} UDP frame(s) on port 443 are most likely QUIC, whose handshake this command does not read",
+                summary.udp_443_frames
+            ),
+        )?;
     }
-    write_stdout_line(format_args!(
-        "hint: no ClientHello was assembled, so the capture most likely starts after the handshake or does not carry one"
-    ))
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "hint: no ClientHello was assembled, so the capture most likely starts after the handshake or does not carry one"
+        ),
+    )
 }
 
 fn session_line_with(session: &Session, presentation: crate::rendering::Presentation) -> String {

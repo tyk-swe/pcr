@@ -4,8 +4,7 @@
 use clap::Args;
 use packetcraftr_core::{
     error::Kind,
-    expression,
-    field::FieldValue,
+    expression, field,
     layer::selector::{self, Selector},
     packet::Packet,
     registry::Registry,
@@ -34,11 +33,11 @@ pub(crate) struct TemplateArgs {
 struct Axis {
     selector: Selector,
     field: String,
-    values: Vec<FieldValue>,
+    values: Vec<field::Value>,
 }
 
 enum AxisSource {
-    List(Vec<FieldValue>),
+    List(Vec<field::Value>),
     Range(NumericRange),
 }
 
@@ -100,7 +99,7 @@ impl TemplateArgs {
             // Range lengths count arithmetically so oversized spans fail on the
             // ceiling before any value materializes.
             let (source, axis_len) = if values.starts_with('[') {
-                let FieldValue::List(values) = expression::parse_value(
+                let field::Value::List(values) = expression::parse_value(
                     values,
                     expression::Limits {
                         max_generated_bytes: generated_left,
@@ -153,13 +152,13 @@ impl TemplateArgs {
 
 /// Byte payload held by a value, counting literal bytes as well as generated
 /// ones so the shared budget errs toward refusing.
-pub(crate) fn bytes_held(value: &FieldValue) -> usize {
+pub(crate) fn bytes_held(value: &field::Value) -> usize {
     match value {
-        FieldValue::Bytes(bytes) => bytes.len(),
-        FieldValue::List(values) => values
+        field::Value::Bytes(bytes) => bytes.len(),
+        field::Value::List(values) => values
             .iter()
             .fold(0, |total, value| total.saturating_add(bytes_held(value))),
-        FieldValue::Object(values) => values
+        field::Value::Object(values) => values
             .values()
             .fold(0, |total, value| total.saturating_add(bytes_held(value))),
         _ => 0,

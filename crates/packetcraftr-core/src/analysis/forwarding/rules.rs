@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::field::FieldValue;
+use crate::field;
 use crate::filter::{Filter, Projection};
 use crate::registry::Registry;
 
@@ -324,7 +324,7 @@ impl Rules {
         record: &crate::analysis::FrameRecord<'_>,
         incomplete: &mut Option<Incomplete>,
         remaining: &mut usize,
-    ) -> Result<(Vec<Option<FieldValue>>, Vec<ValueState>), Error> {
+    ) -> Result<(Vec<Option<field::Value>>, Vec<ValueState>), Error> {
         match projection.values_with_budget(&record.physical_context(), remaining) {
             Ok(cells) => {
                 let states = cells
@@ -351,7 +351,7 @@ impl Rules {
 }
 
 fn cell_state(
-    value: Option<&FieldValue>,
+    value: Option<&field::Value>,
     single: bool,
     record: &crate::analysis::FrameRecord<'_>,
 ) -> ValueState {
@@ -367,12 +367,12 @@ fn cell_state(
         && matches!(
             value,
             Some(
-                FieldValue::Bool(_)
-                    | FieldValue::Unsigned(_)
-                    | FieldValue::Signed(_)
-                    | FieldValue::Ipv4(_)
-                    | FieldValue::Ipv6(_)
-                    | FieldValue::Mac(_)
+                field::Value::Bool(_)
+                    | field::Value::Unsigned(_)
+                    | field::Value::Signed(_)
+                    | field::Value::Ipv4(_)
+                    | field::Value::Ipv6(_)
+                    | field::Value::Mac(_)
             )
         );
     if truncated && !fixed {

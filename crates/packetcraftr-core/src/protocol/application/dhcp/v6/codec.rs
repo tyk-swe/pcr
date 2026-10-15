@@ -11,8 +11,8 @@ use super::super::{Error, Limit, Limits};
 use super::reflection::{layout, schema};
 use super::{Dhcpv6, Duid, Option6, Value6};
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::FieldValue,
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field,
     layer::{Id, Layer, Raw, Schema},
     layout::FieldLayout,
     protocol::BuiltinProtocol,
@@ -389,7 +389,7 @@ impl Message for Dhcpv6 {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Dhcpv6Codec;
 
-impl LayerCodec for Dhcpv6Codec {
+impl Codec for Dhcpv6Codec {
     fn protocol_id(&self) -> &'static Id {
         &schema().protocol
     }
@@ -406,16 +406,16 @@ impl LayerCodec for Dhcpv6Codec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         shared::encode::<Dhcpv6>(layer, payload, context)
     }
 
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         if input.len() < 4 {
             return Ok(Raw::decoded(input));
         }
@@ -424,7 +424,7 @@ impl LayerCodec for Dhcpv6Codec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         shared::make_layer::<Dhcpv6>(fields)
     }

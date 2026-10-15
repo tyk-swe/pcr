@@ -6,7 +6,7 @@
 
 use serde::Serialize;
 
-use crate::field::FieldValue;
+use crate::field;
 use crate::frame::LinkType;
 
 use super::rules::Rules;
@@ -124,7 +124,7 @@ pub struct UnkeyedObservation {
     pub evidence: Evidence,
     /// Identity cells in declared order; `None` marks the fields absent from
     /// the observation.
-    pub key: Vec<Option<FieldValue>>,
+    pub key: Vec<Option<field::Value>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -170,16 +170,16 @@ pub struct CheckEvaluation {
     /// For `preserve`, the ingress observation's value; absent for `expect`,
     /// whose target is the declared literal on `check`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub expected: Option<FieldValue>,
+    pub expected: Option<field::Value>,
     /// The egress observation's value.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub actual: Option<FieldValue>,
+    pub actual: Option<field::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Match {
     /// The identity cells both observations carried, in declared order.
-    pub key: Vec<FieldValue>,
+    pub key: Vec<field::Value>,
     pub ingress: Evidence,
     pub egress: Evidence,
     /// Zero-based order among keyed observations of each capture, so readers
@@ -200,15 +200,15 @@ pub struct Violation {
     pub check: Check,
     /// The shared identity; absent when the violating egress observation was
     /// unkeyed.
-    pub key: Option<Vec<FieldValue>>,
+    pub key: Option<Vec<field::Value>>,
     /// The matched ingress observation, when the pair was unique.
     pub ingress: Option<Evidence>,
     pub egress: Evidence,
     /// For `preserve`, the ingress value that did not survive. For `expect`,
     /// the declared literal lives on `check`.
-    pub expected: Option<FieldValue>,
+    pub expected: Option<field::Value>,
     /// The egress observation's offending value.
-    pub actual: Option<FieldValue>,
+    pub actual: Option<field::Value>,
 }
 
 /// An identity carried by more than one observation on at least one side.
@@ -218,7 +218,7 @@ pub struct Violation {
 /// marked indistinguishable.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AmbiguousGroup {
-    pub key: Vec<FieldValue>,
+    pub key: Vec<field::Value>,
     pub ingress: Vec<Evidence>,
     pub egress: Vec<Evidence>,
     /// True member counts; the listed evidence is bounded.

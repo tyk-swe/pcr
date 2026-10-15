@@ -6,7 +6,7 @@
 use bytes::Bytes;
 use libfuzzer_sys::fuzz_target;
 use packetcraftr_core::build::{Builder, Options as BuildOptions};
-use packetcraftr_core::codec::{Context, Mode};
+use packetcraftr_core::codec::{Addresses, Mode};
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::document::{DocumentLimits, Format, Packet as DocPacket};
 use packetcraftr_core::expression::{self, Limits as ExprLimits};
@@ -58,7 +58,7 @@ fn build_both_modes(registry: &Arc<Registry>, packet: &Packet) {
                 max_packet_size: MAX_PACKET_SIZE,
             },
         };
-        let Ok(built) = builder.build(packet.clone(), Context::default(), options) else {
+        let Ok(built) = builder.build(packet.clone(), Addresses::default(), options) else {
             continue;
         };
         assert!(

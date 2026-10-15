@@ -35,23 +35,31 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        _stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        run(invocation, self, format).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+) -> Result<(), CliError> {
     match arguments.protocol {
-        Some(name) => describe_protocol(&name, format),
-        None => list_protocols(format),
+        Some(name) => describe_protocol(invocation, &name, format),
+        None => list_protocols(invocation, format),
     }
 }
 
-fn list_protocols(format: Format) -> Result<(), CliError> {
+fn list_protocols(
+    invocation: &crate::invocation::Invocation,
+    format: Format,
+) -> Result<(), CliError> {
     let result = output::protocols::ListResult::from(BuiltinProtocol::ALL);
     crate::rendering::render_aggregate_rows(
+        invocation,
         output::contract::Command::Protocols,
         format,
         &result,
@@ -60,7 +68,11 @@ fn list_protocols(format: Format) -> Result<(), CliError> {
     )
 }
 
-fn describe_protocol(name: &str, format: Format) -> Result<(), CliError> {
+fn describe_protocol(
+    invocation: &crate::invocation::Invocation,
+    name: &str,
+    format: Format,
+) -> Result<(), CliError> {
     let protocol = BuiltinProtocol::ALL
         .iter()
         .copied()
@@ -76,8 +88,9 @@ fn describe_protocol(name: &str, format: Format) -> Result<(), CliError> {
     let detail = output::protocols::Detail::try_from((registry.as_ref(), protocol))
         .map_err(CliError::classified)?;
     match format {
-        Format::Text => rendering::render_detail(&detail),
+        Format::Text => rendering::render_detail(invocation, &detail),
         Format::Json => emit_aggregate(
+            invocation,
             output::contract::Command::Protocols,
             output::protocols::DetailResult::from(detail),
             Vec::new(),

@@ -16,6 +16,7 @@ use crate::rendering::{
 };
 
 pub(super) fn render_batch_text(
+    invocation: &crate::invocation::Invocation,
     published: output::envelope::Published<output::dns::BatchResult>,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
@@ -27,31 +28,39 @@ pub(super) fn render_batch_text(
     let stats = stats.unwrap_or_default();
     let total = result.questions.len();
     for (index, question) in result.questions.into_iter().enumerate() {
-        write_stdout_line(format_args!(
-            "question={}/{} name={} type={} id={} status={} error={}",
-            index + 1,
-            total,
-            question.query_name,
-            packetcraftr::dns::QueryType::new(question.query_type),
-            question.transaction_id,
-            question.status.as_str(),
-            question.error.as_deref().unwrap_or("none"),
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "question={}/{} name={} type={} id={} status={} error={}",
+                index + 1,
+                total,
+                question.query_name,
+                packetcraftr::dns::QueryType::new(question.query_type),
+                question.transaction_id,
+                question.status.as_str(),
+                question.error.as_deref().unwrap_or("none"),
+            ),
+        )?;
         if let Some(report) = question.result {
             render_text(
+                invocation,
                 output::envelope::Published::new(*report, Vec::new()),
                 presentation,
             )?;
         }
     }
-    write_stdout_line(format_args!(
-        "dns batch questions={} udp_packets_completed={} bytes={}",
-        total, stats.packets_completed, stats.bytes,
-    ))?;
-    render_diagnostics_text(&diagnostics)
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "dns batch questions={} udp_packets_completed={} bytes={}",
+            total, stats.packets_completed, stats.bytes,
+        ),
+    )?;
+    render_diagnostics_text(invocation, &diagnostics)
 }
 
 pub(super) fn render_text(
+    invocation: &crate::invocation::Invocation,
     published: output::envelope::Published<output::dns::Report>,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
@@ -64,35 +73,44 @@ pub(super) fn render_text(
         |_| format!("{}:{}", result.server, result.server_port),
         |address| SocketAddr::new(address, result.server_port).to_string(),
     );
-    write_stdout_line(format_args!(
-        "server={} resolved={} query={} type={} id={} fallback_attempted={} accepted_transport={} outcome={}",
-        server,
-        comma_separated(&result.resolved_addresses),
-        result.query_name,
-        packetcraftr::dns::QueryType::new(result.query_type),
-        result.transaction_id,
-        result.fallback_attempted,
-        optional_display(result.accepted_transport),
-        result.outcome.as_str(),
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "server={} resolved={} query={} type={} id={} fallback_attempted={} accepted_transport={} outcome={}",
+            server,
+            comma_separated(&result.resolved_addresses),
+            result.query_name,
+            packetcraftr::dns::QueryType::new(result.query_type),
+            result.transaction_id,
+            result.fallback_attempted,
+            optional_display(result.accepted_transport),
+            result.outcome.as_str(),
+        ),
+    )?;
     for attempt in &result.attempts {
-        write_stdout_line(format_args!(
-            "attempt={} transport={} server={} source_port={} status={} sent={} received={} latency={} rcode={} reason={}",
-            attempt.attempt,
-            attempt.transport,
-            attempt.server_address,
-            optional_display(attempt.source_port),
-            attempt.status.as_str(),
-            optional_display(attempt.sent_at),
-            optional_display(attempt.received_at),
-            optional_duration(attempt.latency),
-            optional_display(attempt.response_code),
-            attempt.reason,
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "attempt={} transport={} server={} source_port={} status={} sent={} received={} latency={} rcode={} reason={}",
+                attempt.attempt,
+                attempt.transport,
+                attempt.server_address,
+                optional_display(attempt.source_port),
+                attempt.status.as_str(),
+                optional_display(attempt.sent_at),
+                optional_display(attempt.received_at),
+                optional_duration(attempt.latency),
+                optional_display(attempt.response_code),
+                attempt.reason,
+            ),
+        )?;
         if let Some(frame) = &attempt.frame
             && presentation.verbose
         {
-            write_stdout_line(format_args!("  frame {}", captured_frame_text(frame)))?;
+            write_stdout_line(
+                invocation,
+                format_args!("  frame {}", captured_frame_text(frame)),
+            )?;
         }
     }
     for (section, records) in [
@@ -101,56 +119,66 @@ pub(super) fn render_text(
         (output::dns::Section::Additional, &result.additionals),
     ] {
         for record in records {
-            render_record(section, record)?;
+            render_record(invocation, section, record)?;
         }
     }
     for record in &result.rejected_records {
-        write_stdout_line(format_args!(
-            "rejected section={} index={} owner={} type_code={} reason={}",
-            record.section, record.index, record.owner, record.type_code, record.reason,
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "rejected section={} index={} owner={} type_code={} reason={}",
+                record.section, record.index, record.owner, record.type_code, record.reason,
+            ),
+        )?;
     }
-    render_undecoded(result.undecoded.iter().map(|evidence| {
-        (
-            Some(format!("attempt={}", evidence.attempt)),
-            &evidence.frame,
-        )
-    }))?;
-    write_stdout_line(format_args!(
-        "{}",
-        response_summary(ResponseLine {
-            response_code: optional_display(
-                result
+    render_undecoded(
+        invocation,
+        result.undecoded.iter().map(|evidence| {
+            (
+                Some(format!("attempt={}", evidence.attempt)),
+                &evidence.frame,
+            )
+        }),
+    )?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "{}",
+            response_summary(ResponseLine {
+                response_code: optional_display(
+                    result
+                        .response
+                        .as_ref()
+                        .map(|response| response.response_code)
+                ),
+                response_code_name: result
                     .response
                     .as_ref()
-                    .map(|response| response.response_code)
-            ),
-            response_code_name: result
-                .response
-                .as_ref()
-                .map_or("none", |response| response.response_code_name.as_str()),
-            authoritative: optional_display(
-                result
-                    .response
-                    .as_ref()
-                    .map(|response| response.authoritative)
-            ),
-            truncated: optional_display(
-                result.response.as_ref().map(|response| response.truncated)
-            ),
-            accepted: result
-                .answers
-                .len()
-                .saturating_add(result.authorities.len())
-                .saturating_add(result.additionals.len()),
-            rejected: result.rejected_record_count,
-            counters: stats.map(|stats| (stats.packets_completed, stats.bytes)),
-        })
-    ))?;
-    render_diagnostics_text(&diagnostics)
+                    .map_or("none", |response| response.response_code_name.as_str()),
+                authoritative: optional_display(
+                    result
+                        .response
+                        .as_ref()
+                        .map(|response| response.authoritative)
+                ),
+                truncated: optional_display(
+                    result.response.as_ref().map(|response| response.truncated)
+                ),
+                accepted: result
+                    .answers
+                    .len()
+                    .saturating_add(result.authorities.len())
+                    .saturating_add(result.additionals.len()),
+                rejected: result.rejected_record_count,
+                counters: stats.map(|stats| (stats.packets_completed, stats.bytes)),
+            })
+        ),
+    )?;
+    render_diagnostics_text(invocation, &diagnostics)
 }
 
 fn render_record(
+    invocation: &crate::invocation::Invocation,
     section: output::dns::Section,
     record: &output::dns::Record,
 ) -> Result<(), CliError> {
@@ -161,6 +189,7 @@ fn render_record(
         .and_then(|tag| tag.as_str().map(str::to_owned))
         .unwrap_or_default();
     render_dns_record(
+        invocation,
         section,
         &record.owner,
         record_type,

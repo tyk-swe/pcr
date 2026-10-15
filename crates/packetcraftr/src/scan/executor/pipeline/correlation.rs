@@ -86,7 +86,7 @@ pub(super) fn candidates(
         .collect()
 }
 
-/// Probes past their response window that a frame correlates with: the
+/// probe_error past their response window that a frame correlates with: the
 /// frame was captured after transmission but is too late to be their outcome.
 pub(super) fn settled<'s>(
     settled: impl IntoIterator<Item = (usize, &'s Arc<SentPacket>)>,

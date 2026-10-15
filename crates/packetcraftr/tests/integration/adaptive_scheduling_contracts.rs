@@ -7,7 +7,7 @@ use common::responder;
 use packetcraftr::{
     Client, ProviderSet,
     clock::Clock,
-    probe::ProbeEndpoint,
+    probe,
     scan::{self, Request},
     target::{Family, Selection, Specification, Target},
 };
@@ -206,7 +206,7 @@ fn request(targets: Vec<IpAddr>, ports: &[u16], attempts: u32) -> Request {
         address_family: Family::Ipv4,
         endpoints: ports
             .iter()
-            .map(|port| ProbeEndpoint::Tcp { port: *port })
+            .map(|port| probe::Endpoint::Tcp { port: *port })
             .collect(),
         discovery: Default::default(),
         attempts,
@@ -311,7 +311,7 @@ fn a_paced_send_inside_a_truncated_window_still_completes_on_reply() {
             .endpoints
             .iter()
             .flat_map(|endpoint| &endpoint.probes)
-            .all(|probe| probe.status == packetcraftr::probe::ProbeStatus::Response),
+            .all(|probe| probe.status == packetcraftr::probe::Status::Response),
         "{:?}",
         aggregate.endpoints
     );
@@ -1016,7 +1016,7 @@ fn a_host_filtered_after_discovery_keeps_the_survivors_original_ordinals() {
     request.discovery = Options {
         mode: Mode::Before,
         neighbor: false,
-        probes: vec![ProbeEndpoint::Tcp { port: 9 }],
+        probes: vec![probe::Endpoint::Tcp { port: 9 }],
         unresponsive: Unresponsive::Skip,
     };
     {

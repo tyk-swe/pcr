@@ -15,7 +15,6 @@ use crate::command_options::Bounded;
 use crate::errors::CliError;
 use crate::input::{InputKind, read_bounded_file};
 use crate::output::{self, contract::Format};
-use crate::rendering::StreamEncoder;
 use crate::system::{Runtime, client};
 
 use self::arguments::Args;
@@ -53,7 +52,12 @@ impl super::Spec for Args {
         self.policy.resources(settings);
     }
 
-    fn run(self, format: Format, stream: &StreamEncoder) -> Result<super::CommandExit, CliError> {
+    fn run(
+        self,
+        invocation: &crate::invocation::Invocation,
+    ) -> Result<super::CommandExit, CliError> {
+        let format = invocation.format;
+        let stream = &invocation.output;
         let corpus = match &self.corpus {
             Some(path) => Arc::new(
                 service_probes::parse(&read_bounded_file(
@@ -84,7 +88,7 @@ impl super::Spec for Args {
         } else {
             library::builtin_exclusions().map_err(CliError::classified)?
         };
-        crate::invocation::check()?;
+        invocation.check()?;
         let mut request = library::Request::new(
             self.endpoints
                 .into_iter()
@@ -98,7 +102,7 @@ impl super::Spec for Args {
         );
         request.tls = self.tls.settings();
         request.intensity = self.intensity;
-        request.parent_deadline = crate::invocation::deadline();
+        request.parent_deadline = invocation.deadline.clone();
         request.limits = library::Limits {
             operation: library::Limit {
                 attempts: self.max_attempts,
@@ -131,26 +135,28 @@ impl super::Spec for Args {
             publication::validate_ndjson(&request)?;
         }
         let report = client(
+            invocation,
             packetcraftr_core::protocol::builtin::registry(),
             policy,
             Runtime::Workflow,
         )
         .identify(&request)
         .map_err(CliError::classified)?;
-        crate::cancellation::check()?;
-        crate::invocation::check()?;
+        invocation.check()?;
+        invocation.check()?;
         let report = output::identify::Report::try_from(report).map_err(CliError::classified)?;
         match format {
-            Format::Text => rendering::render_text(&report, stream.presentation())?,
+            Format::Text => rendering::render_text(invocation, &report, stream.presentation())?,
             Format::Json => crate::rendering::emit_aggregate(
+                invocation,
                 output::contract::Command::Identify,
                 report,
                 Vec::new(),
             )?,
             Format::Ndjson => {
                 for record in &report.records {
-                    crate::cancellation::check()?;
-                    crate::invocation::check()?;
+                    invocation.check()?;
+                    invocation.check()?;
                     stream.emit_data(record, Vec::new())?;
                 }
                 stream.complete(output::identify::Complete::from(report), Vec::new())?;

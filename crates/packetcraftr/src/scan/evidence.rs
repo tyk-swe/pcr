@@ -18,7 +18,7 @@ use super::report::RttAccumulator;
 use super::{Classification, Event, Probe, ProbeEvidence, Reply, SctpScan, Stage, TcpScan};
 use crate::correlation::{Correlation, Transport};
 use crate::evidence::SentPacket;
-use crate::probe::ProbeStatus;
+use crate::probe;
 use crate::probe::runner::{Classifier, NO_RESPONSE_REASON, Outcome};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -246,7 +246,7 @@ impl Classifier for ProbeClassifier<'_> {
             sctp_scan: (probe.endpoint.transport() == Transport::Sctp).then_some(probe.sctp_scan),
             tcp_window: None,
             attempt: probe.attempt,
-            status: ProbeStatus::Timeout,
+            status: probe::Status::Timeout,
             classification: Classification::Timeout,
             reply: None,
             responder: None,
@@ -275,7 +275,7 @@ impl Classifier for ProbeClassifier<'_> {
         }
         if let Outcome::Reply(reply) = outcome {
             self.rtt.note_received(reply.latency);
-            evidence.status = ProbeStatus::Response;
+            evidence.status = probe::Status::Response;
             evidence.classification = reply.observation.response.classification;
             evidence.reply = Some(reply.observation.response.reply);
             evidence.responder = Some(reply.observation.response.responder);

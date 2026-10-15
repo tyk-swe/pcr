@@ -17,7 +17,7 @@ use crate::correlation::nonzero_ipv4_identification;
 use crate::execution::rate_delay;
 use crate::policy::{DnsOperation, LimitOverflow, SocketLimits, WireLimits};
 
-use super::error::{Attempts, Error};
+use super::error::{Error, attempt_error};
 use super::request::QueryType;
 use super::tcp::LENGTH_PREFIX_BYTES;
 use super::{DEFAULT_SERVER_PORT, MAX_PROBE_OVERHEAD, Request, TransportMode};
@@ -89,7 +89,7 @@ pub(super) fn operation_limits(
         SocketLimits::none()
     };
     let delay = rate_delay(
-        &Attempts,
+        attempt_error,
         "queries_per_second",
         1,
         request.queries_per_second,

@@ -12,7 +12,7 @@ use std::sync::{Arc, LazyLock};
 use packetcraftr_core::document::udp_profiles;
 
 use super::UdpProfile;
-use crate::probe::ProbeEndpoint;
+use crate::probe;
 use crate::scan::DataSet;
 
 /// Matches `dataset.version` in `data/udp-payloads.provenance.yaml`; any
@@ -52,13 +52,13 @@ pub struct Merged {
 
 /// An operator profile always wins over the curated payload for its port;
 /// each such port is reported in `overridden` so the replacement is visible.
-pub fn merge(operator: BTreeMap<u16, Arc<UdpProfile>>, endpoints: &[ProbeEndpoint]) -> Merged {
+pub fn merge(operator: BTreeMap<u16, Arc<UdpProfile>>, endpoints: &[probe::Endpoint]) -> Merged {
     let mut merged = Merged {
         profiles: operator,
         ..Merged::default()
     };
     for endpoint in endpoints {
-        let ProbeEndpoint::Udp { port } = *endpoint else {
+        let probe::Endpoint::Udp { port } = *endpoint else {
             continue;
         };
         let Some(curated) = BUNDLED.get(&port) else {

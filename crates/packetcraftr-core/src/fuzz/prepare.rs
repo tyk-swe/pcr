@@ -9,7 +9,7 @@ use crate::error::{Classification, Kind};
 use crate::{
     build::Builder,
     decode::Dissector,
-    field::{FieldKind, FieldValue, Path},
+    field::{self, Path},
     packet::Packet,
     registry::Registry,
 };
@@ -28,7 +28,7 @@ pub(super) struct ResolvedField {
     pub(super) target: Target,
     pub(super) path: Path,
     pub(super) protocol: String,
-    pub(super) kind: FieldKind,
+    pub(super) kind: field::Kind,
     pub(super) is_derived: bool,
 }
 
@@ -201,7 +201,7 @@ fn new_case(
     index: u64,
     seed: u64,
     mutation: Mutation,
-    shrink_values: Vec<FieldValue>,
+    shrink_values: Vec<field::Value>,
     recipe: Packet,
 ) -> Case {
     Case {
@@ -244,7 +244,7 @@ fn build_case(
 ) -> Result<(), Error> {
     match builder.build(
         case.recipe.clone(),
-        crate::codec::Context::default(),
+        crate::codec::Addresses::default(),
         request.build.clone(),
     ) {
         Ok(built) => {
@@ -324,7 +324,7 @@ fn validate_base_shape(packet: &Packet, max_layers: usize) -> Result<(), Error> 
 
 fn retained_case_value_bytes(
     mutation: &Mutation,
-    shrink_values: &[FieldValue],
+    shrink_values: &[field::Value],
     recipe: &Packet,
     limits: Limits,
 ) -> Result<u64, Error> {
@@ -356,7 +356,7 @@ fn packet_reflected_value_bytes(packet: &Packet, limits: Limits) -> Result<u64, 
     Ok(total)
 }
 
-fn charge_value(total: u64, value: &FieldValue, limits: Limits) -> Result<u64, Error> {
+fn charge_value(total: u64, value: &field::Value, limits: Limits) -> Result<u64, Error> {
     let limit = total_byte_limit(limits);
     let remaining = limits
         .max_total_bytes
@@ -501,7 +501,7 @@ fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedF
 fn strategy_compatible(strategy: Strategy, field: &ResolvedField) -> bool {
     match strategy {
         Strategy::Boundary | Strategy::Random => true,
-        Strategy::BitFlip => field.kind == FieldKind::Bytes,
+        Strategy::BitFlip => field.kind == field::Kind::Bytes,
         Strategy::Malformed => field.is_derived,
     }
 }

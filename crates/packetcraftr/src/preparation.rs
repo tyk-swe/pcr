@@ -26,6 +26,7 @@ use packetcraftr_netio::route::Provider as RouteProvider;
 use packetcraftr_netio::{Error as LiveIoError, interface, transmit};
 
 use crate::clock::Clock;
+use crate::execution::{NeighborMode, Operation as Execution};
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
 use crate::policy::{Operation, Policy, WireLimits};
@@ -63,7 +64,7 @@ pub(crate) struct AdmittedCost {
 pub(crate) struct Admitted {
     packet: Packet,
     plan: route::Plan,
-    build_context: codec::Context,
+    build_context: codec::Addresses,
     preliminary_build: BuiltPacket,
 }
 
@@ -153,7 +154,7 @@ impl Materializer<'_> {
         packet: &mut Packet,
         plan: &route::Plan,
         check: impl Fn() -> Result<(), Error>,
-    ) -> Result<(codec::Context, BuiltPacket), Error> {
+    ) -> Result<(codec::Addresses, BuiltPacket), Error> {
         materialize_network_fields(packet, plan)?;
         materialize_link_structure(packet, plan)?;
         check()?;
@@ -168,7 +169,7 @@ impl Materializer<'_> {
         &self,
         mut packet: Packet,
         route: &route::Materialized,
-        context: codec::Context,
+        context: codec::Addresses,
         preliminary: BuiltPacket,
         check: impl Fn() -> Result<(), Error>,
     ) -> Result<BuiltPacket, Error> {
@@ -216,7 +217,8 @@ impl Budget {
 
 struct Stages<'c, P, K> {
     client: &'c Client<P, K>,
-    policy: &'c Policy,
+    policy: Policy,
+    operation: Execution,
     builder: Builder,
     options: &'c send::Options,
     deadline: Option<&'c Deadline>,
@@ -227,11 +229,13 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         client: &'c Client<P, K>,
         options: &'c send::Options,
         deadline: Option<&'c Deadline>,
+        operation: &Execution,
     ) -> Self {
         Self {
             client,
-            policy: client.policy.as_ref(),
-            builder: Builder::new(client.registry.clone()),
+            policy: operation.policy(&client.policy),
+            operation: operation.clone(),
+            builder: Builder::new(operation.registry.clone()),
             options,
             deadline,
         }
@@ -247,12 +251,14 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
     fn within<T>(&self, limit: std::time::Duration, lookup: impl FnOnce(&Deadline) -> T) -> T {
         match self.deadline {
             Some(deadline) => lookup(deadline),
-            None => lookup(&self.client.deadline(limit)),
+            None => lookup(&self.operation.deadline(self.client, limit)),
         }
     }
 
     fn check(&self) -> Result<(), Error> {
         self.client.check_cancelled()?;
+        self.operation.deadline.check_cancelled()?;
+        ensure_preparation_deadline(&self.operation.deadline)?;
         if let Some(deadline) = self.deadline {
             ensure_preparation_deadline(deadline)?;
         }
@@ -283,6 +289,7 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
                 route_options,
                 routes,
                 deadline,
+                &self.operation.interfaces,
                 || self.check(),
             )
         })?;
@@ -301,12 +308,12 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
     }
 
     fn charge(&self, budget: &mut Budget, admitted: Admitted) -> Result<Admitted, Error> {
-        budget.charge(self.policy, admitted.wire_len())?;
+        budget.charge(&self.policy, admitted.wire_len())?;
         Ok(admitted)
     }
 
     fn authorize_built(&self, built: &BuiltPacket, plan: &route::Plan) -> Result<(), Error> {
-        let policy = &self.client.policy;
+        let policy = &self.policy;
         policy.authorize_built_packet(built, self.options.allow_permissive_live)?;
         crate::policy::authorize_wire(policy, plan.wire_link_type()?, &built.bytes, plan)?;
         Ok(())
@@ -335,7 +342,7 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
     /// the preparation deadline.
     fn pace_neighbor_request(&self, spent: std::time::Duration) -> Result<(), Error> {
         // The resolution's own wait already spaced its request from the packet.
-        let pause = self.client.neighbor_pause.saturating_sub(spent);
+        let pause = self.operation.neighbor_pause.saturating_sub(spent);
         if pause.is_zero() {
             return Ok(());
         }
@@ -362,31 +369,31 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         self.check()?;
         // Only a request about to be sent is checked: a cached answer sends
         // nothing to the neighbor.
-        if (self.client.neighbors_resolved_ahead || self.client.authorize_neighbor_requests)
+        if self.operation.neighbor_mode != NeighborMode::Ordinary
             && plan.needs_neighbor_resolution()
         {
             let request = route::neighbor_request(&plan)?;
             let cached = self
-                .client
+                .operation
                 .neighbors
                 .cached(&request)
                 .map_err(route::Error::from)?
                 .is_some();
-            if !cached && self.client.neighbors_resolved_ahead {
+            if !cached && self.operation.neighbor_mode == NeighborMode::Cached {
                 return Err(Error::UnresolvedNeighbor {
                     target: request.target,
                     interface: request.interface.name,
                 });
             }
             if !cached {
-                authorize_neighbor_request(&self.client.policy, &request, &plan)?;
+                authorize_neighbor_request(&self.policy, &request, &plan)?;
             }
         }
         // The resolver stops at the deadline on its own; a failure it reports
         // after the deadline passed is the deadline, not a neighbor verdict.
         let providers = &self.client.providers;
         let neighbors = self
-            .client
+            .operation
             .neighbors
             .over(providers.transmit(), providers.capture());
         let request = plan
@@ -650,22 +657,35 @@ impl<P: PacketProviders, K: Clock> Streaming<'_, P, K> {
 }
 
 impl<P: PacketProviders, K: Clock> Client<P, K> {
+    #[cfg(test)]
     pub(crate) fn admitting<'c>(
         &'c self,
         options: &'c send::Options,
         packets: u64,
         deadline: &'c Deadline,
     ) -> Result<Admitting<'c, P, K>, Error> {
-        let (stages, budget) = self.open_stages(options, packets, Some(deadline))?;
-        Ok(Admitting { stages, budget })
+        let operation = Execution::new(self, packetcraftr_netio::deadline::MAX_WAIT);
+        self.admitting_in(options, packets, deadline, &operation)
     }
 
-    pub(crate) fn streaming<'c>(
+    pub(crate) fn admitting_in<'c>(
         &'c self,
         options: &'c send::Options,
         packets: u64,
+        deadline: &'c Deadline,
+        operation: &Execution,
+    ) -> Result<Admitting<'c, P, K>, Error> {
+        let (stages, budget) = self.open_stages(options, packets, Some(deadline), operation)?;
+        Ok(Admitting { stages, budget })
+    }
+
+    pub(crate) fn streaming_in<'c>(
+        &'c self,
+        options: &'c send::Options,
+        packets: u64,
+        operation: &Execution,
     ) -> Result<Streaming<'c, P, K>, Error> {
-        let (stages, budget) = self.open_stages(options, packets, None)?;
+        let (stages, budget) = self.open_stages(options, packets, None, operation)?;
         Ok(Streaming { stages, budget })
     }
 
@@ -674,10 +694,11 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         options: &'c send::Options,
         packets: u64,
         deadline: Option<&'c Deadline>,
+        operation: &Execution,
     ) -> Result<(Stages<'c, P, K>, Budget), Error> {
-        let stages = Stages::new(self, options, deadline);
+        let stages = Stages::new(self, options, deadline, operation);
         stages.check()?;
-        let budget = Budget::open(stages.policy, packets)?;
+        let budget = Budget::open(&stages.policy, packets)?;
         Ok((stages, budget))
     }
 }

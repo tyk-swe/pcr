@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::probe::ProbeEndpoint;
+use crate::probe;
 use crate::scan::plan::Probe;
 use packetcraftr_core::protocol::network::ip_protocol;
 
@@ -18,13 +18,13 @@ pub(in crate::scan) fn replies_overlap(a: &Probe, b: &Probe) -> bool {
         || (a.address.is_ipv6() && (extension_probe(a.endpoint) || extension_probe(b.endpoint)))
 }
 
-pub(in crate::scan) fn response_protocol(endpoint: ProbeEndpoint, ipv6: bool) -> u8 {
+pub(in crate::scan) fn response_protocol(endpoint: probe::Endpoint, ipv6: bool) -> u8 {
     match endpoint {
-        ProbeEndpoint::Ip { protocol } => protocol,
-        ProbeEndpoint::Tcp { .. } | ProbeEndpoint::TcpAck { .. } => ip_protocol::TCP,
-        ProbeEndpoint::Udp { .. } => ip_protocol::UDP,
-        ProbeEndpoint::Sctp { .. } => ip_protocol::SCTP,
-        ProbeEndpoint::Icmp | ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask => {
+        probe::Endpoint::Ip { protocol } => protocol,
+        probe::Endpoint::Tcp { .. } | probe::Endpoint::TcpAck { .. } => ip_protocol::TCP,
+        probe::Endpoint::Udp { .. } => ip_protocol::UDP,
+        probe::Endpoint::Sctp { .. } => ip_protocol::SCTP,
+        probe::Endpoint::Icmp | probe::Endpoint::IcmpTimestamp | probe::Endpoint::IcmpNetmask => {
             if ipv6 {
                 ip_protocol::ICMPV6
             } else {
@@ -34,7 +34,7 @@ pub(in crate::scan) fn response_protocol(endpoint: ProbeEndpoint, ipv6: bool) ->
     }
 }
 
-fn extension_probe(endpoint: ProbeEndpoint) -> bool {
+fn extension_probe(endpoint: probe::Endpoint) -> bool {
     endpoint.ip_protocol().is_some_and(|protocol| {
         matches!(
             protocol,
@@ -52,7 +52,7 @@ fn extension_probe(endpoint: ProbeEndpoint) -> bool {
 /// IPv6 extension probes can conflict with every other endpoint at an address.
 pub(super) fn overlap_waits(
     targets: &[crate::target::SelectedAddress],
-    endpoints: &[ProbeEndpoint],
+    endpoints: &[probe::Endpoint],
     attempts: u32,
 ) -> Option<usize> {
     if !endpoints

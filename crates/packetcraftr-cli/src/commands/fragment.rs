@@ -34,18 +34,24 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(crate) fn run(
+    invocation: &crate::invocation::Invocation,
+    args: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let compression = args.compression.for_output(format)?;
     let registry = core::protocol::builtin::registry();
     let packet = crate::input::read_recipe(args.recipe, &registry, args.budget.max_layers)?;
-    crate::cancellation::check()?;
+    invocation.check()?;
     let link_type = core::transform::fragment_link_type(&packet).map_err(CliError::classified)?;
     let built = core::build::Builder::new(registry)
         .build(
@@ -66,7 +72,7 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         },
     )
     .map_err(CliError::classified)?;
-    crate::cancellation::check()?;
+    invocation.check()?;
     if matches!(format, Format::Pcap | Format::PcapNg) {
         return write_capture_file(
             if format == Format::Pcap {
@@ -81,19 +87,22 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     let summary = output::fragment::Complete::from((args.mtu, frames.as_slice()));
     let mut records = Vec::new();
     for (index, frame) in frames.into_iter().enumerate() {
-        crate::cancellation::check()?;
+        invocation.check()?;
         let record = output::fragment::Fragment::try_from((index as u64, frame))
             .map_err(CliError::classified)?;
         match format {
             Format::Json => records.push(record),
             Format::Ndjson => stream.emit_data(record, Vec::new())?,
             Format::Hex => write_hex_line(record.frame.bytes())?,
-            Format::Text => write_stdout_line(format_args!(
-                "fragment {}: {} bytes {}",
-                record.fragment_index,
-                record.frame.captured_length,
-                record.frame.bytes_hex()
-            ))?,
+            Format::Text => write_stdout_line(
+                invocation,
+                format_args!(
+                    "fragment {}: {} bytes {}",
+                    record.fragment_index,
+                    record.frame.captured_length,
+                    record.frame.bytes_hex()
+                ),
+            )?,
             Format::Pcap | Format::PcapNg => {
                 return Err(CliError::new(
                     core::error::Kind::Internal,
@@ -105,6 +114,7 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     }
     match format {
         Format::Json => emit_aggregate(
+            invocation,
             output::contract::Command::Fragment,
             output::fragment::Report::from((summary, records)),
             built.diagnostics,
@@ -113,11 +123,14 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             .complete(summary, built.diagnostics)
             .map_err(Into::into),
         Format::Text => {
-            crate::rendering::write_summary_line(format_args!(
-                "{} fragments, {} bytes, MTU {}",
-                summary.fragments, summary.bytes, summary.mtu
-            ))?;
-            crate::rendering::render_diagnostics_text(&built.diagnostics)
+            crate::rendering::write_summary_line(
+                invocation,
+                format_args!(
+                    "{} fragments, {} bytes, MTU {}",
+                    summary.fragments, summary.bytes, summary.mtu
+                ),
+            )?;
+            crate::rendering::render_diagnostics_text(invocation, &built.diagnostics)
         }
         Format::Hex | Format::Pcap | Format::PcapNg => Ok(()),
         other => other.unreachable(),

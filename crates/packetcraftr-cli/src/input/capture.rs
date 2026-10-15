@@ -13,8 +13,11 @@ use super::fingerprint::{self, Fingerprint};
 use crate::command_options::CaptureReaderBoundsArgs;
 use crate::errors::CliError;
 
-fn capture_source(path: &Path) -> Result<Box<dyn Read>, CliError> {
-    crate::cancellation::check()?;
+fn capture_source(
+    invocation: &crate::invocation::Invocation,
+    path: &Path,
+) -> Result<Box<dyn Read>, CliError> {
+    invocation.check()?;
     if path == Path::new("-") {
         let stdin = io::stdin();
         require_redirected_stdin(InputKind::Capture, stdin.is_terminal())?;
@@ -25,34 +28,38 @@ fn capture_source(path: &Path) -> Result<Box<dyn Read>, CliError> {
 }
 
 pub(crate) fn open_capture(
+    invocation: &crate::invocation::Invocation,
     path: &Path,
     bounds: CaptureReaderBoundsArgs,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
-    capture_reader(capture_source(path)?, bounds)
+    capture_reader(invocation, capture_source(invocation, path)?, bounds)
 }
 
 pub(crate) fn open_capture_hashed(
+    invocation: &crate::invocation::Invocation,
     path: &Path,
     bounds: CaptureReaderBoundsArgs,
 ) -> Result<(Reader<Box<dyn Read>>, Fingerprint), CliError> {
-    let (source, fingerprint) = fingerprint::Hashed::new(capture_source(path)?);
-    Ok((capture_reader(source, bounds)?, fingerprint))
+    let (source, fingerprint) = fingerprint::Hashed::new(capture_source(invocation, path)?);
+    Ok((capture_reader(invocation, source, bounds)?, fingerprint))
 }
 
 pub(crate) fn open_capture_file(
+    invocation: &crate::invocation::Invocation,
     path: &Path,
     bounds: CaptureReaderBoundsArgs,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
-    capture_reader(open_file(path)?, bounds)
+    capture_reader(invocation, open_file(path)?, bounds)
 }
 
 pub(crate) fn snapshot_capture<R: Read>(
+    invocation: &crate::invocation::Invocation,
     input: &mut Reader<R>,
     bounds: CaptureReaderBoundsArgs,
     limits: core::capture_file::Limits,
 ) -> Result<Reader<File>, CliError> {
     use core::capture_file;
-    crate::cancellation::check()?;
+    invocation.check()?;
     let snapshot = tempfile::tempfile()
         .map_err(capture_file::Error::from)
         .map_err(CliError::classified)?;
@@ -68,15 +75,16 @@ pub(crate) fn snapshot_capture<R: Read>(
     std::io::Seek::rewind(&mut snapshot)
         .map_err(capture_file::Error::from)
         .map_err(CliError::classified)?;
-    crate::cancellation::check()?;
-    bounded_reader(snapshot, bounds)
+    invocation.check()?;
+    bounded_reader(invocation, snapshot, bounds)
 }
 
 fn capture_reader<R: Read + 'static>(
+    invocation: &crate::invocation::Invocation,
     source: R,
     bounds: CaptureReaderBoundsArgs,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
-    crate::cancellation::check()?;
+    invocation.check()?;
     let source: Box<dyn Read> = Box::new(
         core::capture_file::compression::Input::new(
             source,
@@ -88,12 +96,13 @@ fn capture_reader<R: Read + 'static>(
         )
         .map_err(CliError::classified)?,
     );
-    let reader = bounded_reader(source, bounds)?;
-    crate::cancellation::check()?;
+    let reader = bounded_reader(invocation, source, bounds)?;
+    invocation.check()?;
     Ok(reader)
 }
 
 fn bounded_reader<R: Read>(
+    invocation: &crate::invocation::Invocation,
     source: R,
     bounds: CaptureReaderBoundsArgs,
 ) -> Result<Reader<R>, CliError> {
@@ -105,8 +114,6 @@ fn bounded_reader<R: Read>(
             ..ReaderLimits::default()
         },
     )
-    .map(|reader| {
-        crate::invocation::reader(reader.with_cancellation(crate::cancellation::signal().clone()))
-    })
+    .map(|reader| invocation.reader(reader.with_cancellation(invocation.cancellation.clone())))
     .map_err(CliError::classified)
 }

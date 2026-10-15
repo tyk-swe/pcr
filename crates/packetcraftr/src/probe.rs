@@ -8,7 +8,7 @@ pub(crate) mod runner;
 pub(crate) mod test_support;
 
 pub use crate::correlation::Transport;
-pub use model::{ProbeEndpoint, ProbeStatus};
+pub use model::{Endpoint, Status};
 pub(crate) use runner::{Batch, Evidence};
 
 pub(crate) use limits::{check_collection_evidence, check_probe_count, check_probe_duration};
@@ -18,7 +18,6 @@ use std::collections::hash_map::Entry;
 
 use packetcraftr_core::budget::Deadline;
 
-use crate::execution::Errors;
 use crate::execution::evidence::EvidenceDiagnosticDescriptor;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,10 +72,13 @@ impl Workflow {
     }
 }
 
-pub(crate) fn enforce_deadline<G: Errors>(errors: &G, deadline: &Deadline) -> Result<(), G::Error> {
+pub(crate) fn enforce_deadline<E>(
+    errors: fn(u64, crate::execution::Failure) -> E,
+    deadline: &Deadline,
+) -> Result<(), E> {
     deadline
         .enforce()
-        .map_err(|interrupted| errors.interrupted(G::Step::default(), interrupted))
+        .map_err(|interrupted| (errors)(0_u64, crate::execution::Failure::Interrupted(interrupted)))
 }
 
 pub(crate) fn index_or_push<'a, K, V>(

@@ -37,26 +37,31 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let prepared = prepare(
         arguments.limits,
         arguments.filter.as_deref(),
         &arguments.decode,
     )?;
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
+    let mut reader = open_capture(invocation, &arguments.path, arguments.limits.capture.reader)?;
 
     let session = analysis::Session::new(
         prepared.registry.clone(),
-        prepared.options(),
+        prepared.options(invocation),
         analysis::expert::Collector::new(),
-        None,
     );
     let mut state = rendering::State::new(arguments.limits.capture.retention_ceiling());
     let selector = analysis::expert::Selector {
@@ -70,8 +75,14 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             |finding| {
                 if selector.matches(&finding) {
                     state.count(&finding);
-                    rendering::render_record(format, finding.into(), &mut state, stream)
-                        .map_err(CliError::into_boundary_error)?;
+                    rendering::render_record(
+                        invocation,
+                        format,
+                        finding.into(),
+                        &mut state,
+                        stream,
+                    )
+                    .map_err(CliError::into_boundary_error)?;
                 }
                 Ok(())
             },
@@ -80,8 +91,8 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let summary = outcome.run;
 
     match format {
-        Format::Text => rendering::render_text(&summary, &state),
-        Format::Json => rendering::render_aggregate(&summary, state),
+        Format::Text => rendering::render_text(invocation, &summary, &state),
+        Format::Json => rendering::render_aggregate(invocation, &summary, state),
         Format::Ndjson => rendering::render_stream(&summary, state, stream),
         other => other.unreachable(),
     }

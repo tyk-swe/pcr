@@ -4,7 +4,7 @@
 use crate::output::contract::Format;
 use crate::output::{self, verify_forwarding::Report};
 use packetcraftr_core::analysis::forwarding as analysis;
-use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::field;
 
 use super::arguments::Args;
 use crate::errors::CliError;
@@ -12,6 +12,7 @@ use crate::rendering::omitted_diagnostic;
 use crate::rendering::{StreamEncoder, emit_json, write_stdout_line};
 
 pub(super) fn render(
+    invocation: &crate::invocation::Invocation,
     format: Format,
     stream: &StreamEncoder,
     report: &analysis::Report,
@@ -20,16 +21,19 @@ pub(super) fn render(
 ) -> Result<(), CliError> {
     match format {
         Format::Text => {
-            render_text(report)?;
+            render_text(invocation, report)?;
             if stream.presentation().verbose {
                 for matched in &report.matches {
-                    write_stdout_line(format_args!("match: {matched:?}"))?;
+                    write_stdout_line(invocation, format_args!("match: {matched:?}"))?;
                 }
                 for (side, source) in [("ingress", sources.ingress), ("egress", sources.egress)] {
-                    write_stdout_line(format_args!(
-                        "{side} source: sha256 {}, {} encoded bytes consumed through EOF",
-                        source.sha256, source.encoded_bytes,
-                    ))?;
+                    write_stdout_line(
+                        invocation,
+                        format_args!(
+                            "{side} source: sha256 {}, {} encoded bytes consumed through EOF",
+                            source.sha256, source.encoded_bytes,
+                        ),
+                    )?;
                 }
             }
             Ok(())
@@ -62,7 +66,7 @@ pub(super) fn render(
                 "--max-details / --max-detail-bytes",
             );
             if format == Format::Json {
-                let envelope = crate::resources::decorate(output::envelope::Envelope::success(
+                let envelope = invocation.decorate(output::envelope::Envelope::success(
                     output::contract::Command::VerifyForwarding,
                     document,
                     diagnostics,
@@ -73,15 +77,15 @@ pub(super) fn render(
                     output::stream::MAX_RECORD_BYTES - 1,
                 )
                 .map_err(|error| error.into_cli_error(report_limit_error))?;
-                crate::cancellation::check()?;
-                emit_json(&envelope)
+                invocation.check()?;
+                emit_json(invocation, &envelope)
             } else {
                 crate::rendering::bounded_json_len(
                     &document,
                     output::stream::MAX_RECORD_BYTES - 1024 * 1024,
                 )
                 .map_err(|error| error.into_cli_error(report_limit_error))?;
-                crate::cancellation::check()?;
+                invocation.check()?;
                 Ok(stream.complete(document, diagnostics)?)
             }
         }
@@ -121,84 +125,108 @@ const fn verdict_text(verdict: analysis::Verdict) -> &'static str {
     }
 }
 
-fn value_text(value: Option<&FieldValue>) -> String {
+fn value_text(value: Option<&field::Value>) -> String {
     value.map_or_else(|| "<absent>".to_owned(), ToString::to_string)
 }
 
-fn key_text(key: &[FieldValue]) -> String {
+fn key_text(key: &[field::Value]) -> String {
     key.iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(", ")
 }
 
-fn render_text(report: &analysis::Report) -> Result<(), CliError> {
-    write_stdout_line(format_args!("verdict: {}", verdict_text(report.verdict)))?;
+fn render_text(
+    invocation: &crate::invocation::Invocation,
+    report: &analysis::Report,
+) -> Result<(), CliError> {
+    write_stdout_line(
+        invocation,
+        format_args!("verdict: {}", verdict_text(report.verdict)),
+    )?;
     let rules = &report.rules;
     let comparison = match rules.comparison {
         analysis::ComparisonKind::CorrespondenceOnly => "correspondence_only",
         analysis::ComparisonKind::PropertyChecks => "property_checks",
     };
-    write_stdout_line(format_args!("comparison: {comparison}"))?;
+    write_stdout_line(invocation, format_args!("comparison: {comparison}"))?;
     for warning in &rules.warnings {
-        write_stdout_line(format_args!(
-            "warning {}: {}",
-            warning.code, warning.message
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!("warning {}: {}", warning.code, warning.message),
+        )?;
     }
     if !rules.preserve_presence.is_empty() || !rules.expect_absent.is_empty() {
-        write_stdout_line(format_args!(
-            "decoder-view presence rules: preserve [{}]; expect absent [{}]",
-            rules.preserve_presence.join(", "),
-            rules.expect_absent.join(", "),
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "decoder-view presence rules: preserve [{}]; expect absent [{}]",
+                rules.preserve_presence.join(", "),
+                rules.expect_absent.join(", "),
+            ),
+        )?;
     }
-    write_stdout_line(format_args!(
-        "rules: identity [{}]; preserve [{}]; expect [{}]",
-        rules.identity.join(", "),
-        rules.preserve.join(", "),
-        rules
-            .expect
-            .iter()
-            .map(|rule| format!("{}={}", rule.field, rule.value))
-            .collect::<Vec<_>>()
-            .join(", "),
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "rules: identity [{}]; preserve [{}]; expect [{}]",
+            rules.identity.join(", "),
+            rules.preserve.join(", "),
+            rules
+                .expect
+                .iter()
+                .map(|rule| format!("{}={}", rule.field, rule.value))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+    )?;
     for (side, capture) in [
         ("ingress", &report.sides.ingress),
         ("egress", &report.sides.egress),
     ] {
-        write_stdout_line(format_args!(
-            "{side}: {} read, {} selected ({} keyed, {} unkeyed, {} incomplete)",
-            capture.read, capture.selected, capture.keyed, capture.unkeyed, capture.incomplete,
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "{side}: {} read, {} selected ({} keyed, {} unkeyed, {} incomplete)",
+                capture.read, capture.selected, capture.keyed, capture.unkeyed, capture.incomplete,
+            ),
+        )?;
     }
     let summary = &report.summary;
-    write_stdout_line(format_args!(
-        "matches: {} unique ({} reordered); unmatched: {} ingress, {} egress; ambiguous: {} group(s), {} observation(s)",
-        summary.unique_matches,
-        summary.reordered_pairs,
-        summary.ingress_only,
-        summary.egress_only,
-        summary.ambiguous_groups,
-        summary.ambiguous_observations,
-    ))?;
-    write_stdout_line(format_args!(
-        "checks: {} evaluated ({} satisfied, {} violated, {} unevaluable)",
-        summary.checks_evaluated,
-        summary.checks_satisfied,
-        summary.checks_violated,
-        summary.checks_unevaluable,
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "matches: {} unique ({} reordered); unmatched: {} ingress, {} egress; ambiguous: {} group(s), {} observation(s)",
+            summary.unique_matches,
+            summary.reordered_pairs,
+            summary.ingress_only,
+            summary.egress_only,
+            summary.ambiguous_groups,
+            summary.ambiguous_observations,
+        ),
+    )?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "checks: {} evaluated ({} satisfied, {} violated, {} unevaluable)",
+            summary.checks_evaluated,
+            summary.checks_satisfied,
+            summary.checks_violated,
+            summary.checks_unevaluable,
+        ),
+    )?;
     for violation in &report.violations {
-        write_stdout_line(format_args!("{}", violation_text(violation)))?;
+        write_stdout_line(invocation, format_args!("{}", violation_text(violation)))?;
     }
     for (side, list) in [
         ("ingress", &report.unmatched.ingress),
         ("egress", &report.unmatched.egress),
     ] {
         for evidence in list {
-            write_stdout_line(format_args!("unmatched {side} frame {}", evidence.frame))?;
+            write_stdout_line(
+                invocation,
+                format_args!("unmatched {side} frame {}", evidence.frame),
+            )?;
         }
     }
     for (side, list) in [
@@ -206,28 +234,34 @@ fn render_text(report: &analysis::Report) -> Result<(), CliError> {
         ("egress", &report.unkeyed.egress),
     ] {
         for observation in list {
-            write_stdout_line(format_args!(
-                "unkeyed {side} frame {}",
-                observation.evidence.frame
-            ))?;
+            write_stdout_line(
+                invocation,
+                format_args!("unkeyed {side} frame {}", observation.evidence.frame),
+            )?;
         }
     }
     for group in &report.ambiguous {
-        write_stdout_line(format_args!(
-            "ambiguous identity [{}]: {} ingress and {} egress observation(s), never paired",
-            key_text(&group.key),
-            group.ingress_total,
-            group.egress_total,
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "ambiguous identity [{}]: {} ingress and {} egress observation(s), never paired",
+                key_text(&group.key),
+                group.ingress_total,
+                group.egress_total,
+            ),
+        )?;
     }
     let omitted = omitted_total(&report.omitted);
     if omitted > 0 {
-        write_stdout_line(format_args!(
-            "{omitted} report detail entries omitted by --max-details / --max-detail-bytes"
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "{omitted} report detail entries omitted by --max-details / --max-detail-bytes"
+            ),
+        )?;
     }
     for assumption in report.assumptions {
-        write_stdout_line(format_args!("assumption: {assumption}"))?;
+        write_stdout_line(invocation, format_args!("assumption: {assumption}"))?;
     }
     Ok(())
 }

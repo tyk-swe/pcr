@@ -15,7 +15,7 @@ use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 use crate::clock::Clock;
 use crate::evidence::ExecutionPermit;
 use crate::execution::Executor;
-use crate::execution::{Context, Errors, Grant, Receipt, rate_delay};
+use crate::execution::{Context, Grant, Receipt, rate_delay};
 use crate::{Stats, evidence::SentPacket};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -109,20 +109,19 @@ pub(crate) trait Sequenced {
     fn sequence(&self) -> u64;
 }
 
-pub(crate) fn run_batches<E, C, K, F, G>(
+pub(crate) fn run_batches<X, C, K, F, E>(
     batches: impl IntoIterator<Item = impl BorrowMut<Batch<K::Probe>>>,
     probes_per_second: Option<u32>,
     deadline: &mut Deadline,
     clock: &mut C,
-    executor: &mut E,
-    evidence: &mut BatchEvidence<K, F, G>,
-) -> Result<Stats, G::Error>
+    executor: &mut X,
+    evidence: &mut BatchEvidence<K, F, E>,
+) -> Result<Stats, E>
 where
-    E: Executor<Batch<K::Probe>>,
+    X: Executor<Batch<K::Probe>>,
     C: Clock,
     K: Classifier,
-    F: FnMut(K::Event, &Deadline) -> Result<(), G::Error>,
-    G: Errors<Step = u64> + Copy,
+    F: FnMut(K::Event, &Deadline) -> Result<(), E>,
 {
     let mut batches = batches.into_iter();
     run_planned(
@@ -140,21 +139,20 @@ where
 /// gathered so far, the clock's current instant, and the deadline before each
 /// batch, and ends the run by returning `None`. The first batch waits what
 /// remains of one probe's rate interval after `paced_after`.
-pub(crate) fn run_planned<E, C, K, F, G, B>(
-    mut next: impl FnMut(&mut BatchEvidence<K, F, G>, Instant, &Deadline) -> Result<Option<B>, G::Error>,
+pub(crate) fn run_planned<X, C, K, F, E, B>(
+    mut next: impl FnMut(&mut BatchEvidence<K, F, E>, Instant, &Deadline) -> Result<Option<B>, E>,
     probes_per_second: Option<u32>,
     paced_after: Option<Instant>,
     deadline: &mut Deadline,
     clock: &mut C,
-    executor: &mut E,
-    evidence: &mut BatchEvidence<K, F, G>,
-) -> Result<Stats, G::Error>
+    executor: &mut X,
+    evidence: &mut BatchEvidence<K, F, E>,
+) -> Result<Stats, E>
 where
-    E: Executor<Batch<K::Probe>>,
+    X: Executor<Batch<K::Probe>>,
     C: Clock,
     K: Classifier,
-    F: FnMut(K::Event, &Deadline) -> Result<(), G::Error>,
-    G: Errors<Step = u64> + Copy,
+    F: FnMut(K::Event, &Deadline) -> Result<(), E>,
     B: BorrowMut<Batch<K::Probe>>,
 {
     let errors = evidence.errors();
@@ -168,12 +166,12 @@ where
         context.enforce(sequence)?;
         let delay = match (previous_probes, paced_after) {
             (Some(previous_probes), _) => rate_delay(
-                &errors,
+                errors,
                 "probes_per_second",
                 previous_probes,
                 probes_per_second,
             )?,
-            (None, Some(after)) => rate_delay(&errors, "probes_per_second", 1, probes_per_second)?
+            (None, Some(after)) => rate_delay(errors, "probes_per_second", 1, probes_per_second)?
                 .saturating_sub(context.now().saturating_duration_since(after)),
             (None, None) => Duration::ZERO,
         };

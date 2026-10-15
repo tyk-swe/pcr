@@ -69,7 +69,7 @@ fn rebuild(
 ) -> Result<build::BuiltPacket, build::Error> {
     build::Builder::new(Arc::clone(registry)).build(
         packet,
-        codec::Context::default(),
+        codec::Addresses::default(),
         build::Options {
             mode,
             ..build::Options::default()

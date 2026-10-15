@@ -5,7 +5,7 @@ use super::{CLIENT, SERVER};
 use bytes::Bytes;
 use packetcraftr_core::build::{Builder, Options as BuildOptions};
 use packetcraftr_core::capture_file::{Reader, Writer};
-use packetcraftr_core::codec::Context as BuildContext;
+use packetcraftr_core::codec::Addresses as BuildContext;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;

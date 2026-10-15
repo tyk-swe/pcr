@@ -208,7 +208,7 @@ fn build(registry: &Arc<Registry>, packet: Packet) -> Vec<u8> {
     core::build::Builder::new(Arc::clone(registry))
         .build(
             packet,
-            core::codec::Context::default(),
+            core::codec::Addresses::default(),
             core::build::Options::default(),
         )
         .expect("fixture frame must build")

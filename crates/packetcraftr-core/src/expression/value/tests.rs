@@ -17,7 +17,7 @@ fn parser(max_nesting: usize) -> Parser {
 fn recursive_list_before_descending() {
     assert_eq!(
         parse_value_bounded(0, "[]", 0, &mut parser(1)).unwrap(),
-        FieldValue::List(Vec::new())
+        field::Value::List(Vec::new())
     );
     assert!(matches!(
         parse_value_bounded(0, "[]", 0, &mut parser(0)),

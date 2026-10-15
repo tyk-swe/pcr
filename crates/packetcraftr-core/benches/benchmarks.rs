@@ -26,7 +26,7 @@ use packetcraftr_core::capture_file::compression::{
     Output as CompressedOutput,
 };
 use packetcraftr_core::capture_file::{Reader, ReaderLimits, Writer};
-use packetcraftr_core::codec::Context;
+use packetcraftr_core::codec::Addresses;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::document::{DocumentLimits, Format, Packet as DocPacket};
 use packetcraftr_core::filter::{Context as FilterContext, Filter, Limits as FilterLimits};
@@ -68,7 +68,11 @@ fn bench_packet_decode_and_rebuild(c: &mut Criterion) {
     packet.push(Raw::new(vec![0x41; 256]));
 
     let built = builder
-        .build(packet.clone(), Context::default(), BuildOptions::default())
+        .build(
+            packet.clone(),
+            Addresses::default(),
+            BuildOptions::default(),
+        )
         .expect("build");
     let frame = Frame::new(SystemTime::now(), LinkType::IPV4, built.bytes.clone()).expect("frame");
 
@@ -89,7 +93,7 @@ fn bench_packet_decode_and_rebuild(c: &mut Criterion) {
             let res = builder
                 .build(
                     black_box(packet.clone()),
-                    black_box(Context::default()),
+                    black_box(Addresses::default()),
                     black_box(BuildOptions::default()),
                 )
                 .expect("rebuild");
@@ -604,7 +608,7 @@ fn tcp_frame(
         packet.push(Raw::new(payload.to_vec()));
     }
     let built = builder
-        .build(packet, Context::default(), BuildOptions::default())
+        .build(packet, Addresses::default(), BuildOptions::default())
         .expect("benchmark TCP frame builds");
     let timestamp = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(tick);
     Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("benchmark frame")
@@ -801,7 +805,7 @@ fn bench_tls_application_data_decode(c: &mut Criterion) {
     });
     packet.push(Raw::new(record));
     let built = builder
-        .build(packet, Context::default(), BuildOptions::default())
+        .build(packet, Addresses::default(), BuildOptions::default())
         .expect("build");
     let frame = Frame::new(SystemTime::now(), LinkType::IPV4, built.bytes).expect("frame");
 

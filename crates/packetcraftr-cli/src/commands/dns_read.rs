@@ -38,20 +38,27 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+fn run(
+    invocation: &crate::invocation::Invocation,
+    args: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     args.application.validate_output()?;
     let mut ports = args.dns_ports;
     ports.push(53);
     let collector = Collector::new(args.application.core(), ports).map_err(CliError::classified)?;
     let (mut messages, mut transactions, mut issues) = (Vec::new(), Vec::new(), Vec::new());
     let outcome = inspect(
+        invocation,
         Inspection {
             path: &args.path,
             limits: args.limits,
@@ -70,7 +77,9 @@ fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliErro
             Event::Message(value) => output.emit(
                 wire::Message::try_from(*value).map_err(CliError::classified)?,
                 &mut messages,
-                |message| rendering::render_message(message, stream.presentation()),
+                |invocation, message| {
+                    rendering::render_message(invocation, message, stream.presentation())
+                },
             ),
             Event::Transaction(value) => output.emit(
                 wire::Transaction::try_from(value).map_err(CliError::classified)?,
@@ -87,6 +96,7 @@ fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliErro
     let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
         .map_err(CliError::classified)?;
     complete_application(
+        invocation,
         Command::DnsRead,
         format,
         stream,

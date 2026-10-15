@@ -11,8 +11,8 @@ use packetcraftr_core::{
 
 use crate::Error;
 
-pub(super) fn build_context(plan: &crate::route::Plan) -> packetcraftr_core::codec::Context {
-    packetcraftr_core::codec::Context {
+pub(super) fn build_context(plan: &crate::route::Plan) -> packetcraftr_core::codec::Addresses {
+    packetcraftr_core::codec::Addresses {
         source: plan.packet_source,
         destination: plan.final_destination,
     }

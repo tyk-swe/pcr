@@ -154,7 +154,7 @@ fn frame_bytes(ttl: u8) -> Vec<u8> {
     packetcraftr_core::build::Builder::new(packetcraftr_core::protocol::builtin::registry())
         .build(
             packet,
-            packetcraftr_core::codec::Context::default(),
+            packetcraftr_core::codec::Addresses::default(),
             packetcraftr_core::build::Options::default(),
         )
         .expect("replay fixture builds")
@@ -225,12 +225,16 @@ fn replay_text_fail_expiring_write() {
             started
         }
     });
-    let _scope = crate::invocation::enter_deadline(Some(Arc::new(deadline)));
+    let mut invocation = crate::test_support::invocation();
+    invocation.deadline = Some(Arc::new(deadline));
     let error = drive(
         &client(10),
         request(reader(1)),
         move |Event::Frame(evidence): Event| {
             text_record_with(evidence, crate::rendering::Presentation::default(), |_| {
+                invocation
+                    .check_interrupted()
+                    .map_err(HumanWriteError::Interrupted)?;
                 expired.store(true, Ordering::Relaxed);
                 Err(HumanWriteError::Write(io::Error::other(
                     "fixture pipe closed",
@@ -266,9 +270,11 @@ fn replay_arguments(path: &std::path::Path, extra: &[&str]) -> arguments::Args {
 
 #[test]
 fn prepare_reject_gap_clamp_immediate_timing() {
+    let invocation = &crate::test_support::invocation();
+
     let missing = std::path::Path::new("/nonexistent/fixture.pcap");
     let arguments = replay_arguments(missing, &["--timing", "immediate", "--max-gap-ms", "5"]);
-    let Err(error) = prepare(&arguments) else {
+    let Err(error) = prepare(invocation, &arguments) else {
         panic!("immediate timing has no gaps to clamp");
     };
     assert_eq!(

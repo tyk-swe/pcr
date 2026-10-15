@@ -17,6 +17,17 @@ for replacement APIs.
 
 ### Breaking
 
+- Rename codec extension types to `Codec`, `EncodeContext`, `DecodeContext`,
+  `Encoded`, and `Decoded`, and address defaults to `codec::Addresses`.
+  Use `field::Kind`, `field::Value`, `probe::Endpoint`, and `probe::Status`.
+- `analysis::Session::new` takes its stream selector from `Options.stream`.
+  `Client::with_deadline` consumes the client and narrows its existing ceiling;
+  scan preparation and remaining-budget helpers are replaced by private operation
+  state. Composed scan, trace, DNS, and OS stages share their bounds and accounting.
+- CLI invocations own output, cancellation, deadlines, and resource diagnostics;
+  worker closures inherit those bounds. Command behavior and serialized schemas
+  remain unchanged by this refactor.
+
 - `scan::Limits`, `traceroute::Limits`, and `dns::Limits` nest evidence bounds
   under `evidence: packetcraftr::evidence::Limits { max_frames, max_bytes, max_undecoded }`,
   preserving JSON and binary Serde representations.

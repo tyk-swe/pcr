@@ -166,7 +166,7 @@ impl FieldEdit {
         let declared = path
             .schema(schema)
             .ok_or(Error::Invalid(InvalidInput::EditUnknownField))?;
-        if declared.kind != crate::field::FieldKind::Unsigned {
+        if declared.kind != crate::field::Kind::Unsigned {
             return Err(Error::Invalid(InvalidInput::EditFieldNotUnsigned));
         }
         let Some(&(_, _, width)) = EDITABLE.iter().find(|(protocol_name, field, _)| {

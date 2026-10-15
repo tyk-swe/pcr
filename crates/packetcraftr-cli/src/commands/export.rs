@@ -37,14 +37,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(crate) fn run(
+    invocation: &crate::invocation::Invocation,
+    args: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let streams = args
         .streams
         .iter()
@@ -59,15 +65,20 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         max_selected_frames: args.max_selected_frames,
     };
     selection.validate().map_err(CliError::classified)?;
-    let mut staged = crate::staged_output::StagedFile::stage(&args.write)?;
+    let mut staged = crate::staged_output::StagedFile::stage(invocation, &args.write)?;
     let limits = args.limits.capture.stream_limits();
-    let mut source = crate::input::open_capture(&args.path, args.limits.capture.reader)?;
-    let mut reader =
-        crate::input::snapshot_capture(&mut source, args.limits.capture.reader, limits)?;
+    let mut source =
+        crate::input::open_capture(invocation, &args.path, args.limits.capture.reader)?;
+    let mut reader = crate::input::snapshot_capture(
+        invocation,
+        &mut source,
+        args.limits.capture.reader,
+        limits,
+    )?;
     let plan = analysis::export::plan(
         &mut reader,
         setup.registry.clone(),
-        &setup.options(),
+        &setup.options(invocation),
         &selection,
     )
     .map_err(CliError::classified)?;
@@ -89,54 +100,66 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     let report = output::export::Report::try_from((args.write.display().to_string(), report, plan))
         .map_err(CliError::classified)?;
     staged.sync()?;
-    crate::cancellation::check()?;
+    invocation.check()?;
     staged.persist()?;
     match format {
-        Format::Json => emit_aggregate(Command::Export, report, Vec::new()),
+        Format::Json => emit_aggregate(invocation, Command::Export, report, Vec::new()),
         Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
         Format::Text => {
             for selected in &report.matched_streams {
-                crate::rendering::write_stdout_line(format_args!(
-                    "exported stream: {}:{}",
-                    selected.transport.as_str(),
-                    selected.index
-                ))?;
+                crate::rendering::write_stdout_line(
+                    invocation,
+                    format_args!(
+                        "exported stream: {}:{}",
+                        selected.transport.as_str(),
+                        selected.index
+                    ),
+                )?;
             }
             for missing in &report.unmatched_streams {
-                crate::rendering::write_stdout_line(format_args!(
-                    "warning: unmatched stream {}:{}",
-                    missing.transport.as_str(),
-                    missing.index
-                ))?;
+                crate::rendering::write_stdout_line(
+                    invocation,
+                    format_args!(
+                        "warning: unmatched stream {}:{}",
+                        missing.transport.as_str(),
+                        missing.index
+                    ),
+                )?;
             }
             for missing in &report.unmatched_datagram_frames {
-                crate::rendering::write_stdout_line(format_args!(
-                    "warning: unmatched datagram frame {missing}"
-                ))?;
+                crate::rendering::write_stdout_line(
+                    invocation,
+                    format_args!("warning: unmatched datagram frame {missing}"),
+                )?;
             }
             for incomplete in &report.selected_incomplete_datagrams {
-                crate::rendering::write_stdout_line(format_args!(
-                    "warning: incomplete datagram {:?}",
-                    incomplete.key
-                ))?;
+                crate::rendering::write_stdout_line(
+                    invocation,
+                    format_args!("warning: incomplete datagram {:?}", incomplete.key),
+                )?;
             }
             if report.source_outcomes_omitted > 0 {
-                crate::rendering::write_stdout_line(format_args!(
-                    "{} source outcomes omitted",
-                    report.source_outcomes_omitted
-                ))?;
+                crate::rendering::write_stdout_line(
+                    invocation,
+                    format_args!("{} source outcomes omitted", report.source_outcomes_omitted),
+                )?;
             }
-            stream.presentation().details("Export sources", &report)?;
-            write_summary_line(format_args!(
-                "exported {} of {} physical frames to {}; {} complete and {} incomplete datagrams, {} unmatched stream selectors, {} unmatched datagram selectors",
-                report.capture.frames_selected,
-                report.capture.frames_read,
-                report.path,
-                report.selected_complete_datagrams,
-                report.selected_incomplete_datagrams.len(),
-                report.unmatched_streams.len(),
-                report.unmatched_datagram_frames.len()
-            ))
+            stream
+                .presentation()
+                .details(invocation, "Export sources", &report)?;
+            write_summary_line(
+                invocation,
+                format_args!(
+                    "exported {} of {} physical frames to {}; {} complete and {} incomplete datagrams, {} unmatched stream selectors, {} unmatched datagram selectors",
+                    report.capture.frames_selected,
+                    report.capture.frames_read,
+                    report.path,
+                    report.selected_complete_datagrams,
+                    report.selected_incomplete_datagrams.len(),
+                    report.unmatched_streams.len(),
+                    report.unmatched_datagram_frames.len()
+                ),
+            )
         }
         other => other.unreachable(),
     }

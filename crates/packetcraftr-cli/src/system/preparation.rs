@@ -79,6 +79,7 @@ pub(crate) struct Prepared<R> {
 }
 
 pub(crate) fn prepare_live<R: LiveRequest>(
+    invocation: &crate::invocation::Invocation,
     send: SendArgs,
     template: TemplateArgs,
     mut request: R,
@@ -102,10 +103,14 @@ pub(crate) fn prepare_live<R: LiveRequest>(
             packetcraftr::policy::WireLimits::new(count, 0),
         ))
         .map_err(CliError::classified)?;
-    let first =
-        route::authorize_expanded_destinations(request.template(), max_template_packets, &policy)?;
+    let first = route::authorize_expanded_destinations(
+        invocation,
+        request.template(),
+        max_template_packets,
+        &policy,
+    )?;
     let plan = route::options(&send.route.route)?;
-    let destination = route::destination(send.route.destination, &first, &policy)?;
+    let destination = route::destination(invocation, send.route.destination, &first, &policy)?;
     request.set_send(packetcraftr::send::Options {
         destination,
         plan,
@@ -117,7 +122,7 @@ pub(crate) fn prepare_live<R: LiveRequest>(
     });
     Ok(Prepared {
         request,
-        client: client(registry, policy, Runtime::Client),
+        client: client(invocation, registry, policy, Runtime::Client),
     })
 }
 
@@ -129,6 +134,7 @@ pub(crate) struct Plan {
 }
 
 pub(crate) fn prepare_plan(
+    invocation: &crate::invocation::Invocation,
     arguments: RouteArgs,
     policy: packetcraftr::policy::Policy,
 ) -> Result<Plan, CliError> {
@@ -145,9 +151,9 @@ pub(crate) fn prepare_plan(
         .authorize_packet_destinations(&packet)
         .map_err(CliError::classified)?;
     let route = route::options(&route)?;
-    let destination = route::destination(destination, &packet, &policy)?;
+    let destination = route::destination(invocation, destination, &packet, &policy)?;
     Ok(Plan {
-        client: client(registry, policy, Runtime::Client),
+        client: client(invocation, registry, policy, Runtime::Client),
         packet,
         destination,
         route,
@@ -161,8 +167,13 @@ pub(crate) struct Workflow {
 }
 
 impl Workflow {
-    pub(crate) fn client(&self, runtime: Runtime) -> Client {
+    pub(crate) fn client(
+        &self,
+        invocation: &crate::invocation::Invocation,
+        runtime: Runtime,
+    ) -> Client {
         client(
+            invocation,
             core::protocol::builtin::registry(),
             Arc::clone(&self.policy),
             runtime,
@@ -279,17 +290,19 @@ mod tests {
 
     #[test]
     fn exchange_rejects_invalid_options_before_the_recipe() {
+        let invocation = &crate::test_support::invocation();
+
         let (send, template) = live_arguments("exchange");
         let request = packetcraftr::exchange::Request {
             timeout: Duration::MAX,
             ..exchange_request()
         };
-        let message = error_message(prepare_live(send, template, request));
+        let message = error_message(prepare_live(invocation, send, template, request));
         assert!(message.contains("timeout"), "{message}");
         assert_ne!(message, recipe_error());
     }
 
-    fn plan_error(options: &[&str]) -> CliError {
+    fn plan_error(invocation: &crate::invocation::Invocation, options: &[&str]) -> CliError {
         let cli = Cli::try_parse_from(
             ["packetcraftr", "plan"]
                 .into_iter()
@@ -299,7 +312,7 @@ mod tests {
         let CommandLine::Plan(arguments) = cli.command else {
             panic!("plan command");
         };
-        match prepare_plan(arguments.route, arguments.policy.into_policy()) {
+        match prepare_plan(invocation, arguments.route, arguments.policy.into_policy()) {
             Ok(_) => panic!("preparation must fail"),
             Err(error) => error,
         }
@@ -307,7 +320,10 @@ mod tests {
 
     #[test]
     fn plan_rejects_the_interface_before_resolving_the_destination() {
-        let error = plan_error(UNRESOLVABLE_HOST_BAD_INTERFACE);
+        let error = plan_error(
+            &crate::test_support::invocation(),
+            UNRESOLVABLE_HOST_BAD_INTERFACE,
+        );
         assert_eq!(error.message, "--interface index must be non-zero");
         assert_eq!(error.exit_code(), 2);
     }

@@ -7,7 +7,11 @@ use crate::route::CachedProvider;
 use crate::{Client, clock::Clock, providers::PacketProviders};
 
 impl<P: PacketProviders, K: Clock> Client<P, K> {
-    pub(super) fn prepare_exchange(&self, request: Request) -> Result<Prepared, Error> {
+    pub(super) fn prepare_exchange(
+        &self,
+        request: Request,
+        operation: &crate::execution::Operation,
+    ) -> Result<Prepared, Error> {
         self.check_cancelled()?;
         request.validate()?;
         let Request {
@@ -18,16 +22,15 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             collection,
             stop: _,
         } = request;
-        let window =
-            Window::open(&self.clock, timeout, self.cancellation.clone()).ok_or_else(|| {
-                Error::InvalidRequest {
-                    field: "timeout",
-                    message: "cannot be represented by the platform monotonic clock".to_owned(),
-                }
-            })?;
+        let window = Window::open(&self.clock, timeout, self.cancellation.clone())
+            .ok_or_else(|| Error::InvalidRequest {
+                field: "timeout",
+                message: "cannot be represented by the platform monotonic clock".to_owned(),
+            })?
+            .with_parent(operation.deadline.clone());
         let expansion_len = template.expansion_len().map_err(crate::Error::from)?;
         let packet_count = u64::try_from(expansion_len).unwrap_or(u64::MAX);
-        let mut admission = self.admitting(&send, packet_count, window.deadline())?;
+        let mut admission = self.admitting_in(&send, packet_count, window.deadline(), operation)?;
         if expansion_len == 0 {
             return Err(crate::Error::Template {
                 message: "template expanded to no packets".to_owned(),

@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use bytes::Bytes;
 
-use crate::codec::{DecodedLayer, LayerCodec, LayerDecodeContext};
+use crate::codec::{Codec, DecodeContext, Decoded};
 use crate::diagnostic::Diagnostic;
 use crate::frame::Frame;
 use crate::packet::Packet;
@@ -37,7 +37,7 @@ struct TrailingBytes {
 }
 
 struct ValidatedLayer {
-    decoded: DecodedLayer,
+    decoded: Decoded,
     protocol: crate::layer::Id,
     layer_end: usize,
     payload_end: usize,
@@ -122,14 +122,14 @@ impl<'registry> DecodeSession<'registry> {
 
     fn decode_layer(
         &self,
-        codec: &dyn LayerCodec,
+        codec: &dyn Codec,
         cursor: &DecodeCursor,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+    ) -> Result<Decoded, crate::codec::Error> {
         // validate_layer checks cursor ranges; slicing shares the buffer instead of copying
         let input = self.frame.bytes().slice(cursor.bytes.clone());
         codec.decode(
             input,
-            &LayerDecodeContext {
+            &DecodeContext {
                 parent: self
                     .packet
                     .iter()
@@ -179,9 +179,9 @@ impl<'registry> DecodeSession<'registry> {
     }
 
     fn validate_layer(
-        codec: &dyn LayerCodec,
+        codec: &dyn Codec,
         cursor: &DecodeCursor,
-        mut decoded: DecodedLayer,
+        mut decoded: Decoded,
     ) -> Result<ValidatedLayer, Error> {
         let actual_protocol = *decoded.layer.protocol_id();
         if !codec.accepts_decoded_protocol(&actual_protocol) {

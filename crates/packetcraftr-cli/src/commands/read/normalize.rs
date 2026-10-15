@@ -18,6 +18,7 @@ use crate::errors::CliError;
 use crate::rendering::SourceCaptureWriter;
 
 pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
     reader: &mut Reader<impl Read>,
     limits: OfflineCaptureLimitsArgs,
     selection: Selection<'_>,
@@ -26,8 +27,12 @@ pub(super) fn run(
 ) -> Result<(), CliError> {
     reader.refuse_declared_fcs().map_err(CliError::classified)?;
     match format {
-        capture::Format::PcapNg => normalize_to_pcapng(reader, limits, selection, destination),
-        capture::Format::Pcap => normalize_to_pcap(reader, limits, selection, destination),
+        capture::Format::PcapNg => {
+            normalize_to_pcapng(invocation, reader, limits, selection, destination)
+        }
+        capture::Format::Pcap => {
+            normalize_to_pcap(invocation, reader, limits, selection, destination)
+        }
     }
 }
 
@@ -36,6 +41,7 @@ pub(super) fn run(
 /// Every frame read is charged to the input budget, selected or not, and the reader is
 /// checked for a declared frame check sequence after each read.
 fn next_selected(
+    invocation: &crate::invocation::Invocation,
     reader: &mut Reader<impl Read>,
     budget: &mut capture::Budget,
     selection: Selection<'_>,
@@ -44,7 +50,7 @@ fn next_selected(
         let next = reader.next_frame().map_err(CliError::classified)?;
         reader.refuse_declared_fcs().map_err(CliError::classified)?;
         let Some(frame) = next else { return Ok(None) };
-        let source_frame = account_frame(budget, &frame)?;
+        let source_frame = account_frame(invocation, budget, &frame)?;
         if !selection.matches(source_frame, &frame)? {
             continue;
         }
@@ -53,6 +59,7 @@ fn next_selected(
 }
 
 fn normalize_to_pcapng(
+    invocation: &crate::invocation::Invocation,
     reader: &mut Reader<impl Read>,
     limits: OfflineCaptureLimitsArgs,
     selection: Selection<'_>,
@@ -70,7 +77,7 @@ fn normalize_to_pcapng(
     .map_err(CliError::classified)?;
     let mut output = SourceCaptureWriter::new(writer);
     let mut budget = capture::Budget::new(limits.stream_limits()).map_err(CliError::classified)?;
-    while let Some((_, frame)) = next_selected(reader, &mut budget, selection)? {
+    while let Some((_, frame)) = next_selected(invocation, reader, &mut budget, selection)? {
         // Classic PCAP exposes its single interface at zero; PCAPNG frame IDs are global.
         let source_interface = frame.interface.unwrap_or(0);
         output
@@ -96,6 +103,7 @@ fn source_description<R: Read>(reader: &Reader<R>, source_interface: u32) -> &ca
 /// Classic PCAP fixes its header before the first record, so the writer opens at the first
 /// selected frame, and a later conflict can leave the earlier records already written.
 fn normalize_to_pcap<W: Write>(
+    invocation: &crate::invocation::Invocation,
     reader: &mut Reader<impl Read>,
     limits: OfflineCaptureLimitsArgs,
     selection: Selection<'_>,
@@ -104,7 +112,9 @@ fn normalize_to_pcap<W: Write>(
     let mut budget = capture::Budget::new(limits.stream_limits()).map_err(CliError::classified)?;
     let mut destination = Some(destination);
     let mut open: Option<(u32, capture::Writer<W>)> = None;
-    while let Some((source_frame, mut frame)) = next_selected(reader, &mut budget, selection)? {
+    while let Some((source_frame, mut frame)) =
+        next_selected(invocation, reader, &mut budget, selection)?
+    {
         let source_interface = frame.interface.unwrap_or(0);
         if open.is_none() {
             let opened = open_classic_writer(

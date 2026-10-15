@@ -348,14 +348,14 @@ pub struct Inference {
     pub state: Option<State>,
     pub rule: Rule,
     /// Each attempt's probe sequence lands in exactly one list, ascending.
-    /// Attempts whose own observation concludes `state`.
+    /// attempt_error whose own observation concludes `state`.
     pub supporting: Vec<u64>,
-    /// Attempts whose reply concludes a different state.
+    /// attempt_error whose reply concludes a different state.
     pub conflicting: Vec<u64>,
     /// Silent attempts beside a reply-based conclusion they do not share;
     /// silence is consistent with loss and neither supports nor contradicts.
     pub unanswered: Vec<u64>,
-    /// Attempts that ended in an operational failure and observed nothing.
+    /// attempt_error that ended in an operational failure and observed nothing.
     pub failed: Vec<u64>,
 }
 

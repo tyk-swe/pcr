@@ -18,6 +18,7 @@ use crate::output::contract::Format;
 use crate::rendering::{FieldTree, StreamEncoder};
 
 pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
     reader: &mut Reader<impl Read>,
     limits: OfflineCaptureLimitsArgs,
     selection: Selection<'_>,
@@ -28,14 +29,14 @@ pub(super) fn run(
     let mut budget = capture::Budget::new(limits.stream_limits()).map_err(CliError::classified)?;
     let mut frames_matched = 0;
     while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
-        let source_frame = account_frame(&mut budget, &frame)?;
+        let source_frame = account_frame(invocation, &mut budget, &frame)?;
         if !selection.keeps(source_frame, &frame) {
             continue;
         }
         let Some(record) = convert_frame(frame, source_frame, selection.decoding)? else {
             continue;
         };
-        render_record(record, format, stream, tree.as_deref_mut())?;
+        render_record(invocation, record, format, stream, tree.as_deref_mut())?;
         frames_matched = increment_counter(frames_matched, "read matched-frame count")?;
     }
     if format == Format::Ndjson {

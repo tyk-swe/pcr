@@ -11,7 +11,7 @@ use super::report::{
 };
 use super::{Error, ExpectationOutcome, Limits, Observation, Rules, Side, ValueState};
 use crate::budget::{Cancellation, Deadline};
-use crate::field::FieldValue;
+use crate::field;
 
 #[derive(Clone, Debug, Default)]
 pub struct SideInput {
@@ -484,8 +484,8 @@ fn preservation_outcome(
     kind: CheckKind,
     expected_state: ValueState,
     actual_state: ValueState,
-    expected: &Option<FieldValue>,
-    actual: &Option<FieldValue>,
+    expected: &Option<field::Value>,
+    actual: &Option<field::Value>,
 ) -> Outcome {
     let equal = if kind == CheckKind::PreservePresence {
         expected_state
@@ -507,7 +507,7 @@ fn preservation_outcome(
 fn evaluate_expectation(
     kind: CheckKind,
     stored: &ExpectationOutcome,
-) -> (Outcome, Option<FieldValue>) {
+) -> (Outcome, Option<field::Value>) {
     let available = if kind == CheckKind::ExpectAbsent {
         stored.state.presence().is_some()
     } else {

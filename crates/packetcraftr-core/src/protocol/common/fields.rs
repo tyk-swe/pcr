@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
-    codec::LayerEncodeContext,
+    codec::EncodeContext,
     diagnostic::Diagnostic,
-    field::{self, FieldValue, WireValue},
+    field::{self, WireValue},
     layer::Layer,
     registry::Discriminator,
 };
@@ -73,7 +73,7 @@ pub(crate) fn resolve_u16_discriminator(
     name: &'static str,
     field: &'static str,
     value: &WireValue<u16>,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(u16, WireValue<u16>), crate::codec::Error> {
     validate_auto_raw_discriminator(name, field, value, context, diagnostics)?;
@@ -166,7 +166,7 @@ where
 /// several protocols are registered under more than one discriminator.
 pub(crate) fn expected_discriminator<T>(
     parent: &str,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     fallback: T,
     value: &WireValue<T>,
 ) -> ValueExpectation<T>
@@ -204,17 +204,17 @@ where
         )
 }
 
-pub(crate) fn text_list(values: &[String]) -> FieldValue {
-    FieldValue::List(values.iter().cloned().map(FieldValue::Text).collect())
+pub(crate) fn text_list(values: &[String]) -> field::Value {
+    field::Value::List(values.iter().cloned().map(field::Value::Text).collect())
 }
 
-pub(crate) fn unsigned_list(values: &[u16]) -> FieldValue {
-    FieldValue::List(values.iter().copied().map(FieldValue::from).collect())
+pub(crate) fn unsigned_list(values: &[u16]) -> field::Value {
+    field::Value::List(values.iter().copied().map(field::Value::from).collect())
 }
 
 pub(crate) fn make_layer<L>(
     mut layer: L,
-    fields: &BTreeMap<String, FieldValue>,
+    fields: &BTreeMap<String, field::Value>,
 ) -> Result<Box<dyn Layer>, crate::codec::Error>
 where
     L: Layer + 'static,
@@ -229,7 +229,7 @@ where
 pub(crate) fn set_document_field<L>(
     layer: &mut L,
     name: &str,
-    value: FieldValue,
+    value: field::Value,
 ) -> Result<(), field::Error>
 where
     L: Layer,
@@ -245,7 +245,7 @@ where
 
 pub(crate) fn reject_aliased_duplicates(
     schema: &'static crate::layer::Schema,
-    fields: &BTreeMap<String, FieldValue>,
+    fields: &BTreeMap<String, field::Value>,
 ) -> Result<(), crate::codec::Error> {
     for declared in schema.fields {
         let mut supplied = std::iter::once(declared.name)

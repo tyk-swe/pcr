@@ -12,6 +12,7 @@ use crate::rendering::{
 };
 
 pub(super) fn render_complete(
+    invocation: &crate::invocation::Invocation,
     format: Format,
     snapshot: &output::capture::Snapshot,
     diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
@@ -19,48 +20,64 @@ pub(super) fn render_complete(
 ) -> Result<(), CliError> {
     let output::capture::Snapshot { summary, stats } = snapshot;
     match format {
-        Format::Json => {
-            emit_aggregate_with_stats(Command::Capture, summary, diagnostics, stats.clone())
-        }
+        Format::Json => emit_aggregate_with_stats(
+            invocation,
+            Command::Capture,
+            summary,
+            diagnostics,
+            stats.clone(),
+        ),
         Format::Ndjson => stream
             .complete_with_stats(summary, diagnostics, stats.clone())
             .map_err(Into::into),
         Format::Text => {
-            write_summary_line(format_args!(
-                "captured {} frames ({} emitted), {} bytes across {} interfaces; stopped for {}",
-                stats.packets_attempted,
-                stats.packets_completed,
-                stats.bytes,
-                summary.sources.len(),
-                summary.stop_reason
-            ))?;
+            write_summary_line(
+                invocation,
+                format_args!(
+                    "captured {} frames ({} emitted), {} bytes across {} interfaces; stopped for {}",
+                    stats.packets_attempted,
+                    stats.packets_completed,
+                    stats.bytes,
+                    summary.sources.len(),
+                    summary.stop_reason
+                ),
+            )?;
             for source in &summary.sources {
                 if let Some(settings) = &source.capture_settings {
-                    write_stdout_line(format_args!(
-                        "  source {} ({}): buffer_size {} timestamp_source {} timestamp_precision {}",
-                        source.capture_id,
-                        source.native_interface.name,
-                        realized_text(&settings.buffer_size),
-                        realized_text(&settings.timestamp_source),
-                        realized_text(&settings.timestamp_precision),
-                    ))?;
+                    write_stdout_line(
+                        invocation,
+                        format_args!(
+                            "  source {} ({}): buffer_size {} timestamp_source {} timestamp_precision {}",
+                            source.capture_id,
+                            source.native_interface.name,
+                            realized_text(&settings.buffer_size),
+                            realized_text(&settings.timestamp_source),
+                            realized_text(&settings.timestamp_precision),
+                        ),
+                    )?;
                 }
             }
             if let Some(files) = &summary.files {
                 for file in &files.files {
-                    write_stdout_line(format_args!(
-                        "  {}: {} frames, {} capture bytes, finalized={}",
-                        file.path, file.frames, file.capture_bytes, file.finalized
-                    ))?;
+                    write_stdout_line(
+                        invocation,
+                        format_args!(
+                            "  {}: {} frames, {} capture bytes, finalized={}",
+                            file.path, file.frames, file.capture_bytes, file.finalized
+                        ),
+                    )?;
                 }
-                write_stdout_line(format_args!(
-                    "  retention={}, retired files={}, retired frames={}",
-                    document_spelling(&files.retention),
-                    files.discarded_files,
-                    files.discarded_frames
-                ))?;
+                write_stdout_line(
+                    invocation,
+                    format_args!(
+                        "  retention={}, retired files={}, retired frames={}",
+                        document_spelling(&files.retention),
+                        files.discarded_files,
+                        files.discarded_frames
+                    ),
+                )?;
             }
-            render_diagnostics_text(&diagnostics)
+            render_diagnostics_text(invocation, &diagnostics)
         }
         _ => render_diagnostics_stderr(&diagnostics),
     }

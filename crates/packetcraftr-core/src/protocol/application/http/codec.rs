@@ -12,8 +12,8 @@ use super::{
     StartLine,
 };
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::FieldValue,
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field,
     layer::{Layer, Raw},
     protocol::{
         BuiltinProtocol,
@@ -337,7 +337,7 @@ fn validate_line_endings(input: &[u8]) -> Result<(), Error> {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct HttpCodec;
-impl LayerCodec for HttpCodec {
+impl Codec for HttpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &http_schema().protocol
     }
@@ -351,24 +351,24 @@ impl LayerCodec for HttpCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Http>(NAME, layer)?;
         ensure_encode_budget(NAME, layer.head.wire().len(), context)?;
         Ok(
-            EncodedLayer::header(layer.head.wire().to_vec(), Box::new(layer.clone()))
+            Encoded::header(layer.head.wire().to_vec(), Box::new(layer.clone()))
                 .with_fields(http_layout()),
         )
     }
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Ok(Some((head, consumed))) = parse_head(&input) else {
             return Ok(Raw::decoded(input));
         };
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Http { head }),
             consumed,
             payload_len: input.len() - consumed,
@@ -385,9 +385,9 @@ impl LayerCodec for HttpCodec {
     }
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        let Some(FieldValue::Bytes(wire)) = fields.get("wire") else {
+        let Some(field::Value::Bytes(wire)) = fields.get("wire") else {
             return Err(invalid(
                 NAME,
                 "HTTP/1 dissection requires retained header wire",

@@ -14,7 +14,7 @@ use crate::{
     preparation::RebuildError,
     probe::Evidence,
     providers::{CaptureProviders, PacketProviders},
-    scan::error::Probes,
+    scan::error::probe_error,
 };
 use correlation::{Best, SeenFrames, candidates, definitive, settled};
 use packetcraftr_core::{
@@ -98,7 +98,7 @@ fn validate_options(
         (
             "probes_per_second",
             crate::scan::MAX_RATE as usize,
-            check_rate(&Probes, "probes_per_second", options.probes_per_second).is_ok(),
+            check_rate(probe_error, "probes_per_second", options.probes_per_second).is_ok(),
         ),
         (
             "max_duration",
@@ -369,7 +369,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             started,
             emit,
             group,
-            decoder: Dissector::new(executor.client.registry.clone()),
+            decoder: Dissector::new(executor.operation.registry.clone()),
             spacing: Duration::ZERO,
             stats: Stats::default(),
             pending: BTreeMap::new(),
@@ -397,7 +397,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .wait_ready(&until(self.executor.client, self.deadline))
             .map_err(BoundaryError::from_error)?;
         self.spacing = rate_delay(
-            &Probes,
+            probe_error,
             "probes_per_second",
             1,
             self.options.probes_per_second,
@@ -668,7 +668,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         let mut candidates = candidates(
             &self.pending,
             &self.planned,
-            &self.executor.client.registry,
+            &self.executor.operation.registry,
             &decoded,
             &self.plan.interfaces[source],
             received,
@@ -686,7 +686,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             let settled = settled(
                 expired.chain(recent),
                 &self.planned,
-                &self.executor.client.registry,
+                &self.executor.operation.registry,
                 &decoded,
                 &self.plan.interfaces[source],
                 received,

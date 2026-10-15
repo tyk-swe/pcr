@@ -13,7 +13,7 @@ use super::path::{
     StreamTransport,
 };
 use crate::decode::DecodedPacket;
-use crate::field::{FieldKind, FieldValue};
+use crate::field;
 use crate::frame::{Direction, unix_floor};
 use crate::layer::Layer;
 use crate::registry::FilterFieldBinding;
@@ -83,11 +83,11 @@ pub(super) fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
             let wanted = Literal::Unsigned(*value);
             any_value(context, field, |candidate| match measure {
                 Measure::Len => any_byte_length(candidate, |length| {
-                    comparison::matches(&FieldValue::Unsigned(length), *operator, &wanted)
+                    comparison::matches(&field::Value::Unsigned(length), *operator, &wanted)
                 }),
                 Measure::Count => match candidate {
-                    FieldValue::List(elements) => comparison::matches(
-                        &FieldValue::Unsigned(elements.len() as u64),
+                    field::Value::List(elements) => comparison::matches(
+                        &field::Value::Unsigned(elements.len() as u64),
                         *operator,
                         &wanted,
                     ),
@@ -99,17 +99,17 @@ pub(super) fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
 }
 
 /// A list measures per element, like every other comparison on a list.
-fn any_byte_length(value: &FieldValue, mut test: impl FnMut(u64) -> bool) -> bool {
-    let length = |value: &FieldValue| match value {
-        FieldValue::Bytes(bytes) => Some(bytes.len()),
-        FieldValue::Text(text) => Some(text.len()),
-        FieldValue::Mac(mac) => Some(mac.len()),
-        FieldValue::Ipv4(_) => Some(4),
-        FieldValue::Ipv6(_) => Some(16),
+fn any_byte_length(value: &field::Value, mut test: impl FnMut(u64) -> bool) -> bool {
+    let length = |value: &field::Value| match value {
+        field::Value::Bytes(bytes) => Some(bytes.len()),
+        field::Value::Text(text) => Some(text.len()),
+        field::Value::Mac(mac) => Some(mac.len()),
+        field::Value::Ipv4(_) => Some(4),
+        field::Value::Ipv6(_) => Some(16),
         _ => None,
     };
     match value {
-        FieldValue::List(elements) => elements
+        field::Value::List(elements) => elements
             .iter()
             .filter_map(length)
             .any(|length| test(length as u64)),
@@ -160,7 +160,7 @@ fn layers<'a>(
 
 pub(super) fn any_value<F>(context: &Context<'_>, field: &FieldRef, mut predicate: F) -> bool
 where
-    F: FnMut(&FieldValue) -> bool,
+    F: FnMut(&field::Value) -> bool,
 {
     let mut matched = false;
     each_value(context, field, |value| {
@@ -189,13 +189,13 @@ pub(super) fn selected_list_present(context: &Context<'_>, field: &FieldRef) -> 
     layers(context, protocol.as_str(), *occurrence).any(|layer| {
         layer
             .field(path.root())
-            .is_some_and(|root| matches!(path.get(&root), Some(FieldValue::List(_))))
+            .is_some_and(|root| matches!(path.get(&root), Some(field::Value::List(_))))
     })
 }
 
 pub(super) fn each_value<F>(context: &Context<'_>, field: &FieldRef, mut consume: F)
 where
-    F: FnMut(Cow<'_, FieldValue>) -> bool,
+    F: FnMut(Cow<'_, field::Value>) -> bool,
 {
     match &field.source {
         FieldSource::NestedLayer {
@@ -239,7 +239,7 @@ where
                 StreamTransport::Udp => context.udp_stream,
             };
             if let Some(index) = stream {
-                consume(Cow::Owned(FieldValue::Unsigned(index)));
+                consume(Cow::Owned(field::Value::Unsigned(index)));
             }
         }
         FieldSource::Layer {
@@ -266,11 +266,11 @@ where
 /// The value inside each element a `[*]` or `[-1]` selects, in list order. A value that is
 /// not a list selects nothing, and the walk never goes beyond the already-decoded list.
 fn selected_elements<'a>(
-    list: &'a FieldValue,
+    list: &'a field::Value,
     selection: &'a ListSelection,
-) -> impl Iterator<Item = &'a FieldValue> {
-    let items: &[FieldValue] = match list {
-        FieldValue::List(items) => items,
+) -> impl Iterator<Item = &'a field::Value> {
+    let items: &[field::Value] = match list {
+        field::Value::List(items) => items,
         _ => &[],
     };
     let picked = match selection.selector {
@@ -285,23 +285,23 @@ fn selected_elements<'a>(
         })
 }
 
-fn is_set(value: &FieldValue) -> bool {
+fn is_set(value: &field::Value) -> bool {
     match value {
-        FieldValue::Bool(value) => *value,
-        FieldValue::Unsigned(value) => *value != 0,
-        FieldValue::Signed(value) => *value != 0,
+        field::Value::Bool(value) => *value,
+        field::Value::Unsigned(value) => *value != 0,
+        field::Value::Signed(value) => *value != 0,
         _ => true,
     }
 }
 
 fn project(
-    value: FieldValue,
+    value: field::Value,
     binding: &FilterFieldBinding,
     slice: Option<ByteSlice>,
-) -> Option<FieldValue> {
+) -> Option<field::Value> {
     let value = match binding {
         FilterFieldBinding::Bits { mask, shift, .. } => {
-            FieldValue::Unsigned((value.as_u64()? & mask) >> shift)
+            field::Value::Unsigned((value.as_u64()? & mask) >> shift)
         }
         FilterFieldBinding::Direct { .. } | FilterFieldBinding::Either { .. } => value,
     };
@@ -312,9 +312,9 @@ fn project(
 }
 
 fn project_nested<'a>(
-    value: &'a FieldValue,
+    value: &'a field::Value,
     slice: Option<ByteSlice>,
-) -> Option<Cow<'a, FieldValue>> {
+) -> Option<Cow<'a, field::Value>> {
     match slice {
         Some(slice) => slice_value(value, slice).map(Cow::Owned),
         None => Some(Cow::Borrowed(value)),
@@ -322,23 +322,27 @@ fn project_nested<'a>(
 }
 
 /// The compiler rejects other kinds; keep this list aligned with `slice_value`.
-pub(super) fn byte_addressable(kind: FieldKind) -> bool {
+pub(super) fn byte_addressable(kind: field::Kind) -> bool {
     matches!(
         kind,
-        FieldKind::Bytes | FieldKind::Mac | FieldKind::Text | FieldKind::Ipv4 | FieldKind::Ipv6
+        field::Kind::Bytes
+            | field::Kind::Mac
+            | field::Kind::Text
+            | field::Kind::Ipv4
+            | field::Kind::Ipv6
     )
 }
 
-fn slice_value(value: &FieldValue, slice: ByteSlice) -> Option<FieldValue> {
+fn slice_value(value: &field::Value, slice: ByteSlice) -> Option<field::Value> {
     match value {
-        FieldValue::Bytes(bytes) => {
+        field::Value::Bytes(bytes) => {
             let (start, end) = slice_range(bytes.len(), slice)?;
-            crate::frame::checked_slice(bytes, start, end).map(FieldValue::Bytes)
+            crate::frame::checked_slice(bytes, start, end).map(field::Value::Bytes)
         }
-        FieldValue::Mac(mac) => sliced_bytes(mac, slice),
-        FieldValue::Text(text) => sliced_bytes(text.as_bytes(), slice),
-        FieldValue::Ipv4(address) => sliced_bytes(&address.octets(), slice),
-        FieldValue::Ipv6(address) => sliced_bytes(&address.octets(), slice),
+        field::Value::Mac(mac) => sliced_bytes(mac, slice),
+        field::Value::Text(text) => sliced_bytes(text.as_bytes(), slice),
+        field::Value::Ipv4(address) => sliced_bytes(&address.octets(), slice),
+        field::Value::Ipv6(address) => sliced_bytes(&address.octets(), slice),
         _ => None,
     }
 }
@@ -351,35 +355,35 @@ fn slice_range(len: usize, slice: ByteSlice) -> Option<(usize, usize)> {
     (slice.start <= end).then_some((slice.start, end))
 }
 
-fn sliced_bytes(bytes: &[u8], slice: ByteSlice) -> Option<FieldValue> {
+fn sliced_bytes(bytes: &[u8], slice: ByteSlice) -> Option<field::Value> {
     let (start, end) = slice_range(bytes.len(), slice)?;
-    Some(FieldValue::Bytes(Bytes::copy_from_slice(
+    Some(field::Value::Bytes(Bytes::copy_from_slice(
         &bytes[start..end],
     )))
 }
 
-fn frame_value(context: &Context<'_>, which: FrameField) -> Option<FieldValue> {
+fn frame_value(context: &Context<'_>, which: FrameField) -> Option<field::Value> {
     let frame = &context.decoded.frame;
     Some(match which {
-        FrameField::Number => FieldValue::Unsigned(context.number),
+        FrameField::Number => field::Value::Unsigned(context.number),
         // Floor to whole Unix seconds, matching the capture and output layers.
         FrameField::TimeEpoch => {
             let (seconds, _) = unix_floor(frame.timestamp?);
             match u64::try_from(seconds) {
-                Ok(seconds) => FieldValue::Unsigned(seconds),
-                Err(_) => FieldValue::Signed(i64::try_from(seconds).ok()?),
+                Ok(seconds) => field::Value::Unsigned(seconds),
+                Err(_) => field::Value::Signed(i64::try_from(seconds).ok()?),
             }
         }
         // The sub-second part of the same floored instant, so no rounding can carry into `time_epoch`.
         FrameField::TimeNanoseconds => {
             let (_, nanoseconds) = unix_floor(frame.timestamp?);
-            FieldValue::Unsigned(u64::from(nanoseconds))
+            field::Value::Unsigned(u64::from(nanoseconds))
         }
-        FrameField::Length => FieldValue::Unsigned(u64::from(frame.original_length())),
-        FrameField::CapturedLength => FieldValue::Unsigned(u64::from(frame.captured_length())),
-        FrameField::InterfaceId => FieldValue::Unsigned(u64::from(frame.interface?)),
-        FrameField::LinkType => FieldValue::Unsigned(u64::from(frame.link_type.0)),
-        FrameField::Direction => FieldValue::Text(
+        FrameField::Length => field::Value::Unsigned(u64::from(frame.original_length())),
+        FrameField::CapturedLength => field::Value::Unsigned(u64::from(frame.captured_length())),
+        FrameField::InterfaceId => field::Value::Unsigned(u64::from(frame.interface?)),
+        FrameField::LinkType => field::Value::Unsigned(u64::from(frame.link_type.0)),
+        FrameField::Direction => field::Value::Text(
             match frame.direction? {
                 Direction::Inbound => "inbound",
                 Direction::Outbound => "outbound",
@@ -388,12 +392,12 @@ fn frame_value(context: &Context<'_>, which: FrameField) -> Option<FieldValue> {
             .to_owned(),
         ),
         FrameField::Truncated => {
-            FieldValue::Bool(frame.captured_length() < frame.original_length())
+            field::Value::Bool(frame.captured_length() < frame.original_length())
         }
-        FrameField::LayerCount => FieldValue::Unsigned(visible_layers(context).count() as u64),
-        FrameField::Protocols => FieldValue::List(
+        FrameField::LayerCount => field::Value::Unsigned(visible_layers(context).count() as u64),
+        FrameField::Protocols => field::Value::List(
             visible_layers(context)
-                .map(|layer| FieldValue::Text(layer.protocol_id().as_str().to_owned()))
+                .map(|layer| field::Value::Text(layer.protocol_id().as_str().to_owned()))
                 .collect(),
         ),
     })

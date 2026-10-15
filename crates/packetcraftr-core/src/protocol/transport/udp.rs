@@ -7,9 +7,9 @@ use std::net::IpAddr;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, UDP_CHECKSUM},
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, Malformed, Padding, reflective_layer},
     protocol::BuiltinProtocol,
     registry::Discriminator,
@@ -110,7 +110,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct UdpCodec;
 
-impl LayerCodec for UdpCodec {
+impl Codec for UdpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &udp_schema().protocol
     }
@@ -119,8 +119,8 @@ impl LayerCodec for UdpCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Udp>(NAME, layer)?;
         let covered_payload = payload_without_padding(NAME, payload, context)?;
         let expected_length = UDP_LEN
@@ -164,18 +164,16 @@ impl LayerCodec for UdpCodec {
         let mut materialized = layer.clone();
         materialized.length = materialized_length;
         materialized.checksum = materialized_checksum;
-        Ok(
-            EncodedLayer::header(header.to_vec(), Box::new(materialized))
-                .with_fields(udp_layout())
-                .with_diagnostics(diagnostics),
-        )
+        Ok(Encoded::header(header.to_vec(), Box::new(materialized))
+            .with_fields(udp_layout())
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
         &self,
         input: Bytes,
-        context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<UDP_LEN>() else {
             return Err(truncated(NAME, UDP_LEN, input.len()));
         };
@@ -206,7 +204,7 @@ impl LayerCodec for UdpCodec {
         let payload_len = length.saturating_sub(UDP_LEN);
         let source_port = u16::from_be_bytes([header[0], header[1]]);
         let destination_port = u16::from_be_bytes([header[2], header[3]]);
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Udp {
                 source_port,
                 destination_port,
@@ -233,7 +231,7 @@ impl LayerCodec for UdpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Udp::default(), fields)
     }
@@ -242,7 +240,7 @@ impl LayerCodec for UdpCodec {
 fn validate_child_selection(
     layer: &Udp,
     payload: &[u8],
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
 ) -> Result<Vec<Diagnostic>, crate::codec::Error> {
     let mut diagnostics = Vec::new();
     let Some(child) = context.child else {

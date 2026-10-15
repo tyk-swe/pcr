@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::FieldValue,
+    field,
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -54,7 +54,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct EspCodec;
 
-impl LayerCodec for EspCodec {
+impl Codec for EspCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &esp_schema().protocol
     }
@@ -63,8 +63,8 @@ impl LayerCodec for EspCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Esp>(NAME, layer)?;
         ensure_encode_budget(NAME, ESP_LEN, context)?;
         let mut diagnostics = Vec::new();
@@ -106,7 +106,7 @@ impl LayerCodec for EspCodec {
         let mut prefix = Vec::with_capacity(ESP_LEN);
         prefix.extend_from_slice(&layer.spi.to_be_bytes());
         prefix.extend_from_slice(&layer.sequence.to_be_bytes());
-        Ok(EncodedLayer::header(prefix, Box::new(layer.clone()))
+        Ok(Encoded::header(prefix, Box::new(layer.clone()))
             .with_fields(esp_layout())
             .with_diagnostics(diagnostics))
     }
@@ -114,8 +114,8 @@ impl LayerCodec for EspCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<ESP_LEN>() else {
             return Err(truncated(NAME, ESP_LEN, input.len()));
         };
@@ -130,7 +130,7 @@ impl LayerCodec for EspCodec {
                 .at_field("sequence"),
             );
         }
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: esp_layout(),
             layer: Box::new(Esp {
                 spi: u32::from_be_bytes([header[0], header[1], header[2], header[3]]),
@@ -147,7 +147,7 @@ impl LayerCodec for EspCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Esp::default(), fields)
     }

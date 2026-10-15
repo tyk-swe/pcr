@@ -139,7 +139,7 @@ fn denied_address_never_reaches_providers() {
         udp_payload: Default::default(),
         udp_profiles: Default::default(),
         address_family: Family::Any,
-        endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
+        endpoints: vec![packetcraftr::probe::Endpoint::Tcp { port: 80 }],
         discovery: Default::default(),
         attempts: 1,
         adaptive: None,

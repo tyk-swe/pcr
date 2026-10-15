@@ -150,6 +150,13 @@ fn registry() -> Arc<packetcraftr_core::registry::Registry> {
 fn proj_strms_bounded_fields_records() {
     let (provider, request, stopped) = single_session(LinkType::ETHERNET, vec![ipv4_udp_frame()]);
     let (publisher, buffer) = stream(Command::Capture);
+    let invocation = &crate::invocation::Invocation::new(
+        Format::Ndjson,
+        publisher.clone(),
+        None,
+        Default::default(),
+        None,
+    );
     let projector = crate::rendering::Projector::prepare(
         &["frame.len".to_owned(), "ipv4.destination".to_owned()],
         4096,
@@ -159,6 +166,7 @@ fn proj_strms_bounded_fields_records() {
     )
     .unwrap();
     drive(
+        invocation,
         &client(provider, 1),
         workflow::Request::new(request, Duration::from_secs(1)),
         Output {

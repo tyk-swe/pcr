@@ -13,8 +13,8 @@ use crate::target::Family;
 use crate::target::Selection;
 
 use super::Error;
-use super::error::Probes;
-use crate::probe::{ProbeEndpoint, Transport};
+use super::error::probe_error;
+use crate::probe::{self, Transport};
 use crate::scan::{
     DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS, MAX_IN_FLIGHT, MAX_PROBES,
 };
@@ -143,7 +143,7 @@ pub struct Request {
     /// Probed on every scanned target, in order; TCP, UDP, and SCTP endpoints
     /// may share a port and never merge. ICMP echo and IP-protocol scans are
     /// portless and stand alone. Empty only for discovery-only requests.
-    pub endpoints: Vec<ProbeEndpoint>,
+    pub endpoints: Vec<probe::Endpoint>,
     /// The segment sent to each TCP scan endpoint; discovery, UDP, SCTP, ICMP,
     /// and IP-protocol probes ignore it.
     pub tcp_scan: super::TcpScan,
@@ -168,13 +168,13 @@ impl Request {
     pub(super) fn has_ip_probes(&self) -> bool {
         self.endpoints
             .iter()
-            .any(|endpoint| matches!(endpoint, crate::probe::ProbeEndpoint::Ip { .. }))
+            .any(|endpoint| matches!(endpoint, crate::probe::Endpoint::Ip { .. }))
             || self.discovery.runs()
                 && self
                     .discovery
                     .probes
                     .iter()
-                    .any(|endpoint| matches!(endpoint, crate::probe::ProbeEndpoint::Ip { .. }))
+                    .any(|endpoint| matches!(endpoint, crate::probe::Endpoint::Ip { .. }))
     }
 
     pub fn validate(&self) -> Result<(), Error> {
@@ -262,7 +262,7 @@ impl Request {
         if let Some(adaptive) = &self.adaptive {
             adaptive.validate(self)?;
         }
-        check_rate(&Probes, "probes_per_second", self.probes_per_second)?;
+        check_rate(probe_error, "probes_per_second", self.probes_per_second)?;
         self.discovery
             .validate(&self.route, &self.limits, self.address_family)?;
         self.validate_endpoints()?;
@@ -341,21 +341,21 @@ impl Request {
         if let Some(endpoint) = self.endpoints.iter().find(|endpoint| {
             matches!(
                 endpoint,
-                ProbeEndpoint::TcpAck { .. }
-                    | ProbeEndpoint::IcmpTimestamp
-                    | ProbeEndpoint::IcmpNetmask
+                probe::Endpoint::TcpAck { .. }
+                    | probe::Endpoint::IcmpTimestamp
+                    | probe::Endpoint::IcmpNetmask
             )
         }) {
             return Err(Error::InvalidDiscovery {
                 message: format!("{endpoint} is a host-discovery probe, not a scan endpoint"),
             });
         }
-        if self.endpoints.contains(&ProbeEndpoint::Sctp { port: 0 }) {
+        if self.endpoints.contains(&probe::Endpoint::Sctp { port: 0 }) {
             return invalid("SCTP scans require a non-zero destination port".to_owned());
         }
         // Discovery may pair ICMP echo with port probes; only the scan's
         // portless ICMP endpoint stands alone.
-        if self.endpoints.contains(&ProbeEndpoint::Icmp) && self.endpoints.len() > 1 {
+        if self.endpoints.contains(&probe::Endpoint::Icmp) && self.endpoints.len() > 1 {
             return invalid(
                 "ICMP scans are portless and do not accept destination ports".to_owned(),
             );
@@ -363,12 +363,12 @@ impl Request {
         let has_ip_protocol = self
             .endpoints
             .iter()
-            .any(|endpoint| matches!(endpoint, ProbeEndpoint::Ip { .. }));
+            .any(|endpoint| matches!(endpoint, probe::Endpoint::Ip { .. }));
         if has_ip_protocol
             && self
                 .endpoints
                 .iter()
-                .any(|endpoint| !matches!(endpoint, ProbeEndpoint::Ip { .. }))
+                .any(|endpoint| !matches!(endpoint, probe::Endpoint::Ip { .. }))
         {
             return invalid(
                 "IP-protocol scans are portless and cannot combine with port or ICMP endpoints"
@@ -408,7 +408,7 @@ impl Request {
     }
 
     /// The validated endpoints every target is probed on.
-    pub fn planned_endpoints(&self) -> Result<&[ProbeEndpoint], Error> {
+    pub fn planned_endpoints(&self) -> Result<&[probe::Endpoint], Error> {
         self.validate()?;
         Ok(&self.endpoints)
     }

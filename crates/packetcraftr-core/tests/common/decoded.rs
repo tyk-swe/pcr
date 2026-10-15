@@ -25,7 +25,11 @@ const PAYLOAD: &[u8] = b"GET /index HTTP/1.1";
 pub(crate) fn decoded(packet: Packet) -> decode::DecodedPacket {
     let registry = registry();
     let built = build::Builder::new(Arc::clone(&registry))
-        .build(packet, codec::Context::default(), build::Options::default())
+        .build(
+            packet,
+            codec::Addresses::default(),
+            build::Options::default(),
+        )
         .unwrap_or_else(|error| panic!("fixture build: {error}"));
     let frame = Frame::new(
         SystemTime::UNIX_EPOCH + Duration::from_secs(123),

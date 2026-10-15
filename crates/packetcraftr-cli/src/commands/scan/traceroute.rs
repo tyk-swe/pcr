@@ -103,9 +103,12 @@ impl Stage {
     }
 
     /// The trace request, publishing through its own registered runtime.
-    pub(super) fn trace(&self) -> followup::Trace {
+    pub(super) fn trace(&self, invocation: &crate::invocation::Invocation) -> followup::Trace {
         followup::Trace {
-            runtime: Some(crate::system::runtime(crate::system::Runtime::Workflow)),
+            runtime: Some(crate::system::runtime(
+                invocation,
+                crate::system::Runtime::Workflow,
+            )),
             ..self.trace.clone()
         }
     }
@@ -134,7 +137,7 @@ mod tests {
             max_in_flight: 1,
             targets: Target::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))).into(),
             target_sources: Vec::new(),
-            endpoints: vec![packetcraftr::probe::ProbeEndpoint::Icmp],
+            endpoints: vec![packetcraftr::probe::Endpoint::Icmp],
             discovery: Default::default(),
             adaptive: None,
             udp_payload: Default::default(),

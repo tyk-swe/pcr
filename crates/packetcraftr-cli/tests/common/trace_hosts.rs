@@ -6,7 +6,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, UNIX_EPOCH};
 
-use packetcraftr::probe::{ProbeStatus, Transport};
+use packetcraftr::probe::{self, Transport};
 use packetcraftr::scan::{Reply, Stage};
 use packetcraftr::traceroute::hosts::{
     self as library, Basis, Host, HostTrace, NotTraced, Observed, ReusedHop, Selection, State,
@@ -34,9 +34,9 @@ fn probe(
         strategy: Transport::Tcp,
         destination_port: Some(443),
         status: if kind.is_some() {
-            ProbeStatus::Response
+            probe::Status::Response
         } else {
-            ProbeStatus::Timeout
+            probe::Status::Timeout
         },
         response_kind: kind,
         responder,

@@ -48,7 +48,7 @@ impl<'l> Budget<'l> {
         let maximum = self
             .limits
             .max_input_bytes
-            .saturating_mul(2 * std::mem::size_of::<crate::field::FieldValue>());
+            .saturating_mul(2 * std::mem::size_of::<crate::field::Value>());
         let next = self
             .temporary
             .get()

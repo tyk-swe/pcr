@@ -15,7 +15,7 @@ use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
 use super::engine::PreparedOperation;
-use super::error::Attempts;
+use super::error::attempt_error;
 use super::executor::{Exchange, TcpQuerier};
 use super::plan::batch_limits;
 use super::report::Observed;
@@ -314,7 +314,7 @@ where
     let limits = batch_limits(prepared.iter().map(|prepared| prepared.limits))?;
     let mut stop = deadline.enforce().is_err();
     if !stop {
-        approve_operation(authorizer, Operation::Dns(limits), deadline, &Attempts)?;
+        approve_operation(authorizer, Operation::Dns(limits), deadline, attempt_error)?;
     }
     let mut questions = Vec::with_capacity(requests.len());
     let mut stats = Stats::default();
@@ -329,8 +329,8 @@ where
         if let Some(previous) = previous_delay {
             let delay = previous.max(prepared.delay);
             if !delay.is_zero() {
-                let mut pause = Context::new(&mut *deadline, &mut *clock, Attempts);
-                let waited = pause.pace(FIRST_ATTEMPT, delay).and_then(|()| {
+                let mut pause = Context::new(&mut *deadline, &mut *clock, attempt_error);
+                let waited = pause.pace(u64::from(FIRST_ATTEMPT), delay).and_then(|()| {
                     stats.checked_add_assign(&pause.into_stats()).map_err(|_| {
                         Error::StatisticsOverflow {
                             attempt: FIRST_ATTEMPT,

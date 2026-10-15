@@ -10,6 +10,7 @@ use crate::{errors::CliError, output};
 /// Host records, when discovery or a reverse lookup was requested; the plan
 /// line already says when neither was.
 pub(super) fn render_hosts_text<P>(
+    invocation: &crate::invocation::Invocation,
     plan: &output::scan::plan::Plan,
     hosts: &[output::scan::host::Host<P>],
     probe_text: impl Fn(&P) -> Result<(), CliError>,
@@ -24,23 +25,29 @@ pub(super) fn render_hosts_text<P>(
             Some(scope) => format!("{}%{}", host.address, scope.zone),
             None => host.address.to_string(),
         };
-        write_stdout_line(format_args!(
-            "host {address} discovery={} scan={}",
-            host.discovery, host.scan
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "host {address} discovery={} scan={}",
+                host.discovery, host.scan
+            ),
+        )?;
         if let Some(neighbor) = &host.neighbor {
-            write_stdout_line(format_args!("  {}", neighbor_text(neighbor)))?;
+            write_stdout_line(invocation, format_args!("  {}", neighbor_text(neighbor)))?;
         }
         for reason in &host.reasons {
-            write_stdout_line(format_args!(
-                "  reason={} evidence={} basis={} probe={} link={} observed={}",
-                reason.kind,
-                reason.evidence,
-                reason.basis,
-                optional_display(reason.probe),
-                optional_display(reason.link_address),
-                optional_display(reason.observed_at.as_ref()),
-            ))?;
+            write_stdout_line(
+                invocation,
+                format_args!(
+                    "  reason={} evidence={} basis={} probe={} link={} observed={}",
+                    reason.kind,
+                    reason.evidence,
+                    reason.basis,
+                    optional_display(reason.probe),
+                    optional_display(reason.link_address),
+                    optional_display(reason.observed_at.as_ref()),
+                ),
+            )?;
         }
         // Discovery probes belong to no endpoint, so their evidence is shown
         // with the host it decided.
@@ -48,7 +55,7 @@ pub(super) fn render_hosts_text<P>(
             probe_text(probe)?;
         }
         if let Some(lookup) = &host.reverse_dns {
-            write_stdout_line(format_args!("  {}", reverse_dns_text(lookup)))?;
+            write_stdout_line(invocation, format_args!("  {}", reverse_dns_text(lookup)))?;
         }
     }
     Ok(())

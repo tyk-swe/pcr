@@ -12,36 +12,46 @@ use crate::rendering::{
 };
 
 pub(super) fn render_text(
+    invocation: &crate::invocation::Invocation,
     result: &packetcraftr::exchange::Aggregate,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "sent={} responses={} unanswered={} unsolicited={} undecoded={} bytes={}",
-        result.sent.len(),
-        result.responses.len(),
-        result.unanswered.len(),
-        result.unsolicited.len(),
-        result.undecoded.len(),
-        result.stats.bytes
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "sent={} responses={} unanswered={} unsolicited={} undecoded={} bytes={}",
+            result.sent.len(),
+            result.responses.len(),
+            result.unanswered.len(),
+            result.unsolicited.len(),
+            result.undecoded.len(),
+            result.stats.bytes
+        ),
+    )?;
     for response in &result.responses {
-        write_stdout_line(format_args!(
-            "request={} response_bytes={} latency={}",
-            response.request_index,
-            response.response.frame.bytes().len(),
-            crate::rendering::duration_text(response.latency)
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "request={} response_bytes={} latency={}",
+                response.request_index,
+                response.response.frame.bytes().len(),
+                crate::rendering::duration_text(response.latency)
+            ),
+        )?;
         if presentation.verbose {
-            write_stdout_line(format_args!(
-                "  bytes: {}",
-                crate::rendering::spaced_hex(response.response.frame.bytes())
-            ))?;
+            write_stdout_line(
+                invocation,
+                format_args!(
+                    "  bytes: {}",
+                    crate::rendering::spaced_hex(response.response.frame.bytes())
+                ),
+            )?;
         }
     }
     for request in &result.unanswered {
-        write_stdout_line(format_args!("request={request} unanswered"))?;
+        write_stdout_line(invocation, format_args!("request={request} unanswered"))?;
     }
-    render_diagnostics_text(&text_diagnostics(result))
+    render_diagnostics_text(invocation, &text_diagnostics(result))
 }
 
 fn text_diagnostics(result: &packetcraftr::exchange::Aggregate) -> Vec<Diagnostic> {

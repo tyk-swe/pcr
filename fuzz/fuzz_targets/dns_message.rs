@@ -92,7 +92,7 @@ fn correlate_endpoints(control: u8, message: &[u8], limits: MessageLimits) {
     use packetcraftr::dns::{Probe, ResponseClassification, classify_response};
     use packetcraftr_core::{
         build::{Builder, Options},
-        codec::Context,
+        codec::Addresses,
         decode::Dissector,
         frame::{Frame, LinkType},
         layer::Raw,
@@ -140,7 +140,7 @@ fn correlate_endpoints(control: u8, message: &[u8], limits: MessageLimits) {
     });
     response.push(Raw::new(message.to_vec()));
     let built = Builder::new(registry.clone())
-        .build(response, Context::default(), Options::default())
+        .build(response, Addresses::default(), Options::default())
         .unwrap();
     let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::IPV4, built.bytes).unwrap();
     let decoded = Dissector::new(registry.clone())

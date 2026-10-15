@@ -6,7 +6,7 @@
 use std::net::IpAddr;
 
 use bytes::Bytes;
-use packetcraftr_core::field::{FieldValue, WireValue};
+use packetcraftr_core::field::{self, WireValue};
 use packetcraftr_core::protocol::{
     IcmpErrorKind, QuotedTransport, SctpResponseKind,
     network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
@@ -382,7 +382,7 @@ pub(crate) fn outer_has_protocol(packet: &Packet, protocol: u8) -> bool {
     }
     header.downcast_ref::<Ipv6>().is_some_and(|ipv6| ipv6.next_header == WireValue::Exact(protocol))
         || layers.take_while(|layer| BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ipv6_extension))
-            .any(|layer| matches!(layer.field("next_header"), Some(FieldValue::Unsigned(value)) if value == u64::from(protocol)))
+            .any(|layer| matches!(layer.field("next_header"), Some(field::Value::Unsigned(value)) if value == u64::from(protocol)))
 }
 
 fn classify_icmp_error(

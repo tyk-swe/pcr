@@ -12,7 +12,7 @@ use packetcraftr::{
     Client, ProviderSet,
     clock::Clock,
     policy::Policy,
-    probe::{ProbeEndpoint, ProbeStatus},
+    probe,
     scan::{self, Classification, Request, State, TcpScan},
     target::{Family, Selection, Specification, Target},
 };
@@ -473,7 +473,7 @@ fn request(ipv6: bool, mode: TcpScan, schedule: Schedule) -> Request {
             exclude: Vec::new(),
         },
         address_family: Family::Any,
-        endpoints: PORTS.map(|port| ProbeEndpoint::Tcp { port }).to_vec(),
+        endpoints: PORTS.map(|port| probe::Endpoint::Tcp { port }).to_vec(),
         discovery: Default::default(),
         attempts: 1,
         adaptive: (schedule == Schedule::Adaptive).then(|| scan::Adaptive {
@@ -711,7 +711,7 @@ fn late_replies_remain_evidence_without_changing_silent_inference() {
             for schedule in [Schedule::Serial, Schedule::Pipelined, Schedule::Adaptive] {
                 for port in PORTS {
                     let mut request = request(ipv6, mode, schedule);
-                    request.endpoints = vec![ProbeEndpoint::Tcp { port }];
+                    request.endpoints = vec![probe::Endpoint::Tcp { port }];
                     let clock = VirtualClock::default();
                     let fixture = Fixture::new(
                         Script {
@@ -730,7 +730,7 @@ fn late_replies_remain_evidence_without_changing_silent_inference() {
                     let row = expected(mode, SILENT);
                     assert_eq!(
                         probe.status,
-                        ProbeStatus::Timeout,
+                        probe::Status::Timeout,
                         "mode={mode:?} ipv6={ipv6} port={port} schedule={}",
                         schedule as u8
                     );
@@ -764,7 +764,7 @@ fn late_replies_remain_evidence_without_changing_silent_inference() {
 #[test]
 fn retries_use_distinct_acknowledgment_identities() {
     let mut request = request(false, TcpScan::Ack, Schedule::Serial);
-    request.endpoints = vec![ProbeEndpoint::Tcp { port: RESET_ZERO }];
+    request.endpoints = vec![probe::Endpoint::Tcp { port: RESET_ZERO }];
     request.attempts = 3;
     let (fixture, result) = execute(request, Script::default());
     let aggregate = result.unwrap();
@@ -792,7 +792,7 @@ fn discovery_stays_syn_while_scan_probes_use_the_mode() {
     request.limits.max_probes = 9;
     request.discovery = scan::discovery::Options {
         mode: scan::discovery::Mode::Before,
-        probes: vec![ProbeEndpoint::Tcp { port: 2000 }],
+        probes: vec![probe::Endpoint::Tcp { port: 2000 }],
         neighbor: false,
         unresponsive: scan::discovery::Unresponsive::Skip,
     };
@@ -819,8 +819,8 @@ fn discovery_stays_syn_while_scan_probes_use_the_mode() {
 fn udp_endpoints_and_default_syn_are_unaffected() {
     let mut mixed = request(false, TcpScan::Ack, Schedule::Serial);
     mixed.endpoints = vec![
-        ProbeEndpoint::Tcp { port: RESET_ZERO },
-        ProbeEndpoint::Udp { port: 53 },
+        probe::Endpoint::Tcp { port: RESET_ZERO },
+        probe::Endpoint::Udp { port: 53 },
     ];
     let (fixture, result) = execute(mixed, Script::default());
     let aggregate = result.unwrap();
@@ -841,7 +841,7 @@ fn udp_endpoints_and_default_syn_are_unaffected() {
     assert_eq!(udp.inference.as_ref().unwrap().state, Some(State::Closed));
 
     let mut syn = request(true, TcpScan::default(), Schedule::Pipelined);
-    syn.endpoints = vec![ProbeEndpoint::Tcp { port: RESET_ZERO }];
+    syn.endpoints = vec![probe::Endpoint::Tcp { port: RESET_ZERO }];
     let (fixture, result) = execute(syn, Script::default());
     let aggregate = result.unwrap();
     let probe = fixture.sent()[0].get::<Tcp>().unwrap().clone();
@@ -859,14 +859,14 @@ fn udp_endpoints_and_default_syn_are_unaffected() {
 fn invalid_requests_fail_before_any_provider_work() {
     let invalid_custom = request(false, TcpScan::Custom { flags: 0x200 }, Schedule::Serial);
     let mut udp_only = request(false, TcpScan::Fin, Schedule::Serial);
-    udp_only.endpoints = vec![ProbeEndpoint::Udp { port: 53 }];
+    udp_only.endpoints = vec![probe::Endpoint::Udp { port: 53 }];
     let mut icmp_only = request(false, TcpScan::Null, Schedule::Serial);
-    icmp_only.endpoints = vec![ProbeEndpoint::Icmp];
+    icmp_only.endpoints = vec![probe::Endpoint::Icmp];
     let mut discovery_only = request(false, TcpScan::Ack, Schedule::Serial);
     discovery_only.endpoints.clear();
     discovery_only.discovery = scan::discovery::Options {
         mode: scan::discovery::Mode::Only,
-        probes: vec![ProbeEndpoint::Tcp { port: 2000 }],
+        probes: vec![probe::Endpoint::Tcp { port: 2000 }],
         neighbor: false,
         unresponsive: scan::discovery::Unresponsive::Skip,
     };
@@ -979,7 +979,7 @@ fn a_reset_outranks_router_evidence_in_the_same_probe_window_in_either_order() {
                         schedule as u8
                     );
                     let mut request = request(ipv6, mode, schedule);
-                    request.endpoints = vec![ProbeEndpoint::Tcp {
+                    request.endpoints = vec![probe::Endpoint::Tcp {
                         port: RESET_AND_PROHIBITED,
                     }];
                     let (_fixture, result) = execute(
@@ -1021,7 +1021,7 @@ fn custom_syn_bearing_probes_accept_only_the_exact_sequence_space_acknowledgment
         for ipv6 in [false, true] {
             let mode = TcpScan::Custom { flags };
             let mut matching = request(ipv6, mode, Schedule::Serial);
-            matching.endpoints = vec![ProbeEndpoint::Tcp { port: RESET_ZERO }];
+            matching.endpoints = vec![probe::Endpoint::Tcp { port: RESET_ZERO }];
             let (_fixture, result) = execute(matching, Script::default());
             let aggregate = result.unwrap();
             let endpoint = &aggregate.endpoints[0];
@@ -1036,7 +1036,7 @@ fn custom_syn_bearing_probes_accept_only_the_exact_sequence_space_acknowledgment
 
             for delta in [-1, 1] {
                 let mut wrong = request(ipv6, mode, Schedule::Serial);
-                wrong.endpoints = vec![ProbeEndpoint::Tcp { port: RESET_ZERO }];
+                wrong.endpoints = vec![probe::Endpoint::Tcp { port: RESET_ZERO }];
                 let (_fixture, result) = execute(
                     wrong,
                     Script {
@@ -1048,7 +1048,7 @@ fn custom_syn_bearing_probes_accept_only_the_exact_sequence_space_acknowledgment
                 let endpoint = &aggregate.endpoints[0];
                 assert_eq!(
                     endpoint.probes[0].status,
-                    ProbeStatus::Timeout,
+                    probe::Status::Timeout,
                     "{flags:#x} delta {delta}"
                 );
                 assert_eq!(
@@ -1064,7 +1064,7 @@ fn custom_syn_bearing_probes_accept_only_the_exact_sequence_space_acknowledgment
 fn a_syn_scan_still_rejects_a_wrong_syn_ack_acknowledgment() {
     for delta in [-1, 1] {
         let mut request = request(false, TcpScan::Syn, Schedule::Serial);
-        request.endpoints = vec![ProbeEndpoint::Tcp { port: RESET_ZERO }];
+        request.endpoints = vec![probe::Endpoint::Tcp { port: RESET_ZERO }];
         let (_fixture, result) = execute(
             request,
             Script {
@@ -1073,7 +1073,7 @@ fn a_syn_scan_still_rejects_a_wrong_syn_ack_acknowledgment() {
             },
         );
         let endpoint = &result.unwrap().endpoints[0];
-        assert_eq!(endpoint.probes[0].status, ProbeStatus::Timeout);
+        assert_eq!(endpoint.probes[0].status, probe::Status::Timeout);
         assert_eq!(
             endpoint.inference.as_ref().unwrap().rule.as_str(),
             "tcp_syn.silence"

@@ -7,8 +7,8 @@ use bytes::Bytes;
 
 use super::{Error, Limit, Limits, MAX_MESSAGE_BYTES};
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerEncodeContext},
-    field::FieldValue,
+    codec::{Decoded, EncodeContext, Encoded},
+    field,
     layer::Layer,
     layout::FieldLayout,
     protocol::common::{invalid, reject_aliased_duplicates, rejected, typed_layer},
@@ -27,8 +27,8 @@ pub(super) trait Message: Layer + Default + Sized + 'static {
 pub(super) fn encode<M: Message>(
     layer: &dyn Layer,
     payload: &[u8],
-    context: &LayerEncodeContext<'_>,
-) -> Result<EncodedLayer, crate::codec::Error> {
+    context: &EncodeContext<'_>,
+) -> Result<Encoded, crate::codec::Error> {
     if !payload.is_empty() {
         return Err(invalid(M::NAME, "DHCP is a complete UDP payload"));
     }
@@ -40,21 +40,21 @@ pub(super) fn encode<M: Message>(
         })
         .map_err(|error| rejected(M::NAME, error))?;
     let normalized = M::decode_wire(wire.clone()).map_err(|error| rejected(M::NAME, error))?;
-    Ok(EncodedLayer::header(wire.to_vec(), Box::new(normalized)).with_fields(M::layout()))
+    Ok(Encoded::header(wire.to_vec(), Box::new(normalized)).with_fields(M::layout()))
 }
 
-pub(super) fn decode<M: Message>(input: Bytes) -> Result<DecodedLayer, crate::codec::Error> {
+pub(super) fn decode<M: Message>(input: Bytes) -> Result<Decoded, crate::codec::Error> {
     let layer = M::decode_wire(input.clone()).map_err(|error| rejected(M::NAME, error))?;
-    let mut decoded = DecodedLayer::terminal(Box::new(layer), input.len());
+    let mut decoded = Decoded::terminal(Box::new(layer), input.len());
     decoded.fields = M::layout();
     Ok(decoded)
 }
 
 pub(super) fn make_layer<M: Message>(
-    fields: &BTreeMap<String, FieldValue>,
+    fields: &BTreeMap<String, field::Value>,
 ) -> Result<Box<dyn Layer>, crate::codec::Error> {
     let mut layer = match fields.get("wire") {
-        Some(FieldValue::Bytes(wire)) => {
+        Some(field::Value::Bytes(wire)) => {
             M::decode_wire(wire.clone()).map_err(|error| rejected(M::NAME, error))?
         }
         Some(_) => return Err(invalid(M::NAME, "wire must be retained bytes")),

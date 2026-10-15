@@ -30,14 +30,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(crate) fn run(
+    invocation: &crate::invocation::Invocation,
+    args: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     args.limits.validate()?;
     let reorder = args.max_reorder_frames > 0;
     if reorder && args.order == OrderArg::Append {
@@ -63,14 +69,14 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             ),
         ));
     }
-    let mut staged = crate::staged_output::StagedFile::stage(&args.write)?;
+    let mut staged = crate::staged_output::StagedFile::stage(invocation, &args.write)?;
     let mut sources = args
         .paths
         .iter()
         .map(|path| {
             Ok(capture_file::MergeSource {
                 name: path.display().to_string(),
-                reader: crate::input::open_capture(path, args.limits.reader)?,
+                reader: crate::input::open_capture(invocation, path, args.limits.reader)?,
             })
         })
         .collect::<Result<Vec<_>, CliError>>()?;
@@ -103,21 +109,31 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     .map_err(CliError::classified)?;
     let _ = writer.into_inner().finish().map_err(CliError::classified)?;
     staged.sync()?;
-    crate::cancellation::check()?;
+    invocation.check()?;
     staged.persist()?;
     let report = output::merge::Report::from((args.write.display().to_string(), report));
     match format {
-        Format::Json => emit_aggregate(output::contract::Command::Merge, report, Vec::new()),
+        Format::Json => emit_aggregate(
+            invocation,
+            output::contract::Command::Merge,
+            report,
+            Vec::new(),
+        ),
         Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
         Format::Text => {
-            stream.presentation().details("Capture sources", &report)?;
-            write_summary_line(format_args!(
-                "merged {} frames ({} bytes) across {} interfaces into {}",
-                report.frames,
-                report.captured_bytes,
-                report.interfaces.len(),
-                report.path
-            ))
+            stream
+                .presentation()
+                .details(invocation, "Capture sources", &report)?;
+            write_summary_line(
+                invocation,
+                format_args!(
+                    "merged {} frames ({} bytes) across {} interfaces into {}",
+                    report.frames,
+                    report.captured_bytes,
+                    report.interfaces.len(),
+                    report.path
+                ),
+            )
         }
         other => other.unreachable(),
     }

@@ -30,6 +30,7 @@ pub(super) fn options(
 /// The library repeats these checks against every final packet before
 /// transmission.
 pub(super) fn authorize_expanded_destinations(
+    invocation: &crate::invocation::Invocation,
     template: &core::template::Template,
     max_template_packets: usize,
     policy: &packetcraftr::policy::Policy,
@@ -51,7 +52,7 @@ pub(super) fn authorize_expanded_destinations(
         .authorize_packet_destinations(&first)
         .map_err(CliError::classified)?;
     for packet in packets {
-        crate::cancellation::check()?;
+        invocation.check()?;
         policy
             .authorize_packet_destinations(&packet.map_err(CliError::classified)?)
             .map_err(CliError::classified)?;
@@ -60,6 +61,7 @@ pub(super) fn authorize_expanded_destinations(
 }
 
 pub(super) fn destination(
+    invocation: &crate::invocation::Invocation,
     destination: Option<String>,
     packet: &Packet,
     policy: &packetcraftr::policy::Policy,
@@ -81,7 +83,7 @@ pub(super) fn destination(
         .resolve_target(
             &target,
             &packetcraftr::target::SystemResolver,
-            &crate::invocation::passive_lookup(),
+            &invocation.passive_lookup(),
         )
         .map_err(CliError::classified)?;
     let ip_version = packet

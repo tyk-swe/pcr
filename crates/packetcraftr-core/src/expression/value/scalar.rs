@@ -5,20 +5,20 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
 use crate::expression::Error;
-use crate::field::{FieldValue, parse_mac};
+use crate::field::{self, parse_mac};
 
-pub(super) fn parse_scalar(base: usize, input: &str) -> Result<FieldValue, Error> {
+pub(super) fn parse_scalar(base: usize, input: &str) -> Result<field::Value, Error> {
     if input.eq_ignore_ascii_case("true") {
-        return Ok(FieldValue::Bool(true));
+        return Ok(field::Value::Bool(true));
     }
     if input.eq_ignore_ascii_case("false") {
-        return Ok(FieldValue::Bool(false));
+        return Ok(field::Value::Bool(false));
     }
     if let Ok(value) = Ipv4Addr::from_str(input) {
-        return Ok(FieldValue::Ipv4(value));
+        return Ok(field::Value::Ipv4(value));
     }
     if let Ok(value) = Ipv6Addr::from_str(input) {
-        return Ok(FieldValue::Ipv6(value));
+        return Ok(field::Value::Ipv6(value));
     }
     if let Some(digits) = strip_hex_prefix(input) {
         return parse_radix_integer(base, input, digits, 16, "hexadecimal");
@@ -41,15 +41,15 @@ pub(super) fn parse_scalar(base: usize, input: &str) -> Result<FieldValue, Error
         return Ok(value);
     }
     if let Ok(value) = input.parse::<u64>() {
-        return Ok(FieldValue::Unsigned(value));
+        return Ok(field::Value::Unsigned(value));
     }
     if let Ok(value) = input.parse::<i64>() {
-        return Ok(FieldValue::Signed(value));
+        return Ok(field::Value::Signed(value));
     }
     if let Some(mac) = parse_mac(input) {
-        return Ok(FieldValue::Mac(mac));
+        return Ok(field::Value::Mac(mac));
     }
-    Ok(FieldValue::Text(input.to_owned()))
+    Ok(field::Value::Text(input.to_owned()))
 }
 
 fn parse_radix_integer(
@@ -58,21 +58,21 @@ fn parse_radix_integer(
     digits: &str,
     radix: u32,
     name: &str,
-) -> Result<FieldValue, Error> {
+) -> Result<field::Value, Error> {
     let invalid = || Error::Syntax {
         offset: base,
         message: format!("invalid {name} integer {input}"),
     };
     let digits = without_separators(digits, radix).ok_or_else(invalid)?;
     u64::from_str_radix(&digits, radix)
-        .map(FieldValue::Unsigned)
+        .map(field::Value::Unsigned)
         .map_err(|_| invalid())
 }
 
 /// Decimal integers spelled with `_` separators, such as `1_000`. A token made
 /// only of digits and underscores that misplaces one is an error rather than
 /// text, so a typo cannot silently become a string.
-fn parse_separated_decimal(base: usize, input: &str) -> Result<Option<FieldValue>, Error> {
+fn parse_separated_decimal(base: usize, input: &str) -> Result<Option<field::Value>, Error> {
     let (negative, digits) = match input.strip_prefix('-') {
         Some(digits) => (true, digits),
         None => (false, input),
@@ -93,12 +93,12 @@ fn parse_separated_decimal(base: usize, input: &str) -> Result<Option<FieldValue
     let value = if negative {
         format!("-{digits}")
             .parse::<i64>()
-            .map(FieldValue::Signed)
+            .map(field::Value::Signed)
             .map_err(|_| invalid())?
     } else {
         digits
             .parse::<u64>()
-            .map(FieldValue::Unsigned)
+            .map(field::Value::Unsigned)
             .map_err(|_| invalid())?
     };
     Ok(Some(value))

@@ -13,26 +13,30 @@ use crate::{errors::CliError, output};
 /// hop is a claim from another host's trace, so it is marked apart from the
 /// probes that observed a hop for this host.
 pub(super) fn render_traceroute_text(
+    invocation: &crate::invocation::Invocation,
     trace: &output::traceroute::hosts::Report,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     use output::traceroute::hosts::Basis;
 
     let plan = &trace.plan;
-    write_stdout_line(format_args!(
-        "traceroute first-hop={} max-hops={} attempts={} max-probes={} strategy={} reuse-max-age={}",
-        plan.first_hop,
-        plan.max_hops,
-        plan.attempts,
-        plan.max_probes,
-        plan.strategy.as_ref().map_or_else(
-            || "-".to_owned(),
-            |strategy| strategy_text(strategy.strategy, strategy.destination_port)
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "traceroute first-hop={} max-hops={} attempts={} max-probes={} strategy={} reuse-max-age={}",
+            plan.first_hop,
+            plan.max_hops,
+            plan.attempts,
+            plan.max_probes,
+            plan.strategy.as_ref().map_or_else(
+                || "-".to_owned(),
+                |strategy| strategy_text(strategy.strategy, strategy.destination_port)
+            ),
+            plan.reuse
+                .as_ref()
+                .map_or_else(|| "-".to_owned(), |reuse| duration_text(reuse.max_age)),
         ),
-        plan.reuse
-            .as_ref()
-            .map_or_else(|| "-".to_owned(), |reuse| duration_text(reuse.max_age)),
-    ))?;
+    )?;
     for host in &trace.hosts {
         let summary = &host.summary;
         let address = match &summary.scope {
@@ -57,15 +61,18 @@ pub(super) fn render_traceroute_text(
                 )
             },
         );
-        write_stdout_line(format_args!(
-            "trace {address} status={} {} strategy={selection}",
-            summary.status.as_str(),
-            match (&summary.reason, &summary.completion) {
-                (Some(reason), _) => format!("reason={}", reason.as_str()),
-                (None, Some(completion)) => format!("completion={}", completion.as_str()),
-                (None, None) => "completion=-".to_owned(),
-            },
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "trace {address} status={} {} strategy={selection}",
+                summary.status.as_str(),
+                match (&summary.reason, &summary.completion) {
+                    (Some(reason), _) => format!("reason={}", reason.as_str()),
+                    (None, Some(completion)) => format!("completion={}", completion.as_str()),
+                    (None, None) => "completion=-".to_owned(),
+                },
+            ),
+        )?;
         let mut hops: Vec<(u8, Option<&output::traceroute::Hop>, Option<&_>)> = host
             .hops
             .iter()
@@ -79,10 +86,11 @@ pub(super) fn render_traceroute_text(
             .collect();
         hops.sort_by_key(|(hop_limit, _, _)| *hop_limit);
         for (hop_limit, fresh, reused) in hops {
-            write_stdout_line(format_args!("  hop={hop_limit}"))?;
+            write_stdout_line(invocation, format_args!("  hop={hop_limit}"))?;
             if let Some(hop) = fresh {
                 for probe in &hop.probes {
                     crate::commands::traceroute::rendering::render_probe_text(
+                        invocation,
                         "    ",
                         probe,
                         presentation,
@@ -90,31 +98,40 @@ pub(super) fn render_traceroute_text(
                 }
             }
             if let Some(hop) = reused {
-                write_stdout_line(format_args!(
-                    "    reused from={} age={} probes={} responders={} observed={}",
-                    hop.source,
-                    duration_text(hop.age),
-                    comma_separated(&hop.probes),
-                    comma_separated(&hop.responders),
-                    optional_display(hop.observed_at.as_ref()),
-                ))?;
+                write_stdout_line(
+                    invocation,
+                    format_args!(
+                        "    reused from={} age={} probes={} responders={} observed={}",
+                        hop.source,
+                        duration_text(hop.age),
+                        comma_separated(&hop.probes),
+                        comma_separated(&hop.responders),
+                        optional_display(hop.observed_at.as_ref()),
+                    ),
+                )?;
             }
         }
     }
-    render_undecoded(trace.undecoded.iter().map(|evidence| {
-        (
-            Some(format!(
-                "destination={} hop={}",
-                evidence.destination, evidence.hop_limit
-            )),
-            &evidence.frame,
-        )
-    }))?;
-    write_summary_line(format_args!(
-        "traced {} host(s); retained evidence {} byte(s)",
-        traced_hosts(trace),
-        trace.retained_evidence_bytes
-    ))
+    render_undecoded(
+        invocation,
+        trace.undecoded.iter().map(|evidence| {
+            (
+                Some(format!(
+                    "destination={} hop={}",
+                    evidence.destination, evidence.hop_limit
+                )),
+                &evidence.frame,
+            )
+        }),
+    )?;
+    write_summary_line(
+        invocation,
+        format_args!(
+            "traced {} host(s); retained evidence {} byte(s)",
+            traced_hosts(trace),
+            trace.retained_evidence_bytes
+        ),
+    )
 }
 
 /// Count complete and incomplete traces, excluding not-traced records.

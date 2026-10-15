@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::packet::Packet;
 
 use crate::error::{Classification, Classified, Kind};
-use crate::field::FieldValue;
+use crate::field;
 use crate::registry::Registry;
 
 mod syntax;
@@ -171,7 +171,7 @@ pub fn parse(input: &str, registry: &Registry, limits: Limits) -> Result<Packet,
 }
 
 /// `max_layers` has no effect because this input contains no layer stack.
-pub fn parse_value(input: &str, limits: Limits) -> Result<FieldValue, Error> {
+pub fn parse_value(input: &str, limits: Limits) -> Result<field::Value, Error> {
     if input.len() > limits.max_bytes {
         return Err(Error::SizeLimit {
             actual: input.len(),
@@ -187,7 +187,7 @@ fn parse_layer(
     segment: &str,
     layer: usize,
     values: &mut value::Parser,
-) -> Result<(String, BTreeMap<String, FieldValue>), Error> {
+) -> Result<(String, BTreeMap<String, field::Value>), Error> {
     let (base, segment) = trim_at(base, segment);
     if segment.is_empty() {
         return Err(Error::Syntax {

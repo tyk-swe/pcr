@@ -12,9 +12,9 @@ use super::model::{
 use super::reflection::{tcp_layout, tcp_schema};
 use super::{SackBlock, Tcp, TcpOption};
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, TCP_CHECKSUM},
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::Layer,
     protocol::{
         BuiltinProtocol,
@@ -37,7 +37,7 @@ pub(super) const MAX_OPTION_BYTES: usize = 40;
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct TcpCodec;
 
-impl LayerCodec for TcpCodec {
+impl Codec for TcpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &tcp_schema().protocol
     }
@@ -46,8 +46,8 @@ impl LayerCodec for TcpCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Tcp>(NAME, layer)?;
         if layer.flags > 0x01ff {
             return Err(invalid(NAME, "flags exceed nine bits"));
@@ -111,7 +111,7 @@ impl LayerCodec for TcpCodec {
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
         materialized.options = parse(&Bytes::from(options));
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(tcp_layout(header_len))
             .with_diagnostics(diagnostics))
     }
@@ -119,8 +119,8 @@ impl LayerCodec for TcpCodec {
     fn decode(
         &self,
         input: Bytes,
-        context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<TCP_MIN_LEN>() else {
             return Err(truncated(NAME, TCP_MIN_LEN, input.len()));
         };
@@ -159,7 +159,7 @@ impl LayerCodec for TcpCodec {
         let payload_len = input.len().saturating_sub(header_len);
         let source_port = u16::from_be_bytes([header[0], header[1]]);
         let destination_port = u16::from_be_bytes([header[2], header[3]]);
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Tcp {
                 source_port,
                 destination_port,
@@ -188,7 +188,7 @@ impl LayerCodec for TcpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Tcp::default(), fields)
     }

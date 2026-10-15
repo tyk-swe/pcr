@@ -11,7 +11,7 @@ use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
 use crate::execution::Shared;
-use crate::probe::{ProbeStatus, Transport, index_or_push};
+use crate::probe::{self, Transport, index_or_push};
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
@@ -83,7 +83,7 @@ pub struct ProbeEvidence {
     pub destination: IpAddr,
     pub strategy: Transport,
     pub destination_port: Option<u16>,
-    pub status: ProbeStatus,
+    pub status: probe::Status,
     pub response_kind: Option<ResponseKind>,
     pub responder: Option<IpAddr>,
     pub sent_at: SystemTime,

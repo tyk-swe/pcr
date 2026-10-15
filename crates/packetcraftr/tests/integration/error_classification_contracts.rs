@@ -12,7 +12,7 @@ use packetcraftr::send;
 use packetcraftr::{Client, ProviderSet};
 use packetcraftr_core::build::{self, Builder};
 use packetcraftr_core::capture_file::{Reader, Writer};
-use packetcraftr_core::codec::Context;
+use packetcraftr_core::codec::Addresses;
 use packetcraftr_core::error::{Classified, Coordinate, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
@@ -155,7 +155,7 @@ fn owned_ethernet_frame(ttl: u8) -> Vec<u8> {
         })
         .push(Icmpv4::default());
     Builder::new(protocol::builtin::registry())
-        .build(packet, Context::default(), build::Options::default())
+        .build(packet, Addresses::default(), build::Options::default())
         .expect("replay fixture builds")
         .bytes
         .to_vec()

@@ -127,9 +127,9 @@ mod tests {
 
     use super::*;
     use crate::evidence::ExecutionPermit;
-    use crate::probe::ProbeEndpoint;
+    use crate::probe;
 
-    fn batch(target: ProbeEndpoint, source_ports: &[u16]) -> Batch<Probe> {
+    fn batch(target: probe::Endpoint, source_ports: &[u16]) -> Batch<Probe> {
         Batch {
             probes: source_ports
                 .iter()
@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn executor_rejects_heterogeneous_source_ports() {
-        let batch = batch(ProbeEndpoint::Udp { port: 33_434 }, &[49_152, 49_153]);
+        let batch = batch(probe::Endpoint::Udp { port: 33_434 }, &[49_152, 49_153]);
 
         assert!(validate_batch(&batch).is_err());
     }
@@ -167,7 +167,7 @@ mod tests {
             |probe| probe.dscp = 46,
         ];
         for mutate in mixed {
-            let mut batch = batch(ProbeEndpoint::Icmp, &[0, 0]);
+            let mut batch = batch(probe::Endpoint::Icmp, &[0, 0]);
             assert!(validate_batch(&batch).is_ok());
             mutate(&mut batch.probes[1]);
             assert!(validate_batch(&batch).is_err());

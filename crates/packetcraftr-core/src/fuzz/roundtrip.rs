@@ -7,7 +7,7 @@
 
 use crate::{
     build::{self, Builder, BuiltPacket},
-    codec::Context,
+    codec::Addresses,
     decode::DecodedPacket,
     diagnostic::Diagnostic,
     layout::PacketLayout,
@@ -62,7 +62,7 @@ pub(super) fn diagnostic(
             Diagnostic::warning(code, message)
         }
     };
-    match builder.build(decoded.packet.clone(), Context::default(), options) {
+    match builder.build(decoded.packet.clone(), Addresses::default(), options) {
         Ok(rebuilt) if rebuilt.bytes == built.bytes => None,
         Ok(rebuilt) => {
             let offset = first_difference(&built.bytes, &rebuilt.bytes);

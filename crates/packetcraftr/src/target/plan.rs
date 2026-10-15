@@ -111,66 +111,63 @@ impl Classified for Error {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-struct SelectionPlan;
-
-impl crate::execution::Errors for SelectionPlan {
-    type Error = Error;
-    type Step = u64;
-
-    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Error {
-        Error::InvalidLimit {
+fn selection_error(step: u64, failure: crate::execution::Failure) -> Error {
+    match failure {
+        crate::execution::Failure::InvalidLimit {
             field,
             value,
             reason,
+        } => Error::InvalidLimit {
+            field,
+            value,
+            reason,
+        },
+        crate::execution::Failure::Authorization(source) => Error::Authorization(source),
+        crate::execution::Failure::DurationLimit(source) => {
+            let _step = step;
+
+            source.into()
         }
-    }
+        crate::execution::Failure::Interrupted(source) => {
+            let _step = step;
 
-    fn authorization(&self, source: BoundaryError) -> Error {
-        Error::Authorization(source)
-    }
+            source.into()
+        }
+        crate::execution::Failure::Clock(_source) => {
+            let _step = step;
 
-    fn duration_limit(
-        &self,
-        _step: u64,
-        source: packetcraftr_core::budget::DeadlineExceeded,
-    ) -> Error {
-        source.into()
-    }
+            BoundaryError::internal_execution(
+                "target planning never waits on a clock",
+                "internal.target_plan",
+                "report the unexpected selection path",
+            )
+            .into()
+        }
+        crate::execution::Failure::Execution(source) => {
+            let _step = step;
 
-    fn interrupted(&self, _step: u64, source: packetcraftr_core::budget::Interrupted) -> Error {
-        source.into()
-    }
+            Error::Authorization(source)
+        }
+        crate::execution::Failure::InvalidEvidence(_source) => {
+            let _step = step;
 
-    fn clock(&self, _step: u64, _source: Box<dyn std::error::Error + Send + Sync>) -> Error {
-        BoundaryError::internal_execution(
-            "target planning never waits on a clock",
-            "internal.target_plan",
-            "report the unexpected selection path",
-        )
-        .into()
-    }
+            BoundaryError::internal_execution(
+                "target planning produces no evidence",
+                "internal.target_plan",
+                "report the unexpected selection path",
+            )
+            .into()
+        }
+        crate::execution::Failure::StatsOverflow(_source) => {
+            let _step = step;
 
-    fn execution(&self, _step: u64, source: BoundaryError) -> Error {
-        Error::Authorization(source)
-    }
-
-    fn invalid_evidence(&self, _step: u64, _source: crate::evidence::Error) -> Error {
-        BoundaryError::internal_execution(
-            "target planning produces no evidence",
-            "internal.target_plan",
-            "report the unexpected selection path",
-        )
-        .into()
-    }
-
-    fn stats_overflow(&self, _step: u64, _source: crate::StatsOverflow) -> Error {
-        BoundaryError::internal_execution(
-            "target planning accumulates no statistics",
-            "internal.target_plan",
-            "report the unexpected selection path",
-        )
-        .into()
+            BoundaryError::internal_execution(
+                "target planning accumulates no statistics",
+                "internal.target_plan",
+                "report the unexpected selection path",
+            )
+            .into()
+        }
     }
 }
 
@@ -207,7 +204,7 @@ impl<P: TargetProviders, K: Clock> Client<P, K> {
         let (selected, ()) = admit_selection(
             &mut admission,
             &deadline,
-            &SelectionPlan,
+            selection_error,
             DeclaredTargets {
                 selection: &request.selection,
                 family: FamilyGate::new(request.family, |family| Error::Family {

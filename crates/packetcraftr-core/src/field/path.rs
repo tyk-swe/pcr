@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::FieldValue;
+use crate::field;
 use crate::layer::{FieldSchema, Schema};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -114,15 +114,15 @@ impl Path {
         for part in &self.components {
             match part {
                 Component::Name(name) => {
-                    if field.kind != super::FieldKind::Object
-                        && !(field.kind == super::FieldKind::List && element)
+                    if field.kind != field::Kind::Object
+                        && !(field.kind == field::Kind::List && element)
                     {
                         return None;
                     }
                     field = field.children.iter().find(|child| child.name == name)?;
                     element = false;
                 }
-                Component::Index(_) if field.kind == super::FieldKind::List && !element => {
+                Component::Index(_) if field.kind == field::Kind::List && !element => {
                     element = true;
                 }
                 Component::Index(_) => return None,
@@ -131,12 +131,12 @@ impl Path {
         Some(field)
     }
 
-    pub fn get<'a>(&self, root: &'a FieldValue) -> Option<&'a FieldValue> {
+    pub fn get<'a>(&self, root: &'a field::Value) -> Option<&'a field::Value> {
         let mut value = root;
         for component in &self.components {
             value = match (component, value) {
-                (Component::Name(name), FieldValue::Object(values)) => values.get(name)?,
-                (Component::Index(index), FieldValue::List(values)) => values.get(*index)?,
+                (Component::Name(name), field::Value::Object(values)) => values.get(name)?,
+                (Component::Index(index), field::Value::List(values)) => values.get(*index)?,
                 _ => return None,
             };
         }
@@ -144,12 +144,12 @@ impl Path {
     }
 
     /// Atomically replaces an existing member; never creates unspecified keys or indices.
-    pub fn replace(&self, root: &mut FieldValue, replacement: FieldValue) -> bool {
+    pub fn replace(&self, root: &mut field::Value, replacement: field::Value) -> bool {
         let mut value = root;
         for component in &self.components {
             let next = match (component, value) {
-                (Component::Name(name), FieldValue::Object(values)) => values.get_mut(name),
-                (Component::Index(index), FieldValue::List(values)) => values.get_mut(*index),
+                (Component::Name(name), field::Value::Object(values)) => values.get_mut(name),
+                (Component::Index(index), field::Value::List(values)) => values.get_mut(*index),
                 _ => None,
             };
             let Some(next) = next else {

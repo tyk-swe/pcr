@@ -7,7 +7,7 @@ use super::{
     eval, parser,
     path::{FieldRef, FieldSource, FrameField, Occurrence},
 };
-use crate::{field::FieldValue, registry::Registry};
+use crate::{field, registry::Registry};
 
 #[derive(Clone, Debug)]
 pub struct Projection {
@@ -113,7 +113,7 @@ impl Projection {
         &self,
         context: &Context<'_>,
         max_bytes: usize,
-    ) -> Result<Vec<Option<FieldValue>>, Error> {
+    ) -> Result<Vec<Option<field::Value>>, Error> {
         let mut remaining = max_bytes;
         self.values_with_budget(context, &mut remaining)
     }
@@ -122,7 +122,7 @@ impl Projection {
         &self,
         context: &Context<'_>,
         remaining: &mut usize,
-    ) -> Result<Vec<Option<FieldValue>>, Error> {
+    ) -> Result<Vec<Option<field::Value>>, Error> {
         let max_bytes = *remaining;
         let limit = || Error::ProjectionLimit {
             field: "cell_bytes",
@@ -153,7 +153,7 @@ impl Projection {
                     // that is absent reads as null.
                     if field.selects_all() && eval::selected_list_present(context, field) {
                         *remaining = remaining.checked_sub(2).ok_or_else(limit)?;
-                        Some(FieldValue::List(values))
+                        Some(field::Value::List(values))
                     } else {
                         *remaining = remaining.checked_sub(4).ok_or_else(limit)?;
                         None
@@ -163,7 +163,7 @@ impl Projection {
                 1 if !field.selects_all() => values.pop(),
                 _ => {
                     *remaining = remaining.checked_sub(values.len() + 1).ok_or_else(limit)?;
-                    Some(FieldValue::List(values))
+                    Some(field::Value::List(values))
                 }
             });
         }
@@ -172,11 +172,11 @@ impl Projection {
 }
 
 // A small decoded slice must not keep an entire source frame alive.
-fn detach_bytes(value: &mut FieldValue) {
+fn detach_bytes(value: &mut field::Value) {
     match value {
-        FieldValue::Bytes(bytes) => *bytes = bytes::Bytes::copy_from_slice(bytes),
-        FieldValue::List(values) => values.iter_mut().for_each(detach_bytes),
-        FieldValue::Object(values) => values.values_mut().for_each(detach_bytes),
+        field::Value::Bytes(bytes) => *bytes = bytes::Bytes::copy_from_slice(bytes),
+        field::Value::List(values) => values.iter_mut().for_each(detach_bytes),
+        field::Value::Object(values) => values.values_mut().for_each(detach_bytes),
         _ => {}
     }
 }
@@ -213,33 +213,35 @@ fn display_len(value: impl std::fmt::Display) -> usize {
     counter.0
 }
 
-fn measure(value: &FieldValue, maximum: usize, depth: usize) -> Option<usize> {
+fn measure(value: &field::Value, maximum: usize, depth: usize) -> Option<usize> {
     if depth > 64 {
         return None;
     }
     let bytes = match value {
-        FieldValue::Bool(value) => {
+        field::Value::Bool(value) => {
             if *value {
                 4
             } else {
                 5
             }
         }
-        FieldValue::Unsigned(value) => unsigned_len(*value),
-        FieldValue::Signed(value) => {
+        field::Value::Unsigned(value) => unsigned_len(*value),
+        field::Value::Signed(value) => {
             unsigned_len(value.unsigned_abs()) + usize::from(value.is_negative())
         }
-        FieldValue::Ipv4(_) | FieldValue::Ipv6(_) | FieldValue::Mac(_) => display_len(value) + 2,
-        FieldValue::Text(value) => string_size(value)?,
-        FieldValue::Bytes(value) => value.len().checked_mul(2)?.checked_add(2)?,
-        FieldValue::List(values) => {
+        field::Value::Ipv4(_) | field::Value::Ipv6(_) | field::Value::Mac(_) => {
+            display_len(value) + 2
+        }
+        field::Value::Text(value) => string_size(value)?,
+        field::Value::Bytes(value) => value.len().checked_mul(2)?.checked_add(2)?,
+        field::Value::List(values) => {
             let mut size = 2usize.checked_add(values.len().saturating_sub(1))?;
             for value in values {
                 size = size.checked_add(measure(value, maximum.checked_sub(size)?, depth + 1)?)?;
             }
             size
         }
-        FieldValue::Object(values) => {
+        field::Value::Object(values) => {
             let mut size = 2usize.checked_add(values.len().saturating_sub(1))?;
             for (key, value) in values {
                 size = size.checked_add(string_size(key)?)?.checked_add(1)?;

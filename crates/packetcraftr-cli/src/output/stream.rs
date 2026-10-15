@@ -80,6 +80,12 @@ pub struct StreamEncoder {
 }
 
 impl StreamEncoder {
+    /// Terminal error cleanup keeps the writer timeout but releases the execution ceiling.
+    pub(crate) fn terminal(mut self) -> Self {
+        self.deadline = None;
+        self
+    }
+
     #[must_use]
     pub fn with_deadline(mut self, deadline: Arc<Deadline>) -> Self {
         self.deadline = Some(deadline);

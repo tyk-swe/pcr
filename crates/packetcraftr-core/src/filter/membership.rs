@@ -9,7 +9,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use super::comparison;
 use super::lexer::CompareOperator;
 use super::literal::Literal;
-use crate::field::FieldValue;
+use crate::field;
 
 /// Members of a set. An exact literal is indexed under every value kind that
 /// [`comparison::matches`] lets equal it; prefixes and ranges, and every
@@ -88,8 +88,8 @@ impl MemberSet {
     }
 
     /// Whether `value == member` holds for some member.
-    pub(super) fn contains(&self, value: &FieldValue) -> bool {
-        if let FieldValue::List(values) = value {
+    pub(super) fn contains(&self, value: &field::Value) -> bool {
+        if let field::Value::List(values) = value {
             return values.iter().any(|value| self.contains(value));
         }
         let indexed = self
@@ -105,28 +105,28 @@ impl MemberSet {
 }
 
 impl Index {
-    fn contains(&self, value: &FieldValue) -> bool {
+    fn contains(&self, value: &field::Value) -> bool {
         match value {
-            FieldValue::Bool(value) => {
+            field::Value::Bool(value) => {
                 self.bools[usize::from(*value)] || self.unsigned.contains(&u64::from(*value))
             }
-            FieldValue::Unsigned(value) => {
+            field::Value::Unsigned(value) => {
                 self.unsigned.contains(value)
                     || i64::try_from(*value).is_ok_and(|value| self.signed.contains(&value))
             }
-            FieldValue::Signed(value) => {
+            field::Value::Signed(value) => {
                 self.signed.contains(value)
                     || u64::try_from(*value).is_ok_and(|value| self.unsigned.contains(&value))
             }
-            FieldValue::Text(value) => self.text.contains(value),
-            FieldValue::Bytes(value) => {
+            field::Value::Text(value) => self.text.contains(value),
+            field::Value::Bytes(value) => {
                 self.bytes.contains(value.as_ref())
                     || matches!(value.as_ref(), [only] if self.unsigned.contains(&u64::from(*only)))
             }
-            FieldValue::Mac(value) => self.macs.contains(value),
-            FieldValue::Ipv4(value) => self.ipv4.contains(value),
-            FieldValue::Ipv6(value) => self.ipv6.contains(value),
-            FieldValue::List(_) | FieldValue::Object(_) => false,
+            field::Value::Mac(value) => self.macs.contains(value),
+            field::Value::Ipv4(value) => self.ipv4.contains(value),
+            field::Value::Ipv6(value) => self.ipv6.contains(value),
+            field::Value::List(_) | field::Value::Object(_) => false,
         }
     }
 }
@@ -162,47 +162,47 @@ mod tests {
         ]
     }
 
-    fn values() -> Vec<FieldValue> {
+    fn values() -> Vec<field::Value> {
         let scalars = vec![
-            FieldValue::Bool(true),
-            FieldValue::Bool(false),
-            FieldValue::Unsigned(0),
-            FieldValue::Unsigned(1),
-            FieldValue::Unsigned(9),
-            FieldValue::Unsigned(150),
-            FieldValue::Unsigned(u64::MAX),
-            FieldValue::Signed(-3),
-            FieldValue::Signed(7),
-            FieldValue::Signed(150),
-            FieldValue::Signed(-1),
-            FieldValue::Text("ab".to_owned()),
-            FieldValue::Text("cd".to_owned()),
-            FieldValue::Bytes(Bytes::from_static(b"ab")),
-            FieldValue::Bytes(Bytes::from_static(b"cd")),
-            FieldValue::Bytes(Bytes::from_static(&[7])),
-            FieldValue::Bytes(Bytes::from_static(&[0xa, 0xb, 0xc, 0xd, 0xe, 0xf])),
-            FieldValue::Mac([1, 2, 3, 4, 5, 6]),
-            FieldValue::Mac([0xa, 0xb, 0xc, 0xd, 0xe, 0xf]),
-            FieldValue::Mac([0; 6]),
-            FieldValue::Ipv4(Ipv4Addr::new(192, 0, 2, 1)),
-            FieldValue::Ipv4(Ipv4Addr::new(198, 51, 100, 7)),
-            FieldValue::Ipv4(Ipv4Addr::new(203, 0, 113, 15)),
-            FieldValue::Ipv4(Ipv4Addr::new(192, 0, 2, 2)),
-            FieldValue::Ipv6(Ipv6Addr::LOCALHOST),
-            FieldValue::Ipv6("2001:db8::5".parse().unwrap()),
-            FieldValue::Ipv6(Ipv6Addr::UNSPECIFIED),
-            FieldValue::Object(Default::default()),
+            field::Value::Bool(true),
+            field::Value::Bool(false),
+            field::Value::Unsigned(0),
+            field::Value::Unsigned(1),
+            field::Value::Unsigned(9),
+            field::Value::Unsigned(150),
+            field::Value::Unsigned(u64::MAX),
+            field::Value::Signed(-3),
+            field::Value::Signed(7),
+            field::Value::Signed(150),
+            field::Value::Signed(-1),
+            field::Value::Text("ab".to_owned()),
+            field::Value::Text("cd".to_owned()),
+            field::Value::Bytes(Bytes::from_static(b"ab")),
+            field::Value::Bytes(Bytes::from_static(b"cd")),
+            field::Value::Bytes(Bytes::from_static(&[7])),
+            field::Value::Bytes(Bytes::from_static(&[0xa, 0xb, 0xc, 0xd, 0xe, 0xf])),
+            field::Value::Mac([1, 2, 3, 4, 5, 6]),
+            field::Value::Mac([0xa, 0xb, 0xc, 0xd, 0xe, 0xf]),
+            field::Value::Mac([0; 6]),
+            field::Value::Ipv4(Ipv4Addr::new(192, 0, 2, 1)),
+            field::Value::Ipv4(Ipv4Addr::new(198, 51, 100, 7)),
+            field::Value::Ipv4(Ipv4Addr::new(203, 0, 113, 15)),
+            field::Value::Ipv4(Ipv4Addr::new(192, 0, 2, 2)),
+            field::Value::Ipv6(Ipv6Addr::LOCALHOST),
+            field::Value::Ipv6("2001:db8::5".parse().unwrap()),
+            field::Value::Ipv6(Ipv6Addr::UNSPECIFIED),
+            field::Value::Object(Default::default()),
         ];
         let mut values = scalars.clone();
-        values.push(FieldValue::List(Vec::new()));
-        values.push(FieldValue::List(vec![
-            FieldValue::Unsigned(1),
-            FieldValue::Ipv4(Ipv4Addr::new(203, 0, 113, 15)),
+        values.push(field::Value::List(Vec::new()));
+        values.push(field::Value::List(vec![
+            field::Value::Unsigned(1),
+            field::Value::Ipv4(Ipv4Addr::new(203, 0, 113, 15)),
         ]));
         values.extend(
             scalars
                 .into_iter()
-                .map(|value| FieldValue::List(vec![value])),
+                .map(|value| field::Value::List(vec![value])),
         );
         values
     }

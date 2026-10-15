@@ -14,7 +14,7 @@ use super::report::{Event, Report};
 use super::request::{Request, overflow};
 use super::selection::{Choice, choose};
 use crate::clock::Clock;
-use crate::execution::{Errors as _, ExchangeExecutor, Executor, publisher, rate_delay};
+use crate::execution::{ExchangeExecutor, Executor, publisher, rate_delay};
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_planned};
 use crate::probe::{Batch, Transport, check_probe_count, check_probe_duration, enforce_deadline};
@@ -23,7 +23,7 @@ use crate::target::{
     DeclaredTargets, FamilyGate, ResolveTarget, SelectedAddress, admit_resolved_selection,
     admit_selection, wire_limits,
 };
-use crate::traceroute::error::Probes;
+use crate::traceroute::error::probe_error;
 use crate::traceroute::request::tcp_payload;
 use crate::traceroute::{Error, MAX_PROBE_BYTES, Probe, WORKFLOW};
 use crate::{Client, Sink, Stats};
@@ -36,10 +36,26 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
+        let operation = crate::execution::Operation::new(self, request.limits.max_duration);
+        self.trace_hosts_in(request, sink, &operation)
+    }
+
+    pub(crate) fn trace_hosts_in<S>(
+        &self,
+        request: Request,
+        sink: S,
+        operation: &crate::execution::Operation,
+    ) -> Result<Report, Error>
+    where
+        S: Sink<Event, Ack = ()>,
+    {
+        let mut operation = operation.clone();
+        let policy = operation.policy(&self.policy);
+        let mut admission = crate::execution::Admission::new(&policy, self.providers.resolver());
         let publish = publisher(
-            &self.runtime,
+            &operation.runtime,
             sink,
-            |error| Probes.duration_limit(0, error),
+            |error| (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error)),
             |source| Error::Output { source },
         )?;
         let send = crate::send::Options {
@@ -51,13 +67,11 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         // The trace resolves its own neighbors, so its executor authorizes
         // each neighbor request like a probe whether or not the caller did.
         request.validate()?;
-        let mut client = self
-            .view_with_registry(std::sync::Arc::clone(&self.registry))
-            .with_neighbor_request_authorization();
+        operation.neighbor_mode = crate::execution::NeighborMode::Authorized;
         if request.route.link_mode != packetcraftr_netio::link::Mode::Layer3
             && (request.strategy.is_some() || !request.observed.is_empty())
         {
-            client.neighbors = client
+            operation.neighbors = operation
                 .neighbors
                 .one_attempt(
                     request.timeout,
@@ -69,21 +83,26 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
                 .map_err(|source| Error::Collection(BoundaryError::from_error(source)))?;
             // An implicit neighbor request waits on the trace's own rate
             // before its probe's batch.
-            client.neighbor_pause =
-                rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?;
+            operation.neighbor_pause = rate_delay(
+                probe_error,
+                "probes_per_second",
+                1,
+                request.probes_per_second,
+            )?;
         }
         let mut executor = super::executor::ClientExecutor::new(ExchangeExecutor::new(
-            &client,
+            self,
+            &operation,
             send,
             request.collection.clone(),
         ));
         let mut report = run(
             &request,
-            &mut self.admission(),
-            &self.registry,
+            &mut admission,
+            &operation.registry,
             &mut executor,
             &mut self.clock.clone(),
-            &mut self.deadline(request.limits.max_duration),
+            &mut operation.deadline(self, request.limits.max_duration),
             publish,
         )?;
         // The neighbor requests the probes' routes resolved count in the
@@ -93,7 +112,9 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         report
             .stats
             .checked_add_assign(&report.neighbor_stats.clone())
-            .map_err(|source| Probes.stats_overflow(0, source))?;
+            .map_err(|source| {
+                (probe_error)(0_u64, crate::execution::Failure::StatsOverflow(source))
+            })?;
         Ok(report)
     }
 }
@@ -113,12 +134,12 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    enforce_deadline(&Probes, deadline)?;
+    enforce_deadline(probe_error, deadline)?;
     let approved = approve(request, authorizer, deadline)?;
-    enforce_deadline(&Probes, deadline)?;
+    enforce_deadline(probe_error, deadline)?;
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
-        Probes,
+        probe_error,
         request.limits.evidence,
         HostsClassifier {
             registry,
@@ -182,7 +203,7 @@ fn approve<A: Authorizer + ResolveTarget>(
         admit_resolved_selection(
             authorizer,
             deadline,
-            &Probes,
+            probe_error,
             declared,
             resolved,
             Error::TargetSelection,
@@ -198,7 +219,7 @@ fn approve<A: Authorizer + ResolveTarget>(
         admit_selection(
             authorizer,
             deadline,
-            &Probes,
+            probe_error,
             declared,
             Error::TargetSelection,
             |selected| plan_hosts(request, &selected.targets),
@@ -295,9 +316,9 @@ fn plan_hosts(request: &Request, targets: &[SelectedAddress]) -> Result<Plan, Er
     let transmissions = probes
         .checked_add(neighbor_requests)
         .ok_or_else(|| overflow("probes"))?;
-    check_probe_count(&Probes, transmissions, request.limits.max_probes)?;
+    check_probe_count(probe_error, transmissions, request.limits.max_probes)?;
     check_probe_duration(
-        &Probes,
+        probe_error,
         worst_case_duration(request, traced)?,
         request.limits.max_duration,
     )?;
@@ -325,7 +346,7 @@ fn worst_case_duration(request: &Request, traced: usize) -> Result<Duration, Err
         .checked_mul(batches)
         .ok_or_else(overflowed)?;
     let delay = rate_delay(
-        &Probes,
+        probe_error,
         "probes_per_second",
         usize::try_from(request.probes_per_hop).unwrap_or(usize::MAX),
         request.probes_per_second,
@@ -333,7 +354,12 @@ fn worst_case_duration(request: &Request, traced: usize) -> Result<Duration, Err
     .checked_mul(batches.saturating_sub(1))
     .ok_or_else(overflowed)?;
     let initial = if request.paced_after.is_some() && batches > 0 {
-        rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?
+        rate_delay(
+            probe_error,
+            "probes_per_second",
+            1,
+            request.probes_per_second,
+        )?
     } else {
         Duration::ZERO
     };

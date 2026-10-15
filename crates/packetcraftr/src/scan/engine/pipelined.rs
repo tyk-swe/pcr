@@ -6,14 +6,13 @@ use std::time::Instant;
 use packetcraftr_core::budget::Deadline;
 
 use crate::clock::Clock;
-use crate::execution::Errors as _;
 use crate::probe::Batch;
 use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::target::SelectedAddress;
 
-use crate::probe::{ProbeEndpoint, enforce_deadline};
+use crate::probe::{self, enforce_deadline};
 use crate::scan::Error;
-use crate::scan::error::Probes;
+use crate::scan::error::probe_error;
 use crate::scan::evidence::ProbeClassifier;
 use crate::scan::executor::{PipelineEvent, PipelineOptions, Pipelined};
 use crate::scan::plan::packet::sent_probe_matches;
@@ -24,7 +23,7 @@ use crate::scan::{Event, Probe, Request};
 /// numbered from `first_sequence`.
 pub(super) struct StagePlan<'a> {
     pub(super) targets: &'a [SelectedAddress],
-    pub(super) endpoints: &'a [ProbeEndpoint],
+    pub(super) endpoints: &'a [probe::Endpoint],
     pub(super) stage: Stage,
     pub(super) first_sequence: u64,
 }
@@ -35,7 +34,7 @@ impl StagePlan<'_> {
             || self
                 .endpoints
                 .iter()
-                .any(|endpoint| matches!(endpoint, ProbeEndpoint::Ip { .. }))
+                .any(|endpoint| matches!(endpoint, probe::Endpoint::Ip { .. }))
     }
     pub(super) fn probes(&self, request: &Request) -> Result<u64, Error> {
         probe_count(self.targets.len(), self.endpoints.len(), request.attempts)
@@ -65,7 +64,7 @@ pub(super) fn execute<E, C, F>(
     executor: &mut E,
     clock: &mut C,
     deadline: &mut Deadline,
-    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
+    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
     plan: &StagePlan<'_>,
     preceding: &crate::Stats,
     peak: &mut usize,
@@ -78,7 +77,7 @@ where
     if plan.targets.is_empty() || plan.endpoints.is_empty() {
         return Ok(crate::Stats::default());
     }
-    enforce_deadline(&Probes, deadline)?;
+    enforce_deadline(probe_error, deadline)?;
     if !plan.uses_pipeline(request) {
         let probes = run_batches(
             plan.batches(request),
@@ -150,9 +149,9 @@ pub(super) fn pipeline_options(
     Ok(PipelineOptions {
         max_in_flight: request.max_in_flight,
         probes_per_second: request.probes_per_second,
-        max_duration: deadline
-            .remaining()
-            .map_err(|error| Probes.duration_limit(0, error))?,
+        max_duration: deadline.remaining().map_err(|error| {
+            (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error))
+        })?,
         max_prepared_bytes: request.limits.max_prepared_bytes.saturating_sub(reserved),
         max_evidence_frames: request.limits.evidence.max_frames,
         max_evidence_bytes: request.limits.evidence.max_bytes,
@@ -166,7 +165,7 @@ pub(super) fn pipeline_options(
 pub(super) fn check_prepared_descriptions(
     request: &Request,
     targets: &[SelectedAddress],
-    endpoints: &[ProbeEndpoint],
+    endpoints: &[probe::Endpoint],
 ) -> Result<(), Error> {
     let probes_per_target = endpoints.len().saturating_mul(request.attempts as usize);
     let batch_bytes = targets.iter().fold(0usize, |bytes, target| {
@@ -203,7 +202,7 @@ pub(super) fn drive_pipeline<E, C, F>(
     request: &Request,
     executor: &mut E,
     clock: &C,
-    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
+    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
     deadline: &Deadline,
     batches: &[Batch<Probe>],
     host_deadlines: Vec<Option<Instant>>,
@@ -325,7 +324,7 @@ pub(super) fn run_pipelined<E, C, F>(
     request: &Request,
     executor: &mut E,
     clock: &C,
-    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
+    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
     deadline: &Deadline,
     plan: &StagePlan<'_>,
     preceding: crate::Stats,
@@ -360,6 +359,6 @@ where
                 .to_owned(),
         });
     }
-    enforce_deadline(&Probes, deadline)?;
+    enforce_deadline(probe_error, deadline)?;
     Ok((outcome.stats, outcome.peak_pending))
 }

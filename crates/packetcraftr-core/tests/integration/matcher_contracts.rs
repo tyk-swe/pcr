@@ -134,7 +134,11 @@ fn build_probe(network: NetworkVersion, transport: ProbeTransport) -> build::Bui
 
 fn build_packet(packet: Packet) -> build::BuiltPacket {
     build::Builder::new(registry())
-        .build(packet, codec::Context::default(), build::Options::default())
+        .build(
+            packet,
+            codec::Addresses::default(),
+            build::Options::default(),
+        )
         .expect("packet fixture must build")
 }
 
@@ -447,7 +451,7 @@ fn init_ack_requires_complete_chunk_framing_and_padding() {
         let response = build::Builder::new(registry())
             .build(
                 response,
-                codec::Context::default(),
+                codec::Addresses::default(),
                 build::Options {
                     mode: codec::Mode::Permissive,
                     ..Default::default()

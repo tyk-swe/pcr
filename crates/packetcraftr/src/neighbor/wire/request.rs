@@ -8,7 +8,7 @@ use bytes::Bytes;
 use crate::neighbor::Request as NeighborRequest;
 use crate::neighbor::error::{invalid_request, unbuildable_request};
 use packetcraftr_core::build::{Builder, BuiltPacket, Options};
-use packetcraftr_core::codec::Context;
+use packetcraftr_core::codec::Addresses;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::layer::Padding;
 use packetcraftr_core::packet::{MacAddress, Packet, VlanKind, VlanTag};
@@ -131,6 +131,6 @@ pub(super) fn push_vlan(packet: &mut Packet, tag: VlanTag) {
 
 fn build_packet(packet: Packet) -> Result<BuiltPacket, crate::neighbor::Error> {
     Builder::new(builtin::registry())
-        .build(packet, Context::default(), Options::default())
+        .build(packet, Addresses::default(), Options::default())
         .map_err(|source| unbuildable_request("discovery frame does not build", source))
 }

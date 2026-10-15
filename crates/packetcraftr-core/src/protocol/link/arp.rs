@@ -7,8 +7,8 @@ use std::net::Ipv4Addr;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::{FieldValue, WireValue},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
 };
 
@@ -85,7 +85,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ArpCodec;
 
-impl LayerCodec for ArpCodec {
+impl Codec for ArpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &arp_schema().protocol
     }
@@ -94,8 +94,8 @@ impl LayerCodec for ArpCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Arp>(NAME, layer)?;
         let mut diagnostics = Vec::new();
         if layer.hardware_type != 1 || layer.protocol_type != 0x0800 {
@@ -140,7 +140,7 @@ impl LayerCodec for ArpCodec {
         let mut materialized = layer.clone();
         materialized.hardware_len = materialized_hardware_len;
         materialized.protocol_len = materialized_protocol_len;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(arp_layout())
             .with_diagnostics(diagnostics))
     }
@@ -148,8 +148,8 @@ impl LayerCodec for ArpCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(head) = input.first_chunk::<ARP_HEAD_LEN>() else {
             return Err(truncated(NAME, ARP_HEAD_LEN, input.len()));
         };
@@ -190,7 +190,7 @@ impl LayerCodec for ArpCodec {
             target_hardware,
             target_protocol: Ipv4Addr::from(target_protocol),
         };
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(layer),
             consumed: ARP_ETHERNET_IPV4_LEN,
             payload_len: 0,
@@ -204,7 +204,7 @@ impl LayerCodec for ArpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Arp::default(), fields)
     }

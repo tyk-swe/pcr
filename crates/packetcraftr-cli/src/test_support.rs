@@ -116,7 +116,11 @@ pub fn sent_packet_with(diagnostics: Vec<Diagnostic>) -> Arc<packetcraftr::evide
     let mut packet = Packet::new();
     packet.push(Raw::new(vec![0_u8]));
     let mut built = build::Builder::new(packetcraftr_core::protocol::builtin::registry())
-        .build(packet, codec::Context::default(), build::Options::default())
+        .build(
+            packet,
+            codec::Addresses::default(),
+            build::Options::default(),
+        )
         .expect("sent fixture builds");
     built.diagnostics = diagnostics;
     let route = Materialized {
@@ -155,5 +159,19 @@ pub fn sent_packet_with(diagnostics: Vec<Diagnostic>) -> Arc<packetcraftr::evide
     Arc::new(
         packetcraftr::evidence::SentPacket::try_new(built, route, report)
             .expect("trusted sent fixture"),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn invocation() -> crate::invocation::Invocation {
+    crate::invocation::Invocation::new(
+        crate::output::contract::Format::Text,
+        crate::rendering::StreamEncoder::new(
+            crate::output::contract::Command::Build,
+            std::io::sink(),
+        ),
+        None,
+        Default::default(),
+        None,
     )
 }

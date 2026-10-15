@@ -4,7 +4,7 @@
 use serde::Serialize;
 
 use packetcraftr_core::analysis::forwarding as analysis;
-use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::field;
 
 use super::contract::Error;
 use super::frame::{SourceFrame, Timestamp};
@@ -89,9 +89,9 @@ pub struct CheckEvaluation {
     pub expected_state: Option<ValueState>,
     pub actual_state: ValueState,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub expected: Option<FieldValue>,
+    pub expected: Option<field::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub actual: Option<FieldValue>,
+    pub actual: Option<field::Value>,
 }
 
 impl From<analysis::CheckEvaluation> for CheckEvaluation {
@@ -281,7 +281,7 @@ fn evidence_list(values: &[analysis::Evidence]) -> Result<Vec<Evidence>, Error> 
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Match {
-    pub key: Vec<FieldValue>,
+    pub key: Vec<field::Value>,
     pub ingress: Evidence,
     pub egress: Evidence,
     /// Zero-based order among keyed observations of each capture.
@@ -311,14 +311,14 @@ impl TryFrom<&analysis::Match> for Match {
 pub struct Violation {
     pub check: Check,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub key: Option<Vec<FieldValue>>,
+    pub key: Option<Vec<field::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ingress: Option<Evidence>,
     pub egress: Evidence,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub expected: Option<FieldValue>,
+    pub expected: Option<field::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub actual: Option<FieldValue>,
+    pub actual: Option<field::Value>,
 }
 
 impl TryFrom<&analysis::Violation> for Violation {
@@ -339,7 +339,7 @@ impl TryFrom<&analysis::Violation> for Violation {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Unkeyed {
     pub evidence: Evidence,
-    pub key: Vec<Option<FieldValue>>,
+    pub key: Vec<Option<field::Value>>,
 }
 
 impl TryFrom<&analysis::UnkeyedObservation> for Unkeyed {
@@ -355,7 +355,7 @@ impl TryFrom<&analysis::UnkeyedObservation> for Unkeyed {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct AmbiguousGroup {
-    pub key: Vec<FieldValue>,
+    pub key: Vec<field::Value>,
     pub ingress: Vec<Evidence>,
     pub egress: Vec<Evidence>,
     /// True member counts; the listed evidence is bounded.

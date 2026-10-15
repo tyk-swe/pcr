@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::{self, FieldValue},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    field,
     layer::{Layer, Raw, reflective_layer},
 };
 
@@ -67,10 +67,10 @@ impl Default for Ntp {
 }
 
 impl Ntp {
-    fn set_reference_id(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
+    fn set_reference_id(&mut self, value: field::Value, name: &str) -> Result<(), field::Error> {
         let bytes = match value {
-            FieldValue::Bytes(value) => value,
-            FieldValue::Text(value) if value.is_ascii() => Bytes::from(value.into_bytes()),
+            field::Value::Bytes(value) => value,
+            field::Value::Text(value) if value.is_ascii() => Bytes::from(value.into_bytes()),
             _ => return Err(wrong_type(ntp_schema(), name, "four bytes")),
         };
         if bytes.len() != 4 {
@@ -135,7 +135,7 @@ reflective_layer! {
         "reference_id" => {
             kind: Bytes, derived: false, required: false,
             description: "Reference identifier (four bytes or ASCII kiss code)",
-            get |layer| Some(FieldValue::Bytes(layer.reference_id.clone())),
+            get |layer| Some(field::Value::Bytes(layer.reference_id.clone())),
             set |layer, value, name| layer.set_reference_id(value, name),
             layout: (12, 16)
         },
@@ -180,7 +180,7 @@ fn is_supported(version: u8, mode: u8) -> bool {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct NtpCodec;
 
-impl LayerCodec for NtpCodec {
+impl Codec for NtpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &ntp_schema().protocol
     }
@@ -193,8 +193,8 @@ impl LayerCodec for NtpCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         if !payload.is_empty() {
             return Err(invalid(NAME, "NTP is a complete UDP payload"));
         }
@@ -234,15 +234,15 @@ impl LayerCodec for NtpCodec {
         message.extend_from_slice(&layer.transmit_timestamp.to_be_bytes());
         message.extend_from_slice(&layer.extensions);
 
-        Ok(EncodedLayer::header(message, Box::new(layer.clone()))
+        Ok(Encoded::header(message, Box::new(layer.clone()))
             .with_fields(ntp_layout(layer.extensions.len())))
     }
 
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         // Unsupported modes, other versions, and truncated headers stay byte-faithful as `raw`.
         let supported = input
             .first_chunk::<NTP_HEADER_LEN>()
@@ -255,7 +255,7 @@ impl LayerCodec for NtpCodec {
             .expect("the supported check above requires a full base header");
         let extensions = input.slice(NTP_HEADER_LEN..);
         let extension_len = extensions.len();
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Ntp {
                 leap: header[0] >> 6,
                 version: header[0] >> 3 & 0x07,
@@ -290,7 +290,7 @@ impl LayerCodec for NtpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Ntp::default(), fields)
     }
@@ -299,10 +299,10 @@ impl LayerCodec for NtpCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codec::LayerDecodeContext;
+    use crate::codec::DecodeContext;
 
-    fn context(registry: &crate::registry::Registry) -> LayerDecodeContext<'_> {
-        LayerDecodeContext {
+    fn context(registry: &crate::registry::Registry) -> DecodeContext<'_> {
+        DecodeContext {
             parent: None,
             registry,
             network: None,
@@ -354,11 +354,11 @@ mod tests {
     #[test]
     fn construction_rejects_out_of_scope_fields() {
         for (field, value) in [
-            ("version", FieldValue::Unsigned(8)),
-            ("mode", FieldValue::Unsigned(8)),
-            ("leap", FieldValue::Unsigned(4)),
-            ("poll", FieldValue::Signed(-129)),
-            ("precision", FieldValue::Text("bad".to_owned())),
+            ("version", field::Value::Unsigned(8)),
+            ("mode", field::Value::Unsigned(8)),
+            ("leap", field::Value::Unsigned(4)),
+            ("poll", field::Value::Signed(-129)),
+            ("precision", field::Value::Text("bad".to_owned())),
         ] {
             let mut layer = Ntp::default();
             assert!(
@@ -370,14 +370,14 @@ mod tests {
         layer
             .set_field(
                 "reference_id",
-                FieldValue::Bytes(Bytes::from_static(b"GPS\0")),
+                field::Value::Bytes(Bytes::from_static(b"GPS\0")),
             )
             .expect("four-byte reference id");
         assert!(
             layer
                 .set_field(
                     "reference_id",
-                    FieldValue::Bytes(Bytes::from_static(b"TOOLONG"))
+                    field::Value::Bytes(Bytes::from_static(b"TOOLONG"))
                 )
                 .is_err()
         );

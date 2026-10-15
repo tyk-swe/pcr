@@ -14,7 +14,7 @@ use crate::providers::PacketProviders;
 use crate::{Client, Sink};
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
-use super::error::{CaseErrors, Error, duration_limit};
+use super::error::{Error, case_error, duration_limit};
 use super::evidence::{Recorder, validate_execution};
 use super::executor::{CaseEvidence, CaseStep};
 use super::plan::worst_case_duration;
@@ -25,11 +25,14 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let mut deadline = self.deadline(request.campaign.limits.max_duration);
+        let operation =
+            crate::execution::Operation::new(self, request.campaign.limits.max_duration);
+        let mut deadline = operation.deadline(self, request.campaign.limits.max_duration);
         let publish = publisher(&self.runtime, sink, duration_limit, |source| {
             Error::Output { source }
         })?;
-        let mut executor = ExchangeExecutor::new(self, request.send(), request.collection.clone());
+        let mut executor =
+            ExchangeExecutor::new(self, &operation, request.send(), request.collection.clone());
         let mut authorization = self.policy.as_ref();
         run(
             &request,
@@ -70,10 +73,10 @@ where
         stats: campaign,
         ..
     } = prepared;
-    let delay = rate_delay(&CaseErrors, "cases_per_second", 1, request.cases_per_second)?;
+    let delay = rate_delay(case_error, "cases_per_second", 1, request.cases_per_second)?;
     let builder = Builder::new(Arc::clone(&registry));
     let mut recorder = Recorder::new(registry, request.campaign.limits, request.evidence());
-    let mut context = Context::new(deadline, clock, CaseErrors);
+    let mut context = Context::new(deadline, clock, case_error);
     let mut executed_before = false;
     for mut case in cases {
         let case_index = case.index;

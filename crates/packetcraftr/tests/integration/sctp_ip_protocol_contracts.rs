@@ -10,7 +10,7 @@ use bytes::Bytes;
 use packetcraftr::{
     Client, ProviderSet,
     policy::Policy,
-    probe::{ProbeEndpoint, ProbeStatus},
+    probe,
     scan::{
         self, Classification, IpProtocolSelection, IpProtocolSpec, Request, SctpScan, State,
         discovery, select_ip_protocols,
@@ -629,7 +629,7 @@ fn target(ipv6: bool) -> IpAddr {
     }
 }
 
-fn base_request(ipv6: bool, endpoints: Vec<ProbeEndpoint>, schedule: Schedule) -> Request {
+fn base_request(ipv6: bool, endpoints: Vec<probe::Endpoint>, schedule: Schedule) -> Request {
     Request {
         tcp_scan: Default::default(),
         sctp_scan: Default::default(),
@@ -702,7 +702,9 @@ fn sctp_init_cookie_echo_and_ip_protocol_match_corpus_across_schedules_and_famil
                     .unwrap();
                 let mut request = base_request(
                     ipv6,
-                    SCTP_PORTS.map(|port| ProbeEndpoint::Sctp { port }).to_vec(),
+                    SCTP_PORTS
+                        .map(|port| probe::Endpoint::Sctp { port })
+                        .to_vec(),
                     schedule,
                 );
                 request.sctp_scan = mode;
@@ -781,7 +783,7 @@ fn sctp_abort_outranks_router_icmp_and_ignores_wrong_tag_while_retaining_superse
     for mode in [SctpScan::Init, SctpScan::CookieEcho] {
         let mut request = base_request(
             false,
-            vec![ProbeEndpoint::Sctp { port: 2006 }],
+            vec![probe::Endpoint::Sctp { port: 2006 }],
             Schedule::Serial,
         );
         request.sctp_scan = mode;
@@ -814,7 +816,7 @@ fn serialized_ip_duration_is_rejected_before_scan_or_discovery_transmission() {
         for discovery_only in [false, true] {
             let endpoints = protocols
                 .iter()
-                .map(|&protocol| ProbeEndpoint::Ip { protocol })
+                .map(|&protocol| probe::Endpoint::Ip { protocol })
                 .collect();
             let mut request = base_request(ipv6, endpoints, Schedule::Pipelined);
             request.attempts = attempts;
@@ -840,7 +842,7 @@ fn serialized_ip_duration_is_rejected_before_scan_or_discovery_transmission() {
     let mut request = base_request(
         false,
         [0, 47, 60]
-            .map(|protocol| ProbeEndpoint::Ip { protocol })
+            .map(|protocol| probe::Endpoint::Ip { protocol })
             .to_vec(),
         Schedule::Pipelined,
     );
@@ -864,7 +866,7 @@ fn pipelined_ip_identities_serialize_while_independent_protocols_keep_parallelis
             ipv6,
             protocols
                 .iter()
-                .map(|&protocol| ProbeEndpoint::Ip { protocol })
+                .map(|&protocol| probe::Endpoint::Ip { protocol })
                 .collect(),
             Schedule::Pipelined,
         );
@@ -900,7 +902,7 @@ fn operation_history_preserves_ambiguity_across_schedules_and_retention_eviction
                         ipv6,
                         protocols
                             .iter()
-                            .map(|&protocol| ProbeEndpoint::Ip { protocol })
+                            .map(|&protocol| probe::Endpoint::Ip { protocol })
                             .collect(),
                         schedule,
                     );
@@ -919,13 +921,13 @@ fn operation_history_preserves_ambiguity_across_schedules_and_retention_eviction
                     assert_eq!(
                         endpoint.probes[0].status,
                         if withhold {
-                            ProbeStatus::Timeout
+                            probe::Status::Timeout
                         } else {
-                            ProbeStatus::Response
+                            probe::Status::Response
                         }
                     );
                     let retry = &endpoint.probes[1];
-                    assert_eq!(retry.status, ProbeStatus::Timeout);
+                    assert_eq!(retry.status, probe::Status::Timeout);
                     assert!(
                         retry.reply.is_none()
                             && retry.response.is_none()
@@ -952,7 +954,7 @@ fn discovery_reply_history_prevents_attributing_a_duplicate_to_the_scan_stage() 
     for ipv6 in [false, true] {
         for schedule in [Schedule::Serial, Schedule::Pipelined, Schedule::Adaptive] {
             let mut request =
-                base_request(ipv6, vec![ProbeEndpoint::Ip { protocol: 47 }], schedule);
+                base_request(ipv6, vec![probe::Endpoint::Ip { protocol: 47 }], schedule);
             request.discovery = discovery::Options {
                 mode: discovery::Mode::Before,
                 probes: request.endpoints.clone(),
@@ -964,7 +966,7 @@ fn discovery_reply_history_prevents_attributing_a_duplicate_to_the_scan_stage() 
             let aggregate = collector.finish(report).unwrap();
             assert_eq!(sent.lock().unwrap().len(), 2);
             let probe = &aggregate.endpoints[0].probes[0];
-            assert_eq!(probe.status, ProbeStatus::Timeout);
+            assert_eq!(probe.status, probe::Status::Timeout);
             assert!(probe.latency.is_none() && probe.response.is_none());
             assert_eq!(aggregate.rtt.received, 1);
             assert_eq!(aggregate.unattributed.len(), 1);
@@ -981,14 +983,14 @@ fn typed_serial_discovery_history_also_protects_a_later_ip_probe() {
     for ipv6 in [false, true] {
         let mut request = base_request(
             ipv6,
-            vec![ProbeEndpoint::Ip {
+            vec![probe::Endpoint::Ip {
                 protocol: if ipv6 { 58 } else { 1 },
             }],
             Schedule::Serial,
         );
         request.discovery = discovery::Options {
             mode: discovery::Mode::Before,
-            probes: vec![ProbeEndpoint::Icmp],
+            probes: vec![probe::Endpoint::Icmp],
             ..Default::default()
         };
         let (client, sent) = client_with_reply_flags(true, true, false);
@@ -1002,7 +1004,7 @@ fn typed_serial_discovery_history_also_protects_a_later_ip_probe() {
             aggregate.hosts
         );
         let probe = &aggregate.endpoints[0].probes[0];
-        assert_eq!(probe.status, ProbeStatus::Timeout);
+        assert_eq!(probe.status, probe::Status::Timeout);
         assert!(probe.response.is_none() && probe.latency.is_none());
         assert_eq!(aggregate.rtt.received, 1);
         assert_eq!(aggregate.unattributed.len(), 1);
@@ -1018,7 +1020,11 @@ fn ipv6_ip_protocol_replies_match_extension_chains_and_extension_numbers() {
     // Each extension identity gets a fresh operation: one reply could match
     // every member of this chain, so combined probes must remain ambiguous.
     for protocol in [47, 0, 60, 44, 43, 99] {
-        let request = base_request(true, vec![ProbeEndpoint::Ip { protocol }], Schedule::Serial);
+        let request = base_request(
+            true,
+            vec![probe::Endpoint::Ip { protocol }],
+            Schedule::Serial,
+        );
         let (client, _) = client();
         let collector = scan::Collector::default();
         let report = client.scan(request, collector.clone()).unwrap();
@@ -1029,9 +1035,9 @@ fn ipv6_ip_protocol_replies_match_extension_chains_and_extension_numbers() {
         assert_eq!(
             endpoint.probes[0].status,
             if matched {
-                ProbeStatus::Response
+                probe::Status::Response
             } else {
-                ProbeStatus::Timeout
+                probe::Status::Timeout
             }
         );
         assert_eq!(
@@ -1055,8 +1061,8 @@ fn ip_in_ip_replies_retain_positive_evidence_with_inner_icmp_errors() {
         let mut request = base_request(
             ipv6,
             vec![
-                ProbeEndpoint::Ip { protocol: 4 },
-                ProbeEndpoint::Ip { protocol: 41 },
+                probe::Endpoint::Ip { protocol: 4 },
+                probe::Endpoint::Ip { protocol: 41 },
             ],
             Schedule::Serial,
         );
@@ -1067,7 +1073,7 @@ fn ip_in_ip_replies_retain_positive_evidence_with_inner_icmp_errors() {
         let aggregate = collector.finish(report).unwrap();
         assert_eq!(aggregate.endpoints.len(), 2);
         for endpoint in &aggregate.endpoints {
-            assert_eq!(endpoint.probes[0].status, ProbeStatus::Response);
+            assert_eq!(endpoint.probes[0].status, probe::Status::Response);
             assert_eq!(
                 endpoint.probes[0].reply,
                 Some(scan::Reply::IpProtocolPayload)
@@ -1086,10 +1092,10 @@ fn icmp_errors_quoting_other_ip_protocols_never_mark_icmp_protocol_open() {
         let request = base_request(
             ipv6,
             vec![
-                ProbeEndpoint::Ip {
+                probe::Endpoint::Ip {
                     protocol: icmp_proto,
                 },
-                ProbeEndpoint::Ip { protocol: 50 },
+                probe::Endpoint::Ip { protocol: 50 },
             ],
             Schedule::Pipelined,
         );
@@ -1100,7 +1106,7 @@ fn icmp_errors_quoting_other_ip_protocols_never_mark_icmp_protocol_open() {
         assert_eq!(aggregate.endpoints[0].ip_protocol, Some(icmp_proto));
         assert_eq!(
             aggregate.endpoints[0].probes[0].status,
-            ProbeStatus::Timeout
+            probe::Status::Timeout
         );
         assert_eq!(
             aggregate.endpoints[0].inference.as_ref().unwrap().state,
@@ -1118,17 +1124,17 @@ fn icmp_errors_quoting_other_ip_protocols_never_mark_icmp_protocol_open() {
 fn extra_discovery_probes_record_host_reasons_and_reject_ipv6_timestamp_or_netmask() {
     let mut request = base_request(
         false,
-        vec![ProbeEndpoint::Tcp { port: 80 }],
+        vec![probe::Endpoint::Tcp { port: 80 }],
         Schedule::Serial,
     );
     request.discovery = discovery::Options {
         mode: discovery::Mode::Before,
         probes: vec![
-            ProbeEndpoint::IcmpTimestamp,
-            ProbeEndpoint::IcmpNetmask,
-            ProbeEndpoint::TcpAck { port: 80 },
-            ProbeEndpoint::Sctp { port: 9899 },
-            ProbeEndpoint::Ip { protocol: 47 },
+            probe::Endpoint::IcmpTimestamp,
+            probe::Endpoint::IcmpNetmask,
+            probe::Endpoint::TcpAck { port: 80 },
+            probe::Endpoint::Sctp { port: 9899 },
+            probe::Endpoint::Ip { protocol: 47 },
         ],
         neighbor: false,
         unresponsive: discovery::Unresponsive::Skip,
@@ -1153,10 +1159,10 @@ fn extra_discovery_probes_record_host_reasons_and_reject_ipv6_timestamp_or_netma
     );
 
     // IPv4-only ICMP timestamp and netmask discovery probes fail typed on IPv6 targets.
-    for probe in [ProbeEndpoint::IcmpTimestamp, ProbeEndpoint::IcmpNetmask] {
+    for probe in [probe::Endpoint::IcmpTimestamp, probe::Endpoint::IcmpNetmask] {
         let mut ipv6_request = base_request(
             true,
-            vec![ProbeEndpoint::Sctp { port: 9899 }],
+            vec![probe::Endpoint::Sctp { port: 9899 }],
             Schedule::Serial,
         );
         ipv6_request.discovery = discovery::Options {
@@ -1179,7 +1185,7 @@ fn self_captured_loopback_ip_probes_do_not_hide_protocol_unreachable() {
     for ipv6 in [false, true] {
         for schedule in [Schedule::Serial, Schedule::Pipelined, Schedule::Adaptive] {
             let mut request =
-                base_request(ipv6, vec![ProbeEndpoint::Ip { protocol: 254 }], schedule);
+                base_request(ipv6, vec![probe::Endpoint::Ip { protocol: 254 }], schedule);
             request.targets.include = vec![Specification::Target(Target::Address(if ipv6 {
                 IpAddr::V6(Ipv6Addr::LOCALHOST)
             } else {
@@ -1208,7 +1214,7 @@ fn checksum_valid_init_ack_with_malformed_trailing_chunks_never_opens_an_endpoin
         let request = base_request(
             ipv6,
             [2000, 2007, 2008]
-                .map(|port| ProbeEndpoint::Sctp { port })
+                .map(|port| probe::Endpoint::Sctp { port })
                 .to_vec(),
             Schedule::Pipelined,
         );
@@ -1221,9 +1227,9 @@ fn checksum_valid_init_ack_with_malformed_trailing_chunks_never_opens_an_endpoin
             assert_eq!(
                 endpoint.probes[0].status,
                 if valid {
-                    ProbeStatus::Response
+                    probe::Status::Response
                 } else {
-                    ProbeStatus::Timeout
+                    probe::Status::Timeout
                 }
             );
             assert_eq!(

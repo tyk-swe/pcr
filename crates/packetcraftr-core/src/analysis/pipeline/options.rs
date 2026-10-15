@@ -28,6 +28,29 @@ impl Default for Plan {
 }
 
 impl Plan {
+    /// Derives the stages needed by a collector, its filter, and selected stream.
+    /// Any collector index keeps both transports indexed because the flow ceiling
+    /// and stream numbering apply to the whole capture before selection.
+    pub fn for_collector(
+        needs: crate::analysis::CollectorNeeds,
+        filter: Option<&Filter>,
+        stream: Option<crate::analysis::StreamRef>,
+    ) -> Self {
+        let requirements = filter.map_or_else(Default::default, Filter::requirements);
+        let indexed = requirements.tcp_stream
+            || requirements.udp_stream
+            || needs.tcp_stream
+            || needs.udp_stream
+            || stream.is_some();
+        let mut plan = Self::physical(crate::filter::Requirements {
+            tcp_stream: indexed,
+            udp_stream: indexed,
+            ..Default::default()
+        });
+        plan.ip_reassembly |= needs.ip_reassembly;
+        plan
+    }
+
     /// Only the conversation indexes requested by compiled filters/projections,
     /// retaining IP reconstruction when needed for canonical stream numbering.
     /// IDs include reconstructed conversations before selection. Consumers use
@@ -65,7 +88,7 @@ pub struct Options<'a> {
     /// and matching exactly what `tcp.stream == N` or `udp.stream == N`
     /// matches. Indices are assigned before selection, so the plan must
     /// index the selected transport; [`Session`](crate::analysis::Session) derives
-    /// such a plan from its selector.
+    /// such a plan from this option.
     pub stream: Option<crate::analysis::StreamRef>,
     /// Inclusive capture-time bounds applied with the filter. Comparison uses
     /// the timestamp's full precision and assumes nothing about ordering, so

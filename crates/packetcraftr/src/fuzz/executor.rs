@@ -62,6 +62,7 @@ impl<P: PacketProviders, K: Clock> Executor<CaseStep> for ExchangeExecutor<'_, P
                     collection: self.collection.clone(),
                     stop: crate::exchange::StopCondition::Window,
                 },
+                self.operation,
                 None,
                 None,
             )

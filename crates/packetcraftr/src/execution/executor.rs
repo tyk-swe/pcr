@@ -33,6 +33,7 @@ pub(crate) trait Executor<S: Step> {
 
 pub(crate) struct ExchangeExecutor<'a, P, K = crate::clock::SystemClock> {
     pub(crate) client: &'a crate::Client<P, K>,
+    pub(crate) operation: &'a super::Operation,
     pub(crate) send: crate::send::Options,
     pub(crate) collection: crate::exchange::Collection,
 }
@@ -40,11 +41,13 @@ pub(crate) struct ExchangeExecutor<'a, P, K = crate::clock::SystemClock> {
 impl<'a, P, K> ExchangeExecutor<'a, P, K> {
     pub(crate) fn new(
         client: &'a crate::Client<P, K>,
+        operation: &'a super::Operation,
         send: crate::send::Options,
         collection: crate::exchange::Collection,
     ) -> Self {
         Self {
             client,
+            operation,
             send,
             collection,
         }
@@ -93,6 +96,7 @@ where
                     collection,
                     stop: crate::exchange::StopCondition::Window,
                 },
+                self.operation,
                 Some(matches_request),
                 stop_after_response,
             )

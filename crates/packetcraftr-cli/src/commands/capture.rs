@@ -71,14 +71,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    args: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let timeout = args.timeout.timeout();
     if timeout > net::deadline::MAX_WAIT || Instant::now().checked_add(timeout).is_none() {
         return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
@@ -158,7 +164,7 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     let mut seen = HashSet::new();
     let mut interfaces = Vec::new();
     for source in args.interface {
-        let interface = resolve(source.get()?)?;
+        let interface = resolve(invocation, source.get()?)?;
         if seen.insert(interface.index) {
             interfaces.push(interface);
         }
@@ -180,7 +186,8 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         timeout,
     );
     drive(
-        &client(registry, policy, Runtime::Capture),
+        invocation,
+        &client(invocation, registry, policy, Runtime::Capture),
         request,
         Output {
             format,
@@ -319,7 +326,6 @@ struct Destinations {
     format: Format,
     compression: Compression,
     limits: capture_file::Limits,
-    stream: StreamEncoder,
 }
 
 impl Destinations {
@@ -350,6 +356,7 @@ impl Destinations {
 
     fn frame(
         &mut self,
+        invocation: &crate::invocation::Invocation,
         decoding: Option<&Mutex<Decoding>>,
         source_frame: u64,
         elapsed: Duration,
@@ -367,10 +374,9 @@ impl Destinations {
         }
         let mut decoding = decoding.map(lock);
         emit_frame(
+            invocation,
             decoding.as_deref_mut(),
             self.projector.as_mut(),
-            &self.stream,
-            self.format,
             &mut self.writer,
             source_frame,
             frame,
@@ -420,6 +426,7 @@ fn file_limits(policy: &Policy) -> capture_file::Limits {
 }
 
 fn drive<P: packetcraftr::CaptureProviders>(
+    invocation: &crate::invocation::Invocation,
     client: &packetcraftr::Client<P>,
     request: workflow::Request,
     rendering: Output<'_>,
@@ -443,7 +450,6 @@ fn drive<P: packetcraftr::CaptureProviders>(
         format,
         compression,
         limits: file_limits(client.policy()),
-        stream: stream.clone(),
     }));
     let request = match (&decoding, selector) {
         (Some(decoding), _) => {
@@ -462,6 +468,7 @@ fn drive<P: packetcraftr::CaptureProviders>(
         (None, None) => request,
     };
     let sink = {
+        let invocation = invocation.clone();
         let destinations = Arc::clone(&destinations);
         move |event| {
             let mut destinations = lock(&destinations);
@@ -474,7 +481,13 @@ fn drive<P: packetcraftr::CaptureProviders>(
                     elapsed,
                     frame,
                     ..
-                } => destinations.frame(decoding.as_deref(), source_frame, elapsed, frame),
+                } => destinations.frame(
+                    &invocation,
+                    decoding.as_deref(),
+                    source_frame,
+                    elapsed,
+                    frame,
+                ),
             }
         }
     };
@@ -503,10 +516,15 @@ fn drive<P: packetcraftr::CaptureProviders>(
         && let Some(projector) = destinations.projector.take()
     {
         projector
-            .finish(report.frames_delivered, report.stats.bytes, stream)
+            .finish(
+                invocation,
+                report.frames_delivered,
+                report.stats.bytes,
+                stream,
+            )
             .map_err(|error| error.with_capture(snapshot.clone()))?;
     }
-    rendering::render_complete(format, &snapshot, report.diagnostics, stream)
+    rendering::render_complete(invocation, format, &snapshot, report.diagnostics, stream)
         .map_err(|error| error.with_capture(snapshot))
 }
 
@@ -516,14 +534,15 @@ fn lock<T>(state: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 fn emit_frame(
+    invocation: &crate::invocation::Invocation,
     decoding: Option<&mut Decoding>,
     projector: Option<&mut crate::rendering::Projector>,
-    stream: &StreamEncoder,
-    format: Format,
     writer: &mut Option<capture_file::Writer<compression::Output<io::Stdout>>>,
     source_frame: u64,
     frame: Frame,
 ) -> Result<(), CliError> {
+    let stream = &invocation.output;
+    let format = invocation.format;
     if let Some(decoding) = decoding {
         let decoded = decoding.take_or_decode(source_frame, &frame)?;
         let tree = decoding.tree.as_mut();
@@ -544,10 +563,16 @@ fn emit_frame(
                     output::frame::Captured::try_from(frame).map_err(CliError::classified)?;
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
                 match tree {
-                    Some(tree) => render_frame_tree(source_frame, &frame, Some(&stack), tree),
-                    None => {
-                        render_frame_text(source_frame, &frame, Some(&stack), stream.presentation())
+                    Some(tree) => {
+                        render_frame_tree(invocation, source_frame, &frame, Some(&stack), tree)
                     }
+                    None => render_frame_text(
+                        invocation,
+                        source_frame,
+                        &frame,
+                        Some(&stack),
+                        stream.presentation(),
+                    ),
                 }
             }
             Format::Ndjson => output::read::Frame::try_from((source_frame, frame, &decoded))
@@ -565,7 +590,13 @@ fn emit_frame(
             .map_err(CliError::classified)
             .and_then(|frame| {
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
-                render_frame_text(source_frame, &frame, None, stream.presentation())
+                render_frame_text(
+                    invocation,
+                    source_frame,
+                    &frame,
+                    None,
+                    stream.presentation(),
+                )
             }),
         Format::Hex => output::frame::Captured::try_from(frame)
             .map_err(CliError::classified)

@@ -55,6 +55,7 @@ pub(super) struct DirectionFiles {
 impl DirectionFiles {
     /// Fails before any capture is read when the directory or a destination is unusable.
     pub(super) fn stage(
+        invocation: &crate::invocation::Invocation,
         directory: &Path,
         selector: StreamRef,
         selected: Selected,
@@ -73,7 +74,7 @@ impl DirectionFiles {
                 selector.index,
                 direction_name(*direction),
             ));
-            let file = StagedFile::stage(&destination)?;
+            let file = StagedFile::stage(invocation, &destination)?;
             staged.push(Staged {
                 direction: *direction,
                 file,
@@ -212,11 +213,14 @@ mod tests {
 
     #[test]
     fn staging_rejects_existing_destinations_before_any_write() {
+        let invocation = &crate::test_support::invocation();
+
         let directory = tempfile::tempdir().expect("destination dir");
         let occupied = directory.path().join("tcp-7-server.bin");
         std::fs::write(&occupied, b"mine").expect("occupying file");
-        let error = DirectionFiles::stage(directory.path(), selector(), Selected::Both, 16)
-            .expect_err("occupied destination fails");
+        let error =
+            DirectionFiles::stage(invocation, directory.path(), selector(), Selected::Both, 16)
+                .expect_err("occupied destination fails");
         assert!(error.message.contains("already exists"));
         assert_eq!(std::fs::read(&occupied).unwrap(), b"mine");
     }
@@ -240,8 +244,11 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn staged_directions(alias: &Path) -> DirectionFiles {
-        let mut files = DirectionFiles::stage(alias, selector(), Selected::Both, 8)
+    fn staged_directions(
+        invocation: &crate::invocation::Invocation,
+        alias: &Path,
+    ) -> DirectionFiles {
+        let mut files = DirectionFiles::stage(invocation, alias, selector(), Selected::Both, 8)
             .expect("stage both directions through alias");
         files
             .write(&chunk(PeerDirection::ClientToServer, b"ping"))
@@ -254,9 +261,12 @@ mod tests {
 
     #[test]
     fn the_output_byte_budget_is_shared_across_directions() {
+        let invocation = &crate::test_support::invocation();
+
         let directory = tempfile::tempdir().expect("destination dir");
-        let mut files = DirectionFiles::stage(directory.path(), selector(), Selected::Both, 6)
-            .expect("staging succeeds");
+        let mut files =
+            DirectionFiles::stage(invocation, directory.path(), selector(), Selected::Both, 6)
+                .expect("staging succeeds");
         files
             .write(&chunk(PeerDirection::ClientToServer, b"hello"))
             .unwrap();
@@ -275,7 +285,7 @@ mod tests {
     #[test]
     fn a_parent_alias_retargeted_to_a_collision_is_refused_before_publication() {
         let (_root, original, replacement, alias) = aliased_directories();
-        let files = staged_directions(&alias);
+        let files = staged_directions(&crate::test_support::invocation(), &alias);
         std::fs::write(replacement.join("tcp-7-server.bin"), b"existing payload")
             .expect("server sentinel");
         std::fs::remove_file(&alias).expect("remove original alias");
@@ -305,7 +315,7 @@ mod tests {
     #[test]
     fn empty_directory_retarget_refused() {
         let (_root, original, replacement, alias) = aliased_directories();
-        let files = staged_directions(&alias);
+        let files = staged_directions(&crate::test_support::invocation(), &alias);
         std::fs::remove_file(&alias).expect("remove original alias");
         std::os::unix::fs::symlink(&replacement, &alias).expect("retarget parent alias");
 
@@ -325,7 +335,7 @@ mod tests {
     #[test]
     fn stable_parent_alias_publishes_both_directions() {
         let (_root, original, replacement, alias) = aliased_directories();
-        let written = staged_directions(&alias)
+        let written = staged_directions(&crate::test_support::invocation(), &alias)
             .publish()
             .expect("publish both directions");
 
@@ -360,7 +370,7 @@ mod tests {
     #[test]
     fn rollback_after_a_retargeted_parent_alias_never_touches_the_replacement() {
         let (_root, original, replacement, alias) = aliased_directories();
-        let files = staged_directions(&alias);
+        let files = staged_directions(&crate::test_support::invocation(), &alias);
         std::fs::write(original.join("tcp-7-server.bin"), b"existing server").unwrap();
         std::fs::write(
             replacement.join("tcp-7-client.bin"),

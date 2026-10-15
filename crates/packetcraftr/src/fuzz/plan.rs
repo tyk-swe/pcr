@@ -6,7 +6,7 @@ use std::time::Duration;
 use packetcraftr_netio::deadline::MAX_WAIT;
 
 use super::Request;
-use super::error::{CaseErrors, Error};
+use super::error::{Error, case_error};
 use crate::execution::rate_delay;
 
 pub(super) fn worst_case_duration(request: &Request, cases: usize) -> Result<Duration, Error> {
@@ -17,7 +17,7 @@ pub(super) fn worst_case_duration(request: &Request, cases: usize) -> Result<Dur
             actual: Duration::MAX,
             limit: MAX_WAIT,
         })?;
-    let delay = rate_delay(&CaseErrors, "cases_per_second", 1, request.cases_per_second)?
+    let delay = rate_delay(case_error, "cases_per_second", 1, request.cases_per_second)?
         .checked_mul(u32::try_from(cases.saturating_sub(1)).unwrap_or(u32::MAX))
         .ok_or(Error::DurationLimit {
             actual: Duration::MAX,

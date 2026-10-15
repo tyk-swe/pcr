@@ -8,7 +8,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider};
 
 use super::super::discovery::{Composer, Scan};
-use super::super::error::Probes;
+use super::super::error::probe_error;
 use super::super::report::RttAccumulator;
 use super::super::{Error, Request, Stage};
 use super::accounting::{Progress, record};
@@ -16,7 +16,6 @@ use super::attempts::{Active, admit_next, connect_outcome, settle_active};
 use super::planning::{StagePlan, planned};
 use super::{Event, ProbeEvidence, Report, Stats, execution, invalid};
 use crate::clock::Clock;
-use crate::execution::Errors as _;
 use crate::policy::{Authorizer, Operation, SocketOperation};
 use crate::probe::enforce_deadline;
 use crate::providers::{TargetProviders, TcpOf, TcpProviders};
@@ -31,15 +30,30 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
+        let operation = crate::execution::Operation::new(self, request.limits.max_duration);
+        self.scan_connect_in(request, sink, &operation)
+    }
+
+    pub(crate) fn scan_connect_in<S>(
+        &self,
+        request: Request,
+        sink: S,
+        operation: &crate::execution::Operation,
+    ) -> Result<Report, Error>
+    where
+        S: Sink<Event, Ack = ()>,
+    {
+        let policy = operation.policy(&self.policy);
+        let mut admission = crate::execution::Admission::new(&policy, self.providers.resolver());
         let started = self.now();
-        let mut deadline = self.deadline(request.limits.max_duration);
+        let mut deadline = operation.deadline(self, request.limits.max_duration);
         let mut publish =
-            crate::execution::publisher(&self.runtime, sink, Error::from, |source| {
+            crate::execution::publisher(&operation.runtime, sink, Error::from, |source| {
                 Error::Output { source }
             })?;
         run(
             &request,
-            &mut self.admission(),
+            &mut admission,
             &Arc::new(TcpOf(Arc::clone(&self.providers))),
             &self.clock,
             &mut deadline,
@@ -65,7 +79,7 @@ where
     C: Clock,
     F: FnMut(ProbeEvidence, &Deadline) -> Result<(), Error>,
 {
-    enforce_deadline(&Probes, deadline)?;
+    enforce_deadline(probe_error, deadline)?;
     let (targets, planned) = planned(
         request,
         authorizer,
@@ -148,7 +162,7 @@ where
             }
         }
     }
-    enforce_deadline(&Probes, deadline)?;
+    enforce_deadline(probe_error, deadline)?;
     let Progress {
         mut stats,
         rtt,
@@ -206,7 +220,7 @@ where
     let effective = request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS);
     let mut next = 0usize;
     while next < stage.count || !active.is_empty() {
-        enforce_deadline(&Probes, deadline)?;
+        enforce_deadline(probe_error, deadline)?;
         let mut admission_held = false;
         while next < stage.count && active.len() < effective && clock.now() >= progress.next_start {
             let Some(admitted) = admit_next(
@@ -227,7 +241,7 @@ where
         }
         let mut index = 0;
         while index < active.len() {
-            enforce_deadline(&Probes, deadline)?;
+            enforce_deadline(probe_error, deadline)?;
             let Some((_, probe)) = settle_active(&mut active, index, clock.now())? else {
                 index += 1;
                 continue;
@@ -281,11 +295,11 @@ where
     );
     let mut active: Vec<Active<Q::Stream>> = Vec::new();
     loop {
-        enforce_deadline(&Probes, deadline)?;
+        enforce_deadline(probe_error, deadline)?;
         let mut index = 0;
         let mut settled = Vec::new();
         while index < active.len() {
-            enforce_deadline(&Probes, deadline)?;
+            enforce_deadline(probe_error, deadline)?;
             let Some((entry, probe)) = settle_active(&mut active, index, clock.now())? else {
                 index += 1;
                 continue;
@@ -309,9 +323,9 @@ where
             return Ok(());
         }
         let now = clock.now();
-        let remaining = deadline
-            .remaining()
-            .map_err(|error| Probes.duration_limit(0, error))?;
+        let remaining = deadline.remaining().map_err(|error| {
+            (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error))
+        })?;
         let operation_end = now
             .checked_add(remaining)
             .ok_or_else(|| invalid("rate", 0, "pacing deadline overflow"))?;
@@ -343,7 +357,12 @@ where
             let final_endpoints = [endpoint];
             let operation = SocketOperation::new(&final_endpoints, *stage.limits)
                 .map_err(|source| execution(sequence, source))?;
-            approve_operation(authorizer, Operation::Socket(operation), deadline, &Probes)?;
+            approve_operation(
+                authorizer,
+                Operation::Socket(operation),
+                deadline,
+                probe_error,
+            )?;
             let now = clock.now();
             let host_remaining = selection.host_deadline.saturating_duration_since(now);
             if host_remaining.is_zero() {
@@ -362,7 +381,9 @@ where
             }
             let timeout = deadline
                 .bounded_timeout(selection.timeout)
-                .map_err(|error| Probes.duration_limit(sequence, error))?
+                .map_err(|error| {
+                    (probe_error)(sequence, crate::execution::Failure::DurationLimit(error))
+                })?
                 .min(host_remaining);
             selection.host_limited = selection.host_limited || timeout < selection.timeout;
             let admitted = clock.now();

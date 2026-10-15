@@ -11,6 +11,7 @@ use crate::rendering::{
 };
 
 pub(super) fn render_record(
+    invocation: &crate::invocation::Invocation,
     record: output::read::Frame,
     format: Format,
     stream: &StreamEncoder,
@@ -23,8 +24,11 @@ pub(super) fn render_record(
     } = &record;
     match format {
         Format::Text => match tree {
-            Some(tree) => render_frame_tree(*source_frame, frame, decoded.as_ref(), tree),
+            Some(tree) => {
+                render_frame_tree(invocation, *source_frame, frame, decoded.as_ref(), tree)
+            }
             None => render_frame_text(
+                invocation,
                 *source_frame,
                 frame,
                 decoded.as_ref(),

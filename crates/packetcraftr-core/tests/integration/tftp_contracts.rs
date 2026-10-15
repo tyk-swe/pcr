@@ -47,7 +47,7 @@ fn build_with(registry: &Arc<Registry>, packet: Packet, mode: codec::Mode) -> bu
     build::Builder::new(Arc::clone(registry))
         .build(
             packet,
-            codec::Context::default(),
+            codec::Addresses::default(),
             build::Options {
                 mode,
                 ..build::Options::default()
@@ -168,7 +168,7 @@ fn build_reject_what_wire_cant_carry() {
         build::Builder::new(Arc::clone(&registry))
             .build(
                 udp_packet(40_000, 69, message),
-                codec::Context::default(),
+                codec::Addresses::default(),
                 build::Options::default(),
             )
             .map(|built| built.bytes)

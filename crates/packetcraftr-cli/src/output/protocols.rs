@@ -11,7 +11,7 @@ use packetcraftr_core::registry::{FilterFieldBinding, Registry};
 use super::contract::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub enum FieldKind {
+pub enum Kind {
     #[serde(rename = "bool")]
     Bool,
     #[serde(rename = "unsigned")]
@@ -34,7 +34,7 @@ pub enum FieldKind {
     Object,
 }
 
-impl FieldKind {
+impl Kind {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -52,27 +52,27 @@ impl FieldKind {
     }
 }
 
-impl std::fmt::Display for FieldKind {
+impl std::fmt::Display for Kind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.as_str())
     }
 }
 
-impl TryFrom<field::FieldKind> for FieldKind {
+impl TryFrom<field::Kind> for Kind {
     type Error = Error;
 
-    fn try_from(value: field::FieldKind) -> Result<Self, Error> {
+    fn try_from(value: field::Kind) -> Result<Self, Error> {
         Ok(match value {
-            field::FieldKind::Bool => Self::Bool,
-            field::FieldKind::Unsigned => Self::Unsigned,
-            field::FieldKind::Signed => Self::Signed,
-            field::FieldKind::Text => Self::Text,
-            field::FieldKind::Bytes => Self::Bytes,
-            field::FieldKind::Ipv4 => Self::Ipv4,
-            field::FieldKind::Ipv6 => Self::Ipv6,
-            field::FieldKind::Mac => Self::Mac,
-            field::FieldKind::List => Self::List,
-            field::FieldKind::Object => Self::Object,
+            field::Kind::Bool => Self::Bool,
+            field::Kind::Unsigned => Self::Unsigned,
+            field::Kind::Signed => Self::Signed,
+            field::Kind::Text => Self::Text,
+            field::Kind::Bytes => Self::Bytes,
+            field::Kind::Ipv4 => Self::Ipv4,
+            field::Kind::Ipv6 => Self::Ipv6,
+            field::Kind::Mac => Self::Mac,
+            field::Kind::List => Self::List,
+            field::Kind::Object => Self::Object,
             _ => {
                 return Err(Error::Unpublished {
                     value: "protocol field kind",
@@ -114,7 +114,7 @@ impl From<BuiltinProtocol> for Summary {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Field {
     pub name: String,
-    pub kind: FieldKind,
+    pub kind: Kind,
     pub required: bool,
     pub derived: bool,
     pub description: String,

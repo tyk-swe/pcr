@@ -27,7 +27,12 @@ skipped checks and cross-compilation are not runtime evidence.
 - Keep core independent of native I/O. Native code and unsafe blocks belong in
   `packetcraftr-netio/src/platform/`; every unsafe block needs a `SAFETY` comment.
   Keep platform selection in `build.rs` and `platform::dispatch`.
-- Split modules by responsibility; use `foo.rs` beside `foo/`, not `mod.rs`.
+- Make ownership explicit: reusable services belong to clients; deadlines,
+  spending, and preparation state belong to the operation that uses them.
+- Name modules for their domain and use module-qualified type names when the
+  module supplies the context. Use `foo.rs` beside `foo/`, not `mod.rs`.
+- Prefer concrete types. Add traits or other abstractions when actual consumers
+  need substitution or share meaningful behavior, rather than for one caller.
 - Preserve input validation, resource limits, and wire data. Authorize live
   operations before discovery or transmission. Use finite budgets and loopback,
   documentation addresses, or isolated networks in tests and examples.

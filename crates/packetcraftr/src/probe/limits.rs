@@ -6,29 +6,31 @@ use std::time::Duration;
 use packetcraftr_core::budget::DeadlineExceeded;
 
 use crate::exchange::Collection;
-use crate::execution::Errors;
 use crate::execution::limits::EvidenceLimits;
 
-pub(crate) fn check_probe_count<G: Errors>(
-    errors: &G,
+pub(crate) fn check_probe_count<E>(
+    errors: fn(u64, crate::execution::Failure) -> E,
     total_probes: usize,
     max_probes: usize,
-) -> Result<(), G::Error> {
+) -> Result<(), E> {
     if total_probes > max_probes {
-        return Err(errors.invalid_limit(
-            "probes",
-            u64::try_from(total_probes).unwrap_or(u64::MAX),
-            format!("exceeds max_probes={max_probes}"),
+        return Err((errors)(
+            0_u64,
+            crate::execution::Failure::InvalidLimit {
+                field: "probes",
+                value: u64::try_from(total_probes).unwrap_or(u64::MAX),
+                reason: format!("exceeds max_probes={max_probes}"),
+            },
         ));
     }
     Ok(())
 }
 
-pub(crate) fn check_collection_evidence<G: Errors>(
-    errors: &G,
+pub(crate) fn check_collection_evidence<E>(
+    errors: fn(u64, crate::execution::Failure) -> E,
     collection: &Collection,
     limits: EvidenceLimits,
-) -> Result<(), G::Error> {
+) -> Result<(), E> {
     let capture = &collection.capture;
     for (field, captured, limit, name) in [
         (
@@ -45,28 +47,31 @@ pub(crate) fn check_collection_evidence<G: Errors>(
         ),
     ] {
         if captured > limit {
-            return Err(errors.invalid_limit(
-                field,
-                u64::try_from(captured).unwrap_or(u64::MAX),
-                format!("exceeds {name}={limit}"),
+            return Err((errors)(
+                0_u64,
+                crate::execution::Failure::InvalidLimit {
+                    field,
+                    value: u64::try_from(captured).unwrap_or(u64::MAX),
+                    reason: format!("exceeds {name}={limit}"),
+                },
             ));
         }
     }
     Ok(())
 }
 
-pub(crate) fn check_probe_duration<G: Errors>(
-    errors: &G,
+pub(crate) fn check_probe_duration<E>(
+    errors: fn(u64, crate::execution::Failure) -> E,
     worst_case: Duration,
     max_duration: Duration,
-) -> Result<(), G::Error> {
+) -> Result<(), E> {
     if worst_case > max_duration {
-        return Err(errors.duration_limit(
-            G::Step::default(),
-            DeadlineExceeded {
+        return Err((errors)(
+            0_u64,
+            crate::execution::Failure::DurationLimit(DeadlineExceeded {
                 actual: worst_case,
                 limit: max_duration,
-            },
+            }),
         ));
     }
     Ok(())

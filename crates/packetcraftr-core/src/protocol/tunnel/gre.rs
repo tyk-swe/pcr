@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, GRE_CHECKSUM},
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
 };
@@ -67,8 +67,8 @@ reflective_layer! {
     impl Gre {
         "protocol_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType discriminator", reflect: protocol_type, layout: (2, 4) },
         "checksum" => { kind: Unsigned, derived: true, required: false, description: "Optional checksum over the GRE header and payload", get |layer| layer.checksum.as_ref().map(reflect_get), set |layer, value, name| { let mut checksum = layer.checksum.clone().unwrap_or_default(); reflect_set(&mut checksum, gre_schema(), name, value)?; layer.checksum = Some(checksum); Ok(()) } },
-        "key" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE key", get |layer| layer.key.map(FieldValue::from), set |layer, value, name| { let mut key = layer.key.unwrap_or_default(); reflect_set(&mut key, gre_schema(), name, value)?; layer.key = Some(key); Ok(()) } },
-        "sequence" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE sequence number", get |layer| layer.sequence.map(FieldValue::from), set |layer, value, name| { let mut sequence = layer.sequence.unwrap_or_default(); reflect_set(&mut sequence, gre_schema(), name, value)?; layer.sequence = Some(sequence); Ok(()) } },
+        "key" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE key", get |layer| layer.key.map(field::Value::from), set |layer, value, name| { let mut key = layer.key.unwrap_or_default(); reflect_set(&mut key, gre_schema(), name, value)?; layer.key = Some(key); Ok(()) } },
+        "sequence" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE sequence number", get |layer| layer.sequence.map(field::Value::from), set |layer, value, name| { let mut sequence = layer.sequence.unwrap_or_default(); reflect_set(&mut sequence, gre_schema(), name, value)?; layer.sequence = Some(sequence); Ok(()) } },
         "reserved_bits" => { kind: Unsigned, derived: false, required: false, description: "Receiver-ignored GRE bits 6 through 12", reflect: reserved_bits, layout: (0, 2) },
     }
     layout pub(crate) fn gre_static_layout();
@@ -77,7 +77,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct GreCodec;
 
-impl LayerCodec for GreCodec {
+impl Codec for GreCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &gre_schema().protocol
     }
@@ -86,8 +86,8 @@ impl LayerCodec for GreCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Gre>(NAME, layer)?;
         let header_len = gre_header_len(
             layer.checksum.is_some(),
@@ -143,7 +143,7 @@ impl LayerCodec for GreCodec {
         let mut materialized = layer.clone();
         materialized.protocol_type = materialized_protocol_type;
         materialized.checksum = materialized_checksum;
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(gre_layout(layer))
             .with_diagnostics(diagnostics))
     }
@@ -151,8 +151,8 @@ impl LayerCodec for GreCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<GRE_BASE_LEN>() else {
             return Err(truncated(NAME, GRE_BASE_LEN, input.len()));
         };
@@ -204,7 +204,7 @@ impl LayerCodec for GreCodec {
             reserved_bits,
         };
         let payload_len = input.len().saturating_sub(header_len);
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: gre_layout(&layer),
             layer: Box::new(layer),
             consumed: header_len,
@@ -218,7 +218,7 @@ impl LayerCodec for GreCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Gre::default(), fields)
     }

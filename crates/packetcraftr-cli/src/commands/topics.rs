@@ -59,14 +59,18 @@ const TOPICS: &[Topic] = &[
 ];
 
 impl Generate for Args {
-    fn generate(self, format: Format) -> Result<(), CliError> {
+    fn generate(
+        self,
+        invocation: &crate::invocation::Invocation,
+        format: Format,
+    ) -> Result<(), CliError> {
         if format != Format::Text {
             return Err(CliError::new(
                 Kind::Usage,
                 format!("topics prints text only, not --output {format}"),
             ));
         }
-        emit_stdout_document(&render(self.name.as_deref())?)
+        emit_stdout_document(invocation, &render(self.name.as_deref())?)
     }
 }
 

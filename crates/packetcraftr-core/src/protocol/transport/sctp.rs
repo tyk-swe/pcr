@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, SCTP_CHECKSUM},
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -76,7 +76,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SctpCodec;
 
-impl LayerCodec for SctpCodec {
+impl Codec for SctpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &sctp_schema().protocol
     }
@@ -85,8 +85,8 @@ impl LayerCodec for SctpCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Sctp>(NAME, layer)?;
         let mut diagnostics = Vec::new();
         validate_port("source_port", layer.source_port, context, &mut diagnostics)?;
@@ -123,18 +123,16 @@ impl LayerCodec for SctpCodec {
 
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
-        Ok(
-            EncodedLayer::header(header.to_vec(), Box::new(materialized))
-                .with_fields(sctp_layout())
-                .with_diagnostics(diagnostics),
-        )
+        Ok(Encoded::header(header.to_vec(), Box::new(materialized))
+            .with_fields(sctp_layout())
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<SCTP_HEADER_LEN>() else {
             return Err(truncated(NAME, SCTP_HEADER_LEN, input.len()));
         };
@@ -160,7 +158,7 @@ impl LayerCodec for SctpCodec {
             );
         }
 
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Sctp {
                 source_port,
                 destination_port,
@@ -179,7 +177,7 @@ impl LayerCodec for SctpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Sctp::default(), fields)
     }
@@ -188,7 +186,7 @@ impl LayerCodec for SctpCodec {
 fn validate_port(
     field: &'static str,
     port: u16,
-    context: &LayerEncodeContext<'_>,
+    context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
     if port != 0 {

@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
-use crate::field::{self, FieldValue, Path};
+use crate::field::{self, Path};
 use crate::packet::Packet;
 
 pub const DEFAULT_MAX_TEMPLATE_PACKETS: usize = 10_000;
@@ -39,12 +39,12 @@ impl NumericRange {
         false
     }
 
-    pub fn values(&self) -> impl Iterator<Item = FieldValue> + '_ {
+    pub fn values(&self) -> impl Iterator<Item = field::Value> + '_ {
         let (end, step) = (self.end, self.step);
         std::iter::successors(Some(self.start), move |value| {
             value.checked_add(step).filter(|next| *next <= end)
         })
-        .map(FieldValue::Unsigned)
+        .map(field::Value::Unsigned)
     }
 }
 
@@ -53,7 +53,7 @@ struct TemplateAxis {
     layer: usize,
     field: String,
     path: Option<Path>,
-    values: Vec<FieldValue>,
+    values: Vec<field::Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -73,7 +73,12 @@ impl Template {
     /// Adds a varying field to the Cartesian product. Declaration order is
     /// stable, with the last axis varying fastest.
     #[must_use]
-    pub fn axis(mut self, layer: usize, field: impl Into<String>, values: Vec<FieldValue>) -> Self {
+    pub fn axis(
+        mut self,
+        layer: usize,
+        field: impl Into<String>,
+        values: Vec<field::Value>,
+    ) -> Self {
         let field = field.into();
         self.axes.push(TemplateAxis {
             layer,

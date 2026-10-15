@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::correlation::Transport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ProbeEndpoint {
+pub enum Endpoint {
     Tcp {
         port: u16,
     },
@@ -30,7 +30,7 @@ pub enum ProbeEndpoint {
     },
 }
 
-impl ProbeEndpoint {
+impl Endpoint {
     #[must_use]
     pub const fn transport(self) -> Transport {
         match self {
@@ -73,7 +73,7 @@ impl ProbeEndpoint {
 }
 
 /// Renders `tcp/80`, `tcp-ack/80`, `udp/53`, `sctp/80`, `ip/47`, or `icmp*`.
-impl std::fmt::Display for ProbeEndpoint {
+impl std::fmt::Display for Endpoint {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Tcp { port } => write!(formatter, "tcp/{port}"),
@@ -90,12 +90,12 @@ impl std::fmt::Display for ProbeEndpoint {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProbeStatus {
+pub enum Status {
     Response,
     Timeout,
 }
 
-impl ProbeStatus {
+impl Status {
     /// The name the CLI prints, identical to the serialized one.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -106,7 +106,7 @@ impl ProbeStatus {
     }
 }
 
-impl std::fmt::Display for ProbeStatus {
+impl std::fmt::Display for Status {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.as_str())
     }

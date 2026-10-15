@@ -16,7 +16,7 @@ use super::contract::Error;
 use super::envelope::{Published, Stats};
 use super::frame::{Captured, Timestamp};
 use super::network::InterfaceId;
-use packetcraftr::probe::{ProbeStatus, Transport};
+use packetcraftr::probe::{self, Transport};
 
 use packetcraftr::scan as library;
 
@@ -173,7 +173,7 @@ pub struct Probe {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sctp_scan: Option<plan::SctpScan>,
     pub attempt: u32,
-    pub status: ProbeStatus,
+    pub status: probe::Status,
     pub classification: Classification,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub responder: Option<IpAddr>,

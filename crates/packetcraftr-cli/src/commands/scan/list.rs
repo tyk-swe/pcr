@@ -23,6 +23,7 @@ pub(super) struct Options {
 }
 
 pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
     selection: Selection,
     options: Options,
     format: Format,
@@ -40,6 +41,7 @@ pub(super) fn run(
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     let client = client(
+        invocation,
         packetcraftr_core::protocol::builtin::registry(),
         policy,
         Runtime::Workflow,
@@ -54,12 +56,19 @@ pub(super) fn run(
     let diagnostics = duplicate_diagnostics(&report.duplicates, &origins);
     match format {
         Format::Text => {
-            render_text(&report, &origins, ports.as_ref(), ip_protocols.as_ref())?;
-            crate::rendering::render_diagnostics_text(&diagnostics)
+            render_text(
+                invocation,
+                &report,
+                &origins,
+                ports.as_ref(),
+                ip_protocols.as_ref(),
+            )?;
+            crate::rendering::render_diagnostics_text(invocation, &diagnostics)
         }
         Format::Json => {
             let published = output::scan::list::Report::new(report, &origins, ports, ip_protocols);
             crate::rendering::emit_aggregate(
+                invocation,
                 output::contract::Command::Scan,
                 published,
                 diagnostics,
@@ -96,19 +105,26 @@ fn duplicate_diagnostics(duplicates: &[u32], origins: &[Declaration]) -> Vec<Dia
 }
 
 fn render_text(
+    invocation: &crate::invocation::Invocation,
     report: &plan::Report,
     origins: &[Declaration],
     ports: Option<&output::scan::plan::Ports>,
     ip_protocols: Option<&output::scan::plan::IpProtocols>,
 ) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "target={} resolution_performed={}",
-        report.declared, report.resolution_performed
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "target={} resolution_performed={}",
+            report.declared, report.resolution_performed
+        ),
+    )?;
     if report.resolution_performed {
-        write_stdout_line(format_args!(
-            "warning: hostname resolution ran during planning and may have used network I/O"
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "warning: hostname resolution ran during planning and may have used network I/O"
+            ),
+        )?;
     }
     for target in &report.targets {
         let scope = target
@@ -131,53 +147,68 @@ fn render_text(
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ");
-        write_stdout_line(format_args!(
-            "{}{} declarations: {}",
-            target.selected.address, scope, sources
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "{}{} declarations: {}",
+                target.selected.address, scope, sources
+            ),
+        )?;
     }
     if let Some(ports) = ports {
         if let Some(tcp_scan) = ports.tcp_scan {
-            write_stdout_line(format_args!(
-                "{}",
-                super::rendering::tcp_scan_text(tcp_scan)
-            ))?;
+            write_stdout_line(
+                invocation,
+                format_args!("{}", super::rendering::tcp_scan_text(tcp_scan)),
+            )?;
         }
         if let Some(sctp_scan) = ports.sctp_scan {
-            write_stdout_line(format_args!(
-                "{}",
-                super::rendering::sctp_scan_text(sctp_scan)
-            ))?;
+            write_stdout_line(
+                invocation,
+                format_args!("{}", super::rendering::sctp_scan_text(sctp_scan)),
+            )?;
         }
         for endpoint in &ports.endpoints {
-            write_stdout_line(format_args!(
-                "port {}/{} port-hint={}",
-                endpoint.transport,
-                endpoint.port,
-                endpoint.port_hint.unwrap_or("-")
-            ))?;
+            write_stdout_line(
+                invocation,
+                format_args!(
+                    "port {}/{} port-hint={}",
+                    endpoint.transport,
+                    endpoint.port,
+                    endpoint.port_hint.unwrap_or("-")
+                ),
+            )?;
         }
-        write_summary_line(format_args!(
-            "planned {} port endpoint(s) per target, {} excluded, port-catalog={}/{}",
-            ports.endpoints.len(),
-            ports.excluded_endpoints,
-            ports.port_catalog.name,
-            ports.port_catalog.version
-        ))?;
+        write_summary_line(
+            invocation,
+            format_args!(
+                "planned {} port endpoint(s) per target, {} excluded, port-catalog={}/{}",
+                ports.endpoints.len(),
+                ports.excluded_endpoints,
+                ports.port_catalog.name,
+                ports.port_catalog.version
+            ),
+        )?;
     }
     if let Some(ip_protocols) = ip_protocols {
         for protocol in &ip_protocols.protocols {
-            write_stdout_line(format_args!("ip-protocol ip/{protocol}"))?;
+            write_stdout_line(invocation, format_args!("ip-protocol ip/{protocol}"))?;
         }
-        write_summary_line(format_args!(
-            "planned {} IP protocol endpoint(s) per target, {} excluded",
-            ip_protocols.protocols.len(),
-            ip_protocols.excluded_protocols,
-        ))?;
+        write_summary_line(
+            invocation,
+            format_args!(
+                "planned {} IP protocol endpoint(s) per target, {} excluded",
+                ip_protocols.protocols.len(),
+                ip_protocols.excluded_protocols,
+            ),
+        )?;
     }
-    write_summary_line(format_args!(
-        "planned {} target(s), {} duplicate declaration(s)",
-        report.targets.len(),
-        report.duplicates.len()
-    ))
+    write_summary_line(
+        invocation,
+        format_args!(
+            "planned {} target(s), {} duplicate declaration(s)",
+            report.targets.len(),
+            report.duplicates.len()
+        ),
+    )
 }

@@ -49,14 +49,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let selected_stream = arguments
         .stream
         .as_ref()
@@ -84,14 +90,16 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let prepared = prepare(arguments.limits, None, &arguments.decode)?;
     let session = analysis::Session::new(
         prepared.registry.clone(),
-        prepared.options(),
+        analysis::Options {
+            stream: selected_stream.map(|index| analysis::StreamRef {
+                transport: StreamTransport::Tcp,
+                index,
+            }),
+            ..prepared.options(invocation)
+        },
         collector,
-        selected_stream.map(|index| analysis::StreamRef {
-            transport: StreamTransport::Tcp,
-            index,
-        }),
     );
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
+    let mut reader = open_capture(invocation, &arguments.path, arguments.limits.capture.reader)?;
 
     let mut state = State::new(arguments.max_output_sessions);
     let outcome = session
@@ -100,8 +108,14 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             crate::rendering::ip_event_sink(format, stream),
             |event| {
                 if selector.matches(&event.session) {
-                    rendering::render_session(format, event.session, &mut state, stream)
-                        .map_err(CliError::into_boundary_error)?;
+                    rendering::render_session(
+                        invocation,
+                        format,
+                        event.session,
+                        &mut state,
+                        stream,
+                    )
+                    .map_err(CliError::into_boundary_error)?;
                 }
                 Ok(())
             },
@@ -120,8 +134,8 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let (selected, omitted) = state.counts();
     let summary = output::tls::Summary::from((outcome.summary, &outcome.run, selected, omitted));
     match format {
-        Format::Text => rendering::render_text(&state, &summary, &prepared.registry),
-        Format::Json => rendering::render_aggregate(state, summary),
+        Format::Text => rendering::render_text(invocation, &state, &summary, &prepared.registry),
+        Format::Json => rendering::render_aggregate(invocation, state, summary),
         Format::Ndjson => rendering::render_stream(summary, stream),
         other => other.unreachable(),
     }

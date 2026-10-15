@@ -8,7 +8,6 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
-use crate::execution::Errors as _;
 use crate::execution::{ExchangeExecutor, Executor, publisher};
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
@@ -21,7 +20,7 @@ use crate::{Client, Sink};
 use super::Error;
 use super::MAX_PROBE_BYTES;
 use super::WORKFLOW;
-use super::error::Probes;
+use super::error::probe_error;
 use super::evidence::ProbeClassifier;
 use super::plan::{build_batches, probe_target, worst_case_duration};
 use super::{Event, Probe, Report, Request, Termination};
@@ -35,10 +34,25 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
+        let operation = crate::execution::Operation::new(self, request.limits.max_duration);
+        self.traceroute_in(request, sink, &operation)
+    }
+
+    pub(crate) fn traceroute_in<S>(
+        &self,
+        request: Request,
+        sink: S,
+        operation: &crate::execution::Operation,
+    ) -> Result<Report, Error>
+    where
+        S: Sink<Event, Ack = ()>,
+    {
+        let policy = operation.policy(&self.policy);
+        let mut admission = crate::execution::Admission::new(&policy, self.providers.resolver());
         let publish = publisher(
-            &self.runtime,
+            &operation.runtime,
             sink,
-            |error| Probes.duration_limit(0, error),
+            |error| (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error)),
             |source| Error::Output { source },
         )?;
         let send = crate::send::Options {
@@ -49,11 +63,11 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         };
         run(
             &request,
-            &mut self.admission(),
-            &self.registry,
-            &mut ExchangeExecutor::new(self, send, request.collection.clone()),
+            &mut admission,
+            &operation.registry,
+            &mut ExchangeExecutor::new(self, operation, send, request.collection.clone()),
             &mut self.clock.clone(),
-            &mut self.deadline(request.limits.max_duration),
+            &mut operation.deadline(self, request.limits.max_duration),
             publish,
         )
     }
@@ -74,13 +88,13 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    enforce_deadline(&Probes, deadline)?;
+    enforce_deadline(probe_error, deadline)?;
     let approved = approve_traceroute(request, authorizer, deadline)?;
     let mut batches = build_batches(request, approved.destination)?;
-    enforce_deadline(&Probes, deadline)?;
+    enforce_deadline(probe_error, deadline)?;
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
-        Probes,
+        probe_error,
         request.limits.evidence,
         ProbeClassifier {
             registry,
@@ -128,7 +142,7 @@ fn approve_traceroute<A: Authorizer + ResolveTarget>(
     let (selected, _) = admit_operation(
         authorizer,
         deadline,
-        &Probes,
+        probe_error,
         &request.target,
         FamilyGate::new(request.address_family, Error::family),
         |selected| {
@@ -179,13 +193,13 @@ fn approve_traceroute<A: Authorizer + ResolveTarget>(
 }
 
 fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Error> {
-    check_probe_count(&Probes, total_probes, request.limits.max_probes)?;
+    check_probe_count(probe_error, total_probes, request.limits.max_probes)?;
     probe_target(
         request,
         u64::try_from(total_probes.saturating_sub(1)).unwrap_or(u64::MAX),
     )?;
     check_probe_duration(
-        &Probes,
+        probe_error,
         worst_case_duration(request)?,
         request.limits.max_duration,
     )

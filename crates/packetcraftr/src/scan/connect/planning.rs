@@ -9,13 +9,13 @@ use std::time::Duration;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp;
 
-use super::super::error::Probes;
+use super::super::error::probe_error;
 use super::super::plan::{adaptive_worst_case_duration, probe_count, worst_case_duration};
 use super::super::{Error, Request, Stage};
 use super::{execution, invalid};
 use crate::execution::rate_delay;
 use crate::policy::{Authorizer, Operation, SocketLimits, SocketOperation};
-use crate::probe::ProbeEndpoint;
+use crate::probe;
 use crate::target::{DeclaredTargets, FamilyGate, ResolveTarget, SelectedAddress, admit_selection};
 
 pub(super) struct Planned {
@@ -35,7 +35,7 @@ pub(super) fn planned<A: Authorizer + ResolveTarget>(
     deadline: &Deadline,
     active_size: usize,
 ) -> Result<(Vec<SelectedAddress>, Planned), Error> {
-    let tcp_ports = |endpoints: &[ProbeEndpoint]| -> Vec<u16> {
+    let tcp_ports = |endpoints: &[probe::Endpoint]| -> Vec<u16> {
         endpoints
             .iter()
             .filter_map(|endpoint| endpoint.port())
@@ -62,7 +62,7 @@ pub(super) fn planned<A: Authorizer + ResolveTarget>(
     let (selected, (planned, _)) = admit_selection(
         authorizer,
         deadline,
-        &Probes,
+        probe_error,
         DeclaredTargets {
             selection: &request.targets,
             family: FamilyGate::new(request.address_family, Error::family),
@@ -76,8 +76,13 @@ pub(super) fn planned<A: Authorizer + ResolveTarget>(
             let count = discovery_count.checked_add(scan_count).ok_or_else(|| {
                 invalid("probes", usize::MAX, "probe-count arithmetic overflowed")
             })?;
-            crate::probe::check_probe_count(&Probes, count, request.limits.max_probes)?;
-            let delay = rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?;
+            crate::probe::check_probe_count(probe_error, count, request.limits.max_probes)?;
+            let delay = rate_delay(
+                probe_error,
+                "probes_per_second",
+                1,
+                request.probes_per_second,
+            )?;
             let stage_pause = if discovery_count > 0 && scan_count > 0 {
                 delay
             } else {
@@ -101,7 +106,7 @@ pub(super) fn planned<A: Authorizer + ResolveTarget>(
                 limit: request.limits.max_duration,
             })?;
             crate::probe::check_probe_duration(
-                &Probes,
+                probe_error,
                 planned_duration,
                 request.limits.max_duration,
             )?;

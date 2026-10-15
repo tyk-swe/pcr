@@ -2,33 +2,33 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{contract::Error, frame::SourceFrame, stream::StreamRecord};
-use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::field;
 use packetcraftr_core::filter::Projection;
 use serde::{
     Serialize, Serializer,
     ser::{Error as _, SerializeMap, SerializeSeq},
 };
 
-pub struct Cell<'a>(pub &'a FieldValue);
+pub struct Cell<'a>(pub &'a field::Value);
 impl Serialize for Cell<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self.0 {
-            FieldValue::Bool(v) => serializer.serialize_bool(*v),
-            FieldValue::Unsigned(v) => serializer.serialize_u64(*v),
-            FieldValue::Signed(v) => serializer.serialize_i64(*v),
-            FieldValue::Text(v) => serializer.serialize_str(v),
-            FieldValue::Bytes(v) => serializer.collect_str(&super::hex::CompactHex(v)),
-            FieldValue::Ipv4(_) | FieldValue::Ipv6(_) | FieldValue::Mac(_) => {
+            field::Value::Bool(v) => serializer.serialize_bool(*v),
+            field::Value::Unsigned(v) => serializer.serialize_u64(*v),
+            field::Value::Signed(v) => serializer.serialize_i64(*v),
+            field::Value::Text(v) => serializer.serialize_str(v),
+            field::Value::Bytes(v) => serializer.collect_str(&super::hex::CompactHex(v)),
+            field::Value::Ipv4(_) | field::Value::Ipv6(_) | field::Value::Mac(_) => {
                 serializer.collect_str(self.0)
             }
-            FieldValue::List(values) => {
+            field::Value::List(values) => {
                 let mut seq = serializer.serialize_seq(Some(values.len()))?;
                 for value in values {
                     seq.serialize_element(&Cell(value))?;
                 }
                 seq.end()
             }
-            FieldValue::Object(values) => {
+            field::Value::Object(values) => {
                 let mut map = serializer.serialize_map(Some(values.len()))?;
                 for (key, value) in values {
                     map.serialize_entry(key, &Cell(value))?;
@@ -39,7 +39,10 @@ impl Serialize for Cell<'_> {
         }
     }
 }
-fn values<S: Serializer>(values: &[Option<FieldValue>], serializer: S) -> Result<S::Ok, S::Error> {
+fn values<S: Serializer>(
+    values: &[Option<field::Value>],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
     let mut seq = serializer.serialize_seq(Some(values.len()))?;
     for value in values {
         seq.serialize_element(&value.as_ref().map(Cell))?;
@@ -50,12 +53,12 @@ fn values<S: Serializer>(values: &[Option<FieldValue>], serializer: S) -> Result
 pub struct Row {
     pub source_frame: SourceFrame,
     #[serde(serialize_with = "values")]
-    pub values: Vec<Option<FieldValue>>,
+    pub values: Vec<Option<field::Value>>,
 }
-impl TryFrom<(u64, Vec<Option<FieldValue>>)> for Row {
+impl TryFrom<(u64, Vec<Option<field::Value>>)> for Row {
     type Error = Error;
 
-    fn try_from((source_frame, values): (u64, Vec<Option<FieldValue>>)) -> Result<Self, Error> {
+    fn try_from((source_frame, values): (u64, Vec<Option<field::Value>>)) -> Result<Self, Error> {
         Ok(Self {
             source_frame: source_frame.try_into()?,
             values,

@@ -32,7 +32,7 @@ fn packet(payload: impl Layer) -> Packet {
 fn build_with(packet: Packet, mode: codec::Mode) -> Result<build::BuiltPacket, build::Error> {
     build::Builder::new(builtin::registry()).build(
         packet,
-        codec::Context::default(),
+        codec::Addresses::default(),
         build::Options {
             mode,
             ..build::Options::default()

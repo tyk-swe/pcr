@@ -83,7 +83,12 @@ impl super::Spec for Args {
         self.policy.resources(settings);
     }
 
-    fn run(self, format: Format, stream: &StreamEncoder) -> Result<super::CommandExit, CliError> {
+    fn run(
+        self,
+        invocation: &crate::invocation::Invocation,
+    ) -> Result<super::CommandExit, CliError> {
+        let format = invocation.format;
+        let stream = &invocation.output;
         let corpus = match &self.corpus {
             Some(path) => Arc::new(
                 os_fingerprints::parse(&read_bounded_file(
@@ -122,39 +127,23 @@ impl super::Spec for Args {
         request.collection.max_responses = self.max_queue_frames;
         request.collection.max_unmatched_frames = self.max_queue_frames;
         request.validate().map_err(CliError::classified)?;
-        crate::invocation::check()?;
+        invocation.check()?;
         let workflow = prepare_workflow(
             &self.route,
             self.policy.into_policy(),
             request.timeout,
             request.collection.capture,
         )?;
-        let mut client = workflow.client(Runtime::Workflow);
-        if let Some(deadline) = crate::invocation::deadline() {
-            client = client.with_parent_deadline((*deadline).clone());
+        let mut client = workflow.client(invocation, Runtime::Workflow);
+        if let Some(deadline) = invocation.deadline.clone() {
+            client = client.with_deadline((*deadline).clone());
         }
         request.route = workflow.route;
         // Preserve explicit evidence ceilings; preparation supplies native decoding options.
         request.collection.decode = workflow.collection.decode;
-        super::execution::run_workflow(
-            format,
-            stream,
-            crate::cancellation::signal(),
-            super::execution::Hooks {
-                command: output::contract::Command::IdentifyOs,
-                run: Box::new(|| {
-                    let collector = library::Collector::default();
-                    let report = client
-                        .identify_os(request.clone(), collector.clone())
-                        .map_err(CliError::classified)?;
-                    collector.finish(report).map_err(CliError::classified)
-                }),
-                run_with_events: Box::new(|emit| {
-                    client
-                        .identify_os(request.clone(), emit)
-                        .map_err(CliError::classified)
-                }),
-                on_event: |event, stream| {
+        match format {
+            Format::Ndjson => {
+                let emit = crate::commands::execution::emitter(invocation, |event, stream| {
                     stream
                         .emit_published(
                             output::envelope::Published::<output::os::Event>::try_from(event)
@@ -162,52 +151,96 @@ impl super::Spec for Args {
                         )
                         .map(|_| ())
                         .map_err(CliError::from)
-                },
-                into_result: Box::new(|report| {
-                    output::envelope::Published::<output::os::Report>::try_from(report)
+                });
+                let summary = {
+                    let emit = emit;
+
+                    client
+                        .identify_os(request.clone(), emit)
                         .map_err(CliError::classified)
-                }),
-                render: Box::new(|aggregate, _| render(aggregate.report, stream.presentation())),
-                complete: |report, stream| {
+                }?;
+                invocation.check()?;
+                {
+                    let report = summary;
+                    let stream: &StreamEncoder = stream;
+
                     stream
                         .complete_published(output::envelope::Published::<output::os::Event>::from(
                             report,
                         ))
                         .map(|_| ())
                         .map_err(CliError::from)
-                },
-            },
-        )?;
+                }
+            }
+            format => {
+                let report = (|| -> Result<_, CliError> {
+                    let collector = library::Collector::default();
+                    let report = client
+                        .identify_os(request.clone(), collector.clone())
+                        .map_err(CliError::classified)?;
+                    collector.finish(report).map_err(CliError::classified)
+                })()?;
+                invocation.check()?;
+                if format == Format::Json {
+                    crate::rendering::emit_published(
+                        invocation,
+                        output::contract::Command::IdentifyOs,
+                        {
+                            let report = report;
+
+                            output::envelope::Published::<output::os::Report>::try_from(report)
+                                .map_err(CliError::classified)
+                        }?,
+                    )
+                } else {
+                    {
+                        let aggregate = report;
+                        let _ = format;
+                        render(invocation, aggregate.report, stream.presentation())
+                    }
+                }
+            }
+        }?;
         Ok(super::CommandExit::SUCCESS)
     }
 }
 
 fn render(
+    invocation: &crate::invocation::Invocation,
     report: library::Report,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "OS identification {}: {:?} — {}",
-        report.target, report.identification.outcome, report.identification.reason
-    ))?;
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "OS identification {}: {:?} — {}",
+            report.target, report.identification.outcome, report.identification.reason
+        ),
+    )?;
     if presentation.verbose {
         for observation in &report.observations {
-            write_stdout_line(format_args!("  observation: {observation:?}"))?;
+            write_stdout_line(invocation, format_args!("  observation: {observation:?}"))?;
         }
     }
     for candidate in report.identification.candidates {
-        write_stdout_line(format_args!(
-            "  {:?}: signature={} corpus={}@{} qualification=qualified",
-            candidate.family, candidate.signature, candidate.corpus, candidate.corpus_version
-        ))?;
+        write_stdout_line(
+            invocation,
+            format_args!(
+                "  {:?}: signature={} corpus={}@{} qualification=qualified",
+                candidate.family, candidate.signature, candidate.corpus, candidate.corpus_version
+            ),
+        )?;
     }
-    write_stdout_line(format_args!(
-        "  observations={} transmissions={} bytes={} complete={}",
-        report.observations.len(),
-        report.stats.packets_attempted,
-        report.stats.bytes,
-        report.complete
-    ))
+    write_stdout_line(
+        invocation,
+        format_args!(
+            "  observations={} transmissions={} bytes={} complete={}",
+            report.observations.len(),
+            report.stats.packets_attempted,
+            report.stats.bytes,
+            report.complete
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -235,7 +268,7 @@ mod tests {
                     _ => started + Duration::from_millis(550),
                 }
             });
-            let _invocation = crate::invocation::enter_deadline(Some(Arc::new(parent)));
+
             let crate::commands::CommandLine::IdentifyOs(args) = crate::cli::Cli::parse_from([
                 "packetcraftr",
                 "identify-os",
@@ -255,7 +288,16 @@ mod tests {
                 panic!("expected OS identification command");
             };
             let (stream, output) = stream(output::contract::Command::IdentifyOs);
-            let Err(error) = args.run(format, &stream) else {
+            let mut invocation = crate::invocation::Invocation::new(
+                format,
+                stream.clone(),
+                None,
+                Default::default(),
+                None,
+            );
+            invocation.deadline = Some(Arc::new(parent));
+            let invocation = &invocation;
+            let Err(error) = args.run(invocation) else {
                 panic!("invocation deadline must expire");
             };
             assert_eq!(

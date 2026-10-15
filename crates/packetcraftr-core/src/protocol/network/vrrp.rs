@@ -7,9 +7,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, VRRP_CHECKSUM},
-    field::{FieldValue, WireValue},
+    field::{self, WireValue},
     layer::{Layer, Raw, reflective_layer},
     layout::FieldLayout,
 };
@@ -82,13 +82,13 @@ impl Default for Vrrp {
     }
 }
 
-fn addresses_value(addresses: &[IpAddr]) -> FieldValue {
-    FieldValue::List(
+fn addresses_value(addresses: &[IpAddr]) -> field::Value {
+    field::Value::List(
         addresses
             .iter()
             .map(|address| match address {
-                IpAddr::V4(address) => FieldValue::Ipv4(*address),
-                IpAddr::V6(address) => FieldValue::Ipv6(*address),
+                IpAddr::V4(address) => field::Value::Ipv4(*address),
+                IpAddr::V6(address) => field::Value::Ipv6(*address),
             })
             .collect(),
     )
@@ -96,10 +96,10 @@ fn addresses_value(addresses: &[IpAddr]) -> FieldValue {
 
 fn set_addresses(
     layer: &mut Vrrp,
-    value: FieldValue,
+    value: field::Value,
     name: &str,
 ) -> Result<(), crate::field::Error> {
-    let FieldValue::List(values) = value else {
+    let field::Value::List(values) = value else {
         return Err(wrong_type(vrrp_schema(), name, "list"));
     };
     if values.len() > MAX_ADDRESSES {
@@ -108,9 +108,9 @@ fn set_addresses(
     layer.addresses = values
         .into_iter()
         .map(|value| match value {
-            FieldValue::Ipv4(address) => Ok(IpAddr::V4(address)),
-            FieldValue::Ipv6(address) => Ok(IpAddr::V6(address)),
-            FieldValue::Text(text) => text
+            field::Value::Ipv4(address) => Ok(IpAddr::V4(address)),
+            field::Value::Ipv6(address) => Ok(IpAddr::V6(address)),
+            field::Value::Text(text) => text
                 .parse()
                 .map_err(|_| wrong_type(vrrp_schema(), name, "list of IP addresses")),
             _ => Err(wrong_type(vrrp_schema(), name, "list of IP addresses")),
@@ -121,10 +121,10 @@ fn set_addresses(
 
 fn set_auth_data(
     layer: &mut Vrrp,
-    value: FieldValue,
+    value: field::Value,
     name: &str,
 ) -> Result<(), crate::field::Error> {
-    let FieldValue::Bytes(bytes) = value else {
+    let field::Value::Bytes(bytes) = value else {
         return Err(wrong_type(vrrp_schema(), name, "bytes"));
     };
     layer.auth_data = Some(bytes);
@@ -204,7 +204,7 @@ reflective_layer! {
         "auth_data" => {
             kind: Bytes, derived: false, required: false,
             description: "Bytes after the address list (version 2 authentication data)",
-            get |layer| layer.auth_data.clone().map(FieldValue::Bytes),
+            get |layer| layer.auth_data.clone().map(field::Value::Bytes),
             set |layer, value, name| set_auth_data(layer, value, name),
             layout: (addresses_end, message_end)
         },
@@ -250,7 +250,7 @@ fn read_address(bytes: &[u8], ipv6: bool) -> Option<IpAddr> {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct VrrpCodec;
 
-impl LayerCodec for VrrpCodec {
+impl Codec for VrrpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &vrrp_schema().protocol
     }
@@ -263,8 +263,8 @@ impl LayerCodec for VrrpCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Vrrp>(NAME, layer)?;
         let version = layer.version;
         if !matches!(version, 2 | 3) {
@@ -392,7 +392,7 @@ impl LayerCodec for VrrpCodec {
         materialized.auth_data = Some(auth_data);
         materialized.checksum = materialized_checksum;
         let addresses_end = VRRP_HEADER_LEN.saturating_add(addresses_len);
-        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+        Ok(Encoded::header(prefix, Box::new(materialized))
             .with_fields(vrrp_layout(version, addresses_end, contribution))
             .with_diagnostics(diagnostics))
     }
@@ -400,8 +400,8 @@ impl LayerCodec for VrrpCodec {
     fn decode(
         &self,
         input: Bytes,
-        context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(&first) = input.first() else {
             return Err(truncated(NAME, VRRP_HEADER_LEN, 0));
         };
@@ -513,7 +513,7 @@ impl LayerCodec for VrrpCodec {
         } else {
             (0, 0, (interval >> 12) as u8, interval & MAX_ADVERT_INTERVAL)
         };
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(Vrrp {
                 version,
                 vrrp_type: first & MAX_RESERVED,
@@ -540,7 +540,7 @@ impl LayerCodec for VrrpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Vrrp::default(), fields)
     }
@@ -555,11 +555,11 @@ mod tests {
         input: &[u8],
         network: Option<NetworkEnvelope>,
         hop_limit: Option<u8>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+    ) -> Result<Decoded, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
         VrrpCodec.decode(
             Bytes::copy_from_slice(input),
-            &LayerDecodeContext {
+            &DecodeContext {
                 parent: None,
                 registry: &registry,
                 network,
@@ -569,7 +569,7 @@ mod tests {
         )
     }
 
-    fn codes(decoded: &DecodedLayer) -> Vec<&'static str> {
+    fn codes(decoded: &Decoded) -> Vec<&'static str> {
         decoded
             .diagnostics
             .iter()

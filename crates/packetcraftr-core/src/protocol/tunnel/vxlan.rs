@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::FieldValue,
+    field,
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -70,7 +70,7 @@ fn nonzero_reserved_field(reserved1: u32, reserved2: u8) -> Option<&'static str>
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct VxlanCodec;
 
-impl LayerCodec for VxlanCodec {
+impl Codec for VxlanCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
         &vxlan_schema().protocol
     }
@@ -79,8 +79,8 @@ impl LayerCodec for VxlanCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Vxlan>(NAME, layer)?;
         ensure_encode_budget(NAME, VXLAN_LEN, context)?;
         if layer.vni > VNI_MAX || layer.reserved1 > VNI_MAX {
@@ -117,7 +117,7 @@ impl LayerCodec for VxlanCodec {
         prefix.extend_from_slice(&[reserved1_hi, reserved1_mid, reserved1_lo]);
         prefix.extend_from_slice(&[vni_hi, vni_mid, vni_lo]);
         prefix.push(layer.reserved2);
-        Ok(EncodedLayer::header(prefix, Box::new(layer.clone()))
+        Ok(Encoded::header(prefix, Box::new(layer.clone()))
             .with_fields(vxlan_layout())
             .with_diagnostics(diagnostics))
     }
@@ -125,8 +125,8 @@ impl LayerCodec for VxlanCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        _context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         let Some(header) = input.first_chunk::<VXLAN_LEN>() else {
             return Err(truncated(NAME, VXLAN_LEN, input.len()));
         };
@@ -158,7 +158,7 @@ impl LayerCodec for VxlanCodec {
             reserved2,
         };
         let payload_len = input.len().saturating_sub(VXLAN_LEN);
-        Ok(DecodedLayer {
+        Ok(Decoded {
             fields: vxlan_layout(),
             layer: Box::new(layer),
             consumed: VXLAN_LEN,
@@ -172,7 +172,7 @@ impl LayerCodec for VxlanCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Vxlan::default(), fields)
     }

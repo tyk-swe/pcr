@@ -10,13 +10,17 @@ use crate::command_options::InterfaceSelector;
 use crate::errors::CliError;
 
 pub(crate) fn interfaces(
+    invocation: &crate::invocation::Invocation,
     selector: Option<&InterfaceSelector>,
 ) -> Result<Vec<net::interface::Info>, CliError> {
-    select_interfaces(&net::interface::SystemProvider, selector)
+    select_interfaces(invocation, &net::interface::SystemProvider, selector)
 }
 
-pub(crate) fn resolve(selector: InterfaceSelector) -> Result<net::interface::Id, CliError> {
-    select_interfaces(&net::interface::SystemProvider, Some(&selector))?
+pub(crate) fn resolve(
+    invocation: &crate::invocation::Invocation,
+    selector: InterfaceSelector,
+) -> Result<net::interface::Id, CliError> {
+    select_interfaces(invocation, &net::interface::SystemProvider, Some(&selector))?
         .into_iter()
         .next()
         .map(|interface| interface.id)
@@ -24,27 +28,30 @@ pub(crate) fn resolve(selector: InterfaceSelector) -> Result<net::interface::Id,
 }
 
 pub(crate) fn timestamp_types(
+    invocation: &crate::invocation::Invocation,
     interface: &net::interface::Id,
 ) -> Result<Vec<net::capture::TimestampType>, CliError> {
     net::capture::SystemProvider
-        .timestamp_types(interface, &crate::invocation::passive_lookup())
+        .timestamp_types(interface, &invocation.passive_lookup())
         .map_err(CliError::classified)
 }
 
 pub(crate) fn interface_route(
+    invocation: &crate::invocation::Invocation,
     interface: &net::interface::Id,
 ) -> Result<Option<net::route::Decision>, CliError> {
     net::route::SystemProvider
-        .lookup_interface(interface, &crate::invocation::passive_lookup())
+        .lookup_interface(interface, &invocation.passive_lookup())
         .map_err(CliError::classified)
 }
 
 fn select_interfaces<I: net::interface::Provider>(
+    invocation: &crate::invocation::Invocation,
     provider: &I,
     selector: Option<&InterfaceSelector>,
 ) -> Result<Vec<net::interface::Info>, CliError> {
     let interfaces = provider
-        .interfaces(&crate::invocation::passive_lookup())
+        .interfaces(&invocation.passive_lookup())
         .map_err(CliError::classified)?;
     let Some(selector) = selector else {
         return Ok(interfaces);
@@ -114,8 +121,10 @@ mod tests {
 
     #[test]
     fn an_unknown_selector_fails_before_rendering() {
+        let invocation = &crate::test_support::invocation();
+
         let selector = InterfaceSelector::parse("fixture9").expect("fixture selector");
-        let error = select_interfaces(&FixtureProvider, Some(&selector))
+        let error = select_interfaces(invocation, &FixtureProvider, Some(&selector))
             .expect_err("unknown names must fail");
         assert_eq!(error.exit_code(), 5);
         assert!(error.message.contains("no interface matches"));

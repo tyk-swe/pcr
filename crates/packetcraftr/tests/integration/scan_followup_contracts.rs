@@ -15,7 +15,7 @@ use common::responder::{Arrival, Io, Path, Routes, State};
 use packetcraftr::clock::{Clock, SystemClock};
 use packetcraftr::dns::{self, batch};
 use packetcraftr::policy::Policy;
-use packetcraftr::probe::{ProbeEndpoint, Transport};
+use packetcraftr::probe::{self, Transport};
 use packetcraftr::scan::followup::{self, Collector, Event, Report, Request};
 use packetcraftr::scan::{self, discovery};
 use packetcraftr::target::{Family, Target};
@@ -65,7 +65,7 @@ fn scan_request(octets: &[u8]) -> scan::Request {
             exclude: Vec::new(),
         },
         address_family: Family::Any,
-        endpoints: vec![ProbeEndpoint::Tcp { port: 80 }],
+        endpoints: vec![probe::Endpoint::Tcp { port: 80 }],
         discovery: Default::default(),
         attempts: 1,
         adaptive: None,

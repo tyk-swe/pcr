@@ -3,7 +3,7 @@
 use super::super::MAX_OPTIONS;
 use super::{Dhcpv4, Kind4, Option4, Value4};
 use crate::{
-    field::{self, FieldKind, FieldValue},
+    field,
     layer::{FieldSchema, reflect_set, reflective_layer},
     protocol::{
         BuiltinProtocol,
@@ -16,24 +16,24 @@ use crate::{
 };
 use bytes::Bytes;
 const VALUE_FIELDS: &[FieldSchema] = &[
-    member("message_type", FieldKind::Unsigned, &[]),
-    member("address", FieldKind::Ipv4, &[]),
-    member("addresses", FieldKind::List, &[]),
-    member("seconds", FieldKind::Unsigned, &[]),
-    member("number", FieldKind::Unsigned, &[]),
-    member("codes", FieldKind::Bytes, &[]),
-    member("text", FieldKind::Bytes, &[]),
-    member("hardware_type", FieldKind::Unsigned, &[]),
-    member("identifier", FieldKind::Bytes, &[]),
-    member("overload", FieldKind::Unsigned, &[]),
-    member("data", FieldKind::Bytes, &[]),
+    member("message_type", field::Kind::Unsigned, &[]),
+    member("address", field::Kind::Ipv4, &[]),
+    member("addresses", field::Kind::List, &[]),
+    member("seconds", field::Kind::Unsigned, &[]),
+    member("number", field::Kind::Unsigned, &[]),
+    member("codes", field::Kind::Bytes, &[]),
+    member("text", field::Kind::Bytes, &[]),
+    member("hardware_type", field::Kind::Unsigned, &[]),
+    member("identifier", field::Kind::Bytes, &[]),
+    member("overload", field::Kind::Unsigned, &[]),
+    member("data", field::Kind::Bytes, &[]),
 ];
 const OPTION_FIELDS: &[FieldSchema] = &[
-    member("code", FieldKind::Unsigned, &[]),
-    member("value", FieldKind::Object, VALUE_FIELDS),
+    member("code", field::Kind::Unsigned, &[]),
+    member("value", field::Kind::Object, VALUE_FIELDS),
 ];
-fn options_value(options: &[Option4]) -> FieldValue {
-    FieldValue::List(
+fn options_value(options: &[Option4]) -> field::Value {
+    field::Value::List(
         options
             .iter()
             .map(|option| {
@@ -48,7 +48,7 @@ fn options_value(options: &[Option4]) -> FieldValue {
                             Value4::Address(value) => object([("address", (*value).into())]),
                             Value4::Addresses(values) => object([(
                                 "addresses",
-                                FieldValue::List(
+                                field::Value::List(
                                     values.iter().map(|value| (*value).into()).collect(),
                                 ),
                             )]),
@@ -72,7 +72,7 @@ fn options_value(options: &[Option4]) -> FieldValue {
             .collect(),
     )
 }
-fn parse_options(value: FieldValue, field: &str) -> Result<Vec<Option4>, field::Error> {
+fn parse_options(value: field::Value, field: &str) -> Result<Vec<Option4>, field::Error> {
     list(value, MAX_OPTIONS, schema(), field)?
         .into_iter()
         .map(|value| {
@@ -127,10 +127,10 @@ fn parse_options(value: FieldValue, field: &str) -> Result<Vec<Option4>, field::
 }
 fn fixed<const N: usize>(
     target: &mut [u8; N],
-    value: FieldValue,
+    value: field::Value,
     field: &str,
 ) -> Result<(), field::Error> {
-    let FieldValue::Bytes(value) = value else {
+    let field::Value::Bytes(value) = value else {
         return Err(wrong_type(schema(), field, "bytes"));
     };
     if value.len() > N {
@@ -140,7 +140,7 @@ fn fixed<const N: usize>(
     target[..value.len()].copy_from_slice(&value);
     Ok(())
 }
-fn message_type(layer: &mut Dhcpv4, value: FieldValue, field: &str) -> Result<(), field::Error> {
+fn message_type(layer: &mut Dhcpv4, value: field::Value, field: &str) -> Result<(), field::Error> {
     let mut number = 0u8;
     reflect_set(&mut number, schema(), field, value)?;
     if let Some(option) = layer.options.iter_mut().find(|option| option.code == 53) {

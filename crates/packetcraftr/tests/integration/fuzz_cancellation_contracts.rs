@@ -15,9 +15,9 @@ use bytes::Bytes;
 use packetcraftr::policy::Policy;
 use packetcraftr::{Client, fuzz};
 use packetcraftr_core::budget::Cancellation;
-use packetcraftr_core::codec::{self, LayerCodec};
+use packetcraftr_core::codec::{self, Codec};
 use packetcraftr_core::error::Classified;
-use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::field;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::layer::{Id, Layer, Raw};
 use packetcraftr_core::packet::Packet;
@@ -92,12 +92,12 @@ fn cancel_entry_prevents_first_live_case() {
 
 #[derive(Debug)]
 struct CancellingCodec {
-    inner: Arc<dyn LayerCodec>,
+    inner: Arc<dyn Codec>,
     signal: Cancellation,
     builds: Arc<AtomicUsize>,
 }
 
-impl LayerCodec for CancellingCodec {
+impl Codec for CancellingCodec {
     fn protocol_id(&self) -> &'static Id {
         self.inner.protocol_id()
     }
@@ -106,8 +106,8 @@ impl LayerCodec for CancellingCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &codec::LayerEncodeContext<'_>,
-    ) -> Result<codec::EncodedLayer, codec::Error> {
+        context: &codec::EncodeContext<'_>,
+    ) -> Result<codec::Encoded, codec::Error> {
         self.builds.fetch_add(1, Ordering::SeqCst);
         let encoded = self.inner.encode(layer, payload, context)?;
         self.signal.cancel();
@@ -117,14 +117,14 @@ impl LayerCodec for CancellingCodec {
     fn decode(
         &self,
         input: Bytes,
-        context: &codec::LayerDecodeContext<'_>,
-    ) -> Result<codec::DecodedLayer, codec::Error> {
+        context: &codec::DecodeContext<'_>,
+    ) -> Result<codec::Decoded, codec::Error> {
         self.inner.decode(input, context)
     }
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, codec::Error> {
         self.inner.make_layer(fields)
     }

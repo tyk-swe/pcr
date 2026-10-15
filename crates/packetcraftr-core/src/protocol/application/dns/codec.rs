@@ -8,10 +8,10 @@ use bytes::Bytes;
 use super::reflection::{dns_layout, dns_schema};
 use super::{Dns, Error, Limits, MAX_MESSAGE_BYTES};
 use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     error::{Classified, Kind},
-    field::FieldValue,
+    field,
     layer::Layer,
     protocol::{
         BuiltinProtocol,
@@ -112,7 +112,7 @@ fn layer_from_wire(wire: Bytes, mdns: bool) -> Result<Dns, crate::codec::Error> 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct DnsCodec;
 
-impl LayerCodec for DnsCodec {
+impl Codec for DnsCodec {
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
         matches!(protocol.as_str(), "dns" | "raw")
     }
@@ -129,8 +129,8 @@ impl LayerCodec for DnsCodec {
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
+        context: &EncodeContext<'_>,
+    ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Dns>(NAME, layer)?;
         let tcp = context
             .index
@@ -164,7 +164,7 @@ impl LayerCodec for DnsCodec {
             field.range.start += prefix;
             field.range.end += prefix;
         }
-        Ok(EncodedLayer::header(wire, Box::new(materialized))
+        Ok(Encoded::header(wire, Box::new(materialized))
             .with_fields(fields)
             .with_diagnostics(diagnostics))
     }
@@ -172,8 +172,8 @@ impl LayerCodec for DnsCodec {
     fn decode(
         &self,
         input: Bytes,
-        context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayer, crate::codec::Error> {
+        context: &DecodeContext<'_>,
+    ) -> Result<Decoded, crate::codec::Error> {
         if context.parent == Some(protocol("tcp")) {
             let mut failure = None;
             let parsed = input
@@ -198,7 +198,7 @@ impl LayerCodec for DnsCodec {
                     field.range.start += 2;
                     field.range.end += 2;
                 }
-                return Ok(DecodedLayer {
+                return Ok(Decoded {
                     layer: Box::new(layer),
                     consumed,
                     payload_len: remaining,
@@ -223,7 +223,7 @@ impl LayerCodec for DnsCodec {
                 })
                 .into_iter()
                 .collect();
-            return Ok(DecodedLayer {
+            return Ok(Decoded {
                 layer: Box::new(crate::layer::Raw::new(input.clone())),
                 consumed: input.len(),
                 payload_len: 0,
@@ -240,7 +240,7 @@ impl LayerCodec for DnsCodec {
             .discriminator
             .is_some_and(|discriminator| discriminator.0 == MDNS_PORT);
         let layer = layer_from_wire(input.clone(), mdns)?;
-        Ok(DecodedLayer {
+        Ok(Decoded {
             layer: Box::new(layer),
             consumed: input.len(),
             payload_len: 0,
@@ -254,16 +254,16 @@ impl LayerCodec for DnsCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, field::Value>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        let mut layer = if let Some(FieldValue::Bytes(wire)) = fields.get("wire") {
+        let mut layer = if let Some(field::Value::Bytes(wire)) = fields.get("wire") {
             layer_from_wire(wire.clone(), false)?
         } else {
             Dns::default()
         };
         for (name, value) in fields {
             if name == "wire" {
-                if !matches!(value, FieldValue::Bytes(_)) {
+                if !matches!(value, field::Value::Bytes(_)) {
                     return Err(invalid(NAME, "wire must be bytes"));
                 }
                 continue;

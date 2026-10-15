@@ -24,7 +24,6 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
-use crate::execution::Errors as _;
 use crate::execution::publisher;
 use crate::policy::Authorizer;
 use crate::probe::runner::BatchEvidence;
@@ -35,7 +34,7 @@ use crate::{Client, Sink};
 use super::Error;
 use super::WORKFLOW;
 use super::discovery::{self, Composer};
-use super::error::Probes;
+use super::error::probe_error;
 use super::evidence::ProbeClassifier;
 use super::executor::{ClientExecutor, Pipelined};
 use super::plan::{Stage, probe_count};
@@ -52,19 +51,34 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
+        let operation = crate::execution::Operation::new(self, request.limits.max_duration);
+        self.scan_in(request, sink, &operation)
+    }
+
+    pub(crate) fn scan_in<S>(
+        &self,
+        request: Request,
+        sink: S,
+        operation: &crate::execution::Operation,
+    ) -> Result<Report, Error>
+    where
+        S: Sink<Event, Ack = ()>,
+    {
+        let policy = operation.policy(&self.policy);
+        let mut admission = crate::execution::Admission::new(&policy, self.providers.resolver());
         let publish = publisher(
-            &self.runtime,
+            &operation.runtime,
             sink,
-            |error| Probes.duration_limit(0, error),
+            |error| (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error)),
             |source| Error::Output { source },
         )?;
         run(
             &request,
-            &mut self.admission(),
-            &self.registry,
-            &mut ClientExecutor::new(self, &request),
+            &mut admission,
+            &operation.registry,
+            &mut ClientExecutor::new(self, &request, operation),
             &mut self.clock.clone(),
-            &mut self.deadline(request.limits.max_duration),
+            &mut operation.deadline(self, request.limits.max_duration),
             publish,
         )
     }
@@ -85,11 +99,11 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    enforce_deadline(&Probes, deadline)?;
+    enforce_deadline(probe_error, deadline)?;
     let approved = approve_scan(request, authorizer, deadline)?;
     let options = &request.discovery;
     executor.resolves_neighbors(approved.resolves_neighbors);
-    enforce_deadline(&Probes, deadline)?;
+    enforce_deadline(probe_error, deadline)?;
     let mut controller = request.adaptive.map(|config| {
         super::adaptive::Controller::new(config, request.timeout, request.max_in_flight)
     });
@@ -139,7 +153,7 @@ where
     };
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
-        Probes,
+        probe_error,
         request.limits.evidence,
         ProbeClassifier {
             registry,
@@ -237,7 +251,7 @@ where
         } else {
             discovery_probes
         };
-        // Probes skipped after a silent neighbor or next hop hold no
+        // probe_error skipped after a silent neighbor or next hop hold no
         // response capacity; only the remaining targets' probes are
         // outstanding.
         let scan_probes = probe_count(

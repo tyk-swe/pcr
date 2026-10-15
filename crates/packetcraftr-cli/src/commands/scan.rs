@@ -25,7 +25,6 @@ use self::selection::{
     discovery_options, ingest_targets, load_udp_profiles, read_udp_payload, select_endpoints,
     transports,
 };
-use super::execution;
 use crate::command_options::parse_target;
 use crate::errors::CliError;
 use crate::input::manifest;
@@ -63,14 +62,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let Args {
         connect,
         method,
@@ -246,6 +251,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             ));
         }
         return list::run(
+            invocation,
             targets,
             list::Options {
                 origins: selection.origins,
@@ -311,7 +317,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         && discovery
             .probes
             .iter()
-            .any(|probe| matches!(probe, packetcraftr::probe::ProbeEndpoint::Ip { .. }))
+            .any(|probe| matches!(probe, packetcraftr::probe::Endpoint::Ip { .. }))
     {
         Vec::new()
     } else {
@@ -404,7 +410,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         request.validate().map_err(CliError::classified)?;
     }
     let trace_stage = traceroute
-        .then(|| {
+        .then(|| -> Result<_, CliError> {
             traceroute::Stage::new(
                 &traceroute::Options {
                     strategy: traceroute_strategy,
@@ -478,6 +484,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             })
             .transpose()?;
         return connect::run(
+            invocation,
             followup::ConnectRequest {
                 scan: request,
                 reverse_dns: reverse,
@@ -489,7 +496,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         );
     }
     let workflow = prepare_workflow(&route, policy.into_policy(), request.timeout, queue_limits)?;
-    let client = workflow.client(Runtime::Workflow);
+    let client = workflow.client(invocation, Runtime::Workflow);
     let request = packetcraftr::scan::Request {
         route: workflow.route,
         collection: workflow.collection,
@@ -520,17 +527,43 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         .transpose()?;
     let trace_plan = trace_stage.as_ref().map(traceroute::Stage::plan);
     let request = followup::Request {
-        trace: trace_stage.as_ref().map(traceroute::Stage::trace),
+        trace: trace_stage.as_ref().map(|stage| stage.trace(invocation)),
         reverse_dns: reverse,
         scan: request,
     };
-    execution::run_workflow(
-        format,
-        stream,
-        crate::cancellation::signal(),
-        execution::Hooks {
-            command: output::contract::Command::Scan,
-            run: Box::new(|| {
+    match format {
+        Format::Ndjson => {
+            let emit = crate::commands::execution::emitter(invocation, streaming::emit_event);
+            let summary = {
+                let plan = plan.clone();
+                let client = &client;
+                let request = &request;
+
+                let emit = emit;
+
+                let mut report = client
+                    .scan_with_followups(request.clone(), emit)
+                    .map_err(followup_error)?;
+                report.scan.stats = report.stats;
+                let traceroute = trace_plan.zip(report.trace).map(|(plan, traced)| {
+                    output::traceroute::hosts::Complete {
+                        plan,
+                        retained_evidence_bytes: traced.retained_evidence_bytes,
+                    }
+                });
+                Ok::<_, CliError>(Streamed {
+                    report: report.scan,
+                    endpoints: report.endpoints,
+                    plan,
+                    reverse_dns: reverse_dns_hosts(report.reverse_dns),
+                    traceroute,
+                })
+            }?;
+            invocation.check()?;
+            (streaming::emit_complete)(summary, stream)
+        }
+        format => {
+            let report = (|| -> Result<_, CliError> {
                 let collector = followup::Collector::default();
                 let report = client
                     .scan_with_followups(request.clone(), collector.clone())
@@ -548,35 +581,14 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 }
                 let traced = trace_plan.zip(trace);
                 Ok((scan, reverse_dns_hosts(reverse_dns), traced))
-            }),
-            run_with_events: Box::new({
-                let plan = plan.clone();
-                let client = &client;
-                let request = &request;
-                move |emit| {
-                    let mut report = client
-                        .scan_with_followups(request.clone(), emit)
-                        .map_err(followup_error)?;
-                    report.scan.stats = report.stats;
-                    let traceroute = trace_plan.zip(report.trace).map(|(plan, traced)| {
-                        output::traceroute::hosts::Complete {
-                            plan,
-                            retained_evidence_bytes: traced.retained_evidence_bytes,
-                        }
-                    });
-                    Ok(Streamed {
-                        report: report.scan,
-                        endpoints: report.endpoints,
-                        plan,
-                        reverse_dns: reverse_dns_hosts(report.reverse_dns),
-                        traceroute,
-                    })
-                }
-            }),
-            on_event: streaming::emit_event,
-            into_result: Box::new({
-                let plan = plan.clone();
-                move |(report, names, traced)| {
+            })()?;
+            invocation.check()?;
+            if format == Format::Json {
+                crate::rendering::emit_published(invocation, output::contract::Command::Scan, {
+                    let plan = plan.clone();
+
+                    let (report, names, traced) = report;
+
                     output::scan::Report::publish(
                         report,
                         plan,
@@ -589,28 +601,32 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                             .map_err(CliError::classified)?,
                     )
                     .map_err(CliError::classified)
-                }
-            }),
-            render: Box::new(move |(report, names, traced), _| {
-                rendering::render_text(
-                    output::scan::Report::publish(
-                        report,
-                        plan,
-                        names,
-                        traced
-                            .map(|(plan, aggregate)| {
-                                output::traceroute::hosts::Report::new(plan, aggregate)
-                            })
-                            .transpose()
-                            .map_err(CliError::classified)?,
+                }?)
+            } else {
+                {
+                    let (report, names, traced) = report;
+                    let _ = format;
+
+                    rendering::render_text(
+                        invocation,
+                        output::scan::Report::publish(
+                            report,
+                            plan,
+                            names,
+                            traced
+                                .map(|(plan, aggregate)| {
+                                    output::traceroute::hosts::Report::new(plan, aggregate)
+                                })
+                                .transpose()
+                                .map_err(CliError::classified)?,
+                        )
+                        .map_err(CliError::classified)?,
+                        stream.presentation(),
                     )
-                    .map_err(CliError::classified)?,
-                    stream.presentation(),
-                )
-            }),
-            complete: streaming::emit_complete,
-        },
-    )
+                }
+            }
+        }
+    }
 }
 
 fn validated_reverse_dns(

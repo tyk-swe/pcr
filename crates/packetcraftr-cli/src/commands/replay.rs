@@ -63,23 +63,35 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let compression = arguments.compression.for_output(format)?;
     let ReplayRun {
         client,
         request,
         filtered,
-    } = prepare(&arguments)?;
+    } = prepare(invocation, &arguments)?;
     match format {
-        Format::Text => replay_text(&client, request, filtered, stream.presentation()),
-        Format::Json => replay_aggregate(&client, request),
+        Format::Text => replay_text(
+            invocation,
+            &client,
+            request,
+            filtered,
+            stream.presentation(),
+        ),
+        Format::Json => replay_aggregate(invocation, &client, request),
         Format::Ndjson => replay_stream(&client, request, stream),
         Format::Pcap => replay_capture(
             &client,
@@ -101,7 +113,10 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     }
 }
 
-fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
+fn prepare(
+    invocation: &crate::invocation::Invocation,
+    arguments: &Args,
+) -> Result<ReplayRun, CliError> {
     let policy = arguments.policy.clone().into_policy();
     let capture_limits = OfflineCaptureLimitsArgs {
         max_frames: policy.max_packets_per_operation,
@@ -157,8 +172,9 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
         allow_permissive_live: arguments.allow_permissive_live,
     };
     options.validate().map_err(CliError::classified)?;
-    let mut input = open_capture_file(&arguments.path, arguments.reader)?;
+    let mut input = open_capture_file(invocation, &arguments.path, arguments.reader)?;
     let reader = crate::input::snapshot_capture(
+        invocation,
         &mut input,
         arguments.reader,
         capture::Limits {
@@ -170,7 +186,7 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     let mut request = Request::new(Source::seekable(reader), routing, options);
     request.filter = filter;
     Ok(ReplayRun {
-        client: crate::system::client(registry, policy, crate::system::Runtime::Client),
+        client: crate::system::client(invocation, registry, policy, crate::system::Runtime::Client),
         request,
         filtered,
     })
@@ -221,21 +237,24 @@ where
 }
 
 fn replay_text<P: PacketProviders, K: Clock, R: Read>(
+    invocation: &crate::invocation::Invocation,
     client: &packetcraftr::Client<P, K>,
     request: Request<R>,
     filtered: bool,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
     // The sink runs on a runtime worker, so it enters the invocation's deadline itself.
-    let deadline = crate::invocation::deadline();
+    let worker_invocation = invocation.clone();
     let report = drive(client, request, move |Event::Frame(evidence): Event| {
-        let _scope = crate::invocation::enter_deadline(deadline.clone());
-        text_record_with(evidence, presentation, write_stdout_line_with_interrupt)
+        text_record_with(evidence, presentation, |args| {
+            write_stdout_line_with_interrupt(&worker_invocation, args)
+        })
     })?;
-    rendering::render_summary(&report, filtered)
+    rendering::render_summary(invocation, &report, filtered)
 }
 
 fn replay_aggregate<P: PacketProviders, K: Clock, R: Read>(
+    invocation: &crate::invocation::Invocation,
     client: &packetcraftr::Client<P, K>,
     request: Request<R>,
 ) -> Result<(), CliError> {
@@ -256,7 +275,13 @@ fn replay_aggregate<P: PacketProviders, K: Clock, R: Read>(
     let stats = output::replay::stats(&report, started.elapsed());
     let result = output::replay::Report::try_from((report, requested_interface, link_mode, frames))
         .map_err(CliError::classified)?;
-    emit_aggregate_with_stats(output::contract::Command::Replay, result, Vec::new(), stats)
+    emit_aggregate_with_stats(
+        invocation,
+        output::contract::Command::Replay,
+        result,
+        Vec::new(),
+        stats,
+    )
 }
 
 fn replay_stream<P: PacketProviders, K: Clock, R: Read>(

@@ -44,17 +44,23 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let compression = arguments.compression.for_output(format)?;
     if !arguments.fields.is_empty() {
-        return projection::run(arguments, format, stream);
+        return projection::run(invocation, arguments, format, stream);
     }
     if matches!(format, Format::Json) {
         return Err(crate::rendering::missing_fields_error());
@@ -100,7 +106,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let mut tree = tree
         .tree
         .then(|| FieldTree::new(Arc::clone(&registry), tree.max_tree_bytes));
-    let mut reader = open_capture(&path, limits.reader)?;
+    let mut reader = open_capture(invocation, &path, limits.reader)?;
     let selection = Selection {
         bounds,
         frames: &selection,
@@ -110,10 +116,11 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         output.validate_input(reader.format())?;
         let stdout = io::stdout();
         let mut destination = compression.writer(stdout.lock())?;
-        let result = output.write(&mut reader, limits, selection, &mut destination);
+        let result = output.write(invocation, &mut reader, limits, selection, &mut destination);
         return finish_compressed_output(result, destination);
     }
     records::run(
+        invocation,
         &mut reader,
         limits,
         selection,

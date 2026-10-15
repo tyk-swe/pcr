@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use super::report::{Basis, NotTraced, Selection};
 use super::request::{Request, Strategy};
-use crate::probe::{ProbeStatus, Transport};
+use crate::probe::{self, Transport};
 use crate::scan::{self, Reply, Stage};
 use crate::target::SelectedAddress;
 
@@ -46,7 +46,7 @@ pub fn observed(scan: &scan::Aggregate) -> Vec<Observed> {
         let Some(reply) = probe.reply else {
             continue;
         };
-        if probe.status != ProbeStatus::Response
+        if probe.status != probe::Status::Response
             || probe.scope.is_some()
             || probe.responder != Some(probe.address)
         {

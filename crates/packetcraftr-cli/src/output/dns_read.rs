@@ -10,7 +10,7 @@ use super::{
 };
 use packetcraftr_core::{
     analysis::{dns, provenance::SourceSet},
-    field::FieldValue,
+    field,
     layer::Layer,
 };
 use serde::Serialize;
@@ -67,7 +67,7 @@ pub struct Message {
     pub wire_hex: String,
     pub framing_hex: String,
     pub declared_length: Option<u16>,
-    pub fields: Option<BTreeMap<String, FieldValue>>,
+    pub fields: Option<BTreeMap<String, field::Value>>,
     pub error: Option<String>,
     pub sources: Vec<Source>,
 }

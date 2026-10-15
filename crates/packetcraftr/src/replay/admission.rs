@@ -96,7 +96,7 @@ impl<'c> FrameAdmission<'c> {
         build::Builder::new(Arc::clone(&self.registry))
             .build(
                 decoded.packet.clone(),
-                codec::Context::default(),
+                codec::Addresses::default(),
                 build::Options {
                     mode: codec::Mode::Permissive,
                     ..build::Options::default()
@@ -261,11 +261,9 @@ mod tests {
 
     use bytes::Bytes;
     use packetcraftr_core::build::{Builder, BuiltPacket};
-    use packetcraftr_core::codec::{
-        DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
-    };
+    use packetcraftr_core::codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded};
     use packetcraftr_core::error::Classified;
-    use packetcraftr_core::field::FieldValue;
+    use packetcraftr_core::field;
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::layer::{Layer, Raw};
     use packetcraftr_core::packet::MacAddress;
@@ -295,7 +293,7 @@ mod tests {
     #[derive(Clone, Copy, Debug)]
     struct OpaqueRawCodec;
 
-    impl LayerCodec for OpaqueRawCodec {
+    impl Codec for OpaqueRawCodec {
         fn protocol_id(&self) -> &'static packetcraftr_core::layer::Id {
             const PROTOCOL: &packetcraftr_core::layer::Id =
                 &packetcraftr_core::layer::Id::new("raw");
@@ -306,15 +304,15 @@ mod tests {
             &self,
             layer: &dyn Layer,
             _payload: &[u8],
-            _context: &LayerEncodeContext<'_>,
-        ) -> Result<EncodedLayer, packetcraftr_core::codec::Error> {
+            _context: &EncodeContext<'_>,
+        ) -> Result<Encoded, packetcraftr_core::codec::Error> {
             let raw = layer.downcast_ref::<Raw>().ok_or_else(|| {
                 packetcraftr_core::codec::Error::WrongLayer {
                     expected: "raw".into(),
                     actual: *layer.protocol_id(),
                 }
             })?;
-            let mut encoded = EncodedLayer::header(raw.bytes.to_vec(), Box::new(raw.clone()));
+            let mut encoded = Encoded::header(raw.bytes.to_vec(), Box::new(raw.clone()));
             encoded.fields = Raw::layout(raw.bytes.len());
             Ok(encoded)
         }
@@ -322,17 +320,16 @@ mod tests {
         fn decode(
             &self,
             input: Bytes,
-            _context: &LayerDecodeContext<'_>,
-        ) -> Result<DecodedLayer, packetcraftr_core::codec::Error> {
-            let mut decoded =
-                DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
+            _context: &DecodeContext<'_>,
+        ) -> Result<Decoded, packetcraftr_core::codec::Error> {
+            let mut decoded = Decoded::terminal(Box::new(Raw::new(input.clone())), input.len());
             decoded.fields = Raw::layout(input.len());
             Ok(decoded)
         }
 
         fn make_layer(
             &self,
-            _fields: &BTreeMap<String, FieldValue>,
+            _fields: &BTreeMap<String, field::Value>,
         ) -> Result<Box<dyn Layer>, packetcraftr_core::codec::Error> {
             Ok(Box::new(Raw::default()))
         }
@@ -351,7 +348,7 @@ mod tests {
         Builder::new(registry())
             .build(
                 packet,
-                codec::Context::default(),
+                codec::Addresses::default(),
                 build::Options {
                     mode: if reserved_flag {
                         codec::Mode::Permissive

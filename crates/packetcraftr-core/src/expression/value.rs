@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::field::FieldValue;
+use crate::field;
 
 use super::syntax::{split_assignment, split_top_level_bounded, trim_at};
 use super::{Error, Limits};
@@ -32,7 +32,7 @@ impl Parser {
         }
     }
 
-    pub(super) fn parse(&mut self, base: usize, input: &str) -> Result<FieldValue, Error> {
+    pub(super) fn parse(&mut self, base: usize, input: &str) -> Result<field::Value, Error> {
         parse_value_bounded(base, input, 0, self)
     }
 
@@ -61,7 +61,7 @@ fn parse_value_bounded(
     input: &str,
     depth: usize,
     bounds: &mut Parser,
-) -> Result<FieldValue, Error> {
+) -> Result<field::Value, Error> {
     let (base, input) = trim_at(base, input);
     if input.is_empty() {
         return Err(Error::Syntax {
@@ -83,7 +83,7 @@ fn parse_value_bounded(
         }
     }
     if input.starts_with('"') {
-        return parse_quoted(base, input).map(FieldValue::Text);
+        return parse_quoted(base, input).map(field::Value::Text);
     }
     if input.starts_with('{') {
         return parse_object(base, input, depth, bounds);
@@ -99,7 +99,7 @@ fn parse_byte_literal(
     prefix_len: usize,
     body: &str,
     hexadecimal: bool,
-) -> Result<FieldValue, Error> {
+) -> Result<field::Value, Error> {
     let body = body.strip_suffix(')').ok_or_else(|| Error::Syntax {
         offset: base,
         message: "unterminated byte literal".to_owned(),
@@ -107,13 +107,13 @@ fn parse_byte_literal(
     let (text_base, quoted) = trim_at(base.saturating_add(prefix_len), body);
     let text = parse_quoted(text_base, quoted)?;
     if !hexadecimal {
-        return Ok(FieldValue::Bytes(text.into()));
+        return Ok(field::Value::Bytes(text.into()));
     }
     let bytes = decode_hex_pairs(&text).ok_or_else(|| Error::Syntax {
         offset: text_base,
         message: "hex literal requires pairs of hexadecimal digits".to_owned(),
     })?;
-    Ok(FieldValue::Bytes(bytes.into()))
+    Ok(field::Value::Bytes(bytes.into()))
 }
 
 fn decode_hex_pairs(text: &str) -> Option<Vec<u8>> {
@@ -138,7 +138,7 @@ fn parse_object(
     input: &str,
     depth: usize,
     bounds: &mut Parser,
-) -> Result<FieldValue, Error> {
+) -> Result<field::Value, Error> {
     let body = enclosed_body(
         base,
         input,
@@ -149,7 +149,7 @@ fn parse_object(
     )?;
     let mut values = BTreeMap::new();
     if body.trim().is_empty() {
-        return Ok(FieldValue::Object(values));
+        return Ok(field::Value::Object(values));
     }
     for (entry_base, entry) in split_top_level_bounded(base.saturating_add(1), body, ',', None)? {
         let Some((name, (value_base, value))) = split_assignment(entry_base, entry) else {
@@ -177,7 +177,7 @@ fn parse_object(
             });
         }
     }
-    Ok(FieldValue::Object(values))
+    Ok(field::Value::Object(values))
 }
 
 fn parse_list(
@@ -185,7 +185,7 @@ fn parse_list(
     input: &str,
     depth: usize,
     bounds: &mut Parser,
-) -> Result<FieldValue, Error> {
+) -> Result<field::Value, Error> {
     let body = enclosed_body(
         base,
         input,
@@ -195,7 +195,7 @@ fn parse_list(
         bounds.max_nesting,
     )?;
     if body.trim().is_empty() {
-        return Ok(FieldValue::List(Vec::new()));
+        return Ok(field::Value::List(Vec::new()));
     }
     let values = split_top_level_bounded(base.saturating_add(1), body, ',', None)?
         .into_iter()
@@ -203,7 +203,7 @@ fn parse_list(
             parse_value_bounded(value_base, value, depth.saturating_add(1), bounds)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(FieldValue::List(values))
+    Ok(field::Value::List(values))
 }
 
 /// Checks the nesting budget, then strips the opening delimiter (already known

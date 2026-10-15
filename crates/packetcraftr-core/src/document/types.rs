@@ -7,7 +7,7 @@ use std::fmt;
 use serde::Serialize;
 
 use super::error::Error;
-use crate::field::FieldValue;
+use crate::field;
 
 pub const PACKET_DOCUMENT_SCHEMA_V2: &str = "packetcraftr.packet/v2";
 pub const DEFAULT_MAX_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
@@ -158,7 +158,7 @@ pub struct Packet {
 pub struct Layer {
     pub protocol: String,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub fields: BTreeMap<String, FieldValue>,
+    pub fields: BTreeMap<String, field::Value>,
 }
 
 impl Packet {

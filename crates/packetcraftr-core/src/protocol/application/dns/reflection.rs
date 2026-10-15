@@ -6,14 +6,14 @@ use super::{
     Dns, Edns, EdnsOption, Limits, MAX_EDNS_OPTIONS, MAX_QUESTIONS, MAX_RECORDS, Name, Question,
     Record, RecordValue,
 };
-use crate::field::{self, FieldKind, FieldValue};
+use crate::field;
 use crate::layer::{FieldSchema, reflect_set, reflective_layer};
 use crate::protocol::common::structured::{Object, list, member, object};
 use crate::protocol::common::{out_of_range, protocol, read_only, wrong_type};
 use bytes::Bytes;
 
 impl Dns {
-    fn assign(&mut self, name: &str, value: FieldValue) -> Result<(), field::Error> {
+    fn assign(&mut self, name: &str, value: field::Value) -> Result<(), field::Error> {
         let mut candidate = self.clone();
         if !candidate.wire.is_empty() {
             candidate.edit(|_| {});
@@ -46,63 +46,63 @@ reflective_layer! {
         "answers" => { kind: List, derived: false, required: false, description: "Answer records", children: RECORD_FIELDS, get |layer| Some(records(&layer.answers)), set |layer, value, name| layer.assign(name, value) },
         "authorities" => { kind: List, derived: false, required: false, description: "Authority records", children: RECORD_FIELDS, get |layer| Some(records(&layer.authorities)), set |layer, value, name| layer.assign(name, value) },
         "additionals" => { kind: List, derived: false, required: false, description: "Additional records", children: RECORD_FIELDS, get |layer| Some(records(&layer.additionals)), set |layer, value, name| layer.assign(name, value) },
-        "qname" => { kind: List, derived: false, required: false, description: "Question qname values", get |layer| Some(FieldValue::List(layer.questions.iter().map(|q| (q.name.to_string().replace("\\032", " ")).into()).collect())), set |_layer, _value, name| read_only(dns_schema(), name) },
-        "qtype" => { kind: List, derived: false, required: false, description: "Question qtype values", get |layer| Some(FieldValue::List(layer.questions.iter().map(|q| (q.query_type).into()).collect())), set |_layer, _value, name| read_only(dns_schema(), name) },
-        "qclass" => { kind: List, derived: false, required: false, description: "Question qclass values", get |layer| Some(FieldValue::List(layer.questions.iter().map(|q| (q.class).into()).collect())), set |_layer, _value, name| read_only(dns_schema(), name) },
+        "qname" => { kind: List, derived: false, required: false, description: "Question qname values", get |layer| Some(field::Value::List(layer.questions.iter().map(|q| (q.name.to_string().replace("\\032", " ")).into()).collect())), set |_layer, _value, name| read_only(dns_schema(), name) },
+        "qtype" => { kind: List, derived: false, required: false, description: "Question qtype values", get |layer| Some(field::Value::List(layer.questions.iter().map(|q| (q.query_type).into()).collect())), set |_layer, _value, name| read_only(dns_schema(), name) },
+        "qclass" => { kind: List, derived: false, required: false, description: "Question qclass values", get |layer| Some(field::Value::List(layer.questions.iter().map(|q| (q.class).into()).collect())), set |_layer, _value, name| read_only(dns_schema(), name) },
         "wire" => { kind: Bytes, derived: false, required: false, description: "Retained original message; explicit field edits invalidate it", get |layer| (!layer.wire.is_empty()).then(|| layer.wire.clone().into()), set |_layer, _value, name| read_only(dns_schema(), name) }
     }
     layout pub(super) fn dns_layout();
 }
 
 const QUESTION_FIELDS: &[FieldSchema] = &[
-    member("name", FieldKind::Text, &[]),
-    member("type", FieldKind::Unsigned, &[]),
-    member("class", FieldKind::Unsigned, &[]),
+    member("name", field::Kind::Text, &[]),
+    member("type", field::Kind::Unsigned, &[]),
+    member("class", field::Kind::Unsigned, &[]),
 ];
 const OPTION_FIELDS: &[FieldSchema] = &[
-    member("code", FieldKind::Unsigned, &[]),
-    member("data", FieldKind::Bytes, &[]),
+    member("code", field::Kind::Unsigned, &[]),
+    member("data", field::Kind::Bytes, &[]),
 ];
 const VALUE_FIELDS: &[FieldSchema] = &[
-    member("kind", FieldKind::Text, &[]),
-    member("type", FieldKind::Unsigned, &[]),
-    member("address", FieldKind::Ipv4, &[]),
-    member("address6", FieldKind::Ipv6, &[]),
-    member("name", FieldKind::Text, &[]),
-    member("preference", FieldKind::Unsigned, &[]),
-    member("exchange", FieldKind::Text, &[]),
-    member("primary_name_server", FieldKind::Text, &[]),
-    member("responsible_mailbox", FieldKind::Text, &[]),
-    member("serial", FieldKind::Unsigned, &[]),
-    member("refresh", FieldKind::Unsigned, &[]),
-    member("retry", FieldKind::Unsigned, &[]),
-    member("expire", FieldKind::Unsigned, &[]),
-    member("minimum", FieldKind::Unsigned, &[]),
-    member("priority", FieldKind::Unsigned, &[]),
-    member("weight", FieldKind::Unsigned, &[]),
-    member("port", FieldKind::Unsigned, &[]),
-    member("target", FieldKind::Text, &[]),
-    member("flags", FieldKind::Unsigned, &[]),
-    member("tag", FieldKind::Bytes, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("strings", FieldKind::List, &[]),
-    member("rdata", FieldKind::Bytes, &[]),
-    member("udp_payload_size", FieldKind::Unsigned, &[]),
-    member("extended_response_code", FieldKind::Unsigned, &[]),
-    member("version", FieldKind::Unsigned, &[]),
-    member("dnssec_ok", FieldKind::Bool, &[]),
-    member("options", FieldKind::List, OPTION_FIELDS),
+    member("kind", field::Kind::Text, &[]),
+    member("type", field::Kind::Unsigned, &[]),
+    member("address", field::Kind::Ipv4, &[]),
+    member("address6", field::Kind::Ipv6, &[]),
+    member("name", field::Kind::Text, &[]),
+    member("preference", field::Kind::Unsigned, &[]),
+    member("exchange", field::Kind::Text, &[]),
+    member("primary_name_server", field::Kind::Text, &[]),
+    member("responsible_mailbox", field::Kind::Text, &[]),
+    member("serial", field::Kind::Unsigned, &[]),
+    member("refresh", field::Kind::Unsigned, &[]),
+    member("retry", field::Kind::Unsigned, &[]),
+    member("expire", field::Kind::Unsigned, &[]),
+    member("minimum", field::Kind::Unsigned, &[]),
+    member("priority", field::Kind::Unsigned, &[]),
+    member("weight", field::Kind::Unsigned, &[]),
+    member("port", field::Kind::Unsigned, &[]),
+    member("target", field::Kind::Text, &[]),
+    member("flags", field::Kind::Unsigned, &[]),
+    member("tag", field::Kind::Bytes, &[]),
+    member("data", field::Kind::Bytes, &[]),
+    member("strings", field::Kind::List, &[]),
+    member("rdata", field::Kind::Bytes, &[]),
+    member("udp_payload_size", field::Kind::Unsigned, &[]),
+    member("extended_response_code", field::Kind::Unsigned, &[]),
+    member("version", field::Kind::Unsigned, &[]),
+    member("dnssec_ok", field::Kind::Bool, &[]),
+    member("options", field::Kind::List, OPTION_FIELDS),
 ];
 const RECORD_FIELDS: &[FieldSchema] = &[
-    member("owner", FieldKind::Text, &[]),
-    member("type", FieldKind::Unsigned, &[]),
-    member("class", FieldKind::Unsigned, &[]),
-    member("ttl", FieldKind::Unsigned, &[]),
-    member("value", FieldKind::Object, VALUE_FIELDS),
+    member("owner", field::Kind::Text, &[]),
+    member("type", field::Kind::Unsigned, &[]),
+    member("class", field::Kind::Unsigned, &[]),
+    member("ttl", field::Kind::Unsigned, &[]),
+    member("value", field::Kind::Object, VALUE_FIELDS),
 ];
 
-fn questions(values: &[Question]) -> FieldValue {
-    FieldValue::List(
+fn questions(values: &[Question]) -> field::Value {
+    field::Value::List(
         values
             .iter()
             .map(|q| {
@@ -116,8 +116,8 @@ fn questions(values: &[Question]) -> FieldValue {
     )
 }
 
-fn records(values: &[Record]) -> FieldValue {
-    FieldValue::List(
+fn records(values: &[Record]) -> field::Value {
+    field::Value::List(
         values
             .iter()
             .map(|record| {
@@ -133,7 +133,7 @@ fn records(values: &[Record]) -> FieldValue {
     )
 }
 
-fn record_value(value: &RecordValue) -> FieldValue {
+fn record_value(value: &RecordValue) -> field::Value {
     match value {
         RecordValue::A(v) => object([("kind", "a".into()), ("address", (*v).into())]),
         RecordValue::Aaaa(v) => object([("kind", "aaaa".into()), ("address6", (*v).into())]),
@@ -203,7 +203,7 @@ fn record_value(value: &RecordValue) -> FieldValue {
             ("kind", "txt".into()),
             (
                 "strings",
-                FieldValue::List(strings.iter().cloned().map(Into::into).collect()),
+                field::Value::List(strings.iter().cloned().map(Into::into).collect()),
             ),
         ]),
         RecordValue::Unknown { type_code, rdata } => object([
@@ -220,7 +220,7 @@ fn record_value(value: &RecordValue) -> FieldValue {
             ("flags", edns.flags.into()),
             (
                 "options",
-                FieldValue::List(
+                field::Value::List(
                     edns.options
                         .iter()
                         .map(|opt| {
@@ -234,13 +234,13 @@ fn record_value(value: &RecordValue) -> FieldValue {
 }
 
 fn name(object: &mut Object, key: &str) -> Result<Name, field::Error> {
-    let FieldValue::Text(text) = object.required(key)? else {
+    let field::Value::Text(text) = object.required(key)? else {
         return Err(wrong_type(dns_schema(), key, "DNS name text"));
     };
     text.parse().map_err(|_| out_of_range(dns_schema(), key))
 }
 
-fn record(value: FieldValue, field: &str) -> Result<Record, field::Error> {
+fn record(value: field::Value, field: &str) -> Result<Record, field::Error> {
     let mut o = Object::new(value, dns_schema(), field)?;
     let owner = name(&mut o, "owner")?;
     let value = parse_value(o.required("value")?, field)?;
@@ -265,7 +265,7 @@ fn record(value: FieldValue, field: &str) -> Result<Record, field::Error> {
     })
 }
 
-fn parse_value(value: FieldValue, field: &str) -> Result<RecordValue, field::Error> {
+fn parse_value(value: field::Value, field: &str) -> Result<RecordValue, field::Error> {
     let mut o = Object::new(value, dns_schema(), field)?;
     let kind = o.value("kind", String::new())?;
     let value = match kind.as_str() {
@@ -359,7 +359,7 @@ fn parse_value(value: FieldValue, field: &str) -> Result<RecordValue, field::Err
     Ok(value)
 }
 
-fn assign_field(layer: &mut Dns, field: &str, value: FieldValue) -> Result<(), field::Error> {
+fn assign_field(layer: &mut Dns, field: &str, value: field::Value) -> Result<(), field::Error> {
     macro_rules! scalar { ($($name:ident),* $(,)?) => { match field {
         $(stringify!($name) => return reflect_set(&mut layer.$name, dns_schema(), field, value),)*
         _ => {}

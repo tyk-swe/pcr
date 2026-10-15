@@ -83,8 +83,11 @@ fn bounded_json_len_with_formatter(
     }
 }
 
-pub(crate) fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
-    crate::invocation::check()?;
+pub(crate) fn emit_json(
+    invocation: &crate::invocation::Invocation,
+    value: &impl Serialize,
+) -> Result<(), CliError> {
+    invocation.check()?;
     let stdout = io::stdout().lock();
     let mut writer = io::BufWriter::with_capacity(64 * 1024, stdout);
     serde_json::to_writer_pretty(&mut writer, value).map_err(json_error)?;
@@ -103,36 +106,48 @@ fn json_error(source: serde_json::Error) -> CliError {
 }
 
 pub(crate) fn emit_aggregate<T: Serialize>(
+    invocation: &crate::invocation::Invocation,
     command: output::contract::Command,
     result: T,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
 ) -> Result<(), CliError> {
-    crate::cancellation::check()?;
-    emit_json(&crate::resources::decorate(
-        output::envelope::Envelope::success(command, result, diagnostics),
-    ))
+    invocation.check()?;
+    emit_json(
+        invocation,
+        &invocation.decorate(output::envelope::Envelope::success(
+            command,
+            result,
+            diagnostics,
+        )),
+    )
 }
 
 pub(crate) fn emit_aggregate_with_stats<T: Serialize>(
+    invocation: &crate::invocation::Invocation,
     command: output::contract::Command,
     result: T,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
-    crate::cancellation::check()?;
-    emit_json(&crate::resources::decorate(
-        output::envelope::Envelope::success(command, result, diagnostics).with_stats(stats),
-    ))
+    invocation.check()?;
+    emit_json(
+        invocation,
+        &invocation.decorate(
+            output::envelope::Envelope::success(command, result, diagnostics).with_stats(stats),
+        ),
+    )
 }
 
 pub(crate) fn emit_published<T: Serialize>(
+    invocation: &crate::invocation::Invocation,
     command: output::contract::Command,
     published: output::envelope::Published<T>,
 ) -> Result<(), CliError> {
-    crate::cancellation::check()?;
-    emit_json(&crate::resources::decorate(
-        output::envelope::Envelope::published(command, published),
-    ))
+    invocation.check()?;
+    emit_json(
+        invocation,
+        &invocation.decorate(output::envelope::Envelope::published(command, published)),
+    )
 }
 
 #[cfg(test)]

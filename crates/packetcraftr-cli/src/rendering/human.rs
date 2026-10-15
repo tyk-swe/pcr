@@ -29,10 +29,14 @@ fn diagnostic_line(diagnostic: impl Into<packetcraftr_core::diagnostic::Diagnost
 pub(crate) fn render_diagnostics_text<
     D: Clone + Into<packetcraftr_core::diagnostic::Diagnostic>,
 >(
+    invocation: &crate::invocation::Invocation,
     diagnostics: &[D],
 ) -> Result<(), CliError> {
     for diagnostic in diagnostics {
-        write_stdout_line(format_args!("{}", diagnostic_line(diagnostic.clone())))?;
+        write_stdout_line(
+            invocation,
+            format_args!("{}", diagnostic_line(diagnostic.clone())),
+        )?;
     }
     Ok(())
 }
@@ -97,8 +101,11 @@ pub(crate) fn spaced_hex(bytes: &[u8]) -> impl fmt::Display + '_ {
     crate::output::hex::SpacedHex(bytes)
 }
 
-pub(crate) fn write_stdout_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
-    write_stdout_line_with_interrupt(arguments).map_err(HumanWriteError::into_cli_error)
+pub(crate) fn write_stdout_line(
+    invocation: &crate::invocation::Invocation,
+    arguments: fmt::Arguments<'_>,
+) -> Result<(), CliError> {
+    write_stdout_line_with_interrupt(invocation, arguments).map_err(HumanWriteError::into_cli_error)
 }
 
 pub(crate) enum HumanWriteError {
@@ -116,10 +123,11 @@ impl HumanWriteError {
 }
 
 pub(crate) fn write_stdout_line_with_interrupt(
+    invocation: &crate::invocation::Invocation,
     arguments: fmt::Arguments<'_>,
 ) -> Result<(), HumanWriteError> {
     let rendered = style_human_line(&terminal_safe(&arguments.to_string()));
-    write_human_stdout(&rendered, true)
+    write_human_stdout(invocation, &rendered, true)
 }
 
 /// Appends a line styled as [`write_stdout_line`] would print it.
@@ -129,21 +137,30 @@ pub(crate) fn push_stdout_line(block: &mut String, arguments: fmt::Arguments<'_>
 }
 
 /// Writes lines from [`push_stdout_line`] with one interruption check and flush.
-pub(crate) fn write_stdout_block(block: &str) -> Result<(), CliError> {
+pub(crate) fn write_stdout_block(
+    invocation: &crate::invocation::Invocation,
+    block: &str,
+) -> Result<(), CliError> {
     if block.is_empty() {
         return Ok(());
     }
-    write_human_stdout(block, false).map_err(HumanWriteError::into_cli_error)
+    write_human_stdout(invocation, block, false).map_err(HumanWriteError::into_cli_error)
 }
 
-pub(crate) fn write_summary_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
+pub(crate) fn write_summary_line(
+    invocation: &crate::invocation::Invocation,
+    arguments: fmt::Arguments<'_>,
+) -> Result<(), CliError> {
     let rendered = style_summary_line(&terminal_safe(&arguments.to_string()));
-    write_human_stdout(&rendered, true).map_err(HumanWriteError::into_cli_error)
+    write_human_stdout(invocation, &rendered, true).map_err(HumanWriteError::into_cli_error)
 }
 
-pub(crate) fn emit_stdout_document(message: &str) -> Result<(), CliError> {
+pub(crate) fn emit_stdout_document(
+    invocation: &crate::invocation::Invocation,
+    message: &str,
+) -> Result<(), CliError> {
     let rendered = style_document(&terminal_document(message));
-    write_human_stdout(&rendered, false).map_err(HumanWriteError::into_cli_error)
+    write_human_stdout(invocation, &rendered, false).map_err(HumanWriteError::into_cli_error)
 }
 
 pub(crate) fn emit_stderr_document(message: &str) -> Result<(), CliError> {
@@ -185,8 +202,14 @@ pub(crate) fn emit_stderr_message(message: &str) -> Result<(), CliError> {
     write_human_stderr(&rendered, true)
 }
 
-fn write_human_stdout(rendered: &str, append_newline: bool) -> Result<(), HumanWriteError> {
-    crate::invocation::check_interrupted().map_err(HumanWriteError::Interrupted)?;
+fn write_human_stdout(
+    invocation: &crate::invocation::Invocation,
+    rendered: &str,
+    append_newline: bool,
+) -> Result<(), HumanWriteError> {
+    invocation
+        .check_interrupted()
+        .map_err(HumanWriteError::Interrupted)?;
     let stdout = anstream::stdout();
     let mut stdout = stdout.lock();
     write_terminated(&mut stdout, rendered, append_newline).map_err(HumanWriteError::Write)

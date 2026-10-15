@@ -207,7 +207,7 @@ fn build(registry: &Arc<Registry>, packet: Packet) -> Vec<u8> {
     packetcraftr_core::build::Builder::new(Arc::clone(registry))
         .build(
             packet,
-            packetcraftr_core::codec::Context::default(),
+            packetcraftr_core::codec::Addresses::default(),
             packetcraftr_core::build::Options::default(),
         )
         .expect("fixture frame must build")

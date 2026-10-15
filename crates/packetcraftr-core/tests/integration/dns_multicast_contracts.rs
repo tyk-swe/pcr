@@ -60,7 +60,7 @@ fn build_with(packet: Packet, mode: codec::Mode) -> build::BuiltPacket {
     build::Builder::new(registry())
         .build(
             packet,
-            codec::Context::default(),
+            codec::Addresses::default(),
             build::Options {
                 mode,
                 ..build::Options::default()

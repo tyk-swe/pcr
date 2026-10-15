@@ -14,10 +14,10 @@ use crate::target::ResolveTarget;
 use crate::target::{DeclaredTargets, FamilyGate, SelectedAddress, admit_selection, wire_limits};
 
 use crate::neighbor::{needs_resolution, request_wire_bytes};
-use crate::probe::ProbeEndpoint;
+use crate::probe;
 use crate::scan::Error;
 use crate::scan::Request;
-use crate::scan::error::Probes;
+use crate::scan::error::probe_error;
 use crate::scan::plan::{adaptive_worst_case_duration, ip_worst_case_duration, probe_count};
 use crate::scan::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
 
@@ -26,7 +26,7 @@ pub(super) struct ApprovedScan {
     pub(super) declared_target: String,
     pub(super) targets: Vec<SelectedAddress>,
     pub(super) duplicates: Vec<u32>,
-    pub(super) endpoints: Vec<ProbeEndpoint>,
+    pub(super) endpoints: Vec<probe::Endpoint>,
     /// Discovery and scan probes, without neighbor requests.
     pub(super) total_probes: usize,
     /// Whether explicit discovery or any probe resolves a link-layer
@@ -56,7 +56,7 @@ pub(super) fn approve_scan<A: Authorizer + ResolveTarget>(
     let endpoints = request.planned_endpoints()?.to_vec();
     // Only the serial path reuses `collection` to retain each exchange's frames.
     if request.max_in_flight == 1 {
-        check_collection_evidence(&Probes, &request.collection, request.limits.evidence)?;
+        check_collection_evidence(probe_error, &request.collection, request.limits.evidence)?;
     }
     // Implementations must authorize the declared target before DNS and every
     // answer before anything below constructs a probe; `admit_selection` owns
@@ -64,7 +64,7 @@ pub(super) fn approve_scan<A: Authorizer + ResolveTarget>(
     let (selected, plan) = admit_selection(
         authorizer,
         deadline,
-        &Probes,
+        probe_error,
         DeclaredTargets {
             selection: &request.targets,
             family: FamilyGate::new(request.address_family, Error::family),
@@ -93,7 +93,7 @@ pub(super) fn approve_scan<A: Authorizer + ResolveTarget>(
         && request.discovery.probes.iter().any(|probe| {
             matches!(
                 probe,
-                ProbeEndpoint::IcmpTimestamp | ProbeEndpoint::IcmpNetmask
+                probe::Endpoint::IcmpTimestamp | probe::Endpoint::IcmpNetmask
             )
         })
         && selected
@@ -123,7 +123,7 @@ pub(super) fn approve_scan<A: Authorizer + ResolveTarget>(
 pub(super) fn plan_scan(
     request: &Request,
     targets: &[SelectedAddress],
-    endpoints: &[ProbeEndpoint],
+    endpoints: &[probe::Endpoint],
 ) -> Result<ScanPlan, Error> {
     let overflow = || Error::InvalidLimit {
         field: "probes",
@@ -210,7 +210,7 @@ pub(super) fn plan_scan(
         .checked_add(implicit_requests)
         .ok_or_else(overflow)?;
     check_probe_count(
-        &Probes,
+        probe_error,
         total_probes
             .checked_add(neighbor_requests)
             .ok_or_else(overflow)?,
@@ -243,7 +243,12 @@ pub(super) fn plan_scan(
         actual: Duration::MAX,
         limit: request.limits.max_duration,
     };
-    let pause = rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?;
+    let pause = rate_delay(
+        probe_error,
+        "probes_per_second",
+        1,
+        request.probes_per_second,
+    )?;
     // Every neighbor request waits its attempt timeout and paces like a probe,
     // except a last request no probe follows; a paced request's wait counts
     // toward its pause, so it holds the next transmission back by the longer.
@@ -270,7 +275,7 @@ pub(super) fn plan_scan(
     } else {
         Duration::ZERO
     };
-    let stage_duration = |count, stage_endpoints: &[ProbeEndpoint]| {
+    let stage_duration = |count, stage_endpoints: &[probe::Endpoint]| {
         request.adaptive.map_or_else(
             || ip_worst_case_duration(request, count, targets, stage_endpoints),
             |adaptive| adaptive_worst_case_duration(request, &adaptive, count),
@@ -285,7 +290,7 @@ pub(super) fn plan_scan(
     .into_iter()
     .try_fold(Duration::ZERO, Duration::checked_add)
     .ok_or_else(too_long)?;
-    check_probe_duration(&Probes, worst_case, request.limits.max_duration)?;
+    check_probe_duration(probe_error, worst_case, request.limits.max_duration)?;
     Ok(ScanPlan {
         total_probes,
         resolves_neighbors: resolves_next_hops || explicit_requests > 0,
@@ -297,7 +302,7 @@ pub(super) fn plan_scan(
 
 pub(super) fn maximum_wire_bytes(
     targets: &[SelectedAddress],
-    endpoints: &[ProbeEndpoint],
+    endpoints: &[probe::Endpoint],
     request: &Request,
     scan_stage: bool,
 ) -> Result<u64, Error> {
@@ -313,19 +318,19 @@ pub(super) fn maximum_wire_bytes(
     };
     let payload = endpoints.iter().try_fold(0u64, |total, endpoint| {
         let extra = match endpoint {
-            ProbeEndpoint::Udp { port } => request
+            probe::Endpoint::Udp { port } => request
                 .udp_profiles
                 .get(port)
                 .map_or(request.udp_payload.len(), |profile| {
                     profile.payload_length()
                 }) as u64,
-            ProbeEndpoint::Sctp { .. } => sctp_init_extra,
-            ProbeEndpoint::Tcp { .. }
-            | ProbeEndpoint::TcpAck { .. }
-            | ProbeEndpoint::Icmp
-            | ProbeEndpoint::IcmpTimestamp
-            | ProbeEndpoint::IcmpNetmask
-            | ProbeEndpoint::Ip { .. } => 0,
+            probe::Endpoint::Sctp { .. } => sctp_init_extra,
+            probe::Endpoint::Tcp { .. }
+            | probe::Endpoint::TcpAck { .. }
+            | probe::Endpoint::Icmp
+            | probe::Endpoint::IcmpTimestamp
+            | probe::Endpoint::IcmpNetmask
+            | probe::Endpoint::Ip { .. } => 0,
         };
         total.checked_add(extra).ok_or_else(overflow)
     })?;

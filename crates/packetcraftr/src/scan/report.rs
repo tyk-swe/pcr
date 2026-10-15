@@ -12,7 +12,7 @@ use packetcraftr_core::frame::Frame;
 
 use crate::correlation::Correlation;
 use crate::execution::Shared;
-use crate::probe::{ProbeStatus, Transport, index_or_push};
+use crate::probe::{self, Transport, index_or_push};
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
@@ -135,7 +135,7 @@ pub struct ProbeEvidence {
     /// transports.
     pub sctp_scan: Option<super::SctpScan>,
     pub attempt: u32,
-    pub status: ProbeStatus,
+    pub status: probe::Status,
     pub classification: Classification,
     /// The correlated reply; `None` when the attempt was silent.
     pub reply: Option<Reply>,

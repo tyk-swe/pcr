@@ -19,8 +19,6 @@ use crate::input::read_recipe;
 use crate::rendering::StreamEncoder;
 use crate::system::{Runtime, Workflow, prepare_workflow};
 
-use super::execution;
-
 struct PreparedLive {
     request: packetcraftr::fuzz::Request,
     workflow: Workflow,
@@ -55,14 +53,20 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Format,
-        stream: &crate::rendering::StreamEncoder,
+        invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let (mut request, selectors) = prepare_request(&arguments)?;
     let mut live = prepare_live(&arguments, &request)?;
     let registry = packetcraftr_core::protocol::builtin::registry();
@@ -74,7 +78,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     if let Some(live) = &mut live {
         live.request.campaign.targets.clone_from(&request.targets);
     }
-    execute_and_render(request, packet, registry, live, format, stream)
+    execute_and_render(invocation, request, packet, registry, live, format, stream)
 }
 
 /// The request without its targets, and the `--field` selectors that become
@@ -149,6 +153,7 @@ fn prepare_live(
 }
 
 fn execute_and_render(
+    invocation: &crate::invocation::Invocation,
     request: core::fuzz::Request,
     packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
@@ -157,127 +162,159 @@ fn execute_and_render(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     if let Some(live) = live {
-        execute_live(packet, live, format, stream)
+        execute_live(invocation, packet, live, format, stream)
     } else {
-        execute_offline(request, packet, registry, format, stream)
+        execute_offline(invocation, request, packet, registry, format, stream)
     }
 }
 
 fn execute_offline(
+    invocation: &crate::invocation::Invocation,
     request: core::fuzz::Request,
     packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
     format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    crate::cancellation::check()?;
-    execution::run_workflow(
-        format,
-        stream,
-        crate::cancellation::signal(),
-        execution::Hooks {
-            command: output::contract::Command::Fuzz,
-            run: Box::new(|| {
+    invocation.check()?;
+    match format {
+        Format::Ndjson => {
+            let emit = crate::commands::execution::emitter(invocation, |case, stream| {
+                let event = output::fuzz::Event::try_from(case).map_err(CliError::classified)?;
+                Ok(stream.emit_data(event, Vec::new())?)
+            });
+            let summary = {
+                let emit = emit;
+
+                publish_offline(
+                    invocation,
+                    &request,
+                    packet.clone(),
+                    Arc::clone(&registry),
+                    emit,
+                )
+                .map_err(CliError::classified)
+            }?;
+            invocation.check()?;
+            (rendering::render_offline_complete)(summary, stream)
+        }
+        format => {
+            let report = (|| -> Result<_, CliError> {
                 let mut cases = Vec::new();
                 let summary = core::fuzz::run_observed(
                     &request,
                     packet.clone(),
                     Arc::clone(&registry),
                     |case, _| {
-                        crate::cancellation::check().map_err(|error| {
-                            core::fuzz::Error::Output {
+                        invocation
+                            .check()
+                            .map_err(|error| core::fuzz::Error::Output {
                                 source: error.into_boundary_error(),
-                            }
-                        })?;
+                            })?;
                         cases.push(case);
                         Ok(())
                     },
                 )
                 .map_err(CliError::classified)?;
                 Ok(core::fuzz::Report::from_summary(summary, cases))
-            }),
-            run_with_events: Box::new(|emit| {
-                publish_offline(&request, packet.clone(), Arc::clone(&registry), emit)
-                    .map_err(CliError::classified)
-            }),
-            on_event: |case, stream| {
-                let event = output::fuzz::Event::try_from(case).map_err(CliError::classified)?;
-                Ok(stream.emit_data(event, Vec::new())?)
-            },
-            into_result: Box::new(|report| {
-                output::envelope::Published::<output::fuzz::Report>::try_from(report)
-                    .map_err(CliError::classified)
-            }),
-            render: Box::new(|report, _| {
-                rendering::render_text(
-                    output::envelope::Published::try_from(report).map_err(CliError::classified)?,
-                    stream.presentation(),
-                )
-            }),
-            complete: rendering::render_offline_complete,
-        },
-    )
+            })()?;
+            invocation.check()?;
+            if format == Format::Json {
+                crate::rendering::emit_published(invocation, output::contract::Command::Fuzz, {
+                    let report = report;
+
+                    output::envelope::Published::<output::fuzz::Report>::try_from(report)
+                        .map_err(CliError::classified)
+                }?)
+            } else {
+                {
+                    let report = report;
+                    let _ = format;
+
+                    rendering::render_text(
+                        invocation,
+                        output::envelope::Published::try_from(report)
+                            .map_err(CliError::classified)?,
+                        stream.presentation(),
+                    )
+                }
+            }
+        }
+    }
 }
 
 fn execute_live(
+    invocation: &crate::invocation::Invocation,
     packet: core::packet::Packet,
     live: PreparedLive,
     format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let PreparedLive { request, workflow } = live;
-    let client = workflow.client(Runtime::Fuzz);
+    let client = workflow.client(invocation, Runtime::Fuzz);
     let request = packetcraftr::fuzz::Request {
         packet,
         route: workflow.route,
         collection: workflow.collection,
         ..request
     };
-    execution::run_workflow(
-        format,
-        stream,
-        crate::cancellation::signal(),
-        execution::Hooks {
-            command: output::contract::Command::Fuzz,
-            run: Box::new(|| {
+    match format {
+        Format::Ndjson => {
+            let emit = crate::commands::execution::emitter(invocation, |event, stream| {
+                let event = output::fuzz::Event::try_from(event).map_err(CliError::classified)?;
+                Ok(stream.emit_data(event, Vec::new())?)
+            });
+            let summary = {
+                let emit = emit;
+
+                client
+                    .fuzz(request.clone(), emit)
+                    .map_err(CliError::classified)
+            }?;
+            invocation.check()?;
+            (rendering::render_live_complete)(summary, stream)
+        }
+        format => {
+            let report = (|| -> Result<_, CliError> {
                 let collector = packetcraftr::fuzz::Collector::default();
                 let report = client
                     .fuzz(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
                 Ok(collector.finish(report))
-            }),
-            run_with_events: Box::new(|emit| {
-                client
-                    .fuzz(request.clone(), emit)
-                    .map_err(CliError::classified)
-            }),
-            on_event: |event, stream| {
-                let event = output::fuzz::Event::try_from(event).map_err(CliError::classified)?;
-                Ok(stream.emit_data(event, Vec::new())?)
-            },
-            into_result: Box::new(|aggregate| {
-                output::envelope::Published::<output::fuzz::Report>::try_from(aggregate)
-                    .map_err(CliError::classified)
-            }),
-            render: Box::new(|aggregate, _| {
-                rendering::render_text(
-                    output::envelope::Published::try_from(aggregate)
-                        .map_err(CliError::classified)?,
-                    stream.presentation(),
-                )
-            }),
-            complete: rendering::render_live_complete,
-        },
-    )
+            })()?;
+            invocation.check()?;
+            if format == Format::Json {
+                crate::rendering::emit_published(invocation, output::contract::Command::Fuzz, {
+                    let aggregate = report;
+
+                    output::envelope::Published::<output::fuzz::Report>::try_from(aggregate)
+                        .map_err(CliError::classified)
+                }?)
+            } else {
+                {
+                    let aggregate = report;
+                    let _ = format;
+
+                    rendering::render_text(
+                        invocation,
+                        output::envelope::Published::try_from(aggregate)
+                            .map_err(CliError::classified)?,
+                        stream.presentation(),
+                    )
+                }
+            }
+        }
+    }
 }
 
 fn publish_offline(
+    invocation: &crate::invocation::Invocation,
     request: &core::fuzz::Request,
     packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
-    emit: execution::Emit<core::fuzz::Case>,
+    emit: impl FnMut(core::fuzz::Case) -> Result<(), core::error::BoundaryError> + Send + 'static,
 ) -> Result<core::fuzz::Summary, core::fuzz::Error> {
-    let runtime = crate::system::runtime(Runtime::Fuzz);
+    let runtime = crate::system::runtime(invocation, Runtime::Fuzz);
     let worker = packetcraftr::runtime::Worker::new_in(&runtime, emit)
         .map_err(|source| core::fuzz::Error::Output { source })?;
     core::fuzz::run_observed(request, packet, registry, |case, deadline| {

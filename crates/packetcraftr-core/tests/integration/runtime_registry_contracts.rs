@@ -63,7 +63,11 @@ fn build_probe(
     packet.push(Child { value: 4 });
     let builder = build::Builder::new(Arc::clone(registry));
     let built = builder
-        .build(packet, codec::Context::default(), build::Options::default())
+        .build(
+            packet,
+            codec::Addresses::default(),
+            build::Options::default(),
+        )
         .expect("bound packet builds");
     assert_eq!(built.bytes.as_ref(), &[9, 4]);
     assert_eq!(built.layout.layers.len(), 2);
@@ -160,7 +164,7 @@ fn assert_build_decode_limits(
     assert!(matches!(
         builder.build(
             Packet::new(),
-            codec::Context::default(),
+            codec::Addresses::default(),
             build::Options::default()
         ),
         Err(build::Error::EmptyPacket)
@@ -170,7 +174,7 @@ fn assert_build_decode_limits(
     assert!(matches!(
         builder.build(
             one.clone(),
-            codec::Context::default(),
+            codec::Addresses::default(),
             build::Options {
                 limits: packetcraftr_core::packet::Limits {
                     max_layers: 0,
@@ -187,7 +191,7 @@ fn assert_build_decode_limits(
     assert!(matches!(
         builder.build(
             one,
-            codec::Context::default(),
+            codec::Addresses::default(),
             build::Options {
                 limits: packetcraftr_core::packet::Limits {
                     max_packet_size: 0,
@@ -457,7 +461,7 @@ packetcraftr_core::reflective_layer! {
 #[derive(Clone, Copy, Debug)]
 struct TagCodec;
 
-impl codec::LayerCodec for TagCodec {
+impl codec::Codec for TagCodec {
     fn protocol_id(&self) -> &'static packetcraftr_core::layer::Id {
         &tag_schema().protocol
     }
@@ -466,18 +470,16 @@ impl codec::LayerCodec for TagCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        _context: &codec::LayerEncodeContext<'_>,
-    ) -> Result<codec::EncodedLayer, codec::Error> {
+        _context: &codec::EncodeContext<'_>,
+    ) -> Result<codec::Encoded, codec::Error> {
         let tag = layer
             .downcast_ref::<Tag>()
             .ok_or_else(|| codec::Error::WrongLayer {
                 expected: "tag".into(),
                 actual: *layer.protocol_id(),
             })?;
-        let mut encoded = codec::EncodedLayer::header(
-            tag.ether_type.to_be_bytes().to_vec(),
-            Box::new(tag.clone()),
-        );
+        let mut encoded =
+            codec::Encoded::header(tag.ether_type.to_be_bytes().to_vec(), Box::new(tag.clone()));
         encoded.fields = tag_layout();
         Ok(encoded)
     }
@@ -485,8 +487,8 @@ impl codec::LayerCodec for TagCodec {
     fn decode(
         &self,
         input: Bytes,
-        _context: &codec::LayerDecodeContext<'_>,
-    ) -> Result<codec::DecodedLayer, codec::Error> {
+        _context: &codec::DecodeContext<'_>,
+    ) -> Result<codec::Decoded, codec::Error> {
         let Some(&[high, low]) = input.first_chunk::<2>() else {
             return Err(codec::Error::Truncated {
                 protocol: "tag".into(),
@@ -495,7 +497,7 @@ impl codec::LayerCodec for TagCodec {
             });
         };
         let ether_type = u16::from_be_bytes([high, low]);
-        let mut decoded = codec::DecodedLayer::terminal(Box::new(Tag { ether_type }), 2);
+        let mut decoded = codec::Decoded::terminal(Box::new(Tag { ether_type }), 2);
         decoded.payload_len = input.len() - 2;
         decoded.next = vec![Discriminator(ether_type.into())];
         decoded.stop = false;
@@ -505,7 +507,7 @@ impl codec::LayerCodec for TagCodec {
 
     fn make_layer(
         &self,
-        fields: &std::collections::BTreeMap<String, packetcraftr_core::field::FieldValue>,
+        fields: &std::collections::BTreeMap<String, packetcraftr_core::field::Value>,
     ) -> Result<Box<dyn Layer>, codec::Error> {
         let mut layer = Tag::default();
         for (name, value) in fields {

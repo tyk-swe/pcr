@@ -38,6 +38,7 @@ mod merge;
 mod offline_analysis;
 mod plan;
 mod protocols;
+mod quic;
 mod read;
 pub(crate) mod registry;
 mod replay;

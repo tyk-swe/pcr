@@ -36,6 +36,7 @@ pub(super) fn register(
             (BuiltinProtocol::Udp, 53, BuiltinProtocol::Dns, 100),
             (BuiltinProtocol::Udp, 69, BuiltinProtocol::Tftp, 100),
             (BuiltinProtocol::Udp, 123, BuiltinProtocol::Ntp, 100),
+            (BuiltinProtocol::Udp, 443, BuiltinProtocol::Quic, 100),
             (BuiltinProtocol::Udp, 514, BuiltinProtocol::Syslog, 100),
             (BuiltinProtocol::Udp, 5353, BuiltinProtocol::Dns, 100),
             (BuiltinProtocol::Udp, 5355, BuiltinProtocol::Dns, 100),

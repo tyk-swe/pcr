@@ -17,6 +17,7 @@ pub mod http;
 pub mod http2;
 mod pipeline;
 pub mod provenance;
+pub mod quic;
 pub mod reassembly;
 pub mod scope;
 mod serial;

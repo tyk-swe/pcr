@@ -29,6 +29,7 @@ ASSETS = (
     'schemas/packetcraftr.output.v15.schema.json',
     'schemas/packetcraftr.output.v16.schema.json',
     'schemas/packetcraftr.output.v17.schema.json',
+    'schemas/packetcraftr.output.v18.schema.json',
     'schemas/packetcraftr.os-fingerprints.v1.schema.json',
     'docs/verification-contract.md', 'docs/consumer-compatibility.md',
     'docs/resource-presets.md', 'docs/statistics.md', 'docs/tasks.md', 'docs/native-validation.md',
@@ -147,7 +148,7 @@ def verify(root, version, commit, target, variant):
     if len(records) != expected_frames + 1:
         raise ValueError(f'packaged capture must produce {expected_frames} frames and one completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v17'
+        if (record.get('schema') != 'packetcraftr.output/v18'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):
@@ -216,7 +217,7 @@ def verify(root, version, commit, target, variant):
                 raise ValueError(f'packaged help for {canonical} has no legacy alias')
             paths.append((canonical, legacy.group(1)))
     if len(paths) != 31:
-        raise ValueError('packaged help must describe all 31 commands')
+        raise ValueError('packaged help must describe all 33 commands')
     for path in [*groups, *(path for pair in paths for path in pair)]:
         name = path.replace(' ', '-')
         page = root / 'man' / f'packetcraftr-{name}.1'

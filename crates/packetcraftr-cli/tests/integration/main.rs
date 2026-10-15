@@ -54,6 +54,7 @@ mod packet_set_contracts;
 mod port_planning_contracts;
 mod process_contracts;
 mod published_schema_conformance;
+mod quic_contracts;
 mod recipe_payload_contracts;
 mod resource_diagnostic_contracts;
 mod scan_payload_contracts;

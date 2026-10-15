@@ -32,7 +32,7 @@ for replacement APIs.
   under `evidence: packetcraftr::evidence::Limits { max_frames, max_bytes, max_undecoded }`,
   preserving JSON and binary Serde representations.
 - Packet documents use `packetcraftr.packet/v2`; machine output uses
-  `packetcraftr.output/v17` (output v6–v16 remain frozen; see
+  `packetcraftr.output/v18` (output v6–v17 remain frozen; see
   [consumer compatibility](docs/consumer-compatibility.md)).
 - Live workflows run through `Client<P, K>` with explicit providers, policy,
   clock, cancellation, and runtime, taking `(request, sink)` and returning
@@ -53,6 +53,31 @@ for replacement APIs.
   list; `capture` uses capture-local interface IDs.
 
 ### Added
+
+- QUIC packet dissection without decryption: a bounded `quic` codec (RFC 9000
+  long and short headers, version negotiation lists, Retry original
+  destination connection IDs and tokens, canonical variable-length integers,
+  opaque protected remainders for byte-exact round trips), `packet build
+  'udp()/quic(...)'` fixtures, `--decode-as udp.port=PORT:quic`, the UDP 443
+  built-in binding, and `analyze quic` reporting per-conversation packet counts
+  by header form, connection IDs, versions seen, version-negotiation offers,
+  coalesced-packet walks, and malformed-first reasons under finite
+  conversation/packet ceilings.
+- `files info` describes a capture before any packet is decoded: container
+  format, compression, byte order, PCAPNG section version and count, interface
+  inventory with names and link types, frame/byte totals with truncation,
+  timestamp bounds, packet-block representation counts, and unknown block types
+  bounded to a retained list. The pass charges every packet record against the
+  frame and byte ceilings and fails rather than truncating.
+- Statistics `rtt` table: per-conversation TCP round-trip estimation in
+  nanoseconds, pairing the first SYN with its first answering SYN-ACK and each
+  data segment with the first ACK that covers it across the sequence-space
+  wrap, with bounded outstanding-segment windows, clock-regression exclusion,
+  reset-acknowledgment exclusion, CSV export, and `--top` retention behind an
+  omission diagnostic.
+- TLS sessions gained the FoxIO JA4S server fingerprint beside JA3S: the
+  extension list keeps wire order, retains GREASE, and hashes the server_name
+  and ALPN extensions, so server order itself stays part of the identity.
 
 - Offline statistics overview with capture totals and five-row traffic leaderboards,
   explicit `--sort frames|bytes`, and CSV exports for flat statistics tables.

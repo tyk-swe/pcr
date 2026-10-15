@@ -24,17 +24,21 @@ a deliberate forwarding fail can be a passing regression. Choose a stable identi
 ## 2. Investigate a capture without losing evidence
 
 ```sh
+packetcraftr files info examples/captures/tls-handshake.pcapng
 packetcraftr --resource-preset ci-v1 --resource-diagnostics --output ndjson \
   analyze http examples/captures/http-stream.pcap > http.ndjson
 packetcraftr analyze stats examples/captures/http-stream.pcap --table overview
 packetcraftr analyze stats examples/captures/http-stream.pcap --table conversations --sort bytes --top 10
 packetcraftr --output csv analyze stats examples/captures/http-stream.pcap --table endpoints > endpoints.csv
+packetcraftr analyze quic examples/captures/quic-handshake.pcap
 packetcraftr --resource-preset ci-v1 --resource-diagnostics --output ndjson \
   analyze http2 examples/captures/http2-multiplexed.pcapng
 packetcraftr --output json analyze http2 examples/captures/http2-upgrade.pcapng --stream tcp:0
 ```
 
-Use [statistics](statistics.md) for capture totals, traffic leaderboards, and CSV exports.
+Use [statistics](statistics.md) for capture totals, traffic leaderboards, RTT tables, and CSV exports.
+`files info` reports the container, interfaces, and block inventory first, and
+`analyze quic` counts header forms without decryption.
 
 `analyze http` is HTTP/1-only; `analyze http2` handles cleartext prior knowledge/h2c, not TLS
 decryption. `tcp:INDEX` selects a conversation, not an HTTP/2 stream. Defaults

@@ -13,6 +13,7 @@ const GROUPS: &[(&str, &[&str])] = &[
             "expert",
             "follow",
             "dns",
+            "quic",
             "http",
             "http2",
             "tls",
@@ -347,7 +348,7 @@ fn generated_documentation_covers_all_paths_and_five_shells() {
         std::fs::read_dir(directory.path().join("man"))
             .unwrap()
             .count(),
-        70
+        72
     );
     let mut entries = std::fs::read_dir(directory.path())
         .unwrap()

@@ -4,9 +4,7 @@
 use super::tls_frames::{
     ClientHelloSpec, ServerHelloSpec, client_hello, handshake_record, server_hello, split,
 };
-use super::{
-    CLIENT, SERVER, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame,
-};
+use super::{CLIENT, SERVER, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame};
 use packetcraftr_core::analysis::tls::{
     Collector, Limits as TlsLimits, Session, Summary as TlsSummary,
 };
@@ -143,16 +141,36 @@ impl Capture {
     }
 
     pub(crate) fn udp_443(&mut self) {
+        // UDP 443 is QUIC's registered service port, so the fixture carries a
+        // real QUIC layer: a short-header packet with an opaque protected body.
         let timestamp = self.timestamp();
-        self.frames.push(udp_frame(
-            &self.registry,
-            timestamp,
-            CLIENT,
-            SERVER,
-            50_000,
-            443,
-            b"quic-initial",
-        ));
+        let mut packet = packetcraftr_core::packet::Packet::new();
+        packet.push(packetcraftr_core::protocol::network::Ipv4 {
+            source: CLIENT,
+            destination: SERVER,
+            ..Default::default()
+        });
+        packet.push(packetcraftr_core::protocol::transport::Udp {
+            source_port: 50_000,
+            destination_port: 443,
+            ..Default::default()
+        });
+        packet.push(packetcraftr_core::protocol::application::quic::Quic {
+            packet_type: packetcraftr_core::protocol::application::quic::PacketType::OneRtt,
+            payload: bytes::Bytes::from_static(b"protected"),
+            ..Default::default()
+        });
+        let built = packetcraftr_core::build::Builder::new(Arc::clone(&self.registry))
+            .build(packet, Default::default(), Default::default())
+            .expect("QUIC fixture frame builds");
+        self.frames.push(
+            packetcraftr_core::frame::Frame::new(
+                timestamp,
+                packetcraftr_core::frame::LinkType::IPV4,
+                built.bytes,
+            )
+            .expect("valid QUIC fixture frame"),
+        );
     }
 }
 

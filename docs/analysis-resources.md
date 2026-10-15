@@ -26,6 +26,7 @@ Reader `max_interfaces` counts descriptions per PCAPNG section;
 | IP state | `max_ip_reassembly_bytes` covers retained fragments, cascade buffers, and metadata; per-datagram, fragment, and outcome limits also apply. |
 | TCP state | `max_tcp_reassembly_bytes` covers retained payload/history, 4 KiB out-of-order page slack, and flow/segment metadata. |
 | HTTP/2 state | Bounded frames, streams, active streams per connection, frame payload, compressed/decoded headers, continuations, HPACK table bytes, pending SETTINGS, and body bytes alongside shared application/provenance limits. |
+| QUIC state | `analyze quic` retains one bounded slot per UDP conversation (`--max-quic-conversations`) with per-conversation version and version-negotiation-offer lists capped at 8 and 16 distinct entries; parsing charges `--max-quic-packets` across all conversations. The `stats` RTT table retains at most 64 outstanding segments per direction per conversation. |
 | TLS state | `max_tls_sessions` bounds tracked slots; `max_tls_buffer_bytes` bounds logical handshake buffers (135,168-byte floor per direction) and alert charges. |
 | Stats | CLI retains only selected tables; overview collects protocols/endpoints/conversations together, defaulting to five rows each. `--sort` ranks before `--top`; totals precede truncation. See [statistics](statistics.md). |
 | Results | JSON retains selected rows/sessions/chunks up to command limits; NDJSON holds one line per encoder (at most 16 MiB including newline). |

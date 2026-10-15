@@ -12,7 +12,7 @@ The crates are unpublished; [pin a reviewed revision](docs/consumer-compatibilit
 > Opt-in flags are technical controls, not permission.
 
 Commands are grouped by workflow: `packet`, `files`, `analyze`, `network`, and
-`reference`. All 31 commands retain supported flat aliases. Use `-h` for common
+`reference`. All 33 commands retain supported flat aliases. Use `-h` for common
 options and `--help` for full help. Text results are compact; `-v`/`--verbose`
 expands retained evidence and technical details. JSON, NDJSON, and byte output are unchanged by verbosity.
 
@@ -27,6 +27,9 @@ packetcraftr --output hex packet build --packet 'ipv4()/icmpv4(identifier=1)' \
   | packetcraftr packet dissect --link-type ipv4 --hex - --tree
 packetcraftr --output ndjson files read examples/captures/tls-handshake.pcapng --max-frames 100
 packetcraftr analyze stats examples/captures/http-stream.pcap --table overview
+packetcraftr files info examples/captures/tls-handshake.pcapng
+packetcraftr analyze stats examples/captures/http-stream.pcap --table rtt
+packetcraftr analyze quic examples/captures/quic-handshake.pcap
 packetcraftr --output csv analyze stats examples/captures/http-stream.pcap --table endpoints
 packetcraftr analyze tls examples/captures/tls-handshake.pcapng
 packetcraftr analyze http2 examples/captures/http2-multiplexed.pcapng
@@ -40,6 +43,7 @@ filters, formats, and exit codes.
 | --- | --- |
 | Build fixtures or test forwarding | [Task recipes](docs/tasks.md#1-build-a-fixture-and-test-one-property), [verification](docs/verification-contract.md) |
 | Investigate or transform captures | [Capture recipes](docs/tasks.md#2-investigate-a-capture-without-losing-evidence), [resources and evidence](docs/analysis-resources.md) |
+| Inspect QUIC traffic | [`analyze quic`](docs/consumer-compatibility.md#output-family-v18), [statistics `rtt`](docs/statistics.md#rtt-table) |
 | Run live diagnostics | [Isolated lab recipe](docs/tasks.md#3-run-an-authorized-diagnostic-in-an-isolated-lab), [native validation](docs/native-validation.md) |
 | Interpret scans and services | [Scanner evidence](docs/scanner-evidence.md), [TCP diagnostic scans](docs/tcp-diagnostics.md), [service identification](docs/service-identification.md), [OS identification](docs/os-identification.md) |
 | Automate processing | [Resource presets](docs/resource-presets.md), [consumer compatibility](docs/consumer-compatibility.md) |

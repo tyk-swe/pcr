@@ -47,6 +47,7 @@ macro_rules! builtin_protocol_catalog {
             Padding { canonical: "padding", aliases: ["pad"], constructible: true, exact_round_trip: true, matcher: none, layer: [crate::layer::Padding], codec: PaddingCodec }
             Ppp { canonical: "ppp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Ppp], codec: PppCodec }
             Pppoe { canonical: "pppoe", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Pppoe], codec: PppoeCodec }
+            Quic { canonical: "quic", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::quic::Quic], codec: QuicCodec }
             Raw { canonical: "raw", aliases: ["payload", "bytes"], constructible: true, exact_round_trip: true, matcher: none, layer: [crate::layer::Raw], codec: RawCodec }
             RawIp { canonical: "raw_ip", aliases: ["rawip"], constructible: false, exact_round_trip: false, matcher: none, layer: [], codec: RawIpCodec }
             Sctp { canonical: "sctp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, layer: [transport::Sctp], codec: SctpCodec }

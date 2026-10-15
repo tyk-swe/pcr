@@ -443,3 +443,4 @@ macro_rules! wire_reflective_field {
 wire_reflective_field!(u8);
 wire_reflective_field!(u16);
 wire_reflective_field!(u32);
+wire_reflective_field!(u64);

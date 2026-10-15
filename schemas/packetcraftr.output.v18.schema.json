@@ -68,7 +68,8 @@
             "verify-forwarding",
             "http2",
             "identify",
-            "identify-os"
+            "identify-os",
+            "quic"
           ]
         },
         "mode": {
@@ -222,6 +223,9 @@
               "$ref": "#/$defs/infoSuccess"
             },
             {
+              "$ref": "#/$defs/quicSuccess"
+            },
+            {
               "$ref": "#/$defs/projectionAggregateSuccess"
             },
             {
@@ -337,6 +341,9 @@
             },
             {
               "$ref": "#/$defs/infoStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/quicStreamSuccess"
             },
             {
               "$ref": "#/$defs/projectionStreamSuccess"
@@ -9250,7 +9257,257 @@
           "$ref": "#/$defs/infoResult"
         }
       }
+    },    "quicPacketCounts": {
+      "description": "QUIC packets counted per conversation by header form.",
+      "type": "object",
+      "required": [
+        "initial",
+        "zero_rtt",
+        "handshake",
+        "retry",
+        "version_negotiation",
+        "one_rtt",
+        "malformed"
+      ],
+      "properties": {
+        "initial": {
+          "$ref": "#/$defs/uint64"
+        },
+        "zero_rtt": {
+          "$ref": "#/$defs/uint64"
+        },
+        "handshake": {
+          "$ref": "#/$defs/uint64"
+        },
+        "retry": {
+          "$ref": "#/$defs/uint64"
+        },
+        "version_negotiation": {
+          "$ref": "#/$defs/uint64"
+        },
+        "one_rtt": {
+          "$ref": "#/$defs/uint64"
+        },
+        "malformed": {
+          "description": "Datagrams that claimed the QUIC fixed bit but broke a wire rule.",
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
     },
+    "quicConversation": {
+      "description": "One UDP conversation's retained QUIC evidence, without decryption.",
+      "type": "object",
+      "required": [
+        "stream",
+        "scope",
+        "address_a",
+        "port_a",
+        "address_b",
+        "port_b",
+        "packets",
+        "versions",
+        "versions_omitted",
+        "negotiated",
+        "negotiated_omitted",
+        "first_timestamp",
+        "last_timestamp",
+        "duration"
+      ],
+      "properties": {
+        "stream": {
+          "description": "Capture-global udp.stream index; filters and selectors share it.",
+          "$ref": "#/$defs/uint64"
+        },
+        "scope": {
+          "$ref": "#/$defs/captureScope"
+        },
+        "address_a": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "port_a": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "address_b": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "port_b": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "packets": {
+          "$ref": "#/$defs/quicPacketCounts"
+        },
+        "versions": {
+          "description": "Distinct long-header versions in first-seen order, minus omissions.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        },
+        "versions_omitted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "negotiated": {
+          "description": "Supported versions offered by version negotiation, in first-seen order.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        },
+        "negotiated_omitted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "initial_dcid_hex": {
+          "description": "Lowercase hex of the first Initial's destination connection ID.",
+          "type": "string"
+        },
+        "initial_scid_hex": {
+          "description": "Lowercase hex of the first Initial's source connection ID.",
+          "type": "string"
+        },
+        "first_timestamp": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "last_timestamp": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "duration": {
+          "$ref": "#/$defs/duration"
+        }
+      },
+      "additionalProperties": false
+    },
+    "quicSummary": {
+      "description": "Run totals across every conversation on the analyzed service ports.",
+      "type": "object",
+      "required": [
+        "clock",
+        "frames_read",
+        "frames_matched",
+        "conversations",
+        "quic_conversations",
+        "packets",
+        "malformed",
+        "non_quic_datagrams"
+      ],
+      "properties": {
+        "clock": {
+          "$ref": "#/$defs/captureClock"
+        },
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "#/$defs/uint64"
+        },
+        "conversations": {
+          "description": "UDP conversations observed on the analyzed service ports, QUIC or not.",
+          "$ref": "#/$defs/uint64"
+        },
+        "quic_conversations": {
+          "description": "Conversations with at least one retained QUIC packet.",
+          "$ref": "#/$defs/uint64"
+        },
+        "packets": {
+          "$ref": "#/$defs/uint64"
+        },
+        "malformed": {
+          "$ref": "#/$defs/uint64"
+        },
+        "non_quic_datagrams": {
+          "description": "Service-port datagrams that never claimed the QUIC fixed bit.",
+          "$ref": "#/$defs/uint64"
+        },
+        "first_malformed": {
+          "description": "The first malformed packet's reason, when one was seen.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "quicResult": {
+      "type": "object",
+      "required": [
+        "conversations",
+        "summary"
+      ],
+      "properties": {
+        "conversations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/quicConversation"
+          }
+        },
+        "summary": {
+          "$ref": "#/$defs/quicSummary"
+        }
+      }
+    },
+    "quicSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "quic"
+        },
+        "result": {
+          "$ref": "#/$defs/quicResult"
+        }
+      }
+    },
+    "quicStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result",
+        "event"
+      ],
+      "properties": {
+        "command": {
+          "const": "quic"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "conversation"
+            },
+            "result": {
+              "$ref": "#/$defs/quicConversation"
+            }
+          },
+          "required": [
+            "event"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/quicSummary"
+            }
+          },
+          "required": [
+            "event"
+          ]
+        }
+      ]
+    },
+
     "projectionCell": {
       "oneOf": [
         {

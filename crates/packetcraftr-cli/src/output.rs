@@ -71,6 +71,7 @@ pub mod plan;
 pub mod projection;
 pub mod protocols;
 pub mod provenance;
+pub mod quic;
 pub mod read;
 pub mod reassembly;
 pub mod replay;

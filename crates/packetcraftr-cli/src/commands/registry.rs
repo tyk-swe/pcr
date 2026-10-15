@@ -8,7 +8,8 @@ use super::dispatch::Launch;
 use super::{
     Spec, build, capture, dissect, dns, dns_read, documentation, exchange, expert, export, follow,
     fragment, fuzz, http, http2, identify, identify_os, info, interfaces, merge, plan, protocols,
-    read, replay, rewrite, routes, scan, send, stats, tls, topics, traceroute, verify_forwarding,
+    quic, read, replay, rewrite, routes, scan, send, stats, tls, topics, traceroute,
+    verify_forwarding,
 };
 use crate::output::contract::Format;
 use crate::resources::Settings;
@@ -172,7 +173,7 @@ commands! {
     Dissect(dissect::arguments::Args) = "dissect" => ("packet", "dissect", 1),
     /// List built-in protocols or describe one protocol.
     #[command(after_long_help = protocols::AFTER_LONG_HELP)]
-    Protocols(protocols::Args) = "protocols" => ("reference", "protocols", 29),
+    Protocols(protocols::Args) = "protocols" => ("reference", "protocols", 30),
     /// Describe a capture's container, interfaces, and block inventory.
     #[command(after_long_help = info::arguments::AFTER_LONG_HELP)]
     Info(info::arguments::Args) = "info" => ("files", "info", 4),
@@ -181,19 +182,19 @@ commands! {
     Read(read::arguments::Args) = "read" => ("files", "read", 5),
     /// Enumerate local interfaces.
     #[command(after_long_help = interfaces::AFTER_LONG_HELP)]
-    Interfaces(interfaces::Args) = "interfaces" => ("network", "interfaces", 17),
+    Interfaces(interfaces::Args) = "interfaces" => ("network", "interfaces", 18),
     /// Passively select route, source, MTU, and link mode.
     #[command(after_long_help = plan::AFTER_LONG_HELP)]
-    Plan(plan::Args) = "plan" => ("network", "plan", 19),
+    Plan(plan::Args) = "plan" => ("network", "plan", 20),
     /// Transmit a packet under traffic policy.
     #[command(after_long_help = send::arguments::AFTER_LONG_HELP)]
-    Send(send::arguments::Args) = "send" => ("network", "send", 21),
+    Send(send::arguments::Args) = "send" => ("network", "send", 22),
     /// Capture-ready request/response exchange.
     #[command(after_long_help = exchange::arguments::AFTER_LONG_HELP)]
-    Exchange(exchange::arguments::Args) = "exchange" => ("network", "exchange", 22),
+    Exchange(exchange::arguments::Args) = "exchange" => ("network", "exchange", 23),
     /// Stream live captured frames.
     #[command(after_long_help = capture::arguments::AFTER_LONG_HELP)]
-    Capture(capture::arguments::Args) = "capture" => ("network", "capture", 20),
+    Capture(capture::arguments::Args) = "capture" => ("network", "capture", 21),
     /// Report protocol health findings over a capture file.
     #[command(after_long_help = expert::arguments::AFTER_LONG_HELP)]
     Expert(expert::arguments::Args) = "expert" => ("analyze", "expert", 10),
@@ -202,45 +203,48 @@ commands! {
     Follow(follow::arguments::Args) = "follow" => ("analyze", "follow", 11),
     /// Replay a PCAP/PCAPNG stream.
     #[command(after_long_help = replay::arguments::AFTER_LONG_HELP)]
-    Replay(replay::arguments::Args) = "replay" => ("network", "replay", 23),
+    Replay(replay::arguments::Args) = "replay" => ("network", "replay", 24),
     /// Run a structured network scan.
     #[command(after_long_help = scan::arguments::AFTER_LONG_HELP)]
-    Scan(scan::arguments::Args) = "scan" => ("network", "scan", 24),
+    Scan(scan::arguments::Args) = "scan" => ("network", "scan", 25),
     /// Explicitly identify services at selected numeric TCP or UDP endpoints.
     #[command(after_long_help = identify::arguments::AFTER_LONG_HELP)]
-    Identify(identify::arguments::Args) = "identify" => ("network", "identify", 25),
+    Identify(identify::arguments::Args) = "identify" => ("network", "identify", 26),
     /// Identify qualified OS families from bounded raw packet observations.
     #[command(after_long_help = "Requires a native raw packet provider and explicit destination authorization. Conclusions are qualified inferences, not authenticated identities.\n\nExample:\n  packetcraftr network identify-os 192.0.2.10 --open-port 80 --closed-port 81")]
-    IdentifyOs(identify_os::Args) = "identify-os" => ("network", "identify-os", 26),
+    IdentifyOs(identify_os::Args) = "identify-os" => ("network", "identify-os", 27),
     /// Compute aggregate statistics over a capture file.
     #[command(after_long_help = stats::arguments::AFTER_LONG_HELP)]
     Stats(stats::arguments::Args) = "stats" => ("analyze", "stats", 9),
     /// Assemble TLS handshake sessions from a capture file.
     #[command(after_long_help = tls::arguments::AFTER_LONG_HELP)]
-    Tls(tls::arguments::Args) = "tls" => ("analyze", "tls", 15),
+    Tls(tls::arguments::Args) = "tls" => ("analyze", "tls", 16),
     /// Run bounded, policy-gated traceroute probes.
     #[command(
         long_about = traceroute::arguments::LONG_ABOUT,
         after_long_help = traceroute::arguments::AFTER_LONG_HELP
     )]
-    Traceroute(traceroute::arguments::Args) = "traceroute" => ("network", "traceroute", 27),
+    Traceroute(traceroute::arguments::Args) = "traceroute" => ("network", "traceroute", 28),
     /// Run bounded DNS over UDP, TCP, or UDP with TCP fallback.
     #[command(
         long_about = dns::arguments::LONG_ABOUT,
         after_long_help = dns::arguments::AFTER_LONG_HELP
     )]
-    Dns(dns::arguments::Args) = "dns" => ("network", "dns", 28),
+    Dns(dns::arguments::Args) = "dns" => ("network", "dns", 29),
     /// Inspect captured UDP/TCP DNS messages and transaction evidence.
     #[command(after_long_help = dns_read::arguments::AFTER_LONG_HELP)]
     DnsRead(dns_read::arguments::Args) = "dns-read" => ("analyze", "dns", 12),
+    /// Inspect captured QUIC packets without decryption.
+    #[command(after_long_help = quic::arguments::AFTER_LONG_HELP)]
+    Quic(quic::arguments::Args) = "quic" => ("analyze", "quic", 13),
     /// Inspect cleartext HTTP/1 messages over captured TCP streams.
     #[command(after_long_help = http::arguments::AFTER_LONG_HELP)]
-    Http(http::arguments::Args) = "http" => ("analyze", "http", 13),
+    Http(http::arguments::Args) = "http" => ("analyze", "http", 14),
     #[command(
         about = "Inspect cleartext HTTP/2 and h2c over captured TCP streams.",
         after_long_help = http2::arguments::AFTER_LONG_HELP
     )]
-    Http2(http2::arguments::Args) = "http2" => ("analyze", "http2", 14),
+    Http2(http2::arguments::Args) = "http2" => ("analyze", "http2", 15),
     /// Export streams and reassembled IP datagrams with their physical dependencies.
     #[command(after_long_help = export::arguments::AFTER_LONG_HELP)]
     Export(export::arguments::Args) = "export" => ("files", "export", 8),
@@ -252,16 +256,16 @@ commands! {
     Fuzz(fuzz::arguments::Args) = "fuzz" => ("packet", "fuzz", 3),
     /// Enumerate passive interface-bound route decisions.
     #[command(after_long_help = routes::AFTER_LONG_HELP)]
-    Routes(routes::Args) = "routes" => ("network", "routes", 18),
+    Routes(routes::Args) = "routes" => ("network", "routes", 19),
     /// Compare ingress and egress captures under explicit identity rules.
     #[command(after_long_help = verify_forwarding::arguments::AFTER_LONG_HELP)]
-    VerifyForwarding(verify_forwarding::arguments::Args) = "verify-forwarding" => ("analyze", "verify-forwarding", 16),
+    VerifyForwarding(verify_forwarding::arguments::Args) = "verify-forwarding" => ("analyze", "verify-forwarding", 17),
     /// Generate shell completions and man pages under a directory.
     #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all canonical and legacy paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
-    Documentation(documentation::Args) => ("reference", "documentation", 31),
+    Documentation(documentation::Args) => ("reference", "documentation", 32),
     /// Print built-in references for packet expressions, filters, formats, and exit codes.
     #[command(after_long_help = topics::AFTER_LONG_HELP)]
-    Topics(topics::Args) => ("reference", "topics", 30),
+    Topics(topics::Args) => ("reference", "topics", 31),
 }
 
 /// Workflow placement. Published identifiers deliberately remain the legacy names.
@@ -395,6 +399,7 @@ mod tests {
             "traceroute",
             "dns",
             "dns-read",
+            "quic",
             "http",
             "http2",
             "export",
@@ -413,7 +418,7 @@ mod tests {
             expected
         );
         // Generators have legacy names but no published output identifiers.
-        let published = &expected[..30];
+        let published = &expected[..31];
         assert_eq!(
             Command::ALL
                 .iter()
@@ -443,6 +448,7 @@ mod tests {
             "analyze expert",
             "analyze follow",
             "analyze dns",
+            "analyze quic",
             "analyze http",
             "analyze http2",
             "analyze tls",
@@ -500,7 +506,7 @@ mod tests {
     fn every_workflow_and_legacy_path_has_the_same_arguments_and_help() {
         let mut definition = crate::cli::Cli::command();
         definition.build();
-        assert_eq!(INVENTORY.len(), 32);
+        assert_eq!(INVENTORY.len(), 33);
         for entry in INVENTORY {
             let canonical = definition
                 .find_subcommand(entry.group)

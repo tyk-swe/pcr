@@ -6,9 +6,9 @@ A contract family covers names, units, meanings, enums, ordering, and terminal
 semantics, not only JSON shape. Incompatible changes require a new family even
 when an older schema accepts their shape.
 
-Current producers emit [output/v17](../schemas/packetcraftr.output.v17.schema.json)
+Current producers emit [output/v18](../schemas/packetcraftr.output.v18.schema.json)
 and [packet/v2](../schemas/packetcraftr.packet.v2.schema.json). Beta.3 used
-output/v2 and packet/v1; output v6–v16 remain frozen for historical evidence.
+output/v2 and packet/v1; output v6–v17 remain frozen for historical evidence.
 Resolve `$id` to the bundled local file, never moving `main` or a network fetch.
 Tolerate unknown object members, but reject unknown families, verdicts, check
 kinds, or evidence states.
@@ -24,6 +24,19 @@ Missing metadata, null ingress operand on an expectation, and explicit decoder
 `absent` are distinct. Summary counters include accepted evidence regardless of
 retained detail/omissions. Forwarding fail/inconclusive returns exit 1 after
 publication; an error envelope is execution failure.
+
+## Output family v18
+
+Adds `files info` (container format, compression, interfaces with names and
+snapshot lengths, packet-block representation counts, and unknown block types
+behind a retained list with an omission counter), the statistics `rtt` table
+(per-conversation TCP round-trip nanoseconds with handshake and data samples),
+the `analyze quic` conversation reports (packet counts by header form,
+connection IDs, versions, and version-negotiation offers, all without
+decryption), and the TLS server `ja4s` fingerprint whose extension list keeps
+wire order and retains GREASE. Statistics and QUIC omissions use their own
+diagnostic codes; RTT rejects `--sort`, and QUIC selectors require
+`--stream udp:INDEX`.
 
 ## Output family v17
 

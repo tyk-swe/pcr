@@ -51,18 +51,35 @@ other metric, then ascending by the natural key:
 | Conversations | Transport, then capture-global stream index |
 | Ports | Transport, then port number |
 | I/O | Bucket offset |
+| Rtt | Transport, then capture-global stream index |
 
 Conversations and endpoints rank by combined directional counts. Sorting happens
 before `--top`. Overview defaults to frame ranking, including the byte tie-breaker.
 Without `--sort`, protocols keep frame count/name ordering; conversations,
 endpoints, and ports keep natural order unless `--top` requests their busiest rows
-by frames, then bytes. I/O keeps chronological order even with `--top`.
-`--sort` is rejected for fragments before opening the capture.
+by frames, then bytes. I/O keeps chronological order even with `--top`. RTT rows
+keep capture-global stream order; `--sort` is rejected for rtt and fragments
+before opening the capture.
+
+## RTT table
+
+`--table rtt` measures one TCP conversation at a time, in nanoseconds:
+`handshake_rtt_ns` is the first SYN to its first answering SYN-ACK, and each data
+sample is the segment's send time to the first ACK that covers it, matched with
+wrapping sequence arithmetic so byte ranges crossing the sequence-space wrap still
+pair with their ACKs. `samples`, `min_rtt_ns`, `mean_rtt_ns`, and `max_rtt_ns`
+summarize the data phase; `mean` saturates rather than overflowing.
+
+Outstanding segments are bounded per direction (`stats::MAX_OUTSTANDING_SEGMENTS`):
+eviction drops unacknowledged evidence instead of inventing samples. Clock
+regressions yield no sample, and a reset's acknowledgment field never covers
+outstanding data. Captures that start midstream or mid-handshake keep their rows
+and lack the missing observation.
 
 ## CSV contract
 
-`--output csv` supports conversations, endpoints, protocols, ports, and I/O only.
-Other commands and overview/fragments reject CSV before reading input. Output is
+`--output csv` supports conversations, endpoints, protocols, ports, rtt, and I/O
+only. Other commands and overview/fragments reject CSV before reading input. Output is
 UTF-8 without a BOM, comma-separated, with CRLF record endings. Fields containing
 commas, quotes, or line breaks are quoted; embedded quotes are doubled. Empty
 results emit the header. Diagnostics and errors go to stderr, leaving stdout
@@ -76,6 +93,7 @@ Headers preserve the declared output row field order:
 | Endpoints | `address,tx_frames,tx_bytes,rx_frames,rx_bytes` |
 | Protocols | `protocol,frames,bytes` |
 | Ports | `transport,port,frames,bytes` |
+| Rtt | `transport,stream,scope_id,scope_interface,scope_encapsulation,address_a,port_a,address_b,port_b,handshake_rtt_ns,samples,min_rtt_ns,mean_rtt_ns,max_rtt_ns` |
 | I/O | `origin,underflow_frames,interval,offset,frames,bytes` |
 
 Counts and byte sizes are unsigned decimal integers. Timestamps are signed Unix

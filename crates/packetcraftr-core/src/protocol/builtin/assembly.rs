@@ -27,7 +27,8 @@ use crate::protocol::BuiltinProtocol;
 use crate::protocol::catalog::builtin_protocol_catalog;
 
 use application::{
-    Dhcpv4Codec, Dhcpv6Codec, DnsCodec, HttpCodec, NtpCodec, SyslogCodec, TftpCodec, TlsCodec,
+    Dhcpv4Codec, Dhcpv6Codec, DnsCodec, HttpCodec, NtpCodec, QuicCodec, SyslogCodec, TftpCodec,
+    TlsCodec,
 };
 
 use super::bindings;

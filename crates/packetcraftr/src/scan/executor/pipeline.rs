@@ -1045,6 +1045,11 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
     }
 
     fn rotate_if_needed(&mut self) -> Result<(), BoundaryError> {
+        // Fixed pipelines arm every source up front; their ready queue can span
+        // the whole stage, so rediscovering rotations here would be quadratic.
+        if self.streaming.is_none() {
+            return Ok(());
+        }
         let changes = self.ready.iter().any(|(index, _)| {
             self.descriptions[index]
                 .route

@@ -136,6 +136,8 @@ for replacement APIs.
 
 ### Fixed
 
+- Skip capture-source rotation discovery for fixed raw scans, avoiding repeated
+  traversals of every unsent probe that could exhaust the scan duration budget.
 - Apply raw-scan acquisition qualifications to follow-up endpoint reports so
   NDJSON and collected inferences agree for fixed and adaptive scans.
 - Retry transient cleanup-slot overlap after callback worker admission, keeping

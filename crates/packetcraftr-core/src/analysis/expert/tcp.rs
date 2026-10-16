@@ -25,10 +25,11 @@ pub(super) fn finish(
     streams: &HashMap<ScopedFlowKey, u64>,
     events: &[TcpEvent],
     end_number: u64,
-) -> Vec<Finding> {
-    let mut findings = sequence::finish(streams, events, end_number);
-    findings.extend(handshake::finish(flows, streams, events, end_number));
-    findings
+    check: &mut dyn FnMut() -> Result<(), crate::error::BoundaryError>,
+    emit: &mut dyn FnMut(Finding) -> Result<(), crate::error::BoundaryError>,
+) -> Result<(), crate::error::BoundaryError> {
+    sequence::finish(streams, events, end_number, check, emit)?;
+    handshake::finish(flows, streams, events, end_number, check, emit)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

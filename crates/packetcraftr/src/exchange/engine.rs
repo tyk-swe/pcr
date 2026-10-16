@@ -56,7 +56,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
                     publish(event, deadline)
                 },
             )
-            .map(|(report, _)| report)
+            .map(|(report, _, _)| report)
     }
 
     pub(crate) fn exchange_hooked(
@@ -70,7 +70,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         let transaction =
             self.arm_capture(self.prepare_exchange(request, operation)?, operation)?;
         let response_deadline = transaction.window.ends_at();
-        let (report, unsolicited_ingress) = transaction.execute(
+        let (report, unsolicited_ingress, observation_quality) = transaction.execute(
             self.providers.transmit(),
             workflow_matcher,
             stop_predicate,
@@ -80,6 +80,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             },
         )?;
         Ok(super::WorkflowEvidence {
+            observation_quality,
             aggregate: observed.finish(report)?,
             unsolicited_ingress,
             response_deadline,

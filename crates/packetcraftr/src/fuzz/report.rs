@@ -69,6 +69,10 @@ impl TryFrom<&Aggregate> for packet_fuzz::Totals {
 pub struct Collector(Shared<Vec<Trial>>);
 
 impl Sink<Event> for Collector {
+    fn delivery(&self) -> crate::Delivery {
+        crate::Delivery::Cooperative
+    }
+
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {

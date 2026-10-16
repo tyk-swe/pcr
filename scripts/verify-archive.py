@@ -29,6 +29,7 @@ ASSETS = (
     'schemas/packetcraftr.output.v15.schema.json',
     'schemas/packetcraftr.output.v16.schema.json',
     'schemas/packetcraftr.output.v17.schema.json',
+    'schemas/packetcraftr.output.v18.schema.json',
     'schemas/packetcraftr.os-fingerprints.v1.schema.json',
     'docs/verification-contract.md', 'docs/consumer-compatibility.md',
     'docs/resource-presets.md', 'docs/statistics.md', 'docs/tasks.md', 'docs/native-validation.md',
@@ -41,11 +42,16 @@ ASSETS = (
     'examples/consumers/fixtures/v15-forwarding.json',
     'examples/consumers/fixtures/v16-forwarding.json',
     'examples/consumers/fixtures/v17-forwarding.json',
+    'examples/consumers/fixtures/v18-forwarding.json',
     'docs/tcp-diagnostics.md',
     'examples/documents/output-scan-tcp-diagnostic.json',
     'examples/documents/output-scan-tcp-diagnostic-event.json',
     'examples/documents/output-scan-sctp-diagnostic.json',
     'examples/documents/output-scan-ip-protocol.json',
+    'examples/documents/output-scan-qualified-v18.json',
+    'examples/documents/output-scan-provisional-event-v18.json',
+    'examples/documents/output-scan-quality-event-v18.json',
+    'examples/documents/output-scan-qualified-endpoint-event-v18.json',
     'crates/packetcraftr/data/os-fingerprints.v1.json',
     'crates/packetcraftr/data/os-fingerprints.provenance.yaml',
     'docs/os-identification.md',
@@ -143,11 +149,11 @@ def verify(root, version, commit, target, variant):
         raise ValueError('expected NDJSON objects')
     if records[-1].get('event') != 'complete':
         raise ValueError('stream has no terminal completion')
-    expected_frames = DECODE_PROFILES['pull-request']['tls-handshake']
+    expected_frames = DECODE_PROFILES['curated']['tls-handshake']
     if len(records) != expected_frames + 1:
         raise ValueError(f'packaged capture must produce {expected_frames} frames and one completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v17'
+        if (record.get('schema') != 'packetcraftr.output/v18'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):
@@ -169,8 +175,8 @@ def verify(root, version, commit, target, variant):
         expected = json.loads((root / 'examples/documents' / example).read_text(encoding='utf-8'))
         if expected.get('schema') != 'packetcraftr.output/v10':
             raise ValueError(f'{example} must preserve its released output/v10 family')
-        if actual.get('schema') != 'packetcraftr.output/v17':
-            raise ValueError(f'packaged stats output for {example} must use output/v17')
+        if actual.get('schema') != 'packetcraftr.output/v18':
+            raise ValueError(f'packaged stats output for {example} must use output/v18')
         # Preserve released examples and compare every other envelope/payload
         # field against the current producer without changing archived files.
         expected['schema'] = actual['schema']
@@ -179,8 +185,8 @@ def verify(root, version, commit, target, variant):
 
     overview = json.loads(cli('--output', 'json', 'analyze', 'stats',
                               'examples/captures/http-stream.pcap', '--table', 'overview'))
-    if overview.get('schema') != 'packetcraftr.output/v17' or overview['result']['table'] != 'overview':
-        raise ValueError('packaged overview must use output/v17')
+    if overview.get('schema') != 'packetcraftr.output/v18' or overview['result']['table'] != 'overview':
+        raise ValueError('packaged overview must use output/v18')
     for rows, count in (('protocols', 'protocol_count'), ('endpoints', 'endpoint_count'),
                         ('conversations', 'conversation_count')):
         if len(overview['result'][rows]) > min(5, overview['result'][count]):

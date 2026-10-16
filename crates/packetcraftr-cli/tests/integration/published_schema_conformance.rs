@@ -91,7 +91,8 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v17" => output_validator,
+            "packetcraftr.output/v18" => output_validator,
+            "packetcraftr.output/v17" => common::frozen_v17_schema_validator(),
             "packetcraftr.output/v16" => common::frozen_v16_schema_validator(),
             "packetcraftr.output/v15" => v15_validator,
             "packetcraftr.output/v14" => v14_validator,

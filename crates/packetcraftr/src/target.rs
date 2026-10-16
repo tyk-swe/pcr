@@ -12,8 +12,8 @@ pub(crate) use admission::{
 };
 
 pub use model::{
-    Authorized, Error, Family, Hostname, ResolvedZone, Resolver, ScopedAddress, SelectedAddress,
-    SystemResolver, Target, Zone, requires_scope,
+    Authorized, BlockingResolver, Error, Family, Hostname, ResolvedZone, Resolver, ScopedAddress,
+    SelectedAddress, SystemResolver, Target, Zone, requires_scope,
 };
 pub(crate) use model::{ResolveTarget, distinct_addresses, valid_zone_interface};
 pub(crate) use selection::MAX_CANDIDATES;

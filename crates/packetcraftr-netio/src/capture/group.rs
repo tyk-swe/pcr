@@ -6,11 +6,15 @@ use super::{
     Session, Stats,
 };
 use crate::{Error, interface::Id};
-use packetcraftr_core::{budget::Deadline, frame::LinkType};
+use packetcraftr_core::{
+    budget::{Deadline, Interrupted},
+    frame::LinkType,
+};
 use source::Owned;
 use std::{
     collections::HashSet,
     fmt,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -115,6 +119,7 @@ pub struct Source {
     pub ready: bool,
     pub shutdown_confirmed: bool,
     pub statistics_valid: bool,
+    pub observation_quality: super::ObservationQuality,
     pub statistics: Stats,
     pub delivered_frames: u64,
     pub delivered_bytes: u64,
@@ -236,10 +241,23 @@ impl<C: Session> Group<C> {
                 message: "capture readiness deadline expired".to_owned(),
             });
         };
+        let check_control = || {
+            caller
+                .live_remaining()
+                .map(drop)
+                .map_err(|interrupted| match interrupted {
+                    Interrupted::Cancelled(cancelled) => cancelled.into(),
+                    _ => Error::CaptureReadiness {
+                        message: "capture readiness deadline expired".into(),
+                    },
+                })
+        };
         for owned in &mut self.sources {
+            check_control()?;
             owned.wait_ready(caller, deadline)?;
+            check_control()?;
         }
-        caller.check_cancelled()?;
+        check_control()?;
         self.lifecycle = Lifecycle::Ready;
         Ok(())
     }
@@ -251,7 +269,7 @@ impl<C: Session> Group<C> {
             return Err(Error::CaptureGroupState);
         }
         let deadline = super::wait_end(caller)?;
-        let immediate = Deadline::new(Duration::ZERO);
+        let immediate = Deadline::new(Duration::ZERO).with_parent(Some(Arc::new(caller.clone())));
         loop {
             caller.check_cancelled()?;
             for _ in 0..self.sources.len() {
@@ -261,13 +279,21 @@ impl<C: Session> Group<C> {
                     return Ok(Some(captured));
                 }
             }
+            if let Err(interrupted) = caller.live_remaining() {
+                return match interrupted {
+                    Interrupted::Cancelled(cancelled) => Err(cancelled.into()),
+                    _ => Ok(None),
+                };
+            }
             let Some(remaining) = deadline.and_then(crate::deadline::remaining_before) else {
                 return Ok(None);
             };
             let index = self.cursor;
             self.cursor = (self.cursor + 1) % self.sources.len();
             let wait = remaining.min(POLL_SLICE);
-            let slice = Deadline::new(wait).with_cancellation(caller.cancellation().cloned());
+            let Ok(slice) = caller.for_wait(wait) else {
+                return Ok(None);
+            };
             let started = Instant::now();
             if let Some(captured) = self.sources[index].poll(&slice, caller)? {
                 return Ok(Some(captured));
@@ -284,15 +310,32 @@ impl<C: Session> Group<C> {
         error
     }
 
-    fn shutdown_all(&mut self) {
+    fn stop_all(&mut self) {
         self.lifecycle = Lifecycle::Closed;
         for owned in &mut self.sources {
-            owned.shutdown(&mut self.cleanup);
+            owned.request_stop(&mut self.cleanup);
         }
+    }
+
+    fn shutdown_all_until(&mut self, deadline: &Deadline) {
+        self.stop_all();
+        for owned in &mut self.sources {
+            owned.shutdown(deadline, &mut self.cleanup);
+        }
+    }
+
+    fn shutdown_all(&mut self) {
+        self.shutdown_all_until(&Deadline::new(super::CLEANUP_TIMEOUT));
     }
 }
 
 impl<C: Session> Session for Group<C> {
+    fn observation_quality(&self) -> super::ObservationQuality {
+        self.snapshot().iter().fold(
+            super::ObservationQuality::NoReportedLoss,
+            |quality, source| quality.combine(source.observation_quality),
+        )
+    }
     fn metadata(&self) -> &Metadata {
         self.sources
             .first()
@@ -316,8 +359,17 @@ impl<C: Session> Session for Group<C> {
         self.receive_frame(caller).map_err(|error| self.fail(error))
     }
 
+    fn request_stop(&mut self) -> Result<(), Error> {
+        self.stop_all();
+        self.cleanup.first().cloned().map_or(Ok(()), Err)
+    }
+
     fn shutdown(&mut self) -> Result<(), Error> {
-        self.shutdown_all();
+        self.shutdown_until(&Deadline::new(super::CLEANUP_TIMEOUT))
+    }
+
+    fn shutdown_until(&mut self, deadline: &Deadline) -> Result<(), Error> {
+        self.shutdown_all_until(deadline);
         let mut failures = self.cleanup.iter().cloned();
         match failures.next() {
             None => Ok(()),
@@ -353,3 +405,6 @@ impl<C: Session> Drop for Group<C> {
         self.shutdown_all();
     }
 }
+
+#[cfg(test)]
+mod tests;

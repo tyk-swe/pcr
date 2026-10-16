@@ -181,6 +181,7 @@ pub(super) struct Feedback {
 }
 
 pub(super) struct ProbeClassifier<'a> {
+    pub(super) observation_quality: Option<packetcraftr_netio::capture::ObservationQuality>,
     pub(super) registry: &'a Registry,
     pub(super) target: Arc<str>,
     pub(super) winners: HashMap<super::report::EndpointKey, Classification>,
@@ -195,6 +196,13 @@ impl Classifier for ProbeClassifier<'_> {
     type Probe = Probe;
     type Observation = Observation;
     type Event = Event;
+
+    fn observation_quality(
+        &mut self,
+        quality: Option<packetcraftr_netio::capture::ObservationQuality>,
+    ) {
+        self.observation_quality = quality;
+    }
 
     fn sent_matches(&self, probe: &Probe, sent: &Packet) -> bool {
         sent_probe_matches(probe, sent)
@@ -235,6 +243,10 @@ impl Classifier for ProbeClassifier<'_> {
     ) -> Event {
         let mut evidence = ProbeEvidence {
             sequence: probe.sequence,
+            measurement: super::Measurement::NoReply(
+                self.observation_quality
+                    .map_or(super::Coverage::Pending, Into::into),
+            ),
             stage: probe.stage,
             address: probe.address,
             scope: probe.scope.clone(),
@@ -278,6 +290,7 @@ impl Classifier for ProbeClassifier<'_> {
             evidence.status = probe::Status::Response;
             evidence.classification = reply.observation.response.classification;
             evidence.reply = Some(reply.observation.response.reply);
+            evidence.measurement = super::Measurement::Response(reply.observation.response.reply);
             evidence.responder = Some(reply.observation.response.responder);
             evidence.received_at = reply.received_at;
             evidence.latency = Some(reply.latency);
@@ -285,6 +298,9 @@ impl Classifier for ProbeClassifier<'_> {
             evidence.reason = reply.observation.response.reason.to_owned();
             evidence.application = reply.observation.application;
             evidence.tcp_window = reply.observation.tcp_window;
+        }
+        if let super::Measurement::NoReply(coverage) = evidence.measurement {
+            self.rtt.note_no_reply(coverage);
         }
         match probe.stage {
             Stage::Scan => self

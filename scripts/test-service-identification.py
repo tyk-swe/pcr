@@ -25,7 +25,7 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = "packetcraftr.output/v17"
+SCHEMA = "packetcraftr.output/v18"
 FIXTURES = ROOT / "scripts/fixtures/service-identification"
 PROFILES = {"all": ["--all-features"]}
 HTTP = b"HTTP/1.1 200 OK\r\nServer: nginx/1.26.2\r\n\r\n"

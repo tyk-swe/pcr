@@ -6,6 +6,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+- Publish output/v18 with typed raw measurement coverage, provisional stream
+  qualification before inference, preserved positive evidence under permissive
+  capture loss, and separate RTT unavailable counts. Output v17 stays frozen.
+
 - Group all 31 CLI commands under packet, files, analyze, network, and reference,
   retaining every flat path as a supported alias. Add layered short/full help,
   compact text results and global verbose details, canonical command references,
@@ -16,6 +20,13 @@ Net changes since 0.5.0-beta.3. See [migration guidance](docs/migration-unreleas
 for replacement APIs.
 
 ### Breaking
+
+- Reserve four of the 16 native-root places for eligible control work by bounding
+  connecting/established TCP data at 12. Trace stages share their parent runtime
+  by default; explicit trace runtimes remain independent. Built-in collectors
+  publish cooperatively without worker admission. See the architecture migration
+  notes for snapshot and `Runtime::new(0)` implications.
+
 
 - Rename codec extension types to `Codec`, `EncodeContext`, `DecodeContext`,
   `Encoded`, and `Decoded`, and address defaults to `codec::Addresses`.
@@ -32,7 +43,7 @@ for replacement APIs.
   under `evidence: packetcraftr::evidence::Limits { max_frames, max_bytes, max_undecoded }`,
   preserving JSON and binary Serde representations.
 - Packet documents use `packetcraftr.packet/v2`; machine output uses
-  `packetcraftr.output/v17` (output v6–v16 remain frozen; see
+  `packetcraftr.output/v18` (output v6–v17 remain frozen; see
   [consumer compatibility](docs/consumer-compatibility.md)).
 - Live workflows run through `Client<P, K>` with explicit providers, policy,
   clock, cancellation, and runtime, taking `(request, sink)` and returning
@@ -53,6 +64,11 @@ for replacement APIs.
   list; `capture` uses capture-local interface IDs.
 
 ### Added
+
+- Add capture-free policy-gated `send_layer3` with `TransmitProviders`, bounded
+  owned hostname resolution, explicit cooperative sink delivery, and separate
+  native execution/socket snapshots. Preserve isolated arbitrary callbacks.
+
 
 - Offline statistics overview with capture totals and five-row traffic leaderboards,
   explicit `--sort frames|bytes`, and CSV exports for flat statistics tables.
@@ -119,6 +135,26 @@ for replacement APIs.
   built-in topics, user guides, and migration notes.
 
 ### Fixed
+
+- Bound executor thread retirement under original caller control, including
+  abandoned socket destructors and provider-owned thread-local cleanup.
+- Retire idle historical namespace services without abandoning queued work;
+  transfer connect execution to socket ownership transactionally; retain actual
+  unfinished lookup/capture charges after caller cancellation.
+- Preserve inherited raw-scan and analysis-finalization control, share one
+  capture-group cleanup allowance, and treat local TCP deadline expiry as an
+  unavailable observation in adaptive control.
+- Replace growing HTTP/TCP-DNS/fragment provenance unions with charged mutable
+  assembly and remove repeated adaptive endpoint-prefix work discovery.
+- Index raw response candidates and expirations while preserving ambiguity and
+  conservative matching fallbacks. Refill adaptive raw slots incrementally under
+  one acquisition lifetime and cumulative budget, with bounded source rotation.
+- Retain bounded preparation previews while revalidating current routes,
+  interfaces, MTUs and final bytes. Account for retained stage summaries, scoped
+  names and overlapping capture-source allocations before admission.
+- Preserve inherited elapsed control in native waits and prepare repeated sends
+  after pacing, so route and MTU checks follow that cooperative boundary.
+- Use the current curated decoder inventory in release-archive verification.
 
 - Keep rejected UDP application checks visible in compact scan output, including
   their profile and rejection reason.

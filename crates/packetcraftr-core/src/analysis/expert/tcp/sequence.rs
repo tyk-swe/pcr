@@ -436,35 +436,36 @@ pub(in crate::analysis::expert) fn finish(
     streams: &HashMap<ScopedFlowKey, u64>,
     events: &[TcpEvent],
     end_number: u64,
-) -> Vec<Finding> {
-    events
-        .iter()
-        .filter_map(|event| {
-            let TcpEvent::Evicted {
-                flow,
-                pending_bytes,
-            } = event
-            else {
-                return None;
-            };
-            if *pending_bytes == 0 {
-                return None;
-            }
-            Some(new_finding(
-                Severity::Info,
-                "tcp.incomplete_at_end",
-                end_number,
-                streams
-                    .get(flow)
-                    .or_else(|| streams.get(&flow.reverse()))
-                    .copied()
-                    .map(tcp_stream_ref),
-                format!(
-                    "{} byte(s) from {}:{} were still awaiting missing earlier data \
+    check: &mut dyn FnMut() -> Result<(), crate::error::BoundaryError>,
+    emit: &mut dyn FnMut(Finding) -> Result<(), crate::error::BoundaryError>,
+) -> Result<(), crate::error::BoundaryError> {
+    for event in events {
+        check()?;
+        let TcpEvent::Evicted {
+            flow,
+            pending_bytes,
+        } = event
+        else {
+            continue;
+        };
+        if *pending_bytes == 0 {
+            continue;
+        }
+        emit(new_finding(
+            Severity::Info,
+            "tcp.incomplete_at_end",
+            end_number,
+            streams
+                .get(flow)
+                .or_else(|| streams.get(&flow.reverse()))
+                .copied()
+                .map(tcp_stream_ref),
+            format!(
+                "{} byte(s) from {}:{} were still awaiting missing earlier data \
                      when the capture ended",
-                    pending_bytes, flow.flow.source, flow.flow.source_port
-                ),
-            ))
-        })
-        .collect()
+                pending_bytes, flow.flow.source, flow.flow.source_port
+            ),
+        ))?;
+    }
+    check()
 }

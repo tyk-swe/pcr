@@ -65,7 +65,7 @@ fn open_with(
     let (handoff, claim) = mpsc::sync_channel::<Result<Started, Error>>(0);
     let worker_deadline = deadline.clone();
     let task = permit
-        .spawn(move || {
+        .spawn_with_control(&deadline, move || {
             let activated = (|| {
                 admit(&worker_deadline, ARMING)?;
                 let parts = activate();
@@ -85,9 +85,12 @@ fn open_with(
                 }
             }
         })
-        .map_err(|error| Error::Capture {
-            message: "could not start the native capture activation worker".to_owned(),
-            source: Some(Source::new(error)),
+        .map_err(|error| match deadline.enforce() {
+            Err(interrupted) => Error::interrupted(interrupted, ARMING),
+            Ok(()) => Error::Capture {
+                message: "could not start the native capture activation worker".to_owned(),
+                source: Some(Source::new(error)),
+            },
         })?;
 
     match await_handoff(&claim, &deadline) {

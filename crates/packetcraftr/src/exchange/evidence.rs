@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub(crate) struct WorkflowEvidence {
+    pub(crate) observation_quality: packetcraftr_netio::capture::ObservationQuality,
     pub(crate) aggregate: Aggregate,
     pub(crate) unsolicited_ingress: Vec<UnsolicitedIngress>,
     pub(crate) response_deadline: std::time::Instant,

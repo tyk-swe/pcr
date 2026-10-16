@@ -104,10 +104,11 @@ pub(super) fn render_text(
     write_summary_line(
         invocation,
         format_args!(
-            "probes sent={} received={} lost={} rtt min/avg/max={}/{}/{}",
+            "probes sent={} received={} lost={} unavailable={} rtt min/avg/max={}/{}/{}",
             rtt.sent,
             rtt.received,
             rtt.lost,
+            rtt.unavailable,
             optional_duration(rtt.min),
             optional_duration(rtt.avg),
             optional_duration(rtt.max),
@@ -464,10 +465,11 @@ pub(super) fn render_connect_text(
     write_stdout_line(
         invocation,
         format_args!(
-            "probes sent={} received={} lost={} rtt min/avg/max={}/{}/{}",
+            "probes sent={} received={} lost={} unavailable={} rtt min/avg/max={}/{}/{}",
             rtt.sent,
             rtt.received,
             rtt.lost,
+            rtt.unavailable,
             optional_duration(rtt.min),
             optional_duration(rtt.avg),
             optional_duration(rtt.max),

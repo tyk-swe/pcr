@@ -7,4 +7,7 @@
 //! links once, and runs every module in one parallel test pool.
 
 mod application_io_contracts;
+mod native_ownership_contracts;
 mod tls_contracts;
+
+mod capture_cleanup_contracts;

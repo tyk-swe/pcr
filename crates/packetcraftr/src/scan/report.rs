@@ -116,6 +116,8 @@ impl std::fmt::Display for Classification {
 
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {
+    /// Authoritative measurement; pending silence requires a qualification event.
+    pub measurement: super::Measurement<Reply>,
     pub sequence: u64,
     pub stage: super::Stage,
     pub address: IpAddr,
@@ -137,7 +139,7 @@ pub struct ProbeEvidence {
     pub attempt: u32,
     pub status: probe::Status,
     pub classification: Classification,
-    /// The correlated reply; `None` when the attempt was silent.
+    /// The correlated reply; consult `measurement` before interpreting `None`.
     pub reply: Option<Reply>,
     pub responder: Option<IpAddr>,
     pub sent_at: SystemTime,
@@ -230,6 +232,8 @@ pub struct Rtt {
     pub sent: u64,
     pub received: u64,
     pub lost: u64,
+    /// Attempts whose local acquisition quality cannot support silence.
+    pub unavailable: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min: Option<Duration>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -240,6 +244,8 @@ pub struct Rtt {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RttAccumulator {
+    unavailable: u64,
+    pending: u64,
     sent: u64,
     received: u64,
     total: Duration,
@@ -250,6 +256,21 @@ pub(crate) struct RttAccumulator {
 impl RttAccumulator {
     pub(crate) fn note_sent(&mut self) {
         self.sent = self.sent.saturating_add(1);
+    }
+
+    pub(crate) fn note_no_reply(&mut self, coverage: super::Coverage) {
+        if coverage == super::Coverage::Pending {
+            self.pending = self.pending.saturating_add(1);
+        } else if !coverage.permits_silence() {
+            self.unavailable = self.unavailable.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn qualify_pending(&mut self, coverage: super::Coverage) {
+        if !coverage.permits_silence() {
+            self.unavailable = self.unavailable.saturating_add(self.pending);
+        }
+        self.pending = 0;
     }
 
     pub(crate) fn note_received(&mut self, sample: Duration) {
@@ -268,7 +289,12 @@ impl RttAccumulator {
         Rtt {
             sent: self.sent,
             received: self.received,
-            lost: self.sent.saturating_sub(self.received),
+            lost: self
+                .sent
+                .saturating_sub(self.received)
+                .saturating_sub(self.unavailable)
+                .saturating_sub(self.pending),
+            unavailable: self.unavailable.saturating_add(self.pending),
             min: self.min,
             avg,
             max: self.max,
@@ -301,6 +327,7 @@ pub enum Event {
     },
     Unattributed(Unattributed),
     Diagnostic(Diagnostic),
+    Qualification(super::Qualification),
 }
 
 /// Diagnostics are not repeated here: each one already reached the
@@ -362,12 +389,17 @@ struct Collected {
     endpoints: Vec<Endpoint>,
     endpoint_indices: HashMap<EndpointKey, usize>,
     probes: u64,
+    provisional: std::collections::BTreeMap<u64, (super::Stage, Option<usize>, usize)>,
     undecoded: Vec<Frame>,
     unattributed: Vec<Unattributed>,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl Sink<Event> for Collector {
+    fn delivery(&self) -> crate::Delivery {
+        crate::Delivery::Cooperative
+    }
+
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
@@ -377,6 +409,32 @@ impl Sink<Event> for Collector {
 }
 
 impl Collected {
+    fn qualify(&mut self, qualification: super::Qualification) {
+        // Collector residency belongs to its caller. Each provisional sequence
+        // is retired once; later scopes never rescan completed history.
+        let Self {
+            provisional,
+            endpoints,
+            discovery,
+            ..
+        } = self;
+        let range = qualification.first_sequence()..=qualification.last_sequence();
+        for (_, (_, endpoint, probe)) in
+            provisional.extract_if(range, |_, (stage, _, _)| *stage == qualification.stage())
+        {
+            let evidence = match endpoint {
+                Some(endpoint) => &mut endpoints[endpoint].probes[probe],
+                None => &mut discovery[probe],
+            };
+            if matches!(
+                evidence.measurement,
+                super::Measurement::NoReply(super::Coverage::Pending)
+            ) {
+                evidence.measurement = super::Measurement::NoReply(qualification.coverage());
+            }
+        }
+    }
+
     fn observe(&mut self, event: Event) {
         match event {
             Event::Sent(_) => {}
@@ -384,12 +442,22 @@ impl Collected {
             Event::Undecoded { frame } => self.undecoded.push(frame),
             Event::Unattributed(unattributed) => self.unattributed.push(unattributed),
             Event::Diagnostic(diagnostic) => self.diagnostics.push(diagnostic),
+            Event::Qualification(qualification) => self.qualify(qualification),
         }
     }
 
     fn observe_probe(&mut self, evidence: ProbeEvidence) {
         self.probes = self.probes.saturating_add(1);
         if evidence.stage == super::Stage::Discovery {
+            if matches!(
+                evidence.measurement,
+                super::Measurement::NoReply(super::Coverage::Pending)
+            ) {
+                self.provisional.insert(
+                    evidence.sequence,
+                    (evidence.stage, None, self.discovery.len()),
+                );
+            }
             self.discovery.push(evidence);
             return;
         }
@@ -399,6 +467,11 @@ impl Collected {
         let ip_protocol = evidence.ip_protocol;
         let scope = evidence.scope.clone();
         let interface = scope.as_ref().map(|scope| scope.interface.clone());
+        let endpoint_index = self
+            .endpoint_indices
+            .get(&(address, transport, port, ip_protocol, interface.clone()))
+            .copied()
+            .unwrap_or(self.endpoints.len());
         let endpoint = index_or_push(
             &mut self.endpoints,
             &mut self.endpoint_indices,
@@ -415,6 +488,15 @@ impl Collected {
                 probes: Vec::new(),
             },
         );
+        if matches!(
+            evidence.measurement,
+            super::Measurement::NoReply(super::Coverage::Pending)
+        ) {
+            self.provisional.insert(
+                evidence.sequence,
+                (evidence.stage, Some(endpoint_index), endpoint.probes.len()),
+            );
+        }
         endpoint.classification.promote(evidence.classification);
         endpoint.probes.push(evidence);
     }
@@ -445,7 +527,7 @@ impl Collector {
                 endpoint.transport,
                 endpoint.probes.iter().map(|probe| inference::Attempt {
                     sequence: probe.sequence,
-                    reply: probe.reply,
+                    measurement: probe.measurement,
                     tcp_scan: probe.tcp_scan,
                     sctp_scan: probe.sctp_scan,
                     tcp_window: probe.tcp_window,

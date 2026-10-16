@@ -14,7 +14,7 @@ use std::{
 
 use packetcraftr_core::budget::{Cancelled, Deadline, DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
-use packetcraftr_netio::deadline::POLL_INTERVAL;
+use packetcraftr_netio::{deadline::POLL_INTERVAL, resources::ThreadCleanup};
 
 pub const MAX_WORKER_CAPACITY: usize = 8;
 
@@ -25,7 +25,8 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Zero capacity refuses every publication. A capacity above
+    /// Zero capacity refuses isolated publication workers. Cooperative sinks
+    /// execute in the caller and consume no worker slot. A capacity above
     /// [`MAX_WORKER_CAPACITY`] is refused, not lowered.
     pub fn new(capacity: usize) -> Result<Self, CapacityError> {
         if capacity > MAX_WORKER_CAPACITY {
@@ -44,13 +45,9 @@ impl Runtime {
                 active: AtomicUsize::new(0),
                 rejected: AtomicUsize::new(0),
                 timed_out: AtomicUsize::new(0),
+                cleanup: Mutex::new(None),
             }),
         }
-    }
-
-    /// A runtime of the same capacity with no active workers.
-    pub(crate) fn fresh(&self) -> Self {
-        Self::with_valid_capacity(self.capacity())
     }
 
     pub fn snapshot(&self) -> RuntimeSnapshot {
@@ -108,6 +105,7 @@ struct WorkerBudget {
     active: AtomicUsize,
     rejected: AtomicUsize,
     timed_out: AtomicUsize,
+    cleanup: Mutex<Option<ThreadCleanup>>,
 }
 
 #[derive(Clone, Copy)]
@@ -173,11 +171,10 @@ impl Drop for WorkerPermit {
     }
 }
 
-// Rust drops fields in declaration order, including during unwinding. Callback
-// captures must be released before another operation can acquire this permit.
+// The callback and its captures live on the execution thread. The external
+// join owner retains admission through their destruction and all thread TLS.
 struct Callback<F> {
     callback: F,
-    _permit: WorkerPermit,
 }
 
 impl<F> Callback<F> {
@@ -247,6 +244,7 @@ pub struct Worker<T, A = ()> {
     outcomes: mpsc::Receiver<Result<A, BoundaryError>>,
     in_flight: Cell<bool>,
     worker: Arc<WorkerStatus>,
+    cleanup: ThreadCleanup,
 }
 
 impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
@@ -254,30 +252,65 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
     where
         F: FnMut(T) -> Result<A, BoundaryError> + Send + 'static,
     {
-        let worker = Callback {
-            callback: emit,
-            _permit: runtime.budget.acquire()?,
+        Self::new_in_with(runtime, emit, ThreadCleanup::new)
+    }
+
+    fn new_in_with<F>(
+        runtime: &Runtime,
+        emit: F,
+        create: impl FnOnce(usize) -> io::Result<ThreadCleanup>,
+    ) -> Result<Self, BoundaryError>
+    where
+        F: FnMut(T) -> Result<A, BoundaryError> + Send + 'static,
+    {
+        {
+            let cleanup = runtime
+                .budget
+                .cleanup
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(cleanup) = &*cleanup {
+                cleanup.retry_pending();
+            }
+        }
+        let permit = runtime.budget.acquire()?;
+        let cleanup = {
+            let mut cleanup = runtime
+                .budget
+                .cleanup
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if cleanup.is_none() {
+                *cleanup = Some(create(runtime.capacity()).map_err(spawn_failure)?);
+            }
+            cleanup.as_ref().expect("cleanup initialized").clone()
         };
-        let status = Arc::clone(&worker._permit.0);
+        let join = cleanup.reserve().map_err(spawn_failure)?;
+        let status = Arc::clone(&permit.0);
+        let worker = Callback { callback: emit };
         let (events, receiver) = mpsc::sync_channel(1);
         let (outcomes, outcome_receiver) = mpsc::sync_channel(1);
-        drop(
-            thread::Builder::new()
-                .name("packetcraftr-worker".to_owned())
-                .spawn(move || worker.run(receiver, outcomes))
-                .map_err(spawn_failure)?,
-        );
+        let thread = thread::Builder::new()
+            .name("packetcraftr-worker".to_owned())
+            .spawn(move || worker.run(receiver, outcomes))
+            .map_err(spawn_failure)?;
+        if !join.attach(thread, permit) {
+            cleanup.retry_pending();
+        }
         Ok(Self {
             events,
             outcomes: outcome_receiver,
             in_flight: Cell::new(false),
             worker: status,
+            cleanup,
         })
     }
 
     /// Waits no longer than the deadline for the callback's answer. This
     /// cannot interrupt a callback already running on the worker.
     pub fn emit(&self, event: T, deadline: &Deadline) -> Result<A, Error> {
+        self.cleanup.retry_pending();
+        let deadline = deadline.detach()?;
         deadline.enforce()?;
         if self.in_flight.replace(true) {
             return Err(unavailable("progressive output already has an in-flight callback").into());
@@ -312,13 +345,21 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
                 }
             }
         })();
-        match waited {
+        match waited.and_then(|outcome| {
+            deadline.enforce()?;
+            Ok(outcome)
+        }) {
             Ok(outcome) => outcome.map_err(Error::Output),
             Err(interrupted) => {
                 self.worker.mark_timed_out();
                 Err(interrupted.into())
             }
         }
+    }
+}
+impl<T, A> Drop for Worker<T, A> {
+    fn drop(&mut self) {
+        self.cleanup.retry_pending();
     }
 }
 
@@ -360,3 +401,6 @@ const fn output_classification() -> Classification {
         Some("treat the progressive operation as incomplete and inspect the event callback"),
     )
 }
+
+#[cfg(test)]
+mod tests;

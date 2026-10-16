@@ -254,30 +254,52 @@ impl Collector {
         Ok(())
     }
 
-    pub fn finish(mut self, run: &RunSummary) -> Result<(Vec<Event>, Summary), Error> {
+    pub fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), Error> {
+        let mut out = Vec::new();
+        let summary = self.finalize(run, |events| {
+            out.extend(events);
+            Ok(())
+        })?;
+        Ok((out, summary))
+    }
+
+    fn finalize(
+        mut self,
+        run: &RunSummary,
+        mut emit: impl FnMut(Vec<Event>) -> Result<(), Error>,
+    ) -> Result<Summary, Error> {
         if self.failed {
             return Err(Error::Failed);
         }
         if let Some(deadline) = self.deadline.as_deref() {
             deadline.enforce()?;
         }
-        let mut out = Vec::new();
         for event in self
             .tcp
             .trailing(&run.trailing_tcp_events, run.frames_read)?
         {
+            if let Some(deadline) = self.deadline.as_deref() {
+                deadline.enforce()?;
+            }
+            let mut out = Vec::new();
             if !matches!(event, application::Event::Evicted { .. }) {
                 self.dispatch(event, run.frames_read, &mut out)?;
             }
+            emit(out)?;
         }
-        let connections: Vec<Box<Conn>> = std::mem::take(&mut self.connections)
-            .into_values()
-            .collect();
-        for mut conn in connections {
+        for mut conn in std::mem::take(&mut self.connections).into_values() {
+            if let Some(deadline) = self.deadline.as_deref() {
+                deadline.enforce()?;
+            }
+            let mut out = Vec::new();
             conn.number = run.frames_read;
             conn.finish(&mut self.with_cx(&mut out))?;
+            emit(out)?;
         }
-        Ok((out, self.summary))
+        if let Some(deadline) = self.deadline.as_deref() {
+            deadline.enforce()?;
+        }
+        Ok(self.summary)
     }
 }
 
@@ -304,5 +326,18 @@ impl session::Collector for Collector {
 
     fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
         Self::finish(self, run).map_err(BoundaryError::from_error)
+    }
+
+    fn finish_controlled(
+        mut self,
+        run: &RunSummary,
+        deadline: &Deadline,
+        event_sink: &mut dyn FnMut(Event) -> Result<(), BoundaryError>,
+    ) -> Result<Summary, BoundaryError> {
+        self.deadline = Some(Arc::new(deadline.clone().with_parent(self.deadline.take())));
+        self.finalize(run, |events| {
+            session::deliver(deadline, events, event_sink).map_err(Error::Output)
+        })
+        .map_err(BoundaryError::from_error)
     }
 }

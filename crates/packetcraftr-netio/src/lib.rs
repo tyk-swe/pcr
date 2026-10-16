@@ -19,6 +19,8 @@ pub mod interface;
 pub mod link;
 mod platform;
 #[forbid(unsafe_code)]
+pub mod resolution;
+#[forbid(unsafe_code)]
 pub mod resources;
 #[forbid(unsafe_code)]
 pub mod route;

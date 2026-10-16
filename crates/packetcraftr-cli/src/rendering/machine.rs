@@ -23,11 +23,13 @@ impl BoundedJsonError {
     pub(crate) fn into_cli_error(self, limit: impl FnOnce() -> CliError) -> CliError {
         match self {
             Self::Limit => limit(),
-            Self::Serialize(source) => {
-                CliError::new(Kind::Internal, format!("serialize output failed: {source}"))
-            }
+            Self::Serialize(source) => serialization_error(source),
         }
     }
+}
+
+pub(crate) fn serialization_error(source: serde_json::Error) -> CliError {
+    CliError::new(Kind::Internal, format!("serialize output failed: {source}"))
 }
 
 pub(crate) fn bounded_json_len(

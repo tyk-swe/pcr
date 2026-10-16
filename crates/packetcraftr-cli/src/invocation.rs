@@ -32,10 +32,10 @@ impl Invocation {
         let deadline = duration.map(|duration| {
             Arc::new(Deadline::new(duration).with_cancellation(Some(cancellation.clone())))
         });
-        let output = match &deadline {
-            Some(deadline) => output.with_deadline(deadline.clone()),
-            None => output,
-        };
+        let control = deadline.clone().unwrap_or_else(|| {
+            Arc::new(Deadline::new(Duration::MAX).with_cancellation(Some(cancellation.clone())))
+        });
+        let output = output.with_control(control);
         let output = match &diagnostics {
             Some(diagnostics) => {
                 let diagnostics = diagnostics.clone();
@@ -53,10 +53,12 @@ impl Invocation {
     }
 
     pub(crate) fn with_output(mut self, output: StreamEncoder) -> Self {
-        let output = match &self.deadline {
-            Some(deadline) => output.with_deadline(deadline.clone()),
-            None => output,
-        };
+        let control = self.deadline.clone().unwrap_or_else(|| {
+            Arc::new(
+                Deadline::new(Duration::MAX).with_cancellation(Some(self.cancellation.clone())),
+            )
+        });
+        let output = output.with_control(control);
         self.output = match &self.diagnostics {
             Some(diagnostics) => {
                 let diagnostics = diagnostics.clone();

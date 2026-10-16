@@ -24,3 +24,5 @@ mod packet_set_contracts;
 mod published_schema_conformance;
 mod target_planning_contracts;
 mod tls_workflow_contracts;
+
+mod scan_measurement_contracts;

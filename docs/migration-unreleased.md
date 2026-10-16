@@ -20,13 +20,85 @@ Reference output and requested packet bytes stay comprehensive.
 
 Workflow grouping preserves command identifiers, existing flags, defaults, exit
 codes, policy enforcement, and packet/v2. Verbosity has no effect on machine/byte
-formats. Current producers use output/v17 for the statistics additions below.
+formats. Current producers use output/v18, including the statistics additions below.
 
 
 Net upgrade from 0.5.0-beta.3 to current `main`. See the [changelog](../CHANGELOG.md)
 for additions, the [path tables](#renamed-and-removed-paths) for mechanical Rust
 replacements, and [the provider cleanup](#callers-tracking-main) if you already
 track `main`.
+
+## Architecture ownership and control repairs
+
+These repairs preserve packet/v2 and publish output/v18. Historical schema families are
+unchanged. Resource diagnostics retain their existing units; the effective TCP
+process ceiling is now 12, rather than 16, to reserve four native-root places
+for eligible control work. Root exhaustion still refuses work. In Rust,
+`tcp_connect_snapshot().capacity` now means the TCP data allocation; use
+`native_snapshot()` for aggregate root ownership and the new
+`execution_snapshot()` / `socket_snapshot()` for lifecycle phases.
+
+- `Trace.runtime: None` shares the containing operation's runtime while caches
+  remain fresh. Set `Some(runtime)` only when an independent root is intentional.
+- `target::Resolver::resolve_controlled` is an additive cooperative hook. The
+  default checks before and after legacy `resolve`; a blocked custom resolver
+  remains blocked. Wrap owned legacy implementations with
+  `target::BlockingResolver::new(resolver)` to bound caller waiting and unfinished
+  lookup admission. The system resolver uses that bounded native ownership while
+  preserving system hosts-file/NSS/search-domain lookup and first-seen order.
+  Hostname policy still runs before lookup; resolved-address policy follows it.
+- Capture `Session` gains `request_stop` and `shutdown_until`. Override both for
+  cooperative two-phase group cleanup. Their defaults preserve legacy shutdown
+  behavior and make no new preemption guarantee. Groups stop all sources first,
+  then pass one independent cleanup deadline to every join. Native unfinished
+  work retains its resource charge through eventual cleanup.
+- `analysis::Collector::finish_controlled` is additive. Its default wraps legacy
+  finalization and checks each trailing event. Implement it for large custom
+  finalizers that can check the supplied effective deadline internally.
+- `Sink::delivery()` defaults to `Delivery::Isolated`; arbitrary closure
+  acknowledgements still control execution synchronously through the bounded
+  worker boundary. Built-in collectors select `Cooperative`, consume no worker
+  admission, and run on the caller thread. `Runtime::new(0)` accepts those
+  collectors; it continues to refuse isolated workers. Opting a custom sink into
+  cooperative delivery promises prompt callbacks, not forced interruption.
+  Additive `Sink::publish_controlled(event, &Deadline)` defaults to `publish`;
+  adapters can preserve effective operation control through nested waits.
+  Isolated facade workers now retain admission through actual thread exit,
+  callback captures, TLS destruction, and opaque panic cleanup. Cancellation
+  returns without releasing unfinished work. Each independent runtime has a
+  separate bounded cleanup allocation matching its worker capacity (maximum
+  eight callback plus eight cleanup workers). `resources::ThreadCleanup` and
+  `ThreadJoinSlot` are additive netio APIs for pre-spawn cleanup reservation and
+  actual-join ownership; failed transfers stay retained and report that state.
+  `resources::executor_thread_snapshot` separately reports busy/idle/retiring
+  native executor slots, including completed handles awaiting dispatch pruning;
+  existing resource-grant snapshot meanings are unchanged.
+  Runtime snapshots count resource grants, not resident cleanup workers. See
+  [resource ownership](analysis-resources.md#effective-settings-and-resource-ownership).
+- Trusted CLI NDJSON sinks select cooperative delivery only when their writer is
+  already isolated. Generic callback acknowledgements, text isolation, record
+  order, and per-line write/flush visibility are unchanged. Effective operation
+  control reaches writer waits alongside invocation cancellation, including
+  invocations with no duration. Application NDJSON
+  emits and charges exact compact `result` bytes in one serialization; envelope,
+  diagnostics, and newline retain their previous accounting treatment. Text and
+  aggregate application accounting keep the existing measure.
+  Cancellation after a write starts cannot recall bytes, including an already
+  started `complete` record. Such a caller returns an error and retains unfinished
+  writer charges; consumers must also require a successful CLI exit status.
+- Numeric Layer 3 sends can use `ProviderSet::transmit(route, interface, transmit)`
+  and `Client::send_layer3`, through `TransmitProviders` / `TransmitSet`, without
+  supplying a capture implementation. Existing `PacketProviders` and `send`
+  remain available for workflows that may perform neighbor discovery. Explicit
+  Layer 2 is rejected by `send_layer3`; final-wire, route, MTU, and cumulative
+  budget validation remain shared.
+  Repeated sends wait for pacing before preparing the next packet, so a route or
+  MTU change during the wait is validated before transmission. A next-packet
+  rejection can therefore follow its pacing wait.
+
+An attempted TCP `DeadlineExpired` is a local unavailable observation, rather
+than transport silence, for adaptive control as well as port inference. Actual
+transport `TimedOut` retains its existing meaning. Raw capture observations now carry the qualification contract described below.
 
 ## Execution ownership and Rust names
 
@@ -65,14 +137,14 @@ codes, packet semantics, and historical schemas are unchanged.
 | Contract | beta.3 | Current main |
 | --- | --- | --- |
 | Packet JSON/YAML | `packetcraftr.packet/v1` | `packetcraftr.packet/v2` |
-| Command JSON/NDJSON | `packetcraftr.output/v2` | `packetcraftr.output/v17` |
+| Command JSON/NDJSON | `packetcraftr.output/v2` | `packetcraftr.output/v18` |
 
-Older packet documents are rejected. Output v6–v16 schemas stay frozen for
+Older packet documents are rejected. Output v6–v17 schemas stay frozen for
 historical evidence; see the [consumer policy](consumer-compatibility.md).
 
 ## Offline statistics (v17)
 
-Adopt `output::contract::SCHEMA_V17` for current producers. Core and output
+Adopt `output::contract::SCHEMA_V18` for current producers. Core and output
 statistics `Table` gain `Overview`; output `TableData::Overview` contains total
 counts and protocol/endpoint/conversation rows. Core `stats::Report` adds
 `protocol_count`, `endpoint_count`, and `conversation_count` fields; update
@@ -126,7 +198,7 @@ See [statistics](statistics.md) for sorting, CSV headers/units, and limitations.
     run scan, trace, and reverse DNS under one budget.
   - `client.scan_connect(request, sink)` runs socket scans under `Operation::Socket`
     and `SocketLimits` (`tcp::start_connect` returns `PendingConnect` under the
-    shared 16-worker pool). See [scanner evidence](scanner-evidence.md).
+    12-place TCP data allocation within the shared 16-place native root). See [scanner evidence](scanner-evidence.md).
 - **Send and replay:** `client.send(send::Request, sink)` supports `--axis`,
   `--repeat`, and `--rate` (`frames` and `passes_completed` replace single `frame`/`route`).
   `client.replay(Request::new(Source::stream(reader), routing, options), sink)`
@@ -385,7 +457,7 @@ for a row are in the sections above.
 
 | 0.5.0-beta.3 | Current main |
 | --- | --- |
-| `output::contract::SCHEMA_V2` | `output::contract::SCHEMA_V15` |
+| `output::contract::SCHEMA_V2` | `output::contract::SCHEMA_V18` |
 | `Command::require_format(format) -> Result<(), Error>` | `require_format(format) -> Result<Format, Error>` |
 | `impl clap::ValueEnum` for `output::contract::Format` and `output::stats::Table` | removed; declare your own value enum and convert with `From` |
 | `try_from_*`, `from_*`, and `complete_from_*` constructors on output types | `From`/`TryFrom`, yielding `output::envelope::Published<T>` where diagnostics or stats travel with the result (see [Output field types](#output-field-types)) |
@@ -394,7 +466,7 @@ for a row are in the sections above.
 
 Items introduced and removed entirely after beta.3 have no released migration.
 Pin a reviewed revision rather than depending on intermediate names. This cleanup
-changes provider composition only; CLI behavior and output/v15 remain unchanged:
+changes provider composition; the current producer family is output/v18:
 
 - `ProviderSet<R,N,C,T,P,H>` defaults UDP to `()`; full literals add `udp: ()`.
 - Replace `WithUdp<ProviderSet<R,N,C,T,P,H>,U>` with
@@ -410,5 +482,20 @@ changes provider composition only; CLI behavior and output/v15 remain unchanged:
 `completed()` for the acceptance-return marker. Replies captured during an exact
 successful native send can correlate; older or missing monotonic ingress cannot.
 `sent_at`/latency use submission start, not proven wire departure or causality.
-These semantics are retained in current output/v15; historical native evidence
+These semantics are retained in current output/v18; historical native evidence
 keeps its original schema identity. See [scanner timing](scanner-evidence.md).
+
+### Qualified scan measurements (output/v18)
+
+Read `ProbeEvidence::measurement` before interpreting absence of `reply`; update
+Rust struct literals with the appropriate typed measurement. New capture
+`Source` literals need `observation_quality` (use `Unknown` unless the provider
+explicitly reports local quality).
+Raw pipeline no-reply events are provisional until `Event::Qualification`;
+collectors apply these before endpoint inference. Exhaustive Rust event matches
+must handle the added variant. Capture providers may explicitly implement
+`Session::observation_quality`; the default keeps their quality unknown. This is
+an honest adapter default, not a stronger guarantee inferred from zero counters.
+See [consumer compatibility](consumer-compatibility.md#output-family-v18) for
+stream scope, terminal behavior, and the revised RTT partition. Frozen v17
+schemas/examples retain their former meanings.

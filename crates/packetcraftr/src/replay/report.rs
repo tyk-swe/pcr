@@ -45,6 +45,10 @@ pub struct Aggregate {
 pub struct Collector(Shared<Vec<FrameEvidence>>);
 
 impl Sink<Event> for Collector {
+    fn delivery(&self) -> crate::Delivery {
+        crate::Delivery::Cooperative
+    }
+
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {

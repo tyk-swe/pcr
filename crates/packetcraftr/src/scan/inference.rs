@@ -80,7 +80,7 @@ pub enum Rule {
     /// A stack-dependent TCP diagnostic conclusion.
     TcpDiagnostic(DiagnosticRule),
     /// No attempt observed the port: every attempt failed locally or at the
-    /// operation deadline. Not a port state.
+    /// operation deadline, or had insufficient acquisition coverage. Not a port state.
     OperationalFailure,
 }
 
@@ -355,7 +355,7 @@ pub struct Inference {
     /// Silent attempts beside a reply-based conclusion they do not share;
     /// silence is consistent with loss and neither supports nor contradicts.
     pub unanswered: Vec<u64>,
-    /// attempt_error that ended in an operational failure and observed nothing.
+    /// Attempts with operational failure or insufficient acquisition coverage.
     pub failed: Vec<u64>,
 }
 
@@ -364,7 +364,7 @@ pub struct Inference {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Attempt {
     pub(crate) sequence: u64,
-    pub(crate) reply: Option<Reply>,
+    pub(crate) measurement: super::Measurement<Reply>,
     pub(crate) tcp_scan: Option<TcpScan>,
     pub(crate) sctp_scan: Option<SctpScan>,
     pub(crate) tcp_window: Option<u16>,
@@ -380,14 +380,21 @@ pub(crate) fn raw(
         return None;
     }
     Some(conclude(attempts.into_iter().map(|attempt| {
+        let reply = match attempt.measurement {
+            super::Measurement::Response(reply) => Some(reply),
+            super::Measurement::NoReply(coverage) if coverage.permits_silence() => None,
+            super::Measurement::NoReply(_) | super::Measurement::Unavailable => {
+                return (attempt.sequence, None);
+            }
+        };
         let rule = match transport {
             Transport::Tcp => match attempt.tcp_scan.and_then(DiagnosticMethod::of) {
-                Some(method) => diagnostic_rule(method, attempt.reply, attempt.tcp_window),
-                None => syn_rule(attempt.reply),
+                Some(method) => diagnostic_rule(method, reply, attempt.tcp_window),
+                None => syn_rule(reply),
             },
-            Transport::Udp => udp_rule(attempt.reply),
-            Transport::Sctp => sctp_rule(attempt.sctp_scan.unwrap_or_default(), attempt.reply),
-            Transport::Ip => ip_protocol_rule(attempt.reply),
+            Transport::Udp => udp_rule(reply),
+            Transport::Sctp => sctp_rule(attempt.sctp_scan.unwrap_or_default(), reply),
+            Transport::Ip => ip_protocol_rule(reply),
             Transport::Icmp => unreachable!("ICMP echo is filtered above"),
         };
         (attempt.sequence, Some(rule))
@@ -499,6 +506,12 @@ const fn ip_protocol_rule(reply: Option<Reply>) -> Rule {
 /// Socket attempts; local errors and the operation deadline are failures.
 pub(crate) fn connect(attempts: impl IntoIterator<Item = (u64, Outcome)>) -> Inference {
     conclude(attempts.into_iter().map(|(sequence, outcome)| {
+        use super::measurement::Measurement;
+        let outcome = match outcome.measurement() {
+            Measurement::Response(outcome) => outcome,
+            Measurement::NoReply(_) => Outcome::TimedOut,
+            Measurement::Unavailable => return (sequence, None),
+        };
         let rule = match outcome {
             Outcome::Connected => Rule::ConnectConnected,
             Outcome::Refused => Rule::ConnectRefused,

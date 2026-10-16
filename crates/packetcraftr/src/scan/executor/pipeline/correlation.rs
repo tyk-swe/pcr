@@ -1,7 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{Pending, Planned};
+mod index;
+pub(super) use index::{CandidateIndex, charge as index_charge};
+
+use super::Pending;
+#[cfg(test)]
+use super::Planned;
 use crate::evidence::SentPacket;
 use crate::scan::{Classification, evidence::Observation, profile};
 use packetcraftr_netio::capture::RecordIdentity;
@@ -59,6 +64,77 @@ impl Best {
     }
 }
 
+pub(super) fn indexed_candidates<'p>(
+    possible: &[usize],
+    pending: &BTreeMap<usize, Pending>,
+    planned: impl Fn(usize) -> Option<&'p crate::scan::Probe>,
+    registry: &packetcraftr_core::registry::Registry,
+    decoded: &packetcraftr_core::decode::DecodedPacket,
+    native_interface: &packetcraftr_netio::interface::Id,
+    received: Instant,
+) -> Vec<(usize, Observation)> {
+    possible
+        .iter()
+        .filter_map(|index| {
+            let entry = pending.get(index)?;
+            if entry.sent.route().plan.decision.interface != *native_interface
+                || received < entry.sent.timing().freshness_marker().monotonic()
+                || received > entry.deadline
+            {
+                return None;
+            }
+            observe(
+                registry,
+                planned(*index)?,
+                &entry.sent.built().packet,
+                decoded,
+            )
+            .map(|observation| (*index, observation))
+        })
+        .collect()
+}
+
+pub(super) fn indexed_settled<'s, 'p>(
+    possible: &[usize],
+    mut sent: impl FnMut(usize) -> Option<&'s Arc<SentPacket>>,
+    planned: impl Fn(usize) -> Option<&'p crate::scan::Probe>,
+    registry: &packetcraftr_core::registry::Registry,
+    decoded: &packetcraftr_core::decode::DecodedPacket,
+    native_interface: &packetcraftr_netio::interface::Id,
+    received: Instant,
+) -> Vec<usize> {
+    possible
+        .iter()
+        .copied()
+        .filter(|index| {
+            sent(*index)
+                .zip(planned(*index))
+                .is_some_and(|(sent, probe)| {
+                    sent.route().plan.decision.interface == *native_interface
+                        && received >= sent.timing().freshness_marker().monotonic()
+                        && observe(registry, probe, &sent.built().packet, decoded).is_some()
+                })
+        })
+        .collect()
+}
+
+fn observe(
+    registry: &packetcraftr_core::registry::Registry,
+    probe: &crate::scan::Probe,
+    sent: &packetcraftr_core::packet::Packet,
+    response: &packetcraftr_core::decode::DecodedPacket,
+) -> Option<Observation> {
+    #[cfg(test)]
+    COMPARISONS.with(|count| count.set(count.get() + 1));
+    Observation::observe(registry, probe, sent, response)
+}
+
+#[cfg(test)]
+thread_local! {
+    static COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 pub(super) fn candidates(
     pending: &BTreeMap<usize, Pending>,
     planned: &[Planned<'_>],
@@ -88,6 +164,7 @@ pub(super) fn candidates(
 
 /// probe_error past their response window that a frame correlates with: the
 /// frame was captured after transmission but is too late to be their outcome.
+#[cfg(test)]
 pub(super) fn settled<'s>(
     settled: impl IntoIterator<Item = (usize, &'s Arc<SentPacket>)>,
     planned: &[Planned<'_>],

@@ -58,14 +58,16 @@ pub(in crate::platform) fn on_worker<T: Send + 'static>(
     let permit = crate::workers::shared()
         .admit(Class::Native)
         .map_err(refused)?;
-    let task =
-        permit
-            .spawn(move || query(&detached))
-            .map_err(|error| route::Error::OperatingSystem {
+    let task = permit
+        .spawn_with_control(&wait, move || query(&detached))
+        .map_err(|error| match wait.enforce() {
+            Err(interrupted) => route::Error::interrupted(interrupted, operation),
+            Ok(()) => route::Error::OperatingSystem {
                 operation: "start native route worker",
                 message: "the operating system refused the request".to_owned(),
                 source: Some(Source::new(error)),
-            })?;
+            },
+        })?;
     drop(permit);
     match task.wait(&wait) {
         Waited::Finished(Ok(result)) => result,

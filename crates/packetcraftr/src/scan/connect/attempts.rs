@@ -12,6 +12,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider, Stream as _};
 
 use super::super::error::probe_error;
+use super::super::measurement::Measurement;
 use super::super::{Error, Request, Stage};
 use super::planning::StagePlan;
 use super::{Outcome, ProbeEvidence, execution};
@@ -67,11 +68,7 @@ where
     let timeout = deadline.bounded_timeout(request.timeout)?;
     let admitted = clock.now();
     let scheduled_at = SystemTime::now();
-    let pending = match budget.start(
-        Arc::clone(provider),
-        endpoint,
-        &Deadline::new(timeout).with_cancellation(deadline.cancellation().cloned()),
-    ) {
+    let pending = match budget.start(Arc::clone(provider), endpoint, &deadline.for_wait(timeout)?) {
         Ok(pending) => pending,
         Err(tcp::Error::Capacity { .. }) => return Ok(None),
         Err(source) => return Err(execution(sequence, source)),
@@ -131,14 +128,18 @@ pub(super) fn connect_outcome(probe: &ProbeEvidence) -> super::super::adaptive::
     if !probe.attempted {
         return super::super::adaptive::Outcome::Omitted;
     }
-    match probe.outcome {
-        Outcome::Connected | Outcome::Refused => super::super::adaptive::Outcome::Reply {
-            latency: probe.elapsed,
-            responder: probe.endpoint.ip(),
-            control: false,
-        },
-        Outcome::TimedOut | Outcome::DeadlineExpired => super::super::adaptive::Outcome::Silent,
-        Outcome::Unreachable | Outcome::LocalError => super::super::adaptive::Outcome::Aborted,
+    match probe.outcome.measurement() {
+        Measurement::Response(Outcome::Connected | Outcome::Refused) => {
+            super::super::adaptive::Outcome::Reply {
+                latency: probe.elapsed,
+                responder: probe.endpoint.ip(),
+                control: false,
+            }
+        }
+        Measurement::NoReply(_) => super::super::adaptive::Outcome::Silent,
+        Measurement::Response(_) | Measurement::Unavailable => {
+            super::super::adaptive::Outcome::Aborted
+        }
     }
 }
 
@@ -225,3 +226,6 @@ fn socket_error(error: tcp::Error) -> io::Error {
         error => io::Error::other(error),
     }
 }
+
+#[cfg(test)]
+mod tests;

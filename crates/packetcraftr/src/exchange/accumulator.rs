@@ -38,6 +38,8 @@ pub(crate) type WorkflowResponseMatcher<'a> =
 pub(crate) type WorkflowStopPredicate<'a> = dyn FnMut(usize, &Packet, &DecodedPacket) -> bool + 'a;
 
 pub(crate) struct Accumulator {
+    pub(crate) ingress_unknown: bool,
+    refused_reply: bool,
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
     pub(super) pending_events: Vec<super::Event>,
     /// Ingress markers and correlation state for unsolicited events, in publication order.
@@ -89,6 +91,8 @@ pub(crate) enum ProcessOutcome {
 impl Accumulator {
     pub(crate) fn new(requests: usize) -> Self {
         Self {
+            ingress_unknown: false,
+            refused_reply: false,
             unsolicited: Vec::new(),
             pending_events: Vec::new(),
             unsolicited_ingress: Vec::new(),
@@ -184,7 +188,25 @@ impl Accumulator {
     }
 
     pub(super) fn refuse_reply(&mut self, request_index: usize, limit: &'static str) {
+        self.refused_reply = true;
         self.refused_replies[request_index].get_or_insert(limit);
+    }
+
+    pub(crate) fn observation_quality(
+        &self,
+        source: packetcraftr_netio::capture::ObservationQuality,
+    ) -> packetcraftr_netio::capture::ObservationQuality {
+        use packetcraftr_netio::capture::ObservationQuality;
+        // Local evidence retention can reject a positively matched reply even
+        // when the native queue reports no drops. A permissive overflow policy
+        // must not turn that refusal into a qualified interval of silence.
+        if self.refused_reply {
+            source.combine(ObservationQuality::Incomplete)
+        } else if self.ingress_unknown {
+            source.combine(ObservationQuality::Unknown)
+        } else {
+            source
+        }
     }
 
     /// A refused reply is not evidence of absence, so its request is not listed.
@@ -272,3 +294,6 @@ impl Accumulator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

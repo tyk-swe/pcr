@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::IpAddr;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -416,6 +416,8 @@ pub enum Error {
     #[error("zone resolution is unavailable with this resolver")]
     ZoneCapability { zone: Zone },
     #[error(transparent)]
+    Control(#[from] packetcraftr_core::error::BoundaryError),
+    #[error(transparent)]
     Policy(#[from] crate::policy::Error),
 }
 
@@ -487,6 +489,7 @@ impl Classified for Error {
                 Some("use a resolver that can enumerate interfaces for scoped targets"),
             ),
             Self::Policy(error) => error.classification(),
+            Self::Control(error) => error.classification(),
         }
     }
 
@@ -500,10 +503,27 @@ impl Classified for Error {
 
 /// Injectable hostname resolver. Implementations must stop once `limit`
 /// distinct addresses have been selected and report a typed overflow.
-/// Resolution is synchronous. Implementations own their I/O timeout; an
-/// operation deadline can stop subsequent work but cannot interrupt this call.
+/// The legacy `resolve` callback is synchronous. `resolve_controlled` checks
+/// control around that callback but cannot interrupt it. Override it with a
+/// cooperative implementation or use [`BlockingResolver`] for owned isolation.
 pub trait Resolver: Send + Sync {
     fn resolve(&self, hostname: &Hostname, limit: usize) -> Result<Vec<IpAddr>, Error>;
+
+    fn resolve_controlled(
+        &self,
+        hostname: &Hostname,
+        limit: usize,
+        deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<Vec<IpAddr>, Error> {
+        deadline
+            .enforce()
+            .map_err(packetcraftr_core::error::BoundaryError::from_error)?;
+        let result = self.resolve(hostname, limit);
+        deadline
+            .enforce()
+            .map_err(packetcraftr_core::error::BoundaryError::from_error)?;
+        result
+    }
 
     fn resolve_zone(
         &self,
@@ -527,14 +547,21 @@ pub struct SystemResolver;
 
 impl Resolver for SystemResolver {
     fn resolve(&self, hostname: &Hostname, limit: usize) -> Result<Vec<IpAddr>, Error> {
-        let resolved =
-            (hostname.as_str(), 0)
-                .to_socket_addrs()
-                .map_err(|source| Error::Resolver {
-                    hostname: hostname.to_string(),
-                    source: Box::new(source),
-                })?;
-        distinct_addresses(hostname, resolved.map(|address| address.ip()), limit)
+        self.resolve_controlled(
+            hostname,
+            limit,
+            &packetcraftr_core::budget::Deadline::new(packetcraftr_netio::deadline::MAX_WAIT),
+        )
+    }
+
+    fn resolve_controlled(
+        &self,
+        hostname: &Hostname,
+        limit: usize,
+        deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<Vec<IpAddr>, Error> {
+        let addresses = packetcraftr_netio::resolution::system(hostname.as_str(), limit, deadline)?;
+        distinct_addresses(hostname, addresses, limit)
     }
 
     fn resolve_zone(
@@ -549,6 +576,60 @@ impl Resolver for SystemResolver {
                 source,
             })?;
         resolve_zone_from(zone, interfaces.into_iter().map(|info| info.id))
+    }
+}
+
+/// An owned adapter for legacy blocking hostname resolvers. At most
+/// `netio::resolution::MAX_PENDING_LOOKUPS` invocations remain unfinished, also
+/// charged to the native root. Zone callbacks retain their cooperative contract.
+#[derive(Debug)]
+pub struct BlockingResolver<R>(std::sync::Arc<R>);
+
+impl<R> Clone for BlockingResolver<R> {
+    fn clone(&self) -> Self {
+        Self(std::sync::Arc::clone(&self.0))
+    }
+}
+
+impl<R> BlockingResolver<R> {
+    pub fn new(resolver: R) -> Self {
+        Self(std::sync::Arc::new(resolver))
+    }
+}
+
+impl<R: Resolver + 'static> Resolver for BlockingResolver<R> {
+    fn resolve(&self, hostname: &Hostname, limit: usize) -> Result<Vec<IpAddr>, Error> {
+        self.resolve_controlled(
+            hostname,
+            limit,
+            &packetcraftr_core::budget::Deadline::new(packetcraftr_netio::deadline::MAX_WAIT),
+        )
+    }
+
+    fn resolve_controlled(
+        &self,
+        hostname: &Hostname,
+        limit: usize,
+        deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<Vec<IpAddr>, Error> {
+        let resolver = std::sync::Arc::clone(&self.0);
+        let hostname = hostname.clone();
+        Ok(packetcraftr_netio::resolution::blocking_lookup(
+            deadline,
+            move || {
+                resolver
+                    .resolve(&hostname, limit)
+                    .map_err(packetcraftr_core::error::BoundaryError::from_error)
+            },
+        )?)
+    }
+
+    fn resolve_zone(
+        &self,
+        zone: &Zone,
+        deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<packetcraftr_netio::interface::Id, Error> {
+        self.0.resolve_zone(zone, deadline)
     }
 }
 

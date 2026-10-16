@@ -29,6 +29,12 @@ pub(crate) trait Classifier {
     type Observation;
     type Event;
 
+    fn observation_quality(
+        &mut self,
+        _quality: Option<packetcraftr_netio::capture::ObservationQuality>,
+    ) {
+    }
+
     fn sent_matches(&self, probe: &Self::Probe, sent: &Packet) -> bool;
     fn classify(
         &self,
@@ -179,6 +185,7 @@ where
     ) -> Result<ControlFlow<()>, E> {
         self.enforce(deadline)?;
         let Evidence {
+            observation_quality,
             permit,
             sent,
             mut responses,
@@ -193,6 +200,7 @@ where
                 crate::execution::Failure::InvalidEvidence(crate::evidence::Error::PermitMismatch),
             ));
         }
+        self.classifier.observation_quality(observation_quality);
         self.record_diagnostics(diagnostics, deadline)?;
         self.enforce(deadline)?;
         let mut selector = ResponseSelector::new(&mut responses);

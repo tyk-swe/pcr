@@ -261,6 +261,10 @@ pub struct Session {
 }
 
 impl capture::Session for Session {
+    fn observation_quality(&self) -> capture::ObservationQuality {
+        capture::ObservationQuality::NoReportedLoss
+    }
+
     fn metadata(&self) -> &capture::Metadata {
         &self.metadata
     }

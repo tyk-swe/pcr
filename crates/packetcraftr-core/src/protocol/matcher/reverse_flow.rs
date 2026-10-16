@@ -31,6 +31,10 @@ impl ReverseFlowMatcher {
 }
 
 impl ResponseMatcher for ReverseFlowMatcher {
+    fn uses_builtin_response_identity(&self) -> bool {
+        true
+    }
+
     fn matches(&self, request: &Packet, response: &Packet) -> Option<Match> {
         let transport = QuotedTransport::of(self.protocol)?;
         if quoted_icmp_error(request, response, transport).is_some() {

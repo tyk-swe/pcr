@@ -20,7 +20,7 @@ use std::{
 
 use crate::deadline::{POLL_INTERVAL, expires_at, remaining_before};
 use futures_util::future::{Either, select};
-use packetcraftr_core::budget::{Cancellation, Cancelled, Deadline};
+use packetcraftr_core::budget::{Deadline, Interrupted};
 use rtnetlink::{Handle, new_connection};
 
 use crate::{
@@ -33,6 +33,9 @@ use crate::{
 };
 
 const NETLINK_QUEUE_DEPTH: usize = crate::workers::CAPACITY;
+// Namespace services are a bounded cache, rather than immortal historical work.
+const RESIDENT_CAPACITY: usize = crate::workers::CAPACITY / 4;
+const IDLE_RETIREMENT: Duration = Duration::from_millis(250);
 
 type OperationResult = Result<Box<dyn Any + Send>, route::Error>;
 type OperationFuture = Pin<Box<dyn Future<Output = OperationResult> + Send>>;
@@ -42,15 +45,13 @@ struct NetlinkRequest {
     operation: Operation,
     respond: SyncSender<OperationResult>,
     deadline: Instant,
-    cancellation: Option<Cancellation>,
+    control: Arc<Deadline>,
 }
 
 struct WorkerSlot {
     generation: u64,
     inbox: Arc<Inbox>,
     worker: Task<()>,
-    // Pin the namespace identity even after its original callers leave.
-    _namespace: File,
 }
 
 struct Inbox {
@@ -62,9 +63,11 @@ struct InboxState {
     queue: VecDeque<NetlinkRequest>,
     serving: bool,
     owned: bool,
+    active: bool,
 }
 
 enum Refused {
+    Retired(NetlinkRequest),
     Stopped(NetlinkRequest),
     Interrupted(route::Error),
 }
@@ -80,6 +83,7 @@ impl Inbox {
                 queue: VecDeque::new(),
                 serving: true,
                 owned: true,
+                active: false,
             }),
             changed: Condvar::new(),
         }
@@ -93,46 +97,75 @@ impl Inbox {
     ) -> Result<(), Refused> {
         let mut state = lock(&self.state);
         loop {
+            let remaining = wait_remaining(caller, deadline, "submitting the netlink request")
+                .map_err(Refused::Interrupted)?;
             if !state.serving {
-                return Err(Refused::Stopped(request));
+                return Err(if state.owned {
+                    Refused::Stopped(request)
+                } else {
+                    Refused::Retired(request)
+                });
             }
             if state.queue.len() < NETLINK_QUEUE_DEPTH {
                 state.queue.push_back(request);
                 self.changed.notify_all();
                 return Ok(());
             }
-            let Some(remaining) = remaining_before(deadline) else {
-                return Err(Refused::Interrupted(netlink_timeout(
-                    "submitting the netlink request",
-                )));
-            };
             // The caller's cancellation has no waker, so the wait is sliced to notice it.
             state = self
                 .changed
                 .wait_timeout(state, remaining.min(POLL_INTERVAL))
                 .unwrap_or_else(PoisonError::into_inner)
                 .0;
-            if let Err(cancelled) = caller.check_cancelled() {
-                return Err(Refused::Interrupted(cancelled.into()));
-            }
         }
     }
 
     fn next(&self) -> Option<NetlinkRequest> {
+        self.next_with_idle(IDLE_RETIREMENT)
+    }
+
+    fn next_with_idle(&self, idle: Duration) -> Option<NetlinkRequest> {
         let mut state = lock(&self.state);
+        let expires = Instant::now() + idle;
         loop {
             if let Some(request) = state.queue.pop_front() {
+                state.active = true;
                 self.changed.notify_all();
                 return Some(request);
             }
             if !state.owned {
                 return None;
             }
+            let Some(remaining) = remaining_before(expires) else {
+                // Submission and retirement hold this same lock: a request is
+                // either queued on a reachable worker or returned undelivered.
+                state.serving = false;
+                state.owned = false;
+                self.changed.notify_all();
+                return None;
+            };
             state = self
                 .changed
-                .wait(state)
-                .unwrap_or_else(PoisonError::into_inner);
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
         }
+    }
+
+    fn retire_if_idle(&self) -> bool {
+        let mut state = lock(&self.state);
+        if state.active || !state.queue.is_empty() {
+            return false;
+        }
+        state.serving = false;
+        state.owned = false;
+        self.changed.notify_all();
+        true
+    }
+
+    fn complete_request(&self) {
+        lock(&self.state).active = false;
+        self.changed.notify_all();
     }
 
     fn abandon(&self) {
@@ -148,6 +181,14 @@ impl Inbox {
         };
         self.changed.notify_all();
         drop(queued);
+    }
+}
+
+struct RequestInFlight<'a>(&'a Inbox);
+
+impl Drop for RequestInFlight<'_> {
+    fn drop(&mut self) {
+        self.0.complete_request();
     }
 }
 
@@ -239,17 +280,21 @@ where
         }),
         respond,
         deadline,
-        cancellation: caller.cancellation().cloned(),
+        control: Arc::new(caller.clone()),
     };
     let mut restarted = false;
     loop {
-        caller.check_cancelled()?;
-        remaining_before(deadline)
-            .ok_or_else(|| netlink_timeout("submitting the netlink request"))?;
+        wait_remaining(caller, deadline, "submitting the netlink request")?;
         let (generation, inbox) = worker_inbox(&namespace, caller, deadline)?;
         match inbox.submit(request, caller, deadline) {
             Ok(()) => break,
             Err(Refused::Interrupted(error)) => return Err(error),
+            // Healthy retirement is expected cache churn, not worker failure.
+            // Retrying remains bounded by the original caller control.
+            Err(Refused::Retired(returned)) => {
+                request = returned;
+                restart_worker(&namespace, generation, caller, deadline)?;
+            }
             // The request came back undelivered, so it is safe to resubmit to a replacement.
             Err(Refused::Stopped(returned)) => {
                 request = returned;
@@ -262,13 +307,13 @@ where
         }
     }
     let result = loop {
-        let Some(remaining) = remaining_before(deadline) else {
-            return Err(netlink_timeout("waiting for the netlink response"));
-        };
-        match finished.recv_timeout(remaining.min(POLL_INTERVAL)) {
+        let remaining = wait_remaining(caller, deadline, "waiting for the netlink response")?;
+        let received = finished.recv_timeout(remaining.min(POLL_INTERVAL));
+        wait_remaining(caller, deadline, "waiting for the netlink response")?;
+        match received {
             Ok(result) => break result,
             Err(mpsc::RecvTimeoutError::Disconnected) => return Err(netlink_worker_panicked()),
-            Err(mpsc::RecvTimeoutError::Timeout) => caller.check_cancelled()?,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
     };
     result.and_then(|value| {
@@ -284,19 +329,17 @@ where
 fn shared_workers(caller: &Deadline, deadline: Instant) -> Result<Checkout, route::Error> {
     let mut workers = lock(&REGISTRY.workers);
     loop {
+        let remaining = wait_remaining(caller, deadline, "waiting for netlink worker admission")?;
         if let Some(checked_out) = workers.take() {
             return Ok(Checkout {
                 workers: Some(checked_out),
             });
         }
-        let remaining = remaining_before(deadline)
-            .ok_or_else(|| netlink_timeout("waiting for netlink worker admission"))?;
         workers = REGISTRY
             .returned
             .wait_timeout(workers, remaining.min(POLL_INTERVAL))
             .unwrap_or_else(PoisonError::into_inner)
             .0;
-        caller.check_cancelled()?;
     }
 }
 
@@ -305,22 +348,66 @@ fn worker_inbox(
     caller: &Deadline,
     deadline: Instant,
 ) -> Result<(u64, Arc<Inbox>), route::Error> {
+    wait_remaining(caller, deadline, "reserving netlink namespace worker")?;
     let mut workers = shared_workers(caller, deadline)?;
-    // A finished worker's pooled thread has already returned to the pool.
+    ensure_worker(
+        &mut workers,
+        namespace,
+        caller,
+        deadline,
+        workers::shared(),
+        start_worker,
+    )
+}
+
+fn ensure_worker(
+    workers: &mut Workers,
+    namespace: &Namespace,
+    caller: &Deadline,
+    deadline: Instant,
+    pool: &Arc<workers::Pool>,
+    start: impl FnOnce(&Namespace, &Deadline, Instant) -> Result<WorkerSlot, route::Error>,
+) -> Result<(u64, Arc<Inbox>), route::Error> {
+    wait_remaining(caller, deadline, "reserving netlink namespace worker")?;
+    // A finished service no longer needs a resident registry entry. Its pooled
+    // executor can still retain the namespace until actual thread retirement.
     workers.retain(|_, worker| worker.worker.try_take().is_none());
     if !workers.contains_key(&namespace.id) {
+        // Reclaim healthy idle historical services before refusing a fresh
+        // namespace. Keep the slot and descriptor owned until actual completion.
+        while workers.len() >= RESIDENT_CAPACITY
+            || pool.snapshot().active >= pool.snapshot().capacity
+        {
+            let idle = workers
+                .iter()
+                .find_map(|(id, worker)| worker.inbox.retire_if_idle().then_some(*id));
+            let Some(idle) = idle else { break };
+            let worker = workers.get_mut(&idle).expect("the idle worker is retained");
+            let remaining = wait_remaining(caller, deadline, "retiring idle netlink worker")?;
+            let wait = caller
+                .for_wait(remaining)
+                .map_err(|_| netlink_timeout("retiring idle netlink worker"))?;
+            worker.worker.wait_ready(&wait);
+            if worker.worker.try_take().is_none() {
+                worker.worker.retention_marker().mark_retained();
+                check_control(caller, "retiring idle netlink worker")?;
+                return Err(netlink_timeout("retiring idle netlink worker"));
+            }
+            workers.remove(&idle);
+        }
         check_namespace_capacity(workers.len())?;
-        let worker = start_worker(namespace, deadline)?;
+        let worker = start(namespace, caller, deadline)?;
         workers.insert(namespace.id, worker);
     }
     let worker = workers
         .get(&namespace.id)
         .expect("the namespace worker was initialized");
+    wait_remaining(caller, deadline, "reserving netlink namespace worker")?;
     Ok((worker.generation, Arc::clone(&worker.inbox)))
 }
 
 fn check_namespace_capacity(count: usize) -> Result<(), route::Error> {
-    if count >= crate::workers::CAPACITY {
+    if count >= RESIDENT_CAPACITY {
         return Err(route::Error::OperatingSystem {
             operation: "reserve netlink namespace worker",
             message: "network namespace worker capacity is exhausted".to_owned(),
@@ -341,65 +428,107 @@ fn restart_worker(
         .get(&namespace.id)
         .is_some_and(|worker| worker.generation != generation)
     {
+        wait_remaining(caller, deadline, "restarting netlink worker")?;
         return Ok(());
     }
     if let Some(dead) = workers.remove(&namespace.id) {
-        settle(dead.worker, deadline);
+        settle(dead.worker, caller, deadline);
     }
     check_namespace_capacity(workers.len())?;
-    let worker = start_worker(namespace, deadline)?;
+    let worker = start_worker(namespace, caller, deadline)?;
     workers.insert(namespace.id, worker);
+    wait_remaining(caller, deadline, "restarting netlink worker")?;
     Ok(())
 }
 
-fn start_worker(namespace: &Namespace, deadline: Instant) -> Result<WorkerSlot, route::Error> {
-    remaining_before(deadline).ok_or_else(|| netlink_timeout("initializing netlink"))?;
+fn start_worker(
+    namespace: &Namespace,
+    caller: &Deadline,
+    deadline: Instant,
+) -> Result<WorkerSlot, route::Error> {
+    start_worker_with(namespace, caller, deadline, workers::shared(), run_worker)
+}
+
+fn start_worker_with(
+    namespace: &Namespace,
+    caller: &Deadline,
+    deadline: Instant,
+    pool: &Arc<workers::Pool>,
+    initialize: impl FnOnce(&SyncSender<Result<(), route::Error>>, &Inbox) + Send + 'static,
+) -> Result<WorkerSlot, route::Error> {
+    let remaining = wait_remaining(caller, deadline, "initializing netlink")?;
+    let dispatch_control = caller
+        .for_wait(remaining)
+        .map_err(|_| netlink_timeout("initializing netlink"))?;
     let namespace = namespace
         .file
         .try_clone()
         .map_err(|error| os_error("retain caller network namespace", error))?;
-    let permit = workers::shared().admit(Class::Native).map_err(refused)?;
+    let permit = pool.admit(Class::Native).map_err(refused)?;
     let (setup, initialized) = mpsc::sync_channel(1);
     let inbox = Arc::new(Inbox::new());
     let worker_inbox = Arc::clone(&inbox);
     // Dispatch from the caller so the pooled thread is in the namespace the descriptor names.
     let worker = permit
-        .spawn(move || run_worker(&setup, &worker_inbox))
-        .map_err(|error| os_error("spawn netlink worker", error))?;
+        .spawn_with_control(&dispatch_control, move || {
+            // Pin identity through service cleanup, then close the descriptor
+            // before the worker releases its native root admission.
+            let _namespace = namespace;
+            let _stop = StopOnExit(&worker_inbox);
+            initialize(&setup, &worker_inbox);
+        })
+        .map_err(|error| match dispatch_control.enforce() {
+            Err(interrupted) => route::Error::interrupted(interrupted, "initializing netlink"),
+            Ok(()) => os_error("spawn netlink worker", error),
+        })?;
     drop(permit);
-    match initialized.recv_timeout(remaining_before(deadline).unwrap_or_default()) {
+    let result = loop {
+        let remaining = match wait_remaining(caller, deadline, "initializing netlink") {
+            Ok(remaining) => remaining,
+            Err(error) => break Err(error),
+        };
+        let received = initialized.recv_timeout(remaining.min(POLL_INTERVAL));
+        if let Err(error) = wait_remaining(caller, deadline, "initializing netlink") {
+            break Err(error);
+        }
+        match received {
+            Ok(result) => break Ok(result),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break Err(netlink_worker_panicked()),
+        }
+    };
+    match result {
         Ok(Ok(())) => Ok(WorkerSlot {
             generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
             inbox,
             worker,
-            _namespace: namespace,
         }),
         Ok(Err(error)) => {
-            settle(worker, deadline);
+            settle(worker, caller, deadline);
             Err(error)
         }
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            settle(worker, deadline);
-            Err(netlink_worker_panicked())
-        }
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            // The worker may still be initializing; abandoning its inbox makes it stop on its own.
+        Err(error) => {
+            // Initialization may still be running. Stop waiting cooperatively,
+            // but retain its charge until the initializer and cleanup return.
             worker.retention_marker().mark_retained();
             inbox.abandon();
-            Err(netlink_timeout("initializing netlink"))
+            settle(worker, caller, deadline);
+            Err(error)
         }
     }
 }
 
-fn settle(worker: Task<()>, deadline: Instant) {
+fn settle(worker: Task<()>, caller: &Deadline, deadline: Instant) {
     let remaining = remaining_before(deadline).unwrap_or_default();
-    if let Waited::Pending(worker) = worker.wait(&Deadline::new(remaining)) {
+    let wait = caller
+        .for_wait(remaining)
+        .unwrap_or_else(|_| Deadline::new(Duration::ZERO));
+    if let Waited::Pending(worker) = worker.wait(&wait) {
         worker.retention_marker().mark_retained();
     }
 }
 
 fn run_worker(setup: &SyncSender<Result<(), route::Error>>, inbox: &Inbox) {
-    let _stop = StopOnExit(inbox);
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()
@@ -444,9 +573,14 @@ fn serve_requests(
         operation,
         respond,
         deadline,
-        cancellation,
+        control,
     }) = inbox.next()
     {
+        let _in_flight = RequestInFlight(inbox);
+        if let Err(error) = check_control(&control, STARTING_OPERATION) {
+            let _ = respond.send(Err(error));
+            continue;
+        }
         if remaining_before(deadline).is_none() {
             let _ = respond.send(Err(netlink_timeout(STARTING_OPERATION)));
             continue;
@@ -464,16 +598,19 @@ fn serve_requests(
                 }
             }
         }
-        let Some(remaining) = remaining_before(deadline) else {
-            let _ = respond.send(Err(netlink_timeout(STARTING_OPERATION)));
-            continue;
+        let remaining = match wait_remaining(&control, deadline, STARTING_OPERATION) {
+            Ok(remaining) => remaining,
+            Err(error) => {
+                let _ = respond.send(Err(error));
+                continue;
+            }
         };
         let (result, discard_connection) = match catch_unwind(AssertUnwindSafe(|| {
             runtime.block_on(await_netlink_operation(
                 operation(handle.clone()),
                 &mut connection,
                 remaining,
-                cancellation.as_ref(),
+                &control,
             ))
         })) {
             Ok(result) => {
@@ -503,36 +640,38 @@ async fn await_netlink_operation<F, T>(
     operation: F,
     connection: &mut tokio::task::JoinHandle<()>,
     timeout: Duration,
-    cancellation: Option<&Cancellation>,
+    control: &Deadline,
 ) -> Result<T, route::Error>
 where
     F: Future<Output = Result<T, route::Error>>,
 {
+    check_control(control, EXECUTING_OPERATION)?;
     let operation = std::pin::pin!(tokio::time::timeout(timeout, operation));
-    let cancelled = std::pin::pin!(cancelled(cancellation));
-    match select(connection, select(operation, cancelled)).await {
-        Either::Left((joined, _)) => {
-            joined.map_err(|error| os_error("drive netlink connection", error))?;
-            Err(route::Error::OperatingSystem {
+    let interrupted = std::pin::pin!(interrupted(control));
+    let result = match select(connection, select(operation, interrupted)).await {
+        Either::Left((joined, _)) => match joined {
+            Ok(()) => Err(route::Error::OperatingSystem {
                 operation: "drive netlink connection",
                 message: "route netlink connection stopped".to_owned(),
                 source: None,
-            })
-        }
+            }),
+            Err(error) => Err(os_error("drive netlink connection", error)),
+        },
         Either::Right((Either::Left((result, _)), _)) => {
-            result.map_err(|_| netlink_timeout(EXECUTING_OPERATION))?
+            result.unwrap_or_else(|_| Err(netlink_timeout(EXECUTING_OPERATION)))
         }
-        Either::Right((Either::Right((cancelled, _)), _)) => Err(cancelled.into()),
-    }
+        Either::Right((Either::Right((interrupted, _)), _)) => {
+            Err(route::Error::interrupted(interrupted, EXECUTING_OPERATION))
+        }
+    };
+    check_control(control, EXECUTING_OPERATION)?;
+    result
 }
 
-async fn cancelled(cancellation: Option<&Cancellation>) -> Cancelled {
-    let Some(cancellation) = cancellation else {
-        return std::future::pending().await;
-    };
+async fn interrupted(control: &Deadline) -> Interrupted {
     loop {
-        if let Err(cancelled) = cancellation.check() {
-            return cancelled;
+        if let Err(interrupted) = control.enforce() {
+            return interrupted;
         }
         tokio::time::sleep(POLL_INTERVAL).await;
     }
@@ -550,3 +689,21 @@ const EXECUTING_OPERATION: &str = "executing the netlink operation";
 fn netlink_timeout(operation: &'static str) -> route::Error {
     route::Error::DeadlineExceeded { operation }
 }
+
+fn check_control(caller: &Deadline, operation: &'static str) -> Result<(), route::Error> {
+    caller
+        .enforce()
+        .map_err(|interrupted| route::Error::interrupted(interrupted, operation))
+}
+
+fn wait_remaining(
+    caller: &Deadline,
+    deadline: Instant,
+    operation: &'static str,
+) -> Result<Duration, route::Error> {
+    check_control(caller, operation)?;
+    remaining_before(deadline).ok_or_else(|| netlink_timeout(operation))
+}
+
+#[cfg(test)]
+mod tests;

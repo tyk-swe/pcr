@@ -12,6 +12,7 @@ pub mod headers;
 pub mod link;
 mod matcher;
 pub mod network;
+pub mod response_identity;
 pub mod semantics;
 pub mod transport;
 pub mod tunnel;

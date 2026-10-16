@@ -11,21 +11,27 @@ use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
 
+#[cfg(test)]
+pub(crate) use connect::start_on;
 pub use connect::{ConnectBudget, PendingConnect, start_connect};
 pub use error::Error;
 pub use exchange::exchange;
 
-/// Process-wide connections that may hold a worker or an open socket at once.
-pub const MAX_PENDING_CONNECTIONS: usize = crate::resources::WORKER_CAPACITY;
+/// Process-wide data allocation for connecting jobs and established sockets.
+pub const MAX_PENDING_CONNECTIONS: usize = crate::resources::TCP_DATA_CAPACITY;
 
-/// A socket and its worker-pool permit. The socket closes before the permit.
+/// A socket and its root/data ownership. The socket closes before admission releases.
 pub struct Connection<S> {
     inner: S,
-    _permit: crate::workers::Permit,
-    _lease: Option<connect::Lease>,
+    _permit: crate::workers::SocketPermit,
+    _lease: Option<std::sync::Arc<connect::Lease>>,
 }
 impl<S> Connection<S> {
-    fn new(inner: S, permit: crate::workers::Permit, lease: Option<connect::Lease>) -> Self {
+    fn new(
+        inner: S,
+        permit: crate::workers::SocketPermit,
+        lease: Option<std::sync::Arc<connect::Lease>>,
+    ) -> Self {
         Self {
             inner,
             _permit: permit,

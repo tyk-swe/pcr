@@ -1,19 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::Duration;
+mod feed;
 
 use packetcraftr_core::budget::Deadline;
 
 use crate::clock::Clock;
-use crate::execution::pause;
 use crate::probe::Batch;
 use crate::probe::runner::BatchEvidence;
 use crate::target::SelectedAddress;
 
 use super::approval::ApprovedScan;
 use super::pacing::{Owed, settle};
-use super::pipelined::{add_stats, drive_pipeline, pipeline_options};
+use super::pipelined::{add_stats, pipeline_options};
 use crate::probe::{self, enforce_deadline};
 use crate::scan::Error;
 use crate::scan::error::probe_error;
@@ -76,14 +75,20 @@ pub(crate) fn adaptive_reservation(
     crate::scan::adaptive::state_charge(
         targets.len(),
         endpoints_per_host,
-        request.max_in_flight,
+        request
+            .max_in_flight
+            .min(targets.len().saturating_mul(endpoints_per_host)),
         crate::scan::adaptive::scoped_bytes(targets),
         shared,
     )
 }
 
-pub(super) fn check_adaptive_prepared(request: &Request, reservation: usize) -> Result<(), Error> {
-    let wave = request.max_in_flight.saturating_mul(
+pub(super) fn check_adaptive_prepared(
+    request: &Request,
+    reservation: usize,
+    window: usize,
+) -> Result<(), Error> {
+    let wave = window.saturating_mul(
         std::mem::size_of::<Batch<Probe>>().saturating_add(std::mem::size_of::<Probe>()),
     );
     if reservation.saturating_add(wave) > request.limits.max_prepared_bytes {
@@ -103,51 +108,81 @@ pub(super) fn admit_adaptive<E: Pipelined>(
     deadline: &Deadline,
     approved: &ApprovedScan,
     reservation: usize,
-) -> Result<(), Error> {
+) -> Result<[crate::scan::executor::AdaptiveAdmission; 2], Error> {
     let discovery = if request.discovery.runs() {
         request.discovery.probes.as_slice()
     } else {
         &[]
     };
-    for (endpoints, stage, first_sequence) in [
+    let mut summaries = [
+        crate::scan::executor::AdaptiveAdmission::new(0),
+        crate::scan::executor::AdaptiveAdmission::new(0),
+    ];
+    for (stage_index, (endpoints, stage, first_sequence)) in [
         (discovery, Stage::Discovery, 0u64),
         (
             approved.endpoints.as_slice(),
             Stage::Scan,
             probe_count(approved.targets.len(), discovery.len(), request.attempts)? as u64,
         ),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         if approved.targets.is_empty() || endpoints.is_empty() {
             continue;
         }
-        check_adaptive_prepared(request, reservation)?;
-        let options = pipeline_options(request, deadline, crate::Stats::default(), reservation)?;
         let wave_len = request
             .max_in_flight
             .min(approved.targets.len().saturating_mul(endpoints.len()))
             .max(1);
         let mut admission = crate::scan::executor::AdaptiveAdmission::new(wave_len);
-        let mut batches = Vec::with_capacity(wave_len);
+        // Admission does not need an acquisition group. Inspect a bounded
+        // source-sized chunk even when the requested execution window is larger.
+        let admission_chunk = wave_len.min(packetcraftr_netio::capture::MAX_SOURCES);
+        let previous_summaries = summaries.iter().fold(0usize, |bytes, summary| {
+            bytes.saturating_add(summary.retained_bytes())
+        });
+        check_adaptive_prepared(
+            request,
+            reservation.saturating_add(previous_summaries),
+            admission_chunk,
+        )?;
+        let mut admit =
+            |batches: &[Batch<Probe>], summary: &mut crate::scan::executor::AdaptiveAdmission| {
+                let held = reservation
+                    .saturating_add(previous_summaries)
+                    .saturating_add(summary.retained_bytes());
+                let options = pipeline_options(request, deadline, crate::Stats::default(), held)?;
+                executor
+                    .admit_adaptive_pipeline(batches, &options, summary)
+                    .map_err(|source| Error::PipelineExecution { source })
+            };
+        let mut batches = Vec::with_capacity(admission_chunk);
         for batch in adaptive_batches(request, &approved.targets, endpoints, stage, first_sequence)
         {
             batches.push(batch);
-            if batches.len() == wave_len {
-                executor
-                    .admit_adaptive_pipeline(&batches, &options, &mut admission)
-                    .map_err(|source| Error::PipelineExecution { source })?;
+            if batches.len() == admission_chunk {
+                admit(&batches, &mut admission)?;
                 batches.clear();
             }
         }
         if !batches.is_empty() {
-            executor
-                .admit_adaptive_pipeline(&batches, &options, &mut admission)
-                .map_err(|source| Error::PipelineExecution { source })?;
+            admit(&batches, &mut admission)?;
         }
-        admission
-            .check(wave_len, approved.targets.len(), &options)
+        summaries[stage_index] = admission;
+    }
+    let summary_bytes = summaries.iter().fold(0usize, |bytes, summary| {
+        bytes.saturating_add(summary.retained_bytes())
+    });
+    let options = pipeline_options(request, deadline, crate::Stats::default(), reservation)?;
+    for summary in &mut summaries {
+        summary.reserve_summaries(summary_bytes);
+        summary
+            .check(request.max_in_flight, approved.targets.len(), &options)
             .map_err(|source| Error::PipelineExecution { source })?;
     }
-    Ok(())
+    Ok(summaries)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -164,6 +199,8 @@ pub(super) fn execute_adaptive<E, C, F>(
     first_sequence: u64,
     owed: &mut Owed,
     reservation: usize,
+    admission: &crate::scan::executor::AdaptiveAdmission,
+    preceding: &crate::Stats,
 ) -> Result<crate::Stats, Error>
 where
     E: Pipelined,
@@ -175,155 +212,45 @@ where
         return Ok(stats);
     }
     enforce_deadline(probe_error, deadline)?;
-    let mut work = controller.open_stage(
-        targets,
-        endpoints.len(),
-        request.attempts,
-        first_sequence,
-        clock.now(),
+    settle(request, clock, deadline, owed, &mut stats)?;
+    let mut prefix = preceding.clone();
+    add_stats(&mut prefix, &stats, first_sequence)?;
+    let mut options = pipeline_options(request, deadline, prefix, reservation)?;
+    options.max_in_flight = options
+        .max_in_flight
+        .min(targets.len().saturating_mul(endpoints.len()))
+        .max(1);
+    let attempts = probe_count(targets.len(), endpoints.len(), request.attempts)?;
+    let mut feed = feed::Feed::new(
+        request,
+        feed::StageInput {
+            targets,
+            endpoints,
+            stage,
+            first_sequence,
+        },
+        deadline,
+        clock,
+        evidence,
+        controller,
     );
-    let state_charge = reservation;
-    loop {
-        enforce_deadline(probe_error, deadline)?;
-        let now = clock.now();
-        let remaining = deadline.remaining().map_err(|error| {
-            (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error))
-        })?;
-        let operation_end = now.checked_add(remaining).ok_or(Error::DurationLimit {
-            actual: Duration::MAX,
-            limit: request.limits.max_duration,
-        })?;
-        let capacity = controller.window();
-        let wave = controller.select(&mut work, now, operation_end, capacity);
-        evidence.release_responses(controller.take_canceled_responses(&mut work));
-        if wave.selections.is_empty() {
-            if wave.done {
-                break;
-            }
-            let wait = wave
-                .next_ready
-                .map_or(Duration::from_millis(1), |ready| {
-                    ready.saturating_duration_since(now)
-                })
-                .min(Duration::from_millis(5));
-            pause(deadline, clock, wait).map_err(|paused| paused.into_error(probe_error, 0))?;
-            add_stats(
-                &mut stats,
-                &crate::Stats {
-                    elapsed: wait,
-                    ..crate::Stats::default()
-                },
-                0,
-            )?;
-            continue;
-        }
-        for selection in &wave.selections {
-            controller.admitted(&mut work, *selection);
-        }
-        settle(request, clock, deadline, owed, &mut stats)?;
-        let mut batches = Vec::with_capacity(wave.selections.len());
-        let mut host_deadlines = Vec::with_capacity(wave.selections.len());
-        for selection in &wave.selections {
-            batches.push(Batch::single(
-                crate::scan::plan::planned_probe(
-                    request,
-                    selection.sequence,
-                    stage,
-                    &targets[selection.slot],
-                    endpoints[selection.endpoint],
-                    selection.attempt,
-                ),
-                selection.timeout,
-            ));
-            host_deadlines.push(Some(selection.host_deadline));
-        }
-        let outcome = drive_pipeline(
-            request,
-            executor,
-            clock,
-            evidence,
-            deadline,
-            &batches,
-            host_deadlines,
-            stats.clone(),
-            state_charge,
-        )?;
-        for (completed, dropped) in outcome.completed.iter().zip(&outcome.omitted) {
-            if !completed && !dropped {
-                return Err(Error::InvalidEvidence {
-                    sequence: 0,
-                    message: "pipeline left an adaptive wave entry unsettled".to_owned(),
-                });
-            }
-        }
-        let sent = outcome.confirmed.iter().filter(|sent| **sent).count() as u64;
-        if outcome.stats.packets_attempted != sent
-            || outcome.stats.packets_completed != sent
-            || outcome.stats.bytes != outcome.sent_bytes
-        {
-            return Err(Error::InvalidEvidence {
-                sequence: 0,
-                message: "pipeline completion statistics disagree with validated sends/outcomes"
-                    .to_owned(),
-            });
-        }
-        add_stats(&mut stats, &outcome.stats, 0)?;
-        if outcome.stats.packets_attempted > 0 {
-            owed.owe(1, None);
-        }
-        controller.observe_active(outcome.peak_pending);
-        let mut replies: std::collections::HashMap<u64, crate::scan::evidence::Feedback> =
-            std::collections::HashMap::new();
-        for feedback in take_feedback(evidence) {
-            replies
-                .entry(feedback.sequence)
-                .and_modify(|kept| {
-                    if feedback.received_at < kept.received_at {
-                        *kept = feedback;
-                    }
-                })
-                .or_insert(feedback);
-        }
-        let settled_at = clock.now();
-        for (index, selection) in wave.selections.iter().enumerate() {
-            let mut selection = *selection;
-            if let Some(sent_at) = outcome.sent_at[index] {
-                let observed_at = outcome.observed_at[index].unwrap_or(sent_at);
-                controller.confirm_send(&mut work, selection, observed_at);
-                selection.host_limited = selection.host_limited
-                    || sent_at
-                        .checked_add(selection.timeout)
-                        .is_none_or(|end| end > selection.host_deadline);
-            }
-            if outcome.omitted[index] {
-                controller.mark_incomplete(selection.host);
-                controller.settle(
-                    &mut work,
-                    selection,
-                    crate::scan::adaptive::Outcome::Omitted,
-                    settled_at,
-                );
-                continue;
-            }
-            let outcome = match replies.get(&selection.sequence) {
-                Some(feedback) => crate::scan::adaptive::Outcome::Reply {
-                    latency: feedback.latency,
-                    responder: feedback.responder,
-                    control: matches!(
-                        feedback.reply,
-                        crate::scan::Reply::IcmpPortUnreachable
-                            | crate::scan::Reply::IcmpProtocolUnreachable
-                            | crate::scan::Reply::IcmpDestinationUnreachable
-                            | crate::scan::Reply::TcpReset
-                            | crate::scan::Reply::SctpAbort
-                    ),
-                },
-                None => crate::scan::adaptive::Outcome::Silent,
-            };
-            controller.settle(&mut work, selection, outcome, settled_at);
-        }
-        evidence.release_responses(controller.take_canceled_responses(&mut work));
+    let result = executor
+        .execute_stream(options, admission, attempts, &mut feed)
+        .map_err(|source| Error::PipelineExecution { source })?;
+    if !feed.settled()
+        || result.packets_attempted != feed.confirmed.packets_attempted
+        || result.packets_completed != feed.confirmed.packets_completed
+        || result.bytes != feed.confirmed.bytes
+    {
+        return Err(Error::InvalidEvidence { sequence: first_sequence,
+            message: "continuous pipeline left an attempt unsettled or returned incoherent send statistics".to_owned() });
     }
+    let last_sent = feed.last_sent;
+    drop(feed);
+    if result.packets_attempted > 0 {
+        owed.owe(1, last_sent);
+    }
+    add_stats(&mut stats, &result, first_sequence)?;
     Ok(stats)
 }
 

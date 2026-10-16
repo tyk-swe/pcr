@@ -65,8 +65,8 @@ impl StreamEncoder {
         self
     }
 
-    pub(crate) fn with_deadline(mut self, deadline: Arc<Deadline>) -> Self {
-        self.encoder = self.encoder.with_deadline(deadline);
+    pub(crate) fn with_control(mut self, control: Arc<Deadline>) -> Self {
+        self.encoder = self.encoder.with_control(control);
         self
     }
 

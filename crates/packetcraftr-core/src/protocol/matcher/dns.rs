@@ -13,6 +13,10 @@ use super::{ReversedProtocolLayers, response_source, reversed_protocol_layers};
 pub(crate) struct DnsMatcher;
 
 impl ResponseMatcher for DnsMatcher {
+    fn uses_builtin_response_identity(&self) -> bool {
+        true
+    }
+
     fn matches(&self, request: &Packet, response: &Packet) -> Option<Match> {
         let pairs = reversed_protocol_layers(BuiltinProtocol::Dns, request, response)?;
         pairs.iter().all(answers).then(|| Match::new(250))

@@ -226,41 +226,46 @@ pub(super) fn finish(
     streams: &HashMap<ScopedFlowKey, u64>,
     events: &[TcpEvent],
     end_number: u64,
-) -> Vec<Finding> {
-    let mut openers = flows
-        .iter()
-        .filter(|(_, state)| state.handshake.syn_sequence.is_some())
-        .map(|(flow, state)| {
+    check: &mut dyn FnMut() -> Result<(), crate::error::BoundaryError>,
+    emit: &mut dyn FnMut(Finding) -> Result<(), crate::error::BoundaryError>,
+) -> Result<(), crate::error::BoundaryError> {
+    let mut openers = Vec::new();
+    for (flow, state) in flows {
+        check()?;
+        if state.handshake.syn_sequence.is_some() {
             let index = streams.get(flow).or_else(|| streams.get(&flow.reverse()));
-            (index.copied(), flow, state)
-        })
-        .collect::<Vec<_>>();
+            openers.push((index.copied(), flow, state));
+        }
+    }
     openers.sort_by(|left, right| (left.0, left.1).cmp(&(right.0, right.1)));
+    check()?;
 
     // Looked up once per established flow, so the scan does not grow with the opener count.
-    let unfinished = events
-        .iter()
-        .filter_map(|event| match event {
-            TcpEvent::Evicted {
-                flow,
-                pending_bytes,
-            } if *pending_bytes > 0 => Some(flow),
-            _ => None,
-        })
-        .collect::<HashSet<_>>();
+    let mut unfinished = HashSet::new();
+    for event in events {
+        check()?;
+        if let TcpEvent::Evicted {
+            flow,
+            pending_bytes,
+        } = event
+            && *pending_bytes > 0
+        {
+            unfinished.insert(flow);
+        }
+    }
 
-    let mut findings = Vec::new();
     for (index, flow, state) in openers {
+        check()?;
         let stream = index.map(tcp_stream_ref);
         let source = format!("{}:{}", flow.flow.source, flow.flow.source_port);
         if !state.handshake.answered {
-            findings.push(new_finding(
+            emit(new_finding(
                 Severity::Warning,
                 "tcp.handshake_unanswered",
                 end_number,
                 stream,
                 format!("the SYN from {source} never received a SYN-ACK"),
-            ));
+            ))?;
             continue;
         }
         if !state.handshake.established {
@@ -273,14 +278,14 @@ pub(super) fn finish(
                 .is_some_and(|peer| peer.fin_sequence.is_some());
         let incomplete = unfinished.contains(flow) || unfinished.contains(&reverse);
         if !closing && !incomplete {
-            findings.push(new_finding(
+            emit(new_finding(
                 Severity::Info,
                 "tcp.not_closed_at_end",
                 end_number,
                 stream,
                 format!("the connection opened by {source} never saw a FIN or RST"),
-            ));
+            ))?;
         }
     }
-    findings
+    check()
 }

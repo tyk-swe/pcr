@@ -7,10 +7,9 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
 };
 
-use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::budget::{Deadline, Interrupted};
 
 use crate::deadline::{POLL_INTERVAL, remaining_before};
 use packetcraftr_core::frame::LinkType;
@@ -29,8 +28,6 @@ use super::{
     worker::{capture_worker, transfer_capture_worker},
 };
 
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
-
 pub(crate) struct NativeCaptureSession {
     metadata: Metadata,
     shared: Arc<CaptureQueue>,
@@ -38,7 +35,7 @@ pub(crate) struct NativeCaptureSession {
     /// The interrupt outlives the worker, and the permit outlives the interrupt.
     running: Option<RunningCapture>,
     reaper: ReaperClient,
-    shutdown_timeout: Duration,
+    stop_result: Option<Result<(), Error>>,
     shutdown: Shutdown,
 }
 
@@ -142,7 +139,7 @@ impl NativeCaptureSession {
                 permit,
             }),
             reaper,
-            shutdown_timeout: SHUTDOWN_TIMEOUT,
+            stop_result: None,
             shutdown: Shutdown::NotAttempted,
         }
     }
@@ -158,8 +155,19 @@ impl Session for NativeCaptureSession {
         let expired = || Error::CaptureReadiness {
             message: "capture readiness deadline expired".to_owned(),
         };
+        let check_control = || {
+            caller
+                .live_remaining()
+                .map(drop)
+                .map_err(|interrupted| match interrupted {
+                    Interrupted::Cancelled(cancelled) => cancelled.into(),
+                    _ => expired(),
+                })
+        };
+        check_control()?;
         let mut state = self.shared.lock();
         while !state.ready && !state.closed && state.error.is_none() {
+            check_control()?;
             let Some(remaining) = deadline.and_then(remaining_before) else {
                 return Err(expired());
             };
@@ -167,9 +175,11 @@ impl Session for NativeCaptureSession {
             state = self
                 .shared
                 .wait_timeout(state, remaining.min(POLL_INTERVAL));
-            if !state.ready && !state.closed && state.error.is_none() {
-                caller.check_cancelled()?;
-            }
+            check_control()?;
+        }
+        check_control()?;
+        if deadline.and_then(remaining_before).is_none() {
+            return Err(expired());
         }
         if let Some(error) = state
             .error
@@ -191,6 +201,7 @@ impl Session for NativeCaptureSession {
         let deadline = crate::capture::wait_end(caller)?;
         let mut state = self.shared.lock();
         loop {
+            caller.check_cancelled()?;
             if let Some(captured) = state.pop_front()? {
                 return Ok(Some(captured));
             }
@@ -201,34 +212,73 @@ impl Session for NativeCaptureSession {
             if state.closed {
                 return Ok(None);
             }
+            // An immediate poll still drains already queued records above.
+            // Quiet waits retain inherited elapsed control as well as their
+            // original real-wall ceiling.
+            if let Err(interrupted) = caller.live_remaining() {
+                return match interrupted {
+                    Interrupted::Cancelled(cancelled) => Err(cancelled.into()),
+                    _ => Ok(None),
+                };
+            }
             let Some(remaining) = deadline.and_then(remaining_before) else {
                 return Ok(None);
             };
             state = self
                 .shared
                 .wait_timeout(state, remaining.min(POLL_INTERVAL));
-            if state.queue.is_empty() && state.error.is_none() {
-                caller.check_cancelled()?;
-            }
         }
     }
 
+    fn request_stop(&mut self) -> Result<(), Error> {
+        if let Some(result) = &self.stop_result {
+            return result.clone();
+        }
+        self.shutdown = Shutdown::Incomplete;
+        self.stop.store(true, Ordering::Release);
+        let result = self.running.as_ref().map_or(Ok(()), |running| {
+            catch_unwind(AssertUnwindSafe(|| running.interrupt.interrupt())).map_err(|_| {
+                Error::Capture {
+                    message: "native capture interrupt panicked during shutdown".to_owned(),
+                    source: None,
+                }
+            })
+        });
+        self.stop_result = Some(result.clone());
+        result
+    }
+
+    fn shutdown_until(&mut self, deadline: &Deadline) -> Result<(), Error> {
+        self.join_until(deadline)
+    }
+
     fn shutdown(&mut self) -> Result<(), Error> {
-        self.shutdown_with_timeout(self.shutdown_timeout)
+        self.join_until(&Deadline::new(crate::capture::CLEANUP_TIMEOUT))
     }
 
     fn stats(&self) -> Stats {
         self.shared.lock().statistics
     }
+
+    fn observation_quality(&self) -> crate::capture::ObservationQuality {
+        let state = self.shared.lock();
+        let quality = if state.ready && state.error.is_none() && !state.error_observed {
+            crate::capture::ObservationQuality::NoReportedLoss
+        } else {
+            crate::capture::ObservationQuality::Unknown
+        };
+        quality.with_statistics(state.statistics)
+    }
 }
 
 impl NativeCaptureSession {
-    fn shutdown_with_timeout(&mut self, timeout: Duration) -> Result<(), Error> {
+    fn join_until(&mut self, deadline: &Deadline) -> Result<(), Error> {
         if let Shutdown::Finished(result) = &self.shutdown {
-            return result.clone();
+            return result
+                .clone()
+                .and(self.stop_result.clone().unwrap_or(Ok(())));
         }
-        self.shutdown = Shutdown::Incomplete;
-        self.stop.store(true, Ordering::Release);
+        let interrupt_result = self.request_stop();
 
         let stopped = match self.running.take() {
             None => Ok(()),
@@ -237,12 +287,7 @@ impl NativeCaptureSession {
                 interrupt,
                 permit,
             }) => {
-                let interrupt_result = catch_unwind(AssertUnwindSafe(|| interrupt.interrupt()))
-                    .map_err(|_| Error::Capture {
-                        message: "native capture interrupt panicked during shutdown".to_owned(),
-                        source: None,
-                    });
-                match worker.wait(&Deadline::new(timeout)) {
+                match worker.wait(deadline) {
                     Waited::Pending(worker) => {
                         permit.retention_marker().mark_retained();
                         self.running = Some(RunningCapture {
@@ -258,13 +303,10 @@ impl NativeCaptureSession {
                         // Release a user-supplied interrupt before returning admission.
                         drop(interrupt);
                         drop(permit);
-                        join_result
-                            .map_err(|_| Error::Capture {
-                                message: "native capture worker panicked during shutdown"
-                                    .to_owned(),
-                                source: None,
-                            })
-                            .and(interrupt_result)
+                        join_result.map_err(|_| Error::Capture {
+                            message: "native capture worker panicked during shutdown".to_owned(),
+                            source: None,
+                        })
                     }
                 }
             }
@@ -283,7 +325,7 @@ impl NativeCaptureSession {
             }
         });
         self.shutdown = Shutdown::Finished(result.clone());
-        result
+        result.and(interrupt_result)
     }
 }
 
@@ -309,3 +351,6 @@ impl Drop for NativeCaptureSession {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -29,7 +29,7 @@ Reader `max_interfaces` counts descriptions per PCAPNG section;
 | TLS state | `max_tls_sessions` bounds tracked slots; `max_tls_buffer_bytes` bounds logical handshake buffers (135,168-byte floor per direction) and alert charges. |
 | Stats | CLI retains only selected tables; overview collects protocols/endpoints/conversations together, defaulting to five rows each. `--sort` ranks before `--top`; totals precede truncation. See [statistics](statistics.md). |
 | Results | JSON retains selected rows/sessions/chunks up to command limits; NDJSON holds one line per encoder (at most 16 MiB including newline). |
-| Native/progress work | Live capture retains its bounded native queue; timed-out/cancelled workers retain permits until cleanup completes (`Runtime::snapshot()`). |
+| Native/progress work | Capture queues and unfinished native work remain bounded and charged. Progressive callback bodies/captures retain Runtime admission; thread-exit limitations are described below. |
 
 Cleartext HTTP/2 analyzes prior knowledge and h2c (no TLS decryption); DATA
 bodies are counted and discarded, and later connection issues (`goaway_unprocessed`)
@@ -91,8 +91,81 @@ bounds each NDJSON write/flush wait (clipped by operation deadline; terminal
 error cleanup gets a separate 1,000 ms allowance).
 
 `Client::new` owns an isolated `Runtime` (`with_runtime` shares admission).
-Netio `resources::native_snapshot` reports the shared 16-slot capture/route/TCP
-pool; `tcp_connect_snapshot` reports nested connect admission.
+Netio `resources::native_snapshot` reports the aggregate 16-slot native root.
+TCP connecting jobs and established sockets share 12 data places, reserving four
+root places for eligible control work. A full root still refuses admission.
+`tcp_connect_snapshot` reports that data allocation; `execution_snapshot` excludes
+established sockets after their connect job ends, and `socket_snapshot` reports
+established socket ownership. Socket transfer never acquires a second root slot.
+Resident Linux namespace route services retain their root admission until they
+actually exit; their cache holds at most four services, with idle retirement and
+pressure eviction. Each service owns its namespace identity descriptor, closing
+it before releasing its root admission; finished cache metadata owns no descriptor.
+Idle executor threads are separate, bounded infrastructure and can still pin a
+kernel namespace until their own retirement. The executor's thread ceiling
+covers idle, busy, and retiring threads. A thread becomes reusable only after
+outcome publication returns; retirement never joins on a new caller and waits
+under its original control. This infrastructure ceiling can delay/refuse a new
+job despite resource-root headroom. Capture cleanup and executor-thread retirement use independent bounded cleanup
+services, each with at most 16 workers and a finite queue, so blocked cleanup in
+one class does not consume the other's completion capacity. These services are
+initialized only when needed. The maximum executor/capture-cleanup/retirement
+worker allocations are 16/16/16, separate from facade Runtime workers. Native
+resource snapshots do not count these resident infrastructure threads or arbitrary
+provider-owned thread-local data.
+`resources::executor_thread_snapshot` separately exposes retained executor slots
+as busy, idle, and retiring; their sum stays at most 16 even when resource-grant
+counts are zero. It conservatively includes completed handles awaiting pruning
+by subsequent dispatch, and excludes the separate cleanup-service threads.
+Hostname lookup has a nested four-job allocation plus native root admission;
+`resolution::snapshot` includes unfinished cancelled lookups until they return.
+
+A capture group requests stop from every source, then cooperative joins share
+one independent one-second cleanup allowance. Unfinished native readers remain
+charged through bounded reaper ownership. Legacy provider shutdown, interrupt,
+statistics, and arbitrary synchronous callbacks cannot be forcibly preempted.
+
+Analysis retains its exact effective run control through collector finalization
+and trailing event delivery, including inherited reader deadlines. Built-in
+finalizers check between records; custom `Collector::finish_controlled` can
+cooperate internally. Mutable HTTP, TCP DNS, and fragment source accumulation
+uses a charged ordered tree, freezing once into immutable published provenance.
+The tree and complete flat result overlap in the charge during freezing;
+retained snapshots keep their own shared leases. Logical charges are not RSS.
+
+Trusted built-in live collectors use `Delivery::Cooperative` and execute in the
+caller with control checks around publication. Arbitrary sinks and closures
+retain `Delivery::Isolated` and acknowledged worker admission by default.
+`Sink::publish_controlled` carries the effective operation control through
+cooperative adapters and their nested waits; its default delegates to the
+existing callback. This does not make arbitrary synchronous code preemptible.
+`Runtime::new(0)` therefore permits cooperative collectors but refuses workers.
+Isolated facade workers retain their runtime admission through actual thread
+exit, callback captures, thread-local destructors, and opaque panic cleanup.
+Cancellation stops waiting while `Runtime::snapshot()` keeps unfinished work
+charged. Each runtime owns an independent cleanup allocation matching its worker
+capacity, at most eight cleanup workers and eight queued joins in addition to
+eight callback workers. Initialization failure releases admission and can be
+retried; failed ownership transfers remain bounded and are retried without
+releasing their charges. Snapshot counters count admission, not resident cleanup
+threads. Running callbacks and destructors cannot be forcibly preempted.
+
+CLI NDJSON emitters cooperate only when the encoder already isolates its writer;
+text and direct writers retain isolated callbacks. Each line still waits for its
+write and flush acknowledgement under the operation and invocation controls,
+including cancellation when no invocation duration was supplied. Application NDJSON counts the exact compact
+JSON bytes of `result` during its one serialization, excluding envelope metadata,
+diagnostics, and newline as before. The independent 16 MiB record ceiling includes
+the newline; refusal happens before writing a record. A writer failure can still
+leave a partial record and prevents successful completion. Cancellation cannot
+recall a record already handed to an arbitrary `Write`: a blocked write of a
+`complete` record may finish later. The caller returns an error, the encoder
+does not acknowledge completion, and the writer stays charged until actual
+exit. Consumers must check the CLI exit status as well as the stream terminal.
+Text and aggregate
+application retention preserve their existing compact-JSON accounting traversal.
+Default trace stages refresh caches while sharing the containing runtime;
+an explicit `Trace.runtime` remains an independent root.
 
 ## Hosting untrusted captures with a hard stop
 

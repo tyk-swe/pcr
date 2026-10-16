@@ -10,6 +10,8 @@ use std::time::Instant;
 pub(super) struct Owned<C: Session> {
     capture: C,
     pub(super) source: Source,
+    stop_attempted: bool,
+    stop_failed: bool,
     shutdown_attempted: bool,
 }
 
@@ -65,10 +67,13 @@ impl<C: Session> Owned<C> {
                 ready: false,
                 shutdown_confirmed: false,
                 statistics_valid: false,
+                observation_quality: crate::capture::ObservationQuality::Unknown,
                 statistics: Stats::default(),
                 delivered_frames: 0,
                 delivered_bytes: 0,
             },
+            stop_attempted: false,
+            stop_failed: false,
             shutdown_attempted: false,
         }
     }
@@ -78,6 +83,10 @@ impl<C: Session> Owned<C> {
         if !self.shutdown_attempted {
             source.statistics = self.capture.stats();
             source.statistics_valid = source.statistics.validate().is_ok();
+            source.observation_quality = self
+                .capture
+                .observation_quality()
+                .with_statistics(source.statistics);
         }
         source
     }
@@ -151,16 +160,31 @@ impl<C: Session> Owned<C> {
         Ok(Some(captured))
     }
 
-    pub(super) fn shutdown(&mut self, cleanup: &mut Vec<Error>) {
+    pub(super) fn request_stop(&mut self, cleanup: &mut Vec<Error>) {
+        if self.stop_attempted {
+            return;
+        }
+        self.stop_attempted = true;
+        if let Err(source) = self.capture.request_stop() {
+            self.stop_failed = true;
+            cleanup.push(self.failure(Phase::Shutdown, source));
+        }
+    }
+
+    pub(super) fn shutdown(&mut self, deadline: &Deadline, cleanup: &mut Vec<Error>) {
         if self.shutdown_attempted {
             return;
         }
         self.shutdown_attempted = true;
-        match self.capture.shutdown() {
-            Ok(()) => self.source.shutdown_confirmed = true,
+        match self.capture.shutdown_until(deadline) {
+            Ok(()) => self.source.shutdown_confirmed = !self.stop_failed,
             Err(source) => cleanup.push(self.failure(Phase::Shutdown, source)),
         }
         self.source.statistics = self.capture.stats();
+        self.source.observation_quality = self
+            .capture
+            .observation_quality()
+            .with_statistics(self.source.statistics);
         match self.source.statistics.validate() {
             Ok(()) => self.source.statistics_valid = true,
             Err(source) => cleanup.push(self.failure(Phase::Stats, source)),

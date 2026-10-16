@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
@@ -198,6 +198,7 @@ struct Host {
     estimator: Estimator,
     first_admission: Option<Instant>,
     last_send: Option<Instant>,
+    uncommitted: usize,
     min_gap: Duration,
     completed: u64,
     replies: u64,
@@ -205,6 +206,8 @@ struct Host {
     control: HashMap<IpAddr, ControlResponder>,
     control_errors: u64,
     loss_sequences: Vec<u64>,
+    pending_losses: u64,
+    pending_loss_sequences: Vec<u64>,
     condition_raised: bool,
     incomplete: bool,
 }
@@ -220,16 +223,31 @@ struct Endpoint {
 pub(super) struct Work {
     slots: Vec<Slot>,
     cursor: usize,
+    /// Only slots with immediately eligible work participate in round robin.
+    runnable: BTreeSet<usize>,
+    wakes: BTreeSet<(Instant, usize)>,
+    expirations: BTreeSet<(Instant, usize)>,
     unfinished: usize,
     max_attempts: u32,
     first_sequence: u64,
     host_count: usize,
     canceled_responses: usize,
+    #[cfg(test)]
+    discovery: usize,
+    #[cfg(test)]
+    ready_operations: usize,
+    #[cfg(test)]
+    time_operations: usize,
 }
 
 struct Slot {
     host: usize,
     endpoints: Vec<Endpoint>,
+    ready: BTreeSet<usize>,
+    delayed: BTreeSet<(Instant, usize)>,
+    unfinished: usize,
+    wake: Option<Instant>,
+    expiration: Option<Instant>,
 }
 
 impl Work {
@@ -266,6 +284,8 @@ pub(super) enum Outcome {
         control: bool,
     },
     Silent,
+    /// Capture is still active: retry without attributing loss or reducing the window.
+    UnqualifiedSilence,
     Aborted,
     Omitted,
 }
@@ -286,6 +306,7 @@ pub(super) struct Controller {
     cohort_members: HashMap<u64, usize>,
     conditions: Vec<Condition>,
     incomplete: Vec<HostIdentity>,
+    defer_conditions: bool,
 }
 
 impl Controller {
@@ -306,6 +327,7 @@ impl Controller {
             cohort_members: HashMap::new(),
             conditions: Vec::new(),
             incomplete: Vec::new(),
+            defer_conditions: false,
         }
     }
 
@@ -325,6 +347,7 @@ impl Controller {
             estimator: Estimator::default(),
             first_admission: None,
             last_send: None,
+            uncommitted: 0,
             min_gap: Duration::ZERO,
             completed: 0,
             replies: 0,
@@ -332,6 +355,8 @@ impl Controller {
             control: HashMap::new(),
             control_errors: 0,
             loss_sequences: Vec::new(),
+            pending_losses: 0,
+            pending_loss_sequences: Vec::new(),
             condition_raised: false,
             incomplete: false,
         });
@@ -415,51 +440,170 @@ impl Controller {
                     };
                     endpoint_count
                 ],
+                ready: (0..endpoint_count).collect(),
+                delayed: BTreeSet::new(),
+                unfinished: endpoint_count,
+                wake: None,
+                expiration: None,
             })
             .collect::<Vec<_>>();
         let unfinished = slots.len().saturating_mul(endpoint_count);
         let host_count = self.hosts.len();
-        Work {
+        let mut work = Work {
             slots,
             cursor: 0,
+            runnable: BTreeSet::new(),
+            wakes: BTreeSet::new(),
+            expirations: BTreeSet::new(),
             unfinished,
             max_attempts,
             first_sequence,
             host_count,
             canceled_responses: 0,
+            #[cfg(test)]
+            discovery: 0,
+            #[cfg(test)]
+            ready_operations: unfinished,
+            #[cfg(test)]
+            time_operations: 0,
+        };
+        for slot in 0..work.slots.len() {
+            self.refresh_slot(&mut work, slot, now);
         }
+        work
     }
 
     pub(super) fn take_canceled_responses(&self, work: &mut Work) -> usize {
         std::mem::take(&mut work.canceled_responses)
     }
 
+    /// Replaces a slot's single wake/expiry index entries. No stale heap
+    /// entries accumulate across retries, pacing changes, or stage completion.
+    fn refresh_slot(&self, work: &mut Work, index: usize, now: Instant) {
+        let slot = &mut work.slots[index];
+        work.runnable.remove(&index);
+        #[cfg(test)]
+        {
+            work.ready_operations += 1;
+        }
+        if let Some(wake) = slot.wake.take() {
+            work.wakes.remove(&(wake, index));
+            #[cfg(test)]
+            {
+                work.time_operations += 1;
+            }
+        }
+        if let Some(expiration) = slot.expiration.take() {
+            work.expirations.remove(&(expiration, index));
+            #[cfg(test)]
+            {
+                work.time_operations += 1;
+            }
+        }
+        if slot.unfinished == 0 {
+            return;
+        }
+        let host = &self.hosts[slot.host];
+        if let Some(started) = host.first_admission {
+            let expiration = started + self.config.host_timeout;
+            work.expirations.insert((expiration, index));
+            #[cfg(test)]
+            {
+                work.time_operations += 1;
+            }
+            slot.expiration = Some(expiration);
+        }
+        if host.min_gap > Duration::ZERO && host.uncommitted > 0 {
+            return;
+        }
+        let gap = host.last_send.map(|last| last + host.min_gap);
+        let ready_time = (!slot.ready.is_empty()).then(|| gap.unwrap_or(now));
+        if ready_time.is_some_and(|ready| ready <= now) {
+            work.runnable.insert(index);
+            #[cfg(test)]
+            {
+                work.ready_operations += 1;
+            }
+        }
+        // Delayed retries must wake even while later first attempts are ready:
+        // on promotion the endpoint's original index restores deterministic order.
+        let retry_time = slot
+            .delayed
+            .first()
+            .map(|(ready, _)| gap.map_or(*ready, |gap| gap.max(*ready)));
+        let wake = ready_time
+            .filter(|ready| *ready > now)
+            .into_iter()
+            .chain(retry_time)
+            .min();
+        if let Some(wake) = wake {
+            work.wakes.insert((wake, index));
+            #[cfg(test)]
+            {
+                work.time_operations += 1;
+            }
+            slot.wake = Some(wake);
+        }
+    }
+
     fn expire(&mut self, work: &mut Work, now: Instant) {
-        let max_attempts = work.max_attempts;
-        let mut canceled = 0usize;
-        for slot in &mut work.slots {
-            if !self.host_expired(slot.host, now) {
-                continue;
+        while let Some((expiration, index)) = work.expirations.first().copied() {
+            if expiration > now {
+                break;
             }
-            let remaining = slot
-                .endpoints
-                .iter()
-                .filter(|endpoint| !endpoint.finished)
-                .count();
-            if remaining == 0 {
-                continue;
+            work.expirations.pop_first();
+            #[cfg(test)]
+            {
+                work.time_operations += 1;
             }
+            let slot = &mut work.slots[index];
+            slot.expiration = None;
+            let remaining = slot.unfinished;
+            let mut canceled = 0usize;
             for endpoint in &mut slot.endpoints {
                 if !endpoint.finished {
                     canceled = canceled
-                        .saturating_add(max_attempts.saturating_sub(endpoint.sent) as usize);
+                        .saturating_add(work.max_attempts.saturating_sub(endpoint.sent) as usize);
+                    endpoint.finished = true;
                 }
-                endpoint.finished = true;
+            }
+            slot.unfinished = 0;
+            slot.ready.clear();
+            slot.delayed.clear();
+            #[cfg(test)]
+            {
+                work.ready_operations += 1;
+                work.time_operations += 1;
             }
             work.unfinished = work.unfinished.saturating_sub(remaining);
-            self.mark_incomplete(slot.host);
+            work.canceled_responses = work.canceled_responses.saturating_add(canceled);
+            if remaining > 0 {
+                self.mark_incomplete(slot.host);
+            }
+            self.refresh_slot(work, index, now);
         }
-        work.canceled_responses = work.canceled_responses.saturating_add(canceled);
+        while let Some((wake, index)) = work.wakes.first().copied() {
+            if wake > now {
+                break;
+            }
+            work.wakes.pop_first();
+            #[cfg(test)]
+            {
+                work.time_operations += 1;
+            }
+            let slot = &mut work.slots[index];
+            slot.wake = None;
+            while slot.delayed.first().is_some_and(|(ready, _)| *ready <= now) {
+                let (_, endpoint) = slot.delayed.pop_first().expect("due retry exists");
+                slot.ready.insert(endpoint);
+                #[cfg(test)]
+                {
+                    work.ready_operations += 1;
+                    work.time_operations += 1;
+                }
+            }
+            self.refresh_slot(work, index, now);
+        }
     }
 
     pub(super) fn select(
@@ -470,81 +614,50 @@ impl Controller {
         capacity: usize,
     ) -> Wave {
         self.expire(work, now);
-        if work.unfinished == 0 || work.slots.is_empty() {
-            return Wave {
-                selections: Vec::new(),
-                next_ready: None,
-                done: true,
-            };
-        }
         let cohort = self.cohort;
         self.cohort = self.cohort.saturating_add(1);
         let mut selections = Vec::new();
-        let mut next_ready: Option<Instant> = None;
-        let note = |instant: Instant, next_ready: &mut Option<Instant>| {
-            *next_ready = Some(next_ready.map_or(instant, |ready| ready.min(instant)));
-        };
-        let hosts_total = work.slots.len();
         let endpoints_per_host = work.slots.first().map_or(0, |slot| slot.endpoints.len());
-        let mut misses = 0usize;
-        let mut picked: std::collections::HashSet<(usize, usize)> =
-            std::collections::HashSet::new();
-        let mut gapped: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        while selections.len() < capacity && misses < hosts_total {
-            let slot_index = work.cursor % hosts_total;
-            work.cursor = (work.cursor + 1) % hosts_total;
+        // Selection is provisional: connect callers can stop admitting a wave
+        // on pacing or capacity refusal. Restore every selection before returning;
+        // admitted() alone commits removal from the ready index.
+        let mut held = Vec::new();
+        let mut suppressed = Vec::new();
+        while selections.len() < capacity {
+            let Some(slot_index) = work
+                .runnable
+                .range(work.cursor..)
+                .next()
+                .copied()
+                .or_else(|| work.runnable.first().copied())
+            else {
+                break;
+            };
+            work.cursor = (slot_index + 1) % work.slots.len();
             let slot = &mut work.slots[slot_index];
             let host = slot.host;
-            if self.host_expired(host, now) {
-                misses += 1;
-                continue;
-            }
-            if self.hosts[host].min_gap > Duration::ZERO && gapped.contains(&slot_index) {
-                misses += 1;
-                continue;
-            }
-            if !self.host_gap_ready(host, now) {
-                if let Some(next_send) = self.hosts[host]
-                    .last_send
-                    .map(|last| last + self.hosts[host].min_gap)
+            let Some(endpoint_index) = slot.ready.pop_first() else {
+                work.runnable.remove(&slot_index);
+                #[cfg(test)]
                 {
-                    note(next_send, &mut next_ready);
+                    work.ready_operations += 1;
                 }
-                misses += 1;
-                continue;
-            }
-            let Some(endpoint_index) =
-                slot.endpoints
-                    .iter()
-                    .enumerate()
-                    .find_map(|(index, endpoint)| {
-                        (!endpoint.finished
-                            && !endpoint.pending
-                            && endpoint.sent < work.max_attempts
-                            && endpoint.ready_at <= now
-                            && !picked.contains(&(slot_index, index)))
-                        .then_some(index)
-                    })
-            else {
-                if let Some(wait) = slot
-                    .endpoints
-                    .iter()
-                    .enumerate()
-                    .filter(|(index, endpoint)| {
-                        !endpoint.finished
-                            && !endpoint.pending
-                            && !picked.contains(&(slot_index, *index))
-                    })
-                    .map(|(_, endpoint)| endpoint.ready_at)
-                    .min()
-                {
-                    note(wait, &mut next_ready);
-                }
-                misses += 1;
                 continue;
             };
-            picked.insert((slot_index, endpoint_index));
-            gapped.insert(slot_index);
+            #[cfg(test)]
+            {
+                work.discovery += 1;
+                work.ready_operations += 1;
+            }
+            held.push((slot_index, endpoint_index));
+            if slot.ready.is_empty() || self.hosts[host].min_gap > Duration::ZERO {
+                work.runnable.remove(&slot_index);
+                #[cfg(test)]
+                {
+                    work.ready_operations += 1;
+                }
+                suppressed.push(slot_index);
+            }
             let host_deadline = self.hosts[host]
                 .first_admission
                 .map_or(now + self.config.host_timeout, |started| {
@@ -554,19 +667,23 @@ impl Controller {
             let host_remaining = host_deadline.saturating_duration_since(now);
             if host_remaining.is_zero() {
                 self.mark_incomplete(host);
-                misses += 1;
+                work.runnable.remove(&slot_index);
+                #[cfg(test)]
+                {
+                    work.ready_operations += 1;
+                }
+                suppressed.push(slot_index);
                 continue;
             }
             let desired = self.rto(host);
             let timeout = desired.min(host_remaining);
-            let host_limited = timeout < desired;
-            let attempt = slot.endpoints[endpoint_index].sent + 1;
+            let attempt = work.slots[slot_index].endpoints[endpoint_index].sent + 1;
             let sequence = work.first_sequence.saturating_add(
                 ((u64::from(attempt) - 1)
                     .saturating_mul(endpoints_per_host as u64)
                     .saturating_add(endpoint_index as u64))
                 .saturating_mul(work.host_count as u64)
-                .saturating_add(slot.host as u64),
+                .saturating_add(host as u64),
             );
             selections.push(Selection {
                 slot: slot_index,
@@ -577,18 +694,31 @@ impl Controller {
                 timeout,
                 host_deadline,
                 cohort,
-                host_limited,
+                host_limited: timeout < desired,
                 selected_at: now,
             });
-            misses = 0;
         }
-        for slot in &work.slots {
-            if slot.endpoints.iter().any(|endpoint| !endpoint.finished)
-                && let Some(started) = self.hosts[slot.host].first_admission
+        for (slot, endpoint) in held {
+            work.slots[slot].ready.insert(endpoint);
+            #[cfg(test)]
             {
-                note(started + self.config.host_timeout, &mut next_ready);
+                work.ready_operations += 1;
             }
         }
+        for slot in suppressed {
+            work.runnable.insert(slot);
+            #[cfg(test)]
+            {
+                work.ready_operations += 1;
+            }
+        }
+        let next_ready = work
+            .wakes
+            .first()
+            .map(|(ready, _)| *ready)
+            .into_iter()
+            .chain(work.expirations.first().map(|(ready, _)| *ready))
+            .min();
         Wave {
             selections,
             next_ready,
@@ -599,8 +729,15 @@ impl Controller {
     pub(super) fn admitted(&mut self, work: &mut Work, selection: Selection) {
         let slot = &mut work.slots[selection.slot];
         slot.endpoints[selection.endpoint].pending = true;
+        slot.ready.remove(&selection.endpoint);
+        #[cfg(test)]
+        {
+            work.ready_operations += 1;
+        }
         *self.cohort_members.entry(selection.cohort).or_default() += 1;
         self.host_started(selection.host, selection.selected_at);
+        self.hosts[selection.host].uncommitted += 1;
+        self.refresh_slot(work, selection.slot, selection.selected_at);
     }
 
     /// Commits an admitted slot's attempt number and paces the host from the
@@ -618,8 +755,11 @@ impl Controller {
             "a committed attempt continues the endpoint's count"
         );
         endpoint.sent = selection.attempt;
+        self.hosts[selection.host].uncommitted =
+            self.hosts[selection.host].uncommitted.saturating_sub(1);
         self.host_started(selection.host, admitted_at);
         self.hosts[selection.host].last_send = Some(admitted_at);
+        self.refresh_slot(work, selection.slot, admitted_at);
     }
 
     /// Counts an attempt a provider actually started as a retry past the first.
@@ -666,7 +806,16 @@ impl Controller {
         let endpoint = &mut slot.endpoints[selection.endpoint];
         let was_finished = endpoint.finished;
         let was_pending = endpoint.pending;
+        if was_pending && endpoint.sent < selection.attempt {
+            self.hosts[host_index].uncommitted =
+                self.hosts[host_index].uncommitted.saturating_sub(1);
+        }
         endpoint.pending = false;
+        slot.ready.remove(&selection.endpoint);
+        #[cfg(test)]
+        {
+            work.ready_operations += 1;
+        }
         if !matches!(outcome, Outcome::Omitted) {
             self.hosts[host_index].completed = self.hosts[host_index].completed.saturating_add(1);
         }
@@ -697,20 +846,34 @@ impl Controller {
                     self.successes = 0;
                 }
             }
-            Outcome::Silent => {
+            Outcome::Silent | Outcome::UnqualifiedSilence => {
                 let host = &mut self.hosts[host_index];
-                host.losses = host.losses.saturating_add(1);
-                if host.loss_sequences.len() < CITED_SEQUENCES {
-                    host.loss_sequences.push(selection.sequence);
-                }
-                if self.halved.insert(selection.cohort) {
-                    self.window = (self.window / 2).max(self.config.min_window);
-                    self.successes = 0;
+                if matches!(outcome, Outcome::Silent) {
+                    host.losses = host.losses.saturating_add(1);
+                    if host.loss_sequences.len() < CITED_SEQUENCES {
+                        host.loss_sequences.push(selection.sequence);
+                    }
+                    if self.halved.insert(selection.cohort) {
+                        self.window = (self.window / 2).max(self.config.min_window);
+                        self.successes = 0;
+                    }
+                } else {
+                    host.pending_losses = host.pending_losses.saturating_add(1);
+                    if host.pending_loss_sequences.len() < CITED_SEQUENCES {
+                        host.pending_loss_sequences.push(selection.sequence);
+                    }
                 }
                 if selection.attempt >= work.max_attempts {
                     endpoint.finished = true;
                 } else {
                     endpoint.ready_at = now + self.retry_delay(selection.attempt + 1);
+                    if !was_finished {
+                        slot.delayed.insert((endpoint.ready_at, selection.endpoint));
+                        #[cfg(test)]
+                        {
+                            work.time_operations += 1;
+                        }
+                    }
                 }
                 if selection.host_limited {
                     self.mark_incomplete(host_index);
@@ -726,6 +889,7 @@ impl Controller {
             }
         }
         if endpoint.finished && !was_finished {
+            slot.unfinished = slot.unfinished.saturating_sub(1);
             work.unfinished = work.unfinished.saturating_sub(1);
         }
         if was_pending && let Some(remaining) = self.cohort_members.get_mut(&selection.cohort) {
@@ -735,7 +899,49 @@ impl Controller {
                 self.halved.remove(&selection.cohort);
             }
         }
-        self.check_conditions(slot_index, host_index);
+        if !self.defer_conditions {
+            self.check_conditions(slot_index, host_index);
+        }
+        self.refresh_slot(work, slot_index, now);
+    }
+
+    /// A raw stage cannot infer a new pacing condition until its acquisition
+    /// quality settles. Existing conditions still pace every admitted send.
+    pub(super) fn begin_observation_stage(&mut self) {
+        self.defer_conditions = true;
+    }
+
+    /// Reconciles bounded per-host provisional counters after acquisition has
+    /// stopped. Raw silence cannot reduce the live stage's window before this
+    /// point; a clean stage applies one loss backoff for a following stage.
+    pub(super) fn qualify_pending(&mut self, coverage: super::Coverage) {
+        let mut qualified_loss = false;
+        for index in 0..self.hosts.len() {
+            let host = &mut self.hosts[index];
+            let pending = std::mem::take(&mut host.pending_losses);
+            if pending == 0 {
+                continue;
+            }
+            if coverage.permits_silence() {
+                qualified_loss = true;
+                host.losses = host.losses.saturating_add(pending);
+                let room = CITED_SEQUENCES.saturating_sub(host.loss_sequences.len());
+                host.loss_sequences
+                    .extend(host.pending_loss_sequences.drain(..).take(room));
+                host.pending_loss_sequences.clear();
+            } else {
+                host.pending_loss_sequences.clear();
+                self.mark_incomplete(index);
+            }
+        }
+        self.defer_conditions = false;
+        for index in 0..self.hosts.len() {
+            self.check_conditions(0, index);
+        }
+        if qualified_loss {
+            self.window = (self.window / 2).max(self.config.min_window);
+            self.successes = 0;
+        }
     }
 
     fn check_conditions(&mut self, _slot: usize, host_index: usize) {
@@ -809,11 +1015,17 @@ pub(super) fn state_charge(
         .saturating_add(std::mem::size_of::<usize>())
         .saturating_add(
             CITED_SEQUENCES
-                .saturating_mul(2)
+                .saturating_mul(3)
                 .saturating_mul(std::mem::size_of::<u64>()),
         );
+    // Reserve conservative B-tree node/allocation slack for the mutually
+    // exclusive endpoint ready/retry entries and the three per-slot indexes.
+    // Replacement removes old entries; retries never leave stale index state.
     let slot = std::mem::size_of::<Slot>()
-        .saturating_add(endpoints_per_host.saturating_mul(std::mem::size_of::<Endpoint>()));
+        .saturating_add(384)
+        .saturating_add(
+            endpoints_per_host.saturating_mul(std::mem::size_of::<Endpoint>().saturating_add(192)),
+        );
     let hosts = host_count
         .saturating_mul(host.saturating_add(slot).saturating_mul(2))
         .saturating_add(
@@ -860,3 +1072,7 @@ pub(super) fn fixed_scheduling(
         process_ceiling: ceilings.1,
     }
 }
+
+#[cfg(test)]
+#[path = "adaptive/tests.rs"]
+mod tests;

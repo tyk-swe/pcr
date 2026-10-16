@@ -3,7 +3,7 @@
 
 use crate::{
     tcp::{ConnectOutcome, Connection, Error, MAX_PENDING_CONNECTIONS, Provider},
-    workers::{self, Class, Task},
+    workers::{self, Task},
 };
 use packetcraftr_core::budget::{Cancelled, Deadline};
 use std::{
@@ -211,15 +211,14 @@ where
     }
     let started = Instant::now();
     let started_at = SystemTime::now();
-    let permit = pool.admit(Class::TcpConnect).map_err(|_| Error::Capacity {
+    let permit = pool.admit_connect().map_err(|_| Error::Capacity {
         limit: MAX_PENDING_CONNECTIONS,
     })?;
-    let slot = permit.clone();
     let cancel = Arc::new(Mutex::new(CancelState::default()));
     let cancelled = Arc::clone(&cancel);
     let dispatch_control = deadline.clone();
     let task = permit
-        .spawn_with_control(&dispatch_control, move || {
+        .spawn_with_control(&dispatch_control, move |slot| {
             let lease_guard = lease.map(Arc::new);
             let connection_lease = lease_guard.clone();
             let outcome = workers::unwind_after_cleanup(|| {

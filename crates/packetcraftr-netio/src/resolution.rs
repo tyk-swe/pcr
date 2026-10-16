@@ -6,7 +6,7 @@
 
 use crate::{
     resources::NativeSnapshot,
-    workers::{self, Class, Pool, Waited},
+    workers::{self, Pool, Waited},
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -71,11 +71,11 @@ pub(crate) fn blocking_lookup_on(
 ) -> Result<Vec<IpAddr>, BoundaryError> {
     let wait = deadline.detach().map_err(BoundaryError::from_error)?;
     let lookup_permit = lookup_pool
-        .admit(Class::Native)
+        .admit()
         .map_err(|error| failure_with_source("hostname lookup admission refused", error))?;
     let retained_lookup = lookup_permit.retention_marker();
     let permit = root
-        .admit(Class::Native)
+        .admit()
         .map_err(|error| failure_with_source("native hostname lookup admission refused", error))?;
     let execution = wait.clone();
     let task = permit
@@ -91,7 +91,6 @@ pub(crate) fn blocking_lookup_on(
             Err(interrupted) => BoundaryError::from_error(interrupted),
             Ok(()) => failure_with_source("start hostname lookup failed", error),
         })?;
-    drop(permit);
     match task.wait(&wait) {
         Waited::Finished(Ok(result)) => {
             deadline.enforce().map_err(BoundaryError::from_error)?;

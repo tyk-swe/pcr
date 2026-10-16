@@ -111,7 +111,7 @@ fn fake_worker(
     namespace: &super::Namespace,
     pool: &Arc<crate::workers::Pool>,
 ) -> super::WorkerSlot {
-    let permit = pool.admit(crate::workers::Class::Native).unwrap();
+    let permit = pool.admit().unwrap();
     let inbox = Arc::new(Inbox::new());
     let worker_inbox = Arc::clone(&inbox);
     let namespace = namespace.file.try_clone().unwrap();
@@ -125,7 +125,6 @@ fn fake_worker(
             }
         })
         .unwrap();
-    drop(permit);
     super::WorkerSlot {
         generation: super::NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         inbox,
@@ -185,7 +184,7 @@ fn sequential_historical_identities_recover_resident_capacity_and_root_headroom(
         assert!(pool.snapshot().active <= super::RESIDENT_CAPACITY);
         std::fs::remove_file(path).unwrap();
     }
-    let unrelated = pool.admit(crate::workers::Class::Native).unwrap();
+    let unrelated = pool.admit().unwrap();
     drop(unrelated);
     for (_, worker) in workers {
         assert!(worker.inbox.retire_if_idle());

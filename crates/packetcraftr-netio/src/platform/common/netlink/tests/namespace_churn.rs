@@ -245,9 +245,8 @@ fn real_namespace_churn_recovers_resources() {
     drop(connection);
     drop(connect);
     drop(listener);
-    let permit = workers::shared().admit(workers::Class::Native).unwrap();
+    let permit = workers::shared().admit().unwrap();
     let control = permit.spawn(|| 7_u8).unwrap();
-    drop(permit);
     assert!(matches!(
         control.wait(&deadline),
         workers::Waited::Finished(Ok(7))

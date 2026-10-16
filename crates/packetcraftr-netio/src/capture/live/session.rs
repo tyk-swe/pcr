@@ -14,7 +14,7 @@ use packetcraftr_core::budget::{Deadline, Interrupted};
 use crate::deadline::{POLL_INTERVAL, remaining_before};
 use packetcraftr_core::frame::LinkType;
 
-use crate::workers::{Permit, Task, Waited};
+use crate::workers::{RootLease, Task, Waited};
 
 use crate::{
     Error,
@@ -32,7 +32,7 @@ pub(crate) struct NativeCaptureSession {
     metadata: Metadata,
     shared: Arc<CaptureQueue>,
     stop: Arc<AtomicBool>,
-    /// The interrupt outlives the worker, and the permit outlives the interrupt.
+    /// The interrupt outlives the worker, and the lease outlives the interrupt.
     running: Option<RunningCapture>,
     reaper: ReaperClient,
     stop_result: Option<Result<(), Error>>,
@@ -42,7 +42,7 @@ pub(crate) struct NativeCaptureSession {
 struct RunningCapture {
     worker: Task<()>,
     interrupt: Arc<dyn CaptureInterrupt>,
-    permit: Permit,
+    lease: RootLease,
 }
 
 enum Shutdown {
@@ -120,7 +120,7 @@ impl NativeCaptureSession {
     pub(crate) fn attach(
         started: Started,
         worker: Task<()>,
-        permit: Permit,
+        lease: RootLease,
         reaper: ReaperClient,
     ) -> Self {
         let Started {
@@ -136,7 +136,7 @@ impl NativeCaptureSession {
             running: Some(RunningCapture {
                 worker,
                 interrupt,
-                permit,
+                lease,
             }),
             reaper,
             stop_result: None,
@@ -285,15 +285,15 @@ impl NativeCaptureSession {
             Some(RunningCapture {
                 worker,
                 interrupt,
-                permit,
+                lease,
             }) => {
                 match worker.wait(deadline) {
                     Waited::Pending(worker) => {
-                        permit.retention_marker().mark_retained();
+                        lease.retention_marker().mark_retained();
                         self.running = Some(RunningCapture {
                             worker,
                             interrupt,
-                            permit,
+                            lease,
                         });
                         return Err(Error::DeadlineExceeded {
                             operation: "shutting down native capture",
@@ -302,7 +302,7 @@ impl NativeCaptureSession {
                     Waited::Finished(join_result) => {
                         // Release a user-supplied interrupt before returning admission.
                         drop(interrupt);
-                        drop(permit);
+                        drop(lease);
                         join_result.map_err(|_| Error::Capture {
                             message: "native capture worker panicked during shutdown".to_owned(),
                             source: None,
@@ -337,7 +337,7 @@ impl Drop for NativeCaptureSession {
         if let Some(RunningCapture {
             worker,
             interrupt,
-            permit,
+            lease,
         }) = self.running.take()
         {
             // Explicit shutdown has already used its finite deadline.
@@ -345,7 +345,7 @@ impl Drop for NativeCaptureSession {
                 worker,
                 Arc::clone(&self.stop),
                 interrupt,
-                permit,
+                lease,
                 &self.reaper,
             );
         }

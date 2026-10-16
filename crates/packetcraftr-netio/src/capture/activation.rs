@@ -19,7 +19,7 @@ use crate::{
     Error,
     deadline::POLL_INTERVAL,
     workers::{
-        Class, Pool,
+        Pool,
         reaper::{ReaperClient, ReaperStartError, shared_reaper, wait_until_finished},
     },
 };
@@ -54,13 +54,14 @@ fn open_with(
         message: "native capture cleanup is unavailable".to_owned(),
         source: Some(Source::new(error)),
     })?;
-    let permit = pool.admit(Class::Native).map_err(|error| Error::Capture {
+    let permit = pool.admit().map_err(|error| Error::Capture {
         message: format!(
             "native capture activation capacity {} is exhausted",
             error.capacity
         ),
         source: Some(Source::new(error)),
     })?;
+    let lease = permit.lease();
     // A rendezvous: the reader starts only once an owner holds its stop flag.
     let (handoff, claim) = mpsc::sync_channel::<Result<Started, Error>>(0);
     let worker_deadline = deadline.clone();
@@ -96,16 +97,16 @@ fn open_with(
     match await_handoff(&claim, &deadline) {
         Err(interrupted) => {
             drop(claim);
-            permit.retention_marker().mark_retained();
+            lease.retention_marker().mark_retained();
             reaper.transfer(Box::new(move || {
-                let _permit = permit;
+                let _lease = lease;
                 wait_until_finished(task, POLL_INTERVAL, || {});
             }));
             Err(Error::interrupted(interrupted, ARMING))
         }
         Ok(Ok(started)) => {
-            let retention = permit.retention_marker();
-            let session = NativeCaptureSession::attach(started, task, permit, reaper.clone());
+            let retention = lease.retention_marker();
+            let session = NativeCaptureSession::attach(started, task, lease, reaper.clone());
             if let Err(interrupted) = deadline.live_remaining() {
                 retention.mark_retained();
                 reaper.transfer(Box::new(move || drop(session)));

@@ -29,7 +29,7 @@ use crate::{
         execution_context::{ExecutionContext, NAMESPACE_PATH},
     },
     route,
-    workers::{self, Class, Task, Waited},
+    workers::{self, Task, Waited},
 };
 
 const NETLINK_QUEUE_DEPTH: usize = crate::workers::CAPACITY;
@@ -464,7 +464,7 @@ fn start_worker_with(
         .file
         .try_clone()
         .map_err(|error| os_error("retain caller network namespace", error))?;
-    let permit = pool.admit(Class::Native).map_err(refused)?;
+    let permit = pool.admit().map_err(refused)?;
     let (setup, initialized) = mpsc::sync_channel(1);
     let inbox = Arc::new(Inbox::new());
     let worker_inbox = Arc::clone(&inbox);
@@ -481,7 +481,6 @@ fn start_worker_with(
             Err(interrupted) => route::Error::interrupted(interrupted, "initializing netlink"),
             Ok(()) => os_error("spawn netlink worker", error),
         })?;
-    drop(permit);
     let result = loop {
         let remaining = match wait_remaining(caller, deadline, "initializing netlink") {
             Ok(remaining) => remaining,

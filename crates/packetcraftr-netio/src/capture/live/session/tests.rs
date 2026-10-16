@@ -7,7 +7,7 @@ use crate::capture::live::{
 };
 use crate::capture::{self, Group, GroupRequest, Provider};
 use crate::interface::Id;
-use crate::workers::{Class, Pool, reaper::shared_reaper};
+use crate::workers::{Pool, reaper::shared_reaper};
 use std::sync::{Condvar, Mutex, atomic::AtomicUsize, mpsc};
 use std::time::{Duration, Instant};
 
@@ -82,12 +82,13 @@ impl Provider for Backend {
             },
         };
         let (started, reader) = NativeCaptureSession::prepare(parts, request.limits);
-        let permit = self.pool.admit(Class::Native).unwrap();
+        let permit = self.pool.admit().unwrap();
+        let lease = permit.lease();
         let task = permit.spawn(move || reader.run()).unwrap();
         Ok(NativeCaptureSession::attach(
             started,
             task,
-            permit,
+            lease,
             shared_reaper().unwrap(),
         ))
     }

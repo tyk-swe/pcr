@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{Class, Pool, SocketPermit, Waited};
+use super::{Pool, SocketPermit, Waited};
 use packetcraftr_core::budget::Deadline;
 use std::{
     sync::{Arc, mpsc},
@@ -20,23 +20,20 @@ fn established_data_keeps_one_root_charge_without_execution_and_leaves_control_h
     let pool = Arc::new(Pool::new(4));
     let mut sockets: Vec<SocketPermit> = Vec::new();
     for _ in 0..3 {
-        let permit = pool.admit(Class::TcpConnect).unwrap();
-        let socket = permit.clone();
-        let task = permit.spawn(move || socket.into_socket()).unwrap();
-        drop(permit);
+        let permit = pool.admit_connect().unwrap();
+        let task = permit.spawn(super::SocketReservation::into_socket).unwrap();
         sockets.push(wait(task));
     }
     assert_eq!(pool.snapshot().active, 3);
     assert_eq!(pool.tcp_snapshot().active, 3);
     assert_eq!(pool.socket_snapshot().active, 3);
     assert_eq!(pool.execution_snapshot().active, 0);
-    assert_eq!(pool.admit(Class::TcpConnect).err().unwrap().capacity, 3);
+    assert_eq!(pool.admit_connect().err().unwrap().capacity, 3);
 
-    let control = pool.admit(Class::Native).unwrap();
+    let control = pool.admit().unwrap();
     assert_eq!(pool.snapshot().active, 4);
-    assert_eq!(pool.admit(Class::Native).err().unwrap().capacity, 4);
+    assert_eq!(pool.admit().err().unwrap().capacity, 4);
     let task = control.spawn(|| 42).unwrap();
-    drop(control);
     assert_eq!(wait(task), 42);
     assert_eq!(pool.snapshot().active, 3);
     drop(sockets);
@@ -47,19 +44,17 @@ fn established_data_keeps_one_root_charge_without_execution_and_leaves_control_h
 #[test]
 fn a_socket_transfer_keeps_execution_until_the_work_really_finishes() {
     let pool = Arc::new(Pool::new(4));
-    let permit = pool.admit(Class::TcpConnect).unwrap();
-    let socket = permit.clone();
+    let permit = pool.admit_connect().unwrap();
     let (published, received) = mpsc::sync_channel(1);
     let (release, held) = mpsc::sync_channel(1);
     let task = permit
-        .spawn(move || {
+        .spawn(move |socket| {
             let socket = socket.into_socket();
             published.send(()).unwrap();
             held.recv().unwrap();
             socket
         })
         .unwrap();
-    drop(permit);
     received.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(pool.snapshot().active, 1);
     assert_eq!(pool.execution_snapshot().active, 1);
@@ -75,20 +70,111 @@ fn a_socket_transfer_keeps_execution_until_the_work_really_finishes() {
 #[test]
 fn cancelled_unfinished_work_stays_charged_until_actual_completion() {
     let pool = Arc::new(Pool::new(1));
-    let permit = pool.admit(Class::Native).unwrap();
+    let permit = pool.admit().unwrap();
     let (release, held) = mpsc::sync_channel(1);
     let task = permit.spawn(move || held.recv().unwrap()).unwrap();
-    drop(permit);
     task.retention_marker().mark_retained();
     task.retention_marker().mark_retained();
     assert_eq!(pool.snapshot().active, 1);
     assert_eq!(pool.snapshot().cleanup_retaining_capacity, 1);
     assert_eq!(pool.execution_snapshot().cleanup_retaining_capacity, 1);
-    assert!(pool.admit(Class::Native).is_err());
+    assert!(pool.admit().is_err());
     release.send(()).unwrap();
     wait(task);
     assert_eq!(pool.snapshot().active, 0);
     assert_eq!(pool.snapshot().cleanup_retaining_capacity, 0);
+}
+
+#[test]
+fn a_root_lease_retains_admission_without_retaining_finished_execution() {
+    let pool = Arc::new(Pool::new(1));
+    let permit = pool.admit().unwrap();
+    let lease = permit.lease();
+    let task = permit.spawn(|| 7).unwrap();
+
+    assert_eq!(wait(task), 7);
+    assert_eq!(pool.snapshot().active, 1);
+    assert_eq!(pool.execution_snapshot().active, 0);
+    assert!(pool.admit().is_err());
+
+    lease.retention_marker().mark_retained();
+    assert_eq!(pool.snapshot().cleanup_retaining_capacity, 1);
+    assert_eq!(pool.execution_snapshot().cleanup_retaining_capacity, 0);
+
+    drop(lease);
+    assert_eq!(pool.snapshot().active, 0);
+    assert_eq!(pool.snapshot().cleanup_retaining_capacity, 0);
+}
+
+#[test]
+fn unpromoted_socket_reservations_release_every_charge() {
+    let pool = Arc::new(Pool::new(4));
+    let assert_released = || {
+        assert_eq!(pool.snapshot().active, 0);
+        assert_eq!(pool.tcp_snapshot().active, 0);
+        assert_eq!(pool.execution_snapshot().active, 0);
+        assert_eq!(pool.socket_snapshot().active, 0);
+    };
+
+    let permit = pool.admit_connect().unwrap();
+    wait(permit.spawn(|_reservation| ()).unwrap());
+    assert_released();
+
+    let permit = pool.admit_connect().unwrap();
+    let task = permit
+        .spawn(|_reservation| panic!("injected unpromoted connection failure"))
+        .unwrap();
+    assert!(matches!(
+        task.wait(&Deadline::new(Duration::from_secs(5))),
+        Waited::Finished(Err(_))
+    ));
+    assert_released();
+}
+
+#[test]
+fn rejected_connect_dispatch_drops_captures_outside_lock_before_releasing_admission() {
+    struct CaptureDrop {
+        pool: Arc<Pool>,
+        snapshot: mpsc::Sender<(usize, usize)>,
+    }
+
+    impl Drop for CaptureDrop {
+        fn drop(&mut self) {
+            self.snapshot
+                .send((
+                    self.pool.snapshot().active,
+                    self.pool.execution_snapshot().active,
+                ))
+                .unwrap();
+        }
+    }
+
+    let pool = Arc::new(Pool::new(4));
+    let (snapshot, observed) = mpsc::channel();
+    let capture = CaptureDrop {
+        pool: Arc::clone(&pool),
+        snapshot,
+    };
+    let permit = pool.admit_connect().unwrap();
+    let caller = std::thread::spawn(move || {
+        assert!(
+            permit
+                .spawn_with_control(&Deadline::new(Duration::ZERO), move |_reservation| {
+                    drop(capture);
+                    panic!("an expired dispatch must not run")
+                })
+                .is_err()
+        );
+    });
+    assert_eq!(
+        observed.recv_timeout(Duration::from_secs(5)).unwrap(),
+        (1, 1)
+    );
+    caller.join().unwrap();
+    assert_eq!(pool.snapshot().active, 0);
+    assert_eq!(pool.tcp_snapshot().active, 0);
+    assert_eq!(pool.execution_snapshot().active, 0);
+    assert_eq!(pool.socket_snapshot().active, 0);
 }
 
 struct BlockedStreamDrop {
@@ -117,9 +203,8 @@ fn context_retirement_never_joins_an_abandoned_socket_drop_on_the_new_caller() {
         return;
     }
     let pool = Arc::new(Pool::new(2));
-    let permit = pool.admit(Class::Native).unwrap();
+    let permit = pool.admit().unwrap();
     let task = permit.spawn(|| ()).unwrap();
-    drop(permit);
     wait(task);
     // Force distinct cached execution identities without switching the test's
     // real namespace. This is a private pool test, not native setns evidence.
@@ -127,13 +212,12 @@ fn context_retirement_never_joins_an_abandoned_socket_drop_on_the_new_caller() {
         worker.context = None;
     }
 
-    let permit = pool.admit(Class::TcpConnect).unwrap();
-    let socket = permit.clone();
+    let permit = pool.admit_connect().unwrap();
     let (work_release, work_held) = mpsc::channel();
     let (entered, dropping) = mpsc::channel();
     let (drop_release, drop_held) = mpsc::channel();
     let task = permit
-        .spawn(move || {
+        .spawn(move |socket| {
             work_held.recv().unwrap();
             AbandonedSocket {
                 _stream: BlockedStreamDrop {
@@ -144,7 +228,6 @@ fn context_retirement_never_joins_an_abandoned_socket_drop_on_the_new_caller() {
             }
         })
         .unwrap();
-    drop(permit);
     task.retention_marker().mark_retained();
     drop(task);
     work_release.send(()).unwrap();
@@ -159,9 +242,8 @@ fn context_retirement_never_joins_an_abandoned_socket_drop_on_the_new_caller() {
     let caller_pool = Arc::clone(&pool);
     let (returned, result) = mpsc::channel();
     let caller = std::thread::spawn(move || {
-        let permit = caller_pool.admit(Class::Native).unwrap();
+        let permit = caller_pool.admit().unwrap();
         let result = permit.spawn(|| 42);
-        drop(permit);
         let outcome = result.map(wait).map_err(|error| error.kind());
         returned.send(outcome).unwrap();
     });
@@ -183,9 +265,8 @@ fn context_retirement_never_joins_an_abandoned_socket_drop_on_the_new_caller() {
         assert!(std::time::Instant::now() < guard);
         std::thread::yield_now();
     }
-    let permit = pool.admit(Class::Native).unwrap();
+    let permit = pool.admit().unwrap();
     let task = permit.spawn(|| 7).unwrap();
-    drop(permit);
     assert_eq!(wait(task), 7);
     assert_eq!(pool.snapshot().active, 0);
 }
@@ -211,9 +292,8 @@ fn healthy_context_retirement_recovers_without_exceeding_the_actual_thread_limit
     }
     let pool = Arc::new(Pool::new(2));
     for number in 0..64 {
-        let permit = pool.admit(Class::Native).unwrap();
+        let permit = pool.admit().unwrap();
         let task = permit.spawn(|| ()).unwrap();
-        drop(permit);
         wait(task);
         await_idle(&pool);
         assert!(
@@ -247,7 +327,7 @@ thread_local! {
 fn gated_idle_tls(pool: &Arc<Pool>) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
     let (entered, dropping) = mpsc::channel();
     let (release, held) = mpsc::channel();
-    let permit = pool.admit(Class::Native).unwrap();
+    let permit = pool.admit().unwrap();
     let task = permit
         .spawn(move || {
             BLOCKED_TLS.with(|slot| {
@@ -258,7 +338,6 @@ fn gated_idle_tls(pool: &Arc<Pool>) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
             });
         })
         .unwrap();
-    drop(permit);
     wait(task);
     await_idle(pool);
     for worker in &mut super::lock(&pool.state).idle {
@@ -319,9 +398,8 @@ fn blocked_provider_tls_retirement_keeps_a_thread_slot_and_parent_control_can_st
         }
     );
     release.send(()).unwrap();
-    let permit = pool.admit(Class::Native).unwrap();
+    let permit = pool.admit().unwrap();
     let task = permit.spawn(|| 99).unwrap();
-    drop(permit);
     assert_eq!(wait(task), 99);
     assert_eq!(pool.snapshot().active, 0);
     await_idle(&pool);
@@ -383,9 +461,8 @@ fn one_blocked_tls_join_does_not_prevent_other_contexts_from_retiring() {
     let pool = Arc::new(Pool::new(2));
     let (dropping, release) = gated_idle_tls(&pool);
     let blocked_id = super::lock(&pool.state).idle[0].id;
-    let permit = pool.admit(Class::Native).unwrap();
+    let permit = pool.admit().unwrap();
     let task = permit.spawn(|| ()).unwrap();
-    drop(permit);
     wait(task);
     let guard = std::time::Instant::now() + Duration::from_secs(5);
     while super::lock(&pool.state).idle.len() != 2 {
@@ -403,10 +480,9 @@ fn one_blocked_tls_join_does_not_prevent_other_contexts_from_retiring() {
     }
     let mut progressed = true;
     for number in 0..8 {
-        let permit = pool.admit(Class::Native).unwrap();
+        let permit = pool.admit().unwrap();
         let task =
             permit.spawn_with_control(&Deadline::new(Duration::from_secs(5)), move || number);
-        drop(permit);
         match task {
             Ok(task) => assert_eq!(wait(task), number),
             Err(_) => {
@@ -437,9 +513,8 @@ fn retirement_initialization_refusal_preserves_the_handle_and_a_later_call_retri
         return;
     }
     let pool = Arc::new(Pool::new(1));
-    let permit = pool.admit(Class::Native).unwrap();
+    let permit = pool.admit().unwrap();
     let task = permit.spawn(|| ()).unwrap();
-    drop(permit);
     wait(task);
     await_idle(&pool);
     for worker in &mut super::lock(&pool.state).idle {
@@ -447,9 +522,8 @@ fn retirement_initialization_refusal_preserves_the_handle_and_a_later_call_retri
     }
     pool.fail_retirement_start
         .store(true, std::sync::atomic::Ordering::Relaxed);
-    let permit = pool.admit(Class::Native).unwrap();
+    let permit = pool.admit().unwrap();
     let error = permit.spawn(|| ()).err().unwrap();
-    drop(permit);
     assert!(
         error
             .get_ref()
@@ -460,9 +534,8 @@ fn retirement_initialization_refusal_preserves_the_handle_and_a_later_call_retri
     assert_eq!(owned_threads(&pool), 1);
     assert_eq!(super::lock(&pool.state).idle.len(), 1);
     assert!(super::lock(&pool.retirement_service).is_none());
-    let permit = pool.admit(Class::Native).unwrap();
+    let permit = pool.admit().unwrap();
     let task = permit.spawn(|| 123).unwrap();
-    drop(permit);
     assert_eq!(wait(task), 123);
     assert_eq!(pool.snapshot().active, 0);
     assert!(owned_threads(&pool) <= 1);
@@ -508,14 +581,13 @@ fn join_acknowledgement_waits_for_panic_payload_drop_and_recovers_after_its_pani
     });
     let payload = Arc::clone(&gate);
     let (release_work, work_held) = mpsc::channel();
-    let permit = pool.admit(Class::Native).unwrap();
+    let permit = pool.admit().unwrap();
     let task = permit
         .spawn(move || {
             work_held.recv().unwrap();
             PanicDuringPublication(payload)
         })
         .unwrap();
-    drop(permit);
     drop(task);
     release_work.send(()).unwrap();
     let guard = std::time::Instant::now() + Duration::from_secs(5);
@@ -533,9 +605,8 @@ fn join_acknowledgement_waits_for_panic_payload_drop_and_recovers_after_its_pani
     let caller_pool = Arc::clone(&pool);
     let (returned, result) = mpsc::channel();
     let caller = std::thread::spawn(move || {
-        let permit = caller_pool.admit(Class::Native).unwrap();
+        let permit = caller_pool.admit().unwrap();
         let task = permit.spawn(|| 77).unwrap();
-        drop(permit);
         returned.send(wait(task)).unwrap();
     });
     dropping.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -567,13 +638,12 @@ fn work_panic_payload_cleanup_stays_charged_after_caller_cancellation() {
     let parent =
         Deadline::new(Duration::from_secs(30)).with_cancellation(Some(cancellation.clone()));
     let control = Deadline::new(Duration::from_secs(30)).with_parent(Some(Arc::new(parent)));
-    let permit = pool.admit(Class::Native).unwrap();
+    let permit = pool.admit().unwrap();
     let task = permit
         .spawn_with_control(&control, move || {
             std::panic::panic_any(GatedPanicPayload(payload))
         })
         .unwrap();
-    drop(permit);
     dropping.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(pool.snapshot().active, 1);
     assert_eq!(pool.execution_snapshot().active, 1);
@@ -584,7 +654,7 @@ fn work_panic_payload_cleanup_stays_charged_after_caller_cancellation() {
     };
     pending.retention_marker().mark_retained();
     assert_eq!(pool.snapshot().cleanup_retaining_capacity, 1);
-    assert!(pool.admit(Class::Native).is_err());
+    assert!(pool.admit().is_err());
     *gate.released.lock().unwrap() = true;
     gate.changed.notify_all();
     // The gated destructor itself panics. Its replacement is disposed while
@@ -696,7 +766,7 @@ fn nested_lookup_allocation_stays_charged_through_cancelled_panic_cleanup() {
     assert_eq!(allocation.snapshot().active, 1);
     assert_eq!(allocation.snapshot().cleanup_retaining_capacity, 1);
     assert_eq!(root.snapshot().cleanup_retaining_capacity, 1);
-    assert!(allocation.admit(Class::Native).is_err());
+    assert!(allocation.admit().is_err());
     *gate.released.lock().unwrap() = true;
     gate.changed.notify_all();
     let guard = std::time::Instant::now() + Duration::from_secs(5);

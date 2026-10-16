@@ -136,6 +136,8 @@ for replacement APIs.
 
 ### Fixed
 
+- Make native worker submission and TCP socket promotion single-use ownership
+  transfers, preventing duplicate work or socket charges under one admission.
 - Skip capture-source rotation discovery for fixed raw scans, avoiding repeated
   traversals of every unsent probe that could exhaust the scan duration budget.
 - Apply raw-scan acquisition qualifications to follow-up endpoint reports so

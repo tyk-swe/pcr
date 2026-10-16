@@ -46,7 +46,7 @@ pub(in crate::platform) fn on_worker<T: Send + 'static>(
     operation: &'static str,
     query: impl FnOnce(&packetcraftr_core::budget::Deadline) -> Result<T, route::Error> + Send + 'static,
 ) -> Result<T, route::Error> {
-    use crate::workers::{Class, Waited};
+    use crate::workers::Waited;
 
     let detached = deadline
         .detach()
@@ -55,9 +55,7 @@ pub(in crate::platform) fn on_worker<T: Send + 'static>(
     let wait = detached
         .detach()
         .map_err(|interrupted| route::Error::interrupted(interrupted, operation))?;
-    let permit = crate::workers::shared()
-        .admit(Class::Native)
-        .map_err(refused)?;
+    let permit = crate::workers::shared().admit().map_err(refused)?;
     let task = permit
         .spawn_with_control(&wait, move || query(&detached))
         .map_err(|error| match wait.enforce() {
@@ -68,7 +66,6 @@ pub(in crate::platform) fn on_worker<T: Send + 'static>(
                 source: Some(Source::new(error)),
             },
         })?;
-    drop(permit);
     match task.wait(&wait) {
         Waited::Finished(Ok(result)) => result,
         Waited::Finished(Err(_)) => Err(route::Error::InvalidResponse {

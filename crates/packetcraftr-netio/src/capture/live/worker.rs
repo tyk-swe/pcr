@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::workers::{Permit, Task};
+use crate::workers::{RootLease, Task};
 use packetcraftr_core::error::Source;
 
 use crate::{Error, capture::Captured};
@@ -26,14 +26,14 @@ pub(super) fn transfer_capture_worker(
     worker: Task<()>,
     stop: Arc<AtomicBool>,
     interrupt: Arc<dyn super::CaptureInterrupt>,
-    permit: Permit,
+    lease: RootLease,
     reaper: &ReaperClient,
 ) {
-    permit.retention_marker().mark_retained();
+    lease.retention_marker().mark_retained();
     reaper.transfer(Box::new(move || {
-        // The permit and interrupt are intentionally captured by this task so
+        // The lease and interrupt are intentionally captured by this task so
         // neither can be released before the worker has actually stopped.
-        let _permit = permit;
+        let _lease = lease;
         stop.store(true, Ordering::Release);
         wait_until_finished(worker, REAPER_POLL_INTERVAL, || {
             // A panicking interrupt must not abandon the ownership bundle.

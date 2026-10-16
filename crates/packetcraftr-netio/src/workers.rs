@@ -32,7 +32,7 @@ pub(crate) fn shared() -> &'static Arc<Pool> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Class {
+enum Class {
     #[cfg_attr(not(native_route), allow(dead_code))]
     Native,
     TcpConnect,
@@ -99,7 +99,7 @@ type Run = Box<dyn FnOnce() -> Box<dyn FnOnce() + Send> + Send>;
 
 struct Job {
     run: Run,
-    permit: Permit,
+    permit: RootLease,
 }
 
 impl State {
@@ -167,7 +167,15 @@ impl Pool {
         }
     }
 
-    pub(crate) fn admit(self: &Arc<Self>, class: Class) -> Result<Permit, Exhausted> {
+    pub(crate) fn admit(self: &Arc<Self>) -> Result<Permit, Exhausted> {
+        self.admit_class(Class::Native)
+    }
+
+    pub(crate) fn admit_connect(self: &Arc<Self>) -> Result<ConnectPermit, Exhausted> {
+        self.admit_class(Class::TcpConnect).map(ConnectPermit)
+    }
+
+    fn admit_class(self: &Arc<Self>, class: Class) -> Result<Permit, Exhausted> {
         let mut state = lock(&self.state);
         let refused = state.all.active >= self.capacity
             || (class == Class::TcpConnect && state.tcp.active >= self.data_capacity);
@@ -189,14 +197,15 @@ impl Pool {
             });
         }
         state.execution.active += 1;
-        Ok(Permit(Arc::new(Grant(
-            RetentionMarker {
-                pool: Arc::clone(self),
-                class,
-                phase: Arc::new(AtomicU8::new(EXECUTING)),
-            },
-            AtomicBool::new(false),
-        ))))
+        Ok(Permit {
+            root: RootLease(Arc::new(Grant {
+                marker: RetentionMarker {
+                    pool: Arc::clone(self),
+                    class,
+                    phase: Arc::new(AtomicU8::new(EXECUTING)),
+                },
+            })),
+        })
     }
 
     fn retirement_reaper(&self) -> Result<reaper::ReaperClient, reaper::ReaperStartError> {
@@ -371,11 +380,11 @@ impl Pool {
         Ok(())
     }
 
-    fn finish_admission(&self, permit: Permit) {
+    fn finish_admission(&self, permit: RootLease) {
         let mut state = lock(&self.state);
-        permit.0.0.finish_execution(&mut state);
+        permit.0.marker.finish_execution(&mut state);
         if let Some(grant) = Arc::into_inner(permit.0) {
-            grant.0.release(&mut state);
+            grant.marker.release(&mut state);
         }
     }
 
@@ -424,16 +433,29 @@ const SOCKET: u8 = 2;
 const RETAINED: u8 = 4;
 const RELEASED: u8 = 8;
 
-/// One admitted root slot; the slot returns when the last clone is dropped.
+/// One admitted execution, consumed when its only job is dispatched.
+pub(crate) struct Permit {
+    root: RootLease,
+}
+
+/// One admitted TCP connection attempt, consumed when its only job is dispatched.
+pub(crate) struct ConnectPermit(Permit);
+
+/// Keeps a root slot charged without granting execution or socket promotion.
 #[derive(Clone)]
-pub(crate) struct Permit(Arc<Grant>);
+pub(crate) struct RootLease(Arc<Grant>);
+
+/// The sole socket promotion right for one admitted TCP connection attempt.
+pub(crate) struct SocketReservation(RootLease);
 
 /// An established socket's root/data ownership, without execution admission.
 pub(crate) struct SocketPermit {
-    _root: Permit,
+    _root: RootLease,
 }
 
-struct Grant(RetentionMarker, AtomicBool);
+struct Grant {
+    marker: RetentionMarker,
+}
 
 #[derive(Clone)]
 pub(crate) struct RetentionMarker {
@@ -495,9 +517,9 @@ impl RetentionMarker {
 impl Drop for Grant {
     fn drop(&mut self) {
         // `Pool::finish_admission` releases under its own lock; the phase is final then.
-        if self.0.phase.load(Ordering::Relaxed) != RELEASED {
-            let mut state = lock(&self.0.pool.state);
-            self.0.release(&mut state);
+        if self.marker.phase.load(Ordering::Relaxed) != RELEASED {
+            let mut state = lock(&self.marker.pool.state);
+            self.marker.release(&mut state);
         }
     }
 }
@@ -528,45 +550,53 @@ pub(crate) fn unwind_after_cleanup<T>(work: impl FnOnce() -> T) -> T {
     }
 }
 
-impl Permit {
+impl SocketReservation {
     /// Transfer root/data ownership to the socket without acquiring another root
     /// slot. The worker keeps execution admission until its job actually ends.
     pub(crate) fn into_socket(self) -> SocketPermit {
-        let marker = &self.0.0;
+        let marker = &self.0.0.marker;
         let mut state = lock(&marker.pool.state);
         let phase = marker.phase.load(Ordering::Relaxed);
-        debug_assert_eq!(marker.class, Class::TcpConnect);
-        debug_assert_eq!(phase & (SOCKET | RELEASED), 0);
         marker.phase.store(phase | SOCKET, Ordering::Relaxed);
         state.sockets.active += 1;
         if phase & RETAINED != 0 {
             state.sockets.retained += 1;
         }
         drop(state);
-        SocketPermit { _root: self }
+        SocketPermit { _root: self.0 }
+    }
+}
+
+impl RootLease {
+    pub(crate) fn retention_marker(&self) -> RetentionMarker {
+        self.0.marker.clone()
+    }
+}
+
+impl Permit {
+    pub(crate) fn lease(&self) -> RootLease {
+        self.root.clone()
     }
 
     pub(crate) fn retention_marker(&self) -> RetentionMarker {
-        self.0.0.clone()
+        self.root.retention_marker()
     }
 
     #[cfg(test)]
     pub(crate) fn spawn<T: Send + 'static>(
-        &self,
+        self,
         work: impl FnOnce() -> T + Send + 'static,
     ) -> std::io::Result<Task<T>> {
         self.spawn_with_control(&Deadline::new(std::time::Duration::from_secs(5)), work)
     }
 
     pub(crate) fn spawn_with_control<T: Send + 'static>(
-        &self,
+        self,
         control: &Deadline,
         work: impl FnOnce() -> T + Send + 'static,
     ) -> std::io::Result<Task<T>> {
-        debug_assert!(
-            !self.0.1.swap(true, Ordering::Relaxed),
-            "a permit runs at most one job"
-        );
+        let retention = self.retention_marker();
+        let pool = Arc::clone(&self.root.0.marker.pool);
         let done = Arc::new(Done {
             slot: Mutex::new(Slot::Running),
             finished: Condvar::new(),
@@ -584,17 +614,33 @@ impl Permit {
         });
         let job = Job {
             run,
-            permit: self.clone(),
+            permit: self.root,
         };
-        let pool = Arc::clone(&self.0.0.pool);
         pool.dispatch(job, control).map_err(|(job, error)| {
             drop(job);
             error
         })?;
-        Ok(Task {
-            done,
-            retention: self.retention_marker(),
-        })
+        Ok(Task { done, retention })
+    }
+}
+
+impl ConnectPermit {
+    #[cfg(test)]
+    pub(crate) fn spawn<T: Send + 'static>(
+        self,
+        work: impl FnOnce(SocketReservation) -> T + Send + 'static,
+    ) -> std::io::Result<Task<T>> {
+        self.spawn_with_control(&Deadline::new(std::time::Duration::from_secs(5)), work)
+    }
+
+    pub(crate) fn spawn_with_control<T: Send + 'static>(
+        self,
+        control: &Deadline,
+        work: impl FnOnce(SocketReservation) -> T + Send + 'static,
+    ) -> std::io::Result<Task<T>> {
+        let reservation = SocketReservation(self.0.lease());
+        self.0
+            .spawn_with_control(control, move || work(reservation))
     }
 }
 

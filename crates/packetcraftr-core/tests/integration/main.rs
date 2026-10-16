@@ -9,6 +9,8 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod analysis_control_contracts;
+mod analysis_provenance_contracts;
 mod capture_compression_contracts;
 mod capture_file_edge_contracts;
 mod document_limit_contracts;

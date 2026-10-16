@@ -106,13 +106,20 @@ where
         super::adaptive::Controller::new(config, request.timeout, request.max_in_flight)
     });
     let mut reservation = 0usize;
+    let mut adaptive_admissions = None;
     if controller.is_some() {
         reservation = adaptive_reservation(
             request,
             &approved.targets,
             options.probes.len().max(approved.endpoints.len()),
         );
-        admit_adaptive(request, executor, deadline, &approved, reservation)?;
+        adaptive_admissions = Some(admit_adaptive(
+            request,
+            executor,
+            deadline,
+            &approved,
+            reservation,
+        )?);
         if let Some(controller) = controller.as_mut() {
             for target in &approved.targets {
                 controller.host_index(target);
@@ -154,6 +161,7 @@ where
         probe_error,
         request.limits.evidence,
         ProbeClassifier {
+            observation_quality: None,
             registry,
             target: Arc::from(approved.declared_target.as_str()),
             winners: HashMap::new(),
@@ -280,6 +288,10 @@ where
                 0,
                 &mut owed,
                 reservation,
+                &adaptive_admissions
+                    .as_ref()
+                    .expect("adaptive stages admitted")[0],
+                &stats,
             )?,
             None => execute(
                 request,
@@ -379,6 +391,10 @@ where
             scan_sequence,
             &mut owed,
             reservation,
+            &adaptive_admissions
+                .as_ref()
+                .expect("adaptive stages admitted")[1],
+            &stats,
         )?,
         None => execute(
             request,

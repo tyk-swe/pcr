@@ -6,11 +6,12 @@
 use std::io::Read;
 use std::sync::Arc;
 
+use crate::budget::Deadline;
 use crate::error::BoundaryError;
 use crate::registry::Registry;
 
 use super::scope::Definition;
-use super::{FrameRecord, IpEventRecord, Options, Plan, StreamRef, Summary, run_with_ip_events};
+use super::{FrameRecord, IpEventRecord, Options, Plan, StreamRef, Summary};
 use crate::capture_file::Reader;
 
 /// A stream index keeps IP reconstruction on: stream numbering follows reconstructed conversations.
@@ -39,6 +40,44 @@ pub trait Collector {
     fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Self::Event>, BoundaryError>;
 
     fn finish(self, run: &Summary) -> Result<(Vec<Self::Event>, Self::Summary), BoundaryError>;
+
+    /// Finalize under the original run control, delivering terminal events in
+    /// order. Override this for large finalizers to check control internally
+    /// and avoid retaining the complete terminal event list. The default keeps
+    /// existing collectors compatible. A synchronous callback must cooperate:
+    /// it cannot be interrupted while it is blocked.
+    fn finish_controlled(
+        self,
+        run: &Summary,
+        deadline: &Deadline,
+        event_sink: &mut dyn FnMut(Self::Event) -> Result<(), BoundaryError>,
+    ) -> Result<Self::Summary, BoundaryError>
+    where
+        Self: Sized,
+    {
+        check(deadline)?;
+        let (events, summary) = self.finish(run)?;
+        deliver(deadline, events, event_sink)?;
+        Ok(summary)
+    }
+}
+
+pub(super) fn check(deadline: &Deadline) -> Result<(), BoundaryError> {
+    deadline.enforce().map_err(BoundaryError::from_error)
+}
+
+pub(super) fn deliver<E>(
+    deadline: &Deadline,
+    events: impl IntoIterator<Item = E>,
+    event_sink: &mut dyn FnMut(E) -> Result<(), BoundaryError>,
+) -> Result<(), BoundaryError> {
+    check(deadline)?;
+    for event in events {
+        check(deadline)?;
+        event_sink(event)?;
+        check(deadline)?;
+    }
+    Ok(())
 }
 
 /// Lets a caller apply [`selected_absent`](Self::selected_absent) before [`finish`](Self::finish).
@@ -46,6 +85,7 @@ pub struct Pass<C: Collector> {
     pub run: Summary,
     collector: C,
     selector: Option<StreamRef>,
+    deadline: Arc<Deadline>,
 }
 
 impl<C: Collector> Pass<C> {
@@ -60,15 +100,15 @@ impl<C: Collector> Pass<C> {
         F: FnMut(C::Event) -> Result<(), BoundaryError>,
     {
         let selected_absent = self.selected_absent();
+        check(&self.deadline).map_err(super::Error::Collector)?;
         // Scope capture precedes finish, which consumes the collector.
         let scopes = self.collector.scopes();
-        let (trailing, summary) = self
+        check(&self.deadline).map_err(super::Error::Collector)?;
+        let summary = self
             .collector
-            .finish(&self.run)
+            .finish_controlled(&self.run, &self.deadline, event_sink)
             .map_err(super::Error::Collector)?;
-        for event in trailing {
-            event_sink(event).map_err(super::Error::Collector)?;
-        }
+        check(&self.deadline).map_err(super::Error::Collector)?;
         Ok(Outcome {
             run: self.run,
             summary,
@@ -142,16 +182,22 @@ impl<'a, C: Collector> Session<'a, C> {
         F: FnMut(C::Event) -> Result<(), BoundaryError>,
     {
         let mut collector = self.collector;
-        let run = run_with_ip_events(reader, self.registry, &self.options, ip_sink, |record| {
-            for event in collector.observe(&record)? {
-                event_sink(event)?;
-            }
-            Ok(())
-        })?;
+        let (run, deadline) = super::pipeline::run_controlled(
+            reader,
+            self.registry,
+            &self.options,
+            ip_sink,
+            |record, deadline| {
+                let events = collector.observe(&record)?;
+                deliver(deadline, events, event_sink)?;
+                Ok(())
+            },
+        )?;
         Ok(Pass {
             run,
             collector,
             selector: self.options.stream,
+            deadline,
         })
     }
 }

@@ -128,6 +128,7 @@ impl Accumulator {
         context: ProcessContext<'_>,
         matcher: Option<&mut WorkflowResponseMatcher<'_>>,
     ) -> Result<ProcessOutcome, DuplicateRecord> {
+        self.ingress_unknown |= captured.received_at.is_none();
         let identity = captured.identity();
         if !self.can_retain_record(identity) {
             return Err(DuplicateRecord);

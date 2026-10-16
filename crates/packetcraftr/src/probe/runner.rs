@@ -43,6 +43,7 @@ pub(crate) struct UnsolicitedCapture {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Evidence {
+    pub(crate) observation_quality: Option<packetcraftr_netio::capture::ObservationQuality>,
     pub(crate) permit: ExecutionPermit,
     pub(crate) sent: Vec<SentPacket>,
     pub(crate) responses: Vec<crate::exchange::Response>,
@@ -81,6 +82,7 @@ impl Evidence {
             .map(crate::exchange::into_sent_packet)
             .collect();
         Self {
+            observation_quality: Some(result.observation_quality),
             permit,
             sent,
             responses,

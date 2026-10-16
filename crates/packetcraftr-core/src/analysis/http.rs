@@ -6,7 +6,7 @@
 use super::{
     FrameRecord, Summary as RunSummary,
     application::{self, Error, Limits, TcpSources},
-    provenance::SourceSet,
+    provenance::{Accumulator, SourceSet},
     reassembly::tcp::ScopedFlowKey,
     scope::Definition,
     session::{self, CollectorNeeds},
@@ -80,7 +80,7 @@ struct Live {
     body: Option<BodyDecoder>,
     framing: Option<Body>,
     request: Option<u64>,
-    sources: SourceSet,
+    sources: Accumulator,
 }
 impl Live {
     fn buffered(&self) -> usize {
@@ -151,27 +151,51 @@ impl Collector {
         }
         Ok(output)
     }
-    pub fn finish(mut self, run: &RunSummary) -> Result<(Vec<Event>, Summary), Error> {
+    pub fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), Error> {
         let mut output = Vec::new();
+        let summary = self.finalize(
+            run,
+            || Ok(()),
+            |events| {
+                output.extend(events);
+                Ok(())
+            },
+        )?;
+        Ok((output, summary))
+    }
+
+    fn finalize(
+        mut self,
+        run: &RunSummary,
+        mut check: impl FnMut() -> Result<(), Error>,
+        mut emit: impl FnMut(Vec<Event>) -> Result<(), Error>,
+    ) -> Result<Summary, Error> {
+        check()?;
         for event in self
             .tcp
             .trailing(&run.trailing_tcp_events, run.frames_read)?
         {
+            check()?;
+            let mut output = Vec::new();
             if let application::Event::Evicted { flow, .. } = event {
                 self.stop(&flow, Status::Incomplete, false, &mut output)?;
             } else {
                 self.event(event, run.frames_read, &mut output)?;
             }
+            emit(output)?;
         }
         for (flow, mut direction) in std::mem::take(&mut self.directions) {
+            check()?;
+            let mut output = Vec::new();
             self.flush(&flow, &mut direction, Status::Incomplete, None, &mut output)?;
+            emit(output)?;
         }
-        self.summary.requests_without_final_response += self
-            .requests
-            .values()
-            .map(|queue| queue.len() as u64)
-            .sum::<u64>();
-        Ok((output, self.summary))
+        for queue in self.requests.values() {
+            check()?;
+            self.summary.requests_without_final_response += queue.len() as u64;
+        }
+        check()?;
+        Ok(self.summary)
     }
     fn event(
         &mut self,
@@ -264,16 +288,15 @@ impl Collector {
                     body: None,
                     framing: None,
                     request: None,
-                    sources: data.sources.clone(),
+                    sources: Accumulator::new(&data.sources)?,
                 });
             }
             let live = direction.live.as_mut().expect("initialized live message");
             if !merged {
-                live.sources = live.sources.union(&data.sources)?;
+                live.sources.insert(&data.sources)?;
                 merged = true;
             }
-            self.limits
-                .check_source_spans(live.sources.frames().len())?;
+            self.limits.check_source_spans(live.sources.len())?;
             if live.head.is_none() {
                 // A run ends at the next LF (or consumes the input):
                 // CR/LF pairing and the CRLFCRLF terminator can only
@@ -531,7 +554,7 @@ impl Collector {
             body_bytes,
             trailers,
             error,
-            sources: live.sources,
+            sources: live.sources.freeze()?,
         })));
         Ok(())
     }
@@ -560,6 +583,20 @@ impl session::Collector for Collector {
 
     fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
         Self::finish(self, run).map_err(BoundaryError::from_error)
+    }
+
+    fn finish_controlled(
+        self,
+        run: &RunSummary,
+        deadline: &crate::budget::Deadline,
+        event_sink: &mut dyn FnMut(Event) -> Result<(), BoundaryError>,
+    ) -> Result<Summary, BoundaryError> {
+        self.finalize(
+            run,
+            || session::check(deadline).map_err(Error::Output),
+            |events| session::deliver(deadline, events, event_sink).map_err(Error::Output),
+        )
+        .map_err(BoundaryError::from_error)
     }
 }
 fn bare_crlf_offset(prev: Option<u8>, run: &[u8]) -> Option<usize> {

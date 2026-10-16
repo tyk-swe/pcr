@@ -6,15 +6,13 @@
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use packetcraftr_core::error::BoundaryError;
-
 use crate::clock::Clock;
 use crate::evidence;
 use crate::providers::{PacketProviders, TargetProviders};
 use crate::scan;
 use crate::target::{ScopedAddress, Target};
 use crate::traceroute::hosts;
-use crate::{Client, traceroute};
+use crate::{Client, Sink, traceroute};
 
 use super::Error;
 use super::request::Trace;
@@ -232,7 +230,7 @@ impl Stage {
         retained: Retained,
         started: Instant,
         last_sent: Option<Instant>,
-        emit: impl FnMut(hosts::Event) -> Result<(), BoundaryError> + Send + 'static,
+        emit: impl Sink<hosts::Event, Ack = ()>,
     ) -> Result<Streamed, Error>
     where
         P: PacketProviders + TargetProviders,
@@ -242,20 +240,24 @@ impl Stage {
         let latest = Arc::new(Mutex::new(None::<Instant>));
         let observed = Arc::clone(&latest);
         let settled = client.clock.clone();
+        let delivery = emit.delivery();
         let mut emit = emit;
         // The trace runs in the policy allowance the scan left over, not a
         // fresh one.
         let report = client.trace_hosts_in(
             request,
-            move |event: hosts::Event| {
+            crate::execution::forwarding(delivery, move |event: hosts::Event, control| {
                 // The probe's wall-clock sent_at is evidence, not a pacing
                 // marker: the monotonic marker is when its event settled.
                 if let hosts::Event::Probe(_) = &event {
                     let mut latest = observed.lock().unwrap_or_else(PoisonError::into_inner);
                     *latest = Some(settled.now());
                 }
-                emit(event)
-            },
+                match control {
+                    Some(control) => emit.publish_controlled(event, control),
+                    None => emit.publish(event),
+                }
+            }),
             operation,
         )?;
         let last_sent = *latest.lock().unwrap_or_else(PoisonError::into_inner);

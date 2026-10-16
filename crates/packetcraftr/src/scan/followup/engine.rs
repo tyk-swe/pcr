@@ -3,6 +3,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 
 use crate::clock::Clock;
@@ -49,6 +50,7 @@ where
             operation.scan_neighbors(&scan)?;
         }
         let started = self.now();
+        let delivery = sink.delivery();
         let sink = Arc::new(Mutex::new(sink));
         // Events stream as they settle; the tracker keeps each attempt
         // without its frame, for the endpoint inferences.
@@ -61,26 +63,32 @@ where
         let scan_sink = Arc::clone(&sink);
         let scan_report = self.scan_in(
             scan,
-            move |event: scan::Event| {
+            crate::execution::forwarding(delivery, move |event: scan::Event, control| {
                 observing
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .observe(&event);
-                if let scan::Event::Probe { target, probe } = &event {
-                    let probe = scan::ProbeEvidence {
-                        response: None,
-                        ..probe.clone()
-                    };
-                    Sink::publish(
-                        &mut tracked,
-                        scan::Event::Probe {
-                            target: target.clone(),
-                            probe,
-                        },
-                    )?;
+                match &event {
+                    scan::Event::Probe { target, probe } => {
+                        let probe = scan::ProbeEvidence {
+                            response: None,
+                            ..probe.clone()
+                        };
+                        Sink::publish(
+                            &mut tracked,
+                            scan::Event::Probe {
+                                target: target.clone(),
+                                probe,
+                            },
+                        )?;
+                    }
+                    scan::Event::Qualification(qualification) => {
+                        Sink::publish(&mut tracked, scan::Event::Qualification(*qualification))?;
+                    }
+                    _ => {}
                 }
-                publish(&scan_sink, Event::Scan(event))
-            },
+                publish(&scan_sink, Event::Scan(event), control)
+            }),
             &operation,
         )?;
         let aggregate = tracker.finish(scan_report.clone())?;
@@ -109,7 +117,9 @@ where
                 retained,
                 started,
                 scan_sent,
-                move |event| publish(&trace_sink, Event::Trace(event)),
+                crate::execution::forwarding(delivery, move |event, control| {
+                    publish(&trace_sink, Event::Trace(event), control)
+                }),
             )?;
             stats.checked_add_assign(&streamed.report.stats)?;
             trace_sent = streamed.last_sent;
@@ -174,12 +184,16 @@ where
         // each endpoint's inference needs.
         let tracker = connect::Collector::default();
         let mut tracked = tracker.clone();
+        let delivery = sink.delivery();
         let report = self.scan_connect_in(
             scan,
-            move |event: connect::Event| {
+            crate::execution::forwarding(delivery, move |event: connect::Event, control| {
                 Sink::publish(&mut tracked, event.clone())?;
-                sink.publish(event)
-            },
+                match control {
+                    Some(control) => sink.publish_controlled(event, control),
+                    None => sink.publish(event),
+                }
+            }),
             &operation,
         )?;
         let aggregate = tracker.finish(report.clone())?;
@@ -205,8 +219,14 @@ where
     }
 }
 
-fn publish<S: Sink<Event, Ack = ()>>(sink: &Mutex<S>, event: Event) -> Result<(), BoundaryError> {
-    sink.lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .publish(event)
+fn publish<S: Sink<Event, Ack = ()>>(
+    sink: &Mutex<S>,
+    event: Event,
+    control: Option<&Deadline>,
+) -> Result<(), BoundaryError> {
+    let mut sink = sink.lock().unwrap_or_else(PoisonError::into_inner);
+    match control {
+        Some(control) => sink.publish_controlled(event, control),
+        None => sink.publish(event),
+    }
 }

@@ -6,9 +6,9 @@ A contract family covers names, units, meanings, enums, ordering, and terminal
 semantics, not only JSON shape. Incompatible changes require a new family even
 when an older schema accepts their shape.
 
-Current producers emit [output/v17](../schemas/packetcraftr.output.v17.schema.json)
+Current producers emit [output/v18](../schemas/packetcraftr.output.v18.schema.json)
 and [packet/v2](../schemas/packetcraftr.packet.v2.schema.json). Beta.3 used
-output/v2 and packet/v1; output v6–v16 remain frozen for historical evidence.
+output/v2 and packet/v1; output v6–v17 remain frozen for historical evidence.
 Resolve `$id` to the bundled local file, never moving `main` or a network fetch.
 Tolerate unknown object members, but reject unknown families, verdicts, check
 kinds, or evidence states.
@@ -24,6 +24,29 @@ Missing metadata, null ingress operand on an expectation, and explicit decoder
 `absent` are distinct. Summary counters include accepted evidence regardless of
 retained detail/omissions. Forwarding fail/inconclusive returns exit 1 after
 publication; an error envelope is execution failure.
+
+## Output family v18
+
+Raw probe `measurement` distinguishes `response`, `no_reply` with explicit
+`coverage`, and `unavailable`. Streamed pipeline no-reply measurements carry
+`pending` coverage until `observation_quality` qualifies the existing attempts
+in its inclusive sequence interval and stage; gaps are allowed. It changes
+only pending no-reply measurements; final `unknown` or `incomplete` coverage is
+never upgraded. A terminal error leaves unqualified attempts unusable for negative inference. Qualification precedes endpoint inference and
+successful completion. Aggregate probes already carry final coverage.
+
+Only `no_reported_loss` and transport-owned `transport_timeout` support silence
+rules. `unknown`, `incomplete`, and `pending` enter inference's `failed` partition.
+Positive correlated replies remain valid under capture loss. Locally shortened
+host windows leave their no-reply coverage unknown. Custom capture providers
+default to unknown acquisition quality; zero counters do not change
+that contract. Zero local drop counts establish neither end-to-end visibility nor a remote cause. Source-global drops conservatively qualify all negative
+observations in the capture interval, without claiming which response was lost.
+
+RTT `sent` now partitions into `received`, `lost` (qualified no reply), and
+`unavailable` (local failure or insufficient acquisition quality). `lost` does
+not identify a network or remote cause. TCP operation-wide `deadline_expired`
+is unavailable; a completed transport `timed_out` remains qualified silence.
 
 ## Output family v17
 
@@ -126,7 +149,7 @@ set -e
 python3 examples/consumers/forwarding.py --format ndjson --exit-code "$status" < report.ndjson
 ```
 
-The forwarding consumer accepts v6–v15 and checks states, counter/omission
+The forwarding consumer accepts v6–v18 and checks states, counter/omission
 relationships, requested checks, and verdict coherence. Its exit 0 means the
 report was valid, not that forwarding passed; inspect `execution` and `verdict`.
 

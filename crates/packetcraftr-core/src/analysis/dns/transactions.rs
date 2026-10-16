@@ -5,7 +5,7 @@ use super::Message;
 use crate::analysis::{
     StreamTransport,
     application::{Error, Limits},
-    provenance::SourceSet,
+    provenance::{Accumulator, SourceSet},
     reassembly::tcp::ScopedFlowKey,
 };
 use serde::Serialize;
@@ -102,7 +102,7 @@ struct Pending {
     queries: Vec<u64>,
     first: SystemTime,
     last: SystemTime,
-    sources: SourceSet,
+    sources: Accumulator,
 }
 struct Answered {
     queries: Vec<u64>,
@@ -158,7 +158,7 @@ impl Tracker {
             if let Some(pending) = self.pending.get_mut(&key) {
                 pending.queries.push(message.index);
                 pending.last = last;
-                pending.sources = pending.sources.union(&message.sources)?;
+                pending.sources.insert(&message.sources)?;
             } else {
                 self.pending.insert(
                     key.clone(),
@@ -166,14 +166,18 @@ impl Tracker {
                         queries: vec![message.index],
                         first: last,
                         last,
-                        sources: message.sources.clone(),
+                        sources: Accumulator::new(&message.sources)?,
                     },
                 );
             }
             // A query can finish reassembly after its response. Link it only
             // when captured query bytes already preceded the response; a later
             // independent query must not absorb an older orphan response.
-            let first_query_frame = self.pending[&key].sources.frames()[0].number;
+            let first_query_frame = self.pending[&key]
+                .sources
+                .first()
+                .expect("query has sources")
+                .number;
             let mut waiting = self.waiting.remove(&key).unwrap_or_default();
             waiting.sort_by_key(|response| response.sources.frames()[0].number);
             let mut output = Vec::new();
@@ -226,7 +230,7 @@ impl Tracker {
     fn matched(
         &mut self,
         key: &Key,
-        pending: Pending,
+        mut pending: Pending,
         response: Waiting,
     ) -> Result<Transaction, Error> {
         let first = response.sources.frames()[0].timestamp;
@@ -236,7 +240,8 @@ impl Tracker {
         transaction.queries = pending.queries.clone();
         transaction.first_query_latency = Some(Latency::between(pending.first, first));
         transaction.latest_query_latency = Some(Latency::between(pending.last, first));
-        transaction.sources = pending.sources.union(&transaction.sources)?;
+        pending.sources.insert(&transaction.sources)?;
+        transaction.sources = pending.sources.freeze()?;
         self.answered.insert(
             key.clone(),
             Answered {
@@ -256,36 +261,43 @@ impl Tracker {
         transaction.sources = answered.sources.union(&transaction.sources)?;
         Ok(transaction)
     }
-    pub(super) fn finish(&mut self) -> Vec<Transaction> {
+    pub(super) fn finish(
+        &mut self,
+        check: &mut dyn FnMut() -> Result<(), Error>,
+    ) -> Result<Vec<Transaction>, Error> {
         let mut transactions: Vec<_> = std::mem::take(&mut self.pending)
             .into_iter()
-            .map(|(key, pending)| Transaction {
-                status: TransactionStatus::Unanswered,
-                transport: key.transport,
-                stream: key.stream,
-                generation: key.generation,
-                flow: key.flow,
-                dns_id: key.id,
-                queries: pending.queries,
-                response: None,
-                original_response: None,
-                first_query_latency: None,
-                latest_query_latency: None,
-                sources: pending.sources,
+            .map(|(key, pending)| {
+                check()?;
+                Ok(Transaction {
+                    status: TransactionStatus::Unanswered,
+                    transport: key.transport,
+                    stream: key.stream,
+                    generation: key.generation,
+                    flow: key.flow,
+                    dns_id: key.id,
+                    queries: pending.queries,
+                    response: None,
+                    original_response: None,
+                    first_query_latency: None,
+                    latest_query_latency: None,
+                    sources: pending.sources.freeze()?,
+                })
             })
-            .collect();
-        transactions.extend(std::mem::take(&mut self.waiting).into_iter().flat_map(
-            |(key, responses)| {
-                responses
-                    .into_iter()
-                    .map(move |response| Self::response(&key, response))
-            },
-        ));
+            .collect::<Result<_, Error>>()?;
+        for (key, responses) in std::mem::take(&mut self.waiting) {
+            for response in responses {
+                check()?;
+                transactions.push(Self::response(&key, response));
+            }
+        }
+        check()?;
         transactions.sort_by_key(|transaction| {
             transaction
                 .response
                 .or_else(|| transaction.queries.first().copied())
         });
-        transactions
+        check()?;
+        Ok(transactions)
     }
 }

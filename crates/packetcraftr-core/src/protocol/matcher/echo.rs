@@ -37,6 +37,10 @@ impl EchoMatcher {
 }
 
 impl ResponseMatcher for EchoMatcher {
+    fn uses_builtin_response_identity(&self) -> bool {
+        true
+    }
+
     fn matches(&self, request: &Packet, response: &Packet) -> Option<Match> {
         if quoted_icmp_error(request, response, QuotedTransport::Icmp).is_some() {
             return Some(Match::new(150));

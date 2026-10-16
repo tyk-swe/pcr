@@ -47,6 +47,17 @@ pub(crate) fn frozen_v16_schema_validator() -> &'static jsonschema::Validator {
     })
 }
 
+pub(crate) fn frozen_v17_schema_validator() -> &'static jsonschema::Validator {
+    static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
+    VALIDATOR.get_or_init(|| {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../../../../schemas/packetcraftr.output.v17.schema.json"
+        ))
+        .expect("frozen output/v17 schema must be JSON");
+        jsonschema::validator_for(&schema).expect("frozen output/v17 schema must compile")
+    })
+}
+
 pub(crate) fn path_text(path: &Path) -> &str {
     path.to_str().expect("temporary path must be UTF-8")
 }
@@ -125,7 +136,7 @@ pub(crate) fn output_schema() -> &'static Value {
     static SCHEMA: OnceLock<Value> = OnceLock::new();
     SCHEMA.get_or_init(|| {
         serde_json::from_str(include_str!(
-            "../../../../schemas/packetcraftr.output.v17.schema.json"
+            "../../../../schemas/packetcraftr.output.v18.schema.json"
         ))
         .expect("published output schema must be JSON")
     })

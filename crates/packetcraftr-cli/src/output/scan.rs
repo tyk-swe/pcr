@@ -74,6 +74,7 @@ pub struct Rtt {
     pub sent: u64,
     pub received: u64,
     pub lost: u64,
+    pub unavailable: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min: Option<Duration>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -88,6 +89,7 @@ impl From<library::Rtt> for Rtt {
             sent: value.sent,
             received: value.received,
             lost: value.lost,
+            unavailable: value.unavailable,
             min: value.min,
             avg: value.avg,
             max: value.max,
@@ -152,8 +154,58 @@ published_enum! {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Measurement {
+    Response,
+    NoReply { coverage: &'static str },
+    Unavailable,
+}
+
+fn coverage(value: library::Coverage) -> &'static str {
+    match value {
+        library::Coverage::Pending => "pending",
+        library::Coverage::Unknown => "unknown",
+        library::Coverage::NoReportedLoss => "no_reported_loss",
+        library::Coverage::Incomplete => "incomplete",
+        library::Coverage::TransportTimeout => "transport_timeout",
+    }
+}
+
+impl From<library::Measurement<library::Reply>> for Measurement {
+    fn from(value: library::Measurement<library::Reply>) -> Self {
+        match value {
+            library::Measurement::Response(_) => Self::Response,
+            library::Measurement::NoReply(value) => Self::NoReply {
+                coverage: coverage(value),
+            },
+            library::Measurement::Unavailable => Self::Unavailable,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Qualification {
+    pub stage: Stage,
+    pub first_sequence: u64,
+    pub last_sequence: u64,
+    pub coverage: &'static str,
+}
+
+impl From<library::Qualification> for Qualification {
+    fn from(value: library::Qualification) -> Self {
+        Self {
+            stage: value.stage().into(),
+            first_sequence: value.first_sequence(),
+            last_sequence: value.last_sequence(),
+            coverage: coverage(value.coverage()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Probe {
+    pub measurement: Measurement,
     pub sequence: u64,
     pub stage: Stage,
     pub protocol: Protocol,
@@ -511,6 +563,9 @@ pub enum Event {
         unattributed: Unattributed,
     },
     Diagnostic {},
+    Qualification {
+        qualification: Qualification,
+    },
     /// One per endpoint after the last probe, before `complete`: the
     /// inference over attempts already published as `probe` records.
     Endpoint {
@@ -557,6 +612,12 @@ impl TryFrom<library::Event> for Published<Event> {
             library::Event::Unattributed(unattributed) => Self::new(
                 Event::Unattributed {
                     unattributed: unattributed.try_into()?,
+                },
+                Vec::new(),
+            ),
+            library::Event::Qualification(qualification) => Self::new(
+                Event::Qualification {
+                    qualification: qualification.into(),
                 },
                 Vec::new(),
             ),
@@ -644,6 +705,7 @@ impl TryFrom<library::ProbeEvidence> for Probe {
 
     fn try_from(evidence: library::ProbeEvidence) -> Result<Self, Error> {
         Ok(Self {
+            measurement: evidence.measurement.into(),
             sequence: evidence.sequence,
             stage: evidence.stage.into(),
             protocol: (evidence.transport, evidence.address).into(),
@@ -677,6 +739,7 @@ impl crate::output::stream::StreamRecord for Event {
             Self::Undecoded { .. } => "undecoded",
             Self::Unattributed { .. } => "unattributed",
             Self::Diagnostic {} => "diagnostic",
+            Self::Qualification { .. } => "observation_quality",
             Self::Endpoint { .. } => "endpoint",
             Self::Complete { .. } => "complete",
         }
@@ -705,6 +768,7 @@ pub struct FailedProbe {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CaptureSource {
+    pub observation_quality: &'static str,
     pub interface: InterfaceId,
     pub ready: bool,
     pub shutdown_confirmed: bool,
@@ -749,6 +813,7 @@ impl TryFrom<&library::PipelineFailure> for Failure {
                 .capture_sources
                 .iter()
                 .map(|source| CaptureSource {
+                    observation_quality: coverage(source.observation_quality.into()),
                     interface: (&source.metadata.interface).into(),
                     ready: source.ready,
                     shutdown_confirmed: source.shutdown_confirmed,

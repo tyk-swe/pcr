@@ -66,10 +66,21 @@ impl Collector {
         }
     }
 
-    pub fn finish(mut self, summary: &RunSummary) -> Summary {
+    pub fn finish(self, summary: &RunSummary) -> Summary {
+        self.finalize(summary, || Ok(()))
+            .expect("uncontrolled collection cannot fail")
+    }
+
+    fn finalize(
+        mut self,
+        summary: &RunSummary,
+        mut check: impl FnMut() -> Result<(), BoundaryError>,
+    ) -> Result<Summary, BoundaryError> {
+        check()?;
         self.summary.clock = summary.clock.clone();
         if let Some(client) = self.client_flow.clone() {
             for event in &summary.trailing_tcp_events {
+                check()?;
                 if let TcpEvent::Evicted {
                     flow,
                     pending_bytes,
@@ -80,7 +91,8 @@ impl Collector {
                 }
             }
         }
-        self.summary
+        check()?;
+        Ok(self.summary)
     }
 
     fn observe_tcp(&mut self, record: &FrameRecord<'_>) -> Vec<Chunk> {
@@ -237,5 +249,14 @@ impl session::Collector for Collector {
 
     fn finish(self, run: &RunSummary) -> Result<(Vec<Chunk>, Summary), BoundaryError> {
         Ok((Vec::new(), Self::finish(self, run)))
+    }
+
+    fn finish_controlled(
+        self,
+        run: &RunSummary,
+        deadline: &crate::budget::Deadline,
+        _event_sink: &mut dyn FnMut(Chunk) -> Result<(), BoundaryError>,
+    ) -> Result<Summary, BoundaryError> {
+        self.finalize(run, || session::check(deadline))
     }
 }

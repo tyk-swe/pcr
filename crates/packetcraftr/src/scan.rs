@@ -32,6 +32,7 @@ mod executor;
 pub mod followup;
 mod inference;
 mod ip_protocol;
+mod measurement;
 pub mod method;
 mod plan;
 pub mod profile;
@@ -46,6 +47,7 @@ pub use error::{Error, PipelineFailure};
 pub use evidence::{CorrelatedResponse, classify_response};
 pub use inference::{DiagnosticMethod, DiagnosticRule, Inference, Rule, State};
 pub use ip_protocol::{IpProtocolSelection, IpProtocolSpec, select_ip_protocols};
+pub use measurement::{Coverage, Measurement, Qualification};
 pub use plan::{Probe, Stage};
 pub use report::{
     Aggregate, Attribution, Classification, ClassificationCounts, Collector, Endpoint, Event,

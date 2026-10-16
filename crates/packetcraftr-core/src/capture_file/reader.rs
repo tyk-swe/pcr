@@ -123,6 +123,10 @@ impl<R: Read> Reader<R> {
         self.deadline.clone()
     }
 
+    pub(crate) fn cancellation(&self) -> Option<Cancellation> {
+        self.cancellation.clone()
+    }
+
     pub(crate) fn replace_deadline(
         &mut self,
         deadline: Option<std::sync::Arc<crate::budget::Deadline>>,

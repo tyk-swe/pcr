@@ -78,33 +78,57 @@ pub fn run_with_ip_events<R, I, F>(
     registry: Arc<Registry>,
     options: &Options<'_>,
     ip_sink: I,
-    sink: F,
+    mut sink: F,
 ) -> Result<Summary, Error>
 where
     R: Read,
     I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
     F: FnMut(FrameRecord<'_>) -> Result<(), crate::error::BoundaryError>,
 {
+    run_controlled(reader, registry, options, ip_sink, |record, _| sink(record))
+        .map(|(summary, _)| summary)
+}
+
+pub(super) fn run_controlled<R, I, F>(
+    reader: &mut Reader<R>,
+    registry: Arc<Registry>,
+    options: &Options<'_>,
+    ip_sink: I,
+    mut sink: F,
+) -> Result<(Summary, Arc<Deadline>), Error>
+where
+    R: Read,
+    I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
+    F: FnMut(FrameRecord<'_>, &Deadline) -> Result<(), crate::error::BoundaryError>,
+{
     options.limits.validate()?;
     let previous = reader.deadline();
+    // Reader cancellation can be configured separately from its deadline. It
+    // remains part of the run after reading finishes, including Pass::finish.
+    let reader_cancellation = reader
+        .cancellation()
+        .map(|signal| Arc::new(Deadline::new(Duration::MAX).with_cancellation(Some(signal))));
     let deadline = Arc::new(
         Deadline::new(options.limits.max_duration)
             .with_cancellation(options.cancellation.clone())
             .with_parent(options.deadline.clone())
-            .with_parent(previous.clone()),
+            .with_parent(previous.clone())
+            .with_parent(reader_cancellation),
     );
     // `next_frame` may consume arbitrarily many metadata records. Give those
     // record boundaries the same phase and invocation clocks as packet work.
     reader.replace_deadline(Some(deadline.clone()));
     let scope = ReaderDeadlineScope { reader, previous };
-    run_inner(
+    let summary = run_inner(
         &mut *scope.reader,
         registry,
         options,
-        deadline,
+        deadline.clone(),
         ip_sink,
-        sink,
-    )
+        |record| sink(record, &deadline),
+    )?;
+    enforce_deadline(&deadline)?;
+    Ok((summary, deadline))
 }
 
 struct ReaderDeadlineScope<'a, R: Read> {
@@ -322,6 +346,7 @@ where
     enforce_deadline(&deadline)?;
     let (incomplete_sources, source_outcomes_omitted) = provenance
         .map(crate::analysis::provenance::Tracker::finish)
+        .transpose()?
         .unwrap_or_default();
     Ok(Summary {
         incomplete_sources,
@@ -380,7 +405,7 @@ where
     if let Some(tracker) = provenance
         && removed
     {
-        tracker.retire(|key| ip_dispatch.contains_datagram(key));
+        tracker.retire(|key| ip_dispatch.contains_datagram(key))?;
     }
     let fragments =
         ip_fragments(decoded, None, scopes).map_err(|source| Error::Scope { number, source })?;
@@ -400,9 +425,10 @@ where
         let budget = ip_dispatch
             .plan_derived_decode(derived_memory_charge, datagram.bytes.len())
             .map_err(|source| Error::IpReassembly { number, source })?;
-        let sources = provenance
-            .as_mut()
-            .and_then(|tracker| tracker.completed(&datagram.key));
+        let sources = match provenance.as_mut() {
+            Some(tracker) => tracker.completed(&datagram.key)?,
+            None => None,
+        };
         let mut next_derived = decode_derived(
             stage.decoder,
             source,

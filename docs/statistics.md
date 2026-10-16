@@ -99,6 +99,6 @@ Core `stats::Report` gains `protocol_count`, `endpoint_count`, and
 `conversation_count`, recording totals before presentation truncation.
 `packetcraftr_cli::output::contract::Format` gains `Csv`.
 
-Current JSON/NDJSON producers use `output::contract::SCHEMA_V17`
-(`packetcraftr.output/v17`) for the new variant and ordering contract. The v16
+Current JSON/NDJSON producers use `output::contract::SCHEMA_V18`
+(`packetcraftr.output/v18`); v17 introduced the overview and ordering contract. The v16
 schema and historical examples remain frozen. See [consumer compatibility](consumer-compatibility.md).

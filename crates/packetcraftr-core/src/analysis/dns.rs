@@ -6,7 +6,7 @@ mod transactions;
 use super::{
     FrameRecord, StreamTransport, Summary as RunSummary,
     application::{self, Error, Limits, TcpSources},
-    provenance::SourceSet,
+    provenance::{Accumulator, SourceSet},
     reassembly::tcp::ScopedFlowKey,
     scope::Definition,
     session::{self, CollectorNeeds},
@@ -80,7 +80,7 @@ struct Direction {
     generation: u64,
     prefix: Vec<u8>,
     body: Vec<u8>,
-    sources: Option<SourceSet>,
+    sources: Option<Accumulator>,
     disabled: bool,
 }
 impl Direction {
@@ -235,25 +235,53 @@ impl Collector {
         }
         Ok(events)
     }
-    pub fn finish(mut self, run: &RunSummary) -> Result<(Vec<Event>, Summary), Error> {
+    pub fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), Error> {
         let mut events = Vec::new();
+        let summary = self.finalize(
+            run,
+            || Ok(()),
+            |batch| {
+                events.extend(batch);
+                Ok(())
+            },
+        )?;
+        Ok((events, summary))
+    }
+
+    fn finalize(
+        mut self,
+        run: &RunSummary,
+        mut check: impl FnMut() -> Result<(), Error>,
+        mut emit: impl FnMut(Vec<Event>) -> Result<(), Error>,
+    ) -> Result<Summary, Error> {
+        check()?;
         for event in self
             .tcp
             .trailing(&run.trailing_tcp_events, run.frames_read)?
         {
+            check()?;
+            let mut events = Vec::new();
             if let application::Event::Evicted { flow, .. } = event {
                 self.stop(flow, Status::Incomplete, &mut events)?;
             } else {
                 self.tcp_event(event, run.frames_read, &mut events)?;
             }
+            emit(events)?;
         }
         for (flow, mut direction) in std::mem::take(&mut self.directions) {
+            check()?;
+            let mut events = Vec::new();
             self.flush(&flow, &mut direction, Status::Incomplete, &mut events)?;
+            emit(events)?;
         }
-        for transaction in self.transactions.finish() {
+        for transaction in self.transactions.finish(&mut check)? {
+            check()?;
+            let mut events = Vec::new();
             self.transaction(transaction, &mut events);
+            emit(events)?;
         }
-        Ok((events, self.summary))
+        check()?;
+        Ok(self.summary)
     }
     fn tcp_event(
         &mut self,
@@ -300,10 +328,18 @@ impl Collector {
                     let take = needed.min(input.len());
                     self.limits
                         .check_buffer(self.buffered.saturating_add(take))?;
-                    direction.sources = Some(match direction.sources.take() {
-                        Some(old) => old.union(&data.sources)?,
-                        None => data.sources.clone(),
-                    });
+                    if let Some(sources) = direction.sources.as_mut() {
+                        sources.insert(&data.sources)?;
+                    } else {
+                        direction.sources = Some(Accumulator::new(&data.sources)?);
+                    }
+                    self.limits.check_source_spans(
+                        direction
+                            .sources
+                            .as_ref()
+                            .expect("initialized sources")
+                            .len(),
+                    )?;
                     if direction.prefix.len() < 2 {
                         direction.prefix.extend_from_slice(&input[..take]);
                     } else {
@@ -386,7 +422,7 @@ impl Collector {
                 framing_bytes,
                 dns: None,
                 error: None,
-                sources,
+                sources: sources.freeze()?,
             },
             events,
         )
@@ -454,5 +490,19 @@ impl session::Collector for Collector {
 
     fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
         Self::finish(self, run).map_err(BoundaryError::from_error)
+    }
+
+    fn finish_controlled(
+        self,
+        run: &RunSummary,
+        deadline: &crate::budget::Deadline,
+        event_sink: &mut dyn FnMut(Event) -> Result<(), BoundaryError>,
+    ) -> Result<Summary, BoundaryError> {
+        self.finalize(
+            run,
+            || session::check(deadline).map_err(Error::Output),
+            |events| session::deliver(deadline, events, event_sink).map_err(Error::Output),
+        )
+        .map_err(BoundaryError::from_error)
     }
 }

@@ -30,6 +30,9 @@ pub use settings::{
     TimestampPrecision, TimestampSource, TimestampType,
 };
 
+/// Independent allowance for an entire cooperative capture cleanup, including groups.
+pub const CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 pub const MAX_FILTER_BYTES: usize = 64 * 1024;
 
 const ARMING: &str = "arming capture";
@@ -53,9 +56,58 @@ pub trait Session: Send {
     /// delivered during this wait, not that none was captured or that the
     /// session ended.
     fn next_captured_frame(&mut self, deadline: &Deadline) -> Result<Option<Captured>, Error>;
+    /// Requests stop without waiting for completion. Cooperative implementations
+    /// must make this idempotent and return promptly. The legacy default does
+    /// nothing; it does not promise that a custom shutdown can be interrupted.
+    fn request_stop(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+    /// Joins stopped capture under a shared, independent cleanup deadline.
+    /// Implementations retaining unfinished work must keep its resources charged.
+    /// The legacy adapter calls `shutdown` and cannot bound a blocking callback.
+    fn shutdown_until(&mut self, _deadline: &Deadline) -> Result<(), Error> {
+        self.shutdown()
+    }
     /// Stops and joins capture; errors leave cleanup unconfirmed.
     fn shutdown(&mut self) -> Result<(), Error>;
     fn stats(&self) -> Stats;
+    /// Quality of this source's local acquisition reporting. The default
+    /// preserves unknown quality for legacy providers. A zero drop count alone
+    /// does not opt a provider into reporting loss, or prove network visibility.
+    fn observation_quality(&self) -> ObservationQuality {
+        ObservationQuality::Unknown.with_statistics(self.stats())
+    }
+}
+
+/// Local acquisition quality, never a guarantee of end-to-end visibility.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ObservationQuality {
+    #[default]
+    Unknown,
+    /// The provider reports its supported local loss counters and none reports
+    /// loss. It must not use this for unsupported or failed statistics queries.
+    NoReportedLoss,
+    Incomplete,
+}
+
+impl ObservationQuality {
+    pub fn with_statistics(self, statistics: Stats) -> Self {
+        if statistics.evidence_loss_error().is_some() {
+            Self::Incomplete
+        } else if statistics.validate().is_err() {
+            Self::Unknown
+        } else {
+            self
+        }
+    }
+
+    pub const fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Incomplete, _) | (_, Self::Incomplete) => Self::Incomplete,
+            (Self::Unknown, _) | (_, Self::Unknown) => Self::Unknown,
+            _ => Self::NoReportedLoss,
+        }
+    }
 }
 
 impl<T: Session + ?Sized> Session for Box<T> {
@@ -79,12 +131,24 @@ impl<T: Session + ?Sized> Session for Box<T> {
         (**self).next_captured_frame(deadline)
     }
 
+    fn request_stop(&mut self) -> Result<(), Error> {
+        (**self).request_stop()
+    }
+
+    fn shutdown_until(&mut self, deadline: &Deadline) -> Result<(), Error> {
+        (**self).shutdown_until(deadline)
+    }
+
     fn shutdown(&mut self) -> Result<(), Error> {
         (**self).shutdown()
     }
 
     fn stats(&self) -> Stats {
         (**self).stats()
+    }
+
+    fn observation_quality(&self) -> ObservationQuality {
+        (**self).observation_quality()
     }
 }
 

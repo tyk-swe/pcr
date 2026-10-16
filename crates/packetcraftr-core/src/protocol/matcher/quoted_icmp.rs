@@ -111,6 +111,33 @@ pub fn quoted_icmp_error(
     Some(kind)
 }
 
+/// Candidate discovery shares the exact validated quote walker used by the
+/// authoritative matcher. A coarse protocol key covers header-only probes;
+/// the optional transport key narrows ordinary TCP/UDP/SCTP/ICMP attempts.
+pub(in crate::protocol) fn quoted_identity(
+    response: &Packet,
+) -> Option<(
+    super::super::response_identity::Identity,
+    Option<super::super::response_identity::Identity>,
+)> {
+    use super::super::response_identity::Identity;
+    let (_, layer) = directly_received_icmp(response)?;
+    let message = IcmpMessage::of(layer)?;
+    let quote = parse_quoted_probe(message.body.get(4..)?, false)?;
+    let protocol = Identity::IpProtocol {
+        source: quote.source,
+        destination: quote.destination,
+        protocol: quote.protocol,
+    };
+    let transport = Identity::transport(
+        quote.source,
+        quote.destination,
+        quote.protocol,
+        quote.payload,
+    );
+    Some((protocol, transport))
+}
+
 fn directly_received_icmp(response: &Packet) -> Option<(BuiltinProtocol, &dyn Layer)> {
     let outer_scope = semantics::outer_scope_len(response);
     let (outer_network_index, outer_network_protocol) = response

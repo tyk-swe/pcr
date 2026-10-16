@@ -19,5 +19,5 @@ pub(crate) use executor::{ExchangeExecutor, Executor, Step};
 pub(crate) use executor::{ExecutorFault, WorkflowOverrides};
 pub(crate) use operation::{NeighborMode, Operation};
 pub(crate) use shared::Shared;
-pub use sink::Sink;
-pub(crate) use sink::publisher;
+pub use sink::{Delivery, Sink};
+pub(crate) use sink::{forwarding, publisher};

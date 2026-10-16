@@ -16,6 +16,7 @@
 mod materialize;
 
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
@@ -30,7 +31,7 @@ use crate::execution::{NeighborMode, Operation as Execution};
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
 use crate::policy::{Operation, Policy, WireLimits};
-use crate::providers::PacketProviders;
+use crate::providers::{PacketProviders, TransmitProviders};
 use crate::route;
 use crate::{Client, Error, evidence::SentPacket, send};
 use materialize::{
@@ -41,6 +42,8 @@ use materialize::{
 #[derive(Clone)]
 pub(crate) struct AuthorizedRoute {
     plan: route::Plan,
+    destination: IpAddr,
+    scoped_interface: Option<interface::Id>,
 }
 
 impl AuthorizedRoute {
@@ -51,14 +54,29 @@ impl AuthorizedRoute {
     pub(crate) fn plan(&self) -> &route::Plan {
         &self.plan
     }
+
+    pub(crate) fn retained_name_bytes(&self) -> usize {
+        self.plan.decision.interface.name.capacity().saturating_add(
+            self.scoped_interface
+                .as_ref()
+                .map_or(0, |interface| interface.name.capacity()),
+        )
+    }
+
+    pub(crate) fn scoped_name_bytes(&self) -> usize {
+        self.scoped_interface
+            .as_ref()
+            .map_or(0, |interface| interface.name.len())
+    }
 }
 
 /// The exact wire bytes one admitted packet charged to the cumulative budget.
-/// It is neither `Clone` nor `Copy`: [`Discovery::rebuild`] consumes it, so
+/// It is neither `Clone` nor `Copy`: [`Admitting::rebuild`] consumes it, so
 /// each admission pays for exactly one rebuild.
 #[derive(Debug)]
 pub(crate) struct AdmittedCost {
     wire_len: usize,
+    admission: Arc<()>,
 }
 
 pub(crate) struct Admitted {
@@ -66,6 +84,19 @@ pub(crate) struct Admitted {
     plan: route::Plan,
     build_context: codec::Addresses,
     preliminary_build: BuiltPacket,
+    admission: Arc<()>,
+    declared: Option<Packet>,
+}
+
+/// One immutable declaration and preview owned by the admission that built it.
+/// The preview is an optimization, never authority to reuse an old route or to
+/// send another declaration. Callers must charge its resident packet/build
+/// memory and retain only a bounded preparation window.
+pub(crate) struct RetainedAdmission(Box<Retained>);
+
+struct Retained {
+    declared: Packet,
+    admitted: Admitted,
 }
 
 impl Admitted {
@@ -77,19 +108,39 @@ impl Admitted {
         self.preliminary_build.bytes.len()
     }
 
+    pub(crate) fn retained_route_name_bytes(&self) -> usize {
+        self.plan.decision.interface.name.capacity()
+    }
+
     pub(crate) fn shares_route_with(&self, other: &Self) -> bool {
         self.plan.decision.interface == other.plan.decision.interface
             && self.plan.mode == other.plan.mode
     }
 
+    /// Keep only spend-once accounting when no preview residency is available.
+    /// This path drops the declaration/build without allocating a preview box.
     pub(crate) fn into_cost(self) -> AdmittedCost {
         AdmittedCost {
             wire_len: self.wire_len(),
+            admission: self.admission,
         }
+    }
+
+    pub(crate) fn into_parts(mut self) -> (AdmittedCost, Option<RetainedAdmission>) {
+        let cost = AdmittedCost {
+            wire_len: self.wire_len(),
+            admission: Arc::clone(&self.admission),
+        };
+        let retained = self.declared.take().map(|declared| {
+            RetainedAdmission(Box::new(Retained {
+                declared,
+                admitted: self,
+            }))
+        });
+        (cost, retained)
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct PreparedPacket {
     built: BuiltPacket,
     route: route::Materialized,
@@ -154,6 +205,8 @@ impl Materializer<'_> {
         materialize_link_structure(packet, plan)?;
         check()?;
         let context = build_context(plan);
+        #[cfg(test)]
+        work::build();
         let built = self
             .builder
             .build(packet.clone(), context.clone(), self.options.clone())?;
@@ -171,6 +224,8 @@ impl Materializer<'_> {
         let preliminary_len = preliminary.bytes.len();
         let built = if materialize_link_fields(&mut packet, route)? {
             check()?;
+            #[cfg(test)]
+            work::build();
             self.builder.build(packet, context, self.options.clone())?
         } else {
             preliminary
@@ -217,9 +272,10 @@ struct Stages<'c, P, K> {
     builder: Builder,
     options: &'c send::Options,
     deadline: Option<&'c Deadline>,
+    admission: Arc<()>,
 }
 
-impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
+impl<'c, P: TransmitProviders, K: Clock> Stages<'c, P, K> {
     fn new(
         client: &'c Client<P, K>,
         options: &'c send::Options,
@@ -233,6 +289,7 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
             builder: Builder::new(operation.registry.clone()),
             options,
             deadline,
+            admission: Arc::new(()),
         }
     }
 
@@ -255,6 +312,7 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         self.operation.deadline.check_cancelled()?;
         ensure_preparation_deadline(&self.operation.deadline)?;
         if let Some(deadline) = self.deadline {
+            deadline.check_cancelled()?;
             ensure_preparation_deadline(deadline)?;
         }
         Ok(())
@@ -276,6 +334,23 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         route_options: &route::Options,
         routes: &R,
     ) -> Result<route::Plan, Error> {
+        self.plan_with_interfaces(
+            packet,
+            destination,
+            route_options,
+            routes,
+            &self.operation.interfaces,
+        )
+    }
+
+    fn plan_with_interfaces<R: RouteProvider>(
+        &self,
+        packet: &Packet,
+        destination: Option<IpAddr>,
+        route_options: &route::Options,
+        routes: &R,
+        interfaces: &route::ResolvedInterface,
+    ) -> Result<route::Plan, Error> {
         self.check()?;
         let plan = self.within(crate::deadline::PASSIVE_LOOKUP_TIMEOUT, |deadline| {
             self.client.authorize_and_plan(
@@ -284,7 +359,7 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
                 route_options,
                 routes,
                 deadline,
-                &self.operation.interfaces,
+                interfaces,
                 || self.check(),
             )
         })?;
@@ -319,6 +394,8 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         mut packet: Packet,
         plan: route::Plan,
     ) -> Result<Admitted, Error> {
+        #[cfg(test)]
+        work::prepare();
         let (build_context, preliminary_build) =
             self.materializer()
                 .preliminary(&mut packet, &plan, || self.check())?;
@@ -330,6 +407,8 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
             plan,
             build_context,
             preliminary_build,
+            admission: Arc::clone(&self.admission),
+            declared: None,
         })
     }
 
@@ -354,13 +433,22 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         self.check()
     }
 
-    fn materialize(&self, admitted: Admitted) -> Result<PreparedPacket, Error> {
+    fn materialize_using(
+        &self,
+        admitted: Admitted,
+        resolve: impl FnOnce(route::Plan, &Deadline) -> Result<route::Materialized, route::Error>,
+    ) -> Result<PreparedPacket, Error> {
         let Admitted {
             packet,
             plan,
             build_context,
             preliminary_build,
+            admission,
+            declared: _,
         } = admitted;
+        if !Arc::ptr_eq(&self.admission, &admission) {
+            return Err(changed_preparation("packet belongs to another admission"));
+        }
         self.check()?;
         // Only a request about to be sent is checked: a cached answer sends
         // nothing to the neighbor.
@@ -386,18 +474,13 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         }
         // The resolver stops at the deadline on its own; a failure it reports
         // after the deadline passed is the deadline, not a neighbor verdict.
-        let providers = &self.client.providers;
-        let neighbors = self
-            .operation
-            .neighbors
-            .over(providers.transmit(), providers.capture());
         let request = plan
             .needs_neighbor_resolution()
             .then(|| route::neighbor_request(&plan))
             .transpose()?;
         let began = self.client.now();
         let route = match self.within(packetcraftr_netio::deadline::MAX_WAIT, |deadline| {
-            route::materialize(plan, &neighbors, deadline)
+            resolve(plan, deadline)
         }) {
             Ok(route) => route,
             Err(error) => {
@@ -426,6 +509,125 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         })()
         .map_err(|error: Error| error.after_neighbor_requests(spent))?;
         Ok(PreparedPacket { built, route })
+    }
+}
+
+impl<P: PacketProviders, K: Clock> Stages<'_, P, K> {
+    fn materialize(&self, admitted: Admitted) -> Result<PreparedPacket, Error> {
+        let providers = &self.client.providers;
+        let neighbors = self.operation.neighbors.over(
+            PacketProviders::transmit(providers.as_ref()),
+            providers.capture(),
+        );
+        self.materialize_using(admitted, |plan, deadline| {
+            route::materialize(plan, &neighbors, deadline)
+        })
+    }
+
+    fn rebuild(
+        &self,
+        packet: Packet,
+        route: &AuthorizedRoute,
+        cost: AdmittedCost,
+    ) -> Result<PreparedPacket, RebuildError> {
+        self.check()?;
+        self.check_cost(&cost)?;
+        let fresh = self.fresh_plan(&packet, route)?;
+        let admitted = self.build_and_authorize(packet, fresh)?;
+        self.materialize_cost(admitted, cost)
+    }
+
+    fn materialize_retained(
+        &self,
+        retained: RetainedAdmission,
+        route: &AuthorizedRoute,
+        cost: AdmittedCost,
+    ) -> Result<PreparedPacket, RebuildError> {
+        self.check()?;
+        self.check_cost(&cost)?;
+        let Retained { declared, admitted } = *retained.0;
+        if !Arc::ptr_eq(&self.admission, &admitted.admission) {
+            return Err(changed_preparation("preview belongs to another admission").into());
+        }
+        let fresh = self.fresh_plan(&declared, route)?;
+        let admitted = if fresh == admitted.plan {
+            #[cfg(test)]
+            work::reuse();
+            self.check()?;
+            validate_mtu(&admitted.preliminary_build, fresh.decision.mtu)?;
+            self.authorize_built(&admitted.preliminary_build, &fresh)?;
+            admitted
+        } else {
+            // Release the obsolete preview before constructing its replacement.
+            drop(admitted);
+            self.build_and_authorize(declared, fresh)?
+        };
+        self.materialize_cost(admitted, cost)
+    }
+
+    fn check_cost(&self, cost: &AdmittedCost) -> Result<(), Error> {
+        if !Arc::ptr_eq(&self.admission, &cost.admission) {
+            return Err(changed_preparation("cost belongs to another admission"));
+        }
+        Ok(())
+    }
+
+    fn fresh_plan(
+        &self,
+        packet: &Packet,
+        expected: &AuthorizedRoute,
+    ) -> Result<route::Plan, Error> {
+        let scoped;
+        let options = if self.options.plan.interface.is_none()
+            && let Some(interface) = &expected.scoped_interface
+        {
+            scoped = route::Options {
+                interface: Some(interface.clone().into()),
+                ..self.options.plan.clone()
+            };
+            &scoped
+        } else {
+            &self.options.plan
+        };
+        // A name/index memo from preparation is not proof that the selector
+        // still names the device whose capture was armed. Resolve it afresh.
+        let fresh = self.plan_with_interfaces(
+            packet,
+            Some(expected.destination),
+            options,
+            self.client.providers.route_provider(),
+            &route::ResolvedInterface::default(),
+        )?;
+        if fresh.decision.interface != expected.plan.decision.interface {
+            return Err(route::Error::InterfaceMismatch {
+                requested: expected.plan.decision.interface.name.clone(),
+                requested_index: expected.plan.decision.interface.index,
+                selected: fresh.decision.interface.name.clone(),
+                selected_index: fresh.decision.interface.index,
+            }
+            .into());
+        }
+        if fresh.mode != expected.plan.mode
+            || fresh.decision.link_type != expected.plan.decision.link_type
+        {
+            return Err(changed_preparation(
+                "route link mode or capture link type changed",
+            ));
+        }
+        Ok(fresh)
+    }
+
+    fn materialize_cost(
+        &self,
+        admitted: Admitted,
+        cost: AdmittedCost,
+    ) -> Result<PreparedPacket, RebuildError> {
+        if admitted.wire_len() != cost.wire_len {
+            return Err(RebuildError::Changed {
+                admitted: cost.wire_len,
+            });
+        }
+        Ok(self.materialize(admitted)?)
     }
 }
 
@@ -538,7 +740,7 @@ impl<'c, P: PacketProviders, K: Clock> Admitting<'c, P, K> {
             packet,
             Some(destination),
             options,
-            self.stages.client.providers.route(),
+            TransmitProviders::route_provider(self.stages.client.providers.as_ref()),
         )?;
         if let Some(expected) = interface
             && plan.decision.interface != *expected
@@ -550,7 +752,11 @@ impl<'c, P: PacketProviders, K: Clock> Admitting<'c, P, K> {
                 selected_index: plan.decision.interface.index,
             }));
         }
-        Ok(AuthorizedRoute { plan })
+        Ok(AuthorizedRoute {
+            plan,
+            destination,
+            scoped_interface: interface.cloned(),
+        })
     }
 
     pub(crate) fn admit_on(
@@ -563,6 +769,38 @@ impl<'c, P: PacketProviders, K: Clock> Admitting<'c, P, K> {
             .stages
             .build_and_authorize(packet, route.plan.clone())?;
         self.stages.charge(&mut self.budget, admitted)
+    }
+
+    pub(crate) fn admit_retained_on(
+        &mut self,
+        packet: Packet,
+        route: &AuthorizedRoute,
+    ) -> Result<Admitted, Error> {
+        let declared = packet.clone();
+        let mut admitted = self.admit_on(packet, route)?;
+        admitted.declared = Some(declared);
+        Ok(admitted)
+    }
+
+    /// Materialize an already-admitted item without closing this cumulative
+    /// budget. The workflow must complete its whole-request preflight before
+    /// invoking any materialization that can perform neighbor discovery.
+    pub(crate) fn materialize_retained(
+        &self,
+        retained: RetainedAdmission,
+        route: &AuthorizedRoute,
+        cost: AdmittedCost,
+    ) -> Result<PreparedPacket, RebuildError> {
+        self.stages.materialize_retained(retained, route, cost)
+    }
+
+    pub(crate) fn rebuild(
+        &self,
+        packet: Packet,
+        route: &AuthorizedRoute,
+        cost: AdmittedCost,
+    ) -> Result<PreparedPacket, RebuildError> {
+        self.stages.rebuild(packet, route, cost)
     }
 
     pub(crate) fn wire_bytes(&self) -> u64 {
@@ -584,25 +822,47 @@ impl<P: PacketProviders, K: Clock> Discovery<'_, P, K> {
     pub(crate) fn materialize(&self, admitted: Admitted) -> Result<PreparedPacket, Error> {
         self.stages.materialize(admitted)
     }
+}
 
-    pub(crate) fn rebuild(
-        &self,
-        packet: Packet,
-        route: &AuthorizedRoute,
-        cost: AdmittedCost,
-    ) -> Result<PreparedPacket, RebuildError> {
-        self.stages.check()?;
-        let admitted = self
-            .stages
-            .build_and_authorize(packet, route.plan.clone())?;
-        if admitted.wire_len() != cost.wire_len {
-            return Err(RebuildError::Changed {
-                admitted: cost.wire_len,
-            });
-        }
-        Ok(self.stages.materialize(admitted)?)
+fn changed_preparation(message: &str) -> Error {
+    Error::PacketMaterialization {
+        layer: 0,
+        field: "preparation",
+        message: message.to_owned(),
+        source: None,
     }
 }
+
+#[cfg(test)]
+mod work {
+    std::thread_local! {
+        static COUNTS: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
+    }
+    pub(super) fn build() {
+        COUNTS.with(|counts| {
+            let (builds, preparations, reused) = counts.get();
+            counts.set((builds + 1, preparations, reused));
+        });
+    }
+    pub(super) fn prepare() {
+        COUNTS.with(|counts| {
+            let (builds, preparations, reused) = counts.get();
+            counts.set((builds, preparations + 1, reused));
+        });
+    }
+    pub(super) fn reuse() {
+        COUNTS.with(|counts| {
+            let (builds, preparations, reused) = counts.get();
+            counts.set((builds, preparations, reused + 1));
+        });
+    }
+    pub(super) fn take() -> (usize, usize, usize) {
+        COUNTS.replace((0, 0, 0))
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests;
 
 #[derive(Debug)]
 pub(crate) enum RebuildError {
@@ -621,28 +881,49 @@ pub(crate) struct Streaming<'c, P, K> {
     budget: Budget,
 }
 
-impl<P: PacketProviders, K: Clock> Streaming<'_, P, K> {
+impl<P: TransmitProviders, K: Clock> Streaming<'_, P, K> {
     pub(crate) fn check(&self) -> Result<(), Error> {
         self.stages.check()
     }
 
-    pub(crate) fn prepare(&mut self, packet: Packet) -> Result<PreparedPacket, Error> {
+    pub(crate) fn prepare_layer3(&mut self, packet: Packet) -> Result<PreparedPacket, Error> {
         let admitted = self.stages.admit(
             &mut self.budget,
             packet,
-            self.stages.client.providers.route(),
+            self.stages.client.providers.route_provider(),
         )?;
-        self.stages.materialize(admitted)
+        self.stages.materialize_using(admitted, |plan, _| {
+            if plan.mode != packetcraftr_netio::link::Mode::Layer3
+                || plan.needs_neighbor_resolution()
+            {
+                return Err(route::Error::Layer3Unsupported);
+            }
+            Ok(route::Materialized {
+                plan,
+                neighbor_resolution: None,
+            })
+        })
     }
 
     pub(crate) fn transmit(&self, packet: PreparedPacket) -> Result<SentPacket, Error> {
-        packet.transmit(self.stages.client.providers.transmit(), || {
+        packet.transmit(self.stages.client.providers.transmit_provider(), || {
             self.stages.check()
         })
     }
 }
 
-impl<P: PacketProviders, K: Clock> Client<P, K> {
+impl<P: PacketProviders, K: Clock> Streaming<'_, P, K> {
+    pub(crate) fn prepare(&mut self, packet: Packet) -> Result<PreparedPacket, Error> {
+        let admitted = self.stages.admit(
+            &mut self.budget,
+            packet,
+            TransmitProviders::route_provider(self.stages.client.providers.as_ref()),
+        )?;
+        self.stages.materialize(admitted)
+    }
+}
+
+impl<P: TransmitProviders, K: Clock> Client<P, K> {
     pub(crate) fn admitting_in<'c>(
         &'c self,
         options: &'c send::Options,

@@ -207,10 +207,32 @@ impl Collector {
     }
 
     #[must_use]
-    pub fn finish(mut self, summary: &RunSummary) -> (Vec<SessionEvent>, Summary) {
+    pub fn finish(self, summary: &RunSummary) -> (Vec<SessionEvent>, Summary) {
         let mut events = Vec::new();
+        let summary = self
+            .finalize(
+                summary,
+                || Ok(()),
+                |batch| {
+                    events.extend(batch);
+                    Ok(())
+                },
+            )
+            .expect("uncontrolled collection cannot fail");
+        (events, summary)
+    }
+
+    fn finalize(
+        mut self,
+        summary: &RunSummary,
+        mut check: impl FnMut() -> Result<(), BoundaryError>,
+        mut emit: impl FnMut(Vec<SessionEvent>) -> Result<(), BoundaryError>,
+    ) -> Result<Summary, BoundaryError> {
+        check()?;
         let trailing = &summary.trailing_tcp_events;
         for event in trailing {
+            check()?;
+            let mut events = Vec::new();
             if let TcpEvent::Gap { flow, .. } = event {
                 let key = CanonicalFlow::from_flow(flow);
                 let number = self.last_frame(&key);
@@ -222,9 +244,11 @@ impl Collector {
                     &mut events,
                 );
             }
+            emit(events)?;
         }
-        let remaining = self.order.values().cloned().collect::<Vec<_>>();
-        for key in remaining {
+        while let Some((_, key)) = self.order.pop_first() {
+            check()?;
+            let mut events = Vec::new();
             let number = self.last_frame(&key);
             self.retire(
                 &key,
@@ -233,6 +257,7 @@ impl Collector {
                 number,
                 &mut events,
             );
+            emit(events)?;
         }
         debug_assert_eq!(
             self.buffered_bytes, 0,
@@ -240,7 +265,8 @@ impl Collector {
         );
         self.summary.clock = summary.clock.clone();
         self.summary.tcp_streams = self.seen_streams.len() as u64;
-        (events, self.summary)
+        check()?;
+        Ok(self.summary)
     }
 
     /// Gap outranks close, which outranks eviction; a reset produces both close and eviction.
@@ -548,5 +574,18 @@ impl SessionCollector for Collector {
 
     fn finish(self, run: &RunSummary) -> Result<(Vec<SessionEvent>, Summary), BoundaryError> {
         Ok(Self::finish(self, run))
+    }
+
+    fn finish_controlled(
+        self,
+        run: &RunSummary,
+        deadline: &crate::budget::Deadline,
+        event_sink: &mut dyn FnMut(SessionEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Summary, BoundaryError> {
+        self.finalize(
+            run,
+            || super::session::check(deadline),
+            |events| super::session::deliver(deadline, events, event_sink),
+        )
     }
 }

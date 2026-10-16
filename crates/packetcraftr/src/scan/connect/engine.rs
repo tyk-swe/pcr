@@ -388,18 +388,15 @@ where
             selection.host_limited = selection.host_limited || timeout < selection.timeout;
             let admitted = clock.now();
             let scheduled_at = SystemTime::now();
-            let pending = match budget.start(
-                Arc::clone(provider),
-                endpoint,
-                &Deadline::new(timeout).with_cancellation(deadline.cancellation().cloned()),
-            ) {
-                Ok(pending) => pending,
-                Err(tcp::Error::Capacity { .. }) => {
-                    admission_held = true;
-                    break;
-                }
-                Err(source) => return Err(execution(sequence, source)),
-            };
+            let pending =
+                match budget.start(Arc::clone(provider), endpoint, &deadline.for_wait(timeout)?) {
+                    Ok(pending) => pending,
+                    Err(tcp::Error::Capacity { .. }) => {
+                        admission_held = true;
+                        break;
+                    }
+                    Err(source) => return Err(execution(sequence, source)),
+                };
             controller.admitted(&mut work, selection);
             controller.commit_attempt(&mut work, selection, admitted);
             active.push(Active {

@@ -61,9 +61,9 @@ pub mod traceroute;
 
 pub use client::Client;
 pub use error::{Error, NeighborSpent};
-pub use execution::Sink;
+pub use execution::{Delivery, Sink};
 pub use providers::{
     CaptureProviders, PacketProviders, ProviderSet, SystemProviders, TargetProviders, TcpProviders,
-    UdpProviders,
+    TransmitProviders, TransmitSet, UdpProviders,
 };
 pub use stats::{Stats, StatsOverflow};

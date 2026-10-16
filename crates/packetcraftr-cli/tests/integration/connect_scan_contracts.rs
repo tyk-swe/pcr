@@ -128,7 +128,7 @@ fn an_adaptive_connect_scan_reports_adaptive_scheduling() {
         "{report}"
     );
     assert_eq!(scheduling["operation_ceiling"], 1);
-    assert_eq!(scheduling["process_ceiling"], 16);
+    assert_eq!(scheduling["process_ceiling"], 12);
     assert!(scheduling["incomplete"].as_array().unwrap().is_empty());
     assert_eq!(report["result"]["endpoints"][0]["classification"], "open");
     let until = Instant::now() + Duration::from_secs(2);

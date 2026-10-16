@@ -57,6 +57,25 @@ capture; `attempted=false` creates no network claim.
 | `local_error` | Other I/O error / `unknown` |
 | `deadline_expired` | Attempt elapsed/cancelled without timely result / `timeout` |
 
+`deadline_expired` and `local_error` are unavailable observations for adaptive
+control and port inference. They do not count as transport silence or trigger
+remote-loss backoff. A socket `timed_out` result remains transport silence.
+
+Raw no-reply events carry typed acquisition coverage. A pipeline publishes
+`pending` silence while capture remains active, then publishes an
+`observation_quality` qualification for its stage and inclusive sequence
+interval after shutdown. A terminal error leaves provisional negatives unusable
+for inference. Aggregate collectors apply qualification only to pending no-reply
+measurements before port inference; final unknown/incomplete coverage stays.
+Only `no_reported_loss` supports raw silence rules. A local host ceiling that
+shortens an attempt leaves its no-reply coverage unknown and the host incomplete.
+Permissive overflow marks
+negative observations `incomplete`; custom providers default to `unknown` even
+with zero counters. Both enter inference's `failed` partition. Positive uniquely
+correlated replies remain valid. Default overflow `Fail` rejects incomplete
+runs. Local counters do not prove end-to-end visibility or identify which
+response was lost. See [output/v18 migration](consumer-compatibility.md#output-family-v18).
+
 ### Application checks on attempts
 
 | UDP profile status | Meaning |
@@ -76,7 +95,9 @@ capture; `attempted=false` creates no network claim.
   not wire departure or receipt. `transmit::Timing::freshness_marker()` marks
   submission start (after socket setup) and `completed()` marks acceptance
   return; replies captured inside that interval with valid monotonic ingress are
-  eligible. RTT `lost = sent - received` includes backend loss.
+  eligible. RTT partitions `sent = received + lost + unavailable`: `lost` counts only
+  qualified no-reply intervals, and `unavailable` covers local failures or
+  insufficient acquisition quality. Neither metric identifies a remote cause.
   `retained_evidence_bytes` charges retained wire bytes (raw/trace) or probe
   structures/error strings (connect), not RSS.
 - **Operational failures:** Policy, capability, budget, operation-deadline, and

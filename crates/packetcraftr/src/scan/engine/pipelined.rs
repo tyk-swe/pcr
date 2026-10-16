@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::Instant;
-
 use packetcraftr_core::budget::Deadline;
 
 use crate::clock::Clock;
@@ -94,7 +92,6 @@ where
         let (probes, wave_peak) = run_pipelined(
             request,
             executor,
-            clock,
             evidence,
             deadline,
             plan,
@@ -147,6 +144,7 @@ pub(super) fn pipeline_options(
     reserved: usize,
 ) -> Result<PipelineOptions, Error> {
     Ok(PipelineOptions {
+        control: deadline.clone(),
         max_in_flight: request.max_in_flight,
         probes_per_second: request.probes_per_second,
         max_duration: deadline.remaining().map_err(|error| {
@@ -155,7 +153,6 @@ pub(super) fn pipeline_options(
         max_prepared_bytes: request.limits.max_prepared_bytes.saturating_sub(reserved),
         max_evidence_frames: request.limits.evidence.max_frames,
         max_evidence_bytes: request.limits.evidence.max_bytes,
-        host_deadlines: Vec::new(),
         preceding,
     })
 }
@@ -186,45 +183,32 @@ pub(super) fn check_prepared_descriptions(
     Ok(())
 }
 
-pub(super) struct WaveOutcome {
+pub(super) struct PipelineOutcome {
     pub(super) stats: crate::Stats,
-    pub(super) confirmed: Vec<bool>,
     pub(super) completed: Vec<bool>,
-    pub(super) omitted: Vec<bool>,
-    pub(super) sent_at: Vec<Option<Instant>>,
-    pub(super) observed_at: Vec<Option<Instant>>,
     pub(super) sent_bytes: u64,
     pub(super) peak_pending: usize,
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn drive_pipeline<E, C, F>(
+fn drive_pipeline<E, F>(
     request: &Request,
     executor: &mut E,
-    clock: &C,
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
     deadline: &Deadline,
     batches: &[Batch<Probe>],
-    host_deadlines: Vec<Option<Instant>>,
     preceding: crate::Stats,
-    state_charge: usize,
-) -> Result<WaveOutcome, Error>
+) -> Result<PipelineOutcome, Error>
 where
     E: Pipelined,
-    C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     let mut completed = vec![false; batches.len()];
     let mut confirmed = vec![false; batches.len()];
-    let mut omitted = vec![false; batches.len()];
-    let mut sent_at: Vec<Option<Instant>> = vec![None; batches.len()];
-    let mut observed_at: Vec<Option<Instant>> = vec![None; batches.len()];
     let mut pending_now = 0usize;
     let mut peak_pending = 0usize;
     let mut sent_bytes = 0u64;
-    let mut settings = pipeline_options(request, deadline, preceding, state_charge)?;
-    settings.host_deadlines = host_deadlines;
-    let adaptive_wave = !settings.host_deadlines.is_empty();
+    let settings = pipeline_options(request, deadline, preceding, 0)?;
     let result = executor.execute_pipeline(batches, settings, &mut |event| {
         let invalid = |index| {
             packetcraftr_core::error::BoundaryError::from_error(Error::InvalidEvidence {
@@ -236,15 +220,10 @@ where
             PipelineEvent::Sent { index, sent } => {
                 let batch = batches.get(index).ok_or_else(|| invalid(index))?;
                 let probe = batch.probe()?;
-                if confirmed[index]
-                    || omitted[index]
-                    || !sent_probe_matches(probe, &sent.built().packet)
-                {
+                if confirmed[index] || !sent_probe_matches(probe, &sent.built().packet) {
                     return Err(invalid(index));
                 }
                 confirmed[index] = true;
-                sent_at[index] = Some(sent.timing().freshness_marker().monotonic());
-                observed_at[index] = Some(clock.now());
                 pending_now = pending_now.saturating_add(1);
                 peak_pending = peak_pending.max(pending_now);
                 sent_bytes = sent_bytes
@@ -260,15 +239,10 @@ where
                     )
                     .map_err(packetcraftr_core::error::BoundaryError::from_error)?;
             }
-            PipelineEvent::Omitted { index } => {
-                if !adaptive_wave || index >= batches.len() || confirmed[index] || omitted[index] {
-                    return Err(invalid(index));
-                }
-                omitted[index] = true;
-            }
+            PipelineEvent::Omitted { index } => return Err(invalid(index)),
             PipelineEvent::Completed { index, execution } => {
                 let batch = batches.get(index).ok_or_else(|| invalid(index))?;
-                if completed[index] || !confirmed[index] || omitted[index] {
+                if completed[index] || !confirmed[index] {
                     return Err(invalid(index));
                 }
                 // Scan probe events never end the operation early.
@@ -279,40 +253,21 @@ where
                 completed[index] = true;
                 pending_now = pending_now.saturating_sub(1);
             }
-            PipelineEvent::Undecoded { frame } => evidence
-                .retain_undecoded(&[], vec![frame], deadline)
-                .map_err(packetcraftr_core::error::BoundaryError::from_error)?,
-            PipelineEvent::Unattributed {
-                frame,
-                attribution,
-                sequence,
-            } => evidence
-                .retain_unattributed(
-                    &frame,
-                    |frame| {
-                        Event::Unattributed(crate::scan::Unattributed {
-                            attribution,
-                            sequence,
-                            frame,
-                        })
-                    },
+            PipelineEvent::Qualification(qualification) => {
+                publish_aux(
+                    PipelineEvent::Qualification(qualification),
+                    evidence,
                     deadline,
-                )
-                .map_err(packetcraftr_core::error::BoundaryError::from_error)?,
-            PipelineEvent::Diagnostic(diagnostic) => evidence
-                .record_diagnostics(vec![diagnostic], deadline)
-                .map_err(packetcraftr_core::error::BoundaryError::from_error)?,
+                )?;
+            }
+            event => publish_aux(event, evidence, deadline)?,
         }
         Ok(())
     });
     match result {
-        Ok(stats) => Ok(WaveOutcome {
+        Ok(stats) => Ok(PipelineOutcome {
             stats,
-            confirmed,
             completed,
-            omitted,
-            sent_at,
-            observed_at,
             sent_bytes,
             peak_pending,
         }),
@@ -320,10 +275,55 @@ where
     }
 }
 
-pub(super) fn run_pipelined<E, C, F>(
+pub(super) fn publish_aux<F>(
+    event: PipelineEvent,
+    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
+    deadline: &Deadline,
+) -> Result<(), packetcraftr_core::error::BoundaryError>
+where
+    F: FnMut(Event, &Deadline) -> Result<(), Error>,
+{
+    let result = match event {
+        PipelineEvent::Undecoded { frame } => evidence.retain_undecoded(&[], vec![frame], deadline),
+        PipelineEvent::Unattributed {
+            frame,
+            attribution,
+            sequence,
+        } => evidence.retain_unattributed(
+            &frame,
+            |frame| {
+                Event::Unattributed(crate::scan::Unattributed {
+                    attribution,
+                    sequence,
+                    frame,
+                })
+            },
+            deadline,
+        ),
+        PipelineEvent::Diagnostic(diagnostic) => {
+            evidence.record_diagnostics(vec![diagnostic], deadline)
+        }
+        PipelineEvent::Qualification(qualification) => {
+            evidence
+                .classifier_mut()
+                .rtt
+                .qualify_pending(qualification.coverage());
+            evidence.emit(Event::Qualification(qualification), deadline)
+        }
+        _ => {
+            return Err(packetcraftr_core::error::BoundaryError::internal_execution(
+                "unexpected attempt event at auxiliary publisher",
+                "internal.scan_pipeline_event",
+                "preserve the attempt publication boundary",
+            ));
+        }
+    };
+    result.map_err(packetcraftr_core::error::BoundaryError::from_error)
+}
+
+pub(super) fn run_pipelined<E, F>(
     request: &Request,
     executor: &mut E,
-    clock: &C,
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
     deadline: &Deadline,
     plan: &StagePlan<'_>,
@@ -331,24 +331,12 @@ pub(super) fn run_pipelined<E, C, F>(
 ) -> Result<(crate::Stats, usize), Error>
 where
     E: Pipelined,
-    C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     let batches: Vec<_> = plan.batches(request).collect();
-    let outcome = drive_pipeline(
-        request,
-        executor,
-        clock,
-        evidence,
-        deadline,
-        &batches,
-        Vec::new(),
-        preceding,
-        0,
-    )?;
+    let outcome = drive_pipeline(request, executor, evidence, deadline, &batches, preceding)?;
     let count = batches.len() as u64;
-    if outcome.omitted.iter().any(|dropped| *dropped)
-        || outcome.completed.iter().any(|done| !*done)
+    if outcome.completed.iter().any(|done| !*done)
         || outcome.stats.packets_attempted != count
         || outcome.stats.packets_completed != count
         || outcome.stats.bytes != outcome.sent_bytes

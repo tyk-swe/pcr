@@ -157,3 +157,39 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(recorded.lock().expect("sent lock").len(), 1);
     Ok(())
 }
+
+// This backend deliberately implements transmission alone. The detached crate
+// must compile and perform an authorized numeric send without capture stubs.
+struct TransmitOnly(RecordingSender);
+
+impl transmit::Provider for TransmitOnly {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
+        self.0.send(frame)
+    }
+}
+
+#[test]
+fn numeric_layer3_without_capture_capability() -> Result<(), Box<dyn std::error::Error>> {
+    let recorded = RecordingSender::default();
+    let client = Client::new(
+        builtin::registry(),
+        Policy {
+            allowed_destinations: vec![DestinationConstraint::Network(
+                packetcraftr::target::Network::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 0)), 24)?,
+            )],
+            max_packets_per_operation: 1,
+            max_bytes_per_operation: 1_500,
+            ..Policy::default()
+        },
+        ProviderSet::transmit(DocumentationRoutes, interface::SystemProvider, TransmitOnly(recorded.clone())),
+    );
+    let collector = send::Collector::default();
+    let report = client.send_layer3(
+        send::Request::packet(packet(Ipv4Addr::new(192, 0, 2, 99))?, send::Options::default()),
+        collector.clone(),
+    )?;
+    let result = collector.finish(report)?;
+    assert_eq!(result.stats.packets_completed, 1);
+    assert_eq!(recorded.sent.lock().unwrap().len(), 1);
+    Ok(())
+}

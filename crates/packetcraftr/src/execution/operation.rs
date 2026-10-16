@@ -68,12 +68,11 @@ impl Operation {
         remaining
     }
 
-    /// Trace stages use their own caches and worker permits while retaining the
-    /// containing operation's deadline and spending.
+    /// Trace stages use fresh preparation caches while retaining the containing
+    /// operation's worker root, deadline, and spending.
     pub(crate) fn isolated(&self) -> Self {
         Self {
             neighbors: self.neighbors.fresh(),
-            runtime: self.runtime.fresh(),
             interfaces: crate::route::ResolvedInterface::default(),
             neighbor_mode: NeighborMode::Authorized,
             neighbor_pause: Duration::ZERO,
@@ -94,3 +93,6 @@ impl Operation {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

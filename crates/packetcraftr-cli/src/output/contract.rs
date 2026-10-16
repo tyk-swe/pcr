@@ -20,8 +20,10 @@ pub const SCHEMA_V15: &str = "packetcraftr.output/v15";
 /// SCTP INIT/COOKIE-ECHO scanning, IP-protocol inventory, and
 /// extra host-discovery probe families.
 pub const SCHEMA_V16: &str = "packetcraftr.output/v16";
-/// Current family: capture overview and explicit statistics ordering.
+/// Capture overview and explicit statistics ordering.
 pub const SCHEMA_V17: &str = "packetcraftr.output/v17";
+/// Current family: qualified scan measurements and acquisition-quality events.
+pub const SCHEMA_V18: &str = "packetcraftr.output/v18";
 
 pub use crate::commands::Command;
 

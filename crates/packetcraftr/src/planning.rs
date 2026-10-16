@@ -11,7 +11,7 @@ use packetcraftr_netio::Error as LiveIoError;
 use crate::Client;
 use crate::Error;
 use crate::clock::Clock;
-use crate::providers::PacketProviders;
+use crate::providers::TransmitProviders;
 use crate::route::{Error as RouteError, Interface, Options, Plan, plan as plan_route};
 
 /// The boundary itself is expired: no time remains once nothing is left.
@@ -30,7 +30,7 @@ pub(crate) fn ensure_preparation_deadline(deadline: &Deadline) -> Result<(), Err
     Ok(())
 }
 
-impl<P: PacketProviders, K: Clock> Client<P, K> {
+impl<P: TransmitProviders, K: Clock> Client<P, K> {
     /// Passive dry planning: route, source, and interface lookup only.
     pub fn plan(
         &self,
@@ -43,7 +43,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             packet,
             destination,
             options,
-            self.providers.route(),
+            self.providers.route_provider(),
             deadline,
             &self.interfaces,
             || Ok(()),
@@ -118,7 +118,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         else {
             return Ok(Cow::Borrowed(options));
         };
-        let id = interfaces.resolve(selector, self.providers.interface(), deadline)?;
+        let id = interfaces.resolve(selector, self.providers.interface_provider(), deadline)?;
         Ok(Cow::Owned(Options {
             interface: Some(id.into()),
             ..options.clone()

@@ -20,6 +20,19 @@ impl Match {
 }
 
 pub trait ResponseMatcher: Send + Sync + fmt::Debug {
+    /// Whether every match has a common necessary key in
+    /// [`crate::protocol::response_identity::request`] and
+    /// [`crate::protocol::response_identity::response`]. Keys only narrow
+    /// candidate discovery; callers must still invoke `matches`.
+    ///
+    /// The conservative default preserves arbitrary custom matcher semantics.
+    /// Returning `true` opts into the built-in outer address/transport identity
+    /// contract, including directly received quoted ICMP errors. Unknown shapes
+    /// for which either helper returns `None` always require conservative lookup.
+    fn uses_builtin_response_identity(&self) -> bool {
+        false
+    }
+
     fn matches(&self, request: &Packet, response: &Packet) -> Option<Match>;
 
     fn responder(&self, _request: &Packet, _response: &Packet) -> Option<IpAddr> {

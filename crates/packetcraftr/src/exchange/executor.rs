@@ -134,7 +134,14 @@ impl<C: Session> Transaction<C> {
         mut workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
         mut stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
         emit: &mut F,
-    ) -> Result<(Report, Vec<super::evidence::UnsolicitedIngress>), Error>
+    ) -> Result<
+        (
+            Report,
+            Vec<super::evidence::UnsolicitedIngress>,
+            capture::ObservationQuality,
+        ),
+        Error,
+    >
     where
         T: transmit::Provider + ?Sized,
         F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
@@ -146,7 +153,13 @@ impl<C: Session> Transaction<C> {
 
         self.capture.shutdown()?;
         let unsolicited_ingress = std::mem::take(&mut self.captured.unsolicited_ingress);
-        Ok((self.finalize_exchange(emit)?, unsolicited_ingress))
+        let quality = self.captured.observation_quality(
+            self.capture
+                .inner
+                .observation_quality()
+                .with_statistics(self.capture.inner.stats()),
+        );
+        Ok((self.finalize_exchange(emit)?, unsolicited_ingress, quality))
     }
 
     fn run<T, F>(

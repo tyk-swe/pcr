@@ -21,8 +21,9 @@ pub struct Trace {
     pub max_probes: usize,
     pub reuse: Option<traceroute::hosts::Reuse>,
     /// The worker runtime the trace stage publishes through. `None` gives it a
-    /// fresh runtime of the client's capacity, so workers an earlier stage
-    /// timed out cannot hold its permits.
+    /// shared runtime of the containing operation, including workers retained
+    /// after cancellation or timeout. An explicit runtime selects an independent
+    /// caller-owned root.
     /// An explicit runtime must have at least one worker slot.
     pub runtime: Option<crate::runtime::Runtime>,
 }

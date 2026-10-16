@@ -63,10 +63,18 @@ pub(super) fn record(
         progress.rtt.note_sent();
     }
     if matches!(
-        probe.outcome,
-        Outcome::Connected | Outcome::Refused | Outcome::Unreachable
+        probe.outcome.measurement(),
+        super::super::measurement::Measurement::Response(_)
     ) {
         progress.rtt.note_received(probe.elapsed);
+    }
+    if probe.attempted
+        && matches!(
+            probe.outcome.measurement(),
+            super::super::Measurement::Unavailable
+        )
+    {
+        progress.rtt.note_no_reply(super::super::Coverage::Unknown);
     }
     if probe.stage == Stage::Discovery {
         // The operating system reports the endpoint's own answer; which

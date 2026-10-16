@@ -4,18 +4,22 @@
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
-        Arc, Mutex, OnceLock,
+        Arc, Mutex,
         mpsc::{self, SyncSender, TrySendError},
     },
     thread::{self, JoinHandle},
-    time::Duration,
 };
 
+#[cfg(native_layer2)]
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Source;
+#[cfg(native_layer2)]
+use std::{sync::OnceLock, time::Duration};
 
+#[cfg(native_layer2)]
 use super::{Task, Waited, shared};
 
+#[cfg(native_layer2)]
 static SHARED_REAPER: OnceLock<Result<ReaperService, ReaperStartError>> = OnceLock::new();
 
 type SharedReceiver = Arc<Mutex<mpsc::Receiver<ReapTask>>>;
@@ -25,7 +29,7 @@ pub(crate) struct ReaperClient {
     tasks: SyncSender<ReapTask>,
 }
 
-struct ReaperService {
+pub(crate) struct ReaperService {
     client: ReaperClient,
     _workers: Vec<JoinHandle<()>>,
 }
@@ -37,9 +41,28 @@ pub(crate) struct ReaperStartError {
     source: Source,
 }
 
+impl From<std::io::Error> for ReaperStartError {
+    fn from(error: std::io::Error) -> Self {
+        Self {
+            source: Source::new(error),
+        }
+    }
+}
+
+impl ReaperService {
+    pub(crate) fn client(&self) -> ReaperClient {
+        self.client.clone()
+    }
+}
+
+pub(crate) fn retirement_service(capacity: usize) -> Result<ReaperService, ReaperStartError> {
+    start_reaper(capacity, spawn_reaper_thread)
+}
+
 pub(crate) type ReapTask = Box<dyn FnOnce() + Send + 'static>;
 
 /// A nudge can arrive before the worker blocks, so it is repeated every `poll_interval`.
+#[cfg(native_layer2)]
 pub(crate) fn wait_until_finished(
     task: Task<()>,
     poll_interval: Duration,
@@ -56,20 +79,28 @@ pub(crate) fn wait_until_finished(
 }
 
 impl ReaperClient {
+    /// The caller retains ownership on every refusal.
+    pub(crate) fn try_transfer(&self, task: ReapTask) -> Result<(), ReapTask> {
+        self.tasks.try_send(task).map_err(|error| match error {
+            TrySendError::Full(task) | TrySendError::Disconnected(task) => task,
+        })
+    }
+
     /// If admission fails, leaks the task so native state outlives workers that may still use it.
+    #[cfg(native_layer2)]
     pub(crate) fn transfer(&self, task: ReapTask) {
-        if let Err(TrySendError::Full(task) | TrySendError::Disconnected(task)) =
-            self.tasks.try_send(task)
-        {
+        if let Err(task) = self.try_transfer(task) {
             self.retain(task);
         }
     }
 
+    #[cfg(native_layer2)]
     fn retain(&self, task: ReapTask) {
         std::mem::forget(task);
     }
 }
 
+#[cfg(native_layer2)]
 pub(crate) fn shared_reaper() -> Result<ReaperClient, ReaperStartError> {
     SHARED_REAPER
         .get_or_init(|| start_reaper(shared().capacity(), spawn_reaper_thread))

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::cell::Cell;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -92,6 +93,15 @@ impl StreamEncoder {
         self
     }
 
+    pub(crate) fn with_control(mut self, control: Arc<Deadline>) -> Self {
+        self.deadline = Some(Arc::new(
+            Deadline::new(Duration::MAX)
+                .with_parent(self.deadline.clone())
+                .with_parent(Some(control)),
+        ));
+        self
+    }
+
     #[must_use]
     pub fn with_resource_diagnostics(
         mut self,
@@ -151,6 +161,45 @@ impl StreamEncoder {
                 writer: EncoderWriter::Bounded { sink, timeout },
             })),
         })
+    }
+
+    /// Trusted CLI emitters may run cooperatively only when writes are already
+    /// isolated behind this encoder's bounded writer.
+    pub(crate) fn isolates_writes(&self) -> bool {
+        self.output
+            .try_lock()
+            .is_ok_and(|output| matches!(output.writer, EncoderWriter::Bounded { .. }))
+    }
+
+    pub(crate) fn emit_data_counted<T: StreamRecord>(
+        &self,
+        result: T,
+        diagnostics: Vec<PacketDiagnostic>,
+        remaining: &mut usize,
+    ) -> Result<(), MeteredError> {
+        let event = result.event_name();
+        if event.is_empty() || matches!(event, "complete" | "error") {
+            return Err(MeteredError::Encode(EncodeError::ReservedEvent));
+        }
+        let meter = ResultMeter::new(*remaining);
+        let outcome = self.write_success_inner(
+            event,
+            Published::new(result, diagnostics),
+            false,
+            Some((&meter, remaining)),
+        );
+        if meter.exceeded.get() {
+            Err(MeteredError::Limit)
+        } else {
+            outcome.map_err(|error| match error {
+                EncodeError::Serialize { source, .. }
+                    if meter.value_failed.get() && !source.is_io() =>
+                {
+                    MeteredError::Serialize(source)
+                }
+                error => MeteredError::Encode(error),
+            })
+        }
     }
 
     pub fn emit_data<T: StreamRecord>(
@@ -239,6 +288,16 @@ impl StreamEncoder {
         published: Published<T>,
         terminal: bool,
     ) -> Result<(), EncodeError> {
+        self.write_success_inner(event, published, terminal, None)
+    }
+
+    fn write_success_inner<T: Serialize>(
+        &self,
+        event: &'static str,
+        published: Published<T>,
+        terminal: bool,
+        budget: Option<(&ResultMeter, &mut usize)>,
+    ) -> Result<(), EncodeError> {
         let Published {
             result,
             diagnostics,
@@ -256,6 +315,11 @@ impl StreamEncoder {
                     .ok_or(EncodeError::SequenceOverflow)?,
             )
         };
+        let meter = budget.as_ref().map(|(meter, _)| *meter);
+        let result = Counted {
+            value: result,
+            meter,
+        };
         let mut record = Envelope::record(self.command, sequence, event, result, diagnostics);
         if (sequence == 0 || terminal)
             && let Some(observe) = &self.resources
@@ -265,7 +329,10 @@ impl StreamEncoder {
         if let Some(stats) = stats {
             record = record.with_stats(stats);
         }
-        let line = serialize_line(&record, sequence)?;
+        let line = serialize_line_metered(&record, sequence, MAX_RECORD_BYTES, meter)?;
+        if let Some((meter, remaining)) = budget {
+            *remaining -= meter.bytes.get();
+        }
         check_publication_budget(self.deadline.as_deref(), "serialization")?;
         write_line(
             &mut output,
@@ -359,6 +426,51 @@ fn check_publication_budget(
     Ok(())
 }
 
+#[derive(Debug)]
+pub(crate) enum MeteredError {
+    Limit,
+    Encode(EncodeError),
+    Serialize(serde_json::Error),
+}
+
+struct ResultMeter {
+    limit: usize,
+    active: Cell<bool>,
+    bytes: Cell<usize>,
+    exceeded: Cell<bool>,
+    value_failed: Cell<bool>,
+}
+
+impl ResultMeter {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            active: Cell::new(false),
+            bytes: Cell::new(0),
+            exceeded: Cell::new(false),
+            value_failed: Cell::new(false),
+        }
+    }
+}
+
+struct Counted<'a, T> {
+    value: T,
+    meter: Option<&'a ResultMeter>,
+}
+impl<T: Serialize> Serialize for Counted<'_, T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if let Some(meter) = self.meter {
+            meter.active.set(true);
+        }
+        let result = self.value.serialize(serializer);
+        if let Some(meter) = self.meter {
+            meter.active.set(false);
+            meter.value_failed.set(result.is_err());
+        }
+        result
+    }
+}
+
 /// Maximum encoded NDJSON record bytes, including its newline.
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 
@@ -371,13 +483,32 @@ fn serialize_line_with_limit(
     sequence: u64,
     limit: usize,
 ) -> Result<Vec<u8>, EncodeError> {
-    struct BoundedLine {
+    serialize_line_metered(record, sequence, limit, None)
+}
+
+fn serialize_line_metered(
+    record: &impl Serialize,
+    sequence: u64,
+    limit: usize,
+    meter: Option<&ResultMeter>,
+) -> Result<Vec<u8>, EncodeError> {
+    struct BoundedLine<'a> {
+        meter: Option<&'a ResultMeter>,
         bytes: Vec<u8>,
         limit: usize,
         exceeded: bool,
     }
-    impl Write for BoundedLine {
+    impl Write for BoundedLine<'_> {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if let Some(meter) = self.meter.filter(|meter| meter.active.get()) {
+                if bytes.len() > meter.limit.saturating_sub(meter.bytes.get()) {
+                    meter.exceeded.set(true);
+                    return Err(io::Error::other(
+                        "application JSON value byte ceiling exceeded",
+                    ));
+                }
+                meter.bytes.set(meter.bytes.get() + bytes.len());
+            }
             if bytes.len() > self.limit.saturating_sub(self.bytes.len()) {
                 self.exceeded = true;
                 return Err(io::Error::other("NDJSON record byte ceiling exceeded"));
@@ -399,6 +530,7 @@ fn serialize_line_with_limit(
         }
     }
     let mut line = BoundedLine {
+        meter,
         bytes: Vec::new(),
         limit,
         exceeded: false,
@@ -490,3 +622,6 @@ impl Classified for EncodeError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

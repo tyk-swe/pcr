@@ -38,6 +38,7 @@ jobs:
         run: |
           mkdir -p target/validation
           echo '{"status":"not_exercised","reason":"namespace launcher has not completed"}' > target/validation/native-isolated.json
+          echo '{"schema":"packetcraftr.namespace-lifecycle/v1","status":"not_exercised","reason":"namespace lifecycle launcher has not completed"}' > target/validation/native-namespace-lifecycle.json
       - name: Install prerequisites
         run: |
           rustup toolchain install
@@ -51,6 +52,10 @@ jobs:
         run: cargo build --locked --release -p packetcraftr-cli --all-features
       - name: Exercise the loopback exchange in a fresh isolated namespace
         run: sudo python3 scripts/test-native-isolated.py --binary target/release/packetcraftr --report target/validation/native-isolated.json
+      - name: Build the explicit native namespace lifecycle test
+        run: cargo test --locked --release -p packetcraftr-netio --all-features --lib --no-run --message-format=json > target/validation/netio-native-build.jsonl
+      - name: Exercise namespace lifecycle in a separate fresh isolated namespace
+        run: sudo python3 scripts/test-native-namespace-lifecycle.py --build-report target/validation/netio-native-build.jsonl --report target/validation/native-namespace-lifecycle.json
       - name: Preserve native evidence even on failure
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

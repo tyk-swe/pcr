@@ -26,25 +26,40 @@ impl<'a> EventOutput<'a> {
         retained: &mut Vec<T>,
         render_text: impl FnOnce(&crate::invocation::Invocation, &T) -> Result<(), CliError>,
     ) -> Result<(), CliError> {
-        let bytes = bounded_json_len(&value, self.remaining).map_err(|error| {
-            error.into_cli_error(|| {
-                CliError::new(
-                    Kind::Policy,
-                    "application output exceeds --max-application-output-bytes",
-                )
-            })
-        })?;
+        if self.format == Format::Ndjson {
+            return self
+                .invocation
+                .output
+                .emit_data_counted(value, Vec::new(), &mut self.remaining)
+                .map_err(|error| match error {
+                    crate::output::stream::MeteredError::Limit => limit_error(),
+                    crate::output::stream::MeteredError::Encode(error) => CliError::from(error),
+                    crate::output::stream::MeteredError::Serialize(error) => {
+                        super::machine::serialization_error(error)
+                    }
+                });
+        }
+        let bytes = bounded_json_len(&value, self.remaining)
+            .map_err(|error| error.into_cli_error(limit_error))?;
         self.remaining -= bytes;
         match self.format {
             Format::Json => retained.push(value),
-            Format::Ndjson => self
-                .invocation
-                .output
-                .emit_data(value, Vec::new())
-                .map_err(CliError::from)?,
+            Format::Ndjson => {
+                unreachable!("NDJSON is emitted and charged in one serialization above")
+            }
             Format::Text => render_text(self.invocation, &value)?,
             other => other.unreachable(),
         }
         Ok(())
     }
 }
+
+fn limit_error() -> CliError {
+    CliError::new(
+        Kind::Policy,
+        "application output exceeds --max-application-output-bytes",
+    )
+}
+
+#[cfg(test)]
+mod tests;

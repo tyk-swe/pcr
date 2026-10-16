@@ -150,8 +150,22 @@ impl ConnectBudget {
         P: Provider + 'static,
         P::Stream: 'static,
     {
+        self.start_on(workers::shared(), provider, endpoint, caller)
+    }
+
+    pub(crate) fn start_on<P>(
+        &self,
+        pool: &Arc<workers::Pool>,
+        provider: Arc<P>,
+        endpoint: SocketAddr,
+        caller: &Deadline,
+    ) -> Result<PendingConnect<P::Stream>, Error>
+    where
+        P: Provider + 'static,
+        P::Stream: 'static,
+    {
         let lease = self.lease()?;
-        start(provider, endpoint, caller, Some(lease))
+        start_on(pool, provider, endpoint, caller, Some(lease))
     }
 }
 
@@ -177,53 +191,83 @@ where
     P: Provider + 'static,
     P::Stream: 'static,
 {
+    start_on(workers::shared(), provider, endpoint, caller, lease)
+}
+
+pub(crate) fn start_on<P>(
+    pool: &Arc<workers::Pool>,
+    provider: Arc<P>,
+    endpoint: SocketAddr,
+    caller: &Deadline,
+    lease: Option<Lease>,
+) -> Result<PendingConnect<P::Stream>, Error>
+where
+    P: Provider + 'static,
+    P::Stream: 'static,
+{
     let deadline = caller.detach().map_err(Error::interrupted)?;
     if deadline.limit() > crate::deadline::MAX_WAIT {
         return Err(Error::Timeout);
     }
     let started = Instant::now();
     let started_at = SystemTime::now();
-    let permit = workers::shared()
-        .admit(Class::TcpConnect)
-        .map_err(|_| Error::Capacity {
-            limit: MAX_PENDING_CONNECTIONS,
-        })?;
+    let permit = pool.admit(Class::TcpConnect).map_err(|_| Error::Capacity {
+        limit: MAX_PENDING_CONNECTIONS,
+    })?;
     let slot = permit.clone();
     let cancel = Arc::new(Mutex::new(CancelState::default()));
     let cancelled = Arc::clone(&cancel);
+    let dispatch_control = deadline.clone();
     let task = permit
-        .spawn(move || {
-            let _lease = lease;
-            let admitted = {
-                let mut state = cancelled
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let admitted = if state.cancelled {
-                    Err(Error::Cancelled(Cancelled))
-                } else {
-                    deadline
-                        .live_remaining()
-                        .map(drop)
-                        .map_err(Error::interrupted)
+        .spawn_with_control(&dispatch_control, move || {
+            let lease_guard = lease.map(Arc::new);
+            let connection_lease = lease_guard.clone();
+            let outcome = workers::unwind_after_cleanup(|| {
+                let _lease = connection_lease;
+                let admitted = {
+                    let mut state = cancelled
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let admitted = if state.cancelled {
+                        Err(Error::Cancelled(Cancelled))
+                    } else {
+                        deadline
+                            .live_remaining()
+                            .map(drop)
+                            .map_err(Error::interrupted)
+                    };
+                    state.attempted = admitted.is_ok();
+                    admitted
                 };
-                state.attempted = admitted.is_ok();
-                admitted
-            };
-            let attempted = admitted.is_ok();
-            let result = admitted.and_then(|()| {
-                provider
-                    .connect(endpoint, &deadline)
-                    .map(|stream| Connection::new(stream, slot, _lease))
+                let attempted = admitted.is_ok();
+                let result = admitted.and_then(|()| {
+                    let stream = provider.connect(endpoint, &deadline)?;
+                    // A provider may return after cancellation or expiry. Close its
+                    // stream before releasing admission instead of publishing success.
+                    let state = cancelled
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if state.cancelled {
+                        return Err(Error::Cancelled(Cancelled));
+                    }
+                    deadline.live_remaining().map_err(Error::interrupted)?;
+                    Ok(Connection::new(stream, slot.into_socket(), _lease))
+                });
+                ConnectOutcome {
+                    attempted,
+                    started_at,
+                    completed_at: SystemTime::now(),
+                    elapsed: started.elapsed(),
+                    result,
+                }
             });
-            ConnectOutcome {
-                attempted,
-                started_at,
-                completed_at: SystemTime::now(),
-                elapsed: started.elapsed(),
-                result,
-            }
+            drop(lease_guard);
+            outcome
         })
-        .map_err(Error::Spawn)?;
+        .map_err(|error| match dispatch_control.enforce() {
+            Err(interrupted) => Error::interrupted(interrupted),
+            Ok(()) => Error::Spawn(error),
+        })?;
     Ok(PendingConnect {
         task,
         cancel,

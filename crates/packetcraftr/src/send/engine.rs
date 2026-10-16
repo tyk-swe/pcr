@@ -4,7 +4,7 @@
 use packetcraftr_netio::{capture, deadline::MAX_WAIT};
 
 use crate::clock::Clock;
-use crate::providers::PacketProviders;
+use crate::providers::{PacketProviders, TransmitProviders};
 use crate::{Client, Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
@@ -31,6 +31,46 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
+        self.send_prepared_in(request, sink, operation, |stream, packet| {
+            stream.prepare(packet)
+        })
+    }
+}
+
+impl<P: TransmitProviders, K: Clock> Client<P, K> {
+    /// Sends numeric IP packets in explicit Layer 3 mode, requiring no capture
+    /// provider. All route, MTU, policy, final-wire and cumulative budget checks
+    /// are shared with `send`; this operation cannot perform neighbor discovery.
+    pub fn send_layer3<S>(&self, mut request: Request, sink: S) -> Result<Report, Error>
+    where
+        S: Sink<Event, Ack = ()>,
+    {
+        if request.send.plan.link_mode == packetcraftr_netio::link::Mode::Layer2 {
+            return Err(super::request::invalid(
+                "link_mode",
+                "send_layer3 requires Layer 3 mode",
+            ));
+        }
+        request.send.plan.link_mode = packetcraftr_netio::link::Mode::Layer3;
+        let operation = crate::execution::Operation::new(self, std::time::Duration::MAX);
+        self.send_prepared_in(request, sink, &operation, |stream, packet| {
+            stream.prepare_layer3(packet)
+        })
+    }
+
+    fn send_prepared_in<S>(
+        &self,
+        request: Request,
+        sink: S,
+        operation: &crate::execution::Operation,
+        mut prepare: impl FnMut(
+            &mut crate::preparation::Streaming<'_, P, K>,
+            packetcraftr_core::packet::Packet,
+        ) -> Result<crate::preparation::PreparedPacket, crate::Error>,
+    ) -> Result<Report, Error>
+    where
+        S: Sink<Event, Ack = ()>,
+    {
         let plan = super::plan::Plan::try_from(&request)?;
         let started = self.now();
         let mut stream = self.streaming_in(&request.send, plan.packet_count, operation)?;
@@ -52,7 +92,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
                 .map_err(crate::Error::from)?;
             for (offset, expanded) in expansion.into_iter().enumerate() {
                 stream.check()?;
-                let prepared = stream.prepare(expanded.map_err(crate::Error::from)?)?;
+                let packet = expanded.map_err(crate::Error::from)?;
                 if completed > 0 {
                     stream.check()?;
                     self.clock
@@ -60,7 +100,11 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
                         .map_err(|source| Error::Clock {
                             source: Box::new(source),
                         })?;
+                    stream.check()?;
                 }
+                // Route, MTU and wire authorization follow the cooperative
+                // pacing wait; a prepared packet must not cross that gap.
+                let prepared = prepare(&mut stream, packet)?;
                 let packet = stream.transmit(prepared)?;
                 completed += 1;
                 bytes =

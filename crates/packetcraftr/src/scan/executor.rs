@@ -44,10 +44,11 @@ pub(crate) struct PipelineOptions {
     pub(crate) max_in_flight: usize,
     pub(crate) probes_per_second: Option<u32>,
     pub(crate) max_duration: Duration,
+    /// Exact operation control, including inherited cancellation and ceilings.
+    pub(crate) control: Deadline,
     pub(crate) max_prepared_bytes: usize,
     pub(crate) max_evidence_frames: usize,
     pub(crate) max_evidence_bytes: usize,
-    pub(crate) host_deadlines: Vec<Option<std::time::Instant>>,
     /// The operation's statistics before this pipeline, which its failure
     /// reports with its own.
     pub(crate) preceding: Stats,
@@ -76,9 +77,44 @@ pub(crate) enum PipelineEvent {
         sequence: Option<u64>,
     },
     Diagnostic(packetcraftr_core::diagnostic::Diagnostic),
+    Qualification(super::Qualification),
+}
+
+/// One controller-selected attempt. The driver owns only its bounded active
+/// and recent descriptors; IDs are stable for the entire stage.
+pub(crate) struct PipelineBatch {
+    pub(crate) index: usize,
+    pub(crate) batch: Batch<Probe>,
+    pub(crate) host_deadline: Option<std::time::Instant>,
+}
+
+pub(crate) struct PipelinePoll {
+    pub(crate) batches: Vec<PipelineBatch>,
+    pub(crate) next_ready: Option<std::time::Instant>,
+    pub(crate) done: bool,
+}
+
+/// The raw controller's private substitution boundary with acquisition. It
+/// selects work and consumes each settlement immediately; capture never chooses
+/// a retry, endpoint, host window or inference policy on its own.
+pub(crate) trait PipelineFeed {
+    fn poll(
+        &mut self,
+        capacity: usize,
+        now: std::time::Instant,
+    ) -> Result<PipelinePoll, BoundaryError>;
+    fn event(&mut self, event: PipelineEvent) -> Result<(), BoundaryError>;
 }
 
 pub(crate) trait Pipelined: Executor<Batch<Probe>> {
+    fn execute_stream(
+        &mut self,
+        options: PipelineOptions,
+        admission: &AdaptiveAdmission,
+        attempts: usize,
+        feed: &mut dyn PipelineFeed,
+    ) -> Result<Stats, BoundaryError>;
+
     fn execute_pipeline(
         &mut self,
         batches: &[Batch<Probe>],
@@ -438,6 +474,24 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_,
 }
 
 impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
+    fn execute_stream(
+        &mut self,
+        options: PipelineOptions,
+        admission: &AdaptiveAdmission,
+        attempts: usize,
+        feed: &mut dyn PipelineFeed,
+    ) -> Result<Stats, BoundaryError> {
+        let mut history = std::mem::replace(
+            &mut self.reply_history,
+            reply_history::ReplyHistory::new(false),
+        );
+        let result = self.exchange().and_then(|executor| {
+            pipeline::run_stream(&executor, options, admission, attempts, feed, &mut history)
+        });
+        self.reply_history = history;
+        result
+    }
+
     fn execute_pipeline(
         &mut self,
         batches: &[Batch<Probe>],

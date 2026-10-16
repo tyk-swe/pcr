@@ -28,6 +28,15 @@ pub enum Outcome {
 }
 
 impl Outcome {
+    pub const fn measurement(self) -> super::super::measurement::Measurement<Self> {
+        use super::super::measurement::Measurement;
+        match self {
+            Self::Connected | Self::Refused | Self::Unreachable => Measurement::Response(self),
+            Self::TimedOut => Measurement::NoReply(super::super::Coverage::TransportTimeout),
+            Self::LocalError | Self::DeadlineExpired => Measurement::Unavailable,
+        }
+    }
+
     pub const fn classification(self) -> Classification {
         match self {
             Self::Connected => Classification::Open,
@@ -112,6 +121,10 @@ pub struct Aggregate {
 pub struct Collector(Shared<Vec<ProbeEvidence>>);
 
 impl Sink<Event> for Collector {
+    fn delivery(&self) -> crate::Delivery {
+        crate::Delivery::Cooperative
+    }
+
     type Ack = ();
 
     fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {

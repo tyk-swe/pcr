@@ -1,0 +1,17 @@
+{
+  "schema": "packetcraftr.output/v18",
+  "command": "scan",
+  "mode": "stream",
+  "sequence": 1,
+  "status": "success",
+  "diagnostics": [],
+  "event": "observation_quality",
+  "result": {
+    "qualification": {
+      "stage": "scan",
+      "first_sequence": 70000,
+      "last_sequence": 70000,
+      "coverage": "incomplete"
+    }
+  }
+}

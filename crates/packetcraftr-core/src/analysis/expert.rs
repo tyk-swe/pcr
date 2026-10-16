@@ -104,18 +104,38 @@ impl Collector {
         findings
     }
 
-    pub fn finish(mut self, summary: &RunSummary) -> (Vec<Finding>, Summary) {
+    pub fn finish(self, summary: &RunSummary) -> (Vec<Finding>, Summary) {
+        let mut findings = Vec::new();
+        let summary = self
+            .finalize(summary, &mut || Ok(()), &mut |finding| {
+                findings.push(finding);
+                Ok(())
+            })
+            .expect("uncontrolled collection cannot fail");
+        (findings, summary)
+    }
+
+    fn finalize(
+        mut self,
+        summary: &RunSummary,
+        check: &mut dyn FnMut() -> Result<(), BoundaryError>,
+        emit: &mut dyn FnMut(Finding) -> Result<(), BoundaryError>,
+    ) -> Result<Summary, BoundaryError> {
+        check()?;
         self.summary.clock = summary.clock.clone();
-        let findings = tcp::finish(
+        tcp::finish(
             &self.flows,
             &self.streams,
             &summary.trailing_tcp_events,
             summary.frames_read,
-        );
-        for finding in &findings {
-            self.summary.record(finding);
-        }
-        (findings, self.summary)
+            check,
+            &mut |finding| {
+                self.summary.record(&finding);
+                emit(finding)
+            },
+        )?;
+        check()?;
+        Ok(self.summary)
     }
 }
 
@@ -139,5 +159,16 @@ impl session::Collector for Collector {
 
     fn finish(self, run: &RunSummary) -> Result<(Vec<Finding>, Summary), BoundaryError> {
         Ok(Self::finish(self, run))
+    }
+
+    fn finish_controlled(
+        self,
+        run: &RunSummary,
+        deadline: &crate::budget::Deadline,
+        event_sink: &mut dyn FnMut(Finding) -> Result<(), BoundaryError>,
+    ) -> Result<Summary, BoundaryError> {
+        self.finalize(run, &mut || session::check(deadline), &mut |finding| {
+            session::deliver(deadline, std::iter::once(finding), event_sink)
+        })
     }
 }

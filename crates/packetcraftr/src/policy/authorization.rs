@@ -186,7 +186,7 @@ impl Policy {
                 self.authorize_hostname(hostname)?;
                 distinct_addresses(
                     hostname,
-                    resolver.resolve(hostname, self.max_resolved_addresses)?,
+                    resolver.resolve_controlled(hostname, self.max_resolved_addresses, deadline)?,
                     self.max_resolved_addresses,
                 )?
                 .into_iter()

@@ -6,13 +6,12 @@
 //!
 //! A destination is staged as a temporary file inside its parent directory and
 //! published with a no-clobber rename. Both steps go through an
-//! [`OutputDirectory`] opened at staging time: with procfs, staging,
-//! publication, and rollback address the directory handle itself, so a parent
-//! path retargeted by another local actor (symlink swap or a renamed and
-//! replaced directory) cannot redirect the output. Elsewhere staging and
-//! publication use the physical directory resolved at staging, its identity is
-//! re-verified immediately before publication and rollback, and a change is
-//! refused.
+//! [`OutputDirectory`] opened at staging time: with procfs, staging and
+//! publication address the directory handle itself, so a parent path retargeted
+//! by another local actor (symlink swap or a renamed and replaced directory)
+//! cannot redirect the output. Elsewhere staging and publication use the
+//! physical directory resolved at staging, its identity is re-verified
+//! immediately before publication, and a change is refused.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -80,7 +79,6 @@ struct OutputDirectory {
     /// procfs path when available, otherwise the physical directory the
     /// requested path resolved to at staging.
     base: PathBuf,
-    handle_relative: bool,
 }
 
 impl OutputDirectory {
@@ -96,19 +94,18 @@ impl OutputDirectory {
                 )));
             }
             let identity = Identity::from_metadata(&metadata);
-            let (base, handle_relative) = match proc_fd_base(&handle, identity) {
-                Some(base) => (base, true),
+            let base = match proc_fd_base(&handle, identity) {
+                Some(base) => base,
                 // Without handle-relative paths, stage and publish at the
                 // physical directory resolved now, so a later change to an
                 // alias in the requested path cannot move the staged file.
-                None => (std::fs::canonicalize(requested).map_err(stage)?, false),
+                None => std::fs::canonicalize(requested).map_err(stage)?,
             };
             Ok(Self {
                 requested: requested.to_owned(),
                 _handle: handle,
                 identity,
                 base,
-                handle_relative,
             })
         }
         #[cfg(not(unix))]
@@ -124,19 +121,12 @@ impl OutputDirectory {
                 requested: requested.to_owned(),
                 identity,
                 base,
-                handle_relative: false,
             })
         }
     }
 
     fn join(&self, name: &OsStr) -> PathBuf {
         self.base.join(name)
-    }
-
-    /// Whether the requested parent still resolves to the directory selected
-    /// at staging.
-    fn still_bound(&self) -> std::io::Result<bool> {
-        Identity::current(&self.requested).map(|identity| identity == self.identity)
     }
 
     /// Refuses publication when the requested parent no longer resolves to the
@@ -256,7 +246,7 @@ impl StagedFile {
     /// Publishes into the directory bound at staging without overwriting.
     pub(crate) fn persist(self) -> Result<Published, CliError> {
         // This is the commit boundary. Expiry after a successful rename must
-        // not claim that the already-published artifact was rolled back.
+        // not claim that the already-published artifact was unpublished.
         self.invocation.check()?;
         self.parent.verify_unchanged(&self.destination)?;
         // `parent` is bound before `file` so it drops after it: a failed
@@ -271,37 +261,19 @@ impl StagedFile {
         } = self;
         file.persist_noclobber(parent.join(&file_name))
             .map_err(|error| output("publish", &destination, error.error))?;
-        Ok(Published {
-            parent,
-            file_name,
-            destination,
-        })
+        Ok(Published { destination })
     }
 }
 
-/// A file this invocation published, removable through the directory it was
-/// published into.
+/// A file this invocation published.
 #[derive(Debug)]
 pub(crate) struct Published {
-    parent: OutputDirectory,
-    file_name: OsString,
     destination: PathBuf,
 }
 
 impl Published {
     pub(crate) fn destination(&self) -> &Path {
         &self.destination
-    }
-
-    /// Removes exactly the file this invocation published; refuses when the
-    /// requested parent no longer resolves to the publication directory.
-    pub(crate) fn remove(&self) -> std::io::Result<()> {
-        if !self.parent.handle_relative && !self.parent.still_bound()? {
-            return Err(std::io::Error::other(
-                "output parent changed since publication",
-            ));
-        }
-        std::fs::remove_file(self.parent.join(&self.file_name))
     }
 }
 

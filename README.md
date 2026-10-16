@@ -93,7 +93,7 @@ completion directory and `man1` directory.
 ## Contracts
 
 Current producers use [packet/v2](schemas/packetcraftr.packet.v2.schema.json) and
-[output/v15](schemas/packetcraftr.output.v15.schema.json). Output v6–v14 schemas
+[output/v17](schemas/packetcraftr.output.v17.schema.json). Output v6–v16 schemas
 remain frozen for historical evidence; beta.3 used packet/v1 and output/v2.
 [Consumer compatibility](docs/consumer-compatibility.md) defines versioning,
 error semantics, and stream completion. Always inspect the terminal `complete`

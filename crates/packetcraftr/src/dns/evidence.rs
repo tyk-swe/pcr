@@ -12,6 +12,7 @@ use packetcraftr_core::{
     codec::NetworkEnvelope, decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw,
     packet::Packet, registry::Registry,
 };
+use packetcraftr_netio::bounded;
 
 use crate::correlation::{self, Transport as ProbeTransport};
 use crate::execution::evidence::{EvidenceState, ResponseCandidate};
@@ -275,7 +276,10 @@ pub(super) fn classify_tcp_response(
     limits: MessageLimits,
 ) -> Result<ClassifiedAttempt, Error> {
     if response.local_address.port() == 0
-        || response.peer_address != SocketAddr::new(probe.server_address, probe.server_port)
+        || !bounded::same_peer(
+            SocketAddr::new(probe.server_address, probe.server_port),
+            response.peer_address,
+        )
         || response.bytes_written != probe.framed_query_bytes()
         || response.elapsed > timeout
         || response.latency > response.elapsed

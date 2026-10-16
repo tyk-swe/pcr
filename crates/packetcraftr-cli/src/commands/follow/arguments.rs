@@ -11,6 +11,8 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Offline conversation payload extracti
 `udp:INDEX` numbering (first sender is `client`). Raw output requires a single
 direction. `--write DIR` atomically stages `TRANSPORT-INDEX-client.bin` and
 `TRANSPORT-INDEX-server.bin` in an existing directory without overwriting files.
+If a later file cannot be published, earlier files are retained and named in
+the error.
 
 Examples:
   packetcraftr analyze follow capture.pcapng --stream tcp:0
@@ -43,8 +45,9 @@ pub(crate) struct Args {
     pub(crate) direction: Direction,
     /// Save each selected direction's payload into an existing writable DIR as
     /// `TRANSPORT-INDEX-client.bin` and `TRANSPORT-INDEX-server.bin`, staged
-    /// and published atomically without overwriting existing files. An empty
-    /// direction produces an empty file.
+    /// and published atomically without overwriting existing files. If a later
+    /// file cannot be published, earlier files are retained and named in the
+    /// error. An empty direction produces an empty file.
     #[arg(long, value_name = "DIR")]
     pub(crate) write: Option<PathBuf>,
     /// Total payload bytes allowed across all direction files `--write` saves.

@@ -3,8 +3,8 @@
 
 //! Bounded DNS-over-TCP framing; callers authorize destinations and validate responses.
 
-use packetcraftr_netio::deadline::POLL_INTERVAL;
 use packetcraftr_netio::tcp::{self, Provider, Stream};
+use packetcraftr_netio::{bounded, deadline::POLL_INTERVAL};
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
@@ -422,7 +422,7 @@ where
         message: "peer socket inspection failed".to_owned(),
         source: Some(Source::new(source)),
     })?;
-    if peer_address != request.endpoint {
+    if !bounded::same_peer(request.endpoint, peer_address) {
         return Err(Error::Connect {
             endpoint: request.endpoint,
             message: format!("connected peer changed to {peer_address}"),

@@ -9,7 +9,7 @@ use packetcraftr_core::analysis::follow::{Chunk, PeerDirection};
 use packetcraftr_core::error::Kind;
 
 use crate::errors::CliError;
-use crate::staged_output::{Published, StagedFile};
+use crate::staged_output::StagedFile;
 
 use super::arguments::Direction as Selected;
 
@@ -46,6 +46,8 @@ pub(super) struct Written {
 }
 
 /// Each file publishes atomically without overwriting, in deterministic order.
+/// If a later file cannot be published, earlier files remain in place and are
+/// named in the returned error rather than being removed through shared paths.
 #[derive(Debug)]
 pub(super) struct DirectionFiles {
     staged: Vec<Staged>,
@@ -122,22 +124,18 @@ impl DirectionFiles {
     }
 
     pub(super) fn publish(self) -> Result<Vec<Written>, CliError> {
-        self.publish_with(StagedFile::sync, Published::remove)
+        self.publish_with(StagedFile::sync)
     }
 
-    /// Rollback removes each published file through the directory it was
-    /// published into, never through a re-resolved requested path.
     fn publish_with(
         mut self,
         mut sync: impl FnMut(&StagedFile) -> Result<(), CliError>,
-        mut remove: impl FnMut(&Published) -> std::io::Result<()>,
     ) -> Result<Vec<Written>, CliError> {
         // No destination is published until every staged file is written and synchronized.
         for staged in &mut self.staged {
             staged.write_pending()?;
             sync(&staged.file)?;
         }
-        let mut published: Vec<Published> = Vec::new();
         let mut written = Vec::new();
         for staged in self.staged {
             match staged.file.persist() {
@@ -147,35 +145,26 @@ impl DirectionFiles {
                         path: file.destination().display().to_string(),
                         bytes: staged.bytes,
                     });
-                    published.push(file);
                 }
                 Err(error) => {
-                    let mut rolled_back = 0;
-                    let mut failures = Vec::new();
-                    for file in &published {
-                        match remove(file) {
-                            Ok(()) => rolled_back += 1,
-                            Err(source) => failures.push(CliError::new(
-                                Kind::Io,
-                                format!(
-                                    "remove published follow output {}: {source}",
-                                    file.destination().display(),
-                                ),
-                            )),
-                        }
-                    }
-                    let mut failure = CliError::from_classification(
-                        error.classification,
+                    let detail = if written.is_empty() {
+                        "no follow output was published".to_owned()
+                    } else {
+                        let paths = written
+                            .iter()
+                            .map(|file| file.path.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ");
                         format!(
-                            "{}; rolled back {rolled_back} published file(s)",
-                            error.message,
-                        ),
+                            "retained {} partially published follow output(s): {paths}",
+                            written.len()
+                        )
+                    };
+                    return Err(CliError::from_classification(
+                        error.classification,
+                        format!("{}; {detail}", error.message),
                         error.causes,
-                    );
-                    for cleanup in failures {
-                        failure = failure.with_secondary("follow rollback", cleanup);
-                    }
-                    return Err(failure);
+                    ));
                 }
             }
         }

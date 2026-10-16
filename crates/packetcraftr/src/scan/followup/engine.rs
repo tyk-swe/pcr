@@ -68,18 +68,24 @@ where
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .observe(&event);
-                if let scan::Event::Probe { target, probe } = &event {
-                    let probe = scan::ProbeEvidence {
-                        response: None,
-                        ..probe.clone()
-                    };
-                    Sink::publish(
-                        &mut tracked,
-                        scan::Event::Probe {
-                            target: target.clone(),
-                            probe,
-                        },
-                    )?;
+                match &event {
+                    scan::Event::Probe { target, probe } => {
+                        let probe = scan::ProbeEvidence {
+                            response: None,
+                            ..probe.clone()
+                        };
+                        Sink::publish(
+                            &mut tracked,
+                            scan::Event::Probe {
+                                target: target.clone(),
+                                probe,
+                            },
+                        )?;
+                    }
+                    scan::Event::Qualification(qualification) => {
+                        Sink::publish(&mut tracked, scan::Event::Qualification(*qualification))?;
+                    }
+                    _ => {}
                 }
                 publish(&scan_sink, Event::Scan(event), control)
             }),

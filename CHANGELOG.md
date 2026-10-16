@@ -136,6 +136,10 @@ for replacement APIs.
 
 ### Fixed
 
+- Apply raw-scan acquisition qualifications to follow-up endpoint reports so
+  NDJSON and collected inferences agree for fixed and adaptive scans.
+- Retry transient cleanup-slot overlap after callback worker admission, keeping
+  immediate runtime reuse reliable without releasing unfinished cleanup charges.
 - Bound executor thread retirement under original caller control, including
   abandoned socket destructors and provider-owned thread-local cleanup.
 - Retire idle historical namespace services without abandoning queued work;

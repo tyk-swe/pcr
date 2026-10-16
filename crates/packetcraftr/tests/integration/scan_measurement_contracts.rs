@@ -157,6 +157,23 @@ impl Sink<scan::Event> for Observer {
     }
 }
 
+struct FollowupObserver(Observer);
+impl Sink<scan::followup::Event> for FollowupObserver {
+    type Ack = ();
+    fn delivery(&self) -> packetcraftr::Delivery {
+        packetcraftr::Delivery::Cooperative
+    }
+    fn publish(
+        &mut self,
+        event: scan::followup::Event,
+    ) -> Result<(), packetcraftr_core::error::BoundaryError> {
+        match event {
+            scan::followup::Event::Scan(event) => self.0.publish(event),
+            scan::followup::Event::Trace(_) => panic!("no trace was requested"),
+        }
+    }
+}
+
 fn run(
     window: usize,
     overflow: capture::OverflowPolicy,
@@ -164,7 +181,11 @@ fn run(
     drop: bool,
     gated: bool,
     adaptive: bool,
-) -> (Result<scan::Aggregate, scan::Error>, Vec<scan::Event>) {
+    followups: bool,
+) -> (
+    Result<scan::Aggregate, scan::followup::Error>,
+    Vec<scan::Event>,
+) {
     let io = Io::default();
     let loss = Arc::new(AtomicBool::new(false));
     let scripts = conditions::Scripts::new([
@@ -229,10 +250,36 @@ fn run(
             max_backoff: Duration::from_millis(10),
         });
     }
-    let running = std::thread::spawn(move || {
-        client
-            .scan(request, observer)
-            .and_then(|report| collected.finish(report))
+    let running = std::thread::spawn(move || -> Result<_, scan::followup::Error> {
+        if followups {
+            let report = client.scan_with_followups(
+                scan::followup::Request {
+                    scan: request,
+                    trace: None,
+                    reverse_dns: None,
+                },
+                FollowupObserver(observer),
+            )?;
+            let aggregate = collected.finish(report.scan)?;
+            assert_eq!(report.endpoints.len(), aggregate.endpoints.len());
+            for (tracked, collected) in report.endpoints.iter().zip(&aggregate.endpoints) {
+                assert_eq!(tracked.address, collected.address);
+                assert_eq!(tracked.port, collected.port);
+                assert_eq!(tracked.inference, collected.inference);
+                assert_eq!(tracked.probes.len(), collected.probes.len());
+                for (tracked, collected) in tracked.probes.iter().zip(&collected.probes) {
+                    assert_eq!(tracked.sequence, collected.sequence);
+                    assert_eq!(tracked.measurement, collected.measurement);
+                    assert!(tracked.response.is_none());
+                }
+            }
+            Ok(aggregate)
+        } else {
+            client
+                .scan(request, observer)
+                .and_then(|report| collected.finish(report))
+                .map_err(Into::into)
+        }
     });
     seeing
         .recv_timeout(Duration::from_secs(2))
@@ -267,6 +314,7 @@ fn permissive_loss_and_unknown_quality_cannot_support_negative_inference() {
                     reported,
                     loss,
                     gated,
+                    false,
                     false,
                 );
                 let aggregate = result.unwrap();
@@ -325,6 +373,7 @@ fn default_loss_policy_fails_without_a_successful_negative_qualification() {
             true,
             true,
             false,
+            false,
         );
         assert!(result.is_err());
         assert!(
@@ -346,6 +395,7 @@ fn adaptive_controller_does_not_treat_unavailable_observation_as_remote_loss() {
             loss,
             true,
             true,
+            false,
         );
         let aggregate = result.unwrap();
         assert_eq!(
@@ -363,6 +413,58 @@ fn adaptive_controller_does_not_treat_unavailable_observation_as_remote_loss() {
             reported && !loss
         );
         assert_eq!(aggregate.rtt.unavailable, u64::from(!reported || loss));
+    }
+}
+
+#[test]
+fn followup_reports_qualify_silence_before_endpoint_inference() {
+    for adaptive in [false, true] {
+        for (reported, loss, coverage) in [
+            (true, false, scan::Coverage::NoReportedLoss),
+            (true, true, scan::Coverage::Incomplete),
+            (false, false, scan::Coverage::Unknown),
+            (false, true, scan::Coverage::Incomplete),
+        ] {
+            let (result, _) = run(
+                2,
+                capture::OverflowPolicy::DropNewest,
+                reported,
+                loss,
+                true,
+                adaptive,
+                true,
+            );
+            let aggregate = result.unwrap();
+            let positive = aggregate
+                .endpoints
+                .iter()
+                .find(|endpoint| endpoint.port == Some(80))
+                .unwrap();
+            assert_eq!(
+                positive.inference.as_ref().unwrap().state,
+                Some(scan::State::Open)
+            );
+            let negative = aggregate
+                .endpoints
+                .iter()
+                .find(|endpoint| endpoint.port == Some(81))
+                .unwrap();
+            assert_eq!(
+                negative.probes[0].measurement,
+                scan::Measurement::NoReply(coverage)
+            );
+            let inference = negative.inference.as_ref().unwrap();
+            if coverage.permits_silence() {
+                assert_eq!(inference.state, Some(scan::State::Filtered));
+                assert_eq!(inference.rule, scan::Rule::SynSilence);
+                assert_eq!(inference.supporting, vec![1]);
+                assert!(inference.failed.is_empty());
+            } else {
+                assert_eq!(inference.state, None);
+                assert_eq!(inference.rule, scan::Rule::OperationalFailure);
+                assert_eq!(inference.failed, vec![1]);
+            }
+        }
     }
 }
 

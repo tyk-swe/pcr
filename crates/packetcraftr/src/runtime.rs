@@ -285,7 +285,17 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
             }
             cleanup.as_ref().expect("cleanup initialized").clone()
         };
-        let join = cleanup.reserve().map_err(spawn_failure)?;
+        let join = loop {
+            match cleanup.reserve() {
+                Ok(join) => break join,
+                // Every cleanup slot has a worker permit until joining, TLS,
+                // and panic disposal finish. Since we already hold a permit,
+                // exhaustion can only overlap an earlier reaper returning its
+                // slot just after releasing that permit.
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => thread::yield_now(),
+                Err(error) => return Err(spawn_failure(error)),
+            }
+        };
         let status = Arc::clone(&permit.0);
         let worker = Callback { callback: emit };
         let (events, receiver) = mpsc::sync_channel(1);

@@ -87,6 +87,59 @@ fn wait_released(runtime: &Runtime) {
 }
 
 #[test]
+fn worker_admission_waits_for_a_released_permits_cleanup_slot() {
+    let runtime = Runtime::new(1).unwrap();
+    let cleanup = ThreadCleanup::new(1).unwrap();
+    *runtime.budget.cleanup.lock().unwrap() = Some(cleanup.clone());
+    let permit = runtime.budget.acquire().unwrap();
+    let slot = cleanup.reserve().unwrap();
+    // Hold the interval between the old worker permit's release and its
+    // cleanup slot's release open while a new worker is admitted.
+    drop(permit);
+    let admitting = runtime.clone();
+    let (returned, result) = mpsc::channel();
+    let caller = thread::spawn(move || {
+        returned
+            .send(Worker::new_in(&admitting, |_: ()| Ok(())))
+            .unwrap();
+    });
+    let premature = result.recv_timeout(Duration::from_millis(100));
+    drop(slot);
+    let worker = match premature {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            result.recv_timeout(Duration::from_secs(5)).unwrap()
+        }
+        Err(error) => panic!("worker admission disconnected: {error}"),
+    };
+    caller.join().unwrap();
+    let worker = worker.expect("an acquired worker permit must have cleanup capacity");
+    worker
+        .emit((), &Deadline::new(Duration::from_secs(5)))
+        .unwrap();
+    drop(worker);
+    wait_released(&runtime);
+    assert_eq!(runtime.snapshot().rejected_admissions, 0);
+}
+
+#[test]
+fn completed_workers_can_immediately_reuse_a_single_slot_runtime() {
+    let runtime = Runtime::new(1).unwrap();
+    for _ in 0..256 {
+        let worker = Worker::new_in(&runtime, |event: usize| Ok(event + 1)).unwrap();
+        assert_eq!(
+            worker
+                .emit(1, &Deadline::new(Duration::from_secs(5)))
+                .unwrap(),
+            2
+        );
+        drop(worker);
+        wait_released(&runtime);
+    }
+    assert_eq!(runtime.snapshot().rejected_admissions, 0);
+}
+
+#[test]
 fn parent_cancellation_retains_callback_and_tls_charges_without_blocking_an_independent_root() {
     let runtime = Runtime::new(1).unwrap();
     let (entered, running) = mpsc::channel();

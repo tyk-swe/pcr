@@ -89,7 +89,7 @@ impl Resolver for CountingResolver {
 }
 
 #[test]
-fn host_auth_precedes_resolver_side_effects() {
+fn hostname_authorization_precedes_resolver_side_effects() {
     let target = Target::from_str("Example.COM.").expect("hostname must parse");
     let resolver = CountingResolver {
         calls: AtomicUsize::new(0),

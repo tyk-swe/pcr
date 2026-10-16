@@ -8,7 +8,7 @@ use common::{parse_json, parse_ndjson, run, run_success};
 const PACKET: &str = "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp()";
 
 #[test]
-fn range_axes_fail_before_output() {
+fn range_axes_expand_inclusively_and_fail_before_output() {
     let output = run_success(&[
         "--output",
         "ndjson",
@@ -59,7 +59,7 @@ fn range_axes_fail_before_output() {
 }
 
 #[test]
-fn allowlist_denies_before_route_prep() {
+fn allowlist_denies_before_route_preparation() {
     for command in ["send", "exchange"] {
         let denied = run(&[
             "--output",
@@ -104,7 +104,7 @@ fn allowlist_denies_before_route_prep() {
 }
 
 #[test]
-fn send_admission_precedes_iface_disc() {
+fn send_admission_precedes_interface_discovery() {
     for (extra, code) in [
         (
             vec!["--repeat", "2", "--max-packets", "1"],

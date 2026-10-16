@@ -8,7 +8,7 @@ use crate::common;
 use common::{path_text, run};
 
 #[test]
-fn limit_fails_reported_before_capture_read() {
+fn limit_failures_are_reported_before_any_capture_is_read() {
     let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("does-not-exist.pcapng");
     let output = run(&["tls", path_text(&missing), "--max-tls-sessions", "0"]);
     assert!(!output.status.success());

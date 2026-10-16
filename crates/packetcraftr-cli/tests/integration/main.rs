@@ -22,7 +22,6 @@ mod offline_fuzz_contracts;
 mod offline_workflow_contracts;
 mod packet_set_contracts;
 mod published_schema_conformance;
+mod scan_measurement_contracts;
 mod target_planning_contracts;
 mod tls_workflow_contracts;
-
-mod scan_measurement_contracts;

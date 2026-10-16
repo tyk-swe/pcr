@@ -18,7 +18,7 @@ fn compression_cause(error: &io::Error) -> Option<&Error> {
 }
 
 #[test]
-fn expansion_encoded_fail_no_excess_bytes() {
+fn expansion_and_encoded_source_limits_fail_without_exposing_excess_bytes() {
     for format in [Format::None, Format::Gzip, Format::Zstd] {
         let encoded = compressed(format, &vec![0; 1024 * 1024]);
         let mut input = Input::new(
@@ -71,7 +71,7 @@ fn expansion_encoded_fail_no_excess_bytes() {
 }
 
 #[test]
-fn trunc_compressed_windows_reject() {
+fn truncated_compressed_data_and_hostile_zstd_windows_are_rejected() {
     for format in [Format::Gzip, Format::Zstd] {
         let mut encoded = compressed(format, b"capture payload");
         encoded.pop();

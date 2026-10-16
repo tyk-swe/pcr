@@ -14,7 +14,7 @@ fn upgrade() -> PathBuf {
 }
 
 #[test]
-fn multiplexed_capture_frame_types_msgs() {
+fn multiplexed_capture_reports_all_frame_types_and_messages() {
     let path = multiplexed();
     let path = path.to_str().unwrap();
     let document = parse_json(&run_success(&["--output", "json", "http2", path]));

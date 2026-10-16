@@ -14,7 +14,7 @@ use packetcraftr_core::analysis::tls::{
 };
 
 #[test]
-fn direction_buffer_bad_no_buffering_past() {
+fn a_direction_buffer_ceiling_reports_malformed_without_buffering_past_it() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
@@ -55,7 +55,7 @@ fn direction_buffer_bad_no_buffering_past() {
 }
 
 #[test]
-fn mutated_handshake_never_yields_session() {
+fn mutated_handshake_never_panics_and_yields_at_most_one_session() {
     let hello = handshake_record(&client_hello(&ClientHelloSpec::default()));
     let answer = handshake_record(&server_hello(&ServerHelloSpec::default()));
     let mut seed = 0x2545_f491_4f6c_dd1d_u64;

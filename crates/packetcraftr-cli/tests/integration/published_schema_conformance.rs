@@ -23,7 +23,7 @@ fn rewrite_v2_validator() -> jsonschema::Validator {
 /// packet example is parsed by the document parser and validated through its
 /// serialized form, since the schema describes the JSON representation.
 #[test]
-fn every_published_declared_schema() {
+fn every_published_example_document_matches_its_declared_schema() {
     use packetcraftr_core::document::{DEFAULT_MAX_DOCUMENT_BYTES, Format, Packet};
 
     let packet_validator = validator(include_str!(

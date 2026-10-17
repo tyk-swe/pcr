@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v16",
+  "schema": "packetcraftr.output/v1",
   "command": "scan",
   "mode": "aggregate",
   "status": "success",
@@ -74,7 +74,10 @@
               "secs": 0,
               "nanos": 1000000
             },
-            "reason": "correlated IP protocol response"
+            "reason": "correlated IP protocol response",
+            "measurement": {
+              "kind": "response"
+            }
           }
         ]
       },
@@ -116,7 +119,10 @@
               "secs": 0,
               "nanos": 2000000
             },
-            "reason": "ICMPv4 protocol unreachable"
+            "reason": "ICMPv4 protocol unreachable",
+            "measurement": {
+              "kind": "response"
+            }
           }
         ]
       }
@@ -139,7 +145,8 @@
       "max": {
         "secs": 0,
         "nanos": 2000000
-      }
+      },
+      "unavailable": 0
     },
     "scheduling": {
       "mode": "fixed",

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v16",
+  "schema": "packetcraftr.output/v1",
   "command": "scan",
   "mode": "stream",
   "sequence": 0,
@@ -19,7 +19,11 @@
         "unix_seconds": 1770000000,
         "nanoseconds": 0
       },
-      "reason": "no checksum-valid, protocol-consistent response before the deadline"
+      "reason": "no checksum-valid, protocol-consistent response before the deadline",
+      "measurement": {
+        "kind": "no_reply",
+        "coverage": "unknown"
+      }
     }
   },
   "diagnostics": [],

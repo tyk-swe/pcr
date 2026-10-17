@@ -254,7 +254,7 @@ pub struct Endpoint {
     pub port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ip_protocol: Option<u8>,
-    /// The highest-ranked attempt observation, kept from v7.
+    /// The highest-ranked attempt observation.
     pub classification: Classification,
     /// The catalog's conventional name for this transport and port; a hint,
     /// never service identification.

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v16",
+  "schema": "packetcraftr.output/v1",
   "command": "scan",
   "mode": "stream",
   "sequence": 0,
@@ -33,7 +33,10 @@
         "nanos": 3000000
       },
       "reason": "correlated TCP reset",
-      "tcp_window": 0
+      "tcp_window": 0,
+      "measurement": {
+        "kind": "response"
+      }
     }
   },
   "diagnostics": [],

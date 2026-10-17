@@ -41,7 +41,7 @@ pub(crate) struct Args {
     /// Match original frame fields; unmatched frames are retained unchanged.
     #[arg(long)]
     pub(crate) filter: Option<String>,
-    /// Ordered JSON rules under packetcraftr.rewrite/v2; at most 1 MiB and 64 rules.
+    /// Ordered JSON rules under packetcraftr.rewrite/v1; at most 1 MiB and 64 rules.
     #[arg(long)]
     pub(crate) rules_file: Option<PathBuf>,
     /// Assign one fixed-width field in place, <protocol>[#occurrence].<field>=
@@ -79,7 +79,7 @@ pub(crate) struct Args {
     /// checksums; preserve keeps checksum bytes exactly.
     #[arg(long, value_enum)]
     pub(crate) checksum_mode: Option<ChecksumArg>,
-    /// Report the field-edit changes --set or v2 rules would make, without
+    /// Report the field-edit changes --set or v1 rules would make, without
     /// creating or replacing the destination. Requires assignments only.
     #[arg(long)]
     pub(crate) dry_run: bool,

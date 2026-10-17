@@ -67,7 +67,6 @@ pub(crate) fn parse(arguments: &[OsString]) -> Context {
                     .iter()
                     .any(|(group, _)| group == name)
             });
-            context.command = argument.and_then(parse_command);
         } else if let Some(selected) = group
             && argument.is_none_or(|argument| !argument.starts_with('-') || argument == "-")
         {
@@ -75,7 +74,7 @@ pub(crate) fn parse(arguments: &[OsString]) -> Context {
                 crate::commands::registry::INVENTORY
                     .iter()
                     .find(|entry| entry.group == selected && entry.name == name)
-                    .and_then(|entry| parse_command(entry.legacy))
+                    .and_then(|entry| parse_command(entry.identifier))
             });
             group = None;
         }

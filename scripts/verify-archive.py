@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Smoke-test an extracted release archive using only the Python standard library."""
 import argparse
+import copy
 import csv
+import importlib.util
 import io
 import json
 import pathlib
@@ -12,97 +14,8 @@ import subprocess
 import sys
 
 from validation_evidence import DECODE_PROFILES
+from release_assets import SOURCE_ASSETS, GENERATED_ASSETS, MANIFEST
 
-ASSETS = (
-    'LICENSE', 'README.md', 'CHANGELOG.md', 'THIRD_PARTY_NOTICES.md',
-    'docs/migration-beta.3.md', 'docs/migration-unreleased.md', 'docs/analysis-resources.md',
-    'BUILD-METADATA.json', 'schemas/packetcraftr.packet.v2.schema.json',
-    'schemas/packetcraftr.output.v6.schema.json',
-    'schemas/packetcraftr.output.v7.schema.json',
-    'schemas/packetcraftr.output.v8.schema.json',
-    'schemas/packetcraftr.output.v9.schema.json',
-    'schemas/packetcraftr.output.v10.schema.json',
-    'schemas/packetcraftr.output.v11.schema.json',
-    'schemas/packetcraftr.output.v12.schema.json',
-    'schemas/packetcraftr.output.v13.schema.json',
-    'schemas/packetcraftr.output.v14.schema.json',
-    'schemas/packetcraftr.output.v15.schema.json',
-    'schemas/packetcraftr.output.v16.schema.json',
-    'schemas/packetcraftr.output.v17.schema.json',
-    'schemas/packetcraftr.output.v18.schema.json',
-    'schemas/packetcraftr.os-fingerprints.v1.schema.json',
-    'docs/verification-contract.md', 'docs/consumer-compatibility.md',
-    'docs/resource-presets.md', 'docs/statistics.md', 'docs/tasks.md', 'docs/native-validation.md',
-    'examples/consumers/forwarding.py',
-    'examples/consumers/fixtures/v6-forwarding.json',
-    'examples/consumers/fixtures/v11-forwarding.json',
-    'examples/consumers/fixtures/v12-forwarding.json',
-    'examples/consumers/fixtures/v13-forwarding.json',
-    'examples/consumers/fixtures/v14-forwarding.json',
-    'examples/consumers/fixtures/v15-forwarding.json',
-    'examples/consumers/fixtures/v16-forwarding.json',
-    'examples/consumers/fixtures/v17-forwarding.json',
-    'examples/consumers/fixtures/v18-forwarding.json',
-    'docs/tcp-diagnostics.md',
-    'examples/documents/output-scan-tcp-diagnostic.json',
-    'examples/documents/output-scan-tcp-diagnostic-event.json',
-    'examples/documents/output-scan-sctp-diagnostic.json',
-    'examples/documents/output-scan-ip-protocol.json',
-    'examples/documents/output-scan-qualified-v18.json',
-    'examples/documents/output-scan-provisional-event-v18.json',
-    'examples/documents/output-scan-quality-event-v18.json',
-    'examples/documents/output-scan-qualified-endpoint-event-v18.json',
-    'crates/packetcraftr/data/os-fingerprints.v1.json',
-    'crates/packetcraftr/data/os-fingerprints.provenance.yaml',
-    'docs/os-identification.md',
-    'schemas/packetcraftr.rewrite.v2.schema.json',
-    'schemas/packetcraftr.udp-profiles.v1.schema.json',
-    'schemas/packetcraftr.service-probes.v1.schema.json',
-    'schemas/packetcraftr.service-exclusions.v1.schema.json',
-    'docs/service-identification.md',
-    'examples/captures/tls-handshake.pcapng',
-    'examples/captures/clock-regression.pcap',
-    'examples/captures/scoped-vxlan.pcap',
-    'examples/captures/http-stream.pcap',
-    'examples/captures/http2-multiplexed.pcapng',
-    'examples/captures/http2-upgrade.pcapng',
-    'examples/documents/packet-dns-response.json',
-    'examples/documents/packet-tls-client-hello.json',
-    'examples/documents/packet-dhcpv4-offer.json',
-    'examples/documents/packet-dhcpv6-reply.json',
-    'examples/documents/rewrite-field-edits.json',
-    'examples/documents/udp-profiles.json',
-    'examples/documents/service-probes.json',
-    'examples/documents/service-exclusions.json',
-    'crates/packetcraftr/data/service-probes.json',
-    'crates/packetcraftr/data/service-probes.provenance.yaml',
-    'crates/packetcraftr/data/service-probes.training.v1.json',
-    'crates/packetcraftr/data/service-exclusions.json',
-    'crates/packetcraftr/data/service-exclusions.provenance.yaml',
-    'examples/documents/packet-ipv4-udp.json',
-    'examples/documents/output-stats-resources.json',
-    'examples/documents/output-stats-overview-success.json',
-    'examples/documents/output-stats-clock.json',
-    'examples/documents/output-stats-scopes.json',
-    'examples/documents/output-read-resources.json',
-    'examples/documents/output-build-event.json',
-    'examples/documents/output-build-complete.json',
-    'examples/documents/output-dns-tcp-success.json',
-    'examples/documents/output-dns-tcp-complete.json',
-    'examples/documents/os-fingerprints.json',
-    'examples/documents/output-os.json',
-    'examples/documents/output-os-probe.json',
-    'examples/documents/output-os-complete.json',
-    'examples/documents/output-identify-success.json',
-    'examples/documents/output-identify-tls-success.json',
-    'examples/documents/output-replay-bit-rate-success.json',
-    'examples/documents/output-http2-success.json',
-    'examples/documents/output-http2-issue-event.json',
-    'examples/documents/output-http2-connection-event.json',
-    'completions/packetcraftr.bash', 'completions/packetcraftr.elv',
-    'completions/packetcraftr.fish', 'completions/_packetcraftr',
-    'completions/_packetcraftr.ps1', 'man/packetcraftr.1',
-)
 EXPECTED = '450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f'
 
 
@@ -114,13 +27,75 @@ def run(command, cwd):
     return result.stdout
 
 
+def verify_forwarding_consumer(root):
+    spec = importlib.util.spec_from_file_location('forwarding', root / 'examples/consumers/forwarding.py')
+    consumer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(consumer)
+
+    def consume(document, output_format='json', exit_code=0):
+        data = (json.dumps(document) + '\n').encode()
+        return consumer.consume(io.BytesIO(data), output_format, exit_code)
+
+    fixture = json.loads((root / 'examples/consumers/fixtures/forwarding.json').read_text())
+    exit_code = 0 if fixture['result']['verdict'] == 'pass' else 1
+    consume(fixture, 'ndjson', exit_code)
+    terminal = copy.deepcopy(fixture)
+    fixture['mode'] = 'aggregate'
+    fixture.pop('event')
+    fixture.pop('sequence')
+    consume(fixture, exit_code=exit_code)
+    error = json.loads((root / 'examples/documents/output-verify-forwarding-error.json').read_text())
+    if consume(error, exit_code=2)['execution'] != 'error':
+        raise ValueError('forwarding consumer lost the error envelope')
+
+    def rejects(document, output_format='json', status=exit_code):
+        try:
+            consume(document, output_format, status)
+        except consumer.ContractError:
+            return
+        raise ValueError('forwarding consumer accepted malformed or unsupported evidence')
+
+    for version in (0, *range(2, 19), 999):
+        invalid = copy.deepcopy(fixture)
+        invalid['schema'] = f'packetcraftr.output/v{version}'
+        rejects(invalid)
+    invalid = copy.deepcopy(fixture)
+    invalid['result']['verdict'] = 'unknown'
+    rejects(invalid)
+    invalid = copy.deepcopy(fixture)
+    invalid['result']['summary']['checks_evaluated'] += 1
+    rejects(invalid)
+    rejects(fixture, status=1 - exit_code)
+    invalid = copy.deepcopy(terminal)
+    invalid['sequence'] = 1
+    rejects(invalid, 'ndjson')
+    invalid = copy.deepcopy(terminal)
+    invalid['event'] = 'event'
+    rejects(invalid, 'ndjson')
+    trailing = (json.dumps(terminal) + '\n') * 2
+    try:
+        consumer.consume(io.BytesIO(trailing.encode()), 'ndjson', exit_code)
+    except consumer.ContractError:
+        pass
+    else:
+        raise ValueError('forwarding consumer accepted a record after the terminal')
+
+
 def verify(root, version, commit, target, variant):
     root = root.resolve()
     binary = root / ('packetcraftr.exe' if 'windows' in target else 'packetcraftr')
-    for asset in (*ASSETS, binary.name):
+    for asset in (*SOURCE_ASSETS, *GENERATED_ASSETS, binary.name):
         path = root / asset
         if not path.is_file() or path.stat().st_size == 0:
             raise ValueError(f'packaged {asset} is missing or empty')
+    if json.loads((root / 'scripts/release-assets.json').read_text()) != MANIFEST:
+        raise ValueError('packaged asset manifest differs from the release inventory')
+    for directory in ('schemas', 'examples/documents', 'examples/consumers/fixtures'):
+        expected = {asset for asset in SOURCE_ASSETS if asset.startswith(directory + '/')}
+        actual = {path.relative_to(root).as_posix() for path in (root / directory).rglob('*')
+                  if path.is_file()}
+        if actual != expected:
+            raise ValueError(f'packaged {directory} differs from the current asset inventory')
     # Keep manifest writing and verification under one identity implementation.
     subprocess.run([
         sys.executable, str(pathlib.Path(__file__).resolve().with_name('build-manifest.py')),
@@ -128,19 +103,21 @@ def verify(root, version, commit, target, variant):
         '--commit', commit, '--target', target, '--variant', variant,
     ], cwd=root, check=True, timeout=60)
 
+    verify_forwarding_consumer(root)
+
     def cli(*args):
         return run([str(binary), *args], root)
 
     if cli('--version').splitlines()[0] != f'packetcraftr {version}':
         raise ValueError('unexpected packaged version')
-    cli('protocols')
-    built = cli('--output', 'hex', 'build', '--packet',
+    cli('reference', 'protocols')
+    built = cli('--output', 'hex', 'packet', 'build', '--packet',
                 'ipv4(src=192.0.2.1,dst=198.51.100.2)/udp(sport=12345,dport=9)/raw(text=hello)')
     if built.strip() != EXPECTED:
         raise ValueError('unexpected build bytes')
-    if cli('--output', 'hex', 'dissect', '--link-type', '228', '--hex', EXPECTED).strip() != EXPECTED:
+    if cli('--output', 'hex', 'packet', 'dissect', '--link-type', '228', '--hex', EXPECTED).strip() != EXPECTED:
         raise ValueError('dissect did not preserve exact bytes')
-    output = cli('--output', 'ndjson', 'read',
+    output = cli('--output', 'ndjson', 'files', 'read',
                  'examples/captures/tls-handshake.pcapng', '--max-frames', '100')
     if not output.endswith('\n'):
         raise ValueError('unterminated NDJSON output')
@@ -153,13 +130,13 @@ def verify(root, version, commit, target, variant):
     if len(records) != expected_frames + 1:
         raise ValueError(f'packaged capture must produce {expected_frames} frames and one completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v18'
+        if (record.get('schema') != 'packetcraftr.output/v1'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):
             raise ValueError('stream has invalid schema, sequence or completion')
-    cli('tls', 'examples/captures/tls-handshake.pcapng')
-    json.loads(cli('--output', 'json', 'build', '--packet-file',
+    cli('analyze', 'tls', 'examples/captures/tls-handshake.pcapng')
+    json.loads(cli('--output', 'json', 'packet', 'build', '--packet-file',
                    'examples/documents/packet-ipv4-udp.json'))
 
     # Run the commands published in docs/analysis-resources.md from the archive,
@@ -170,23 +147,16 @@ def verify(root, version, commit, target, variant):
         ('scoped-vxlan.pcap', 'output-stats-scopes.json',
          ('--table', 'conversations')),
     ):
-        actual = json.loads(cli('--output', 'json', 'stats',
+        actual = json.loads(cli('--output', 'json', 'analyze', 'stats',
                                 f'examples/captures/{capture}', *options))
         expected = json.loads((root / 'examples/documents' / example).read_text(encoding='utf-8'))
-        if expected.get('schema') != 'packetcraftr.output/v10':
-            raise ValueError(f'{example} must preserve its released output/v10 family')
-        if actual.get('schema') != 'packetcraftr.output/v18':
-            raise ValueError(f'packaged stats output for {example} must use output/v18')
-        # Preserve released examples and compare every other envelope/payload
-        # field against the current producer without changing archived files.
-        expected['schema'] = actual['schema']
         if actual != expected:
             raise ValueError(f'packaged stats output differs from {example}')
 
     overview = json.loads(cli('--output', 'json', 'analyze', 'stats',
                               'examples/captures/http-stream.pcap', '--table', 'overview'))
-    if overview.get('schema') != 'packetcraftr.output/v18' or overview['result']['table'] != 'overview':
-        raise ValueError('packaged overview must use output/v18')
+    if overview.get('schema') != 'packetcraftr.output/v1' or overview['result']['table'] != 'overview':
+        raise ValueError('packaged overview must use output/v1')
     for rows, count in (('protocols', 'protocol_count'), ('endpoints', 'endpoint_count'),
                         ('conversations', 'conversation_count')):
         if len(overview['result'][rows]) > min(5, overview['result'][count]):
@@ -199,7 +169,7 @@ def verify(root, version, commit, target, variant):
     if any(len(row) != 5 for row in records):
         raise ValueError('packaged CSV must contain only endpoint records')
 
-    # Discover canonical commands and retained aliases through registry-backed
+    # Discover grouped commands through registry-backed
     # help, then verify their packaged pages without a separate inventory file.
     def commands(help_text):
         _, heading, body = help_text.partition('Commands:\n')
@@ -217,18 +187,27 @@ def verify(root, version, commit, target, variant):
         for command in commands(cli(group, '--help')):
             canonical = f'{group} {command}'
             help_text = cli(group, command, '--help')
-            legacy = re.search(r'Legacy alias:\s+packetcraftr\s+([a-z0-9-]+)\.', help_text)
-            if legacy is None:
-                raise ValueError(f'packaged help for {canonical} has no legacy alias')
-            paths.append((canonical, legacy.group(1)))
+            if f'Command: packetcraftr {canonical}.' not in help_text:
+                raise ValueError(f'packaged help for {canonical} has no command path')
+            if 'Legacy alias:' in help_text:
+                raise ValueError(f'packaged help for {canonical} advertises a removed path')
+            paths.append(canonical)
     if len(paths) != 31:
         raise ValueError('packaged help must describe all 31 commands')
-    for path in [*groups, *(path for pair in paths for path in pair)]:
+    for path in [*groups, *paths]:
         name = path.replace(' ', '-')
         page = root / 'man' / f'packetcraftr-{name}.1'
         if not page.is_file() or page.stat().st_size == 0:
             raise ValueError(f'packaged man page for {path} is missing or empty')
         cli(*path.split(), '--help')
+    for path in paths:
+        flat = 'dns-read' if path == 'analyze dns' else path.split()[1]
+        removed = subprocess.run([str(binary), flat, '--help'], cwd=root,
+                                 capture_output=True, timeout=60)
+        if removed.returncode != 2:
+            raise ValueError(f'removed flat command {flat} did not fail with usage exit 2')
+        if (root / 'man' / f'packetcraftr-{flat}.1').exists():
+            raise ValueError(f'archive contains removed flat manual: {flat}')
     for file in (root / 'completions').iterdir():
         completion = file.read_text(encoding='utf-8')
         if not all(group in completion for group in groups):

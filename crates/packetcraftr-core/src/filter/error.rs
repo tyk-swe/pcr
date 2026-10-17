@@ -143,7 +143,7 @@ impl Classified for Error {
                 ),
             ),
             Self::UnknownField { .. } | Self::UnresolvableProtocol { .. } => cli_filter(
-                "run `packetcraftr protocols <PROTOCOL>` to list the fields a protocol exposes",
+                "run `packetcraftr reference protocols <PROTOCOL>` to list the fields a protocol exposes",
             ),
             Self::IncompatibleLiteral { .. }
             | Self::OrderedPrefixComparison { .. }
@@ -171,9 +171,9 @@ impl Classified for Error {
             | Self::InvalidSetMemberLimit { .. } => {
                 cli_filter("simplify the filter to fit the stable bounds")
             }
-            Self::Empty | Self::Syntax { .. } => {
-                cli_filter("check the filter syntax; see `packetcraftr read --help` for examples")
-            }
+            Self::Empty | Self::Syntax { .. } => cli_filter(
+                "check the filter syntax; see `packetcraftr files read --help` for examples",
+            ),
         }
     }
 }

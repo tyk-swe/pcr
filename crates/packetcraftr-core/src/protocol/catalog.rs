@@ -210,7 +210,7 @@ impl crate::error::Classified for UnknownProtocolName {
         crate::error::Classification::new(
             "cli.protocol",
             crate::error::Kind::Usage,
-            Some("run `packetcraftr protocols` to list the built-in protocol names"),
+            Some("run `packetcraftr reference protocols` to list the built-in protocol names"),
         )
     }
 }

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Run N1's exact ignored test in a fresh isolated Linux user/network namespace.
 
-This standalone report is not the frozen native schema_version: 2 release
+This standalone report is not the frozen native schema_version: 1 release
 inventory. A blocked namespace launcher is never successful runtime evidence.
 """
 import argparse

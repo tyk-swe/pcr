@@ -17,6 +17,7 @@ mod capture_stdin_contracts;
 mod connect_scan_contracts;
 mod field_edit_contracts;
 mod forwarding_verification_contracts;
+mod grouped_cli_contracts;
 mod http2_contracts;
 mod offline_fuzz_contracts;
 mod offline_workflow_contracts;

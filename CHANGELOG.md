@@ -6,20 +6,30 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
-- Publish output/v18 with typed raw measurement coverage, provisional stream
+- Publish output/v1 with typed raw measurement coverage, provisional stream
   qualification before inference, preserved positive evidence under permissive
-  capture loss, and separate RTT unavailable counts. Output v17 stays frozen.
+  capture loss, and separate RTT unavailable counts. All current examples use the v1 baseline.
 
 - Group all 31 CLI commands under packet, files, analyze, network, and reference,
-  retaining every flat path as a supported alias. Add layered short/full help,
+  removing every flat path. Add layered short/full help,
   compact text results and global verbose details, canonical command references,
-  and completion/man-page coverage for grouped and legacy paths. Machine output
-  identifiers and schemas remain unchanged.
+  and completion/man-page coverage for grouped paths. Machine output
+  identifiers remain unchanged.
 
-Net changes since 0.5.0-beta.3. See [migration guidance](docs/migration-unreleased.md)
+Net changes since 0.5.0-beta.3. See [migration guidance](docs/reset-v1.md)
 for replacement APIs.
 
 ### Breaking
+
+- Reset output, packet, and rewrite documents to one current v1 contract each;
+  remove historical schemas, aliases, and version-only fixtures. Historical v1
+  documents are not compatible with this baseline. Update scripts and migrate
+  or regenerate documents together; see the [reset guide](docs/reset-v1.md).
+- Keep only grouped CLI paths for all 31 operations. Preserve options, compact
+  machine command identifiers, and protocol/value aliases. Share one release
+  asset manifest between packaging and archive verification.
+- Reset internal validation and acceptance report versions to 1 without
+  weakening evidence requirements. The package stays at `0.5.0-beta.3`.
 
 - Reserve four of the 16 native-root places for eligible control work by bounding
   connecting/established TCP data at 12. Trace stages share their parent runtime
@@ -42,8 +52,8 @@ for replacement APIs.
 - `scan::Limits`, `traceroute::Limits`, and `dns::Limits` nest evidence bounds
   under `evidence: packetcraftr::evidence::Limits { max_frames, max_bytes, max_undecoded }`,
   preserving JSON and binary Serde representations.
-- Packet documents use `packetcraftr.packet/v2`; machine output uses
-  `packetcraftr.output/v18` (output v6–v17 remain frozen; see
+- Packet documents use `packetcraftr.packet/v1`; machine output uses
+  `packetcraftr.output/v1` (see
   [consumer compatibility](docs/consumer-compatibility.md)).
 - Live workflows run through `Client<P, K>` with explicit providers, policy,
   clock, cancellation, and runtime, taking `(request, sink)` and returning
@@ -72,31 +82,31 @@ for replacement APIs.
 
 - Offline statistics overview with capture totals and five-row traffic leaderboards,
   explicit `--sort frames|bytes`, and CSV exports for flat statistics tables.
-  Publish output/v17 while preserving v16 schemas and historical fixtures.
+  Use the current output/v1 contract and fixtures.
   See [statistics](docs/statistics.md) for ordering, limits, and CSV headers/units.
 
 - Raw SCTP `INIT` and `COOKIE-ECHO` scans (`scan::SctpScan`, `--transport sctp`,
   `--sctp-scan`, `sctp:` port prefixes), standalone IP-protocol (`0..=255`)
   inventory (`scan::select_ip_protocols`, `--transport ip`, `--ip-protocols`,
   `--exclude-ip-protocols`), extra host-discovery probe families (`tcp-ack`,
-  `icmp-timestamp`, `icmp-netmask`, `sctp`, `ip`), output/v16, dataset 1.8.0
+  `icmp-timestamp`, `icmp-netmask`, `sctp`, `ip`), output/v1, dataset 1.8.0
   `sctp_ip_protocol_scenarios`, and the `sctp_ip_protocol` native validation
-  runner ([native validation](docs/native-validation.md#sctp-and-ip-protocol-acceptance)).
+  runner ([native validation](docs/native-validation.md)).
 - Raw TCP diagnostic scans (`scan::TcpScan`: `Syn`, `Ack`, `Window`, `Fin`,
   `Null`, `Xmas`, `Maimon`, and observation-only `Custom`, via `--tcp-scan` and
   `--tcp-flags`) with mode-specific inference (`unfiltered`, `tcp_<mode>.*`),
-  retained `tcp_window` in output/v15, dataset 1.7.0 diagnostic scenarios, and
+  retained `tcp_window` in output/v1, dataset 1.7.0 diagnostic scenarios, and
   the `tcp_diagnostics` native validation runner ([TCP diagnostics](docs/tcp-diagnostics.md)).
 - Standalone `identify-os` / `Client::identify_os` with dual-stack probes,
   verified open/closed prerequisites, exact wire evidence, qualified OS-family
-  candidates, and output/v14 ([OS identification](docs/os-identification.md)).
+  candidates, and output/v1 ([OS identification](docs/os-identification.md)).
 - Explicit service identification (`identify` / `Client::identify`) over
   selected TCP/UDP endpoints with SSH, HTTP HEAD, DNS, SMTP, and FTP probes,
   optional `--tls` wrapping (TLS 1.2/1.3, declared SNI, DER certificate
   observations, `usage.tls`), sensitive-service exclusions, and sourced hostnames
   and wildcard-version CPEs
   ([service identification](docs/service-identification.md)).
-- Bounded target manifests/exclusions, `scan --list`, scoped IPv6 selection,
+- Bounded target manifests/exclusions, `network scan --list`, scoped IPv6 selection,
   port catalog/presets, curated and operator UDP profiles, mixed TCP/UDP plans,
   opt-in host discovery, reverse DNS, adaptive scheduling, and scan-informed
   traceroute with sourced hop reuse (`Client::scan_with_followups`,
@@ -223,8 +233,8 @@ for replacement APIs.
 
 ## [0.5.0-beta.3] - 2026-09-08
 
-See [docs/migration-beta.3.md](docs/migration-beta.3.md) for the migration
-guide and [docs/analysis-resources.md](docs/analysis-resources.md) for the
+See [docs/migration-beta.3.md](https://github.com/tyk-swe/pcr/blob/1e3faf61fe510d6e6be6ba7a7bcb933f4def3632/docs/migration-beta.3.md) for the migration
+guide and [docs/analysis-resources.md](https://github.com/tyk-swe/pcr/blob/1e3faf61fe510d6e6be6ba7a7bcb933f4def3632/docs/analysis-resources.md) for the
 analysis resource semantics introduced in this release.
 
 ### Added

@@ -229,76 +229,15 @@ jobs:
           binary = pathlib.Path("target") / target / "release" / (
               "packetcraftr.exe" if windows else "packetcraftr"
           )
-          assets = (
-              "LICENSE", "README.md", "CHANGELOG.md", "THIRD_PARTY_NOTICES.md",
-              "examples/captures/tls-handshake.pcapng",
-              "examples/captures/clock-regression.pcap",
-              "examples/captures/scoped-vxlan.pcap",
-              "examples/captures/http-stream.pcap",
-              "examples/captures/http2-multiplexed.pcapng",
-              "examples/captures/http2-upgrade.pcapng",
-              "examples/documents/packet-dns-response.json",
-              "examples/documents/packet-tls-client-hello.json",
-              "examples/documents/packet-dhcpv4-offer.json",
-              "examples/documents/packet-dhcpv6-reply.json",
-              "examples/documents/rewrite-field-edits.json",
-              "examples/documents/udp-profiles.json",
-              "examples/documents/service-probes.json",
-              "examples/documents/service-exclusions.json",
-              "crates/packetcraftr/data/service-probes.json",
-              "crates/packetcraftr/data/service-probes.provenance.yaml",
-              "crates/packetcraftr/data/service-probes.training.v1.json",
-              "crates/packetcraftr/data/service-exclusions.json",
-              "crates/packetcraftr/data/service-exclusions.provenance.yaml",
-              "examples/documents/packet-ipv4-udp.json",
-              "examples/documents/output-stats-resources.json",
-              "examples/documents/output-stats-overview-success.json",
-              "examples/documents/output-stats-clock.json",
-              "examples/documents/output-stats-scopes.json",
-              "examples/documents/output-read-resources.json",
-              "examples/documents/output-build-event.json",
-              "examples/documents/output-build-complete.json",
-              "examples/documents/output-dns-tcp-success.json",
-              "examples/documents/output-dns-tcp-complete.json",
-              "examples/documents/os-fingerprints.json",
-              "examples/documents/output-os.json",
-              "examples/documents/output-os-probe.json",
-              "examples/documents/output-os-complete.json",
-              "examples/documents/output-identify-success.json",
-              "examples/documents/output-identify-tls-success.json",
-              "examples/documents/output-replay-bit-rate-success.json",
-              "examples/documents/output-http2-success.json",
-              "examples/documents/output-http2-issue-event.json",
-              "examples/documents/output-http2-connection-event.json",
-              "examples/consumers/forwarding.py",
-              "examples/consumers/fixtures/v6-forwarding.json",
-              "examples/consumers/fixtures/v11-forwarding.json",
-              "examples/consumers/fixtures/v12-forwarding.json",
-              "examples/consumers/fixtures/v13-forwarding.json",
-              "examples/consumers/fixtures/v14-forwarding.json",
-              "examples/consumers/fixtures/v15-forwarding.json",
-              "examples/consumers/fixtures/v16-forwarding.json",
-              "examples/consumers/fixtures/v17-forwarding.json",
-              "examples/consumers/fixtures/v18-forwarding.json",
-              "examples/documents/output-scan-tcp-diagnostic.json",
-              "examples/documents/output-scan-tcp-diagnostic-event.json",
-              "examples/documents/output-scan-sctp-diagnostic.json",
-              "examples/documents/output-scan-ip-protocol.json",
-              "examples/documents/output-scan-qualified-v18.json",
-              "examples/documents/output-scan-provisional-event-v18.json",
-              "examples/documents/output-scan-quality-event-v18.json",
-              "examples/documents/output-scan-qualified-endpoint-event-v18.json",
-              "crates/packetcraftr/data/os-fingerprints.v1.json",
-              "crates/packetcraftr/data/os-fingerprints.provenance.yaml",
-          )
-          for source in map(pathlib.Path, assets):
+          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
+          from release_assets import SOURCE_ASSETS
+
+          for source in map(pathlib.Path, SOURCE_ASSETS):
               destination = staging / source
               destination.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(source, destination)
           shutil.copy2(binary, staging / binary.name)
           shutil.copy2(temporary / "BUILD-METADATA.json", staging / "BUILD-METADATA.json")
-          shutil.copytree("schemas", staging / "schemas")
-          shutil.copytree("docs", staging / "docs")
           # Completions and man pages come from the packaged binary itself, so
           # they always describe the shipped command definitions.
           subprocess.run([
@@ -334,7 +273,7 @@ jobs:
         shell: bash
         run: |
           docker run --rm -e VARIANT -v "$RUNNER_TEMP/archive-smoke-test/$ARCHIVE_BASENAME:/work:ro" ubuntu:24.04 \
-            sh -ec 'if [ "$VARIANT" = all-features ]; then apt-get update -qq; apt-get install -y --no-install-recommends libpcap0.8t64 >/dev/null; fi; /work/packetcraftr --version; /work/packetcraftr protocols >/dev/null; /work/packetcraftr tls /work/examples/captures/tls-handshake.pcapng'
+            sh -ec 'if [ "$VARIANT" = all-features ]; then apt-get update -qq; apt-get install -y --no-install-recommends libpcap0.8t64 >/dev/null; fi; /work/packetcraftr --version; /work/packetcraftr reference protocols >/dev/null; /work/packetcraftr analyze tls /work/examples/captures/tls-handshake.pcapng'
       - name: Upload binary archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

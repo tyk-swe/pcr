@@ -37,7 +37,7 @@ fn qualification_adapter_uses_current_family_and_rejects_unsettled_coverage() {
             .emit_published(Published::<output::scan::Event>::try_from(event).unwrap())
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&writer.0.lock().unwrap()).unwrap();
-        assert_eq!(value["schema"], "packetcraftr.output/v18");
+        assert_eq!(value["schema"], "packetcraftr.output/v1");
         assert_eq!(value["event"], "observation_quality");
         assert_eq!(value["sequence"], 0);
         assert!(common::schema_validator().is_valid(&value));

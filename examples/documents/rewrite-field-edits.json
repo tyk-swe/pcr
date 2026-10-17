@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.rewrite/v2",
+  "schema": "packetcraftr.rewrite/v1",
   "rules": [
     {
       "filter": "ipv4.ttl == 64",

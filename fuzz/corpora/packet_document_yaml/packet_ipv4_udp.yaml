@@ -1,4 +1,4 @@
-schema: "packetcraftr.packet/v2"
+schema: "packetcraftr.packet/v1"
 layers:
   - protocol: ipv4
     fields:

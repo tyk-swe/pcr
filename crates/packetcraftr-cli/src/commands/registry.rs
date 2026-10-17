@@ -15,8 +15,8 @@ use crate::resources::Settings;
 
 /// Declares every command once, in `--help` order, with its workflow placement.
 macro_rules! commands {
-    (@legacy $canonical:literal) => { $canonical };
-    (@legacy $canonical:literal, $name:literal) => { $name };
+    (@identifier $canonical:literal) => { $canonical };
+    (@identifier $canonical:literal, $name:literal) => { $name };
     (@offline $arguments:ty) => { false };
     (@offline $arguments:ty, $name:literal) => { <$arguments as Spec>::OFFLINE };
     (@start $launch:ident, $arguments:ident, $variant:ident) => {
@@ -44,10 +44,10 @@ macro_rules! commands {
         /// The parsed subcommand with its arguments.
         #[derive(Debug, Subcommand)]
         #[allow(dead_code, clippy::large_enum_variant)]
-        enum FlatDefinition {
+        enum LeafDefinitions {
             $(
                 $(#[$attribute])*
-                #[command(name = commands!(@legacy $canonical $(, $name)?))]
+                #[command(name = commands!(@identifier $canonical $(, $name)?))]
                 $variant($arguments),
             )*
         }
@@ -61,7 +61,7 @@ macro_rules! commands {
         impl CommandLine {
             fn from_leaf(name: &str, values: &clap::ArgMatches) -> Result<Self, clap::Error> {
                 $(
-                    if name == commands!(@legacy $canonical $(, $name)?) {
+                    if name == commands!(@identifier $canonical $(, $name)?) {
                         return <$arguments as clap::FromArgMatches>::from_arg_matches(values)
                             .map(Self::$variant);
                     }
@@ -137,7 +137,7 @@ macro_rules! commands {
                     Entry {
                         group: $group,
                         name: $canonical,
-                        legacy: commands!(@legacy $canonical $(, $name)?),
+                        identifier: commands!(@identifier $canonical $(, $name)?),
                     },
                 )*
             ];
@@ -254,19 +254,19 @@ commands! {
     #[command(after_long_help = verify_forwarding::arguments::AFTER_LONG_HELP)]
     VerifyForwarding(verify_forwarding::arguments::Args) = "verify-forwarding" => ("analyze", "verify-forwarding", 15),
     /// Generate shell completions and man pages under a directory.
-    #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all canonical and legacy paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
+    #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all grouped paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
     Documentation(documentation::Args) => ("reference", "documentation", 30),
     /// Print built-in references for packet expressions, filters, formats, and exit codes.
     #[command(after_long_help = topics::AFTER_LONG_HELP)]
     Topics(topics::Args) => ("reference", "topics", 29),
 }
 
-/// Workflow placement. Published identifiers deliberately remain the legacy names.
+/// Workflow placement and compact identifiers used in machine output.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Entry {
     pub(crate) group: &'static str,
     pub(crate) name: &'static str,
-    pub(crate) legacy: &'static str,
+    pub(crate) identifier: &'static str,
 }
 
 pub(crate) const GROUPS: &[(&str, &str)] = &[
@@ -289,8 +289,10 @@ impl Entry {
     }
 }
 
-pub(crate) fn entry(legacy: &str) -> Option<&'static Entry> {
-    INVENTORY.iter().find(|entry| entry.legacy == legacy)
+pub(crate) fn entry(identifier: &str) -> Option<&'static Entry> {
+    INVENTORY
+        .iter()
+        .find(|entry| entry.identifier == identifier)
 }
 
 impl clap::FromArgMatches for CommandLine {
@@ -298,19 +300,14 @@ impl clap::FromArgMatches for CommandLine {
         let (name, values) = matches
             .subcommand()
             .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::MissingSubcommand))?;
-        if GROUPS.iter().any(|(group, _)| *group == name) {
-            let (leaf, _) = values
-                .subcommand()
-                .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::MissingSubcommand))?;
-            let selected = INVENTORY
-                .iter()
-                .find(|entry| entry.group == name && entry.name == leaf)
-                .expect("clap validated the workflow command");
-            let (_, leaf_values) = values.subcommand().expect("leaf exists");
-            Self::from_leaf(selected.legacy, leaf_values)
-        } else {
-            Self::from_leaf(name, values)
-        }
+        let (leaf, leaf_values) = values
+            .subcommand()
+            .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::MissingSubcommand))?;
+        let selected = INVENTORY
+            .iter()
+            .find(|entry| entry.group == name && entry.name == leaf)
+            .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidSubcommand))?;
+        Self::from_leaf(selected.identifier, leaf_values)
     }
 
     fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
@@ -321,7 +318,7 @@ impl clap::FromArgMatches for CommandLine {
 
 impl clap::Subcommand for CommandLine {
     fn augment_subcommands(command: clap::Command) -> clap::Command {
-        let flat = FlatDefinition::augment_subcommands(clap::Command::new("packetcraftr"));
+        let leaves = LeafDefinitions::augment_subcommands(clap::Command::new("packetcraftr"));
         let mut command = command;
         for (group, about) in GROUPS {
             let mut workflow = clap::Command::new(*group)
@@ -329,21 +326,14 @@ impl clap::Subcommand for CommandLine {
                 .subcommand_required(true)
                 .arg_required_else_help(true);
             for entry in INVENTORY.iter().filter(|entry| entry.group == *group) {
-                let leaf = flat
-                    .find_subcommand(entry.legacy)
+                let leaf = leaves
+                    .find_subcommand(entry.identifier)
                     .expect("registered command")
                     .clone();
                 workflow =
                     workflow.subcommand(crate::cli::help::leaf(leaf.name(entry.name), entry));
             }
             command = command.subcommand(workflow);
-        }
-        for entry in INVENTORY {
-            let leaf = flat
-                .find_subcommand(entry.legacy)
-                .expect("registered command")
-                .clone();
-            command = command.subcommand(crate::cli::help::leaf(leaf, entry).hide(true));
         }
         command
     }
@@ -354,6 +344,5 @@ impl clap::Subcommand for CommandLine {
 
     fn has_subcommand(name: &str) -> bool {
         GROUPS.iter().any(|(group, _)| *group == name)
-            || INVENTORY.iter().any(|entry| entry.legacy == name)
     }
 }

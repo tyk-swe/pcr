@@ -102,7 +102,7 @@ pub struct Endpoint {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<super::Scope>,
     pub port: u16,
-    /// The highest-ranked socket outcome, kept from v7.
+    /// The highest-ranked socket outcome.
     pub classification: Classification,
     /// The catalog's conventional TCP name for the port; a hint, never
     /// service identification.

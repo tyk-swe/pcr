@@ -25,18 +25,19 @@ fn tcp_capture(path: &std::path::Path, count: usize) {
 }
 
 #[test]
-fn v2_rules_file_rejects_unknown_assignment_properties() {
+fn v1_rules_file_rejects_unknown_assignment_properties() {
     let source = examples().join("captures/http-stream.pcap");
     let directory = tempfile::tempdir().unwrap();
     let rules = directory.path().join("rules.json");
     let target = directory.path().join("edited.pcapng");
     let document = serde_json::json!({
-        "schema": "packetcraftr.rewrite/v2",
+        "schema": "packetcraftr.rewrite/v1",
         "rules": [{"assign": [{"field": "ipv4.ttl", "value": 63, "occurrence": 2}]}],
     });
     std::fs::write(&rules, serde_json::to_vec(&document).unwrap()).unwrap();
 
     let output = run(&[
+        "files",
         "rewrite",
         path_text(&source),
         "--rules-file",
@@ -58,6 +59,7 @@ fn change_reporting_is_bounded_and_discloses_omissions() {
     let report = parse_json(&run_success(&[
         "--output",
         "json",
+        "files",
         "rewrite",
         path_text(&source),
         "--set",

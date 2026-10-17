@@ -58,8 +58,8 @@ let report = client.scan(request, sink)?;
 ```
 
 `scan::TcpScan` defaults to `Syn` and exposes `as_str`, `flags`, and `validate`.
-Output/v15 publishes `tcp_scan` (`{mode, flags}`) and `tcp_window`; see the
-[v15 contract](consumer-compatibility.md#output-family-v15),
+Output/v1 publishes `tcp_scan` (`{mode, flags}`) and `tcp_window`; see the
+[TCP diagnostic contract](consumer-compatibility.md#tcp-diagnostic-scans),
 [aggregate fixture](../examples/documents/output-scan-tcp-diagnostic.json),
 [event fixture](../examples/documents/output-scan-tcp-diagnostic-event.json),
 and [native validation](native-validation.md).

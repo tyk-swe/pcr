@@ -5,7 +5,7 @@ capture-file processing, offline analysis, and authorized network diagnostics.
 
 Latest release: **0.5.0-beta.3**. This guide describes `main`, including unreleased
 breaking changes. Read the [changelog](CHANGELOG.md) and migration notes for
-[beta.3](docs/migration-beta.3.md) or [beta.3 → main](docs/migration-unreleased.md).
+[beta.3](docs/reset-v1.md) or [beta.3 → main](docs/reset-v1.md).
 The crates are unpublished; [pin a reviewed revision](docs/consumer-compatibility.md#rust-api-adoption).
 
 > Test only systems and networks you own or are explicitly authorized to test.
@@ -32,9 +32,10 @@ packetcraftr analyze tls examples/captures/tls-handshake.pcapng
 packetcraftr analyze http2 examples/captures/http2-multiplexed.pcapng
 ```
 
-Global options such as `--output` may appear before the group, between the group and command, or after the command. Use `packetcraftr <group> <command> --help` for options
-and examples, `reference protocols [PROTOCOL]` for packet fields, and `reference topics` for expressions,
-filters, formats, and exit codes.
+Global options such as `--output` may appear before the group, between the group
+and command, or after the command. Use `packetcraftr <group> <command> --help`
+for options and examples, `reference protocols [PROTOCOL]` for packet fields,
+and `reference topics` for expressions, filters, formats, and exit codes.
 
 | Task | Guide |
 | --- | --- |
@@ -92,15 +93,15 @@ completion directory and `man1` directory.
 
 ## Contracts
 
-Current producers use [packet/v2](schemas/packetcraftr.packet.v2.schema.json) and
-[output/v18](schemas/packetcraftr.output.v18.schema.json). Output v6–v17 schemas
-remain frozen for historical evidence; beta.3 used packet/v1 and output/v2.
+Current producers use [packet/v1](schemas/packetcraftr.packet.v1.schema.json) and
+[output/v1](schemas/packetcraftr.output.v1.schema.json). This is a breaking reset;
+see the [v1 reset guide](docs/reset-v1.md) before migrating existing documents.
 [Consumer compatibility](docs/consumer-compatibility.md) defines versioning,
 error semantics, and stream completion. Always inspect the terminal `complete`
 or `error`; interrupted output can be incomplete. Binary output to an interactive
 terminal requires `--force-binary-stdout`.
 
-[Rewrite rules](schemas/packetcraftr.rewrite.v2.schema.json),
+[Rewrite rules](schemas/packetcraftr.rewrite.v1.schema.json),
 [UDP profiles](schemas/packetcraftr.udp-profiles.v1.schema.json),
 [service probes](schemas/packetcraftr.service-probes.v1.schema.json), and
 [service exclusions](schemas/packetcraftr.service-exclusions.v1.schema.json) have

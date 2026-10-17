@@ -10,7 +10,13 @@ use common::{path_text, run};
 #[test]
 fn limit_failures_are_reported_before_any_capture_is_read() {
     let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("does-not-exist.pcapng");
-    let output = run(&["tls", path_text(&missing), "--max-tls-sessions", "0"]);
+    let output = run(&[
+        "analyze",
+        "tls",
+        path_text(&missing),
+        "--max-tls-sessions",
+        "0",
+    ]);
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("non-zero"),
@@ -19,7 +25,13 @@ fn limit_failures_are_reported_before_any_capture_is_read() {
     );
 
     for value in ["0", "1024"] {
-        let floored = run(&["tls", path_text(&missing), "--max-tls-buffer-bytes", value]);
+        let floored = run(&[
+            "analyze",
+            "tls",
+            path_text(&missing),
+            "--max-tls-buffer-bytes",
+            value,
+        ]);
         assert_eq!(floored.status.code(), Some(2), "{value}");
         let rendered = String::from_utf8_lossy(&floored.stderr);
         assert!(

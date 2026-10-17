@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v16",
+  "schema": "packetcraftr.output/v1",
   "command": "scan",
   "mode": "aggregate",
   "status": "success",
@@ -82,7 +82,10 @@
               "secs": 0,
               "nanos": 2000000
             },
-            "reason": "correlated SCTP ABORT"
+            "reason": "correlated SCTP ABORT",
+            "measurement": {
+              "kind": "response"
+            }
           }
         ]
       },
@@ -92,14 +95,13 @@
         "port": 9900,
         "classification": "timeout",
         "inference": {
-          "state": "open_or_filtered",
-          "rule": "sctp_cookie_echo.silence",
-          "supporting": [
-            80001
-          ],
+          "rule": "operational_failure",
+          "supporting": [],
           "conflicting": [],
           "unanswered": [],
-          "failed": []
+          "failed": [
+            80001
+          ]
         },
         "probes": [
           {
@@ -119,7 +121,11 @@
             },
             "status": "timeout",
             "classification": "timeout",
-            "reason": "no checksum-valid, protocol-consistent response before the deadline"
+            "reason": "no checksum-valid, protocol-consistent response before the deadline",
+            "measurement": {
+              "kind": "no_reply",
+              "coverage": "unknown"
+            }
           }
         ]
       }
@@ -130,7 +136,7 @@
     "rtt": {
       "sent": 2,
       "received": 1,
-      "lost": 1,
+      "lost": 0,
       "min": {
         "secs": 0,
         "nanos": 2000000
@@ -142,7 +148,8 @@
       "max": {
         "secs": 0,
         "nanos": 2000000
-      }
+      },
+      "unavailable": 1
     },
     "scheduling": {
       "mode": "fixed",

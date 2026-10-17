@@ -13,7 +13,7 @@ packetcraftr --output ndjson network identify-os 2001:db8::2 \
 
 ## Observations and candidates
 
-Output/v14 (retained in v15) preserves sent packets, retained response frames,
+Output/v1 preserves sent packets, retained response frames,
 probe/attempt identities, timing, omissions, and diagnostics. Observations record
 TCP flags, window, ordered options, MSS, scale, SACK, and timestamp echo; TTL is
 retained as observed, never converted into a guessed initial TTL or OS label.
@@ -74,4 +74,4 @@ println!("{:?}", aggregate.report.identification.outcome);
 Pure parsing/matching lives in `packetcraftr_core::document::os_fingerprints`;
 see the [schema](../schemas/packetcraftr.os-fingerprints.v1.schema.json),
 [example](../examples/documents/os-fingerprints.json), and
-[v14 contract](consumer-compatibility.md#output-family-v14).
+[OS identification contract](consumer-compatibility.md#os-identification).

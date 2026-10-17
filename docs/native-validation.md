@@ -41,7 +41,7 @@ sudo python3 scripts/test-native-isolated.py --binary target/release/packetcraft
 ```
 
 The loopback exchange uses no separate Rust native test executable. Its internal
-validation report uses `schema_version: 2`. Release validation requires the complete named
+validation report uses `schema_version: 1`. Release validation requires the complete named
 inventory, successful scenario and launcher exit codes, distinct positive
 namespace identifiers, clean exact-commit provenance, and the CLI binary digest.
 Decoder evidence additionally requires the pinned TShark identity and digest,
@@ -74,7 +74,7 @@ this does not dispatch that workflow or change the loopback release inventory.
 Its standalone `packetcraftr.namespace-lifecycle/v1` report records the exact
 test executable and launcher digests, source revision/dirty state, namespace
 identities and measured ownership bounds. It is distinct from the retained
-`schema_version: 2` loopback report. Current local execution is blocked by
+`schema_version: 1` loopback report. Current local execution is blocked by
 `unshare: write failed /proc/self/uid_map: Operation not permitted`; compilation,
 ordinary ignored status and guard refusal are not native runtime coverage.
 Namespace identity reuse and real OS initialization failure remain unexercised;

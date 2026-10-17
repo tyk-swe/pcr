@@ -42,7 +42,7 @@ fn run(arguments: &Args) -> Result<(), CliError> {
     Ok(())
 }
 
-/// Include compatibility commands, and omit clap's synthetic help command tree.
+/// Render the grouped command tree without clap's synthetic help command tree.
 fn write_man_pages(command: &clap::Command, directory: &Path) -> io::Result<()> {
     // Short-help visibility must not suppress the manual's fallback descriptions.
     let manual = command

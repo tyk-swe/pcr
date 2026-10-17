@@ -45,7 +45,7 @@ body:
     attributes:
       label: Command and output format
       description: Redact addresses or filenames as needed.
-      placeholder: packetcraftr --output json dissect ...
+      placeholder: packetcraftr --output json packet dissect ...
     validations:
       required: true
 

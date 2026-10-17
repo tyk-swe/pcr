@@ -15,7 +15,7 @@ use crate::{
     transform,
 };
 
-pub const REWRITE_SCHEMA_V2: &str = "packetcraftr.rewrite/v2";
+pub const REWRITE_SCHEMA_V1: &str = "packetcraftr.rewrite/v1";
 pub const MAX_REWRITE_RULES: usize = 64;
 /// The largest rewrite document, in bytes.
 pub const MAX_REWRITE_DOCUMENT_BYTES: usize = 1_048_576;
@@ -36,7 +36,7 @@ pub struct Rules<F = String> {
 }
 
 impl Rules {
-    /// Reads a `packetcraftr.rewrite/v2` document.
+    /// Reads a `packetcraftr.rewrite/v1` document.
     pub fn parse(
         document: &[u8],
         checksums: ChecksumMode,
@@ -58,7 +58,7 @@ impl Rules {
     ) -> Result<Self, Error> {
         let document: AssignDocument = serde_json::from_slice(document)
             .map_err(|source| Error::Syntax(Source::new(source)))?;
-        check_shape(&document.schema, REWRITE_SCHEMA_V2, document.rules.len())?;
+        check_shape(&document.schema, REWRITE_SCHEMA_V1, document.rules.len())?;
         let mut rules = Vec::with_capacity(document.rules.len());
         for rule in document.rules {
             if rule.assign.is_empty() {
@@ -242,7 +242,7 @@ pub enum Error {
     DocumentSize { actual: usize, limit: usize },
     #[error("invalid rewrite rules")]
     Syntax(#[source] Source),
-    #[error("unsupported rewrite rules schema {schema}; expected {REWRITE_SCHEMA_V2}")]
+    #[error("unsupported rewrite rules schema {schema}; expected {REWRITE_SCHEMA_V1}")]
     Schema { schema: String },
     #[error("rewrite rules hold {count} rules; expected 1 to {MAX_REWRITE_RULES}")]
     RuleCount { count: usize },

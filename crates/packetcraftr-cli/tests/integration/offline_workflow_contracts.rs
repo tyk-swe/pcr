@@ -28,6 +28,7 @@ fn follow_rejects_absent_tcp_and_udp_streams_in_every_output_format() {
                 let output = run(&[
                     "--output",
                     format,
+                    "analyze",
                     "follow",
                     path,
                     "--stream",
@@ -62,14 +63,21 @@ fn follow_rejects_absent_tcp_and_udp_streams_in_every_output_format() {
 fn format_and_limit_failures_are_reported_before_offline_work() {
     let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("does-not-exist.pcap");
     let missing = path_text(&missing);
-    let unsupported = run(&["--output", "raw", "stats", missing]);
+    let unsupported = run(&["--output", "raw", "analyze", "stats", missing]);
     assert_eq!(unsupported.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&unsupported.stderr).contains("does not support raw"));
 
     for arguments in [
-        vec!["stats", missing, "--max-ip-datagrams", "0"],
-        vec!["expert", missing, "--max-ip-fragments-per-datagram", "0"],
+        vec!["analyze", "stats", missing, "--max-ip-datagrams", "0"],
         vec![
+            "analyze",
+            "expert",
+            missing,
+            "--max-ip-fragments-per-datagram",
+            "0",
+        ],
+        vec![
+            "analyze",
             "follow",
             missing,
             "--stream",
@@ -77,12 +85,19 @@ fn format_and_limit_failures_are_reported_before_offline_work() {
             "--max-ip-bytes-per-datagram",
             "0",
         ],
-        vec!["tls", missing, "--max-ip-reassembly-bytes", "0"],
-        vec!["stats", missing, "--max-ip-outcomes", "0"],
-        vec!["expert", missing, "--ip-idle-expiry-ms", "0"],
-        vec!["stats", missing, "--max-tcp-bytes-per-flow", "0"],
-        vec!["expert", missing, "--max-tcp-reassembly-bytes", "0"],
+        vec!["analyze", "tls", missing, "--max-ip-reassembly-bytes", "0"],
+        vec!["analyze", "stats", missing, "--max-ip-outcomes", "0"],
+        vec!["analyze", "expert", missing, "--ip-idle-expiry-ms", "0"],
+        vec!["analyze", "stats", missing, "--max-tcp-bytes-per-flow", "0"],
         vec![
+            "analyze",
+            "expert",
+            missing,
+            "--max-tcp-reassembly-bytes",
+            "0",
+        ],
+        vec![
+            "analyze",
             "follow",
             missing,
             "--stream",
@@ -90,11 +105,17 @@ fn format_and_limit_failures_are_reported_before_offline_work() {
             "--max-tcp-segments-per-flow",
             "0",
         ],
-        vec!["tls", missing, "--tcp-idle-expiry-ms", "0"],
+        vec!["analyze", "tls", missing, "--tcp-idle-expiry-ms", "0"],
         // The per-flow window doubles as the reordering window, so the
         // serial half-space is refused before the capture is opened.
-        vec!["stats", missing, "--max-tcp-bytes-per-flow", "2147483648"],
-        vec!["stats", missing, "--ip-overlap", "invalid"],
+        vec![
+            "analyze",
+            "stats",
+            missing,
+            "--max-tcp-bytes-per-flow",
+            "2147483648",
+        ],
+        vec!["analyze", "stats", missing, "--ip-overlap", "invalid"],
     ] {
         let output = run(&arguments);
         assert_eq!(output.status.code(), Some(2), "{arguments:?}");
@@ -104,7 +125,7 @@ fn format_and_limit_failures_are_reported_before_offline_work() {
         );
     }
     for policy in ["reject", "first", "last"] {
-        let output = run(&["stats", missing, "--ip-overlap", policy]);
+        let output = run(&["analyze", "stats", missing, "--ip-overlap", policy]);
         assert_eq!(output.status.code(), Some(5), "{policy}");
         assert!(
             String::from_utf8_lossy(&output.stderr).contains("open "),
@@ -115,10 +136,10 @@ fn format_and_limit_failures_are_reported_before_offline_work() {
     let capture = write_capture();
     let path = path_text(capture.path());
     for arguments in [
-        vec!["stats", path, "--interval-ms", "0"],
-        vec!["stats", path, "--max-frames", "0"],
-        vec!["expert", path, "--max-flows", "0"],
-        vec!["read", path, "--max-frame-bytes", "0"],
+        vec!["analyze", "stats", path, "--interval-ms", "0"],
+        vec!["analyze", "stats", path, "--max-frames", "0"],
+        vec!["analyze", "expert", path, "--max-flows", "0"],
+        vec!["files", "read", path, "--max-frame-bytes", "0"],
     ] {
         let output = run(&arguments);
         assert!(!output.status.success(), "{arguments:?}");
@@ -138,6 +159,7 @@ fn destination_bearing_live_commands_keep_public_destinations_behind_policy() {
         &[
             "--output",
             "json",
+            "network",
             "plan",
             "--packet",
             "ipv4(dst=8.8.8.8)/udp(dport=9)",
@@ -145,6 +167,7 @@ fn destination_bearing_live_commands_keep_public_destinations_behind_policy() {
         &[
             "--output",
             "json",
+            "network",
             "send",
             "--packet",
             "ipv4(dst=8.8.8.8)/udp(dport=9)",
@@ -152,14 +175,18 @@ fn destination_bearing_live_commands_keep_public_destinations_behind_policy() {
         &[
             "--output",
             "json",
+            "network",
             "exchange",
             "--packet",
             "ipv4(dst=8.8.8.8)/udp(dport=9)",
         ],
-        &["--output", "json", "scan", "8.8.8.8", "--ports", "80"],
+        &[
+            "--output", "json", "network", "scan", "8.8.8.8", "--ports", "80",
+        ],
         &[
             "--output",
             "json",
+            "network",
             "traceroute",
             "8.8.8.8",
             "--strategy",
@@ -172,6 +199,7 @@ fn destination_bearing_live_commands_keep_public_destinations_behind_policy() {
         &[
             "--output",
             "json",
+            "packet",
             "fuzz",
             "--packet",
             "ipv4(dst=8.8.8.8)/udp(dport=9)",
@@ -182,6 +210,7 @@ fn destination_bearing_live_commands_keep_public_destinations_behind_policy() {
         &[
             "--output",
             "json",
+            "network",
             "dns",
             "8.8.8.8",
             "example.com",
@@ -219,6 +248,7 @@ fn follow_write_through_a_parent_alias_reports_requested_paths() {
     let output = run(&[
         "--output",
         "json",
+        "analyze",
         "follow",
         path_text(capture.path()),
         "--stream",

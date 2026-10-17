@@ -71,13 +71,11 @@ pub(crate) fn parse_from(arguments: Vec<OsString>) -> Result<Parsed, clap::Error
         }
     };
     let defaults = cli.command.preset_defaults(preset);
-    let path = match matches
+    let leaf = matches
         .subcommand()
         .and_then(|(_, values)| values.subcommand_name())
-    {
-        Some(leaf) => vec![subcommand, leaf],
-        None => vec![subcommand],
-    };
+        .expect("validated grouped command has a leaf");
+    let path = [subcommand, leaf];
     let mut definition = preset_definition(&path, &defaults);
     let matches = definition.try_get_matches_from_mut(arguments)?;
     let cli = Cli::from_arg_matches(&matches)?;

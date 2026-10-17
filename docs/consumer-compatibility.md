@@ -6,9 +6,12 @@ A contract family covers names, units, meanings, enums, ordering, and terminal
 semantics, not only JSON shape. Incompatible changes require a new family even
 when an older schema accepts their shape.
 
-Current producers emit [output/v18](../schemas/packetcraftr.output.v18.schema.json)
-and [packet/v2](../schemas/packetcraftr.packet.v2.schema.json). Beta.3 used
-output/v2 and packet/v1; output v6–v17 remain frozen for historical evidence.
+Current producers and consumers use one contract per family:
+[output/v1](../schemas/packetcraftr.output.v1.schema.json),
+[packet/v1](../schemas/packetcraftr.packet.v1.schema.json), and
+[rewrite/v1](../schemas/packetcraftr.rewrite.v1.schema.json).
+The [baseline reset](reset-v1.md) intentionally replaces historical meanings of v1;
+old documents require explicit migration or regeneration.
 Resolve `$id` to the bundled local file, never moving `main` or a network fetch.
 Tolerate unknown object members, but reject unknown families, verdicts, check
 kinds, or evidence states.
@@ -25,115 +28,121 @@ Missing metadata, null ingress operand on an expectation, and explicit decoder
 retained detail/omissions. Forwarding fail/inconclusive returns exit 1 after
 publication; an error envelope is execution failure.
 
-## Output family v18
+## Scan measurements and acquisition quality
 
 Raw probe `measurement` distinguishes `response`, `no_reply` with explicit
 `coverage`, and `unavailable`. Streamed pipeline no-reply measurements carry
 `pending` coverage until `observation_quality` qualifies the existing attempts
 in its inclusive sequence interval and stage; gaps are allowed. It changes
 only pending no-reply measurements; final `unknown` or `incomplete` coverage is
-never upgraded. A terminal error leaves unqualified attempts unusable for negative inference. Qualification precedes endpoint inference and
-successful completion. Aggregate probes already carry final coverage.
+never upgraded. A terminal error leaves unqualified attempts unusable for
+negative inference. Qualification precedes endpoint inference and successful
+completion. Aggregate probes already carry final coverage.
 
 Only `no_reported_loss` and transport-owned `transport_timeout` support silence
 rules. `unknown`, `incomplete`, and `pending` enter inference's `failed` partition.
 Positive correlated replies remain valid under capture loss. Locally shortened
 host windows leave their no-reply coverage unknown. Custom capture providers
 default to unknown acquisition quality; zero counters do not change
-that contract. Zero local drop counts establish neither end-to-end visibility nor a remote cause. Source-global drops conservatively qualify all negative
+that contract. Zero local drop counts establish neither end-to-end visibility
+nor a remote cause. Source-global drops conservatively qualify all negative
 observations in the capture interval, without claiming which response was lost.
 
-RTT `sent` now partitions into `received`, `lost` (qualified no reply), and
+RTT `sent` partitions into `received`, `lost` (qualified no reply), and
 `unavailable` (local failure or insufficient acquisition quality). `lost` does
 not identify a network or remote cause. TCP operation-wide `deadline_expired`
 is unavailable; a completed transport `timed_out` remains qualified silence.
 
-## Output family v17
+## Statistics
 
-Adds statistics `table: "overview"` with total protocol/endpoint/conversation
+Statistics publish `table: "overview"` with total protocol/endpoint/conversation
 counts and the corresponding retained leaderboards. Explicit `--sort frames|bytes`
 ranks statistics before truncation, with the other volume metric and natural key
 as tie-breakers. Existing default ordering is unchanged; overview defaults to
 frames. CSV is a separate flat-table format and does not use the JSON envelope.
 See [statistics](statistics.md) for exact headers, units, and omission semantics.
 
-## Output family v16
+## SCTP and IP-protocol inventory
 
-Adds SCTP `init` and `cookie_echo` scanning (`plan.sctp_scan`, `ports.sctp_scan`,
-and per-probe `sctp_scan: {mode, chunk_type}`), standalone IP-protocol (`0..=255`)
+The scan contract covers SCTP `init` and `cookie_echo` (`plan.sctp_scan`,
+`ports.sctp_scan`, and per-probe `sctp_scan: {mode, chunk_type}`), standalone IP-protocol (`0..=255`)
 inventory (`ip_protocol` on endpoints/probes/sends/failures and `ip_protocols` on
 `target_list` reports), extra host-discovery probe discriminators (`icmp_request`
-for `timestamp`/`netmask` and `tcp_scan` for `tcp-ack`), new host reason kinds
+for `timestamp`/`netmask` and `tcp_scan` for `tcp-ack`), host reason kinds
 (`sctp_init_ack`, `sctp_abort`, `sctp_other`, `icmp_timestamp_reply`,
 `icmp_netmask_reply`, `ip_protocol_payload`, `icmp_protocol_unreachable`), and
 `sctp_init.*`, `sctp_cookie_echo.*`, and `ip_protocol.*` inference rules.
 
-## Output family v15
+## TCP diagnostic scans
 
-Adds TCP diagnostic scans (`syn`, `ack`, `window`, `fin`, `null`, `xmas`,
-`maimon`, `custom`). Raw scans with TCP scan endpoints publish `plan.tcp_scan`
+TCP diagnostic scans include `syn`, `ack`, `window`, `fin`, `null`, `xmas`,
+`maimon`, and `custom`. Raw scans with TCP scan endpoints publish `plan.tcp_scan`
 (`{mode, flags}`); each raw scan-stage TCP probe and `probe_sent` record carries
 the same object (`--list` publishes `ports.tcp_scan`), while discovery TCP
 probes always carry `{mode: syn, flags: 2}`. Correlated direct TCP replies carry
-`tcp_window` (`0..=65535`). Inference `state` gains `unfiltered`, and `rule`
-gains `tcp_<mode>.*`. See [TCP diagnostics](tcp-diagnostics.md).
+`tcp_window` (`0..=65535`). Inference `state` includes `unfiltered`, and `rule`
+includes `tcp_<mode>.*`. See [TCP diagnostics](tcp-diagnostics.md).
 
-## Output family v14
+## OS identification
 
-Adds standalone `identify-os` aggregate results and `os_preparation`,
+`network identify-os` publishes aggregate results and `os_preparation`,
 `os_probe`, `os_additional`, `os_undecoded`, `diagnostic`, and `complete` stream
 records. Outcomes are `matched`, `ambiguous`, `unknown`, or `inconclusive` with
 ordinal `qualified` confidence and candidate provenance tied to
 `packetcraftr.os-fingerprints/v1` and `packetcraftr.os-probes/v1`. See
 [OS identification](os-identification.md).
 
-## Output family v13
+## TLS service identification
 
-Adds explicit TLS wrapping (`tls_failed`, probe `tls` with `server_name`,
+Service identification supports explicit TLS wrapping (`tls_failed`, probe
+`tls` with `server_name`,
 `handshake_complete`, negotiated cipher/version, DER `certificates_hex`, and
 `unauthenticated: true`, plus `usage.tls`), SMTP/FTP identification fields, and
 sourced candidate metadata (`hostname`, `device_type`, wildcard-version `cpe`).
 See [service identification](service-identification.md).
 
-## Output family v12
+## Service identification
 
-Adds explicit `identify` aggregate `records` and NDJSON `identify_endpoint`
+Explicit `identify` publishes aggregate `records` and NDJSON `identify_endpoint`
 events with `excluded`/`unknown`/`matched`/`ambiguous`/`malformed`/`truncated`/
 `budget_exhausted` outcomes, exact request/response hex, observed claims,
 candidates with corpus/probe/rule/field provenance, and ordinal `claim`/`protocol`
 confidence.
 
-## Output family v11
+## Traceroute
 
-Adds optional raw-scan `traceroute` plans, host-order trace results,
+Raw scans can publish `traceroute` plans, host-order trace results,
 `traceroute_probe`/`undecoded`/`host` stream events, and separate fresh `hops`
-versus sourced `reused_hops` claims. Standalone `traceroute` keeps its shapes.
+and sourced `reused_hops` claims. Standalone `network traceroute` uses its own
+result shape.
 See [trace semantics](scanner-evidence.md#traceroute-stage).
 
-## Output family v10
+## Scheduling
 
-Adds required `scheduling` on scan/connect results and terminals: fixed/adaptive
+Required `scheduling` on scan/connect results and terminals records fixed/adaptive
 mode, effective config, `observed_peak_window`, `retries_started`, suspected
 rate-limit conditions, `incomplete` hosts, and connect operation/process ceilings.
 
-## Output family v9
+## Host discovery
 
-Adds required host records, discovery plans, and `discovery`/`scan` stage
+Scan results include host records, discovery plans, and `discovery`/`scan` stage
 discriminators on probes, sends, and failures, plus neighbor (`direct`/`cached`/
 `possible_proxy` or routed `next_hop`) and reverse-DNS evidence. See
 [host semantics](scanner-evidence.md#host-observations).
 
-## Output family v8
+## Scan plans and inference
 
-Adds scan/connect plans (`requested_method`, `selected_method`, reason, catalog
-version, exclusions, curated UDP ports), per-endpoint [port inference](scanner-evidence.md#port-inference)
+Scan/connect plans record requested and selected methods, reasons, catalog
+versions, exclusions, and curated UDP ports. Results include per-endpoint
+[port inference](scanner-evidence.md#port-inference)
 (`state`, `rule`, and disjoint `supporting`/`conflicting`/`unanswered`/`failed`
 sequence partitions), unattributed frames, and list-mode ports.
 
-## Output family v7
+## Target lists
 
-Adds `target_list` (`method: target_list`), optional declared zone and resolved
-interface scope on scan evidence/failures, and exact `retained_evidence_bytes`.
+`target_list` reports use `method: target_list`. Scan evidence/failures carry
+optional declared zones and resolved interface scopes. Retention is accounted
+by exact `retained_evidence_bytes`.
 
 ## Streams and the reference consumer
 
@@ -149,7 +158,7 @@ set -e
 python3 examples/consumers/forwarding.py --format ndjson --exit-code "$status" < report.ndjson
 ```
 
-The forwarding consumer accepts v6–v18 and checks states, counter/omission
+The forwarding consumer accepts only output/v1 and checks states, counter/omission
 relationships, requested checks, and verdict coherence. Its exit 0 means the
 report was valid, not that forwarding passed; inspect `execution` and `verdict`.
 

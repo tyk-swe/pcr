@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v16",
+  "schema": "packetcraftr.output/v1",
   "command": "protocols",
   "mode": "aggregate",
   "status": "error",
@@ -8,7 +8,7 @@
     "kind": "usage",
     "message": "unknown built-in protocol 'unknown'",
     "causes": [],
-    "remediation": "run `packetcraftr protocols` to list built-in protocols"
+    "remediation": "run `packetcraftr reference protocols` to list built-in protocols"
   },
   "diagnostics": []
 }

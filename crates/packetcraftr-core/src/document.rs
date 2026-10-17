@@ -16,5 +16,5 @@ pub mod udp_profiles;
 pub use error::Error;
 pub use types::{
     DEFAULT_MAX_DOCUMENT_BYTES, DocumentLimits, Format, Layer, Limit, MAX_DOCUMENT_NESTING,
-    PACKET_DOCUMENT_SCHEMA_V2, Packet,
+    PACKET_DOCUMENT_SCHEMA_V1, Packet,
 };

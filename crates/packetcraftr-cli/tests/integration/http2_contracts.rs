@@ -17,7 +17,9 @@ fn upgrade() -> PathBuf {
 fn multiplexed_capture_reports_all_frame_types_and_messages() {
     let path = multiplexed();
     let path = path.to_str().unwrap();
-    let document = parse_json(&run_success(&["--output", "json", "http2", path]));
+    let document = parse_json(&run_success(&[
+        "--output", "json", "analyze", "http2", path,
+    ]));
     let result = &document["result"];
     let summary = &result["summary"];
     assert_eq!(summary["connections"], 1);
@@ -85,6 +87,7 @@ fn upgrade_capture_reports_h2c_connection() {
     let document = parse_json(&run_success(&[
         "--output",
         "json",
+        "analyze",
         "http2",
         path.to_str().unwrap(),
     ]));

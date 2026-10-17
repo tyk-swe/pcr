@@ -1,6 +1,6 @@
 # Reproducible forwarding verdicts
 
-`verify-forwarding` compares selected physical observations under declared
+`analyze verify-forwarding` compares selected physical observations under declared
 rules and decoder views; it does not attribute causes to a device.
 
 ## Identity is not the property under test

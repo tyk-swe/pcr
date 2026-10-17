@@ -4,8 +4,7 @@
 """Bounded reference consumer for the forwarding contract.
 
 This validates the protocol and forwarding invariants it uses, not the complete
-JSON Schema. It accepts the current v18 family and the frozen v6, v7, v8,
-v9, v10, v11, v12, v13, v14, v15, v16, and v17 families without reinterpreting any of them. Additive fields
+JSON Schema. It accepts the current v1 family. Additive fields
 are accepted; unknown semantic enums are rejected. An error envelope is an execution failure, not a forwarding verdict.
 """
 from __future__ import annotations
@@ -16,21 +15,8 @@ import json
 import sys
 from typing import BinaryIO, Any
 
-SCHEMAS = {
-    "packetcraftr.output/v6",
-    "packetcraftr.output/v7",
-    "packetcraftr.output/v8",
-    "packetcraftr.output/v9",
-    "packetcraftr.output/v10",
-    "packetcraftr.output/v11",
-    "packetcraftr.output/v12",
-    "packetcraftr.output/v13",
-    "packetcraftr.output/v14",
-    "packetcraftr.output/v15",
-    "packetcraftr.output/v16",
-    "packetcraftr.output/v17",
-    "packetcraftr.output/v18",
-}
+SCHEMA = "packetcraftr.output/v1"
+
 MAX_RECORD = 16 * 1024 * 1024
 MAX_STREAM = 64 * 1024 * 1024
 MAX_RULE_DECLARATIONS = 256
@@ -125,7 +111,7 @@ def decode(data: bytes) -> dict[str, Any]:
     except (UnicodeError, ValueError, RecursionError) as error:
         raise ContractError(f"invalid JSON: {error}") from error
     require(isinstance(value, dict), "an envelope must be an object")
-    require(value.get("schema") in SCHEMAS, "unsupported schema; explicit migration required")
+    require(value.get("schema") == SCHEMA, "unsupported schema; explicit migration required")
     require(value.get("command") == "verify-forwarding", "unexpected command")
     return value
 

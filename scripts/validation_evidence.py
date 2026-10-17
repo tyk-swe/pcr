@@ -9,7 +9,7 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-EVIDENCE_VERSION = 2
+EVIDENCE_VERSION = 1
 TSHARK_VERSION = '4.6.4'
 GIT_TIMEOUT = 30
 

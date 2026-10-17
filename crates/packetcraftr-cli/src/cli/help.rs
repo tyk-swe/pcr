@@ -142,7 +142,7 @@ pub(crate) fn leaf(command: clap::Command, entry: &Entry) -> clap::Command {
         .filter(|examples| !examples.is_empty());
     let formats = Command::ALL
         .iter()
-        .find(|command| command.as_str() == entry.legacy)
+        .find(|command| command.as_str() == entry.identifier)
         .map(|command| {
             command
                 .formats()
@@ -153,9 +153,8 @@ pub(crate) fn leaf(command: clap::Command, entry: &Entry) -> clap::Command {
         })
         .unwrap_or_else(|| "text".to_owned());
     let full = format!(
-        "{examples}\n\nSupported output formats: {formats}.\nUse -v/--verbose for retained evidence and technical details in text output.\nCanonical command: packetcraftr {}. Legacy alias: packetcraftr {}.",
-        entry.path(),
-        entry.legacy
+        "{examples}\n\nSupported output formats: {formats}.\nUse -v/--verbose for retained evidence and technical details in text output.\nCommand: packetcraftr {}.",
+        entry.path()
     );
     let short = format!(
         "{}\n\nUse --help for all options, defaults, formats, and prerequisites.",

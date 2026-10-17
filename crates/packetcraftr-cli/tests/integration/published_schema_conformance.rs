@@ -12,9 +12,9 @@ fn validator(schema: &str) -> jsonschema::Validator {
     jsonschema::validator_for(&schema).expect("published schema must compile")
 }
 
-fn rewrite_v2_validator() -> jsonschema::Validator {
+fn rewrite_schema_validator() -> jsonschema::Validator {
     validator(include_str!(
-        "../../../../schemas/packetcraftr.rewrite.v2.schema.json"
+        "../../../../schemas/packetcraftr.rewrite.v1.schema.json"
     ))
 }
 
@@ -27,12 +27,12 @@ fn every_published_example_document_matches_its_declared_schema() {
     use packetcraftr_core::document::{DEFAULT_MAX_DOCUMENT_BYTES, Format, Packet};
 
     let packet_validator = validator(include_str!(
-        "../../../../schemas/packetcraftr.packet.v2.schema.json"
+        "../../../../schemas/packetcraftr.packet.v1.schema.json"
     ));
     let udp_profiles_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.udp-profiles.v1.schema.json"
     ));
-    let rewrite_v2 = rewrite_v2_validator();
+    let rewrite_validator = rewrite_schema_validator();
     let service_probes_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.service-probes.v1.schema.json"
     ));
@@ -43,33 +43,26 @@ fn every_published_example_document_matches_its_declared_schema() {
         "../../../../schemas/packetcraftr.os-fingerprints.v1.schema.json"
     ));
     let output_validator = schema_validator();
-    let v6_validator = validator(include_str!(
-        "../../../../schemas/packetcraftr.output.v6.schema.json"
+    let scanner_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.scanner-corpus.v1.schema.json"
     ));
-    let v7_validator = validator(include_str!(
-        "../../../../schemas/packetcraftr.output.v7.schema.json"
-    ));
-    let v8_validator = validator(include_str!(
-        "../../../../schemas/packetcraftr.output.v8.schema.json"
-    ));
-    let v9_validator = validator(include_str!(
-        "../../../../schemas/packetcraftr.output.v9.schema.json"
-    ));
-    let v10_validator = validator(include_str!(
-        "../../../../schemas/packetcraftr.output.v10.schema.json"
-    ));
-
-    let v11_validator = validator(include_str!(
-        "../../../../schemas/packetcraftr.output.v11.schema.json"
-    ));
-    let v14_validator = common::frozen_v14_schema_validator();
-    let v15_validator = common::frozen_v15_schema_validator();
-
     let directory = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/documents");
     let mut paths: Vec<_> = std::fs::read_dir(directory)
         .expect("published examples directory")
         .map(|entry| entry.expect("example entry").path())
         .collect();
+    paths.extend(
+        std::fs::read_dir(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/consumers/fixtures"
+        ))
+        .unwrap()
+        .map(|entry| entry.unwrap().path()),
+    );
+    paths.push(std::path::PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/scanner-corpus.v1.json"
+    )));
     paths.sort();
 
     let mut validated = 0_usize;
@@ -91,23 +84,14 @@ fn every_published_example_document_matches_its_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v18" => output_validator,
-            "packetcraftr.output/v17" => common::frozen_v17_schema_validator(),
-            "packetcraftr.output/v16" => common::frozen_v16_schema_validator(),
-            "packetcraftr.output/v15" => v15_validator,
-            "packetcraftr.output/v14" => v14_validator,
-            "packetcraftr.output/v11" => &v11_validator,
-            "packetcraftr.output/v10" => &v10_validator,
-            "packetcraftr.output/v9" => &v9_validator,
-            "packetcraftr.output/v8" => &v8_validator,
-            "packetcraftr.output/v7" => &v7_validator,
-            "packetcraftr.output/v6" => &v6_validator,
-            "packetcraftr.packet/v2" => &packet_validator,
-            "packetcraftr.rewrite/v2" => &rewrite_v2,
+            "packetcraftr.output/v1" => output_validator,
+            "packetcraftr.packet/v1" => &packet_validator,
+            "packetcraftr.rewrite/v1" => &rewrite_validator,
             "packetcraftr.udp-profiles/v1" => &udp_profiles_validator,
             "packetcraftr.service-probes/v1" => &service_probes_validator,
             "packetcraftr.service-exclusions/v1" => &service_exclusions_validator,
             "packetcraftr.os-fingerprints/v1" => &os_validator,
+            "packetcraftr.scanner-corpus/v1" => &scanner_validator,
             other => panic!("{name} declares an unknown schema {other}"),
         };
         if let Err(error) = validator.validate(&document) {
@@ -124,4 +108,64 @@ fn every_published_example_document_matches_its_declared_schema() {
         validated > 100,
         "expected every published example to be validated, saw {validated}"
     );
+}
+
+#[test]
+fn reset_contracts_reject_unsupported_families_and_malformed_documents() {
+    use packetcraftr_core::document::{DEFAULT_MAX_DOCUMENT_BYTES, Format, Packet};
+    use packetcraftr_core::transform::{ChecksumMode, rules::Rules};
+
+    let mut output: Value = serde_json::from_str(include_str!(
+        "../../../../examples/documents/output-build-success.json"
+    ))
+    .unwrap();
+    for version in [0, 2, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 999] {
+        output["schema"] = format!("packetcraftr.output/v{version}").into();
+        assert!(!schema_validator().is_valid(&output), "version {version}");
+    }
+    output["schema"] = "packetcraftr.output/v1".into();
+    output.as_object_mut().unwrap().remove("result");
+    assert!(!schema_validator().is_valid(&output));
+
+    let packet_schema = validator(include_str!(
+        "../../../../schemas/packetcraftr.packet.v1.schema.json"
+    ));
+    let packet = include_str!("../../../../examples/documents/packet-ipv4-udp.json");
+    let rules = include_str!("../../../../examples/documents/rewrite-field-edits.json");
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    assert!(Packet::parse(packet, Format::Json, DEFAULT_MAX_DOCUMENT_BYTES).is_ok());
+    assert!(Rules::parse(rules.as_bytes(), ChecksumMode::Repair, &registry).is_ok());
+    for version in [0, 2, 999] {
+        let mut document: Value = serde_json::from_str(packet).unwrap();
+        document["schema"] = format!("packetcraftr.packet/v{version}").into();
+        assert!(!packet_schema.is_valid(&document));
+        assert!(
+            packetcraftr_core::document::recipe::parse(
+                &document.to_string(),
+                Some(Format::Json),
+                &registry,
+                64
+            )
+            .is_err()
+        );
+        let yaml = format!("schema: packetcraftr.packet/v{version}\nlayers:\n  - protocol: raw\n");
+        assert!(
+            packetcraftr_core::document::recipe::parse(&yaml, Some(Format::Yaml), &registry, 64)
+                .is_err()
+        );
+
+        let mut document: Value = serde_json::from_str(rules).unwrap();
+        document["schema"] = format!("packetcraftr.rewrite/v{version}").into();
+        assert!(!rewrite_schema_validator().is_valid(&document));
+        assert!(
+            Rules::parse(
+                document.to_string().as_bytes(),
+                ChecksumMode::Repair,
+                &registry
+            )
+            .is_err()
+        );
+    }
+    assert!(Packet::parse("{", Format::Json, DEFAULT_MAX_DOCUMENT_BYTES).is_err());
+    assert!(Rules::parse(b"{", ChecksumMode::Repair, &registry).is_err());
 }

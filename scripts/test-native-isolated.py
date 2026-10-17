@@ -47,7 +47,7 @@ def exchange(binary, report):
                 report['responder_error'] = str(error)
         worker = threading.Thread(target=reply, daemon=True)
         worker.start()
-        command = [str(binary), '--output', 'ndjson', 'exchange', '--interface', 'lo', '--link-mode', 'layer3',
+        command = [str(binary), '--output', 'ndjson', 'network', 'exchange', '--interface', 'lo', '--link-mode', 'layer3',
                    '--timeout-ms', '1000', '--max-packets', '1', '--max-bytes', '1024',
                    '--max-queue-frames', '64', '--max-captured-bytes', '65536', '--snap-length', '2048', '--max-responses', '1', '--max-unsolicited', '64',
                    '--packet', f'ipv4(dst=127.0.0.1,identification=1)/udp(sport={source_port},dport={destination_port})/raw(text=isolated-probe)']
@@ -58,6 +58,7 @@ def exchange(binary, report):
     assert output.returncode == 0, 'exchange command failed'
     records = [json.loads(line) for line in output.stdout.splitlines()]
     assert records and records[-1]['event'] == 'complete', 'exchange output incomplete'
+    assert all(record.get('schema') == 'packetcraftr.output/v1' for record in records), 'unsupported output schema'
     assert [record['sequence'] for record in records] == list(range(len(records))), 'noncontiguous output'
     assert messages == [b'isolated-probe'.hex()], 'local responder did not receive exact probe'
     assert b'isolated-reply'.hex() in output.stdout.decode(), 'reply absent from capture'

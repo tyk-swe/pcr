@@ -317,7 +317,7 @@ def connect_case(binary, corpus, case, family, nmap, adaptive=False):
         if case["id"] == "connect-responsive":
             fixture.listen(8)
         port = fixture.getsockname()[1]
-        command = [binary, "--output", "json", "scan", address, "--connect", "--ports", str(port),
+        command = [binary, "--output", "json", "network", "scan", address, "--connect", "--ports", str(port),
                    "--attempts", "1", "--max-probes", "1", "--max-in-flight", "1",
                    "--timeout-ms", "1000", "--max-duration-ms", "2000"]
         if adaptive:
@@ -326,16 +326,12 @@ def connect_case(binary, corpus, case, family, nmap, adaptive=False):
         if run["exit_code"] != 0:
             raise ValueError(f"native connect execution failed: {run['stderr']} {run['stdout']}")
         envelope = strict_json(run["stdout"])
-        if (envelope["schema"] not in ("packetcraftr.output/v9", "packetcraftr.output/v10", "packetcraftr.output/v11", "packetcraftr.output/v12", "packetcraftr.output/v13", "packetcraftr.output/v14", "packetcraftr.output/v15", "packetcraftr.output/v16", "packetcraftr.output/v17", "packetcraftr.output/v18")
+        if (envelope["schema"] != "packetcraftr.output/v1"
                 or envelope["status"] != "success" or envelope["command"] != "scan"):
             raise ValueError("native connect did not publish a successful scan envelope")
         result = envelope["result"]
-        if envelope["schema"] in ("packetcraftr.output/v10", "packetcraftr.output/v11", "packetcraftr.output/v12", "packetcraftr.output/v13", "packetcraftr.output/v14", "packetcraftr.output/v15", "packetcraftr.output/v16", "packetcraftr.output/v17", "packetcraftr.output/v18"):
-            if result["scheduling"]["mode"] != ("adaptive" if adaptive else "fixed"):
-                raise ValueError("connect scheduling mode disagrees with the requested mode")
-        if adaptive:
-            if envelope["schema"] not in ("packetcraftr.output/v10", "packetcraftr.output/v11", "packetcraftr.output/v12", "packetcraftr.output/v13", "packetcraftr.output/v14", "packetcraftr.output/v15", "packetcraftr.output/v16", "packetcraftr.output/v17", "packetcraftr.output/v18"):
-                raise ValueError("adaptive connect requires the v10 or later supported scheduling contract")
+        if result["scheduling"]["mode"] != ("adaptive" if adaptive else "fixed"):
+            raise ValueError("connect scheduling mode disagrees with the requested mode")
         endpoints = result["endpoints"]
         if result["method"] != "tcp_connect" or len(endpoints) != 1 or len(endpoints[0]["probes"]) != 1:
             raise ValueError("native connect fixture has unexpected endpoint/attempt cardinality")

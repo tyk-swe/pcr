@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v16",
+  "schema": "packetcraftr.output/v1",
   "command": "scan",
   "mode": "aggregate",
   "status": "success",
@@ -84,7 +84,10 @@
               "nanos": 3000000
             },
             "reason": "correlated TCP reset",
-            "tcp_window": 0
+            "tcp_window": 0,
+            "measurement": {
+              "kind": "response"
+            }
           }
         ]
       },
@@ -95,14 +98,13 @@
         "classification": "timeout",
         "port_hint": "https",
         "inference": {
-          "state": "filtered",
-          "rule": "tcp_ack.silence",
-          "supporting": [
-            70001
-          ],
+          "rule": "operational_failure",
+          "supporting": [],
           "conflicting": [],
           "unanswered": [],
-          "failed": []
+          "failed": [
+            70001
+          ]
         },
         "probes": [
           {
@@ -122,7 +124,11 @@
             },
             "status": "timeout",
             "classification": "timeout",
-            "reason": "no checksum-valid, protocol-consistent response before the deadline"
+            "reason": "no checksum-valid, protocol-consistent response before the deadline",
+            "measurement": {
+              "kind": "no_reply",
+              "coverage": "unknown"
+            }
           }
         ]
       }
@@ -133,7 +139,7 @@
     "rtt": {
       "sent": 2,
       "received": 1,
-      "lost": 1,
+      "lost": 0,
       "min": {
         "secs": 0,
         "nanos": 3000000
@@ -145,7 +151,8 @@
       "max": {
         "secs": 0,
         "nanos": 3000000
-      }
+      },
+      "unavailable": 1
     },
     "scheduling": {
       "mode": "fixed",

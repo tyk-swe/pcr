@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v16",
+  "schema": "packetcraftr.output/v1",
   "command": "scan",
   "mode": "stream",
   "sequence": 1,
@@ -40,7 +40,10 @@
         "direction": "inbound",
         "bytes_hex": "deadbeef"
       },
-      "reason": "checksum-valid SYN/ACK from the target"
+      "reason": "checksum-valid SYN/ACK from the target",
+      "measurement": {
+        "kind": "response"
+      }
     }
   },
   "diagnostics": [],

@@ -74,7 +74,7 @@ negative observations `incomplete`; custom providers default to `unknown` even
 with zero counters. Both enter inference's `failed` partition. Positive uniquely
 correlated replies remain valid. Default overflow `Fail` rejects incomplete
 runs. Local counters do not prove end-to-end visibility or identify which
-response was lost. See [output/v18 migration](consumer-compatibility.md#output-family-v18).
+response was lost. See [scan measurement contract](consumer-compatibility.md#scan-measurements-and-acquisition-quality).
 
 ### Application checks on attempts
 
@@ -122,7 +122,7 @@ concluded state), `unanswered` (silence concluding another state), `conflicting`
 | 1 | `tcp_syn.silence` → `filtered` | `udp.silence` → `open_or_filtered` | `tcp_connect.timed_out` → `filtered` |
 | 0 | — | — | `local_error` / `deadline_expired` → no state (`operational_failure`) |
 
-TCP diagnostic modes (v15) use the same ranks (reset 5, ICMP unreachable 4, time
+TCP diagnostic modes use the same ranks (reset 5, ICMP unreachable 4, time
 exceeded 3, other reply 2, silence 1) with rule IDs `tcp_<mode>.<reason>`:
 
 | Mode | reset | ICMP unreachable | time exceeded / other reply | silence |
@@ -132,7 +132,7 @@ exceeded 3, other reply 2, silence 1) with rule IDs `tcp_<mode>.<reason>`:
 | `tcp_fin`, `tcp_null`, `tcp_xmas`, `tcp_maimon` | `closed` | `filtered` | `unknown` | `open_or_filtered` |
 | `tcp_custom` | `tcp_custom.reply` → `unknown` (any TCP/ICMP reply) | | | `tcp_custom.silence` → `unknown` |
 
-SCTP (`init` and `cookie_echo`) and IP-protocol (`ip`) modes (v16) use the same
+SCTP (`init` and `cookie_echo`) and IP-protocol (`ip`) modes use the same
 ranking order:
 
 | Mode | Direct positive reply | ABORT / protocol unreachable | ICMP unreachable | Time exceeded | Other reply | Silence |
@@ -178,7 +178,7 @@ and connect ceilings. Unsent/omitted probes count as neither starts nor outcomes
 
 ### Traceroute stage
 
-Raw-only `scan --traceroute` traces host-order results after scan and before PTR
+Raw-only `network scan --traceroute` traces host-order results after scan and before PTR
 under remaining budgets. Selection prefers target SYN/ACK, then reset, then echo
 (lowest sequence tie), or explicit `--traceroute-strategy`/`--traceroute-port`
 fallback; missing evidence or scoped targets report `not_traced`. Fresh `hops`

@@ -7,23 +7,8 @@ use serde::Serialize;
 
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
-pub const SCHEMA_V6: &str = "packetcraftr.output/v6";
-pub const SCHEMA_V7: &str = "packetcraftr.output/v7";
-pub const SCHEMA_V8: &str = "packetcraftr.output/v8";
-pub const SCHEMA_V9: &str = "packetcraftr.output/v9";
-pub const SCHEMA_V10: &str = "packetcraftr.output/v10";
-pub const SCHEMA_V11: &str = "packetcraftr.output/v11";
-pub const SCHEMA_V12: &str = "packetcraftr.output/v12";
-pub const SCHEMA_V13: &str = "packetcraftr.output/v13";
-pub const SCHEMA_V14: &str = "packetcraftr.output/v14";
-pub const SCHEMA_V15: &str = "packetcraftr.output/v15";
-/// SCTP INIT/COOKIE-ECHO scanning, IP-protocol inventory, and
-/// extra host-discovery probe families.
-pub const SCHEMA_V16: &str = "packetcraftr.output/v16";
-/// Capture overview and explicit statistics ordering.
-pub const SCHEMA_V17: &str = "packetcraftr.output/v17";
-/// Current family: qualified scan measurements and acquisition-quality events.
-pub const SCHEMA_V18: &str = "packetcraftr.output/v18";
+/// Current output contract, including qualified scan measurements.
+pub const SCHEMA_V1: &str = "packetcraftr.output/v1";
 
 pub use crate::commands::Command;
 

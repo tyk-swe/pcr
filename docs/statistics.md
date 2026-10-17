@@ -1,8 +1,8 @@
 # Offline capture statistics
 
 `analyze stats` reads PCAP/PCAPNG files, redirected stdin (`-`), and gzip or Zstd
-captures. It defaults to the conversations table. Existing flat command aliases
-and default table ordering are unchanged.
+captures. It defaults to the conversations table. Use the grouped command path
+`packetcraftr analyze stats`.
 
 ```sh
 packetcraftr analyze stats capture.pcapng --table overview
@@ -99,6 +99,5 @@ Core `stats::Report` gains `protocol_count`, `endpoint_count`, and
 `conversation_count`, recording totals before presentation truncation.
 `packetcraftr_cli::output::contract::Format` gains `Csv`.
 
-Current JSON/NDJSON producers use `output::contract::SCHEMA_V18`
-(`packetcraftr.output/v18`); v17 introduced the overview and ordering contract. The v16
-schema and historical examples remain frozen. See [consumer compatibility](consumer-compatibility.md).
+Current JSON/NDJSON producers use `output::contract::SCHEMA_V1`
+(`packetcraftr.output/v1`), including overview and ordering. See [consumer compatibility](consumer-compatibility.md).

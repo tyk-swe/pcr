@@ -20,6 +20,7 @@ fn write_snaplen_truncated_capture() -> tempfile::NamedTempFile {
 
 fn verify(ingress: &tempfile::NamedTempFile, egress: &tempfile::NamedTempFile) -> Vec<String> {
     vec![
+        "analyze".to_owned(),
         "verify-forwarding".to_owned(),
         path_text(ingress.path()).to_owned(),
         path_text(egress.path()).to_owned(),
@@ -69,6 +70,7 @@ fn snaplen_truncated_evidence_is_explicitly_inconclusive() {
 #[test]
 fn malformed_expectations_are_rejected_before_input_is_read() {
     let output = run(&[
+        "analyze",
         "verify-forwarding",
         "does-not-exist.pcap",
         "also-absent.pcap",

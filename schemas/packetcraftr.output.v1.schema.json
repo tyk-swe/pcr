@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:packetcraftr:output:v16",
-  "$comment": "Packet documents remain independently versioned at packetcraftr.packet/v2. Version identifiers are immutable. Resolve this schema from the release archive; never fetch a moving branch to validate archived evidence.",
-  "title": "PacketcraftR command output v16",
+  "$id": "urn:packetcraftr:output:v1",
+  "$comment": "Packet documents remain independently versioned at packetcraftr.packet/v1. This reset baseline is incompatible with historical v1 documents. Future identifiers are immutable. Resolve this schema from the release archive; never fetch a moving branch to validate archived evidence.",
+  "title": "PacketcraftR command output v1",
   "description": "Aggregate JSON and sequenced NDJSON. Every stream record declares event in its envelope; complete and error are terminal.",
   "oneOf": [
     {
@@ -30,7 +30,7 @@
       ],
       "properties": {
         "schema": {
-          "const": "packetcraftr.output/v16"
+          "const": "packetcraftr.output/v1"
         },
         "command": {
           "type": [
@@ -706,7 +706,8 @@
             "protocols",
             "ports",
             "io",
-            "fragments"
+            "fragments",
+            "overview"
           ]
         },
         "frames_read": {
@@ -783,6 +784,18 @@
         },
         "clock": {
           "$ref": "#/$defs/captureClock"
+        },
+        "protocol_count": {
+          "description": "Distinct matched entries before leaderboard truncation.",
+          "$ref": "#/$defs/uint64"
+        },
+        "endpoint_count": {
+          "description": "Distinct matched entries before leaderboard truncation.",
+          "$ref": "#/$defs/uint64"
+        },
+        "conversation_count": {
+          "description": "Distinct matched entries before leaderboard truncation.",
+          "$ref": "#/$defs/uint64"
         }
       },
       "allOf": [
@@ -1043,9 +1056,48 @@
               ]
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "table": {
+                "const": "overview"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "protocol_count",
+              "endpoint_count",
+              "conversation_count",
+              "protocols",
+              "endpoints",
+              "conversations"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "ports"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                },
+                {
+                  "required": [
+                    "fragments"
+                  ]
+                }
+              ]
+            }
+          }
         }
       ],
-      "additionalProperties": true
+      "additionalProperties": true,
+      "description": "Matched capture statistics. Explicit sorting ranks frames or bytes descending, then the other volume metric, then the natural key, before retention. Default ordering is unchanged; overview defaults to frame ranking and five rows per leaderboard. Counts precede retention."
     },
     "statsConversation": {
       "type": "object",
@@ -3370,6 +3422,29 @@
             "event",
             "result"
           ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "observation_quality"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "qualification"
+              ],
+              "properties": {
+                "qualification": {
+                  "$ref": "#/$defs/scanQualification"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
         }
       ]
     },
@@ -4660,11 +4735,12 @@
     },
     "rttSummary": {
       "type": "object",
-      "description": "Round-trip accounting across an operation's probes: sent counts confirmed transmissions, received counts replies inside their windows, and lost is sent minus received (including replies the capture backend dropped before delivery).",
+      "description": "Confirmed scan attempts partition into received replies, lost (no reply with qualified local coverage), and unavailable (unknown, incomplete, or local operational failure). Lost does not assert a remote cause. Pending no-reply measurements require observation_quality before final inference.",
       "required": [
         "sent",
         "received",
-        "lost"
+        "lost",
+        "unavailable"
       ],
       "properties": {
         "sent": {
@@ -4684,6 +4760,9 @@
         },
         "max": {
           "$ref": "#/$defs/duration"
+        },
+        "unavailable": {
+          "$ref": "#/$defs/uint64"
         }
       },
       "additionalProperties": true
@@ -5241,7 +5320,7 @@
       ],
       "properties": {
         "schema": {
-          "const": "packetcraftr.packet/v2"
+          "const": "packetcraftr.packet/v1"
         },
         "layers": {
           "type": "array",
@@ -6679,7 +6758,8 @@
         "status",
         "classification",
         "sent_at",
-        "reason"
+        "reason",
+        "measurement"
       ],
       "properties": {
         "sequence": {
@@ -6773,6 +6853,9 @@
         },
         "sctp_scan": {
           "$ref": "#/$defs/sctpScan"
+        },
+        "measurement": {
+          "$ref": "#/$defs/scanMeasurement"
         }
       },
       "additionalProperties": true,
@@ -11632,7 +11715,8 @@
         "ready",
         "shutdown_confirmed",
         "statistics_valid",
-        "statistics"
+        "statistics",
+        "observation_quality"
       ],
       "properties": {
         "interface": {
@@ -11649,6 +11733,14 @@
         },
         "statistics": {
           "$ref": "#/$defs/captureStatistics"
+        },
+        "observation_quality": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "incomplete",
+            "no_reported_loss"
+          ]
         }
       },
       "additionalProperties": true
@@ -17677,6 +17769,94 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 255
+    },
+    "scanCoverage": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "unknown",
+        "no_reported_loss",
+        "incomplete",
+        "transport_timeout"
+      ]
+    },
+    "scanMeasurement": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "response"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "coverage"
+          ],
+          "properties": {
+            "kind": {
+              "const": "no_reply"
+            },
+            "coverage": {
+              "$ref": "#/$defs/scanCoverage"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "unavailable"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "scanQualification": {
+      "description": "Final source quality for existing pending no-reply measurements in this stage and inclusive sparse sequence interval. Final unknown/incomplete coverage and positive responses are unchanged.",
+      "type": "object",
+      "required": [
+        "stage",
+        "first_sequence",
+        "last_sequence",
+        "coverage"
+      ],
+      "properties": {
+        "stage": {
+          "type": "string",
+          "enum": [
+            "discovery",
+            "scan"
+          ]
+        },
+        "first_sequence": {
+          "$ref": "#/$defs/uint64"
+        },
+        "last_sequence": {
+          "$ref": "#/$defs/uint64"
+        },
+        "coverage": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "no_reported_loss",
+            "incomplete"
+          ]
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

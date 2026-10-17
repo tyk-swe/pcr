@@ -142,9 +142,10 @@ def compare(args, report):
         with tempfile.NamedTemporaryFile(suffix='.pcap') as capture:
             capture.write(data)
             capture.flush()
-            encoded = subprocess.check_output([str(args.binary), '--output', 'ndjson', 'read', capture.name, '--dissect'], timeout=60)
+            encoded = subprocess.check_output([str(args.binary), '--output', 'ndjson', 'files', 'read', capture.name, '--dissect'], timeout=60)
         records = [json.loads(line) for line in encoded.splitlines()]
-        if not records or records[-1]['event'] != 'complete':
+        if (not records or records[-1]['event'] != 'complete'
+                or any(record.get('schema') != 'packetcraftr.output/v1' for record in records)):
             raise RuntimeError(f'{name}: incomplete PacketcraftR output')
         records = [record['result'] for record in records if record['event'] == 'frame']
         reference = tshark(data, [field[2] for field in DECODE_FIELDS], args.tshark)
@@ -175,8 +176,11 @@ def compare(args, report):
                                                          observed=observed, expected=expected))
         capture_report.update(status='failed' if mismatches else 'passed', mismatches=mismatches)
     data = captures[1][1]
-    session = json.loads(subprocess.check_output([str(args.binary), '--output', 'json', 'tls',
-                         str(ROOT / 'examples/captures/tls-handshake.pcapng')], timeout=30))['result']['sessions'][0]
+    session = json.loads(subprocess.check_output([str(args.binary), '--output', 'json', 'analyze', 'tls',
+                         str(ROOT / 'examples/captures/tls-handshake.pcapng')], timeout=30))
+    if session.get('schema') != 'packetcraftr.output/v1':
+        raise RuntimeError('unsupported TLS output schema')
+    session = session['result']['sessions'][0]
     ja3 = [value for value in tshark(data, ['tls.handshake.ja3'], args.tshark) if value]
     report['tls_ja3'] = dict(capture='tls-handshake', expected=ja3, observed=[session['client']['ja3']])
     if ja3 != [session['client']['ja3']] or any(item['mismatches'] for item in report['captures']):

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.rewrite.v2.schema.json",
-  "title": "PacketcraftR capture field-assignment rewrite rules v2",
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.rewrite.v1.schema.json",
+  "title": "PacketcraftR capture field-assignment rewrite rules v1",
   "type": "object",
   "required": [
     "schema",
@@ -9,7 +9,7 @@
   ],
   "properties": {
     "schema": {
-      "const": "packetcraftr.rewrite/v2"
+      "const": "packetcraftr.rewrite/v1"
     },
     "rules": {
       "type": "array",

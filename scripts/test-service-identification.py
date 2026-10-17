@@ -25,7 +25,7 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = "packetcraftr.output/v18"
+SCHEMA = "packetcraftr.output/v1"
 FIXTURES = ROOT / "scripts/fixtures/service-identification"
 PROFILES = {"all": ["--all-features"]}
 HTTP = b"HTTP/1.1 200 OK\r\nServer: nginx/1.26.2\r\n\r\n"
@@ -258,7 +258,7 @@ def run_case(binary, family_name, scenario):
         endpoint = f"127.0.0.1:{port}" if family_name == "ipv4" else f"[::1]:{port}"
         with tempfile.TemporaryDirectory(prefix="pcr-service-") as temporary:
             corpus_path, corpus = fixture_documents(Path(temporary))
-            command = [str(binary), "--output", "ndjson", "identify", endpoint,
+            command = [str(binary), "--output", "ndjson", "network", "identify", endpoint,
                        "--transport", "tcp", "--corpus", str(corpus_path),
                        "--intensity", "3", "--max-attempts", "1",
                        "--host-max-attempts", "1", "--connection-max-attempts", "1", "--probe-max-attempts", "1",
@@ -326,7 +326,7 @@ def main():
     require(args.build_timeout > 0, "build timeout must be positive")
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip())
-    report = {"schema": "packetcraftr.service-identification-acceptance/v3", "revision": revision,
+    report = {"schema": "packetcraftr.service-identification-acceptance/v1", "revision": revision,
               "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
               "worktree_dirty": dirty,
               "platform": platform.system(), "architecture": platform.machine(),

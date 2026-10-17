@@ -3,7 +3,7 @@
 ":"
 "-"
 "schema"
-"packetcraftr.packet/v2"
+"packetcraftr.packet/v1"
 "layers"
 "protocol"
 "fields"

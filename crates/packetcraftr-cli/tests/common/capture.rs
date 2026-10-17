@@ -141,6 +141,7 @@ pub(crate) fn write_pcapng(path: &Path, link_type: LinkType, frames: &[Frame]) {
 
 pub(crate) fn assert_file_stdin_parity(
     input: &[u8],
+    group: &str,
     command: &str,
     flags: &[&str],
     format: &str,
@@ -149,10 +150,16 @@ pub(crate) fn assert_file_stdin_parity(
     let mut capture = tempfile::NamedTempFile::new().unwrap();
     capture.write_all(input).unwrap();
     capture.flush().unwrap();
-    let mut arguments = vec!["--output", format, command, path_text(capture.path())];
+    let mut arguments = vec![
+        "--output",
+        format,
+        group,
+        command,
+        path_text(capture.path()),
+    ];
     arguments.extend_from_slice(flags);
     let file = run(&arguments);
-    arguments[3] = "-";
+    arguments[4] = "-";
     let stdin = run_with_stdin(&arguments, input);
     assert_eq!(
         file.status.code(),

@@ -14,6 +14,7 @@ fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {
     let arguments = [
         "--output",
         "json",
+        "packet",
         "fuzz",
         "--packet",
         packet,
@@ -47,6 +48,7 @@ fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {
     let permissive = run(&[
         "--output",
         "ndjson",
+        "packet",
         "fuzz",
         "--packet",
         packet,
@@ -80,7 +82,7 @@ fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {
 
 #[test]
 fn offline_fuzz_rejects_live_options_and_limits() {
-    let base = ["fuzz", "--packet", "raw(text=hi)", "--cases", "1"];
+    let base = ["packet", "fuzz", "--packet", "raw(text=hi)", "--cases", "1"];
     for live_only in [
         &["--allow-permissive-live"][..],
         &["--allow-malformed-live"][..],
@@ -118,6 +120,7 @@ fn offline_fuzz_rejects_live_options_and_limits() {
     let offline = run(&[
         "--output",
         "json",
+        "packet",
         "fuzz",
         "--packet",
         "raw(text=hi)",

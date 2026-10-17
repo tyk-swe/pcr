@@ -12,6 +12,7 @@ fn range_axes_expand_inclusively_and_fail_before_output() {
     let output = run_success(&[
         "--output",
         "ndjson",
+        "packet",
         "build",
         "--packet",
         PACKET,
@@ -39,6 +40,7 @@ fn range_axes_expand_inclusively_and_fail_before_output() {
     let output = run_success(&[
         "--output",
         "hex",
+        "packet",
         "build",
         "--packet",
         PACKET,
@@ -49,7 +51,7 @@ fn range_axes_expand_inclusively_and_fail_before_output() {
 
     for axis in ["0.ttl=1..300", "0.ttl=3..1", "0.ttl=1..3:0"] {
         let output = run(&[
-            "--output", "ndjson", "build", "--packet", PACKET, "--axis", axis,
+            "--output", "ndjson", "packet", "build", "--packet", PACKET, "--axis", axis,
         ]);
         assert!(!output.status.success(), "{axis} unexpectedly succeeded");
         let records = parse_ndjson(&output);
@@ -64,6 +66,7 @@ fn allowlist_denies_before_route_preparation() {
         let denied = run(&[
             "--output",
             "json",
+            "network",
             command,
             "--packet",
             "ipv4(dst=10.0.0.2)/udp(dport=9000)",
@@ -86,6 +89,7 @@ fn allowlist_denies_before_route_preparation() {
         let allowed = run(&[
             "--output",
             "json",
+            "network",
             command,
             "--packet",
             "ipv4(dst=10.0.0.2)/udp(dport=9000)",
@@ -115,6 +119,7 @@ fn send_admission_precedes_interface_discovery() {
         let mut args = vec![
             "--output",
             "json",
+            "network",
             "send",
             "--packet",
             PACKET,

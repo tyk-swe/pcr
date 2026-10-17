@@ -20,6 +20,7 @@ fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {
     let denied = run(&[
         "--output",
         "json",
+        "network",
         "scan",
         "127.0.0.1",
         "--connect",
@@ -42,6 +43,7 @@ fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {
     let report = parse_json(&run_success(&[
         "--output",
         "json",
+        "network",
         "scan",
         "127.0.0.1",
         "--connect",
@@ -75,6 +77,7 @@ fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {
     let records = parse_ndjson(&run_success(&[
         "--output",
         "ndjson",
+        "network",
         "scan",
         "127.0.0.1",
         "--connect",
@@ -86,6 +89,7 @@ fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {
     let rejected = run(&[
         "--output",
         "json",
+        "network",
         "scan",
         "127.0.0.1",
         "--connect",
@@ -112,6 +116,7 @@ fn an_adaptive_connect_scan_reports_adaptive_scheduling() {
     let report = parse_json(&run_success(&[
         "--output",
         "json",
+        "network",
         "scan",
         "127.0.0.1",
         "--connect",
@@ -156,6 +161,7 @@ fn adaptive_tuning_options_require_the_adaptive_flag() {
         let output = run(&[
             "--output",
             "json",
+            "network",
             "scan",
             "192.0.2.1",
             "--list",
@@ -180,6 +186,7 @@ fn a_fixed_scan_reports_fixed_scheduling() {
     let report = parse_json(&run_success(&[
         "--output",
         "json",
+        "network",
         "scan",
         "127.0.0.1",
         "--connect",

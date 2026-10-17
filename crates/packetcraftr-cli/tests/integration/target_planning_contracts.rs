@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::common::*;
 
 fn list_arguments<'a>(extra: &'a [&'a str]) -> Vec<&'a str> {
-    let mut arguments = vec!["scan", "--list", "--output", "json"];
+    let mut arguments = vec!["network", "scan", "--list", "--output", "json"];
     arguments.extend(extra);
     arguments
 }

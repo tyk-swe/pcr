@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_core::document::{
-    DocumentLimits, Error, Format, Limit, MAX_DOCUMENT_NESTING, PACKET_DOCUMENT_SCHEMA_V2, Packet,
+    DocumentLimits, Error, Format, Limit, MAX_DOCUMENT_NESTING, PACKET_DOCUMENT_SCHEMA_V1, Packet,
 };
 use packetcraftr_core::error::Classified;
 use serde::Deserialize;
 
-const SCHEMA: &str = PACKET_DOCUMENT_SCHEMA_V2;
+const SCHEMA: &str = PACKET_DOCUMENT_SCHEMA_V1;
 
 fn document(layers: &str) -> String {
     document_with_schema(SCHEMA, layers)

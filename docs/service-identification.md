@@ -101,9 +101,8 @@ nonzero ports, 64 KiB serialized bytes; overlaps preserve all reasons/provenance
 
 ## Reading evidence
 
-[Output/v15](../schemas/packetcraftr.output.v15.schema.json) (introduced in
-v12/v13) separates exact planned request/response hex, actual partial bytes
-written, numeric peers, observed claims, candidates, ordinal confidence, and
+[Output/v1](../schemas/packetcraftr.output.v1.schema.json) separates exact planned
+request/response hex, actual partial bytes written, numeric peers, observed claims, candidates, ordinal confidence, and
 corpus/probe/rule/field provenance. `claim` and `protocol` are not probabilities
 or authentication. Excluded, unknown, ambiguous, malformed, truncated,
 `budget_exhausted`, and `tls_failed` outcomes are explicit; nonmatching or

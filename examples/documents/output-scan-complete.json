@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v16",
+  "schema": "packetcraftr.output/v1",
   "command": "scan",
   "mode": "stream",
   "sequence": 1,
@@ -43,7 +43,8 @@
     "rtt": {
       "sent": 1,
       "received": 0,
-      "lost": 1
+      "lost": 0,
+      "unavailable": 1
     },
     "scheduling": {
       "mode": "fixed",

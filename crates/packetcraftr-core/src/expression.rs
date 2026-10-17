@@ -73,7 +73,9 @@ impl Classified for Error {
             Self::UnknownProtocol { .. } => Classification::new(
                 "cli.expression_protocol",
                 Kind::Usage,
-                Some("run `packetcraftr protocols` to list the protocol names the registry binds"),
+                Some(
+                    "run `packetcraftr reference protocols` to list the protocol names the registry binds",
+                ),
             ),
             Self::Layer { .. } => Classification::new(
                 "cli.expression_field",

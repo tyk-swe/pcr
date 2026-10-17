@@ -15,7 +15,7 @@ This emits `68656c6c6f`, without traffic. For IPv4/UDP, use `packet build --pack
 with [the structured fixture](../examples/documents/packet-ipv4-udp.json).
 Invalid fields/values fail before transmission.
 
-Run the [forwarding harness](verification-contract.md#reproduction-bundle).
+Run the [forwarding harness](verification-contract.md).
 It generates checksummed captures, expected transformations, intentional violations,
 missing evidence, and output-budget controls. Read observed_verdict and test_contract:
 a deliberate forwarding fail can be a passing regression. Choose a stable identity

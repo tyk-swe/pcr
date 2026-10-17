@@ -15,12 +15,12 @@ use capture_support::assert_file_stdin_parity;
 use common::{assert_contiguous, parse_ndjson};
 use process_support::append_truncated_record;
 
-const COMMANDS: [(&str, &[&str]); 5] = [
-    ("read", &[]),
-    ("expert", &[]),
-    ("follow", &["--stream", "tcp:0"]),
-    ("stats", &[]),
-    ("tls", &[]),
+const COMMANDS: [(&str, &str, &[&str]); 5] = [
+    ("files", "read", &[]),
+    ("analyze", "expert", &[]),
+    ("analyze", "follow", &["--stream", "tcp:0"]),
+    ("analyze", "stats", &[]),
+    ("analyze", "tls", &[]),
 ];
 
 fn handshake_capture(format: Format) -> Vec<u8> {
@@ -59,9 +59,9 @@ fn piped_empty_malformed_and_truncated_input_keeps_file_errors() {
         inputs.push(bytes);
     }
     for bytes in inputs {
-        for (command, flags) in COMMANDS {
+        for (group, command, flags) in COMMANDS {
             let format = if command == "stats" { "json" } else { "ndjson" };
-            let output = assert_file_stdin_parity(&bytes, command, flags, format, 3);
+            let output = assert_file_stdin_parity(&bytes, group, command, flags, format, 3);
             if format == "ndjson" {
                 let records = parse_ndjson(&output);
                 assert_contiguous(&records);
@@ -82,7 +82,7 @@ fn piped_captures_keep_frame_byte_and_per_item_limits() {
             total_bytes += frame.bytes().len();
         }
         let max_bytes = (total_bytes - 1).to_string();
-        for (command, flags) in COMMANDS {
+        for (group, command, flags) in COMMANDS {
             for limits in [
                 &["--max-frames", "1"][..],
                 &["--max-bytes", &max_bytes, "--max-frame-bytes", &max_bytes][..],
@@ -91,7 +91,7 @@ fn piped_captures_keep_frame_byte_and_per_item_limits() {
                 let mut flags = flags.to_vec();
                 flags.extend_from_slice(limits);
                 let format = if command == "stats" { "json" } else { "ndjson" };
-                assert_file_stdin_parity(&bytes, command, &flags, format, 6);
+                assert_file_stdin_parity(&bytes, group, command, &flags, format, 6);
             }
         }
     }

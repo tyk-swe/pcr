@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v16",
+  "schema": "packetcraftr.output/v1",
   "command": "scan",
   "mode": "aggregate",
   "status": "success",
@@ -59,14 +59,13 @@
         "classification": "timeout",
         "port_hint": "https",
         "inference": {
-          "state": "filtered",
-          "rule": "tcp_syn.silence",
-          "supporting": [
-            0
-          ],
+          "rule": "operational_failure",
+          "supporting": [],
           "conflicting": [],
           "unanswered": [],
-          "failed": []
+          "failed": [
+            0
+          ]
         },
         "probes": [
           {
@@ -82,7 +81,11 @@
               "unix_seconds": 1770000000,
               "nanoseconds": 0
             },
-            "reason": "no checksum-valid, protocol-consistent response before the deadline"
+            "reason": "no checksum-valid, protocol-consistent response before the deadline",
+            "measurement": {
+              "kind": "no_reply",
+              "coverage": "unknown"
+            }
           }
         ]
       },
@@ -125,6 +128,9 @@
             "latency": {
               "secs": 0,
               "nanos": 9000000
+            },
+            "measurement": {
+              "kind": "response"
             }
           }
         ]
@@ -136,7 +142,7 @@
     "rtt": {
       "sent": 2,
       "received": 1,
-      "lost": 1,
+      "lost": 0,
       "min": {
         "secs": 0,
         "nanos": 9000000
@@ -148,7 +154,8 @@
       "max": {
         "secs": 0,
         "nanos": 9000000
-      }
+      },
+      "unavailable": 1
     },
     "scheduling": {
       "mode": "fixed",

@@ -121,7 +121,7 @@ pub(crate) fn run(
     if args.checksum_mode.is_some() && !rules.has_field_edits() {
         return Err(CliError::new(
             Kind::Usage,
-            "--checksum-mode requires field assignments via --set or a v2 rules file",
+            "--checksum-mode requires field assignments via --set or a v1 rules file",
         ));
     }
     if args.dry_run && rules.has_header_edits() {

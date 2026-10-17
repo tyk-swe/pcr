@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v16",
+  "schema": "packetcraftr.output/v1",
   "command": "expert",
   "mode": "aggregate",
   "status": "error",
@@ -8,7 +8,7 @@
     "kind": "usage",
     "message": "unknown display filter field nope at byte 0",
     "causes": [],
-    "remediation": "run `packetcraftr protocols <PROTOCOL>` to list the fields a protocol exposes"
+    "remediation": "run `packetcraftr reference protocols <PROTOCOL>` to list the fields a protocol exposes"
   },
   "diagnostics": []
 }

@@ -6,6 +6,22 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+- Correct first-header HSTS handling, directive parsing and duplicate detection,
+  CSP directive precedence/case handling, and cookie attribute whitespace and
+  final SameSite interpretation without disclosing cookie values.
+- Tighten IOC domain/CIDR and decimal link-type validation, normalize no-op frame
+  selections for verbatim paths, and avoid intermediate timestamp/request-line
+  allocations.
+- Validate forwarding detail evidence and omission accounting, harden release
+  and native report provenance, and prevent report/input alias overwrites.
+  Share bounded strict JSON parsing and atomic tooling report publication.
+- Reject inconsistent scanner benchmark inventories, typed settings, comparator
+  disagreement, and hidden accuracy failures; use exact arithmetic for budget
+  decisions and clean up failed measurement processes.
+- Add stdlib-only tooling and consumer regression tests, including optimized
+  Python execution in CI. These tests supplement, not replace, Rust and
+  privileged native validation.
+
 - Add longest-conversation statistics ranking (`--sort duration`) and inclusive
   `--min-frames` row filtering with unchanged overview totals and separate
   omission diagnostics. Reject ignored fragment `--top` options and direct

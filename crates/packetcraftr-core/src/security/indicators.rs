@@ -53,7 +53,7 @@ impl Document {
         }
         let mut ids = BTreeSet::new();
         for i in &mut doc.indicators {
-            if i.id.is_empty()
+            if i.id.trim().is_empty()
                 || i.id.len() > 128
                 || i.id.chars().any(char::is_control)
                 || !ids.insert(i.id.clone())
@@ -67,7 +67,7 @@ impl Document {
                 Kind::Ip => i.value.parse::<IpAddr>().is_ok(),
                 Kind::Cidr => network(&i.value).is_some(),
                 Kind::Domain | Kind::DomainSuffix => {
-                    i.value = i.value.trim_end_matches('.').into();
+                    i.value = i.value.strip_suffix('.').unwrap_or(&i.value).into();
                     valid_domain(&i.value)
                 }
                 Kind::Ja3 => i.value.len() == 32 && i.value.bytes().all(|b| b.is_ascii_hexdigit()),
@@ -107,6 +107,9 @@ fn valid_domain(s: &str) -> bool {
 fn network(s: &str) -> Option<(IpAddr, u8)> {
     let (ip, prefix) = s.split_once('/')?;
     let ip = ip.parse::<IpAddr>().ok()?;
+    if prefix.is_empty() || !prefix.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
     let prefix = prefix.parse::<u8>().ok()?;
     let bits = if ip.is_ipv4() { 32 } else { 128 };
     if prefix > bits {
@@ -136,17 +139,22 @@ impl Indicator {
         }
     }
     pub fn matches_domain(&self, candidate: &str) -> bool {
-        let candidate = candidate.trim_end_matches('.').to_ascii_lowercase();
-        match self.kind {
-            Kind::Domain => candidate == self.value,
-            Kind::DomainSuffix => {
-                candidate == self.value
-                    || candidate
-                        .strip_suffix(&self.value)
-                        .is_some_and(|s| s.ends_with('.'))
-            }
-            _ => false,
+        if !matches!(self.kind, Kind::Domain | Kind::DomainSuffix) {
+            return false;
         }
+        let candidate = candidate.strip_suffix('.').unwrap_or(candidate);
+        let value = self.value.strip_suffix('.').unwrap_or(&self.value);
+        if !valid_domain(candidate) || !valid_domain(value) {
+            return false;
+        }
+        if candidate.eq_ignore_ascii_case(value) {
+            return true;
+        }
+        // Validation guarantees ASCII, so the suffix boundary is a UTF-8 boundary.
+        matches!(self.kind, Kind::DomainSuffix)
+            && candidate.len() > value.len()
+            && candidate.as_bytes()[candidate.len() - value.len() - 1] == b'.'
+            && candidate[candidate.len() - value.len()..].eq_ignore_ascii_case(value)
     }
 }
 
@@ -161,5 +169,78 @@ mod tests {
         assert!(d.indicators[1].matches_domain("A.EXAMPLE.TEST."));
         assert!(!d.indicators[1].matches_domain("badexample.test"));
         for input in [br#"{"schema":"packetcraftr.indicators/v2","indicators":[]}"#.as_slice(),br#"{"schema":"packetcraftr.indicators/v1","indicators":[{"id":"a","kind":"ja3","value":"invalid"}]}"#,br#"{"schema":"packetcraftr.indicators/v1","indicators":[{"id":"a","kind":"ip","value":"127.0.0.1"},{"id":"a","kind":"ip","value":"127.0.0.2"}]}"#] { assert!(Document::parse(input).is_err()); }
+    }
+}
+
+#[cfg(test)]
+mod input_regressions {
+    use super::*;
+
+    fn document(id: &str, kind: Kind, value: &str) -> Result<Document, Error> {
+        let bytes = serde_json::to_vec(&Document {
+            schema: SCHEMA.into(),
+            indicators: vec![Indicator {
+                id: id.into(),
+                kind,
+                value: value.into(),
+            }],
+        })
+        .unwrap();
+        Document::parse(&bytes)
+    }
+
+    #[test]
+    fn domains_have_at_most_one_root_terminator() {
+        assert!(document("dns", Kind::Domain, "example.test.").is_ok());
+        assert!(document("dns", Kind::Domain, "example.test..").is_err());
+    }
+
+    #[test]
+    fn cidr_prefixes_are_decimal_not_signed() {
+        assert!(document("net", Kind::Cidr, "192.0.2.0/+24").is_err());
+        assert!(document("net", Kind::Cidr, "2001:db8::/0").is_ok());
+    }
+
+    #[test]
+    fn blank_identifiers_are_not_useful_evidence_names() {
+        assert!(document("   ", Kind::Ip, "192.0.2.1").is_err());
+        assert!(document("dns name", Kind::Domain, "example.test").is_ok());
+    }
+
+    #[test]
+    fn domain_matching_validates_candidate_labels() {
+        let indicator = Indicator {
+            id: "dns".into(),
+            kind: Kind::DomainSuffix,
+            value: "example.test".into(),
+        };
+        for candidate in [
+            ".example.test",
+            "a..example.test",
+            "example.test..",
+            "-a.example.test",
+            "a\0.example.test",
+        ] {
+            assert!(!indicator.matches_domain(candidate), "{candidate:?}");
+        }
+        assert!(!indicator.matches_domain(&format!("{}.example.test", "a".repeat(64))));
+    }
+
+    #[test]
+    fn public_indicators_match_case_insensitively_without_normalization() {
+        let indicator = Indicator {
+            id: "dns".into(),
+            kind: Kind::DomainSuffix,
+            value: "EXAMPLE.TEST.".into(),
+        };
+        assert!(indicator.matches_domain("a.example.test."));
+        assert!(!indicator.matches_domain("badexample.test"));
+        assert!(
+            !Indicator {
+                value: ".".into(),
+                ..indicator
+            }
+            .matches_domain("anything.")
+        );
     }
 }

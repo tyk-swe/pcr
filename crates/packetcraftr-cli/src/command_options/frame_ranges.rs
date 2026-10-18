@@ -47,11 +47,17 @@ impl FrameSelectionArgs {
 impl FrameSelection {
     /// True when no position is excluded, so a verbatim fast path stays valid.
     pub(crate) fn is_unrestricted(&self) -> bool {
-        self.ranges.is_none() && self.every.is_none()
+        self.ranges
+            .as_deref()
+            .is_none_or(|ranges| ranges == [(1, u64::MAX)])
+            && self.every.is_none_or(|every| every == 1)
     }
 
     /// `position` is the one-based source position of a frame.
     pub(crate) fn keeps(&self, position: u64) -> bool {
+        if position == 0 {
+            return false;
+        }
         if let Some(ranges) = &self.ranges {
             let after = ranges.partition_point(|&(_, end)| end < position);
             if !ranges
@@ -140,5 +146,40 @@ fn position(digits: &str, item: &str) -> Result<u64, CliError> {
         Err(_) => Err(selection_error(format!(
             "--frames item {item:?} has a position beyond the supported range"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn positions_are_always_one_based() {
+        assert!(!FrameSelection::default().keeps(0));
+        assert!(FrameSelection::default().keeps(1));
+    }
+
+    #[test]
+    fn explicit_noop_selections_keep_verbatim_fast_path() {
+        for frames in [None, Some("1-"), Some("1-10,11-")] {
+            for every in [None, Some(1)] {
+                let selection = FrameSelectionArgs {
+                    frames: frames.map(str::to_owned),
+                    every,
+                }
+                .resolve()
+                .unwrap();
+                assert!(selection.is_unrestricted());
+                assert!(selection.keeps(u64::MAX));
+                assert!(!selection.keeps(0));
+            }
+        }
+        assert!(!FrameSelectionArgs {
+            frames: Some("2-".into()),
+            every: None,
+        }
+        .resolve()
+        .unwrap()
+        .is_unrestricted());
     }
 }

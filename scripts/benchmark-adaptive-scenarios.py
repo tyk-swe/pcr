@@ -1,9 +1,11 @@
 import argparse
 import importlib.util
-import json
 import pathlib
 import platform
 import statistics
+import subprocess
+
+from script_support import prepare_report, same_json, write_json_atomic
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("scanner_measurements", ROOT / "scripts/benchmark-scanner.py")
@@ -45,6 +47,8 @@ def expected(scenario, mode):
 
 
 def validate(record, scenario, family, mode):
+    if not isinstance(record, dict):
+        raise ValueError("fixture output must be an object")
     if (record.get("schema") != "packetcraftr.scheduling-fixture/v1"
             or record.get("scenario") != scenario or record.get("family") != family
             or record.get("scheduling_mode") != mode
@@ -53,7 +57,7 @@ def validate(record, scenario, family, mode):
     config = SCENARIOS[scenario]
     settings = dict(config, hosts=1, max_in_flight=2,
                     max_probes=config["ports"] * config["attempts"], max_evidence_bytes=1048576)
-    if record.get("settings") != settings:
+    if not same_json(record.get("settings"), settings):
         raise ValueError("fixture changed the independently specified hard settings")
     oracle = expected(scenario, mode)
     work = measurements.require_integer(record["work_sent"], "work_sent")
@@ -67,11 +71,11 @@ def validate(record, scenario, family, mode):
         raise ValueError("fixture outcome or work disagrees with the independent oracle")
     if oracle["status"] == "rejected":
         if (record.get("error_code") != oracle["error_code"]
-                or record.get("capture_sessions") != 0
+                or measurements.require_integer(record.get("capture_sessions"), "capture sessions") != 0
                 or "prepared" not in str(record.get("error_cause", "")).lower()):
             raise ValueError("oversized fixed plan did not fail before active capture/traffic")
     else:
-        if (record.get("endpoints") != oracle["endpoints"]
+        if (not same_json(record.get("endpoints"), oracle["endpoints"])
                 or record.get("incomplete") != [] or record.get("conditions") != []):
             raise ValueError("endpoint accuracy or scheduling evidence disagrees")
         peak = measurements.require_integer(record["observed_peak_window"], "observed peak")
@@ -84,6 +88,9 @@ def validate(record, scenario, family, mode):
 
 
 def run(binary, repetitions):
+    if not 1 <= measurements.require_integer(repetitions, "repetitions") <= 10:
+        raise ValueError("repetitions must be within 1..=10")
+    binary = pathlib.Path(binary).absolute()
     digest = measurements.digest(binary)
     cases = []
     for scenario in SCENARIOS:
@@ -96,12 +103,14 @@ def run(binary, repetitions):
                     try:
                         result = measurements.measured([str(binary), scenario, family, mode])
                         row.update(result)
+                        if result.get("peak_process_memory_bytes") is not None:
+                            measurements.require_integer(result["peak_process_memory_bytes"], "peak RSS")
                         if result["exit_code"] != 0:
                             raise ValueError(f"fixture failed: {result['stderr']}")
                         record = measurements.strict_json(result["stdout"])
                         row["record"] = record
                         row.update(**validate(record, scenario, family, mode), status="exercised")
-                    except (ValueError, KeyError, TypeError, OSError) as error:
+                    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:
                         row["error"] = str(error)
     if measurements.digest(binary) != digest:
         raise ValueError("fixture binary changed during measurement")
@@ -130,19 +139,27 @@ def run(binary, repetitions):
             for mode, group in groups.items():
                 cell["medians"][mode]["peak_process_memory_bytes"] = statistics.median(
                     row["peak_process_memory_bytes"] for row in group)
-            fixed, adaptive = cell["medians"]["fixed"], cell["medians"]["adaptive"]
+            doubled = {
+                mode: {metric: measurements.median_twice(row["record"][metric] for row in group)
+                       for metric in metrics}
+                for mode, group in groups.items()
+            }
+            for mode, group in groups.items():
+                doubled[mode]["peak_process_memory_bytes"] = measurements.median_twice(
+                    row["peak_process_memory_bytes"] for row in group)
+            fixed, adaptive = doubled["fixed"], doubled["adaptive"]
             cell["checks"] = dict(
                 accuracy=True,
                 peak_memory=adaptive["peak_process_memory_bytes"]
-                <= fixed["peak_process_memory_bytes"] + 8_388_608,
+                <= fixed["peak_process_memory_bytes"] + 2 * 8_388_608,
             )
             if scenario == "plan-retention":
                 cell["checks"]["bounded_admission"] = True
             else:
                 cell["checks"].update(
                     less_work=adaptive["work_sent"] < fixed["work_sent"],
-                    latency=adaptive["operation_elapsed_ns"]
-                    <= fixed["operation_elapsed_ns"] * 1.5 + 1_000_000,
+                    latency=adaptive["operation_elapsed_ns"] * 2
+                    <= fixed["operation_elapsed_ns"] * 3 + 4_000_000,
                 )
             cell["status"] = ("within_proposed_budgets" if all(cell["checks"].values())
                               else "outside_proposed_budgets")
@@ -166,12 +183,15 @@ def main():
     if not 1 <= args.repetitions <= 10:
         parser.error("repetitions must be within 1..=10")
     try:
+        prepare_report(args.report, args.fixture_binary)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    try:
         report = run(args.fixture_binary.resolve(strict=True), args.repetitions)
     except (ValueError, OSError) as error:
         report = dict(schema="packetcraftr.adaptive-scenario-benchmark/v1",
                       status="failed", optimization_accepted=False, error=str(error))
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(report, indent=2) + "\n")
+    write_json_atomic(args.report, report)
     print(args.report)
     return 0 if report["status"] == "measured" else 1
 

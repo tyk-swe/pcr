@@ -4,7 +4,6 @@ import argparse
 import errno
 import hashlib
 import ipaddress
-import json
 import os
 import pathlib
 import platform
@@ -16,7 +15,8 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 
-from validation_evidence import ROOT, digest
+from script_support import prepare_report, same_json, strict_json, write_json_atomic
+from validation_evidence import ROOT, GIT_TIMEOUT, digest
 
 OUTPUT_LIMIT = 1024 * 1024
 PROCESS_TIMEOUT = 15
@@ -45,21 +45,6 @@ def fixture_socket(family, address):
         raise
 
 
-def strict_json(text):
-    def object_pairs(pairs):
-        value = {}
-        for key, item in pairs:
-            if key in value:
-                raise ValueError(f"duplicate JSON key: {key}")
-            value[key] = item
-        return value
-
-    def invalid_constant(value):
-        raise ValueError(f"non-finite JSON constant: {value}")
-
-    return json.loads(text, object_pairs_hook=object_pairs, parse_constant=invalid_constant)
-
-
 def load_corpus(path):
     with path.open("rb") as source:
         raw = source.read(OUTPUT_LIMIT + 1)
@@ -70,6 +55,10 @@ def load_corpus(path):
         raise ValueError("unsupported scanner corpus")
     if corpus["families"] != ["ipv4", "ipv6"] or corpus["transports"] != ["tcp", "udp", "icmp"]:
         raise ValueError("corpus must cover both families and all scanner transports")
+    expected_request = dict(attempts=1, ports=[443], timeout_ms=20, max_duration_ms=2000,
+                            max_probes=1, max_evidence_bytes=65536, windows=[1, 2])
+    if not same_json(corpus["request"], expected_request):
+        raise ValueError("corpus request disagrees with the fixed executable fixture settings")
     windows = corpus["request"]["windows"]
     if windows != [1, 2] or any(type(window) is not int for window in windows):
         raise ValueError("corpus must contain both scheduling windows [1, 2]")
@@ -95,18 +84,23 @@ def load_corpus(path):
             "mixed-same-port", "silent-udp", "contradictory-udp"]:
         raise ValueError("corpus must contain the complete inference inventory")
     for case in corpus.get("inference_scenarios", []):
-        attempts = case["request"]["attempts"]
+        attempts = require_integer(case["request"]["attempts"], "inference attempts")
+        if attempts == 0:
+            raise ValueError("inference attempts must be positive")
+        for label, value in case["request"].items():
+            require_integer(value, "inference " + label)
         if case["families"] != ["ipv4", "ipv6"]:
             raise ValueError("inference scenarios must cover both address families")
         if case["request"]["max_probes"] != attempts * len(case["endpoints"]):
             raise ValueError("an inference probe ceiling must admit every authorized attempt")
         for endpoint in case["endpoints"]:
             expected = endpoint["expected"]
-            ordinals = [attempt["ordinal"] for attempt in expected["attempts"]]
+            ordinals = [require_integer(attempt["ordinal"], "attempt ordinal")
+                        for attempt in expected["attempts"]]
             if len(endpoint["script"]) != attempts or ordinals != list(range(1, attempts + 1)):
                 raise ValueError("inference scenarios must script and author every attempt once")
             partitions = expected["partitions"]
-            accounted = sorted(ordinal for label in (
+            accounted = sorted(require_integer(ordinal, "partition ordinal") for label in (
                 "supporting", "conflicting", "unanswered", "failed") for ordinal in partitions[label])
             if accounted != list(range(1, attempts + 1)):
                 raise ValueError("each inference attempt must belong to exactly one evidence partition")
@@ -120,7 +114,11 @@ def load_corpus(path):
             "adaptive-fair-hosts", "adaptive-host-deadline", "adaptive-window-loss",
             "adaptive-connect-cleanup", "adaptive-plan-boundary"]:
         raise ValueError("adaptive scheduling inventory must contain each authored condition once in order")
+    if set(corpus["fixture_addresses"]) != {"ipv4", "ipv6"}:
+        raise ValueError("fixture addresses must cover exactly both address families")
     for family, addresses in corpus["fixture_addresses"].items():
+        if set(addresses) != {"source", "destination", "router"}:
+            raise ValueError("fixture addresses must declare source, destination and router")
         network = ipaddress.ip_network("192.0.2.0/24" if family == "ipv4" else "2001:db8::/32")
         if any(ipaddress.ip_address(value) not in network for value in addresses.values()):
             raise ValueError("injected fixtures must use documentation addresses")
@@ -137,35 +135,45 @@ def load_corpus(path):
 
 def measured(command):
     started = time.monotonic_ns()
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=ROOT)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=ROOT,
+                               start_new_session=(os.name == "posix"))
     buffers = [bytearray(), bytearray()]
     overflow = threading.Event()
+    read_failure = threading.Event()
+
+    def terminate():
+        # Do not poll/reap in reader threads: wait4 must retain ownership of
+        # the exact child's exit status and resource record.
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            process.kill()
 
     def drain(pipe, destination):
-        with pipe:
-            while block := pipe.read(8192):
-                if len(destination) + len(block) > OUTPUT_LIMIT:
-                    overflow.set()
-                    # Popen.kill() polls/reaps on POSIX, racing the owner's
-                    # wait4() and losing the child's exit/resource record.
-                    if hasattr(os, "wait4"):
-                        try:
-                            os.kill(process.pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
-                    else:
-                        process.kill()
-                    return
-                destination.extend(block)
+        try:
+            with pipe:
+                while block := pipe.read(8192):
+                    if len(destination) + len(block) > OUTPUT_LIMIT:
+                        overflow.set()
+                        terminate()
+                        return
+                    destination.extend(block)
+        except (OSError, ValueError):
+            read_failure.set()
+            terminate()
 
-    readers = [threading.Thread(target=drain, args=(pipe, output), daemon=True)
-               for pipe, output in zip((process.stdout, process.stderr), buffers)]
-    for reader in readers:
-        reader.start()
+    readers = []
     peak = None
     failure = None
     deadline = time.monotonic() + PROCESS_TIMEOUT
     try:
+        for pipe, output in zip((process.stdout, process.stderr), buffers):
+            reader = threading.Thread(target=drain, args=(pipe, output), daemon=True)
+            reader.start()
+            readers.append(reader)
         if hasattr(os, "wait4"):
             while True:
                 pid, status, usage = os.wait4(process.pid, os.WNOHANG)
@@ -179,18 +187,28 @@ def measured(command):
         else:
             process.wait(timeout=PROCESS_TIMEOUT)
     except BaseException as error:
-        process.kill()
+        terminate()
         process.wait()
         failure = error
     finally:
+        # A failed thread start must not leak the child or its unowned pipe.
+        for pipe in (process.stdout, process.stderr)[len(readers):]:
+            pipe.close()
         for reader in readers:
             reader.join(timeout=2)
+        if any(reader.is_alive() for reader in readers):
+            # Descendants must not keep inherited pipes (and daemon readers)
+            # alive after the measured process has exited.
+            read_failure.set()
+            terminate()
+            for reader in readers:
+                reader.join(timeout=2)
     if failure is not None:
         if isinstance(failure, subprocess.TimeoutExpired):
             failure.output = buffers[0].decode('utf-8', errors='replace')
             failure.stderr = buffers[1].decode('utf-8', errors='replace')
         raise failure
-    if any(reader.is_alive() for reader in readers) or overflow.is_set():
+    if any(reader.is_alive() for reader in readers) or overflow.is_set() or read_failure.is_set():
         raise ValueError("benchmark output exceeded its finite bound or did not close")
     return {
         "command": [str(value) for value in command],
@@ -205,9 +223,17 @@ def measured(command):
 
 
 def require_integer(value, label):
-    if type(value) is not int or value < 0:
-        raise ValueError(f"{label} must be a nonnegative integer")
+    if type(value) is not int or not 0 <= value <= 2**64 - 1:
+        raise ValueError(f"{label} must be an unsigned 64-bit integer")
     return value
+
+
+def median_twice(values):
+    """An exact integer twice-median, including for u64-sized measurements."""
+    ordered = sorted(require_integer(value, "measurement") for value in values)
+    if not ordered:
+        raise ValueError("cannot summarize an empty measurement group")
+    return ordered[(len(ordered) - 1) // 2] + ordered[len(ordered) // 2]
 
 
 def validate_packet(record, case, family, transport, window, adaptive=False):
@@ -327,7 +353,8 @@ def connect_case(binary, corpus, case, family, nmap, adaptive=False):
             raise ValueError(f"native connect execution failed: {run['stderr']} {run['stdout']}")
         envelope = strict_json(run["stdout"])
         if (envelope["schema"] != "packetcraftr.output/v1"
-                or envelope["status"] != "success" or envelope["command"] != "scan"):
+                or envelope["status"] != "success" or envelope["command"] != "scan"
+                or envelope.get("mode") != "aggregate"):
             raise ValueError("native connect did not publish a successful scan envelope")
         result = envelope["result"]
         if result["scheduling"]["mode"] != ("adaptive" if adaptive else "fixed"):
@@ -377,6 +404,8 @@ def connect_case(binary, corpus, case, family, nmap, adaptive=False):
             run["nmap"] = dict(**compared, observed_states=states, expected=case["nmap_expected"],
                                explained_divergence=case["divergence"],
                                agrees_with_fixture=(states == [case["nmap_expected"]]))
+            if not run["nmap"]["agrees_with_fixture"]:
+                run["correct"] = False
         return run
 
 
@@ -393,6 +422,11 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.repetitions <= 10:
         parser.error("repetitions must be 1..=10")
+    try:
+        prepare_report(args.report, *(path for path in (
+            args.binary, args.fixture_binary, args.nmap, args.corpus) if path is not None))
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
     report = dict(schema="packetcraftr.scanner-benchmark/v1", platform=platform.platform(),
                   scheduling_mode="adaptive" if args.adaptive else "fixed",
                   measured_inventory="single_probe_scan_connect_and_traceroute",
@@ -418,8 +452,8 @@ def main():
                       settings=dict(raw=corpus["request"], connect=dict(
                           attempts=1, max_probes=1, max_in_flight=1,
                           timeout_ms=1000, max_duration_ms=2000)),
-                      commit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-                      dirty=bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT)))
+                      commit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, encoding="utf-8", timeout=GIT_TIMEOUT).strip(),
+                      dirty=bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, timeout=GIT_TIMEOUT)))
         binary = tool(args.binary, "binary")
         args.fixture_binary = tool(args.fixture_binary, "fixture_binary")
         args.nmap = tool(args.nmap, "nmap")
@@ -489,19 +523,21 @@ def main():
                     evaluated=len(rows), unavailable_or_failed=sum(
                         row["family"] == family and row["workflow"] == workflow
                         and row["status"] != "exercised" for row in report["cases"])))
+        for identity in report["tools"].values():
+            if identity["status"] == "available" and digest(identity["path"]) != identity["sha256"]:
+                raise ValueError("benchmark executable changed during measurement")
         failed = any(row["status"] == "failed" or row.get("correct") is False for row in report["cases"])
         incomplete = any(row["status"] == "unavailable" or row.get("peak_process_memory_bytes") is None
                          for row in report["cases"])
         report["status"] = "failed" if failed else "incomplete" if incomplete else "exercised"
         report["coverage_complete"] = all(row["status"] == "exercised" for row in report["cases"])
         report["comparison_complete"] = bool(args.nmap) and all(
-            row["status"] == "exercised" and "nmap" in row
+            row["status"] == "exercised" and row.get("nmap", {}).get("agrees_with_fixture") is True
             for row in report["cases"] if row["workflow"] == "tcp_connect")
     except Exception as error:
         report.update(status="failed", setup_error=str(error))
     finally:
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(json.dumps(report, indent=2) + "\n")
+        write_json_atomic(args.report, report)
     print(args.report)
     return 1 if report["status"] != "exercised" else 0
 

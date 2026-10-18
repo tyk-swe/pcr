@@ -189,3 +189,27 @@ are observations; `reused_hops` cite source host/probes/time/age and are claims.
 Standalone `identify-os` separates raw observations from qualified OS-family
 candidates (`matched`, `ambiguous`, `unknown`, `inconclusive` with ordinal
 `qualified` confidence). See [OS identification](os-identification.md).
+
+
+## Benchmark report validation
+
+Scanner comparisons require the exact declared fixture inventory and complete
+repetitions, a valid corpus SHA-256, a named platform, and identical hard settings.
+Settings and expectation comparisons distinguish booleans from integers. Invalid
+or unknown report states do not establish measurements; an accuracy failure
+remains a failure even when peak-memory measurement is unavailable. An optional
+Nmap disagreement marks its fixture incorrect rather than completing a successful
+comparison.
+
+Budget decisions use integer twice-medians, avoiding floating-point boundary
+rounding for u64 measurements. Displayed medians remain JSON numbers; unusually
+large half-integer medians may be rounded in display, but never in budget checks.
+Logical retained-byte charges remain separate from exact-child peak RSS.
+POSIX measurement children own process groups so timed-out or exited children
+cannot leave descendants holding the output pipes. Output remains byte-bounded;
+reader failures and incomplete pipe shutdown fail the measurement. Windows
+without `wait4` still reports peak memory as unavailable rather than inventing it.
+
+Run `python3 -m unittest discover -s scripts/tests -v` to exercise these validators
+without scanning a network. This suite does not produce optimization acceptance
+or replace real benchmark reports.

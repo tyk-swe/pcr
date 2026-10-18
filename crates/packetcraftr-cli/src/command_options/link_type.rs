@@ -29,9 +29,26 @@ pub(crate) fn parse(input: &str) -> Result<LinkType, String> {
         "ipv4" | "ip" => Some(LinkType::IPV4),
         "ipv6" => Some(LinkType::IPV6),
         "linux-sll2" | "sll2" => Some(LinkType::LINUX_SLL2),
-        _ => normalized.parse::<u32>().ok().map(LinkType),
+        _ if !normalized.is_empty() && normalized.bytes().all(|byte| byte.is_ascii_digit()) => {
+            normalized.parse::<u32>().ok().map(LinkType)
+        }
+        _ => None,
     };
     link_type.ok_or_else(|| {
         format!("unknown link type {input:?}; use one of {NAMES} or a decimal number")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_link_types_use_unsigned_decimal_syntax() {
+        for invalid in ["+1", "-1", "0x1", "", "4294967296"] {
+            assert!(parse(invalid).is_err(), "{invalid:?}");
+        }
+        assert_eq!(parse(" 4294967295 ").unwrap(), LinkType(u32::MAX));
+        assert_eq!(parse("ETHERNET").unwrap(), LinkType::ETHERNET);
+    }
 }

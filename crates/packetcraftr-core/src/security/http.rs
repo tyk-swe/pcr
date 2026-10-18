@@ -5,6 +5,8 @@ use super::{Finding, Report, Severity};
 use crate::protocol::application::http::Head;
 use serde_json::json;
 
+mod policy;
+
 /// Audits one final HTTP response. Cookie values are never copied into the report.
 pub fn audit(head: &Head, subject: &str, https: bool) -> Report {
     let mut report = Report::new("audit-http");
@@ -18,15 +20,10 @@ pub fn audit(head: &Head, subject: &str, https: bool) -> Report {
             .collect::<Vec<_>>()
     };
     let csp = values("content-security-policy");
-    let framing = csp.iter().any(|v| {
-        v.split(';').any(|d| {
-            d.split_whitespace().next() == Some("frame-ancestors")
-                && d.split_whitespace().count() > 1
-                && !d.split_whitespace().skip(1).any(|source| source == "*")
-        })
-    }) || values("x-frame-options")
-        .iter()
-        .any(|v| ["deny", "sameorigin"].contains(&v.trim().to_ascii_lowercase().as_str()));
+    let framing = csp.iter().any(|value| policy::framing_csp(value))
+        || values("x-frame-options")
+            .iter()
+            .any(|v| ["deny", "sameorigin"].contains(&v.trim().to_ascii_lowercase().as_str()));
     let checks = [
         (
             "http.csp",
@@ -74,14 +71,10 @@ pub fn audit(head: &Head, subject: &str, https: bool) -> Report {
         (
             "http.hsts",
             https
-                && !values("strict-transport-security").iter().any(|v| {
-                    v.split(';').any(|p| {
-                        p.trim().split_once('=').is_some_and(|(k, v)| {
-                            k.eq_ignore_ascii_case("max-age")
-                                && v.trim().parse::<u64>().is_ok_and(|n| n > 0)
-                        })
-                    })
-                }),
+                && !head
+                    .values("strict-transport-security")
+                    .next()
+                    .is_some_and(policy::positive_hsts),
             "Positive HTTPS Strict-Transport-Security max-age not observed",
             "After validating HTTPS deployment, configure a positive HSTS max-age.",
         ),
@@ -107,13 +100,23 @@ pub fn audit(head: &Head, subject: &str, https: bool) -> Report {
             .and_then(|p| p.split_once('='))
             .map(|(n, _)| n.trim())
             .unwrap_or("[malformed]");
-        let attrs: Vec<_> = parts.map(|s| s.trim().to_ascii_lowercase()).collect();
-        let has = |name: &str| attrs.iter().any(|s| s.split('=').next() == Some(name));
+        // RFC 6265 section 5.2 trims attribute names and values separately.
+        let attrs: Vec<_> = parts
+            .map(|part| {
+                let (name, value) = part.split_once('=').unwrap_or((part, ""));
+                (
+                    name.trim_matches([' ', '\t']).to_ascii_lowercase(),
+                    value.trim_matches([' ', '\t']).to_ascii_lowercase(),
+                )
+            })
+            .collect();
+        let has = |name: &str| attrs.iter().any(|(key, _)| key == name);
         let same_site = attrs
             .iter()
             .rev()
-            .find_map(|s| s.strip_prefix("samesite="))
-            .filter(|s| ["strict", "lax", "none"].contains(s));
+            .find(|(name, _)| name == "samesite")
+            .map(|(_, value)| value.as_str())
+            .filter(|value| ["strict", "lax", "none"].contains(value));
         let evidence = json!({"index":index,"name":name,"value":"[redacted]","secure":has("secure"),"http_only":has("httponly"),"same_site":same_site});
         for (rule, missing, summary) in [
             (
@@ -188,5 +191,56 @@ mod tests {
                 .any(|f| f.rule_id == "http.referrer_policy")
         );
         assert!(report.findings.iter().any(|f| f.rule_id == "http.framing"));
+    }
+}
+
+#[cfg(test)]
+mod policy_regressions {
+    use super::*;
+
+    fn report(extra: &str) -> Report {
+        let (head, _) = crate::protocol::application::http::parse_head(&bytes::Bytes::from(format!(
+            "HTTP/1.1 200 OK\r\n{extra}\r\n"
+        )))
+        .unwrap()
+        .unwrap();
+        audit(&head, "example.test", true)
+    }
+
+    #[test]
+    fn only_the_first_hsts_field_is_effective() {
+        let report = report(
+            "Strict-Transport-Security: max-age=0\r\nStrict-Transport-Security: max-age=1\r\n",
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id == "http.hsts")
+        );
+    }
+
+    #[test]
+    fn cookie_attribute_whitespace_does_not_hide_protection() {
+        let report =
+            report("Set-Cookie: sid=private; Secure = yes; HttpOnly = yes; SameSite = Lax\r\n");
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id.starts_with("http.cookie_"))
+        );
+        assert!(!serde_json::to_string(&report).unwrap().contains("private"));
+    }
+
+    #[test]
+    fn the_last_samesite_attribute_is_not_skipped_when_bare() {
+        let report = report("Set-Cookie: sid=private; Secure; HttpOnly; SameSite=Lax; SameSite\r\n");
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id == "http.cookie_same_site")
+        );
     }
 }

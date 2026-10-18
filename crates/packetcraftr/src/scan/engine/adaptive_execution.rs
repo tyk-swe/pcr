@@ -12,7 +12,7 @@ use crate::target::SelectedAddress;
 
 use super::approval::ApprovedScan;
 use super::pacing::{Owed, settle};
-use super::pipelined::{add_stats, pipeline_options};
+use super::pipelined::{add_stats, pipeline_options, prepared_limit};
 use crate::probe::{self, enforce_deadline};
 use crate::scan::Error;
 use crate::scan::error::probe_error;
@@ -28,8 +28,6 @@ pub(in crate::scan) fn adaptive_batches<'r>(
     stage: Stage,
     first_sequence: u64,
 ) -> impl Iterator<Item = Batch<Probe>> + 'r {
-    let host_count = targets.len() as u64;
-    let endpoint_count = endpoints.len() as u64;
     (1..=request.attempts)
         .flat_map(move |attempt| {
             endpoints
@@ -43,12 +41,13 @@ pub(in crate::scan) fn adaptive_batches<'r>(
         })
         .map(
             move |(host_index, endpoint_index, attempt, target, endpoint)| {
-                let sequence = first_sequence.saturating_add(
-                    ((u64::from(attempt) - 1)
-                        .saturating_mul(endpoint_count)
-                        .saturating_add(endpoint_index as u64))
-                    .saturating_mul(host_count)
-                    .saturating_add(host_index as u64),
+                let sequence = crate::scan::plan::sequence(
+                    first_sequence,
+                    attempt,
+                    endpoint_index,
+                    endpoints.len(),
+                    host_index,
+                    targets.len(),
                 );
                 Batch::single(
                     crate::scan::plan::planned_probe(
@@ -92,12 +91,7 @@ pub(super) fn check_adaptive_prepared(
         std::mem::size_of::<Batch<Probe>>().saturating_add(std::mem::size_of::<Probe>()),
     );
     if reservation.saturating_add(wave) > request.limits.max_prepared_bytes {
-        return Err(Error::PipelineExecution {
-            source: crate::scan::executor::limit(
-                "prepared descriptions",
-                request.limits.max_prepared_bytes,
-            ),
-        });
+        return Err(prepared_limit(request));
     }
     Ok(())
 }

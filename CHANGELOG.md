@@ -6,6 +6,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+- Reorganize scan internals: split the adaptive controller by responsibility,
+  share discovery composition between raw and connect scans, remove duplicated
+  scheduling arithmetic, and simplify CLI scan execution, without changing CLI
+  or data contracts.
+
 - Add typed security scan snapshots and `compare_snapshots`, retaining the byte
   comparison API and its validation. Separate security input adaptation,
   published output fields, and rendering, and organize capture investigations,

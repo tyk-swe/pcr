@@ -7,8 +7,9 @@ use std::time::{Duration, Instant, SystemTime};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider};
 
-use super::super::discovery::{Composer, Scan};
-use super::super::error::probe_error;
+use super::super::adaptive::Ceilings;
+use super::super::discovery::{Composer, Scan, scanned};
+use super::super::error::{duration_limit, probe_error};
 use super::super::report::RttAccumulator;
 use super::super::{Error, Request, Stage};
 use super::accounting::{Progress, record};
@@ -115,30 +116,14 @@ where
         &mut emit,
         controller.as_mut(),
     )?;
-    for observation in progress.discovery.drain(..) {
-        if !composer.observe(observation) {
-            return Err(Error::IncoherentEvents {
-                message: "a discovery outcome names no selected target".to_owned(),
-            });
-        }
-    }
+    composer.observe_all(progress.discovery.drain(..))?;
     if let Some(controller) = &controller {
-        for (index, target) in targets.iter().enumerate() {
-            if controller
-                .find(target)
-                .is_some_and(|host| controller.is_incomplete(host))
-            {
-                composer.incomplete(index);
-            }
+        for index in controller.incomplete_targets(&targets) {
+            composer.incomplete(index);
         }
     }
     let mut hosts = composer.finish();
-    let scanned: Vec<_> = targets
-        .iter()
-        .zip(&hosts)
-        .filter(|(_, host)| host.scan == Scan::Scanned)
-        .map(|(target, _)| target.clone())
-        .collect();
+    let scanned = scanned(&targets, &hosts);
     let scan = StagePlan::new(request, &planned, Stage::Scan, &scanned, scan_sequence)?;
     run_stage(
         request,
@@ -153,13 +138,8 @@ where
         controller.as_mut(),
     )?;
     if let Some(controller) = &controller {
-        for (index, target) in targets.iter().enumerate() {
-            if controller
-                .find(target)
-                .is_some_and(|host| controller.is_incomplete(host))
-            {
-                hosts[index].scan = Scan::Incomplete;
-            }
+        for index in controller.incomplete_targets(&targets) {
+            hosts[index].scan = Scan::Incomplete;
         }
     }
     enforce_deadline(probe_error, deadline)?;
@@ -174,7 +154,10 @@ where
     stats.elapsed = clock.now().saturating_duration_since(started);
     stats.rtt = rtt.finish();
     stats.retained_evidence_bytes = evidence_bytes;
-    let ceilings = (Some(budget.capacity()), Some(tcp::MAX_PENDING_CONNECTIONS));
+    let ceilings = Ceilings {
+        operation: Some(budget.capacity()),
+        process: Some(tcp::MAX_PENDING_CONNECTIONS),
+    };
     let scheduling = match controller {
         Some(controller) => controller.finish(ceilings),
         None => super::super::adaptive::fixed_scheduling(ceilings, peak, retries),
@@ -323,9 +306,9 @@ where
             return Ok(());
         }
         let now = clock.now();
-        let remaining = deadline.remaining().map_err(|error| {
-            (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error))
-        })?;
+        let remaining = deadline
+            .remaining()
+            .map_err(|error| duration_limit(0_u64, error))?;
         let operation_end = now
             .checked_add(remaining)
             .ok_or_else(|| invalid("rate", 0, "pacing deadline overflow"))?;
@@ -381,9 +364,7 @@ where
             }
             let timeout = deadline
                 .bounded_timeout(selection.timeout)
-                .map_err(|error| {
-                    (probe_error)(sequence, crate::execution::Failure::DurationLimit(error))
-                })?
+                .map_err(|error| duration_limit(sequence, error))?
                 .min(host_remaining);
             selection.host_limited = selection.host_limited || timeout < selection.timeout;
             let admitted = clock.now();

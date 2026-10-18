@@ -1,6 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::time::Instant;
+
+use crate::target::SelectedAddress;
+
+use super::work::Endpoint;
 use super::*;
 
 fn config() -> Adaptive {
@@ -59,18 +64,18 @@ fn completed_prefix_discovery_is_linear() {
                 completed += 1;
             }
             assert_eq!(completed, hosts * endpoints);
-            assert!(work.ready_operations <= 16 * completed + hosts);
-            assert!(work.time_operations <= 16 * completed + 2 * hosts);
+            assert!(work.operations.ready <= 16 * completed + hosts);
+            assert!(work.operations.time <= 16 * completed + 2 * hosts);
             if hosts == 1 {
                 eprintln!(
                     "N={endpoints}: endpoint visits={}, ready-index mutations={}, time-index mutations={}",
-                    work.discovery, work.ready_operations, work.time_operations
+                    work.operations.discovery, work.operations.ready, work.operations.time
                 );
             }
             assert!(
-                work.discovery <= 3 * completed,
+                work.operations.discovery <= 3 * completed,
                 "{hosts} hosts x {endpoints}: {} endpoint visits",
-                work.discovery
+                work.operations.discovery
             );
         }
     }
@@ -166,7 +171,7 @@ fn expiry_counts_unsent_attempts_once_and_pending_settlement_remains_valid() {
     );
     assert!(work.done());
     assert_eq!(controller.take_canceled_responses(&mut work), 0);
-    assert_eq!(controller.finish((None, None)).incomplete.len(), 1);
+    assert_eq!(controller.finish(Ceilings::default()).incomplete.len(), 1);
 }
 
 struct ConservativeWork {
@@ -261,7 +266,7 @@ impl ConservativeWork {
         endpoint.pending = false;
         match outcome {
             Outcome::Silent | Outcome::UnqualifiedSilence if selection.attempt < max_attempts => {
-                endpoint.ready_at = now + controller.retry_delay(selection.attempt + 1);
+                endpoint.ready_at = now + controller.config.retry_delay(selection.attempt + 1);
             }
             Outcome::Reply { .. } | Outcome::Silent | Outcome::UnqualifiedSilence => {
                 endpoint.finished = true;

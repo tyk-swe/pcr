@@ -155,12 +155,26 @@ impl Controller {
         self.hosts[host].first_admission.get_or_insert(now);
     }
 
-    pub(in crate::scan) fn find(&self, target: &SelectedAddress) -> Option<usize> {
+    fn find(&self, target: &SelectedAddress) -> Option<usize> {
         self.indices.get(&target.key()).copied()
     }
 
-    pub(in crate::scan) fn is_incomplete(&self, host: usize) -> bool {
+    pub(super) fn is_incomplete(&self, host: usize) -> bool {
         self.hosts[host].incomplete
+    }
+
+    pub(in crate::scan) fn incomplete_targets<'a>(
+        &'a self,
+        targets: &'a [SelectedAddress],
+    ) -> impl Iterator<Item = usize> + 'a {
+        targets
+            .iter()
+            .enumerate()
+            .filter_map(move |(index, target)| {
+                self.find(target)
+                    .is_some_and(|host| self.is_incomplete(host))
+                    .then_some(index)
+            })
     }
 
     pub(in crate::scan) fn mark_incomplete(&mut self, host: usize) {

@@ -9,7 +9,7 @@ pub use host::{
     Basis, Evidence, Host, Link, Neighbor, NeighborOutcome, NextHop, Reason, ReasonKind, Scan,
     State,
 };
-pub(super) use host::{Composer, Observation, check_probes};
+pub(super) use host::{Composer, Observation, check_probes, scanned};
 
 use super::Error;
 use crate::probe;

@@ -270,6 +270,20 @@ impl Composer {
         true
     }
 
+    pub(in crate::scan) fn observe_all(
+        &mut self,
+        observations: impl IntoIterator<Item = Observation>,
+    ) -> Result<(), Error> {
+        for observation in observations {
+            if !self.observe(observation) {
+                return Err(Error::IncoherentEvents {
+                    message: "a discovery outcome names no selected target".to_owned(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub(in crate::scan) fn finish(mut self) -> Vec<Host> {
         // Every address each link address answered for on each interface,
         // as a target or as a routed target's next hop. Separate links may
@@ -373,6 +387,18 @@ fn resolved(host: &Host) -> Option<Link> {
             None
         }
     }
+}
+
+pub(in crate::scan) fn scanned(
+    targets: &[SelectedAddress],
+    hosts: &[Host],
+) -> Vec<SelectedAddress> {
+    targets
+        .iter()
+        .zip(hosts)
+        .filter(|(_, host)| host.scan == Scan::Scanned)
+        .map(|(target, _)| target.clone())
+        .collect()
 }
 
 /// Checks that the hosts list exactly the collected discovery outcomes, given

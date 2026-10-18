@@ -64,18 +64,16 @@ impl super::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
-    format: Format,
-    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let format = invocation.format;
+    let stream = &invocation.output;
     let Args {
         connect,
         method,
@@ -168,88 +166,18 @@ pub(super) fn run(
                 "--list sends no probe; remove --discovery, --reverse-dns, and --traceroute",
             ));
         }
-        // Listing needs no ports, but publishes the selection when given one
-        // so the reviewed scope is exactly what a scan would probe.
-        let diagnostic = !tcp_scan.is_syn();
-        if diagnostic && requested == method::Requested::Connect {
-            return Err(CliError::new(
-                Kind::Usage,
-                "--tcp-scan other than syn needs the raw method; drop --connect and --method tcp-connect",
-            ));
+        let (ports, ip_protocols) = list::Listing {
+            requested,
+            transports,
+            tcp_scan,
+            sctp_scan,
+            ports,
+            exclude_ports,
+            ip_protocols,
+            exclude_ip_protocols,
+            max_ports,
         }
-        let sctp_diagnostic = !sctp_scan.is_init();
-        if sctp_diagnostic && requested == method::Requested::Connect {
-            return Err(CliError::new(
-                Kind::Usage,
-                "--sctp-scan other than init needs the raw method; drop --connect and --method tcp-connect",
-            ));
-        }
-        if transports == [Transport::Ip] && requested == method::Requested::Connect {
-            return Err(CliError::new(
-                Kind::Usage,
-                "--transport ip needs the raw method; drop --connect and --method tcp-connect",
-            ));
-        }
-        let (ports, ip_protocols) = if transports == [Transport::Ip] {
-            if !ports.is_empty() || !exclude_ports.is_empty() {
-                return Err(CliError::new(
-                    Kind::Usage,
-                    "--ports and --exclude-ports do not apply to portless IP-protocol scans; use --ip-protocols",
-                ));
-            }
-            let ip_protocols = if ip_protocols.is_empty() && exclude_ip_protocols.is_empty() {
-                None
-            } else {
-                let selected = select_endpoints(
-                    &transports,
-                    ports,
-                    exclude_ports,
-                    ip_protocols,
-                    exclude_ip_protocols,
-                    max_ports,
-                )?;
-                Some(output::scan::plan::IpProtocols::from(&selected))
-            };
-            (None, ip_protocols)
-        } else {
-            if !ip_protocols.is_empty() || !exclude_ip_protocols.is_empty() {
-                return Err(CliError::new(
-                    Kind::Usage,
-                    "--ip-protocols and --exclude-ip-protocols require --transport ip",
-                ));
-            }
-            let ports = if ports.is_empty() && exclude_ports.is_empty() {
-                None
-            } else {
-                let selected = select_endpoints(
-                    &transports,
-                    ports,
-                    exclude_ports,
-                    ip_protocols,
-                    exclude_ip_protocols,
-                    max_ports,
-                )?;
-                let ports = output::scan::plan::Ports::from(&selected);
-                Some(if requested == method::Requested::Connect {
-                    ports
-                } else {
-                    ports.with_tcp_scan(tcp_scan).with_sctp_scan(sctp_scan)
-                })
-            };
-            (ports, None)
-        };
-        if diagnostic && ports.as_ref().is_none_or(|ports| ports.tcp_scan.is_none()) {
-            return Err(CliError::new(
-                Kind::Usage,
-                "--tcp-scan other than syn requires at least one TCP port endpoint",
-            ));
-        }
-        if sctp_diagnostic && ports.as_ref().is_none_or(|ports| ports.sctp_scan.is_none()) {
-            return Err(CliError::new(
-                Kind::Usage,
-                "--sctp-scan other than init requires at least one SCTP port endpoint",
-            ));
-        }
+        .plan()?;
         return list::run(
             invocation,
             targets,
@@ -266,6 +194,211 @@ pub(super) fn run(
             stream,
         );
     }
+    let Built {
+        request,
+        excluded_endpoints,
+        curated,
+        discovery_excluded,
+        queue_limits,
+    } = build_request(RequestArgs {
+        discovery,
+        discovery_probes,
+        discovery_ports,
+        discovery_ip_protocols,
+        unresponsive_hosts,
+        ports,
+        exclude_ports,
+        ip_protocols,
+        exclude_ip_protocols,
+        transports,
+        tcp_scan,
+        sctp_scan,
+        udp_payload_hex,
+        udp_payload_file,
+        udp_profiles,
+        curated_udp_payloads,
+        limits,
+        max_prepared_bytes,
+        max_targets,
+        max_ports,
+        max_probes,
+        max_undecoded,
+        duration,
+        timeout,
+        adaptive,
+        attempts,
+        rate,
+        max_in_flight,
+        family,
+        targets,
+        origins: selection.origins,
+        route_options: packetcraftr::route::Options {
+            link_mode: route.link_mode.into(),
+            ..Default::default()
+        },
+    })?;
+    let trace_stage = traceroute
+        .then(|| -> Result<_, CliError> {
+            traceroute::Stage::new(
+                &traceroute::Options {
+                    strategy: traceroute_strategy,
+                    port: traceroute_port,
+                    first_hop: traceroute_first_hop,
+                    max_hops: traceroute_max_hops,
+                    attempts: traceroute_attempts,
+                    max_probes: traceroute_max_probes,
+                    reuse_max_age: traceroute_reuse_max_age_ms.map(Duration::from_millis),
+                },
+                &request,
+            )
+        })
+        .transpose()?;
+    let selection = method::select(
+        requested,
+        &request,
+        method::Capabilities {
+            raw: raw_capability(route.link_mode.into()),
+            packet_route: !route.supports_kernel_tcp(),
+        },
+    )
+    .map_err(CliError::classified)?;
+    let selected_method = selection.method;
+    if trace_stage.is_some() && selected_method == method::Method::Connect {
+        return Err(CliError::new(
+            Kind::Usage,
+            "--traceroute needs the raw method; use --method raw, or drop --connect and --method tcp-connect",
+        ));
+    }
+    let plan = publication_plan(
+        selection,
+        &request,
+        excluded_endpoints,
+        curated,
+        discovery_excluded,
+        &reverse_dns,
+        reverse_dns_port,
+    );
+    let reverse_dns = reverse_dns.map(parse_target).transpose()?;
+    if selected_method == method::Method::Connect {
+        let reverse = reverse_dns
+            .map(|server| {
+                validated_reverse_dns(
+                    followup::ReverseDns {
+                        server,
+                        server_port: reverse_dns_port,
+                        transport: packetcraftr::dns::TransportMode::Tcp,
+                    },
+                    &request,
+                )
+            })
+            .transpose()?;
+        return connect::run(
+            invocation,
+            followup::ConnectRequest {
+                scan: request,
+                reverse_dns: reverse,
+            },
+            plan,
+            policy,
+            format,
+            stream,
+        );
+    }
+    run_raw(
+        invocation,
+        RawRun {
+            request,
+            plan,
+            policy,
+            route,
+            queue_limits,
+            trace_stage,
+            reverse_dns,
+            reverse_dns_port,
+        },
+        format,
+        stream,
+    )
+}
+
+struct RequestArgs {
+    discovery: Option<arguments::Discovery>,
+    discovery_probes: Vec<arguments::DiscoveryProbe>,
+    discovery_ports: Vec<arguments::PortTerm>,
+    discovery_ip_protocols: Vec<arguments::IpProtocolTerm>,
+    unresponsive_hosts: Option<arguments::UnresponsiveHosts>,
+    ports: Vec<arguments::PortTerm>,
+    exclude_ports: Vec<arguments::PortTerm>,
+    ip_protocols: Vec<arguments::IpProtocolTerm>,
+    exclude_ip_protocols: Vec<arguments::IpProtocolTerm>,
+    transports: Vec<Transport>,
+    tcp_scan: packetcraftr::scan::TcpScan,
+    sctp_scan: packetcraftr::scan::SctpScan,
+    udp_payload_hex: Option<String>,
+    udp_payload_file: Option<std::path::PathBuf>,
+    udp_profiles: Option<std::path::PathBuf>,
+    curated_udp_payloads: bool,
+    limits: crate::command_options::CaptureLimitsArgs,
+    max_prepared_bytes: usize,
+    max_targets: usize,
+    max_ports: usize,
+    max_probes: usize,
+    max_undecoded: usize,
+    duration: crate::command_options::MaxDurationArgs,
+    timeout: crate::command_options::TimeoutArgs,
+    adaptive: arguments::AdaptiveArgs,
+    attempts: u32,
+    rate: Option<u32>,
+    max_in_flight: usize,
+    family: crate::command_options::AddressFamily,
+    targets: packetcraftr::target::Selection,
+    origins: Vec<manifest::Declaration>,
+    route_options: packetcraftr::route::Options,
+}
+
+struct Built {
+    request: packetcraftr::scan::Request,
+    excluded_endpoints: usize,
+    curated: Option<output::scan::plan::CuratedPayloads>,
+    discovery_excluded: usize,
+    queue_limits: packetcraftr_netio::capture::Limits,
+}
+
+fn build_request(arguments: RequestArgs) -> Result<Built, CliError> {
+    let RequestArgs {
+        discovery,
+        discovery_probes,
+        discovery_ports,
+        discovery_ip_protocols,
+        unresponsive_hosts,
+        ports,
+        exclude_ports,
+        ip_protocols,
+        exclude_ip_protocols,
+        transports,
+        tcp_scan,
+        sctp_scan,
+        udp_payload_hex,
+        udp_payload_file,
+        udp_profiles,
+        curated_udp_payloads,
+        limits,
+        max_prepared_bytes,
+        max_targets,
+        max_ports,
+        max_probes,
+        max_undecoded,
+        duration,
+        timeout,
+        adaptive,
+        attempts,
+        rate,
+        max_in_flight,
+        family,
+        targets,
+        origins,
+        route_options,
+    } = arguments;
     let (discovery, discovery_excluded) = discovery_options(
         discovery,
         &discovery_probes,
@@ -387,7 +520,7 @@ pub(super) fn run(
     let request = packetcraftr::scan::Request {
         max_in_flight,
         targets,
-        target_sources: selection.origins.iter().map(ToString::to_string).collect(),
+        target_sources: origins.iter().map(ToString::to_string).collect(),
         udp_payload,
         udp_profiles,
         address_family: family.into(),
@@ -400,48 +533,32 @@ pub(super) fn run(
         timeout: timeout.timeout(),
         probes_per_second: rate,
         limits: scan_limits,
-        route: packetcraftr::route::Options {
-            link_mode: route.link_mode.into(),
-            ..Default::default()
-        },
+        route: route_options,
         collection: collection(timeout.timeout(), queue_limits)?,
     };
     if !tcp_scan.is_syn() || !sctp_scan.is_init() {
         request.validate().map_err(CliError::classified)?;
     }
-    let trace_stage = traceroute
-        .then(|| -> Result<_, CliError> {
-            traceroute::Stage::new(
-                &traceroute::Options {
-                    strategy: traceroute_strategy,
-                    port: traceroute_port,
-                    first_hop: traceroute_first_hop,
-                    max_hops: traceroute_max_hops,
-                    attempts: traceroute_attempts,
-                    max_probes: traceroute_max_probes,
-                    reuse_max_age: traceroute_reuse_max_age_ms.map(Duration::from_millis),
-                },
-                &request,
-            )
-        })
-        .transpose()?;
-    let selection = method::select(
-        requested,
-        &request,
-        method::Capabilities {
-            raw: raw_capability(route.link_mode.into()),
-            packet_route: !route.supports_kernel_tcp(),
-        },
-    )
-    .map_err(CliError::classified)?;
+    Ok(Built {
+        request,
+        excluded_endpoints: selected.excluded,
+        curated,
+        discovery_excluded,
+        queue_limits,
+    })
+}
+
+fn publication_plan(
+    selection: method::Selection,
+    request: &packetcraftr::scan::Request,
+    excluded_endpoints: usize,
+    curated: Option<output::scan::plan::CuratedPayloads>,
+    discovery_excluded: usize,
+    reverse_dns: &Option<String>,
+    reverse_dns_port: u16,
+) -> output::scan::plan::Plan {
     let selected_method = selection.method;
-    if trace_stage.is_some() && selected_method == method::Method::Connect {
-        return Err(CliError::new(
-            Kind::Usage,
-            "--traceroute needs the raw method; use --method raw, or drop --connect and --method tcp-connect",
-        ));
-    }
-    let plan = output::scan::plan::Plan {
+    output::scan::plan::Plan {
         tcp_scan: (selected_method == method::Method::Raw
             && request
                 .endpoints
@@ -456,7 +573,7 @@ pub(super) fn run(
         .then(|| output::scan::plan::SctpScan::from(request.sctp_scan)),
         method: selection.into(),
         port_catalog: packetcraftr::scan::catalog::data_set().into(),
-        excluded_endpoints: selected.excluded,
+        excluded_endpoints,
         curated_udp_payloads: curated,
         discovery: output::scan::plan::Discovery::new(
             &request.discovery,
@@ -468,33 +585,36 @@ pub(super) fn run(
                     port: reverse_dns_port,
                 }),
         ),
-    };
-    let reverse_dns = reverse_dns.map(parse_target).transpose()?;
-    if selected_method == method::Method::Connect {
-        let reverse = reverse_dns
-            .map(|server| {
-                validated_reverse_dns(
-                    followup::ReverseDns {
-                        server,
-                        server_port: reverse_dns_port,
-                        transport: packetcraftr::dns::TransportMode::Tcp,
-                    },
-                    &request,
-                )
-            })
-            .transpose()?;
-        return connect::run(
-            invocation,
-            followup::ConnectRequest {
-                scan: request,
-                reverse_dns: reverse,
-            },
-            plan,
-            policy,
-            format,
-            stream,
-        );
     }
+}
+
+struct RawRun {
+    request: packetcraftr::scan::Request,
+    plan: output::scan::plan::Plan,
+    policy: crate::command_options::HostnamePolicyArgs,
+    route: crate::command_options::RouteSelectionArgs,
+    queue_limits: packetcraftr_netio::capture::Limits,
+    trace_stage: Option<traceroute::Stage>,
+    reverse_dns: Option<packetcraftr::target::Target>,
+    reverse_dns_port: u16,
+}
+
+fn run_raw(
+    invocation: &crate::invocation::Invocation,
+    run: RawRun,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let RawRun {
+        request,
+        plan,
+        policy,
+        route,
+        queue_limits,
+        trace_stage,
+        reverse_dns,
+        reverse_dns_port,
+    } = run;
     let workflow = prepare_workflow(&route, policy.into_policy(), request.timeout, queue_limits)?;
     let client = workflow.client(invocation, Runtime::Workflow);
     let request = packetcraftr::scan::Request {
@@ -534,96 +654,64 @@ pub(super) fn run(
     match format {
         Format::Ndjson => {
             let emit = crate::commands::execution::emitter(invocation, streaming::emit_event);
-            let summary = {
-                let plan = plan.clone();
-                let client = &client;
-                let request = &request;
-
-                let emit = emit;
-
-                let mut report = client
-                    .scan_with_followups(request.clone(), emit)
-                    .map_err(followup_error)?;
-                report.scan.stats = report.stats;
-                let traceroute = trace_plan.zip(report.trace).map(|(plan, traced)| {
-                    output::traceroute::hosts::Complete {
-                        plan,
-                        retained_evidence_bytes: traced.retained_evidence_bytes,
-                    }
-                });
-                Ok::<_, CliError>(Streamed {
-                    report: report.scan,
-                    endpoints: report.endpoints,
+            let mut report = client
+                .scan_with_followups(request, emit)
+                .map_err(followup_error)?;
+            report.scan.stats = report.stats;
+            let traceroute = trace_plan.zip(report.trace).map(|(plan, traced)| {
+                output::traceroute::hosts::Complete {
                     plan,
-                    reverse_dns: reverse_dns_hosts(report.reverse_dns),
-                    traceroute,
-                })
-            }?;
+                    retained_evidence_bytes: traced.retained_evidence_bytes,
+                }
+            });
+            let summary = Streamed {
+                report: report.scan,
+                endpoints: report.endpoints,
+                plan,
+                reverse_dns: reverse_dns_hosts(report.reverse_dns),
+                traceroute,
+            };
             invocation.check()?;
-            (streaming::emit_complete)(summary, stream)
+            streaming::emit_complete(summary, stream)
         }
         format => {
-            let report = (|| -> Result<_, CliError> {
-                let collector = followup::Collector::default();
-                let report = client
-                    .scan_with_followups(request.clone(), collector.clone())
-                    .map_err(followup_error)?;
-                let aggregate = collector.finish(report).map_err(followup_error)?;
-                let followup::Aggregate {
-                    mut scan,
-                    trace,
-                    reverse_dns,
-                    stats,
-                } = aggregate;
-                scan.stats = stats;
-                if let Some(trace) = &trace {
-                    scan.diagnostics.extend(trace.diagnostics.iter().cloned());
-                }
-                let traced = trace_plan.zip(trace);
-                Ok((scan, reverse_dns_hosts(reverse_dns), traced))
-            })()?;
+            let collector = followup::Collector::default();
+            let report = client
+                .scan_with_followups(request, collector.clone())
+                .map_err(followup_error)?;
+            let aggregate = collector.finish(report).map_err(followup_error)?;
+            let followup::Aggregate {
+                mut scan,
+                trace,
+                reverse_dns,
+                stats,
+            } = aggregate;
+            scan.stats = stats;
+            if let Some(trace) = &trace {
+                scan.diagnostics.extend(trace.diagnostics.iter().cloned());
+            }
+            let traced = trace_plan.zip(trace);
             invocation.check()?;
+            let published = output::scan::Report::publish(
+                scan,
+                plan,
+                reverse_dns_hosts(reverse_dns),
+                traced
+                    .map(|(plan, aggregate)| {
+                        output::traceroute::hosts::Report::new(plan, aggregate)
+                    })
+                    .transpose()
+                    .map_err(CliError::classified)?,
+            )
+            .map_err(CliError::classified)?;
             if format == Format::Json {
-                crate::rendering::emit_published(invocation, output::contract::Command::Scan, {
-                    let plan = plan.clone();
-
-                    let (report, names, traced) = report;
-
-                    output::scan::Report::publish(
-                        report,
-                        plan,
-                        names,
-                        traced
-                            .map(|(plan, aggregate)| {
-                                output::traceroute::hosts::Report::new(plan, aggregate)
-                            })
-                            .transpose()
-                            .map_err(CliError::classified)?,
-                    )
-                    .map_err(CliError::classified)
-                }?)
+                crate::rendering::emit_published(
+                    invocation,
+                    output::contract::Command::Scan,
+                    published,
+                )
             } else {
-                {
-                    let (report, names, traced) = report;
-                    let _ = format;
-
-                    rendering::render_text(
-                        invocation,
-                        output::scan::Report::publish(
-                            report,
-                            plan,
-                            names,
-                            traced
-                                .map(|(plan, aggregate)| {
-                                    output::traceroute::hosts::Report::new(plan, aggregate)
-                                })
-                                .transpose()
-                                .map_err(CliError::classified)?,
-                        )
-                        .map_err(CliError::classified)?,
-                        stream.presentation(),
-                    )
-                }
+                rendering::render_text(invocation, published, stream.presentation())
             }
         }
     }

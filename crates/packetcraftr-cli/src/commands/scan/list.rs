@@ -9,8 +9,134 @@ use crate::input::manifest::Declaration;
 use crate::output::{self, contract::Format};
 use crate::rendering::{StreamEncoder, write_stdout_line, write_summary_line};
 use crate::system::{Runtime, client};
+use packetcraftr::probe::Transport;
+use packetcraftr::scan::method;
 use packetcraftr::target::{Selection, plan};
 use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr_core::error::Kind;
+
+use super::selection::select_endpoints;
+
+/// The endpoint selection `--list` would publish, from the scan arguments it
+/// reviews.
+pub(super) struct Listing {
+    pub requested: method::Requested,
+    pub transports: Vec<Transport>,
+    pub tcp_scan: packetcraftr::scan::TcpScan,
+    pub sctp_scan: packetcraftr::scan::SctpScan,
+    pub ports: Vec<super::arguments::PortTerm>,
+    pub exclude_ports: Vec<super::arguments::PortTerm>,
+    pub ip_protocols: Vec<super::arguments::IpProtocolTerm>,
+    pub exclude_ip_protocols: Vec<super::arguments::IpProtocolTerm>,
+    pub max_ports: usize,
+}
+
+impl Listing {
+    pub(super) fn plan(
+        self,
+    ) -> Result<
+        (
+            Option<output::scan::plan::Ports>,
+            Option<output::scan::plan::IpProtocols>,
+        ),
+        CliError,
+    > {
+        let Self {
+            requested,
+            transports,
+            tcp_scan,
+            sctp_scan,
+            ports,
+            exclude_ports,
+            ip_protocols,
+            exclude_ip_protocols,
+            max_ports,
+        } = self;
+        // Listing needs no ports, but publishes the selection when given one
+        // so the reviewed scope is exactly what a scan would probe.
+        let diagnostic = !tcp_scan.is_syn();
+        if diagnostic && requested == method::Requested::Connect {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--tcp-scan other than syn needs the raw method; drop --connect and --method tcp-connect",
+            ));
+        }
+        let sctp_diagnostic = !sctp_scan.is_init();
+        if sctp_diagnostic && requested == method::Requested::Connect {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--sctp-scan other than init needs the raw method; drop --connect and --method tcp-connect",
+            ));
+        }
+        if transports == [Transport::Ip] && requested == method::Requested::Connect {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--transport ip needs the raw method; drop --connect and --method tcp-connect",
+            ));
+        }
+        let (ports, ip_protocols) = if transports == [Transport::Ip] {
+            if !ports.is_empty() || !exclude_ports.is_empty() {
+                return Err(CliError::new(
+                    Kind::Usage,
+                    "--ports and --exclude-ports do not apply to portless IP-protocol scans; use --ip-protocols",
+                ));
+            }
+            let ip_protocols = if ip_protocols.is_empty() && exclude_ip_protocols.is_empty() {
+                None
+            } else {
+                let selected = select_endpoints(
+                    &transports,
+                    ports,
+                    exclude_ports,
+                    ip_protocols,
+                    exclude_ip_protocols,
+                    max_ports,
+                )?;
+                Some(output::scan::plan::IpProtocols::from(&selected))
+            };
+            (None, ip_protocols)
+        } else {
+            if !ip_protocols.is_empty() || !exclude_ip_protocols.is_empty() {
+                return Err(CliError::new(
+                    Kind::Usage,
+                    "--ip-protocols and --exclude-ip-protocols require --transport ip",
+                ));
+            }
+            let ports = if ports.is_empty() && exclude_ports.is_empty() {
+                None
+            } else {
+                let selected = select_endpoints(
+                    &transports,
+                    ports,
+                    exclude_ports,
+                    ip_protocols,
+                    exclude_ip_protocols,
+                    max_ports,
+                )?;
+                let ports = output::scan::plan::Ports::from(&selected);
+                Some(if requested == method::Requested::Connect {
+                    ports
+                } else {
+                    ports.with_tcp_scan(tcp_scan).with_sctp_scan(sctp_scan)
+                })
+            };
+            (ports, None)
+        };
+        if diagnostic && ports.as_ref().is_none_or(|ports| ports.tcp_scan.is_none()) {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--tcp-scan other than syn requires at least one TCP port endpoint",
+            ));
+        }
+        if sctp_diagnostic && ports.as_ref().is_none_or(|ports| ports.sctp_scan.is_none()) {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--sctp-scan other than init requires at least one SCTP port endpoint",
+            ));
+        }
+        Ok((ports, ip_protocols))
+    }
+}
 
 pub(super) struct Options {
     pub origins: Vec<Declaration>,

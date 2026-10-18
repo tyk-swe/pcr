@@ -12,7 +12,7 @@ The crates are unpublished; [pin a reviewed revision](docs/consumer-compatibilit
 > Opt-in flags are technical controls, not permission.
 
 Commands are grouped by workflow: `packet`, `files`, `analyze`, `network`, and
-`reference`. All 31 commands retain supported flat aliases. Use `-h` for common
+`reference`. All 38 commands use grouped paths. Use `-h` for common
 options and `--help` for full help. Text results are compact; `-v`/`--verbose`
 expands retained evidence and technical details. JSON, NDJSON, and byte output are unchanged by verbosity.
 
@@ -131,3 +131,15 @@ cargo doc --locked --workspace --all-features --no-deps --open
 See [Contributing](CONTRIBUTING.md) and report vulnerabilities through
 [Security](SECURITY.md). PacketcraftR uses [AGPL-3.0-only](LICENSE);
 [third-party notices](THIRD_PARTY_NOTICES.md) accompany binary distributions.
+
+## Security investigations
+
+Investigate local captures with `analyze hunt`, `analyze dns-anomalies`, and
+`analyze beacons`. Compare native scans with `analyze scan-diff`. Use
+`network audit-tls` and `network audit-http` for bounded, ordinary-socket checks
+of explicitly selected endpoints, then combine results with
+`analyze report RESULTS... --html assessment.html`.
+
+These commands report evidence, completeness, and remediation notes; they do not
+assert compromise. See [security assessment workflows](docs/security-assessment.md)
+for local indicators, thresholds, trust stores, resource controls, and examples.

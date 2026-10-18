@@ -28,6 +28,7 @@ match_same_arms = "warn"
 mod_module_files = "deny"
 
 [workspace.dependencies]
+webpki-roots = "1.0.9"
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency
 # pins the shared workspace version. Bump these with `workspace.package.version`.
 packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.3", default-features = false }

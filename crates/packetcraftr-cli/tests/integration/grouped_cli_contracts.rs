@@ -67,12 +67,12 @@ fn all_operations_have_grouped_help_and_manuals_and_reject_flat_paths() {
             );
         }
     }
-    assert_eq!(count, 31);
+    assert_eq!(count, 38);
     assert_eq!(
         std::fs::read_dir(directory.path().join("man"))
             .unwrap()
             .count(),
-        37
+        44
     );
     let completions = std::fs::read_dir(directory.path().join("completions")).unwrap();
     let mut count = 0;

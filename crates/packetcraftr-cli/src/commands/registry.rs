@@ -8,7 +8,8 @@ use super::dispatch::Launch;
 use super::{
     Spec, build, capture, dissect, dns, dns_read, documentation, exchange, expert, export, follow,
     fragment, fuzz, http, http2, identify, identify_os, interfaces, merge, plan, protocols, read,
-    replay, rewrite, routes, scan, send, stats, tls, topics, traceroute, verify_forwarding,
+    replay, rewrite, routes, scan, security, send, stats, tls, topics, traceroute,
+    verify_forwarding,
 };
 use crate::output::contract::Format;
 use crate::resources::Settings;
@@ -158,6 +159,27 @@ macro_rules! commands {
 }
 
 commands! {
+    /// Match local indicators against capture endpoints and application evidence.
+    #[command(after_long_help = "Example: packetcraftr analyze hunt capture.pcapng --indicators indicators.json")]
+    Hunt(security::Hunt) = "hunt" => ("analyze", "hunt", 31),
+    /// Report high NXDOMAIN ratios and repeated high-entropy query labels.
+    #[command(after_long_help = "Defaults: 60-second windows; at least 20 matched responses and 50% NXDOMAIN; or 20 distinct leading labels of at least 32 characters and 4 bits/character entropy.\n\nExample: packetcraftr analyze dns-anomalies capture.pcapng")]
+    DnsAnomalies(security::Dns) = "dns-anomalies" => ("analyze", "dns-anomalies", 32),
+    /// Detect regularly spaced TCP connection attempts.
+    #[command(after_long_help = "Defaults: six distinct SYN attempts, mean interval at least one second, coefficient of variation at most 0.10. Retransmissions are deduplicated; clock regressions suppress timing conclusions.\n\nExample: packetcraftr analyze beacons capture.pcapng")]
+    Beacons(security::Beacons) = "beacons" => ("analyze", "beacons", 33),
+    /// Compare scoped endpoint states and scan coverage from native aggregate JSON.
+    #[command(after_long_help = "Requires successful aggregate JSON from matching native scan methods. Missing endpoints are coverage changes, never presumed closed.\n\nExample: packetcraftr analyze scan-diff before.json after.json")]
+    ScanDiff(security::ScanDiff) = "scan-diff" => ("analyze", "scan-diff", 34),
+    /// Combine security results into a standalone local HTML assessment.
+    #[command(after_long_help = "Accepts aggregate JSON from the six security analysis/audit commands. Escapes captured content, records source-file hashes, and refuses existing HTML destinations.\n\nExample: packetcraftr analyze report hunt.json tls.json --html assessment.html")]
+    Assessment(security::Assessment) = "report" => ("analyze", "report", 35),
+    /// Audit an observed TLS handshake, certificate chain, and name matching.
+    #[command(after_long_help = "Uses ordinary TCP sockets. Bundled WebPKI roots are replaced by --ca-file. --server-name sets SNI and certificate identity without resolving another target. No revocation fetching or protocol enumeration.\n\nExample: packetcraftr network audit-tls 192.0.2.10:443 --server-name example.test")]
+    AuditTls(security::AuditTls) = "audit-tls" => ("network", "audit-tls", 36),
+    /// Audit HTTP response headers and redacted cookie attributes with one HEAD request.
+    #[command(after_long_help = "Sends one HEAD / over HTTP/1.1 by default and follows no redirects. HTTPS sends the request only after certificate verification succeeds. Cookie values are redacted.\n\nExample: packetcraftr network audit-http 192.0.2.10:443 --tls --server-name example.test --host example.test")]
+    AuditHttp(security::AuditHttp) = "audit-http" => ("network", "audit-http", 37),
     /// Merge time-ordered captures into scoped PCAPNG.
     #[command(after_long_help = merge::arguments::AFTER_LONG_HELP)]
     Merge(merge::arguments::Args) = "merge" => ("files", "merge", 5),

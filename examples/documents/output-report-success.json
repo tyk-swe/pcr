@@ -1,0 +1,485 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "report",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "kind": "report",
+    "findings": [
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          1
+        ],
+        "evidence": {
+          "observation": {
+            "context": {
+              "interface": 0,
+              "protocol": "ip"
+            },
+            "value": "192.0.2.1"
+          },
+          "source_file": "examples/documents/output-hunt-success.json"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          2
+        ],
+        "evidence": {
+          "observation": {
+            "context": {
+              "interface": 0,
+              "protocol": "ip"
+            },
+            "value": "192.0.2.1"
+          },
+          "source_file": "examples/documents/output-hunt-success.json"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          3
+        ],
+        "evidence": {
+          "observation": {
+            "context": {
+              "interface": 0,
+              "protocol": "ip"
+            },
+            "value": "192.0.2.1"
+          },
+          "source_file": "examples/documents/output-hunt-success.json"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          4
+        ],
+        "evidence": {
+          "observation": {
+            "context": {
+              "interface": 0,
+              "protocol": "ip"
+            },
+            "value": "192.0.2.1"
+          },
+          "source_file": "examples/documents/output-hunt-success.json"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          5
+        ],
+        "evidence": {
+          "observation": {
+            "context": {
+              "interface": 0,
+              "protocol": "ip"
+            },
+            "value": "192.0.2.1"
+          },
+          "source_file": "examples/documents/output-hunt-success.json"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "api.example.test",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-domain",
+        "frames": [
+          4,
+          5
+        ],
+        "evidence": {
+          "observation": {
+            "context": {
+              "frames_sampled": true,
+              "protocol": "tls",
+              "scope": {
+                "encapsulation": [],
+                "id": 0,
+                "interface": 0
+              },
+              "stream": 0
+            },
+            "value": "api.example.test"
+          },
+          "source_file": "examples/documents/output-hunt-success.json"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          6
+        ],
+        "evidence": {
+          "observation": {
+            "context": {
+              "interface": 0,
+              "protocol": "ip"
+            },
+            "value": "192.0.2.1"
+          },
+          "source_file": "examples/documents/output-hunt-success.json"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          7
+        ],
+        "evidence": {
+          "observation": {
+            "context": {
+              "interface": 0,
+              "protocol": "ip"
+            },
+            "value": "192.0.2.1"
+          },
+          "source_file": "examples/documents/output-hunt-success.json"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          8
+        ],
+        "evidence": {
+          "observation": {
+            "context": {
+              "interface": 0,
+              "protocol": "ip"
+            },
+            "value": "192.0.2.1"
+          },
+          "source_file": "examples/documents/output-hunt-success.json"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "traffic.periodic_connections",
+        "severity": "medium",
+        "subject": "192.0.2.1 \u2192 198.51.100.2:443",
+        "summary": "Regularly spaced TCP connection attempts",
+        "indicator_id": null,
+        "frames": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "evidence": {
+          "observation": {
+            "attempts": 6,
+            "coefficient_of_variation": 0.0,
+            "destination": "198.51.100.2",
+            "destination_port": 443,
+            "frames_sampled": true,
+            "max_interval_seconds": 5.0,
+            "mean_interval_seconds": 5.0,
+            "min_interval_seconds": 5.0,
+            "scope": 0,
+            "source": "192.0.2.1",
+            "standard_deviation_seconds": 0.0
+          },
+          "source_file": "examples/documents/output-beacons-success.json"
+        },
+        "remediation": "Correlate periodic traffic with the originating process and expected scheduled activity.",
+        "complete": true
+      },
+      {
+        "rule_id": "scan.evidence_unavailable",
+        "severity": "info",
+        "subject": "null|192.168.56.10|tcp|443",
+        "summary": "Endpoint comparison lacks conclusive evidence",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "observation": {
+            "after": {
+              "address": "192.168.56.10",
+              "classification": "timeout",
+              "inference": {
+                "conflicting": [],
+                "failed": [
+                  70000
+                ],
+                "rule": "operational_failure",
+                "supporting": [],
+                "unanswered": []
+              },
+              "port": 443,
+              "port_hint": "https",
+              "probes": [
+                {
+                  "attempt": 1,
+                  "classification": "timeout",
+                  "destination": "192.168.56.10",
+                  "destination_port": 443,
+                  "measurement": {
+                    "coverage": "unknown",
+                    "kind": "no_reply"
+                  },
+                  "protocol": "tcp",
+                  "reason": "no checksum-valid, protocol-consistent response before the deadline",
+                  "sent_at": {
+                    "nanoseconds": 0,
+                    "unix_seconds": 1770000000
+                  },
+                  "sequence": 70000,
+                  "stage": "scan",
+                  "status": "timeout"
+                }
+              ],
+              "transport": "tcp"
+            },
+            "before": {
+              "address": "192.168.56.10",
+              "classification": "timeout",
+              "inference": {
+                "conflicting": [],
+                "failed": [
+                  70000
+                ],
+                "rule": "operational_failure",
+                "supporting": [],
+                "unanswered": []
+              },
+              "port": 443,
+              "port_hint": "https",
+              "probes": [
+                {
+                  "attempt": 1,
+                  "classification": "timeout",
+                  "destination": "192.168.56.10",
+                  "destination_port": 443,
+                  "measurement": {
+                    "coverage": "unknown",
+                    "kind": "no_reply"
+                  },
+                  "protocol": "tcp",
+                  "reason": "no checksum-valid, protocol-consistent response before the deadline",
+                  "sent_at": {
+                    "nanoseconds": 0,
+                    "unix_seconds": 1770000000
+                  },
+                  "sequence": 70000,
+                  "stage": "scan",
+                  "status": "timeout"
+                }
+              ],
+              "transport": "tcp"
+            }
+          },
+          "source_file": "examples/documents/output-scan-diff-success.json"
+        },
+        "remediation": "Review measurement evidence, scan scope, and expected service changes before drawing conclusions.",
+        "complete": true
+      },
+      {
+        "rule_id": "http.csp",
+        "severity": "low",
+        "subject": "127.0.0.1:43357",
+        "summary": "Content-Security-Policy is absent or empty",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "observation": {
+            "request_method": "HEAD",
+            "response_status": 200
+          },
+          "source_file": "examples/documents/output-audit-http-success.json"
+        },
+        "remediation": "Define a Content-Security-Policy suitable for this application.",
+        "complete": true
+      },
+      {
+        "rule_id": "http.framing",
+        "severity": "low",
+        "subject": "127.0.0.1:43357",
+        "summary": "No recognized framing protection observed",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "observation": {
+            "request_method": "HEAD",
+            "response_status": 200
+          },
+          "source_file": "examples/documents/output-audit-http-success.json"
+        },
+        "remediation": "Set CSP frame-ancestors or a supported X-Frame-Options policy.",
+        "complete": true
+      },
+      {
+        "rule_id": "http.nosniff",
+        "severity": "low",
+        "subject": "127.0.0.1:43357",
+        "summary": "X-Content-Type-Options: nosniff not observed",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "observation": {
+            "request_method": "HEAD",
+            "response_status": 200
+          },
+          "source_file": "examples/documents/output-audit-http-success.json"
+        },
+        "remediation": "Send X-Content-Type-Options: nosniff with correct media types.",
+        "complete": true
+      },
+      {
+        "rule_id": "http.referrer_policy",
+        "severity": "low",
+        "subject": "127.0.0.1:43357",
+        "summary": "No recognized restrictive Referrer-Policy observed",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "observation": {
+            "request_method": "HEAD",
+            "response_status": 200
+          },
+          "source_file": "examples/documents/output-audit-http-success.json"
+        },
+        "remediation": "Choose an explicit Referrer-Policy appropriate for the application.",
+        "complete": true
+      },
+      {
+        "rule_id": "http.cookie_secure",
+        "severity": "low",
+        "subject": "127.0.0.1:43357",
+        "summary": "Observed cookie lacks Secure",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "observation": {
+            "http_only": false,
+            "index": 0,
+            "name": "sid",
+            "same_site": "lax",
+            "secure": false,
+            "value": "[redacted]"
+          },
+          "source_file": "examples/documents/output-audit-http-success.json"
+        },
+        "remediation": "Review this cookie's purpose and set appropriate Secure, HttpOnly, and SameSite attributes.",
+        "complete": true
+      },
+      {
+        "rule_id": "http.cookie_http_only",
+        "severity": "low",
+        "subject": "127.0.0.1:43357",
+        "summary": "Observed cookie lacks HttpOnly",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "observation": {
+            "http_only": false,
+            "index": 0,
+            "name": "sid",
+            "same_site": "lax",
+            "secure": false,
+            "value": "[redacted]"
+          },
+          "source_file": "examples/documents/output-audit-http-success.json"
+        },
+        "remediation": "Review this cookie's purpose and set appropriate Secure, HttpOnly, and SameSite attributes.",
+        "complete": true
+      }
+    ],
+    "completeness": {
+      "complete": false,
+      "reasons": [
+        "examples/documents/output-dns-anomalies-success.json: DNS transactions include unanswered, orphan, or duplicate messages",
+        "examples/documents/output-scan-diff-success.json: one or more endpoints lack conclusive measurement evidence"
+      ]
+    },
+    "measurements": {
+      "html": "assessment.html"
+    },
+    "sources": [
+      {
+        "path": "examples/documents/output-hunt-success.json",
+        "sha256": "539f3ce723fa723d239ddb88f26343a82da120fe8cdeabca2f1e93526a4a184c"
+      },
+      {
+        "path": "examples/documents/output-dns-anomalies-success.json",
+        "sha256": "d3721149615a13bd6eb23c5e1af266c68630b4bb6c3e049f0805e0595eff4f86"
+      },
+      {
+        "path": "examples/documents/output-beacons-success.json",
+        "sha256": "2cd5721783f9a359bcfdfac6310d85996b9a00960491945876fc276f4e054755"
+      },
+      {
+        "path": "examples/documents/output-scan-diff-success.json",
+        "sha256": "1af3e9808295b8396c610c31249bc02ba9a08f90ad719b8f689fa3f919639723"
+      },
+      {
+        "path": "examples/documents/output-audit-tls-success.json",
+        "sha256": "76e3fc89d921cdc26b1f65e75ab599d12474483703ac4ebc79401fd0e55f78b1"
+      },
+      {
+        "path": "examples/documents/output-audit-http-success.json",
+        "sha256": "d66bc5a2788693b63a24bc6d91a690bc57eae6f4d2f3c2911316cc75571dec07"
+      }
+    ]
+  },
+  "diagnostics": []
+}

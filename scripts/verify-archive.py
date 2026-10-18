@@ -192,8 +192,8 @@ def verify(root, version, commit, target, variant):
             if 'Legacy alias:' in help_text:
                 raise ValueError(f'packaged help for {canonical} advertises a removed path')
             paths.append(canonical)
-    if len(paths) != 31:
-        raise ValueError('packaged help must describe all 31 commands')
+    if len(paths) != 38:
+        raise ValueError('packaged help must describe all 38 commands')
     for path in [*groups, *paths]:
         name = path.replace(' ', '-')
         page = root / 'man' / f'packetcraftr-{name}.1'

@@ -42,6 +42,9 @@ fn every_published_example_document_matches_its_declared_schema() {
     let os_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.os-fingerprints.v1.schema.json"
     ));
+    let indicators_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.indicators.v1.schema.json"
+    ));
     let output_validator = schema_validator();
     let scanner_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.scanner-corpus.v1.schema.json"
@@ -84,6 +87,7 @@ fn every_published_example_document_matches_its_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
+            "packetcraftr.indicators/v1" => &indicators_validator,
             "packetcraftr.output/v1" => output_validator,
             "packetcraftr.packet/v1" => &packet_validator,
             "packetcraftr.rewrite/v1" => &rewrite_validator,

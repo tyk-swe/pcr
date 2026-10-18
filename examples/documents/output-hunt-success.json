@@ -1,0 +1,224 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "hunt",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "kind": "hunt",
+    "findings": [
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          1
+        ],
+        "evidence": {
+          "context": {
+            "interface": 0,
+            "protocol": "ip"
+          },
+          "value": "192.0.2.1"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          2
+        ],
+        "evidence": {
+          "context": {
+            "interface": 0,
+            "protocol": "ip"
+          },
+          "value": "192.0.2.1"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          3
+        ],
+        "evidence": {
+          "context": {
+            "interface": 0,
+            "protocol": "ip"
+          },
+          "value": "192.0.2.1"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          4
+        ],
+        "evidence": {
+          "context": {
+            "interface": 0,
+            "protocol": "ip"
+          },
+          "value": "192.0.2.1"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          5
+        ],
+        "evidence": {
+          "context": {
+            "interface": 0,
+            "protocol": "ip"
+          },
+          "value": "192.0.2.1"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "api.example.test",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-domain",
+        "frames": [
+          4,
+          5
+        ],
+        "evidence": {
+          "context": {
+            "frames_sampled": true,
+            "protocol": "tls",
+            "scope": {
+              "encapsulation": [],
+              "id": 0,
+              "interface": 0
+            },
+            "stream": 0
+          },
+          "value": "api.example.test"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          6
+        ],
+        "evidence": {
+          "context": {
+            "interface": 0,
+            "protocol": "ip"
+          },
+          "value": "192.0.2.1"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          7
+        ],
+        "evidence": {
+          "context": {
+            "interface": 0,
+            "protocol": "ip"
+          },
+          "value": "192.0.2.1"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      },
+      {
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "192.0.2.1",
+        "summary": "Observed value matches a local indicator",
+        "indicator_id": "lab-endpoint",
+        "frames": [
+          8
+        ],
+        "evidence": {
+          "context": {
+            "interface": 0,
+            "protocol": "ip"
+          },
+          "value": "192.0.2.1"
+        },
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "complete": true
+      }
+    ],
+    "completeness": {
+      "complete": true,
+      "reasons": []
+    },
+    "measurements": {
+      "capture": "examples/captures/tls-handshake.pcapng",
+      "clock": {
+        "max_forward_step": {
+          "nanos": 24000000,
+          "secs": 0
+        },
+        "max_forward_step_frame": 5,
+        "max_regression": {
+          "nanos": 0,
+          "secs": 0
+        },
+        "regressions": 0
+      },
+      "frames_matched": 8,
+      "frames_read": 8,
+      "scopes": [
+        {
+          "encapsulation": [],
+          "id": 0,
+          "interface": 0
+        }
+      ]
+    },
+    "sources": [
+      {
+        "path": "examples/documents/indicators.json",
+        "sha256": "ef222c2af32179aef305ccb49411d961d686821496d0b84358a585e77af16dfc"
+      }
+    ]
+  },
+  "diagnostics": []
+}

@@ -9,7 +9,9 @@
 //! authorize the numeric peer first, and authorize every encrypted write.
 
 mod error;
+mod verification;
 mod verifier;
+pub use verification::{Check, TrustStore, Verification, verify};
 mod wire;
 
 use std::cell::Cell;

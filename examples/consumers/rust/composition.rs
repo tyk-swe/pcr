@@ -193,3 +193,24 @@ fn numeric_layer3_without_capture_capability() -> Result<(), Box<dyn std::error:
     assert_eq!(recorded.sent.lock().unwrap().len(), 1);
     Ok(())
 }
+
+/// Audits depend only on ordinary TCP, without capture, routes, UDP, or DNS.
+#[test]
+fn audit_api_with_tcp_only_provider() {
+    struct NoConnect;
+    impl packetcraftr_netio::tcp::Provider for NoConnect {
+        type Stream = packetcraftr_netio::tcp::SystemStream;
+        fn connect(
+            &self,
+            _: std::net::SocketAddr,
+            _: &packetcraftr_core::budget::Deadline,
+        ) -> Result<Self::Stream, packetcraftr_netio::tcp::Error> {
+            panic!("the default public-destination policy must reject before connect")
+        }
+    }
+    let empty: ProviderSet = ProviderSet::default();
+    let client = Client::new(builtin::registry(), Policy::default(), empty.with_tcp(NoConnect));
+    let endpoint = "8.8.8.8:443".parse().unwrap();
+    assert!(client.audit_tls(&packetcraftr::audit::TlsRequest::new(endpoint)).is_err());
+    assert!(client.audit_http(&packetcraftr::audit::HttpRequest::new(endpoint)).is_err());
+}

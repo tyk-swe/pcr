@@ -43,6 +43,7 @@ mod replay;
 mod rewrite;
 mod routes;
 mod scan;
+mod security;
 mod send;
 mod stats;
 

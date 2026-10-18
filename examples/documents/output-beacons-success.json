@@ -1,0 +1,76 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "beacons",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "kind": "beacons",
+    "findings": [
+      {
+        "rule_id": "traffic.periodic_connections",
+        "severity": "medium",
+        "subject": "192.0.2.1 \u2192 198.51.100.2:443",
+        "summary": "Regularly spaced TCP connection attempts",
+        "indicator_id": null,
+        "frames": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "evidence": {
+          "attempts": 6,
+          "coefficient_of_variation": 0.0,
+          "destination": "198.51.100.2",
+          "destination_port": 443,
+          "frames_sampled": true,
+          "max_interval_seconds": 5.0,
+          "mean_interval_seconds": 5.0,
+          "min_interval_seconds": 5.0,
+          "scope": 0,
+          "source": "192.0.2.1",
+          "standard_deviation_seconds": 0.0
+        },
+        "remediation": "Correlate periodic traffic with the originating process and expected scheduled activity.",
+        "complete": true
+      }
+    ],
+    "completeness": {
+      "complete": true,
+      "reasons": []
+    },
+    "measurements": {
+      "capture": "examples/captures/beacon-periodic.pcap",
+      "clock": {
+        "max_forward_step": {
+          "nanos": 0,
+          "secs": 5
+        },
+        "max_forward_step_frame": 2,
+        "max_regression": {
+          "nanos": 0,
+          "secs": 0
+        },
+        "regressions": 0
+      },
+      "frames_matched": 6,
+      "frames_read": 6,
+      "scopes": [
+        {
+          "encapsulation": [],
+          "id": 0,
+          "interface": null
+        }
+      ],
+      "thresholds": {
+        "max_cv": 0.1,
+        "min_attempts": 6,
+        "min_interval_seconds": 1.0
+      }
+    },
+    "sources": []
+  },
+  "diagnostics": []
+}

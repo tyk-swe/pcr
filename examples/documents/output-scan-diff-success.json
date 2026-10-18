@@ -1,0 +1,120 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "scan-diff",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "kind": "scan-diff",
+    "findings": [
+      {
+        "rule_id": "scan.evidence_unavailable",
+        "severity": "info",
+        "subject": "null|192.168.56.10|tcp|443",
+        "summary": "Endpoint comparison lacks conclusive evidence",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "after": {
+            "address": "192.168.56.10",
+            "classification": "timeout",
+            "inference": {
+              "conflicting": [],
+              "failed": [
+                70000
+              ],
+              "rule": "operational_failure",
+              "supporting": [],
+              "unanswered": []
+            },
+            "port": 443,
+            "port_hint": "https",
+            "probes": [
+              {
+                "attempt": 1,
+                "classification": "timeout",
+                "destination": "192.168.56.10",
+                "destination_port": 443,
+                "measurement": {
+                  "coverage": "unknown",
+                  "kind": "no_reply"
+                },
+                "protocol": "tcp",
+                "reason": "no checksum-valid, protocol-consistent response before the deadline",
+                "sent_at": {
+                  "nanoseconds": 0,
+                  "unix_seconds": 1770000000
+                },
+                "sequence": 70000,
+                "stage": "scan",
+                "status": "timeout"
+              }
+            ],
+            "transport": "tcp"
+          },
+          "before": {
+            "address": "192.168.56.10",
+            "classification": "timeout",
+            "inference": {
+              "conflicting": [],
+              "failed": [
+                70000
+              ],
+              "rule": "operational_failure",
+              "supporting": [],
+              "unanswered": []
+            },
+            "port": 443,
+            "port_hint": "https",
+            "probes": [
+              {
+                "attempt": 1,
+                "classification": "timeout",
+                "destination": "192.168.56.10",
+                "destination_port": 443,
+                "measurement": {
+                  "coverage": "unknown",
+                  "kind": "no_reply"
+                },
+                "protocol": "tcp",
+                "reason": "no checksum-valid, protocol-consistent response before the deadline",
+                "sent_at": {
+                  "nanoseconds": 0,
+                  "unix_seconds": 1770000000
+                },
+                "sequence": 70000,
+                "stage": "scan",
+                "status": "timeout"
+              }
+            ],
+            "transport": "tcp"
+          }
+        },
+        "remediation": "Review measurement evidence, scan scope, and expected service changes before drawing conclusions.",
+        "complete": true
+      }
+    ],
+    "completeness": {
+      "complete": false,
+      "reasons": [
+        "one or more endpoints lack conclusive measurement evidence"
+      ]
+    },
+    "measurements": {
+      "after_endpoints": 1,
+      "before_endpoints": 1,
+      "method": "raw:syn:init",
+      "unchanged_endpoints": 0
+    },
+    "sources": [
+      {
+        "path": "examples/documents/output-scan-success.json",
+        "sha256": "5370f893ad49f56e79365c5aeca186c971c947cab2aa89bf59f89493d312d996"
+      },
+      {
+        "path": "examples/documents/output-scan-success.json",
+        "sha256": "5370f893ad49f56e79365c5aeca186c971c947cab2aa89bf59f89493d312d996"
+      }
+    ]
+  },
+  "diagnostics": []
+}

@@ -182,3 +182,15 @@ systemd-run --user --wait --pipe \
 
 See [resource presets](resource-presets.md) for named defaults and the
 [verification contract](verification-contract.md) for forwarding accounting.
+
+## Security investigations
+
+`analyze hunt`, `dns-anomalies`, and `beacons` reuse capture, scope, reassembly,
+provenance, and application limits. Security-specific `--max-groups` bounds
+DNS windows, TCP beacon groups, and hunt source tables; `--max-observations`
+bounds counted messages or retained connection attempts; `--max-findings` bounds
+retained results. `--max-result-bytes` bounds serialized reports in every format.
+These settings appear in resource diagnostics and have finite `ci-v1` and
+`workstation-v1` presets. Exhaustion is an operational failure, not an empty
+successful investigation. Group frame lists retain up to 64 representative
+sources with explicit sampling metadata. See [security assessments](security-assessment.md).

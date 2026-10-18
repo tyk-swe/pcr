@@ -67,7 +67,14 @@
             "verify-forwarding",
             "http2",
             "identify",
-            "identify-os"
+            "identify-os",
+            "hunt",
+            "dns-anomalies",
+            "beacons",
+            "audit-tls",
+            "audit-http",
+            "scan-diff",
+            "report"
           ]
         },
         "mode": {
@@ -252,6 +259,9 @@
             },
             {
               "$ref": "#/$defs/osSuccess"
+            },
+            {
+              "$ref": "#/$defs/securitySuccess"
             }
           ]
         }
@@ -363,6 +373,9 @@
             },
             {
               "$ref": "#/$defs/osStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/securityStreamSuccess"
             }
           ]
         }
@@ -17857,6 +17870,480 @@
         }
       },
       "additionalProperties": false
+    },
+    "securityFinding": {
+      "type": "object",
+      "required": [
+        "rule_id",
+        "severity",
+        "subject",
+        "summary",
+        "indicator_id",
+        "frames",
+        "evidence",
+        "remediation",
+        "complete"
+      ],
+      "properties": {
+        "rule_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "subject": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "indicator_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uint64"
+          }
+        },
+        "evidence": {},
+        "remediation": {
+          "type": "string"
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "securityReport": {
+      "type": "object",
+      "required": [
+        "kind",
+        "findings",
+        "completeness",
+        "measurements",
+        "sources"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "hunt",
+            "dns-anomalies",
+            "beacons",
+            "audit-tls",
+            "audit-http",
+            "scan-diff",
+            "report"
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/securityFinding"
+          }
+        },
+        "completeness": {
+          "type": "object",
+          "required": [
+            "complete",
+            "reasons"
+          ],
+          "properties": {
+            "complete": {
+              "type": "boolean"
+            },
+            "reasons": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "measurements": {
+          "type": "object"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "sha256"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "securitySuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "enum": [
+            "hunt",
+            "dns-anomalies",
+            "beacons",
+            "audit-tls",
+            "audit-http",
+            "scan-diff",
+            "report"
+          ]
+        },
+        "result": {
+          "$ref": "#/$defs/securityReport"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "hunt"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "hunt"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "dns-anomalies"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "dns-anomalies"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "beacons"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "beacons"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "audit-tls"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "audit-tls"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "audit-http"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "audit-http"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "scan-diff"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "scan-diff"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "report"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "report"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "securityStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result",
+        "event"
+      ],
+      "properties": {
+        "command": {
+          "enum": [
+            "hunt",
+            "dns-anomalies",
+            "beacons",
+            "audit-tls",
+            "audit-http",
+            "scan-diff"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "finding"
+            },
+            "result": {
+              "$ref": "#/$defs/securityFinding"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/securityReport"
+            }
+          }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "hunt"
+              },
+              "event": {
+                "const": "complete"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "hunt"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "dns-anomalies"
+              },
+              "event": {
+                "const": "complete"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "dns-anomalies"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "beacons"
+              },
+              "event": {
+                "const": "complete"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "beacons"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "audit-tls"
+              },
+              "event": {
+                "const": "complete"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "audit-tls"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "audit-http"
+              },
+              "event": {
+                "const": "complete"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "audit-http"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "const": "scan-diff"
+              },
+              "event": {
+                "const": "complete"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "kind": {
+                    "const": "scan-diff"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

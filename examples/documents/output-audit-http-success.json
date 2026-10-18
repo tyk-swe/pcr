@@ -1,0 +1,127 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "audit-http",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "kind": "audit-http",
+    "findings": [
+      {
+        "rule_id": "http.csp",
+        "severity": "low",
+        "subject": "127.0.0.1:43357",
+        "summary": "Content-Security-Policy is absent or empty",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "request_method": "HEAD",
+          "response_status": 200
+        },
+        "remediation": "Define a Content-Security-Policy suitable for this application.",
+        "complete": true
+      },
+      {
+        "rule_id": "http.framing",
+        "severity": "low",
+        "subject": "127.0.0.1:43357",
+        "summary": "No recognized framing protection observed",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "request_method": "HEAD",
+          "response_status": 200
+        },
+        "remediation": "Set CSP frame-ancestors or a supported X-Frame-Options policy.",
+        "complete": true
+      },
+      {
+        "rule_id": "http.nosniff",
+        "severity": "low",
+        "subject": "127.0.0.1:43357",
+        "summary": "X-Content-Type-Options: nosniff not observed",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "request_method": "HEAD",
+          "response_status": 200
+        },
+        "remediation": "Send X-Content-Type-Options: nosniff with correct media types.",
+        "complete": true
+      },
+      {
+        "rule_id": "http.referrer_policy",
+        "severity": "low",
+        "subject": "127.0.0.1:43357",
+        "summary": "No recognized restrictive Referrer-Policy observed",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "request_method": "HEAD",
+          "response_status": 200
+        },
+        "remediation": "Choose an explicit Referrer-Policy appropriate for the application.",
+        "complete": true
+      },
+      {
+        "rule_id": "http.cookie_secure",
+        "severity": "low",
+        "subject": "127.0.0.1:43357",
+        "summary": "Observed cookie lacks Secure",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "http_only": false,
+          "index": 0,
+          "name": "sid",
+          "same_site": "lax",
+          "secure": false,
+          "value": "[redacted]"
+        },
+        "remediation": "Review this cookie's purpose and set appropriate Secure, HttpOnly, and SameSite attributes.",
+        "complete": true
+      },
+      {
+        "rule_id": "http.cookie_http_only",
+        "severity": "low",
+        "subject": "127.0.0.1:43357",
+        "summary": "Observed cookie lacks HttpOnly",
+        "indicator_id": null,
+        "frames": [],
+        "evidence": {
+          "http_only": false,
+          "index": 0,
+          "name": "sid",
+          "same_site": "lax",
+          "secure": false,
+          "value": "[redacted]"
+        },
+        "remediation": "Review this cookie's purpose and set appropriate Secure, HttpOnly, and SameSite attributes.",
+        "complete": true
+      }
+    ],
+    "completeness": {
+      "complete": true,
+      "reasons": []
+    },
+    "measurements": {
+      "bytes_read": 83,
+      "bytes_sent": 93,
+      "cookies": [
+        {
+          "http_only": false,
+          "index": 0,
+          "name": "sid",
+          "same_site": "lax",
+          "secure": false,
+          "value": "[redacted]"
+        }
+      ],
+      "host": "127.0.0.1:43357",
+      "https": false,
+      "path": "/",
+      "status": 200
+    },
+    "sources": []
+  },
+  "diagnostics": []
+}

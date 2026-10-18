@@ -1,0 +1,37 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "audit-tls",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "kind": "audit-tls",
+    "findings": [],
+    "completeness": {
+      "complete": true,
+      "reasons": []
+    },
+    "measurements": {
+      "certificate_sha256": [
+        "5023d9124b83bbd9d30a3dffe4e9ee5e27235369a098a43703531895a06cb61d"
+      ],
+      "cipher": "TLS13_AES_256_GCM_SHA384",
+      "endpoint": "127.0.0.1:58385",
+      "protocol": "TLSv1_3",
+      "server_name": "audit.example.test",
+      "verification": {
+        "chain": {
+          "reason": null,
+          "valid": true
+        },
+        "name": {
+          "reason": null,
+          "valid": true
+        }
+      },
+      "wire_bytes_read": 1402,
+      "wire_bytes_sent": 325
+    },
+    "sources": []
+  },
+  "diagnostics": []
+}

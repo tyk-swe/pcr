@@ -6,6 +6,13 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+- Add local IOC hunting, DNS anomaly and TCP beacon detection, TLS certificate
+  and HTTP configuration audits, native scan comparison, and standalone HTML
+  assessments. Publish bounded security findings in output/v1 and a versioned
+  local IOC document; support severity exit thresholds and explicit incomplete
+  evidence. Live audits need ordinary TCP sockets and authenticate certificates
+  before sending HTTPS requests.
+
 - Publish output/v1 with typed raw measurement coverage, provisional stream
   qualification before inference, preserved positive evidence under permissive
   capture loss, and separate RTT unavailable counts. All current examples use the v1 baseline.

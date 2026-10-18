@@ -27,6 +27,7 @@
 #![forbid(unsafe_code)]
 
 mod address;
+pub mod audit;
 pub mod capture;
 mod client;
 pub mod clock;

@@ -16,3 +16,5 @@ mod scan_control_contracts;
 mod scan_measurement_contracts;
 mod scan_serial_retention_contracts;
 mod transmit_only_contracts;
+
+mod audit_contracts;

@@ -37,6 +37,7 @@ native-layer2 = ["native-route", "dep:libloading", "dep:pcap"]
 native-layer3 = ["native-route"]
 
 [dependencies]
+webpki-roots.workspace = true
 bytes.workspace = true
 packetcraftr-core.workspace = true
 thiserror.workspace = true

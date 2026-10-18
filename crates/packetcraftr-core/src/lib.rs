@@ -40,3 +40,6 @@ pub mod protocol;
 pub mod registry;
 pub mod template;
 pub mod transform;
+
+/// Bounded security findings and investigation collectors.
+pub mod security;

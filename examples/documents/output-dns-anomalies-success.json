@@ -1,0 +1,50 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dns-anomalies",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "kind": "dns-anomalies",
+    "findings": [],
+    "completeness": {
+      "complete": false,
+      "reasons": [
+        "DNS transactions include unanswered, orphan, or duplicate messages"
+      ]
+    },
+    "measurements": {
+      "capture": "examples/captures/dns-response.pcap",
+      "clock": {
+        "max_forward_step": {
+          "nanos": 0,
+          "secs": 0
+        },
+        "max_forward_step_frame": null,
+        "max_regression": {
+          "nanos": 0,
+          "secs": 0
+        },
+        "regressions": 0
+      },
+      "frames_matched": 1,
+      "frames_read": 1,
+      "scopes": [
+        {
+          "encapsulation": [],
+          "id": 0,
+          "interface": null
+        }
+      ],
+      "thresholds": {
+        "min_entropy": 4.0,
+        "min_label_length": 32,
+        "min_labels": 20,
+        "min_responses": 20,
+        "nxdomain_ratio": 0.5,
+        "window_seconds": 60
+      }
+    },
+    "sources": []
+  },
+  "diagnostics": []
+}

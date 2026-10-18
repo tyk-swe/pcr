@@ -1,0 +1,15 @@
+{
+  "schema": "packetcraftr.indicators/v1",
+  "indicators": [
+    {
+      "id": "lab-endpoint",
+      "kind": "ip",
+      "value": "192.0.2.1"
+    },
+    {
+      "id": "lab-domain",
+      "kind": "domain_suffix",
+      "value": "example.test"
+    }
+  ]
+}

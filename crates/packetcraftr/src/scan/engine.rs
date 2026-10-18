@@ -31,6 +31,7 @@ use crate::{Client, Sink};
 
 use super::Error;
 use super::WORKFLOW;
+use super::adaptive::Ceilings;
 use super::discovery::{self, Composer};
 use super::error::{duration_limit, probe_error};
 use super::evidence::ProbeClassifier;
@@ -431,8 +432,8 @@ where
 
     let resolved_addresses = approved.addresses();
     let scheduling = match controller {
-        Some(controller) => controller.finish((None, None)),
-        None => super::adaptive::fixed_scheduling((None, None), peak, retries_started),
+        Some(controller) => controller.finish(Ceilings::default()),
+        None => super::adaptive::fixed_scheduling(Ceilings::default(), peak, retries_started),
     };
     Ok(Report {
         planned_duration: approved.planned_duration,

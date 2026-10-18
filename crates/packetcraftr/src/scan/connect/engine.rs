@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider};
 
+use super::super::adaptive::Ceilings;
 use super::super::discovery::{Composer, Scan};
 use super::super::error::{duration_limit, probe_error};
 use super::super::report::RttAccumulator;
@@ -174,7 +175,10 @@ where
     stats.elapsed = clock.now().saturating_duration_since(started);
     stats.rtt = rtt.finish();
     stats.retained_evidence_bytes = evidence_bytes;
-    let ceilings = (Some(budget.capacity()), Some(tcp::MAX_PENDING_CONNECTIONS));
+    let ceilings = Ceilings {
+        operation: Some(budget.capacity()),
+        process: Some(tcp::MAX_PENDING_CONNECTIONS),
+    };
     let scheduling = match controller {
         Some(controller) => controller.finish(ceilings),
         None => super::super::adaptive::fixed_scheduling(ceilings, peak, retries),

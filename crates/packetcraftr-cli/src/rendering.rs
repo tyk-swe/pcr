@@ -14,6 +14,7 @@ mod ndjson;
 mod presentation;
 mod projection;
 mod retained;
+pub(crate) mod security;
 mod stdout;
 mod style;
 

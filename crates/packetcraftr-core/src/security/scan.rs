@@ -1,125 +1,83 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Compare scan observations without coupling comparison rules to an output format.
+
+mod legacy;
+
 use super::{Error, Finding, Limits, Report, Severity};
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    net::IpAddr,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const MAX_INPUT_BYTES: usize = 32 * 1024 * 1024;
-struct Scan {
-    method: String,
-    endpoints: BTreeMap<String, Value>,
+
+/// A conclusive inferred endpoint state supported by measurement evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum State {
+    Open,
+    Closed,
+    Filtered,
+    OpenOrFiltered,
+    Unfiltered,
 }
-fn parse(bytes: &[u8], limits: Limits) -> Result<Scan, Error> {
-    if bytes.len() > MAX_INPUT_BYTES {
-        return Err(Error::Limit {
-            field: "scan_input_bytes",
-            limit: MAX_INPUT_BYTES,
-        });
-    }
-    let value: Value = serde_json::from_slice(bytes).map_err(|e| Error::Invalid(e.to_string()))?;
-    if value["schema"] != "packetcraftr.output/v1"
-        || value["command"] != "scan"
-        || value["mode"] != "aggregate"
-        || value["status"] != "success"
-    {
-        return Err(Error::Invalid(
-            "scan-diff requires successful native aggregate scan JSON".into(),
-        ));
-    }
-    let result = &value["result"];
-    let method = result["method"]
-        .as_str()
-        .unwrap_or_else(|| result["plan"]["method"]["selected"].as_str().unwrap_or(""));
-    if !["raw", "tcp_connect"].contains(&method) {
-        return Err(Error::Invalid(
-            "scan-diff supports raw and connect scans".into(),
-        ));
-    }
-    let endpoints = result["endpoints"]
-        .as_array()
-        .ok_or_else(|| Error::Invalid("missing scan endpoints".into()))?;
-    if endpoints.len() > limits.max_groups {
-        return Err(Error::Limit {
-            field: "max_groups",
-            limit: limits.max_groups,
-        });
-    }
-    let mut map = BTreeMap::new();
-    for e in endpoints {
-        let address = e["address"]
-            .as_str()
-            .and_then(|s| s.parse::<IpAddr>().ok())
-            .ok_or_else(|| Error::Invalid("invalid scan endpoint address".into()))?;
-        let protocol = e["transport"]
-            .as_str()
-            .unwrap_or(if method == "tcp_connect" { "tcp" } else { "" });
-        if !["tcp", "udp", "sctp", "icmp", "ip"].contains(&protocol) {
-            return Err(Error::Invalid("invalid endpoint transport".into()));
-        }
-        let port = e
-            .get("port")
-            .or_else(|| e.get("ip_protocol"))
-            .and_then(Value::as_u64);
-        if (protocol != "icmp" && port.is_none())
-            || port.is_some_and(|p| p > if protocol == "ip" { 255 } else { 65535 })
-        {
-            return Err(Error::Invalid(
-                "invalid or missing endpoint port / IP protocol".into(),
-            ));
-        }
-        let port = port.map_or_else(|| "echo".into(), |p| p.to_string());
-        let scope = e.get("scope").unwrap_or(&Value::Null);
-        let key = format!("{scope}|{address}|{protocol}|{port}");
-        if map.insert(key, e.clone()).is_some() {
-            return Err(Error::Invalid("duplicate scoped endpoint".into()));
-        }
-    }
-    // Raw TCP and SCTP probe modes define different inference semantics.
-    let method = if method == "raw" {
-        format!(
-            "raw:{}:{}",
-            result["plan"]["tcp_scan"]["mode"].as_str().unwrap_or("syn"),
-            result["plan"]["sctp_scan"]["mode"]
-                .as_str()
-                .unwrap_or("init")
-        )
-    } else {
-        method.to_owned()
-    };
-    Ok(Scan {
-        method,
-        endpoints: map,
-    })
+
+/// One observation, with a caller-defined scoped identity and retained evidence.
+#[derive(Clone, Debug)]
+pub struct Endpoint {
+    /// Stable identity shared by observations of the same scoped endpoint.
+    pub key: String,
+    /// `None` when the observation lacks a recognized, supported inference.
+    pub state: Option<State>,
+    /// Original evidence, copied unchanged into comparison findings.
+    pub observation: Value,
 }
-fn state(e: &Value) -> Option<&str> {
-    let state = e["inference"]["state"].as_str()?;
-    if ![
-        "open",
-        "closed",
-        "filtered",
-        "open_or_filtered",
-        "unfiltered",
-    ]
-    .contains(&state)
-    {
-        return None;
-    }
-    if e["inference"]["supporting"]
-        .as_array()
-        .is_none_or(Vec::is_empty)
-    {
-        return None;
-    }
-    Some(state)
+
+/// Observations collected using one method and its inference semantics.
+#[derive(Clone, Debug)]
+pub struct Snapshot {
+    /// Equal identities indicate comparable methods, including probe modes.
+    pub method: String,
+    /// Scoped endpoint keys must be unique within a snapshot.
+    pub endpoints: Vec<Endpoint>,
 }
+
+impl Snapshot {
+    fn index(&self, limits: Limits) -> Result<BTreeMap<&str, &Endpoint>, Error> {
+        if self.endpoints.len() > limits.max_groups {
+            return Err(Error::Limit {
+                field: "max_groups",
+                limit: limits.max_groups,
+            });
+        }
+        let mut index = BTreeMap::new();
+        for endpoint in &self.endpoints {
+            if index.insert(endpoint.key.as_str(), endpoint).is_some() {
+                return Err(Error::Invalid("duplicate scoped endpoint".into()));
+            }
+        }
+        Ok(index)
+    }
+}
+
+/// Compare historical successful aggregate scan JSON documents.
+///
+/// This compatibility entry point retains its original validation and input limits.
+/// Use [`compare_snapshots`] when observations are already available as typed data.
 pub fn compare(before: &[u8], after: &[u8], limits: Limits) -> Result<Report, Error> {
     limits.validate()?;
-    let a = parse(before, limits)?;
-    let b = parse(after, limits)?;
+    let before = legacy::parse(before, limits)?;
+    let after = legacy::parse(after, limits)?;
+    compare_snapshots(&before, &after, limits)
+}
+
+/// Compare scoped observations without interpreting their retained JSON evidence.
+///
+/// Endpoint groups and findings are bounded by `limits`. Missing observations mean
+/// changed coverage; they never imply that an endpoint is closed.
+pub fn compare_snapshots(a: &Snapshot, b: &Snapshot, limits: Limits) -> Result<Report, Error> {
+    limits.validate()?;
+    let a_endpoints = a.index(limits)?;
+    let b_endpoints = b.index(limits)?;
     if a.method != b.method {
         return Err(Error::Invalid(
             "scan methods must match, including raw TCP and SCTP scan modes".into(),
@@ -127,20 +85,24 @@ pub fn compare(before: &[u8], after: &[u8], limits: Limits) -> Result<Report, Er
     }
     let mut report = Report::new("scan-diff");
     report.measurements.insert("method".into(), json!(a.method));
-    let keys: BTreeSet<_> = a.endpoints.keys().chain(b.endpoints.keys()).collect();
+    let keys: BTreeSet<_> = a_endpoints
+        .keys()
+        .chain(b_endpoints.keys())
+        .copied()
+        .collect();
     let mut unchanged = 0;
     for key in keys {
-        let before = a.endpoints.get(key);
-        let after = b.endpoints.get(key);
+        let before = a_endpoints.get(key).copied();
+        let after = b_endpoints.get(key).copied();
         let (rule, severity, summary) = match (before, after) {
-            (Some(a), Some(b)) => match (state(a), state(b)) {
+            (Some(a), Some(b)) => match (a.state, b.state) {
                 (Some(a), Some(b)) if a == b => {
                     unchanged += 1;
                     continue;
                 }
                 (Some(_), Some(b)) => (
                     "scan.state_changed",
-                    if b == "open" {
+                    if b == State::Open {
                         Severity::Medium
                     } else {
                         Severity::Info
@@ -164,7 +126,20 @@ pub fn compare(before: &[u8], after: &[u8], limits: Limits) -> Result<Report, Er
                 "Endpoint coverage changed; absence does not imply closed",
             ),
         };
-        limits.push(&mut report, Finding::new(rule, severity, key.clone(), summary, json!({"before":before,"after":after}), "Review measurement evidence, scan scope, and expected service changes before drawing conclusions."))?;
+        limits.push(
+            &mut report,
+            Finding::new(
+                rule,
+                severity,
+                key,
+                summary,
+                json!({
+                    "before": before.map(|e| &e.observation),
+                    "after": after.map(|e| &e.observation),
+                }),
+                "Review measurement evidence, scan scope, and expected service changes before drawing conclusions.",
+            ),
+        )?;
     }
     report
         .measurements

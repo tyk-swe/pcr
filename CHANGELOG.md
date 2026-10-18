@@ -6,6 +6,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+- Add typed security scan snapshots and `compare_snapshots`, retaining the byte
+  comparison API and its validation. Separate security input adaptation,
+  published output fields, and rendering, and organize capture investigations,
+  packet preparation, and scan execution by responsibility without changing
+  CLI or data contracts.
+
 - Add local IOC hunting, DNS anomaly and TCP beacon detection, TLS certificate
   and HTTP configuration audits, native scan comparison, and standalone HTML
   assessments. Publish bounded security findings in output/v1 and a versioned

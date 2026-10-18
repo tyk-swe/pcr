@@ -454,3 +454,77 @@ fn native_connect_scans_compare_inferred_states() {
     assert_eq!(finding["evidence"]["before"]["inference"]["state"], "open");
     assert_eq!(finding["evidence"]["after"]["inference"]["state"], "closed");
 }
+
+#[test]
+fn scan_diff_formats_severity_exit_and_publication_limits_are_stable() {
+    let dir = tempfile::tempdir().unwrap();
+    let before = dir.path().join("before.json");
+    let after = dir.path().join("after.json");
+    let mut document = serde_json::json!({
+        "schema":"packetcraftr.output/v1", "command":"scan", "mode":"aggregate", "status":"success",
+        "result":{"method":"tcp_connect", "endpoints":[{
+            "address":"192.0.2.1", "port":443, "inference":{"state":"closed", "supporting":[1]}
+        }]}
+    });
+    std::fs::write(&before, document.to_string()).unwrap();
+    document["result"]["endpoints"][0]["inference"]["state"] = "open".into();
+    std::fs::write(&after, document.to_string()).unwrap();
+    let args = [
+        "analyze",
+        "scan-diff",
+        path_text(&before),
+        path_text(&after),
+    ];
+    let json_output = run(&[&["--output", "json"][..], &args, &["--fail-on", "medium"]].concat());
+    assert_eq!(json_output.status.code(), Some(1));
+    let aggregate = parse_json(&json_output);
+    assert_eq!(aggregate["status"], "success");
+    assert_eq!(aggregate["result"]["findings"][0]["severity"], "medium");
+    let events = parse_ndjson(&run_success(&[&["--output", "ndjson"][..], &args].concat()));
+    assert_contiguous(&events);
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["event"], "finding");
+    assert_eq!(events[0]["result"], aggregate["result"]["findings"][0]);
+    assert_eq!(events[1]["event"], "complete");
+    assert_eq!(events[1]["result"], aggregate["result"]);
+    let text = String::from_utf8(run_success(&args).stdout).unwrap();
+    assert_eq!(
+        text,
+        concat!(
+            "scan-diff: 1 finding(s); evidence complete within the selected input\n",
+            "  before_endpoints: 1\n  after_endpoints: 1\n  unchanged_endpoints: 0\n",
+            "Medium scan.state_changed null|192.0.2.1|tcp|443: Observed endpoint state changed\n"
+        )
+    );
+    for format in ["json", "ndjson", "text"] {
+        let output = run(&[
+            &["--output", format][..],
+            &args,
+            &["--max-result-bytes", "1"],
+        ]
+        .concat());
+        assert!(!output.status.success());
+        if format == "ndjson" {
+            let events = parse_ndjson(&output);
+            assert!(
+                events
+                    .iter()
+                    .all(|event| event["event"] != "finding" && event["event"] != "complete")
+            );
+        }
+    }
+    let result = dir.path().join("result.json");
+    std::fs::write(&result, json_output.stdout).unwrap();
+    let html = dir.path().join("assessment.html");
+    let failed = run(&[
+        "analyze",
+        "report",
+        path_text(&result),
+        "--html",
+        path_text(&html),
+        "--max-result-bytes",
+        "1",
+    ]);
+    assert!(!failed.status.success());
+    assert!(!html.exists());
+}

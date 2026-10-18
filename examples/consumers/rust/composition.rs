@@ -24,6 +24,15 @@ use packetcraftr_netio::{interface, transmit};
 
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 5);
 
+#[test]
+fn typed_scan_comparison_without_cli_documents() {
+    use packetcraftr_core::security::{Limits, scan::{Snapshot, compare_snapshots}};
+    let snapshot = Snapshot {method:"consumer".into(), endpoints:Vec::new()};
+    let report = compare_snapshots(&snapshot, &snapshot, Limits::default()).unwrap();
+    assert!(report.findings.is_empty());
+    assert!(report.completeness.complete);
+}
+
 struct DocumentationRoutes;
 
 impl Provider for DocumentationRoutes {

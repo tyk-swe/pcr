@@ -37,6 +37,32 @@ Put reusable behavior in the lowest crate that can own it without introducing
 a dependency in the wrong direction. Keep live I/O and policy out of
 `packetcraftr-core`.
 
+## Internal boundaries
+
+Security capture analysis keeps shared limits, provenance, and collector
+finalization in core's `security::capture`, with private modules for hunting,
+DNS anomalies, and beacon timing. Scan comparison takes typed
+`security::scan::Snapshot` observations through `compare_snapshots`; the
+comparator does not interpret the retained JSON evidence. The existing byte
+`compare` API retains a private legacy decoder for compatibility. The CLI owns
+its current output/v1 input adapter; parity tests keep both decoders compatible.
+
+Security commands adapt arguments and inputs, invoke collectors or client
+workflows, and publish results. The CLI's `output::security` defines the
+published fields, borrowing evidence from library reports. Text and HTML
+generation belong to `rendering::security`; assessment orchestration retains
+redaction, bounds, source hashes, and staged file publication.
+
+Live packet preparation keeps one operation's stage context and cumulative
+admission budget. Its private modules separate passive admission and accounting,
+deterministic construction, neighbor discovery and fresh-route checks, and
+streaming preparation. Admission tokens remain single-use. The scan pipeline
+likewise remains the owner of one capture/correlation lifetime: private modules
+handle admission, controller-fed preparation, capture epochs, transmission, and
+reply settlement. Its drive and finish path still owns final cleanup and failure
+evidence. These internal boundaries do not change provider contracts or move
+native resource ownership out of netio.
+
 ## Tests and supporting data
 
 - Public behavior tests belong in `crates/*/tests/integration/` and are

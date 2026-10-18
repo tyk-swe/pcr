@@ -1,0 +1,182 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use super::{Bounds, Command, CommandExit, Format, Invocation, Spec, publish, read};
+use crate::{
+    command_options::{ApplicationLimitsArgs, Bounded, DecodeArgs, OfflineLimitsArgs},
+    errors::CliError,
+    resources::Settings,
+};
+use clap::Args;
+use packetcraftr_core::security;
+use std::path::PathBuf;
+
+#[derive(Debug, Args)]
+pub(super) struct Capture {
+    /// Classic PCAP or PCAPNG input; - reads redirected stdin.
+    path: PathBuf,
+    /// Display filter selecting evidence within the capture.
+    #[arg(long)]
+    filter: Option<String>,
+    #[command(flatten)]
+    decode: DecodeArgs,
+    #[command(flatten)]
+    limits: OfflineLimitsArgs,
+    #[command(flatten)]
+    application: ApplicationLimitsArgs,
+    #[command(flatten)]
+    bounds: Bounds,
+}
+#[derive(Debug, Args)]
+pub(crate) struct Hunt {
+    #[command(flatten)]
+    capture: Capture,
+    /// Local packetcraftr.indicators/v1 JSON document.
+    #[arg(long)]
+    indicators: PathBuf,
+}
+#[derive(Debug, Args)]
+pub(crate) struct Dns {
+    #[command(flatten)]
+    capture: Capture,
+    #[arg(long, default_value_t = 60)]
+    window_seconds: u64,
+    #[arg(long, default_value_t = 20)]
+    min_responses: usize,
+    #[arg(long, default_value_t = 0.5)]
+    nxdomain_ratio: f64,
+    #[arg(long, default_value_t = 20)]
+    min_labels: usize,
+    #[arg(long, default_value_t = 32)]
+    min_label_length: usize,
+    #[arg(long, default_value_t = 4.0)]
+    min_entropy: f64,
+}
+#[derive(Debug, Args)]
+pub(crate) struct Beacons {
+    #[command(flatten)]
+    capture: Capture,
+    #[arg(long, default_value_t = 6)]
+    min_attempts: usize,
+    #[arg(long, default_value_t = 1.0)]
+    min_interval_seconds: f64,
+    #[arg(long, default_value_t = 0.10)]
+    max_cv: f64,
+}
+impl Capture {
+    fn resources(&self, settings: &mut Settings<'_>) {
+        self.bounds.resources(settings);
+        self.application.resources(settings);
+        self.limits.resources(
+            settings,
+            crate::command_options::AnalysisStages::with_tcp(true),
+        );
+    }
+    fn run(
+        self,
+        mode: security::capture::Mode,
+        command: Command,
+        invocation: &Invocation,
+        source: Option<security::Source>,
+    ) -> Result<CommandExit, CliError> {
+        let limits = self.bounds.core()?;
+        self.application.validate_output()?;
+        let collector = security::capture::Collector::new(mode, limits, self.application.core())
+            .map_err(CliError::classified)?;
+        let prepared = crate::commands::offline_analysis::prepare(
+            self.limits,
+            self.filter.as_deref(),
+            &self.decode,
+        )?;
+        let session = packetcraftr_core::analysis::Session::new(
+            prepared.registry.clone(),
+            prepared.options(invocation),
+            collector,
+        );
+        let mut reader =
+            crate::input::open_capture(invocation, &self.path, self.limits.capture.reader)?;
+        let mut report = session
+            .run(&mut reader, |_| Ok(()), |_| Ok(()))
+            .map_err(CliError::classified)?
+            .summary;
+        if self.filter.is_some() {
+            report
+                .measurements
+                .insert("filter".into(), serde_json::json!(self.filter));
+            report
+                .completeness
+                .note("analysis restricted by display filter");
+        }
+        if let Some(source) = source {
+            report.sources.push(source);
+        }
+        // Capture provenance is supplied by physical frame numbers and scope definitions;
+        // streamed stdin is deliberately not reread to manufacture a source hash.
+        report
+            .measurements
+            .insert("capture".into(), serde_json::json!(self.path));
+        let mut bounds = self.bounds;
+        bounds.max_result_bytes = bounds
+            .max_result_bytes
+            .min(self.application.max_application_output_bytes);
+        publish(invocation, command, report, bounds)
+    }
+}
+macro_rules! capture_spec {
+    ($ty:ty, $command:ident, $mode:expr) => {
+        impl Spec for $ty {
+            const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
+            const CANCELLATION: bool = true;
+            const OFFLINE: bool = true;
+            fn run_time(&self) -> Option<&dyn Bounded> {
+                Some(&self.capture.limits)
+            }
+            fn resources(&self, s: &mut Settings<'_>) {
+                self.capture.resources(s);
+            }
+            fn run(self, i: &Invocation) -> Result<CommandExit, CliError> {
+                let mode = ($mode)(&self);
+                self.capture.run(mode, Command::$command, i, None)
+            }
+        }
+    };
+}
+capture_spec!(Dns, DnsAnomalies, |s: &Dns| security::capture::Mode::Dns(
+    security::capture::DnsOptions {
+        window_seconds: s.window_seconds,
+        min_responses: s.min_responses,
+        nxdomain_ratio: s.nxdomain_ratio,
+        min_labels: s.min_labels,
+        min_label_length: s.min_label_length,
+        min_entropy: s.min_entropy
+    }
+));
+capture_spec!(Beacons, Beacons, |s: &Beacons| {
+    security::capture::Mode::Beacons(security::capture::BeaconOptions {
+        min_attempts: s.min_attempts,
+        min_interval_seconds: s.min_interval_seconds,
+        max_cv: s.max_cv,
+    })
+});
+impl Spec for Hunt {
+    const FORMATS: &'static [Format] = &[Format::Text, Format::Json, Format::Ndjson];
+    const CANCELLATION: bool = true;
+    const OFFLINE: bool = true;
+    fn run_time(&self) -> Option<&dyn Bounded> {
+        Some(&self.capture.limits)
+    }
+    fn resources(&self, s: &mut Settings<'_>) {
+        self.capture.resources(s);
+    }
+    fn run(self, i: &Invocation) -> Result<CommandExit, CliError> {
+        let bytes = read(&self.indicators, security::indicators::MAX_DOCUMENT_BYTES)?;
+        let doc = security::indicators::Document::parse(&bytes).map_err(CliError::classified)?;
+        let source = super::source(&self.indicators, &bytes);
+        self.capture.run(
+            security::capture::Mode::Hunt(doc),
+            Command::Hunt,
+            i,
+            Some(source),
+        )
+    }
+}

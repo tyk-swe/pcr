@@ -77,6 +77,7 @@ pub mod resources;
 pub mod rewrite;
 pub mod routes;
 pub mod scan;
+pub mod security;
 pub mod send;
 pub mod stats;
 pub mod stream;

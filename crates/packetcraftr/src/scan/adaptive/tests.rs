@@ -261,7 +261,7 @@ impl ConservativeWork {
         endpoint.pending = false;
         match outcome {
             Outcome::Silent | Outcome::UnqualifiedSilence if selection.attempt < max_attempts => {
-                endpoint.ready_at = now + controller.retry_delay(selection.attempt + 1);
+                endpoint.ready_at = now + controller.config.retry_delay(selection.attempt + 1);
             }
             Outcome::Reply { .. } | Outcome::Silent | Outcome::UnqualifiedSilence => {
                 endpoint.finished = true;

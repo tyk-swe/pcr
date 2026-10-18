@@ -92,6 +92,13 @@ impl Adaptive {
         }
         Ok(())
     }
+
+    pub(crate) fn retry_delay(&self, next_attempt: u32) -> Duration {
+        let shift = next_attempt.saturating_sub(2).min(31);
+        self.retry_backoff
+            .saturating_mul(1u32 << shift)
+            .min(self.max_backoff)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -678,12 +685,13 @@ impl Controller {
             let desired = self.rto(host);
             let timeout = desired.min(host_remaining);
             let attempt = work.slots[slot_index].endpoints[endpoint_index].sent + 1;
-            let sequence = work.first_sequence.saturating_add(
-                ((u64::from(attempt) - 1)
-                    .saturating_mul(endpoints_per_host as u64)
-                    .saturating_add(endpoint_index as u64))
-                .saturating_mul(work.host_count as u64)
-                .saturating_add(host as u64),
+            let sequence = super::plan::sequence(
+                work.first_sequence,
+                attempt,
+                endpoint_index,
+                endpoints_per_host,
+                host,
+                work.host_count,
             );
             selections.push(Selection {
                 slot: slot_index,
@@ -785,14 +793,6 @@ impl Controller {
         }
     }
 
-    fn retry_delay(&self, next_attempt: u32) -> Duration {
-        let shift = next_attempt.saturating_sub(2).min(31);
-        self.config
-            .retry_backoff
-            .saturating_mul(1u32 << shift)
-            .min(self.config.max_backoff)
-    }
-
     pub(super) fn settle(
         &mut self,
         work: &mut Work,
@@ -866,7 +866,7 @@ impl Controller {
                 if selection.attempt >= work.max_attempts {
                     endpoint.finished = true;
                 } else {
-                    endpoint.ready_at = now + self.retry_delay(selection.attempt + 1);
+                    endpoint.ready_at = now + self.config.retry_delay(selection.attempt + 1);
                     if !was_finished {
                         slot.delayed.insert((endpoint.ready_at, selection.endpoint));
                         #[cfg(test)]

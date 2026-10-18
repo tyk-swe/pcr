@@ -10,7 +10,7 @@ use crate::target::SelectedAddress;
 
 use crate::probe::{self, enforce_deadline};
 use crate::scan::Error;
-use crate::scan::error::probe_error;
+use crate::scan::error::{duration_limit, probe_error};
 use crate::scan::evidence::ProbeClassifier;
 use crate::scan::executor::{PipelineEvent, PipelineOptions, Pipelined};
 use crate::scan::plan::packet::sent_probe_matches;
@@ -147,14 +147,23 @@ pub(super) fn pipeline_options(
         control: deadline.clone(),
         max_in_flight: request.max_in_flight,
         probes_per_second: request.probes_per_second,
-        max_duration: deadline.remaining().map_err(|error| {
-            (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error))
-        })?,
+        max_duration: deadline
+            .remaining()
+            .map_err(|error| duration_limit(0_u64, error))?,
         max_prepared_bytes: request.limits.max_prepared_bytes.saturating_sub(reserved),
         max_evidence_frames: request.limits.evidence.max_frames,
         max_evidence_bytes: request.limits.evidence.max_bytes,
         preceding,
     })
+}
+
+pub(super) fn prepared_limit(request: &Request) -> Error {
+    Error::PipelineExecution {
+        source: crate::scan::executor::limit(
+            "prepared descriptions",
+            request.limits.max_prepared_bytes,
+        ),
+    }
 }
 
 /// Rejects a pipelined stage whose batch descriptions for `targets` would
@@ -173,12 +182,7 @@ pub(super) fn check_prepared_descriptions(
         )
     });
     if batch_bytes > request.limits.max_prepared_bytes {
-        return Err(Error::PipelineExecution {
-            source: crate::scan::executor::limit(
-                "prepared descriptions",
-                request.limits.max_prepared_bytes,
-            ),
-        });
+        return Err(prepared_limit(request));
     }
     Ok(())
 }
@@ -252,13 +256,6 @@ where
                     .map_err(packetcraftr_core::error::BoundaryError::from_error)?;
                 completed[index] = true;
                 pending_now = pending_now.saturating_sub(1);
-            }
-            PipelineEvent::Qualification(qualification) => {
-                publish_aux(
-                    PipelineEvent::Qualification(qualification),
-                    evidence,
-                    deadline,
-                )?;
             }
             event => publish_aux(event, evidence, deadline)?,
         }

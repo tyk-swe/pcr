@@ -89,6 +89,23 @@ pub(super) fn probe_count(
         })
 }
 
+pub(super) fn sequence(
+    first: u64,
+    attempt: u32,
+    endpoint: usize,
+    endpoints: usize,
+    host: usize,
+    hosts: usize,
+) -> u64 {
+    first.saturating_add(
+        ((u64::from(attempt) - 1)
+            .saturating_mul(endpoints as u64)
+            .saturating_add(endpoint as u64))
+        .saturating_mul(hosts as u64)
+        .saturating_add(host as u64),
+    )
+}
+
 /// One batch per probe, ordered target, attempt, then endpoint, numbered
 /// from `first_sequence`.
 pub(super) fn build_batches<'a>(
@@ -166,15 +183,18 @@ pub(super) fn planned_probe(
     }
 }
 
+fn overflow(request: &Request) -> Error {
+    Error::DurationLimit {
+        actual: Duration::MAX,
+        limit: request.limits.max_duration,
+    }
+}
+
 pub(super) fn worst_case_duration(
     request: &Request,
     batch_count: usize,
 ) -> Result<Duration, Error> {
-    let overflow = || Error::DurationLimit {
-        actual: Duration::MAX,
-        limit: request.limits.max_duration,
-    };
-    let batch_count_u32 = u32::try_from(batch_count).map_err(|_| overflow())?;
+    let batch_count_u32 = u32::try_from(batch_count).map_err(|_| overflow(request))?;
     let windows = if request.max_in_flight == 1 {
         batch_count_u32
     } else {
@@ -194,23 +214,33 @@ pub(super) fn ip_worst_case_duration(
     if batch_count == 0 {
         return Ok(Duration::ZERO);
     }
-    let overflow = || Error::DurationLimit {
-        actual: Duration::MAX,
-        limit: request.limits.max_duration,
-    };
-    let count = u32::try_from(batch_count).map_err(|_| overflow())?;
+    let count = u32::try_from(batch_count).map_err(|_| overflow(request))?;
     let parallel = batch_count.div_ceil(request.max_in_flight.max(1));
     let extra = reply_identity::overlap_waits(targets, endpoints, request.attempts)
-        .ok_or_else(&overflow)?;
+        .ok_or_else(|| overflow(request))?;
     let windows = parallel
         .checked_add(extra)
-        .ok_or_else(&overflow)?
+        .ok_or_else(|| overflow(request))?
         .min(batch_count);
     duration_with_windows(
         request,
         count,
-        u32::try_from(windows).map_err(|_| overflow())?,
+        u32::try_from(windows).map_err(|_| overflow(request))?,
     )
+}
+
+fn pacing_delay(request: &Request, delay_count: u32) -> Result<Duration, Error> {
+    if delay_count == 0 {
+        return Ok(Duration::ZERO);
+    }
+    rate_delay(
+        probe_error,
+        "probes_per_second",
+        1,
+        request.probes_per_second,
+    )?
+    .checked_mul(delay_count)
+    .ok_or_else(|| overflow(request))
 }
 
 fn duration_with_windows(
@@ -218,25 +248,15 @@ fn duration_with_windows(
     batch_count_u32: u32,
     windows: u32,
 ) -> Result<Duration, Error> {
-    let overflow = || Error::DurationLimit {
-        actual: Duration::MAX,
-        limit: request.limits.max_duration,
-    };
-    let exchange_time = request.timeout.checked_mul(windows).ok_or_else(&overflow)?;
+    let exchange_time = request
+        .timeout
+        .checked_mul(windows)
+        .ok_or_else(|| overflow(request))?;
     let delay_count = batch_count_u32.saturating_sub(1);
-    let delay = if delay_count == 0 {
-        Duration::ZERO
-    } else {
-        rate_delay(
-            probe_error,
-            "probes_per_second",
-            1,
-            request.probes_per_second,
-        )?
-        .checked_mul(delay_count)
-        .ok_or_else(&overflow)?
-    };
-    exchange_time.checked_add(delay).ok_or_else(overflow)
+    let delay = pacing_delay(request, delay_count)?;
+    exchange_time
+        .checked_add(delay)
+        .ok_or_else(|| overflow(request))
 }
 
 /// Scheduling upper projection for adaptive work. It intentionally assumes a
@@ -249,51 +269,36 @@ pub(super) fn adaptive_worst_case_duration(
     adaptive: &super::Adaptive,
     batch_count: usize,
 ) -> Result<Duration, Error> {
-    let overflow = || Error::DurationLimit {
-        actual: Duration::MAX,
-        limit: request.limits.max_duration,
-    };
     if batch_count == 0 {
         return Ok(Duration::ZERO);
     }
-    let batch_count_u32 = u32::try_from(batch_count).map_err(|_| overflow())?;
+    let batch_count_u32 = u32::try_from(batch_count).map_err(|_| overflow(request))?;
     let exchange_time = adaptive
         .max_timeout
         .checked_mul(batch_count_u32)
-        .ok_or_else(&overflow)?;
+        .ok_or_else(|| overflow(request))?;
     let delay_count = batch_count_u32.saturating_sub(1);
-    let delay = if delay_count == 0 {
-        Duration::ZERO
-    } else {
-        rate_delay(
-            probe_error,
-            "probes_per_second",
-            1,
-            request.probes_per_second,
-        )?
-        .checked_mul(delay_count)
-        .ok_or_else(&overflow)?
-    };
+    let delay = pacing_delay(request, delay_count)?;
     let distinct = batch_count_u32
         .checked_div(request.attempts.max(1))
         .unwrap_or(1);
     let mut retry_gaps = Duration::ZERO;
     for attempt in 2..=request.attempts.max(1) {
-        let shift = attempt.saturating_sub(2).min(31);
-        let gap = adaptive
-            .retry_backoff
-            .saturating_mul(1u32 << shift)
-            .min(adaptive.max_backoff);
-        retry_gaps = retry_gaps.checked_add(gap).ok_or_else(&overflow)?;
+        let gap = adaptive.retry_delay(attempt);
+        retry_gaps = retry_gaps
+            .checked_add(gap)
+            .ok_or_else(|| overflow(request))?;
     }
-    let retry_total = retry_gaps.checked_mul(distinct).ok_or_else(&overflow)?;
+    let retry_total = retry_gaps
+        .checked_mul(distinct)
+        .ok_or_else(|| overflow(request))?;
     let spacing = adaptive
         .max_backoff
         .checked_mul(delay_count)
-        .ok_or_else(&overflow)?;
+        .ok_or_else(|| overflow(request))?;
     exchange_time
         .checked_add(delay)
         .and_then(|total| total.checked_add(retry_total))
         .and_then(|total| total.checked_add(spacing))
-        .ok_or_else(overflow)
+        .ok_or_else(|| overflow(request))
 }

@@ -32,7 +32,7 @@ use crate::{Client, Sink};
 use super::Error;
 use super::WORKFLOW;
 use super::discovery::{self, Composer};
-use super::error::probe_error;
+use super::error::{duration_limit, probe_error};
 use super::evidence::ProbeClassifier;
 use super::executor::{ClientExecutor, Pipelined};
 use super::plan::{Stage, probe_count};
@@ -67,7 +67,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         let publish = publisher(
             &operation.runtime,
             sink,
-            |error| (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error)),
+            |error| duration_limit(0_u64, error),
             |source| Error::Output { source },
         )?;
         run(

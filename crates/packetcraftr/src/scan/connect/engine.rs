@@ -8,7 +8,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider};
 
 use super::super::discovery::{Composer, Scan};
-use super::super::error::probe_error;
+use super::super::error::{duration_limit, probe_error};
 use super::super::report::RttAccumulator;
 use super::super::{Error, Request, Stage};
 use super::accounting::{Progress, record};
@@ -323,9 +323,9 @@ where
             return Ok(());
         }
         let now = clock.now();
-        let remaining = deadline.remaining().map_err(|error| {
-            (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error))
-        })?;
+        let remaining = deadline
+            .remaining()
+            .map_err(|error| duration_limit(0_u64, error))?;
         let operation_end = now
             .checked_add(remaining)
             .ok_or_else(|| invalid("rate", 0, "pacing deadline overflow"))?;
@@ -381,9 +381,7 @@ where
             }
             let timeout = deadline
                 .bounded_timeout(selection.timeout)
-                .map_err(|error| {
-                    (probe_error)(sequence, crate::execution::Failure::DurationLimit(error))
-                })?
+                .map_err(|error| duration_limit(sequence, error))?
                 .min(host_remaining);
             selection.host_limited = selection.host_limited || timeout < selection.timeout;
             let admitted = clock.now();

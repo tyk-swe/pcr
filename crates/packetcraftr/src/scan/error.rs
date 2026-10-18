@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_core::budget::Cancelled;
+use packetcraftr_core::budget::{Cancelled, DeadlineExceeded};
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 use super::Probe;
@@ -263,4 +263,8 @@ pub(crate) fn probe_error(step: u64, failure: crate::execution::Failure) -> Erro
             Error::StatisticsOverflow { sequence }
         }
     }
+}
+
+pub(super) fn duration_limit(sequence: u64, error: DeadlineExceeded) -> Error {
+    probe_error(sequence, crate::execution::Failure::DurationLimit(error))
 }

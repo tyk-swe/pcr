@@ -4,12 +4,13 @@
 use super::{Bounds, Command, CommandExit, Format, Invocation, Spec, invalid};
 use crate::{errors::CliError, resources::Settings};
 use clap::Args;
-use packetcraftr_core::security::Report;
-use std::{io::Write, path::PathBuf};
+use packetcraftr_core::security::{Report, Source};
+use std::{collections::BTreeSet, io::Write, path::PathBuf};
 
 #[derive(Debug, Args)]
 pub(crate) struct Assessment {
     /// Aggregate JSON from hunt, dns-anomalies, beacons, audit-tls, audit-http, or scan-diff.
+    /// One input may be - to read redirected JSON stdin.
     #[arg(required = true, num_args = 1..)]
     results: Vec<PathBuf>,
     /// New standalone HTML file; existing destinations are refused.
@@ -30,28 +31,39 @@ impl Spec for Assessment {
         if self.results.len() > 128 {
             return Err(invalid("reports accept at most 128 result files"));
         }
+        super::input::validate_stdin_sources(self.results.iter().map(PathBuf::as_path))?;
         let mut staged = crate::staged_output::StagedFile::stage(i, &self.html)?;
         let mut report = Report::new("report");
+        let mut seen_sources = BTreeSet::new();
         for path in &self.results {
             i.check()?;
             let bytes = super::read(path, self.bounds.max_result_bytes)?;
-            let mut result = super::input::report(&bytes)?;
+            let result = super::input::report(&bytes)?;
             if !result.completeness.complete {
+                if result.completeness.reasons.is_empty() {
+                    report
+                        .completeness
+                        .note(format!("{}: source evidence incomplete", path.display()));
+                }
                 for reason in result.completeness.reasons {
                     report
                         .completeness
                         .note(format!("{}: {reason}", path.display()));
                 }
             }
-            for finding in &mut result.findings {
+            for mut finding in result.findings {
                 redact(&mut finding.evidence);
                 finding.evidence =
                     serde_json::json!({"source_file":path, "observation":finding.evidence});
                 limits
-                    .push(&mut report, finding.clone())
+                    .push(&mut report, finding)
                     .map_err(CliError::classified)?;
             }
-            report.sources.push(super::source(path, &bytes));
+            append_sources(
+                &mut report,
+                &mut seen_sources,
+                std::iter::once(super::source(path, &bytes)).chain(result.sources),
+            );
             crate::rendering::bounded_json_len(
                 &crate::output::security::Report::from(&report),
                 self.bounds.max_result_bytes,
@@ -81,6 +93,18 @@ impl Spec for Assessment {
         super::publish(i, Command::Assessment, report, self.bounds)
     }
 }
+
+fn append_sources(
+    report: &mut Report,
+    seen: &mut BTreeSet<(String, String)>,
+    sources: impl IntoIterator<Item = Source>,
+) {
+    for source in sources {
+        if seen.insert((source.path.clone(), source.sha256.clone())) {
+            report.sources.push(source);
+        }
+    }
+}
 fn redact(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
@@ -103,6 +127,35 @@ fn redact(value: &mut serde_json::Value) {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn source_provenance_preserves_first_seen_order_and_distinct_hashes() {
+        use super::*;
+        let mut report = Report::new("report");
+        let mut seen = BTreeSet::new();
+        let sources = [
+            ("result.json", "a"),
+            ("ioc.json", "b"),
+            ("ioc.json", "b"),
+            ("ioc.json", "c"),
+        ];
+        append_sources(
+            &mut report,
+            &mut seen,
+            sources.into_iter().map(|(path, sha256)| Source {
+                path: path.into(),
+                sha256: sha256.into(),
+            }),
+        );
+        assert_eq!(
+            report
+                .sources
+                .iter()
+                .map(|s| (s.path.as_str(), s.sha256.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("result.json", "a"), ("ioc.json", "b"), ("ioc.json", "c")]
+        );
+    }
+
     #[test]
     fn redacts_cookies() {
         let mut v = serde_json::json!({"cookies":[{"value":"secret","http_only":false}],"Set-Cookie":"sid=secret"});

@@ -460,6 +460,10 @@
         "sha256": "539f3ce723fa723d239ddb88f26343a82da120fe8cdeabca2f1e93526a4a184c"
       },
       {
+        "path": "examples/documents/indicators.json",
+        "sha256": "ef222c2af32179aef305ccb49411d961d686821496d0b84358a585e77af16dfc"
+      },
+      {
         "path": "examples/documents/output-dns-anomalies-success.json",
         "sha256": "d3721149615a13bd6eb23c5e1af266c68630b4bb6c3e049f0805e0595eff4f86"
       },
@@ -470,6 +474,10 @@
       {
         "path": "examples/documents/output-scan-diff-success.json",
         "sha256": "1af3e9808295b8396c610c31249bc02ba9a08f90ad719b8f689fa3f919639723"
+      },
+      {
+        "path": "examples/documents/output-scan-success.json",
+        "sha256": "5370f893ad49f56e79365c5aeca186c971c947cab2aa89bf59f89493d312d996"
       },
       {
         "path": "examples/documents/output-audit-tls-success.json",

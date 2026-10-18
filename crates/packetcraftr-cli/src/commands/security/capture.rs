@@ -31,7 +31,7 @@ pub(super) struct Capture {
 pub(crate) struct Hunt {
     #[command(flatten)]
     capture: Capture,
-    /// Local packetcraftr.indicators/v1 JSON document.
+    /// Local packetcraftr.indicators/v1 JSON document; - reads redirected JSON stdin.
     #[arg(long)]
     indicators: PathBuf,
 }
@@ -39,16 +39,22 @@ pub(crate) struct Hunt {
 pub(crate) struct Dns {
     #[command(flatten)]
     capture: Capture,
+    /// Epoch-aligned observation window in seconds; must be greater than zero.
     #[arg(long, default_value_t = 60)]
     window_seconds: u64,
+    /// Minimum matched responses per window; must be greater than zero.
     #[arg(long, default_value_t = 20)]
     min_responses: usize,
+    /// Minimum NXDOMAIN ratio, from 0 through 1.
     #[arg(long, default_value_t = 0.5)]
     nxdomain_ratio: f64,
+    /// Minimum distinct high-entropy labels; must be greater than zero.
     #[arg(long, default_value_t = 20)]
     min_labels: usize,
+    /// Minimum label length, from 1 through 63 bytes.
     #[arg(long, default_value_t = 32)]
     min_label_length: usize,
+    /// Minimum Shannon entropy, from 0 through 8 bits per byte.
     #[arg(long, default_value_t = 4.0)]
     min_entropy: f64,
 }
@@ -56,10 +62,13 @@ pub(crate) struct Dns {
 pub(crate) struct Beacons {
     #[command(flatten)]
     capture: Capture,
+    /// Minimum distinct connection attempts; must be at least 3.
     #[arg(long, default_value_t = 6)]
     min_attempts: usize,
+    /// Minimum mean attempt interval in seconds; must be finite and positive.
     #[arg(long, default_value_t = 1.0)]
     min_interval_seconds: f64,
+    /// Maximum interval coefficient of variation, from 0 through 1.
     #[arg(long, default_value_t = 0.10)]
     max_cv: f64,
 }
@@ -169,6 +178,10 @@ impl Spec for Hunt {
         self.capture.resources(s);
     }
     fn run(self, i: &Invocation) -> Result<CommandExit, CliError> {
+        super::input::validate_stdin_sources([
+            self.capture.path.as_path(),
+            self.indicators.as_path(),
+        ])?;
         let bytes = read(&self.indicators, security::indicators::MAX_DOCUMENT_BYTES)?;
         let doc = security::indicators::Document::parse(&bytes).map_err(CliError::classified)?;
         let source = super::source(&self.indicators, &bytes);

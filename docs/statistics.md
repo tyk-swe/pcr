@@ -7,6 +7,7 @@ captures. It defaults to the conversations table. Use the grouped command path
 ```sh
 packetcraftr analyze stats capture.pcapng --table overview
 packetcraftr analyze stats capture.pcapng --table conversations --sort bytes --top 10
+packetcraftr analyze stats capture.pcapng --sort duration --min-frames 10 --top 10
 packetcraftr --output csv analyze stats capture.pcapng --table endpoints
 ```
 
@@ -58,6 +59,22 @@ Without `--sort`, protocols keep frame count/name ordering; conversations,
 endpoints, and ports keep natural order unless `--top` requests their busiest rows
 by frames, then bytes. I/O keeps chronological order even with `--top`.
 `--sort` is rejected for fragments before opening the capture.
+
+`--sort duration` is available for the conversations table only. It ranks longest
+conversations first, then combined frame counts, combined byte counts, and the
+natural key. Duration is the span between the earliest and latest matched
+timestamps, not an estimate of active transmission time.
+
+`--min-frames N` retains rows with at least N frames, before sorting and `--top`.
+It uses combined directional counts for conversations and endpoints, and each
+row's frame count for protocols, ports, and I/O. Zero keeps all rows. Overview
+applies the threshold to each leaderboard; capture totals and distinct counts
+remain unchanged. Threshold exclusions and `--top` omissions have separate
+diagnostics. Filtering limits displayed rows, not aggregation memory.
+
+Fragments reject `--top` and `--min-frames` as well as `--sort`. Use
+`--max-ip-outcomes` to bound retained fragment outcomes. All unsupported
+combinations fail before opening the input, including stdin.
 
 ## CSV contract
 

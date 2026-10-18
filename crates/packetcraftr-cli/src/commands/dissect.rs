@@ -95,7 +95,7 @@ pub(super) fn run(
             &read_stdin_bounded(hex_limit, InputKind::FrameHex)?,
             max_packet_size,
         )?,
-        (Some(value), None, None) => parse_hex_text(&value)?.to_vec(),
+        (Some(value), None, None) => hex_frame_bytes(value.as_bytes(), max_packet_size)?,
         (None, Some(path), None) => hex_frame_bytes(
             &read_bounded_file(&path, hex_limit, InputKind::FrameHex)?,
             max_packet_size,
@@ -200,8 +200,39 @@ fn parse_hex_text(text: &str) -> Result<bytes::Bytes, CliError> {
 
 /// Decodes bounded hexadecimal text, keeping the decoded size inside the packet budget.
 fn hex_frame_bytes(text: &[u8], max_packet_size: usize) -> Result<Vec<u8>, CliError> {
+    if text.len() > hex_text_limit(max_packet_size) {
+        return Err(CliError::from_classification(
+            core::error::Classified::classification(&core::decode::Error::PacketSizeLimit {
+                actual: text.len(),
+                limit: max_packet_size,
+            }),
+            format!(
+                "frame hex text input exceeds {} byte limit",
+                hex_text_limit(max_packet_size)
+            ),
+            Vec::new(),
+        ));
+    }
     let text =
         std::str::from_utf8(text).map_err(|source| CliError::caused(Kind::Usage, &source))?;
+    let trimmed = text.trim_start();
+    let digits = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+        .unwrap_or(trimmed);
+    // Count the same bytes the parser retains before it allocates its compact
+    // string and decoded buffer. Round up so an extra nibble also respects the budget.
+    let actual = digits
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace() && !matches!(*byte, b':' | b'-'))
+        .count()
+        .div_ceil(2);
+    if actual > max_packet_size {
+        return Err(CliError::classified(core::decode::Error::PacketSizeLimit {
+            actual,
+            limit: max_packet_size,
+        }));
+    }
     let bytes = parse_hex_text(text)?;
     if bytes.len() > max_packet_size {
         return Err(CliError::classified(core::decode::Error::PacketSizeLimit {
@@ -210,4 +241,43 @@ fn hex_frame_bytes(text: &[u8], max_packet_size: usize) -> Result<Vec<u8>, CliEr
         }));
     }
     Ok(bytes.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_hex_preserves_syntax_and_classifies_size_errors() {
+        assert_eq!(
+            hex_frame_bytes(b" \t0X00:ab-CD\n", 3).unwrap(),
+            [0, 0xab, 0xcd]
+        );
+        let error = hex_frame_bytes(b"00:ab:cd:ef", 3).unwrap_err();
+        let expected = CliError::classified(core::decode::Error::PacketSizeLimit {
+            actual: 4,
+            limit: 3,
+        });
+        assert_eq!(error.classification, expected.classification);
+        assert_eq!(error.message, expected.message);
+        for value in [b"00f".as_slice(), b"zz", &[0xff]] {
+            assert_eq!(
+                hex_frame_bytes(value, 8).unwrap_err().classification.kind,
+                Kind::Usage
+            );
+        }
+        assert!(
+            hex_frame_bytes(b" \t", 3)
+                .unwrap_err()
+                .message
+                .contains("required")
+        );
+    }
+
+    #[test]
+    fn bounded_hex_rejects_oversized_text_and_extra_nibbles() {
+        assert!(hex_frame_bytes(&vec![b' '; hex_text_limit(1) + 1], 1).is_err());
+        let error = hex_frame_bytes(b"aabbc", 2).unwrap_err();
+        assert_eq!(error.classification.kind, Kind::Policy);
+    }
 }

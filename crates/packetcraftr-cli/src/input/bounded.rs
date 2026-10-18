@@ -24,6 +24,7 @@ pub(crate) enum InputKind {
     UdpProfiles,
     ServiceDocument,
     OsDocument,
+    SecurityDocument,
 }
 
 impl InputKind {
@@ -39,6 +40,7 @@ impl InputKind {
             Self::UdpProfiles => "UDP profiles",
             Self::ServiceDocument => "service identification document",
             Self::OsDocument => "OS fingerprint document",
+            Self::SecurityDocument => "security JSON document",
         }
     }
 
@@ -56,6 +58,7 @@ impl InputKind {
             Self::UdpProfiles => "--udp-profiles PATH, or - with redirected document stdin",
             Self::ServiceDocument => "--corpus PATH or --exclusions PATH",
             Self::OsDocument => "--corpus PATH",
+            Self::SecurityDocument => "a document path, or - with redirected JSON stdin",
         }
     }
 
@@ -79,6 +82,7 @@ impl InputKind {
             }
             Self::ServiceDocument => "provide a non-empty JSON service identification document",
             Self::OsDocument => "provide a non-empty JSON OS fingerprint document",
+            Self::SecurityDocument => "provide a JSON document path or redirect JSON stdin with -",
         }
     }
 
@@ -91,7 +95,8 @@ impl InputKind {
             | Self::Manifest
             | Self::UdpProfiles
             | Self::ServiceDocument
-            | Self::OsDocument => CliError::new(
+            | Self::OsDocument
+            | Self::SecurityDocument => CliError::new(
                 Kind::Usage,
                 format!("{} input exceeds {limit} byte limit", self.label()),
             ),

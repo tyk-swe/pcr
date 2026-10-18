@@ -37,6 +37,38 @@ impl Default for DnsOptions {
         }
     }
 }
+impl DnsOptions {
+    /// Validate DNS thresholds before opening or processing a capture.
+    pub fn validate(self) -> Result<(), Error> {
+        if self.window_seconds == 0 {
+            return Err(Error::Invalid(
+                "window_seconds must be greater than 0".into(),
+            ));
+        }
+        if self.min_responses == 0 {
+            return Err(Error::Invalid(
+                "min_responses must be greater than 0".into(),
+            ));
+        }
+        if self.min_labels == 0 {
+            return Err(Error::Invalid("min_labels must be greater than 0".into()));
+        }
+        if !(1..=63).contains(&self.min_label_length) {
+            return Err(Error::Invalid("min_label_length must be in 1..=63".into()));
+        }
+        if !self.nxdomain_ratio.is_finite() || !(0.0..=1.0).contains(&self.nxdomain_ratio) {
+            return Err(Error::Invalid(
+                "nxdomain_ratio must be finite and in 0..=1".into(),
+            ));
+        }
+        if !self.min_entropy.is_finite() || !(0.0..=8.0).contains(&self.min_entropy) {
+            return Err(Error::Invalid(
+                "min_entropy must be finite and in 0..=8".into(),
+            ));
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Copy, Debug)]
 pub struct BeaconOptions {
     pub min_attempts: usize,
@@ -50,6 +82,23 @@ impl Default for BeaconOptions {
             min_interval_seconds: 1.0,
             max_cv: 0.10,
         }
+    }
+}
+impl BeaconOptions {
+    /// Validate beacon thresholds before opening or processing a capture.
+    pub fn validate(self) -> Result<(), Error> {
+        if self.min_attempts < 3 {
+            return Err(Error::Invalid("min_attempts must be at least 3".into()));
+        }
+        if !self.min_interval_seconds.is_finite() || self.min_interval_seconds <= 0.0 {
+            return Err(Error::Invalid(
+                "min_interval_seconds must be finite and greater than 0".into(),
+            ));
+        }
+        if !self.max_cv.is_finite() || !(0.0..=1.0).contains(&self.max_cv) {
+            return Err(Error::Invalid("max_cv must be finite and in 0..=1".into()));
+        }
+        Ok(())
     }
 }
 #[derive(Clone, Debug)]
@@ -94,30 +143,10 @@ impl Collector {
         app: application::Limits,
     ) -> Result<Self, BoundaryError> {
         limits.validate().map_err(BoundaryError::from_error)?;
-        if let Mode::Dns(o) = mode
-            && (o.window_seconds == 0
-                || o.min_responses == 0
-                || o.min_labels == 0
-                || !(1..=63).contains(&o.min_label_length)
-                || !o.nxdomain_ratio.is_finite()
-                || !(0.0..=1.0).contains(&o.nxdomain_ratio)
-                || !o.min_entropy.is_finite()
-                || !(0.0..=8.0).contains(&o.min_entropy))
-        {
-            return Err(BoundaryError::from_error(Error::Invalid(
-                "invalid DNS thresholds".into(),
-            )));
-        }
-        if let Mode::Beacons(o) = mode
-            && (o.min_attempts < 3
-                || !o.min_interval_seconds.is_finite()
-                || o.min_interval_seconds <= 0.0
-                || !o.max_cv.is_finite()
-                || !(0.0..=1.0).contains(&o.max_cv))
-        {
-            return Err(BoundaryError::from_error(Error::Invalid(
-                "invalid beacon thresholds".into(),
-            )));
+        match &mode {
+            Mode::Dns(options) => options.validate().map_err(BoundaryError::from_error)?,
+            Mode::Beacons(options) => options.validate().map_err(BoundaryError::from_error)?,
+            Mode::Hunt(_) => {}
         }
         let hunt = matches!(mode, Mode::Hunt(_));
         let has_dns = !matches!(mode, Mode::Beacons(_));
@@ -249,7 +278,8 @@ impl analysis::Collector for Collector {
         Ok(Vec::new())
     }
     fn finish(self, run: &analysis::Summary) -> Result<(Vec<Finding>, Report), BoundaryError> {
-        self.finalize(run, &crate::budget::Deadline::new(std::time::Duration::MAX))
+        let report = self.finalize(run, &crate::budget::Deadline::new(std::time::Duration::MAX))?;
+        Ok((report.findings.clone(), report))
     }
     fn finish_controlled(
         self,
@@ -257,10 +287,11 @@ impl analysis::Collector for Collector {
         deadline: &crate::budget::Deadline,
         sink: &mut dyn FnMut(Finding) -> Result<(), BoundaryError>,
     ) -> Result<Report, BoundaryError> {
-        let (events, report) = self.finalize(run, deadline)?;
-        for event in events {
+        let report = self.finalize(run, deadline)?;
+        for finding in &report.findings {
             deadline.enforce().map_err(BoundaryError::from_error)?;
-            sink(event)?;
+            sink(finding.clone())?;
+            deadline.enforce().map_err(BoundaryError::from_error)?;
         }
         Ok(report)
     }
@@ -270,7 +301,8 @@ impl Collector {
         mut self,
         run: &analysis::Summary,
         deadline: &crate::budget::Deadline,
-    ) -> Result<(Vec<Finding>, Report), BoundaryError> {
+    ) -> Result<Report, BoundaryError> {
+        deadline.enforce().map_err(BoundaryError::from_error)?;
         if let Some(d) = self.dns.take() {
             analysis::Collector::finish_controlled(d, run, deadline, &mut |e| {
                 self.dns_events(vec![e])
@@ -321,6 +353,239 @@ impl Collector {
         for f in &mut self.report.findings {
             f.complete &= self.report.completeness.complete;
         }
-        Ok((self.report.findings.clone(), self.report))
+        Ok(self.report)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        analysis::Collector as _,
+        budget::{Cancellation, Deadline},
+    };
+    use std::time::Duration;
+
+    #[test]
+    fn threshold_validation_reports_each_invalid_field_and_accepts_boundaries() {
+        for (options, field) in [
+            (
+                DnsOptions {
+                    window_seconds: 0,
+                    ..Default::default()
+                },
+                "window_seconds",
+            ),
+            (
+                DnsOptions {
+                    min_responses: 0,
+                    ..Default::default()
+                },
+                "min_responses",
+            ),
+            (
+                DnsOptions {
+                    min_labels: 0,
+                    ..Default::default()
+                },
+                "min_labels",
+            ),
+            (
+                DnsOptions {
+                    min_label_length: 64,
+                    ..Default::default()
+                },
+                "min_label_length",
+            ),
+            (
+                DnsOptions {
+                    nxdomain_ratio: f64::NAN,
+                    ..Default::default()
+                },
+                "nxdomain_ratio",
+            ),
+            (
+                DnsOptions {
+                    nxdomain_ratio: 1.1,
+                    ..Default::default()
+                },
+                "nxdomain_ratio",
+            ),
+            (
+                DnsOptions {
+                    min_entropy: f64::INFINITY,
+                    ..Default::default()
+                },
+                "min_entropy",
+            ),
+            (
+                DnsOptions {
+                    min_entropy: -0.1,
+                    ..Default::default()
+                },
+                "min_entropy",
+            ),
+        ] {
+            assert!(options.validate().unwrap_err().to_string().contains(field));
+            assert!(
+                Collector::new(
+                    Mode::Dns(options),
+                    Limits::default(),
+                    application::Limits::default()
+                )
+                .is_err()
+            );
+        }
+        for (options, field) in [
+            (
+                BeaconOptions {
+                    min_attempts: 2,
+                    ..Default::default()
+                },
+                "min_attempts",
+            ),
+            (
+                BeaconOptions {
+                    min_interval_seconds: 0.0,
+                    ..Default::default()
+                },
+                "min_interval_seconds",
+            ),
+            (
+                BeaconOptions {
+                    min_interval_seconds: f64::NAN,
+                    ..Default::default()
+                },
+                "min_interval_seconds",
+            ),
+            (
+                BeaconOptions {
+                    max_cv: f64::INFINITY,
+                    ..Default::default()
+                },
+                "max_cv",
+            ),
+            (
+                BeaconOptions {
+                    max_cv: 1.1,
+                    ..Default::default()
+                },
+                "max_cv",
+            ),
+        ] {
+            assert!(options.validate().unwrap_err().to_string().contains(field));
+            assert!(
+                Collector::new(
+                    Mode::Beacons(options),
+                    Limits::default(),
+                    application::Limits::default()
+                )
+                .is_err()
+            );
+        }
+        for (ratio, entropy, length) in [(0.0, 0.0, 1), (1.0, 8.0, 63)] {
+            assert!(
+                DnsOptions {
+                    nxdomain_ratio: ratio,
+                    min_entropy: entropy,
+                    min_label_length: length,
+                    ..Default::default()
+                }
+                .validate()
+                .is_ok()
+            );
+        }
+        for max_cv in [0.0, 1.0] {
+            assert!(
+                BeaconOptions {
+                    min_attempts: 3,
+                    max_cv,
+                    ..Default::default()
+                }
+                .validate()
+                .is_ok()
+            );
+        }
+    }
+
+    fn collector() -> Collector {
+        let mut collector = Collector::new(
+            Mode::Beacons(BeaconOptions::default()),
+            Limits::default(),
+            application::Limits::default(),
+        )
+        .unwrap();
+        for subject in ["first", "second"] {
+            collector
+                .add(Finding::new(
+                    "test",
+                    Severity::Low,
+                    subject,
+                    "summary",
+                    json!({"observed":true}),
+                    "review",
+                ))
+                .unwrap();
+        }
+        collector
+    }
+
+    #[test]
+    fn controlled_finalization_preserves_events_summary_and_completeness() {
+        let run = analysis::Summary::default();
+        let (expected_events, expected_report) = collector().finish(&run).unwrap();
+        let mut events = Vec::new();
+        let report = collector()
+            .finish_controlled(&run, &Deadline::new(Duration::from_secs(1)), &mut |event| {
+                events.push(event);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&events).unwrap(),
+            serde_json::to_value(expected_events).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(report).unwrap(),
+            serde_json::to_value(expected_report).unwrap()
+        );
+        assert!(events.iter().all(|event| !event.complete));
+    }
+
+    #[test]
+    fn controlled_finalization_stops_on_sink_error_expiry_and_cancellation() {
+        let run = analysis::Summary::default();
+        let mut delivered = 0;
+        let error = collector()
+            .finish_controlled(&run, &Deadline::new(Duration::from_secs(1)), &mut |_| {
+                delivered += 1;
+                Err(BoundaryError::from_error(Error::Invalid(
+                    "sink refused".into(),
+                )))
+            })
+            .unwrap_err();
+        assert_eq!(delivered, 1);
+        assert!(error.to_string().contains("sink refused"));
+        assert!(
+            collector()
+                .finish_controlled(&run, &Deadline::immediate(None), &mut |_| panic!(
+                    "expired events must not be delivered"
+                ))
+                .is_err()
+        );
+        let cancellation = Cancellation::default();
+        let deadline =
+            Deadline::new(Duration::from_secs(1)).with_cancellation(Some(cancellation.clone()));
+        let mut delivered = 0;
+        assert!(
+            collector()
+                .finish_controlled(&run, &deadline, &mut |_| {
+                    delivered += 1;
+                    cancellation.cancel();
+                    Ok(())
+                })
+                .is_err()
+        );
+        assert_eq!(delivered, 1);
     }
 }

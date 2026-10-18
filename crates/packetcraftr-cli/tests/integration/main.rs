@@ -26,5 +26,6 @@ mod published_schema_conformance;
 mod scan_measurement_contracts;
 mod target_planning_contracts;
 mod tls_workflow_contracts;
+mod workflow_improvements_contracts;
 
 mod security_contracts;

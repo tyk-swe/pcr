@@ -6,6 +6,18 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+- Add longest-conversation statistics ranking (`--sort duration`) and inclusive
+  `--min-frames` row filtering with unchanged overview totals and separate
+  omission diagnostics. Reject ignored fragment `--top` options and direct
+  users to `--max-ip-outcomes`.
+- Add opt-in `--fail-incomplete` security exit gates, bounded JSON stdin for
+  indicators, scan comparison and assessments, searchable HTML assessments,
+  and preservation of upstream source hashes with stable deduplication.
+- Bound inline hexadecimal input before decoded allocation, share
+  field-specific DNS/beacon threshold validation with library callers, and
+  avoid retaining a duplicate terminal findings vector during controlled
+  security collector finalization.
+
 - Reorganize scan internals: split the adaptive controller by responsibility,
   share discovery composition between raw and connect scans, remove duplicated
   scheduling arithmetic, and simplify CLI scan execution, without changing CLI

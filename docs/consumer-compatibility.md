@@ -27,6 +27,8 @@ Missing metadata, null ingress operand on an expectation, and explicit decoder
 `absent` are distinct. Summary counters include accepted evidence regardless of
 retained detail/omissions. Forwarding fail/inconclusive returns exit 1 after
 publication; an error envelope is execution failure.
+Security commands likewise publish successful results before returning exit 1
+for an explicitly selected `--fail-on` or `--fail-incomplete` gate.
 
 ## Scan measurements and acquisition quality
 
@@ -60,6 +62,10 @@ counts and the corresponding retained leaderboards. Explicit `--sort frames|byte
 ranks statistics before truncation, with the other volume metric and natural key
 as tie-breakers. Existing default ordering is unchanged; overview defaults to
 frames. CSV is a separate flat-table format and does not use the JSON envelope.
+`--sort duration` ranks conversations by duration, then frames, bytes, and natural
+key. `--min-frames` filters rows before ranking and truncation without changing
+overview totals or distinct counts. Fragment tables reject these options and
+`--top`; use `--max-ip-outcomes` for retained fragment outcomes.
 See [statistics](statistics.md) for exact headers, units, and omission semantics.
 
 ## SCTP and IP-protocol inventory

@@ -14,6 +14,7 @@ pub(super) enum SeverityArg {
     High,
     Critical,
 }
+
 impl From<SeverityArg> for Severity {
     fn from(s: SeverityArg) -> Self {
         match s {
@@ -42,8 +43,18 @@ pub(super) struct Bounds {
     /// Exit 1 when a finding meets or exceeds this severity.
     #[arg(long, value_enum)]
     pub(super) fail_on: Option<SeverityArg>,
+    /// Exit 1 after publishing when report or finding evidence is incomplete.
+    #[arg(long)]
+    pub(super) fail_incomplete: bool,
 }
 impl Bounds {
+    pub(super) fn fails(&self, report: &security::Report) -> bool {
+        report.meets(self.fail_on.map(Into::into))
+            || (self.fail_incomplete
+                && (!report.completeness.complete
+                    || report.findings.iter().any(|finding| !finding.complete)))
+    }
+
     pub(super) fn core(self) -> Result<security::Limits, CliError> {
         let limits = security::Limits {
             max_findings: self.max_findings,
@@ -63,5 +74,46 @@ impl Bounds {
             max_observations: Count @ ActiveState preset(10000, 100000),
             max_result_bytes: Bytes @ ResultRetention preset(2097152, 16777216),
         ]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestArgs {
+        #[command(flatten)]
+        bounds: Bounds,
+    }
+
+    #[test]
+    fn completion_and_severity_gates_are_opt_in_and_combine() {
+        let defaults = TestArgs::parse_from(["security"]).bounds;
+        let gate = TestArgs::parse_from(["security", "--fail-incomplete"]).bounds;
+        let both =
+            TestArgs::parse_from(["security", "--fail-incomplete", "--fail-on", "high"]).bounds;
+        let mut report = security::Report::new("hunt");
+        assert!(!gate.fails(&report));
+        report.completeness.note("partial capture");
+        assert!(!defaults.fails(&report));
+        assert!(gate.fails(&report));
+        report.completeness = security::Completeness::observed();
+        report.findings.push(security::Finding::new(
+            "test",
+            Severity::High,
+            "host",
+            "summary",
+            serde_json::Value::Null,
+            "review",
+        ));
+        assert!(!gate.fails(&report));
+        assert!(both.fails(&report));
+        report.findings[0].severity = Severity::Low;
+        assert!(!both.fails(&report));
+        report.findings[0].complete = false;
+        assert!(gate.fails(&report));
+        assert!(both.fails(&report));
     }
 }

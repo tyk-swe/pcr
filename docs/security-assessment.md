@@ -19,7 +19,25 @@ followed by `complete`). Report generation supports text and JSON. Findings use
 stable rule IDs, severity (`info`, `low`, `medium`, `high`, `critical`), measured
 evidence, source frame references, and completeness flags. Successful execution
 returns zero; `--fail-on medium` (or another severity) returns 1 when a finding
-meets the threshold. Operational errors retain the ordinary CLI error contract.
+meets the threshold. `--fail-incomplete` returns 1 when the report or any finding
+has incomplete evidence. These opt-in gates can be combined; either condition
+causes exit 1 after results are published. JSON still carries a successful
+aggregate, NDJSON ends in `complete`, and an assessment HTML file is retained.
+Operational errors retain the ordinary CLI error contract.
+
+Security JSON inputs also accept `-` for redirected stdin:
+
+```sh
+cat indicators.json | packetcraftr analyze hunt capture.pcapng --indicators -
+cat before.json | packetcraftr analyze scan-diff - after.json
+packetcraftr --output json analyze beacons capture.pcapng \
+  | packetcraftr analyze report - --html assessment.html --fail-incomplete
+```
+
+Only one input per command may consume stdin. Capture plus IOC stdin, two scan
+inputs, or multiple assessment inputs using `-` are rejected before reading.
+Piped JSON uses the same finite document limits as files. Source hashes cover
+the consumed bytes, with `-` recorded as the source path.
 
 ## Capture investigations
 
@@ -96,7 +114,19 @@ changes, never presumed closed. Inconclusive or unavailable measurements are
 separate `scan.evidence_unavailable` findings.
 
 Reports accept aggregate JSON from these six commands only. They embed severity
-filters, source-file SHA-256 hashes, evidence, completeness notes, and remediation
-without external assets. All captured text is HTML escaped. Publication uses the
+filters, case-insensitive finding search, a visible/total count, source-file
+SHA-256 hashes, evidence, completeness notes, and remediation without external
+assets. Search includes displayed evidence and combines with the selected
+severities. Without JavaScript all findings remain visible. All captured text
+is HTML escaped. Publication uses the
 existing staged writer and refuses existing files, including symlinks. The JSON
 summary uses the additive `packetcraftr.output/v1` security report contract.
+
+Assessments retain both imported result-file hashes and their recorded upstream
+sources, deduplicating exact `(path, SHA-256)` pairs in first-seen order. Different
+hashes for the same path remain distinct. Upstream entries are retained evidence
+from the input report; assessment generation does not reopen those source paths.
+
+Library callers can validate `security::capture::DnsOptions` and `BeaconOptions`
+with `validate()` before starting work. Collector construction uses the same
+validation and reports the invalid field and accepted range.

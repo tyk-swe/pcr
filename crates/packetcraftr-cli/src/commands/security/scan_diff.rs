@@ -9,7 +9,9 @@ use std::path::PathBuf;
 
 #[derive(Debug, Args)]
 pub(crate) struct ScanDiff {
+    /// Earlier scan's aggregate JSON; - reads redirected stdin (one input only).
     before: PathBuf,
+    /// Later scan's aggregate JSON; - reads redirected stdin (one input only).
     after: PathBuf,
     #[command(flatten)]
     bounds: Bounds,
@@ -22,11 +24,12 @@ impl Spec for ScanDiff {
         self.bounds.resources(s);
     }
     fn run(self, i: &Invocation) -> Result<CommandExit, CliError> {
+        super::input::validate_stdin_sources([self.before.as_path(), self.after.as_path()])?;
+        let limits = self.bounds.core()?;
         let a = read(&self.before, security::scan::MAX_INPUT_BYTES)?;
         i.check()?;
         let b = read(&self.after, security::scan::MAX_INPUT_BYTES)?;
         i.check()?;
-        let limits = self.bounds.core()?;
         let before = super::scan_input::parse(&a, limits).map_err(CliError::classified)?;
         let after = super::scan_input::parse(&b, limits).map_err(CliError::classified)?;
         let mut result = security::scan::compare_snapshots(&before, &after, limits)

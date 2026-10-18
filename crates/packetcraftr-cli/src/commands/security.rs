@@ -50,7 +50,7 @@ fn publish(
             limit: limits.max_findings,
         }));
     }
-    let fail = report.meets(bounds.fail_on.map(Into::into));
+    let fail = bounds.fails(&report);
     let report = crate::output::security::Report::from(&report);
     crate::rendering::bounded_json_len(&report, bounds.max_result_bytes)
         .map_err(|e| e.into_cli_error(|| invalid("security result exceeds --max-result-bytes")))?;

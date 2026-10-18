@@ -44,6 +44,9 @@ impl super::Spec for Args {
             enabled: (self.table != arguments::Table::Fragments).into(),
             preset: None,
         });
+        crate::resources::declare!(settings, self, [
+            min_frames: Count @ ResultRetention if self.table != arguments::Table::Fragments,
+        ]);
         self.limits.resources(
             settings,
             crate::command_options::AnalysisStages::with_tcp(false),
@@ -66,13 +69,8 @@ pub(super) fn run(
     format: Format,
     presentation: crate::rendering::Presentation,
 ) -> Result<(), CliError> {
+    arguments.validate_selection()?;
     let table = Table::from(arguments.table);
-    if arguments.sort.is_some() && table == Table::Fragments {
-        return Err(CliError::new(
-            core::error::Kind::Usage,
-            "--sort is not supported for fragments",
-        ));
-    }
     if format == Format::Csv && matches!(table, Table::Overview | Table::Fragments) {
         return Err(CliError::new(
             core::error::Kind::Usage,
@@ -103,7 +101,13 @@ pub(super) fn run(
     let mut report = collector.finish(&summary);
     let frames_read = summary.frames_read;
     invocation.check()?;
-    let diagnostics = selection::select(&mut report, table, top, arguments.sort);
+    let diagnostics = selection::select(
+        &mut report,
+        table,
+        top,
+        arguments.sort,
+        arguments.min_frames,
+    );
     invocation.check()?;
 
     match format {

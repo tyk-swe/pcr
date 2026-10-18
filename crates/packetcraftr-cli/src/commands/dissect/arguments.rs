@@ -9,6 +9,7 @@ use crate::command_options::{DecodeArgs, PacketBudgetArgs, TreeArgs, link_type};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Reads raw bytes from stdin when none of --hex, --hex-file, or --file is given.
 Hex input accepts an optional 0x prefix and whitespace, colon, or dash separators.
+Inline, file, and stdin hex share the packet-size budget and a bounded text size.
 With --filter, non-matching frames emit nothing in text/hex/raw (noting the miss
 on stderr) and emit `matched: false, dissection: null` in JSON.
 

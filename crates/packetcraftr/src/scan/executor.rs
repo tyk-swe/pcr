@@ -124,23 +124,19 @@ pub(crate) trait Pipelined: Executor<Batch<Probe>> {
 
     /// Admits a pipelined stage's probes as [`Self::execute_pipeline`]
     /// would, sending nothing, so its preparation limit fails before any
-    /// traffic. Executors that charge no preparation admit every stage.
+    /// traffic.
     fn admit_pipeline(
         &mut self,
-        _batches: &[Batch<Probe>],
-        _options: &PipelineOptions,
-    ) -> Result<(), BoundaryError> {
-        Ok(())
-    }
+        batches: &[Batch<Probe>],
+        options: &PipelineOptions,
+    ) -> Result<(), BoundaryError>;
 
     fn admit_adaptive_pipeline(
         &mut self,
         batches: &[Batch<Probe>],
         options: &PipelineOptions,
-        _summary: &mut AdaptiveAdmission,
-    ) -> Result<(), BoundaryError> {
-        self.admit_pipeline(batches, options)
-    }
+        summary: &mut AdaptiveAdmission,
+    ) -> Result<(), BoundaryError>;
 
     /// Sends at most one ARP or NDP request for `target` and reports what
     /// it learned with the exchange's statistics. A routed target's next hop
@@ -156,33 +152,27 @@ pub(crate) trait Pipelined: Executor<Batch<Probe>> {
     /// or its gateway's, unless the operation already knows it, and reports
     /// the request's statistics. A stage resolves its targets before any
     /// probe arms a capture, so each probe's materialization finds the
-    /// answer cached. Executors whose probes resolve no neighbor report
-    /// nothing.
+    /// answer cached.
     fn resolve_next_hop(
         &mut self,
-        _target: &SelectedAddress,
-        _deadline: &Deadline,
-    ) -> Result<NextHopResolution, BoundaryError> {
-        Ok(NextHopResolution::default())
-    }
+        target: &SelectedAddress,
+        deadline: &Deadline,
+    ) -> Result<NextHopResolution, BoundaryError>;
 
     /// Whether resolving `target`'s neighbor, explicitly as discovery does or
     /// for its probes, would send a request, so the engine waits out a pause
-    /// owed by an earlier transmission only before one. Executors that cannot
-    /// tell assume it would.
+    /// owed by an earlier transmission only before one.
     fn requests_neighbor(
         &mut self,
-        _target: &SelectedAddress,
-        _explicit: bool,
-        _deadline: &Deadline,
-    ) -> Result<bool, BoundaryError> {
-        Ok(true)
-    }
+        target: &SelectedAddress,
+        explicit: bool,
+        deadline: &Deadline,
+    ) -> Result<bool, BoundaryError>;
 
     /// Learns whether any probe of the operation resolves a link-layer
     /// neighbor, before the first resolution or exchange. Bounds that could
     /// not hold a reply then never apply to a resolver no probe uses.
-    fn resolves_neighbors(&mut self, _resolves: bool) {}
+    fn resolves_neighbors(&mut self, resolves: bool);
 }
 
 pub(crate) struct ClientExecutor<'c, P, K> {
@@ -297,6 +287,24 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
             send,
             collection,
         ))
+    }
+
+    fn with_reply_history<R>(
+        &mut self,
+        run: impl FnOnce(
+            &ExchangeExecutor<'_, P, K>,
+            &mut reply_history::ReplyHistory,
+        ) -> Result<R, BoundaryError>,
+    ) -> Result<R, BoundaryError> {
+        let mut history = std::mem::replace(
+            &mut self.reply_history,
+            reply_history::ReplyHistory::new(false),
+        );
+        let result = self
+            .exchange()
+            .and_then(|executor| run(&executor, &mut history));
+        self.reply_history = history;
+        result
     }
 
     /// The client every exchange and neighbor resolution of the operation
@@ -481,15 +489,9 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         attempts: usize,
         feed: &mut dyn PipelineFeed,
     ) -> Result<Stats, BoundaryError> {
-        let mut history = std::mem::replace(
-            &mut self.reply_history,
-            reply_history::ReplyHistory::new(false),
-        );
-        let result = self.exchange().and_then(|executor| {
-            pipeline::run_stream(&executor, options, admission, attempts, feed, &mut history)
-        });
-        self.reply_history = history;
-        result
+        self.with_reply_history(|executor, history| {
+            pipeline::run_stream(executor, options, admission, attempts, feed, history)
+        })
     }
 
     fn execute_pipeline(
@@ -498,15 +500,9 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         options: PipelineOptions,
         emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
     ) -> Result<Stats, BoundaryError> {
-        let mut history = std::mem::replace(
-            &mut self.reply_history,
-            reply_history::ReplyHistory::new(false),
-        );
-        let result = self
-            .exchange()
-            .and_then(|executor| pipeline::run(&executor, batches, options, emit, &mut history));
-        self.reply_history = history;
-        result
+        self.with_reply_history(|executor, history| {
+            pipeline::run(executor, batches, options, emit, history)
+        })
     }
 
     fn admit_pipeline(

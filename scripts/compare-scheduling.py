@@ -1,9 +1,10 @@
 import argparse
 import hashlib
 import importlib.util
-import json
 import pathlib
-import statistics
+
+from script_support import prepare_report, same_json, write_json_atomic
+from validation_evidence import valid_digest
 
 ROOT = pathlib.Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("benchmark_scanner", ROOT / "benchmark-scanner.py")
@@ -27,12 +28,22 @@ def load(path):
     value = benchmark.strict_json(raw)
     if value["schema"] != "packetcraftr.scanner-benchmark/v1":
         raise ValueError("unknown benchmark report contract")
-    if value.get("setup_error") or value.get("status") == "failed":
+    if value.get("setup_error") or value.get("status") not in ("exercised", "incomplete"):
         raise ValueError("a failed benchmark cannot establish scheduling evidence")
     return value, hashlib.sha256(raw).hexdigest()
 
 
 def key(row):
+    for field in ("workflow", "id", "family"):
+        if not isinstance(row.get(field), str) or not row[field]:
+            raise ValueError(f"case {field} must be a non-empty string")
+    if row["workflow"] == "tcp_connect":
+        if row.get("transport") is not None or row.get("window") is not None:
+            raise ValueError("connect case must not invent packet scheduling fields")
+    else:
+        benchmark.require_integer(row.get("window"), "window")
+        if not isinstance(row.get("transport"), str):
+            raise ValueError("packet case transport must be a string")
     return tuple(row.get(field) for field in ("workflow", "id", "family", "transport", "window"))
 
 
@@ -53,30 +64,39 @@ def rows(report):
         grouped.setdefault(identity, []).append(row)
     if not grouped or any(len(group) != repetitions for group in grouped.values()):
         raise ValueError("benchmark omitted a case repetition")
+    expected = set()
     for family in ("ipv4", "ipv6"):
-        expected = {
+        expected.update({
             ("raw_scan", condition, family, transport, window)
             for condition in benchmark.CONDITIONS
             for transport in ("tcp", "udp", "icmp") for window in (1, 2)
-        }
+        })
         expected.update(("traceroute", condition, family, transport, 1)
                         for condition in ("responsive", "silent") for transport in ("tcp", "udp", "icmp"))
         expected.update(("tcp_connect", condition, family, None, None)
                         for condition in ("connect-responsive", "connect-closed"))
-        if not expected <= grouped.keys():
-            raise ValueError("benchmark omitted a declared scanner fixture cell")
+    if expected != grouped.keys():
+        raise ValueError("benchmark omitted or invented a declared scanner fixture cell")
     return grouped
 
 
 def median(group, field):
-    return statistics.median(benchmark.require_integer(row[field], field) for row in group)
+    twice = benchmark.median_twice(row[field] for row in group)
+    return twice // 2 if twice % 2 == 0 else twice / 2
 
 
 def compare(baseline, candidate):
     if baseline.get("scheduling_mode", "fixed") != "fixed" or candidate.get("scheduling_mode") != "adaptive":
         raise ValueError("comparison requires a fixed baseline and an explicitly adaptive candidate")
+    for report in (baseline, candidate):
+        if not valid_digest(report.get("corpus_sha256")):
+            raise ValueError("comparison requires the exact corpus SHA-256")
+        if not isinstance(report.get("platform"), str) or not report["platform"].strip():
+            raise ValueError("comparison requires a named platform")
+        if not isinstance(report.get("settings"), dict) or not report["settings"]:
+            raise ValueError("comparison requires explicit hard settings")
     for field in ("platform", "settings", "corpus_sha256", "repetitions"):
-        if field not in baseline or field not in candidate or baseline[field] != candidate[field]:
+        if field not in baseline or field not in candidate or not same_json(baseline[field], candidate[field]):
             raise ValueError(f"comparison differs in {field}; rerun with identical fixtures and settings")
     fixed, adaptive = rows(baseline), rows(candidate)
     if fixed.keys() != adaptive.keys():
@@ -96,26 +116,32 @@ def compare(baseline, candidate):
             raise ValueError("accuracy must be an explicit boolean")
         if not isinstance(left[0].get("expected"), dict) or not left[0]["expected"]:
             raise ValueError("comparison requires independent fixture expectations")
-        if any(row.get("expected") != left[0].get("expected") for row in left + right):
+        if any(not same_json(row.get("expected"), left[0].get("expected")) for row in left + right):
             raise ValueError("independent fixture expectations changed between repetitions")
         if any(row.get("execution") != left[0].get("execution") for row in left + right):
             raise ValueError("execution surface changed between repetitions")
         expected_execution = "native_loopback" if identity[0] == "tcp_connect" else "injected_provider"
         if left[0].get("execution") != expected_execution:
             raise ValueError("fixture execution surface disagrees with the declared workflow")
+        if not all(row["correct"] for row in left + right):
+            cell.update(status="failed", reason="fixture accuracy failed")
+            continue
         if any(row.get("peak_process_memory_bytes") is None for row in left + right):
             cell.update(status="unavailable", reason="exact-process peak memory method unavailable")
             continue
         metrics = ("workflow_elapsed_ns", "work_sent", "retained_state_charged_bytes", "peak_process_memory_bytes")
         cell["baseline_medians"] = {field: median(left, field) for field in metrics}
         cell["candidate_medians"] = {field: median(right, field) for field in metrics}
-        before, after = cell["baseline_medians"], cell["candidate_medians"]
+        # Keep budget decisions exact even when a displayed half-median is
+        # rounded by JSON's floating-point representation.
+        before = {field: benchmark.median_twice(row[field] for row in left) for field in metrics}
+        after = {field: benchmark.median_twice(row[field] for row in right) for field in metrics}
         cell["checks"] = dict(
             baseline_accuracy=all(row["correct"] for row in left),
             candidate_accuracy=all(row["correct"] for row in right),
             work=after["work_sent"] <= before["work_sent"],
-            latency=after["workflow_elapsed_ns"] <= before["workflow_elapsed_ns"] * 1.5 + 1_000_000,
-            peak_memory=after["peak_process_memory_bytes"] <= before["peak_process_memory_bytes"] + 8_388_608,
+            latency=after["workflow_elapsed_ns"] * 2 <= before["workflow_elapsed_ns"] * 3 + 4_000_000,
+            peak_memory=after["peak_process_memory_bytes"] <= before["peak_process_memory_bytes"] + 2 * 8_388_608,
         )
         cell["status"] = "within_proposed_budgets" if all(cell["checks"].values()) else "outside_proposed_budgets"
     return dict(
@@ -140,6 +166,10 @@ def main():
     parser.add_argument("--candidate", type=pathlib.Path, required=True)
     parser.add_argument("--report", type=pathlib.Path, required=True)
     args = parser.parse_args()
+    try:
+        prepare_report(args.report, args.baseline, args.candidate)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
     report = dict(schema="packetcraftr.scheduling-comparison/v1", status="failed",
                   optimization_accepted=False)
     try:
@@ -149,8 +179,7 @@ def main():
         report.update(baseline_sha256=baseline_digest, candidate_sha256=candidate_digest)
     except (KeyError, TypeError, ValueError, OSError) as error:
         report["error"] = str(error)
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(report, indent=2) + "\n")
+    write_json_atomic(args.report, report)
     print(args.report)
     return 0 if report["status"] == "measured" else 1
 

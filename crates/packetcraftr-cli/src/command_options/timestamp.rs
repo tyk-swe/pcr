@@ -32,9 +32,8 @@ pub(crate) fn parse_timestamp(input: &str) -> Result<SystemTime, CliError> {
         if fraction.len() > 9 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
             return Err(invalid());
         }
-        let mut digits = fraction.to_owned();
-        digits.extend(std::iter::repeat_n('0', 9 - fraction.len()));
-        digits.parse::<u32>().map_err(|_| invalid())?
+        // At most nine ASCII digits, so both the parse and scaling fit u32.
+        fraction.parse::<u32>().map_err(|_| invalid())? * 10u32.pow((9 - fraction.len()) as u32)
     };
     let offset = Duration::new(seconds, nanos);
     let timestamp = SystemTime::UNIX_EPOCH
@@ -49,4 +48,29 @@ pub(crate) fn parse_timestamp(input: &str) -> Result<SystemTime, CliError> {
         ));
     }
     Ok(timestamp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fractional_seconds_scale_without_losing_leading_zeroes() {
+        for (text, nanos) in [
+            ("1.1", 100_000_000),
+            ("1.000001", 1_000),
+            ("1.1234567", 123_456_700),
+        ] {
+            assert_eq!(
+                parse_timestamp(text)
+                    .unwrap()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap(),
+                Duration::new(1, nanos),
+            );
+        }
+        for invalid in ["1.", "1.0000000000", "1.2.3", "-1", "+1", "1.x"] {
+            assert!(parse_timestamp(invalid).is_err(), "{invalid:?}");
+        }
+    }
 }

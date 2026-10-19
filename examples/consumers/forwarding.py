@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import math
 import sys
 from typing import BinaryIO, Any
 
@@ -19,6 +20,7 @@ SCHEMA = "packetcraftr.output/v1"
 
 MAX_RECORD = 16 * 1024 * 1024
 MAX_STREAM = 64 * 1024 * 1024
+MAX_NESTING = 64
 MAX_RULE_DECLARATIONS = 256
 MAX_RULE_DECLARATION_BYTES = 64 * 1024
 STATES = {"observed", "absent", "truncated", "decode_incomplete", "field_budget"}
@@ -46,7 +48,7 @@ def utf8_size(value: str) -> int:
 
 
 def field_value(value: Any) -> Any:
-    """Validate the typed operand we compare, ignoring additive wrapper metadata."""
+    """Return an immutable semantic operand, ignoring additive wrapper metadata."""
     try:
         return _field_value(value)
     except RecursionError as error:
@@ -73,6 +75,7 @@ def _field_value(value: Any) -> Any:
         require(all(type(byte) is int and 0 <= byte <= 255 for byte in operand),
                 "invalid byte evidence")
         require(kind != "mac" or len(operand) == 6, "MAC evidence must have six bytes")
+        operand = tuple(operand)
     elif kind in {"ipv4", "ipv6"}:
         require(isinstance(operand, str) and "%" not in operand, "invalid IP address evidence")
         address_type = ipaddress.IPv4Address if kind == "ipv4" else ipaddress.IPv6Address
@@ -82,12 +85,12 @@ def _field_value(value: Any) -> Any:
             raise ContractError("invalid IP address evidence") from error
     elif kind == "list":
         require(isinstance(operand, list), "list evidence must be a list")
-        operand = [_field_value(item) for item in operand]
+        operand = tuple(_field_value(item) for item in operand)
     elif kind == "object":
         require(isinstance(operand, dict), "object evidence must be an object")
         for key in operand:
             utf8_size(key)
-        operand = {key: _field_value(item) for key, item in operand.items()}
+        operand = tuple(sorted((key, _field_value(item)) for key, item in operand.items()))
     else:
         raise ContractError("unknown typed evidence kind")
     return kind, operand
@@ -107,7 +110,28 @@ def reject_constant(value: str) -> None:
 
 def decode(data: bytes) -> dict[str, Any]:
     try:
-        value = json.loads(data, object_pairs_hook=unique_object, parse_constant=reject_constant)
+        require(len(data) <= MAX_RECORD, "JSON record too large")
+        value = json.loads(data.decode("utf-8"), object_pairs_hook=unique_object,
+                           parse_constant=reject_constant)
+        stack = [(iter((value,)), 0)]
+        while stack:
+            items, depth = stack[-1]
+            try:
+                item = next(items)
+            except StopIteration:
+                stack.pop()
+                continue
+            require(depth <= MAX_NESTING, "JSON nesting is too deep")
+            if isinstance(item, str):
+                utf8_size(item)
+            elif isinstance(item, float):
+                require(math.isfinite(item), "non-finite JSON number")
+            elif isinstance(item, dict):
+                for key in item:
+                    utf8_size(key)
+                stack.append((iter(item.values()), depth + 1))
+            elif isinstance(item, list):
+                stack.append((iter(item), depth + 1))
     except (UnicodeError, ValueError, RecursionError) as error:
         raise ContractError(f"invalid JSON: {error}") from error
     require(isinstance(value, dict), "an envelope must be an object")
@@ -149,7 +173,7 @@ def validate_rule_budget(rules: dict[str, Any]) -> None:
     byte_count = 0
     for name in ("identity", "preserve", "preserve_presence", "expect_absent"):
         for field in rules[name]:
-            require(isinstance(field, str), f"rules.{name} entries must be strings")
+            require(isinstance(field, str) and field, f"rules.{name} entries must be non-empty strings")
             byte_count += utf8_size(field)
     for rule in rules["expect"]:
         require(isinstance(rule, dict), "rules.expect entries must be objects")
@@ -186,9 +210,21 @@ def validate_check(check: dict[str, Any]) -> None:
     require(kind in {"preserve", "preserve_presence", "expect", "expect_absent"}, "unknown check kind")
     require(outcome in {"satisfied", "violated", "unevaluable"}, "unknown check outcome")
     require(actual in STATES and (expected is None or expected in STATES), "unknown evidence state")
-    if kind == "preserve":
-        actual_value = None if check.get("actual") is None else field_value(check["actual"])
-        expected_value = None if check.get("expected") is None else field_value(check["expected"])
+    actual_value = None if check.get("actual") is None else field_value(check["actual"])
+    expected_value = None if check.get("expected") is None else field_value(check["expected"])
+    require(actual != "observed" or actual_value is not None, "observed cell has no value")
+    require(actual != "absent" or actual_value is None, "absent cell carries a value")
+    if kind in {"preserve", "preserve_presence"}:
+        require(expected is not None, "preservation has no ingress state")
+        require(expected != "observed" or expected_value is not None, "observed ingress has no value")
+        require(expected != "absent" or expected_value is None, "absent ingress carries a value")
+        available = (actual == expected == "observed" if kind == "preserve" else
+                     actual in {"observed", "absent"} and expected in {"observed", "absent"})
+    else:
+        require(expected is None and expected_value is None, "expectation invents ingress evidence")
+        available = (actual == "observed" if kind == "expect" else
+                     actual in {"observed", "absent"})
+    require((outcome != "unevaluable") == available, "outcome contradicts evidence availability")
     if outcome == "unevaluable":
         return
     if kind == "preserve":
@@ -207,6 +243,146 @@ def validate_check(check: dict[str, Any]) -> None:
     else:
         require(actual in {"observed", "absent"}, "absence check without complete decoder-view evidence")
         require((actual == "absent") == (outcome == "satisfied"), "absence outcome contradicts state")
+
+
+def validate_evidence(evidence: dict[str, Any], capture: dict[str, Any]) -> int:
+    """Validate a capture-local reference without comparing clocks across captures."""
+    frame = integer(evidence["frame"], "evidence.frame")
+    require(1 <= frame <= capture["read"], "frame reference outside capture")
+    timestamp = evidence["timestamp"]
+    seconds = timestamp["unix_seconds"]
+    require(type(seconds) is int and -(2**63) <= seconds < 2**63, "invalid timestamp seconds")
+    require(integer(timestamp["nanoseconds"], "timestamp.nanoseconds") < 10**9,
+            "timestamp nanoseconds are not normalized")
+    require(integer(evidence["link_type"], "link_type") < 2**32, "link type outside u32")
+    if evidence.get("interface") is not None:
+        require(integer(evidence["interface"], "interface") < 2**32, "interface outside u32")
+    require(evidence.get("incomplete") in {None, "truncated", "field_budget"},
+            "unknown acquisition incompleteness")
+    diagnostics = evidence.get("diagnostics", [])
+    require(isinstance(diagnostics, list) and all(isinstance(item, str) for item in diagnostics),
+            "diagnostic codes must be strings")
+    return frame
+
+
+def validate_key(key: Any, width: int, *, nullable: bool = False) -> tuple[Any, ...]:
+    require(isinstance(key, list) and len(key) == width, "identity width disagrees with rules")
+    return tuple(None if value is None and nullable else field_value(value) for value in key)
+
+
+def validate_details(report: dict[str, Any], declared: list[dict[str, Any]]) -> None:
+    """Check bounded evidence against the full census; omitted rows are not guessed."""
+    captures, summary, omitted = report["captures"], report["summary"], report["omitted"]
+    width = len(report["rules"]["identity"])
+    seen = {side: set() for side in ("ingress", "egress")}
+    incomplete = {side: set() for side in seen}
+
+    def reference(evidence: dict[str, Any], side: str, *, unique: bool = True) -> int:
+        frame = validate_evidence(evidence, captures[side])
+        if unique:
+            require(frame not in seen[side], "observation occurs in multiple census details")
+            seen[side].add(frame)
+        if evidence.get("incomplete") is not None:
+            incomplete[side].add(frame)
+        return frame
+
+    identities = set()
+
+    def identity(key: Any) -> None:
+        canonical = validate_key(key, width)
+        require(canonical not in identities, "identity occurs in multiple correspondence groups")
+        identities.add(canonical)
+
+    ranks = {side: set() for side in seen}
+    previous_ingress = -1
+    maximum_egress = -1
+    reordered = 0
+    for pair in report["matches"]:
+        identity(pair["key"])
+        for side in seen:
+            frame = reference(pair[side], side)
+            rank = integer(pair[side + "_order"], side + "_order")
+            require(rank < captures[side]["keyed"] and rank < frame, "invalid keyed observation rank")
+            require(rank not in ranks[side], "duplicate keyed observation rank")
+            ranks[side].add(rank)
+        require(pair["ingress_order"] > previous_ingress, "matches are not in ingress order")
+        previous_ingress = pair["ingress_order"]
+        require(type(pair["reordered"]) is bool, "reordered flag must be boolean")
+        # Even an omitted earlier pair cannot erase an inversion we can see.
+        inversion = pair["egress_order"] < maximum_egress
+        require(not inversion or pair["reordered"], "visible inversion lacks reorder flag")
+        if omitted["matches"] == 0:
+            require(pair["reordered"] == inversion, "reorder flag contradicts complete pair order")
+        maximum_egress = max(maximum_egress, pair["egress_order"])
+        reordered += pair["reordered"]
+    require(reordered <= summary["reordered_pairs"] <= reordered + omitted["matches"],
+            "reorder summary disagrees with retained flags")
+
+    for category in ("unmatched", "unkeyed"):
+        for side in seen:
+            entries = report[category][side]
+            require(isinstance(entries, list), f"{category}.{side} must be a list")
+            total = summary[side + "_only"] if category == "unmatched" else captures[side]["unkeyed"]
+            require(len(entries) + integer(omitted[category + "_" + side], category) == total,
+                    f"{category}.{side} omissions do not sum")
+            for entry in entries:
+                reference(entry if category == "unmatched" else entry["evidence"], side)
+                if category == "unkeyed":
+                    validate_key(entry["key"], width, nullable=True)
+
+    retained_members = 0
+    group_totals = {side: 0 for side in seen}
+    for group in report["ambiguous"]:
+        identity(group["key"])
+        counts = []
+        for side in seen:
+            count = integer(group[side + "_total"], side + "_total")
+            entries = group[side]
+            require(isinstance(entries, list) and 1 <= count and len(entries) <= count,
+                    "invalid ambiguous member census")
+            require(type(group[side + "_indistinguishable"]) is bool,
+                    "indistinguishable flag must be boolean")
+            frames = [reference(entry, side) for entry in entries]
+            require(frames == sorted(frames), "ambiguous members are not in capture order")
+            counts.append(count)
+            group_totals[side] += count
+            retained_members += len(entries)
+        require(sum(counts) >= 3, "a one-to-one identity group is not ambiguous")
+    require(retained_members + integer(omitted["group_members"], "group_members")
+            == summary["ambiguous_observations"], "ambiguous member omissions do not sum")
+    for side in seen:
+        census = captures[side]["keyed"] - summary["unique_matches"] - summary[side + "_only"]
+        require(group_totals[side] + omitted["ambiguous_groups"] <= census,
+                "retained ambiguous totals exceed census")
+        if omitted["ambiguous_groups"] == 0:
+            require(group_totals[side] == census, "complete ambiguous totals disagree with census")
+
+    for violation in report["violations"]:
+        descriptor = check_descriptor(violation)
+        require(descriptor in declared, "violation refers to an undeclared check")
+        reference(violation["egress"], "egress", unique=False)
+        ingress = violation.get("ingress")
+        key = violation.get("key")
+        if ingress is not None:
+            reference(ingress, "ingress", unique=False)
+            require(key is not None, "matched violation has no identity")
+        if key is not None:
+            validate_key(key, width)
+        kind = descriptor["kind"]
+        actual = None if violation.get("actual") is None else field_value(violation["actual"])
+        expected = None if violation.get("expected") is None else field_value(violation["expected"])
+        if kind in {"preserve", "preserve_presence"}:
+            require(ingress is not None, "preservation violation has no ingress evidence")
+            if kind == "preserve":
+                require(actual is not None and expected is not None and actual != expected,
+                        "preservation violation lacks contradictory values")
+            else:
+                require((actual is None) != (expected is None), "presence violation has equal presence")
+        else:
+            require(expected is None and actual is not None, "expectation violation has invalid operands")
+    for side in seen:
+        require(len(incomplete[side]) <= captures[side]["incomplete"],
+                "retained incomplete evidence exceeds census")
 
 
 def validate_report(report: dict[str, Any]) -> str:
@@ -268,6 +444,7 @@ def validate_report(report: dict[str, Any]) -> str:
         omitted = integer(report["omitted"][omitted_name], omitted_name)
         require(len(report[name]) + omitted == summary[total], f"{name} omission count does not sum")
     declared = declared_checks(rules)
+    validate_details(report, declared)
     retained_outcomes = {"satisfied": 0, "violated": 0, "unevaluable": 0}
     for index, pair in enumerate(report["matches"]):
         require(isinstance(pair["checks"], list), f"match {index}: checks must be a list")
@@ -285,6 +462,7 @@ def validate_report(report: dict[str, Any]) -> str:
 def consume(source: BinaryIO, output_format: str, exit_code: int) -> dict[str, Any]:
     """Return execution/domain status, or reject an incomplete/contradictory stream."""
     try:
+        require(type(exit_code) is int and exit_code >= 0, "invalid process exit code")
         if output_format == "json":
             data = source.read(MAX_RECORD + 1)
             require(len(data) <= MAX_RECORD, "aggregate output too large")
@@ -311,6 +489,8 @@ def consume(source: BinaryIO, output_format: str, exit_code: int) -> dict[str, A
                 require(event in {"event", "complete", "error"}, "unknown stream event")
                 if event in {"complete", "error"}:
                     terminal = record
+                else:
+                    require(record.get("status") == "success", "nonterminal event has error status")
             require(terminal is not None, "missing terminal event")
         else:
             raise ContractError("format must be json or ndjson")

@@ -16,6 +16,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  tooling:
+    name: Tooling and consumer regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check Python tools without native privileges or optional packages
+        run: |
+          python3 --version
+          python3 -m compileall -q scripts examples/consumers
+          python3 -m unittest discover -s scripts/tests -v
+          python3 -O -m unittest discover -s scripts/tests -v
+
   linux:
     name: Linux full native
     runs-on: ubuntu-24.04

@@ -30,6 +30,21 @@ publication; an error envelope is execution failure.
 Security commands likewise publish successful results before returning exit 1
 for an explicitly selected `--fail-on` or `--fail-incomplete` gate.
 
+### Standalone forwarding consumer
+
+`examples/consumers/forwarding.py` checks both the full census and retained
+match, violation, unmatched, unkeyed, and ambiguous-group evidence. It validates
+capture-local frame and keyed-order references, typed identity cells, normalized
+signed-second timestamps, and the relationship between evidence availability
+and check outcomes. Omitted pairs are not reconstructed; visible inversions are
+checked without interpreting timestamps as cross-capture latency.
+
+The consumer accepts additive object members but still requires UTF-8 scalar
+strings, finite JSON numbers, and unique object keys throughout the document.
+Its resource policy permits at most 64 nesting levels, 16 MiB per record, and
+64 MiB per stream. Boolean JSON values are not integer counters or exit codes.
+These are consumer safety limits, not a new version of the producer schema.
+
 ## Scan measurements and acquisition quality
 
 Raw probe `measurement` distinguishes `response`, `no_reply` with explicit

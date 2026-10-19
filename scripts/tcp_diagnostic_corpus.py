@@ -1,6 +1,8 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
 """TCP diagnostic inventory validation; expectations are original corpus data, not output."""
+from script_support import same_json
+
 MODES = dict(ack=16, window=16, fin=1, null=0, xmas=41, maimon=17, custom=1)
 CONDITIONS = ('reset-zero', 'reset-positive', 'silent', 'prohibited', 'unexpected',
               'reset-and-prohibited', 'port-unreachable', 'time-exceeded')
@@ -17,9 +19,9 @@ def validate(corpus):
         if type(case['port']) is not int or case['port'] != 1000 + index:
             raise ValueError('diagnostic port identity changed')
         if (case['families'] != ['ipv4', 'ipv6'] or case['variants'] != VARIANTS or
-                case['provision'] != 'independent_tcp_reply_scripts' or case['request'] != dict(
+                case['provision'] != 'independent_tcp_reply_scripts' or not same_json(case['request'], dict(
                     attempts=1, timeout_ms=40, max_duration_ms=10000, max_probes=8,
-                    max_evidence_bytes=65536, windows=[1, 4])):
+                    max_evidence_bytes=65536, windows=[1, 4]))):
             raise ValueError('diagnostic fixture scope or bounds changed')
         if [row['mode'] for row in case['expected']] != list(MODES):
             raise ValueError('diagnostic mode inventory incomplete')
@@ -44,7 +46,7 @@ def validate(corpus):
                 raise ValueError('invalid diagnostic inference state')
             if not isinstance(row['rule'], str) or not row['rule'].startswith('tcp_' + row['mode'] + '.'):
                 raise ValueError('invalid diagnostic rule identity')
-            if row['partitions'] != dict(supporting=[1], conflicting=[], unanswered=[], failed=[]):
+            if not same_json(row['partitions'], dict(supporting=[1], conflicting=[], unanswered=[], failed=[])):
                 raise ValueError('diagnostic partitions must reference the single local attempt')
 
 

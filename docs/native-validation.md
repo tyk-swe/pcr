@@ -46,7 +46,19 @@ inventory, successful scenario and launcher exit codes, distinct positive
 namespace identifiers, clean exact-commit provenance, and the CLI binary digest.
 Decoder evidence additionally requires the pinned TShark identity and digest,
 all comparison fields, capture digests and frame counts, no mismatches, and JA3
-agreement. Missing or failed evidence blocks release validation.
+agreement. Missing or failed evidence blocks release validation. Successful
+reports must also carry a nonempty CLI version and cannot retain execution or
+responder errors. The release gate checks the selected run's exact commit,
+push event, completion, success, positive run ID, and repository URL rather than
+relying on API query filters alone.
+
+The Python native validators use explicit exceptions, not optimization-removable
+assertions. An exchange must contain one authorized send followed by one
+attributed exact reply and a successful terminal with no unanswered request.
+A lifecycle launcher failure cannot preserve a child's `passed` status.
+Report writers reject input aliases, clear stale reports before a new attempt,
+and publish complete UTF-8 JSON atomically. These checks do not replace the
+privileged runtime lane; mocked Python regressions are not native evidence.
 
 ## Namespace lifecycle regression (N1)
 

@@ -228,19 +228,22 @@ fn parse_start(input: &Bytes) -> Result<StartLine, Error> {
             reason: input.slice_ref(reason),
         })
     } else {
-        let parts: Vec<_> = input.split(|b| *b == b' ').collect();
-        if parts.len() != 3
-            || parts[0].is_empty()
-            || !parts[0].iter().all(|b| token(*b))
-            || parts[1].is_empty()
-            || parts[1].iter().any(|b| *b <= 0x20 || *b == 0x7f)
+        let mut parts = input.split(|b| *b == b' ');
+        let method = parts.next().unwrap_or_default();
+        let target = parts.next().unwrap_or_default();
+        let protocol = parts.next().unwrap_or_default();
+        if parts.next().is_some()
+            || method.is_empty()
+            || !method.iter().all(|b| token(*b))
+            || target.is_empty()
+            || target.iter().any(|b| *b <= 0x20 || *b == 0x7f)
         {
             return Err(Error::Invalid("request line is malformed"));
         }
         Ok(StartLine::Request {
-            method: String::from_utf8(parts[0].to_vec()).expect("ASCII token"),
-            target: input.slice_ref(parts[1]),
-            version: version(parts[2])?,
+            method: String::from_utf8(method.to_vec()).expect("ASCII token"),
+            target: input.slice_ref(target),
+            version: version(protocol)?,
         })
     }
 }
@@ -400,5 +403,18 @@ impl Codec for HttpCodec {
             }
         }
         Ok(Box::new(layer))
+    }
+}
+
+#[cfg(test)]
+mod start_line_regressions {
+    use super::*;
+
+    #[test]
+    fn request_start_requires_exactly_three_components() {
+        for invalid in ["GET /", "GET  / HTTP/1.1", "GET / HTTP/1.1 extra", " / HTTP/1.1"] {
+            assert!(parse_start(&Bytes::copy_from_slice(invalid.as_bytes())).is_err());
+        }
+        assert!(parse_start(&Bytes::from_static(b"GET / HTTP/1.1")).is_ok());
     }
 }

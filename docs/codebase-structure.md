@@ -67,7 +67,10 @@ native resource ownership out of netio.
 
 - Public behavior tests belong in `crates/*/tests/integration/` and are
   registered through each integration test's `main.rs`.
-- Unit tests stay beside the implementation they exercise.
+- Rust unit tests stay beside the implementation they exercise. Python tooling
+  and standalone-consumer regressions belong in `scripts/tests/`; shared bounded
+  JSON and report-publication helpers belong in `scripts/script_support.py`.
+  The shipped forwarding consumer remains self-contained and stdlib-only.
 - Benchmarks and Rust examples belong in the owning crate's `benches/` and
   `examples/` directories.
 - Fuzz targets and corpora belong under `fuzz/`; do not duplicate them in a

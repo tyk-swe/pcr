@@ -14,6 +14,8 @@ cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --no-default-features
 cargo test --locked --workspace --all-features
+python3 -m unittest discover -s scripts/tests -v
+python3 -O -m unittest discover -s scripts/tests -v
 ```
 
 [CI](.github/workflows/ci.yml) defines the platform and feature checks.
@@ -42,7 +44,9 @@ fixture locations, and guidance on keeping public paths stable.
   documentation addresses, or isolated networks in tests and examples.
 - Keep the retained public behavior tests in `crates/*/tests/integration/`,
   registered in `main.rs`. Portable/native integration suites are supplemented
-  by focused private Rust regressions; there are no Python unit tests. Preserve fuzz targets, benchmarks,
+  by focused private Rust regressions. Standard-library Python regressions live
+  in `scripts/tests/` and run with Python 3.10 or newer; see their
+  [guide](scripts/tests/README.md). Preserve fuzz targets, benchmarks,
   documentation examples, and release packaging checks.
 - Keep schemas, examples, tests, and migration notes in sync with public contracts.
   Shared dependency updates must also update the fuzz manifest and lockfile.

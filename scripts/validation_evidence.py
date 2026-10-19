@@ -61,7 +61,7 @@ def named_results(items, expected, label):
         raise ValueError(f'{label}: incomplete inventory')
     names = []
     for item in items:
-        if not isinstance(item, dict) or not isinstance(item.get('name'), str) or item.get('status') != 'passed':
+        if not isinstance(item, dict) or not isinstance(item.get('name'), str) or item.get('status') != 'passed' or item.get('error'):
             raise ValueError(f'{label}: missing or failed result')
         names.append(item['name'])
     if len(set(names)) != len(names) or set(names) != set(expected):
@@ -73,6 +73,8 @@ def validate_native(report):
     scenarios = named_results(report.get('scenarios'), NATIVE_SCENARIOS, 'native scenarios')
     if any(type(item.get('exit_code')) is not int or item['exit_code'] != 0 for item in scenarios):
         raise ValueError('native evidence lacks successful scenario exit codes')
+    if any(item.get('responder_error') for item in scenarios):
+        raise ValueError('native evidence contains a failed responder')
     namespace, parent = report.get('namespace'), report.get('parent_namespace')
     if type(namespace) is not int or type(parent) is not int or namespace <= 0 or parent <= 0 or namespace == parent:
         raise ValueError('native evidence lacks distinct positive namespace identifiers')
@@ -114,27 +116,39 @@ def validate_decoder(report, expected_tshark=TSHARK_VERSION):
 
 
 def digest(path):
+    path = pathlib.Path(path)
+    if not path.is_file():
+        raise ValueError(f'digest input is not a regular file: {path}')
     hasher = hashlib.sha256()
-    with pathlib.Path(path).open('rb') as source:
+    with path.open('rb') as source:
         for block in iter(lambda: source.read(65536), b''):
             hasher.update(block)
     return hasher.hexdigest()
 
 
 def checksum(data):
-    data += b'\0' * (len(data) % 2)
-    total = sum(struct.unpack(f'!{len(data) // 2}H', data))
+    """Internet checksum without mutating odd-sized buffers or allocating a word tuple."""
+    view = memoryview(data).cast('B')
+    paired = len(view) - len(view) % 2
+    total = sum(word[0] for word in struct.iter_unpack('!H', view[:paired]))
+    if paired != len(view):
+        total += view[-1] << 8
     while total >> 16:
         total = (total & 0xffff) + (total >> 16)
     return (~total) & 0xffff
 
 
 def provenance(binary):
+    # A bare relative path must not execute a different same-named PATH binary.
+    binary = pathlib.Path(binary).absolute()
+    before = digest(binary)
+    version = subprocess.check_output([str(binary), '--version'], encoding='utf-8',
+                                      timeout=10).strip()
+    if digest(binary) != before:
+        raise ValueError('binary changed while collecting provenance')
     return dict(schema_version=EVIDENCE_VERSION,
-                commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True,
-                                               timeout=GIT_TIMEOUT).strip(),
+                commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT,
+                                               encoding='utf-8', timeout=GIT_TIMEOUT).strip(),
                 dirty=bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT,
                                                    timeout=GIT_TIMEOUT)),
-                binary_sha256=digest(binary),
-                binary_version=subprocess.check_output([str(binary), '--version'], text=True,
-                                                       timeout=10).strip())
+                binary_sha256=before, binary_version=version)

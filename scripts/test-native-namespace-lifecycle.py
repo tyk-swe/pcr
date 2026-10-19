@@ -7,8 +7,6 @@ This standalone report is not the frozen native schema_version: 1 release
 inventory. A blocked namespace launcher is never successful runtime evidence.
 """
 import argparse
-import hashlib
-import json
 import os
 import pathlib
 import platform
@@ -17,27 +15,27 @@ import subprocess
 import sys
 import uuid
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+from script_support import MAX_JSON_BYTES, prepare_report, read_json, strict_json, write_json_atomic
+from validation_evidence import ROOT, digest
 TEST = 'platform::common::netlink::tests::namespace_churn::real_namespace_churn_recovers_resources'
 FAMILY = 'packetcraftr.namespace-lifecycle/v1'
-
-
-def digest(path):
-    result = hashlib.sha256()
-    with path.open('rb') as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b''):
-            result.update(chunk)
-    return result.hexdigest()
 
 
 def test_binary(args):
     if args.test_binary:
         return args.test_binary.resolve()
     matches = []
-    for line in args.build_report.read_text().splitlines():
-        record = json.loads(line)
+    with args.build_report.open('rb') as source:
+        raw = source.read(MAX_JSON_BYTES + 1)
+    if len(raw) > MAX_JSON_BYTES:
+        raise ValueError('Cargo build report exceeds the input byte limit')
+    for line in raw.splitlines():
+        record = strict_json(line)
+        if not isinstance(record, dict):
+            raise ValueError('Cargo build report records must be objects')
         if (record.get('reason') == 'compiler-artifact'
                 and record.get('target', {}).get('name') == 'packetcraftr_netio'
+                and record.get('target', {}).get('kind') == ['lib']
                 and record.get('profile', {}).get('test') is True
                 and record.get('executable')):
             matches.append(pathlib.Path(record['executable']).resolve())
@@ -47,6 +45,13 @@ def test_binary(args):
 
 
 def validate_metrics(metrics, namespace, parent):
+    if not isinstance(metrics, dict):
+        raise ValueError('namespace metrics must be an object')
+    if any(type(value) is not int or value <= 0 for value in (
+            namespace, parent, metrics.get('initial_namespace'), metrics.get('parent_namespace'))):
+        raise ValueError('namespace identifiers must be positive integers')
+    if namespace == parent:
+        raise ValueError('namespace must differ from its parent')
     ids = metrics.get('namespace_ids')
     if (not isinstance(ids, list) or len(ids) <= 16
             or any(type(value) is not int or value <= 0 for value in ids)
@@ -78,7 +83,7 @@ def run(args, binary, report):
         raise RuntimeError('this runtime test requires Linux user/network namespaces')
     listed = subprocess.run([str(binary), '--list', '--exact', TEST], capture_output=True,
                             text=True, check=True, timeout=15)
-    if f'{TEST}: test' not in listed.stdout:
+    if listed.stdout.splitlines().count(f'{TEST}: test') != 1:
         raise RuntimeError('executable does not contain the exact native namespace test')
     namespace = os.stat('/proc/self/ns/net').st_ino
     if args.parent_fd is None:
@@ -98,7 +103,7 @@ def run(args, binary, report):
         launcher = dict(command=command, exit_code=result.returncode, stdout=result.stdout,
                         stderr=result.stderr)
         if args.report.exists():
-            child = json.loads(args.report.read_text())
+            child = read_json(args.report)
             if child.get('run_id') == report['run_id'] and child.get('parent_namespace') == namespace:
                 report.update(child)
             elif child.get('run_id') == report['run_id']:
@@ -116,7 +121,7 @@ def run(args, binary, report):
         raise RuntimeError('missing inherited parent network-namespace descriptor')
     parent = os.fstat(parent_fd).st_ino
     report.update(namespace=namespace, parent_namespace=parent)
-    interfaces = json.loads(subprocess.check_output(['ip', '-j', 'link', 'show'], text=True, timeout=10))
+    interfaces = strict_json(subprocess.check_output(['ip', '-j', 'link', 'show'], text=True, timeout=10))
     if namespace == parent or {link['ifname'] for link in interfaces} != {'lo'}:
         raise RuntimeError('refusing a non-fresh or non-loopback-only namespace')
     environment = os.environ.copy()
@@ -131,7 +136,7 @@ def run(args, binary, report):
     matches = re.findall(r'N1_NAMESPACE_LIFECYCLE (\{[^\n]*\})', result.stdout)
     if len(matches) != 1 or not re.search(r'1 passed; 0 failed; 0 ignored;', result.stdout):
         raise RuntimeError('exact ignored test did not execute exactly once')
-    metrics = json.loads(matches[0])
+    metrics = strict_json(matches[0])
     validate_metrics(metrics, namespace, parent)
     report.update(metrics=metrics, status='passed')
 
@@ -147,21 +152,29 @@ def main():
     parser.add_argument('--run-id', help=argparse.SUPPRESS)
     args = parser.parse_args()
     args.report = args.report.resolve()
+    try:
+        binary = test_binary(args)
+        prepare_report(args.report, binary, args.test_binary or args.build_report)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        parser.error(str(error))
     args.report.parent.mkdir(parents=True, exist_ok=True)
     report = dict(schema=FAMILY, status='failed', run_id=args.run_id or str(uuid.uuid4()),
                   os=platform.platform(), test_name=TEST,
                   os_initialization_failure='not_exercised', namespace_identity_reuse='not_exercised')
     try:
-        binary = test_binary(args)
         report.update(test_executable=str(binary), test_executable_sha256=digest(binary),
                       commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True, timeout=30).strip(),
                       dirty=bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, timeout=30)),
                       launcher_sha256=digest(pathlib.Path(__file__).resolve()))
         run(args, binary, report)
+        if digest(binary) != report['test_executable_sha256']:
+            raise ValueError('test executable changed during native validation')
     except Exception as error:
         report['error'] = str(error)
+        if report['status'] not in ('blocked', 'unsupported'):
+            report['status'] = 'failed'
     finally:
-        args.report.write_text(json.dumps(report, indent=2) + '\n')
+        write_json_atomic(args.report, report)
         if args.parent_fd is None and os.geteuid() == 0 and 'SUDO_UID' in os.environ:
             os.chown(args.report, int(os.environ['SUDO_UID']), int(os.environ['SUDO_GID']))
     print(args.report)

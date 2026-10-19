@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Run native Linux validation only inside a fresh user/network namespace."""
 import argparse
-import json
 import os
 import pathlib
 import platform
@@ -14,6 +13,7 @@ import sys
 import threading
 import uuid
 
+from script_support import prepare_report, read_json, strict_json, write_json_atomic
 from validation_evidence import NATIVE_SCENARIOS, ROOT, checksum, provenance, validate_native
 
 
@@ -43,7 +43,7 @@ def exchange(binary, report):
                 with socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW) as raw:
                     raw.sendto(ip + udp, ('127.0.0.1', 0))
                 report['reply_bytes'] = (ip + udp).hex()
-            except OSError as error:
+            except (OSError, RuntimeError) as error:
                 report['responder_error'] = str(error)
         worker = threading.Thread(target=reply, daemon=True)
         worker.start()
@@ -51,19 +51,58 @@ def exchange(binary, report):
                    '--timeout-ms', '1000', '--max-packets', '1', '--max-bytes', '1024',
                    '--max-queue-frames', '64', '--max-captured-bytes', '65536', '--snap-length', '2048', '--max-responses', '1', '--max-unsolicited', '64',
                    '--packet', f'ipv4(dst=127.0.0.1,identification=1)/udp(sport={source_port},dport={destination_port})/raw(text=isolated-probe)']
-        output = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-        worker.join(timeout=5)
+        try:
+            output = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        finally:
+            worker.join(timeout=6)
+        if worker.is_alive():
+            raise RuntimeError('local responder did not terminate')
     report.update(command=command, exit_code=output.returncode, stdout=output.stdout.decode(),
                   stderr=output.stderr.decode(), received_messages=messages)
-    assert output.returncode == 0, 'exchange command failed'
-    records = [json.loads(line) for line in output.stdout.splitlines()]
-    assert records and records[-1]['event'] == 'complete', 'exchange output incomplete'
-    assert all(record.get('schema') == 'packetcraftr.output/v1' for record in records), 'unsupported output schema'
-    assert [record['sequence'] for record in records] == list(range(len(records))), 'noncontiguous output'
-    assert messages == [b'isolated-probe'.hex()], 'local responder did not receive exact probe'
-    assert b'isolated-reply'.hex() in output.stdout.decode(), 'reply absent from capture'
-    assert next(index for index, record in enumerate(records) if record['event'] == 'sent') < len(records) - 1
+    validate_exchange(report)
     report['status'] = 'passed'
+
+
+def validate_exchange(report):
+    """Validate native evidence with checks that remain active under python -O."""
+    if type(report.get('exit_code')) is not int or report['exit_code'] != 0:
+        raise ValueError('exchange command failed')
+    if report.get('responder_error'):
+        raise ValueError('local responder failed')
+    output = report.get('stdout')
+    if not isinstance(output, str) or not output.endswith('\n') or len(output.encode('utf-8')) > 4 * 1024 * 1024:
+        raise ValueError('exchange output is missing, truncated or oversized')
+    records = [strict_json(line) for line in output.split('\n')[:-1]]
+    if not records or not all(isinstance(record, dict) for record in records):
+        raise ValueError('exchange output must contain object records')
+    if any(record.get('schema') != 'packetcraftr.output/v1'
+           or record.get('mode') != 'stream' or record.get('command') != 'exchange'
+           or record.get('status') != 'success' for record in records):
+        raise ValueError('exchange output has an unsupported identity or failed status')
+    if any(type(record.get('sequence')) is not int or record['sequence'] != index
+           for index, record in enumerate(records)):
+        raise ValueError('noncontiguous exchange output')
+    if records[-1].get('event') != 'complete' or any(
+            record.get('event') not in ('sent', 'response', 'unsolicited', 'unanswered', 'diagnostic', 'undecoded')
+            for record in records[:-1]):
+        raise ValueError('exchange stream has missing, duplicate or unknown terminal events')
+    if report.get('received_messages') != [b'isolated-probe'.hex()]:
+        raise ValueError('local responder did not receive the exact probe')
+    sent = [index for index, record in enumerate(records) if record['event'] == 'sent']
+    responses = [index for index, record in enumerate(records) if record['event'] == 'response']
+    if len(sent) != 1 or len(responses) != 1 or sent[0] >= responses[0]:
+        raise ValueError('exchange lacks exactly one sent request followed by an attributed response')
+    for index in sent + responses:
+        request = records[index].get('result', {}).get('request_index')
+        if type(request) is not int or request != 0:
+            raise ValueError('exchange attribution does not identify the authorized request')
+    reply = report.get('reply_bytes')
+    response = records[responses[0]]['result'].get('response', {}).get('frame', {})
+    if (not isinstance(reply, str) or not reply.endswith(b'isolated-reply'.hex())
+            or response.get('bytes_hex') != reply):
+        raise ValueError('exact local reply absent from attributed capture')
+    if records[-1].get('result', {}).get('unanswered') != []:
+        raise ValueError('exchange completed with an unanswered request')
 
 
 def run(args, report):
@@ -85,7 +124,7 @@ def run(args, report):
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
         launcher = dict(command=command, exit_code=result.returncode, stderr=result.stderr)
         if args.report.exists():
-            child = json.loads(args.report.read_text())
+            child = read_json(args.report)
             if child.get('parent_namespace') == namespace and child.get('run_id') == report['run_id']:
                 report.update(child)
                 child_error = child.get('error')
@@ -95,7 +134,7 @@ def run(args, report):
         if result.returncode:
             raise RuntimeError('isolated namespace launcher or native scenarios failed; see namespace_launcher and scenarios')
         return
-    interfaces = {link['ifname'] for link in json.loads(subprocess.check_output(['ip', '-j', 'link', 'show'], text=True, timeout=10))}
+    interfaces = {link['ifname'] for link in strict_json(subprocess.check_output(['ip', '-j', 'link', 'show'], text=True, timeout=10))}
     if namespace == args.parent_namespace or interfaces != {'lo'}:
         raise RuntimeError('refusing native test outside a fresh, loopback-only network namespace')
     report.update(namespace=namespace, parent_namespace=args.parent_namespace)
@@ -118,6 +157,10 @@ def main():
     parser.add_argument('--run-id', default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
     args.binary, args.report = args.binary.resolve(), args.report.resolve()
+    try:
+        prepare_report(args.report, args.binary)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
     created = not args.report.parent.exists()
     args.report.parent.mkdir(parents=True, exist_ok=True)
     owner = (int(os.environ['SUDO_UID']), int(os.environ['SUDO_GID'])) if args.parent_namespace is None and os.geteuid() == 0 and 'SUDO_UID' in os.environ else None
@@ -137,8 +180,7 @@ def main():
         report['error'] = str(error)
         if report['status'] != 'unsupported': report['status'] = 'failed'
     finally:
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(json.dumps(report, indent=2) + '\n')
+        write_json_atomic(args.report, report)
         if owner: os.chown(args.report, *owner)
     print(args.report)
     return 0 if report['status'] == 'passed' else 1

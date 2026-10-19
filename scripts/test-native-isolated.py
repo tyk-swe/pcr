@@ -97,9 +97,25 @@ def validate_exchange(report):
         if type(request) is not int or request != 0:
             raise ValueError('exchange attribution does not identify the authorized request')
     reply = report.get('reply_bytes')
-    response = records[responses[0]]['result'].get('response', {}).get('frame', {})
-    if (not isinstance(reply, str) or not reply.endswith(b'isolated-reply'.hex())
-            or response.get('bytes_hex') != reply):
+    decoded = records[responses[0]]['result'].get('response', {})
+    response = decoded.get('frame', {})
+    if not isinstance(reply, str) or not reply.endswith(b'isolated-reply'.hex()):
+        raise ValueError('exact local reply absent from attributed capture')
+    frame_bytes = response.get('bytes_hex')
+    if not isinstance(frame_bytes, str):
+        raise ValueError('exact local reply absent from attributed capture')
+    layout = decoded.get('layout')
+    if isinstance(layout, dict):
+        layers = [layer for layer in layout.get('layers', []) if isinstance(layer, dict)]
+        ipv4_start = next((layer.get('range', {}).get('start') for layer in layers
+                           if layer.get('protocol') == 'ipv4'), None)
+        frame_end = max((layer.get('range', {}).get('end', 0) for layer in layers), default=None)
+        if type(ipv4_start) is not int or type(frame_end) is not int:
+            raise ValueError('exact local reply capture has an invalid ipv4 layout range')
+        if not (0 <= ipv4_start <= frame_end <= len(frame_bytes) // 2):
+            raise ValueError('exact local reply capture has an invalid ipv4 layout range')
+        frame_bytes = frame_bytes[2 * ipv4_start:2 * frame_end]
+    if frame_bytes != reply:
         raise ValueError('exact local reply absent from attributed capture')
     if records[-1].get('result', {}).get('unanswered') != []:
         raise ValueError('exchange completed with an unanswered request')

@@ -412,7 +412,12 @@ mod start_line_regressions {
 
     #[test]
     fn request_start_requires_exactly_three_components() {
-        for invalid in ["GET /", "GET  / HTTP/1.1", "GET / HTTP/1.1 extra", " / HTTP/1.1"] {
+        for invalid in [
+            "GET /",
+            "GET  / HTTP/1.1",
+            "GET / HTTP/1.1 extra",
+            " / HTTP/1.1",
+        ] {
             assert!(parse_start(&Bytes::copy_from_slice(invalid.as_bytes())).is_err());
         }
         assert!(parse_start(&Bytes::from_static(b"GET / HTTP/1.1")).is_ok());

@@ -199,9 +199,9 @@ mod policy_regressions {
     use super::*;
 
     fn report(extra: &str) -> Report {
-        let (head, _) = crate::protocol::application::http::parse_head(&bytes::Bytes::from(format!(
-            "HTTP/1.1 200 OK\r\n{extra}\r\n"
-        )))
+        let (head, _) = crate::protocol::application::http::parse_head(&bytes::Bytes::from(
+            format!("HTTP/1.1 200 OK\r\n{extra}\r\n"),
+        ))
         .unwrap()
         .unwrap();
         audit(&head, "example.test", true)
@@ -235,7 +235,8 @@ mod policy_regressions {
 
     #[test]
     fn the_last_samesite_attribute_is_not_skipped_when_bare() {
-        let report = report("Set-Cookie: sid=private; Secure; HttpOnly; SameSite=Lax; SameSite\r\n");
+        let report =
+            report("Set-Cookie: sid=private; Secure; HttpOnly; SameSite=Lax; SameSite\r\n");
         assert!(
             report
                 .findings

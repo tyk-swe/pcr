@@ -174,12 +174,14 @@ mod tests {
                 assert!(!selection.keeps(0));
             }
         }
-        assert!(!FrameSelectionArgs {
-            frames: Some("2-".into()),
-            every: None,
-        }
-        .resolve()
-        .unwrap()
-        .is_unrestricted());
+        assert!(
+            !FrameSelectionArgs {
+                frames: Some("2-".into()),
+                every: None,
+            }
+            .resolve()
+            .unwrap()
+            .is_unrestricted()
+        );
     }
 }

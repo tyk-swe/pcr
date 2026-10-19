@@ -62,7 +62,10 @@ pub(super) fn positive_hsts(mut input: &[u8]) -> bool {
 }
 
 fn trim_start(mut input: &[u8]) -> &[u8] {
-    while input.first().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
+    while input
+        .first()
+        .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+    {
         input = &input[1..];
     }
     input

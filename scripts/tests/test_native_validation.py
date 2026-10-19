@@ -20,7 +20,11 @@ def exchange_report():
     records[2]['sequence'] = 2
     records[2]['result']['unanswered'] = []
     reply = '4500' + b'isolated-reply'.hex()
-    records[1]['result']['response']['frame']['bytes_hex'] = reply
+    frame = records[1]['result']['response']['frame']
+    frame['bytes_hex'] = reply
+    records[1]['result']['response']['layout'] = {'layers': [
+        {'protocol': 'ipv4', 'range': {'start': 0, 'end': len(reply) // 2}},
+    ]}
     return dict(exit_code=0, stdout='\n'.join(json.dumps(record) for record in records) + '\n',
                 reply_bytes=reply, received_messages=[b'isolated-probe'.hex()])
 
@@ -28,6 +32,42 @@ def exchange_report():
 class NativeExchangeTests(unittest.TestCase):
     def test_positive_exchange_evidence(self):
         native.validate_exchange(exchange_report())
+
+    def test_positive_exchange_evidence_without_layout_or_link_header(self):
+        report = exchange_report()
+        records = [json.loads(line) for line in report['stdout'].splitlines()]
+        records[1]['result']['response'].pop('layout')
+        report['stdout'] = '\n'.join(json.dumps(record) for record in records) + '\n'
+        native.validate_exchange(report)
+
+    def test_positive_exchange_evidence_with_link_layer_header(self):
+        report = exchange_report()
+        records = [json.loads(line) for line in report['stdout'].splitlines()]
+        reply = report['reply_bytes']
+        link_header = '00' * 12 + '0800'
+        decoded = records[1]['result']['response']
+        decoded['frame']['bytes_hex'] = link_header + reply
+        decoded['layout'] = {'layers': [
+            {'protocol': 'ethernet', 'range': {'start': 0, 'end': 14}},
+            {'protocol': 'ipv4', 'range': {'start': 14, 'end': 14 + len(reply) // 2}},
+        ]}
+        report['stdout'] = '\n'.join(json.dumps(record) for record in records) + '\n'
+        native.validate_exchange(report)
+
+    def test_invalid_or_missing_ipv4_layout_range_is_rejected(self):
+        changes = {
+            'missing ipv4 layer': lambda layout: layout.update(layers=[{'protocol': 'ethernet', 'range': {'start': 0, 'end': 14}}]),
+            'boolean start': lambda layout: layout['layers'][0]['range'].update(start=True),
+            'out of bounds end': lambda layout: layout['layers'][0]['range'].update(end=10**6),
+            'inverted range': lambda layout: layout['layers'][0]['range'].update(start=20, end=10),
+        }
+        for label, change in changes.items():
+            report = exchange_report()
+            records = [json.loads(line) for line in report['stdout'].splitlines()]
+            change(records[1]['result']['response']['layout'])
+            report['stdout'] = '\n'.join(json.dumps(record) for record in records) + '\n'
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                native.validate_exchange(report)
 
     def test_execution_and_responder_failures_remain_failures(self):
         for updates in ({'exit_code': 1}, {'exit_code': False}, {'responder_error': 'socket failed'},

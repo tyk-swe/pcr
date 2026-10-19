@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub mod connect;
+pub mod event;
 pub mod host;
 pub mod list;
 pub mod plan;
+pub mod probe;
 
 use std::net::IpAddr;
 use std::time::Duration;
@@ -14,11 +16,16 @@ use serde::Serialize;
 use super::capture::Stats as CaptureStats;
 use super::contract::Error;
 use super::envelope::{Published, Stats};
-use super::frame::{Captured, Timestamp};
+use super::frame::Captured;
 use super::network::InterfaceId;
-use packetcraftr::probe::{self, Transport};
+use packetcraftr::probe::Transport;
 
 use packetcraftr::scan as library;
+
+pub use event::{EndpointSummary, Event};
+pub use probe::{
+    ApplicationEvidence, ApplicationStatus, Measurement, Probe, Protocol, Qualification, Sent,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Scope {
@@ -98,150 +105,10 @@ impl From<library::Rtt> for Rtt {
 }
 
 published_enum! {
-    pub enum ApplicationStatus from library::profile::Status {
-        NotObserved => "not_observed",
-        Unchecked => "unchecked",
-        Confirmed => "confirmed",
-        Rejected => "rejected",
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ApplicationEvidence {
-    pub profile: String,
-    pub status: ApplicationStatus,
-    pub reason: String,
-}
-
-impl From<library::profile::Evidence> for ApplicationEvidence {
-    fn from(value: library::profile::Evidence) -> Self {
-        Self {
-            profile: value.profile,
-            status: value.status.into(),
-            reason: value.reason,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Protocol {
-    Tcp,
-    Udp,
-    Sctp,
-    Icmpv4,
-    Icmpv6,
-    Ip,
-}
-
-impl From<(Transport, IpAddr)> for Protocol {
-    fn from((transport, address): (Transport, IpAddr)) -> Self {
-        match (transport, address) {
-            (Transport::Tcp, _) => Self::Tcp,
-            (Transport::Udp, _) => Self::Udp,
-            (Transport::Sctp, _) => Self::Sctp,
-            (Transport::Icmp, IpAddr::V4(_)) => Self::Icmpv4,
-            (Transport::Icmp, IpAddr::V6(_)) => Self::Icmpv6,
-            (Transport::Ip, _) => Self::Ip,
-        }
-    }
-}
-
-published_enum! {
     pub enum Stage from library::Stage {
         Discovery => "discovery",
         Scan => "scan",
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Measurement {
-    Response,
-    NoReply { coverage: &'static str },
-    Unavailable,
-}
-
-fn coverage(value: library::Coverage) -> &'static str {
-    match value {
-        library::Coverage::Pending => "pending",
-        library::Coverage::Unknown => "unknown",
-        library::Coverage::NoReportedLoss => "no_reported_loss",
-        library::Coverage::Incomplete => "incomplete",
-        library::Coverage::TransportTimeout => "transport_timeout",
-    }
-}
-
-impl From<library::Measurement<library::Reply>> for Measurement {
-    fn from(value: library::Measurement<library::Reply>) -> Self {
-        match value {
-            library::Measurement::Response(_) => Self::Response,
-            library::Measurement::NoReply(value) => Self::NoReply {
-                coverage: coverage(value),
-            },
-            library::Measurement::Unavailable => Self::Unavailable,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Qualification {
-    pub stage: Stage,
-    pub first_sequence: u64,
-    pub last_sequence: u64,
-    pub coverage: &'static str,
-}
-
-impl From<library::Qualification> for Qualification {
-    fn from(value: library::Qualification) -> Self {
-        Self {
-            stage: value.stage().into(),
-            first_sequence: value.first_sequence(),
-            last_sequence: value.last_sequence(),
-            coverage: coverage(value.coverage()),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Probe {
-    pub measurement: Measurement,
-    pub sequence: u64,
-    pub stage: Stage,
-    pub protocol: Protocol,
-    pub destination: IpAddr,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<Scope>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub destination_port: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ip_protocol: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub icmp_request: Option<&'static str>,
-    /// The TCP segment a raw TCP probe sent.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tcp_scan: Option<plan::TcpScan>,
-    /// The SCTP chunk a raw SCTP probe sent.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sctp_scan: Option<plan::SctpScan>,
-    pub attempt: u32,
-    pub status: probe::Status,
-    pub classification: Classification,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub responder: Option<IpAddr>,
-    pub sent_at: Timestamp,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub received_at: Option<Timestamp>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub latency: Option<Duration>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub frame: Option<Captured>,
-    pub reason: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub application: Option<ApplicationEvidence>,
-    /// The window the correlated TCP response advertised, as observed.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tcp_window: Option<u16>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -490,263 +357,6 @@ impl TryFrom<library::Endpoint> for Endpoint {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Sent {
-    pub sequence: u64,
-    pub stage: Stage,
-    pub protocol: Protocol,
-    pub destination: IpAddr,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<Scope>,
-    pub destination_port: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ip_protocol: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub icmp_request: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tcp_scan: Option<plan::TcpScan>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sctp_scan: Option<plan::SctpScan>,
-    pub attempt: u32,
-    pub sent_at: Timestamp,
-    pub udp_profile: Option<String>,
-    pub frame: super::frame::Wire,
-    pub route: super::send::MaterializedRoute,
-}
-impl TryFrom<library::SentProbe> for Sent {
-    type Error = Error;
-
-    fn try_from(value: library::SentProbe) -> Result<Self, Error> {
-        let probe = value.probe;
-        let sent = value.sent;
-        Ok(Self {
-            sequence: probe.sequence,
-            stage: probe.stage.into(),
-            udp_profile: probe
-                .udp_profile
-                .as_ref()
-                .map(|profile| profile.name().to_owned()),
-            protocol: (probe.endpoint.transport(), probe.address).into(),
-            destination: probe.address,
-            scope: probe.scope.as_ref().map(Scope::from),
-            destination_port: probe.endpoint.port(),
-            ip_protocol: probe.endpoint.ip_protocol(),
-            icmp_request: probe
-                .endpoint
-                .icmp_request_kind()
-                .filter(|kind| *kind != "echo"),
-            tcp_scan: (probe.endpoint.transport() == Transport::Tcp)
-                .then(|| plan::TcpScan::from(probe.tcp_scan)),
-            sctp_scan: (probe.endpoint.transport() == Transport::Sctp)
-                .then(|| plan::SctpScan::from(probe.sctp_scan)),
-            attempt: probe.attempt,
-            sent_at: Timestamp::try_from(sent.timing().freshness_marker().wall_clock())?,
-            frame: sent.wire_bytes().clone().into(),
-            route: sent.route().clone().try_into()?,
-        })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(untagged)]
-pub enum Event {
-    Sent {
-        sent: Sent,
-    },
-    Probe {
-        target: String,
-        probe: Probe,
-    },
-    Undecoded {
-        frame: Captured,
-    },
-    Unattributed {
-        unattributed: Unattributed,
-    },
-    Diagnostic {},
-    Qualification {
-        qualification: Qualification,
-    },
-    /// One per endpoint after the last probe, before `complete`: the
-    /// inference over attempts already published as `probe` records.
-    Endpoint {
-        endpoint: EndpointSummary,
-    },
-    Complete {
-        planned_duration: Duration,
-        target: String,
-        resolved_addresses: Vec<IpAddr>,
-        plan: plan::Plan,
-        counts: ClassificationCounts,
-        retained_evidence_bytes: usize,
-        rtt: Rtt,
-        scheduling: Scheduling,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        traceroute: Option<super::traceroute::hosts::Complete>,
-    },
-}
-
-impl TryFrom<library::Event> for Published<Event> {
-    type Error = Error;
-
-    fn try_from(event: library::Event) -> Result<Self, Error> {
-        Ok(match event {
-            library::Event::Sent(sent) => Self::new(
-                Event::Sent {
-                    sent: sent.try_into()?,
-                },
-                Vec::new(),
-            ),
-            library::Event::Probe { target, probe } => Self::new(
-                Event::Probe {
-                    target: target.to_string(),
-                    probe: probe.try_into()?,
-                },
-                Vec::new(),
-            ),
-            library::Event::Undecoded { frame } => Self::new(
-                Event::Undecoded {
-                    frame: frame.try_into()?,
-                },
-                Vec::new(),
-            ),
-            library::Event::Unattributed(unattributed) => Self::new(
-                Event::Unattributed {
-                    unattributed: unattributed.try_into()?,
-                },
-                Vec::new(),
-            ),
-            library::Event::Qualification(qualification) => Self::new(
-                Event::Qualification {
-                    qualification: qualification.into(),
-                },
-                Vec::new(),
-            ),
-            library::Event::Diagnostic(diagnostic) => {
-                Self::new(Event::Diagnostic {}, vec![diagnostic])
-            }
-        })
-    }
-}
-
-/// An endpoint without its attempts, which the stream already carried.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct EndpointSummary {
-    pub address: IpAddr,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<Scope>,
-    pub transport: Transport,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub port: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ip_protocol: Option<u8>,
-    pub classification: Classification,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub port_hint: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub inference: Option<plan::Inference>,
-    pub probes: Vec<u64>,
-}
-
-impl From<library::Endpoint> for Published<Event> {
-    fn from(endpoint: library::Endpoint) -> Self {
-        Self::new(
-            Event::Endpoint {
-                endpoint: EndpointSummary {
-                    address: endpoint.address,
-                    scope: endpoint.scope.as_ref().map(Scope::from),
-                    transport: endpoint.transport,
-                    port: endpoint.port,
-                    ip_protocol: endpoint.ip_protocol,
-                    classification: endpoint.classification.into(),
-                    port_hint: endpoint.port_hint,
-                    inference: endpoint.inference.map(plan::Inference::from),
-                    probes: endpoint.probes.iter().map(|probe| probe.sequence).collect(),
-                },
-            },
-            Vec::new(),
-        )
-    }
-}
-
-impl
-    From<(
-        library::Report,
-        plan::Plan,
-        Option<super::traceroute::hosts::Complete>,
-    )> for Published<Event>
-{
-    fn from(
-        (summary, plan, traceroute): (
-            library::Report,
-            plan::Plan,
-            Option<super::traceroute::hosts::Complete>,
-        ),
-    ) -> Self {
-        Self::new(
-            Event::Complete {
-                planned_duration: summary.planned_duration,
-                target: summary.target,
-                resolved_addresses: summary.resolved_addresses,
-                plan,
-                counts: summary.counts.into(),
-                retained_evidence_bytes: summary.retained_evidence_bytes,
-                rtt: summary.rtt.into(),
-                scheduling: summary.scheduling.into(),
-                traceroute,
-            },
-            Vec::new(),
-        )
-        .with_stats(summary.stats)
-    }
-}
-
-impl TryFrom<library::ProbeEvidence> for Probe {
-    type Error = Error;
-
-    fn try_from(evidence: library::ProbeEvidence) -> Result<Self, Error> {
-        Ok(Self {
-            measurement: evidence.measurement.into(),
-            sequence: evidence.sequence,
-            stage: evidence.stage.into(),
-            protocol: (evidence.transport, evidence.address).into(),
-            destination: evidence.address,
-            scope: evidence.scope.as_ref().map(Scope::from),
-            destination_port: evidence.port,
-            ip_protocol: evidence.ip_protocol,
-            icmp_request: evidence.icmp_request.filter(|kind| *kind != "echo"),
-            tcp_scan: evidence.tcp_scan.map(plan::TcpScan::from),
-            sctp_scan: evidence.sctp_scan.map(plan::SctpScan::from),
-            attempt: evidence.attempt,
-            status: evidence.status,
-            classification: evidence.classification.into(),
-            responder: evidence.responder,
-            sent_at: evidence.sent_at.try_into()?,
-            received_at: evidence.received_at.map(Timestamp::try_from).transpose()?,
-            latency: evidence.latency,
-            frame: evidence.response.map(Captured::try_from).transpose()?,
-            reason: evidence.reason,
-            application: evidence.application.map(Into::into),
-            tcp_window: evidence.tcp_window,
-        })
-    }
-}
-
-impl crate::output::stream::StreamRecord for Event {
-    fn event_name(&self) -> &'static str {
-        match self {
-            Self::Sent { .. } => "probe_sent",
-            Self::Probe { .. } => "probe",
-            Self::Undecoded { .. } => "undecoded",
-            Self::Unattributed { .. } => "unattributed",
-            Self::Diagnostic {} => "diagnostic",
-            Self::Qualification { .. } => "observation_quality",
-            Self::Endpoint { .. } => "endpoint",
-            Self::Complete { .. } => "complete",
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Pending {
     pub sent: Sent,
     pub response: Option<Captured>,
@@ -783,6 +393,7 @@ pub struct Failure {
     pub failed_probe: Option<FailedProbe>,
     pub capture_sources: Vec<CaptureSource>,
 }
+
 impl TryFrom<&library::PipelineFailure> for Failure {
     type Error = Error;
 
@@ -813,7 +424,7 @@ impl TryFrom<&library::PipelineFailure> for Failure {
                 .capture_sources
                 .iter()
                 .map(|source| CaptureSource {
-                    observation_quality: coverage(source.observation_quality.into()),
+                    observation_quality: probe::coverage(source.observation_quality.into()),
                     interface: (&source.metadata.interface).into(),
                     ready: source.ready,
                     shutdown_confirmed: source.shutdown_confirmed,

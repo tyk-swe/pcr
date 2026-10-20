@@ -18,6 +18,13 @@ def identity():
 
 
 class BuildManifestTests(unittest.TestCase):
+    def test_version_and_compiler_payload_cannot_be_blank(self):
+        for field, value in (('version', 'packetcraftr '), ('rustc', 'rustc ')):
+            document = identity()
+            document[field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                manifest.validate_identity(document)
+
     def test_complete_provenance_is_required(self):
         for field in manifest.REQUIRED_FIELDS:
             document = identity()

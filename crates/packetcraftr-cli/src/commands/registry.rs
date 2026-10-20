@@ -5,12 +5,7 @@ use clap::Subcommand;
 use serde::Serialize;
 
 use super::dispatch::Launch;
-use super::{
-    Spec, build, capture, dissect, dns, dns_read, documentation, exchange, expert, export, follow,
-    fragment, fuzz, http, http2, identify, identify_os, interfaces, merge, plan, protocols, read,
-    replay, rewrite, routes, scan, security, send, stats, tls, topics, traceroute,
-    verify_forwarding,
-};
+use super::{Spec, analyze, files, network, packet, reference};
 use crate::output::contract::Format;
 use crate::resources::Settings;
 
@@ -161,126 +156,126 @@ macro_rules! commands {
 commands! {
     /// Match local indicators against capture endpoints and application evidence.
     #[command(after_long_help = "Example: packetcraftr analyze hunt capture.pcapng --indicators indicators.json")]
-    Hunt(security::Hunt) = "hunt" => ("analyze", "hunt", 31),
+    Hunt(analyze::security::Hunt) = "hunt" => ("analyze", "hunt", 31),
     /// Report high NXDOMAIN ratios and repeated high-entropy query labels.
     #[command(after_long_help = "Defaults: 60-second windows; at least 20 matched responses and 50% NXDOMAIN; or 20 distinct leading labels of at least 32 characters and 4 bits/character entropy.\n\nExample: packetcraftr analyze dns-anomalies capture.pcapng")]
-    DnsAnomalies(security::Dns) = "dns-anomalies" => ("analyze", "dns-anomalies", 32),
+    DnsAnomalies(analyze::security::Dns) = "dns-anomalies" => ("analyze", "dns-anomalies", 32),
     /// Detect regularly spaced TCP connection attempts.
     #[command(after_long_help = "Defaults: six distinct SYN attempts, mean interval at least one second, coefficient of variation at most 0.10. Retransmissions are deduplicated; clock regressions suppress timing conclusions.\n\nExample: packetcraftr analyze beacons capture.pcapng")]
-    Beacons(security::Beacons) = "beacons" => ("analyze", "beacons", 33),
+    Beacons(analyze::security::Beacons) = "beacons" => ("analyze", "beacons", 33),
     /// Compare scoped endpoint states and scan coverage from native aggregate JSON.
     #[command(after_long_help = "Requires successful aggregate JSON from matching native scan methods. Missing endpoints are coverage changes, never presumed closed.\n\nExample: packetcraftr analyze scan-diff before.json after.json")]
-    ScanDiff(security::ScanDiff) = "scan-diff" => ("analyze", "scan-diff", 34),
+    ScanDiff(analyze::scan_diff::ScanDiff) = "scan-diff" => ("analyze", "scan-diff", 34),
     /// Combine security results into a standalone local HTML assessment.
     #[command(after_long_help = "Accepts aggregate JSON from the six security analysis/audit commands. Escapes captured content, records source-file hashes, and refuses existing HTML destinations.\n\nExample: packetcraftr analyze report hunt.json tls.json --html assessment.html")]
-    Assessment(security::Assessment) = "report" => ("analyze", "report", 35),
+    Assessment(analyze::report::Assessment) = "report" => ("analyze", "report", 35),
     /// Audit an observed TLS handshake, certificate chain, and name matching.
     #[command(after_long_help = "Uses ordinary TCP sockets. Bundled WebPKI roots are replaced by --ca-file. --server-name sets SNI and certificate identity without resolving another target. No revocation fetching or protocol enumeration.\n\nExample: packetcraftr network audit-tls 192.0.2.10:443 --server-name example.test")]
-    AuditTls(security::AuditTls) = "audit-tls" => ("network", "audit-tls", 36),
+    AuditTls(network::audit::AuditTls) = "audit-tls" => ("network", "audit-tls", 36),
     /// Audit HTTP response headers and redacted cookie attributes with one HEAD request.
     #[command(after_long_help = "Sends one HEAD / over HTTP/1.1 by default and follows no redirects. HTTPS sends the request only after certificate verification succeeds. Cookie values are redacted.\n\nExample: packetcraftr network audit-http 192.0.2.10:443 --tls --server-name example.test --host example.test")]
-    AuditHttp(security::AuditHttp) = "audit-http" => ("network", "audit-http", 37),
+    AuditHttp(network::audit::AuditHttp) = "audit-http" => ("network", "audit-http", 37),
     /// Merge time-ordered captures into scoped PCAPNG.
-    #[command(after_long_help = merge::arguments::AFTER_LONG_HELP)]
-    Merge(merge::arguments::Args) = "merge" => ("files", "merge", 5),
+    #[command(after_long_help = files::merge::arguments::AFTER_LONG_HELP)]
+    Merge(files::merge::arguments::Args) = "merge" => ("files", "merge", 5),
     /// Explicitly split a complete IPv4/IPv6 recipe into bounded fragments.
-    #[command(after_long_help = fragment::arguments::AFTER_LONG_HELP)]
-    Fragment(fragment::arguments::Args) = "fragment" => ("packet", "fragment", 2),
+    #[command(after_long_help = packet::fragment::arguments::AFTER_LONG_HELP)]
+    Fragment(packet::fragment::arguments::Args) = "fragment" => ("packet", "fragment", 2),
     /// Build exact packet bytes from an expression or document.
-    #[command(after_long_help = build::arguments::AFTER_LONG_HELP)]
-    Build(build::arguments::Args) = "build" => ("packet", "build", 0),
+    #[command(after_long_help = packet::build::arguments::AFTER_LONG_HELP)]
+    Build(packet::build::arguments::Args) = "build" => ("packet", "build", 0),
     /// Decode a frame with bounded, registry-driven dissection.
-    #[command(after_long_help = dissect::arguments::AFTER_LONG_HELP)]
-    Dissect(dissect::arguments::Args) = "dissect" => ("packet", "dissect", 1),
+    #[command(after_long_help = packet::dissect::arguments::AFTER_LONG_HELP)]
+    Dissect(packet::dissect::arguments::Args) = "dissect" => ("packet", "dissect", 1),
     /// List built-in protocols or describe one protocol.
-    #[command(after_long_help = protocols::AFTER_LONG_HELP)]
-    Protocols(protocols::Args) = "protocols" => ("reference", "protocols", 28),
+    #[command(after_long_help = reference::protocols::AFTER_LONG_HELP)]
+    Protocols(reference::protocols::Args) = "protocols" => ("reference", "protocols", 28),
     /// Stream frames from a classic PCAP or PCAPNG file.
-    #[command(after_long_help = read::arguments::AFTER_LONG_HELP)]
-    Read(read::arguments::Args) = "read" => ("files", "read", 4),
+    #[command(after_long_help = files::read::arguments::AFTER_LONG_HELP)]
+    Read(files::read::arguments::Args) = "read" => ("files", "read", 4),
     /// Enumerate local interfaces.
-    #[command(after_long_help = interfaces::AFTER_LONG_HELP)]
-    Interfaces(interfaces::Args) = "interfaces" => ("network", "interfaces", 16),
+    #[command(after_long_help = network::interfaces::AFTER_LONG_HELP)]
+    Interfaces(network::interfaces::Args) = "interfaces" => ("network", "interfaces", 16),
     /// Passively select route, source, MTU, and link mode.
-    #[command(after_long_help = plan::AFTER_LONG_HELP)]
-    Plan(plan::Args) = "plan" => ("network", "plan", 18),
+    #[command(after_long_help = network::plan::AFTER_LONG_HELP)]
+    Plan(network::plan::Args) = "plan" => ("network", "plan", 18),
     /// Transmit a packet under traffic policy.
-    #[command(after_long_help = send::arguments::AFTER_LONG_HELP)]
-    Send(send::arguments::Args) = "send" => ("network", "send", 20),
+    #[command(after_long_help = network::send::arguments::AFTER_LONG_HELP)]
+    Send(network::send::arguments::Args) = "send" => ("network", "send", 20),
     /// Capture-ready request/response exchange.
-    #[command(after_long_help = exchange::arguments::AFTER_LONG_HELP)]
-    Exchange(exchange::arguments::Args) = "exchange" => ("network", "exchange", 21),
+    #[command(after_long_help = network::exchange::arguments::AFTER_LONG_HELP)]
+    Exchange(network::exchange::arguments::Args) = "exchange" => ("network", "exchange", 21),
     /// Stream live captured frames.
-    #[command(after_long_help = capture::arguments::AFTER_LONG_HELP)]
-    Capture(capture::arguments::Args) = "capture" => ("network", "capture", 19),
+    #[command(after_long_help = network::capture::arguments::AFTER_LONG_HELP)]
+    Capture(network::capture::arguments::Args) = "capture" => ("network", "capture", 19),
     /// Report protocol health findings over a capture file.
-    #[command(after_long_help = expert::arguments::AFTER_LONG_HELP)]
-    Expert(expert::arguments::Args) = "expert" => ("analyze", "expert", 9),
+    #[command(after_long_help = analyze::expert::arguments::AFTER_LONG_HELP)]
+    Expert(analyze::expert::arguments::Args) = "expert" => ("analyze", "expert", 9),
     /// Extract one conversation's payload from a capture file.
-    #[command(after_long_help = follow::arguments::AFTER_LONG_HELP)]
-    Follow(follow::arguments::Args) = "follow" => ("analyze", "follow", 10),
+    #[command(after_long_help = analyze::follow::arguments::AFTER_LONG_HELP)]
+    Follow(analyze::follow::arguments::Args) = "follow" => ("analyze", "follow", 10),
     /// Replay a PCAP/PCAPNG stream.
-    #[command(after_long_help = replay::arguments::AFTER_LONG_HELP)]
-    Replay(replay::arguments::Args) = "replay" => ("network", "replay", 22),
+    #[command(after_long_help = network::replay::arguments::AFTER_LONG_HELP)]
+    Replay(network::replay::arguments::Args) = "replay" => ("network", "replay", 22),
     /// Run a structured network scan.
-    #[command(after_long_help = scan::arguments::AFTER_LONG_HELP)]
-    Scan(scan::arguments::Args) = "scan" => ("network", "scan", 23),
+    #[command(after_long_help = network::scan::arguments::AFTER_LONG_HELP)]
+    Scan(network::scan::arguments::Args) = "scan" => ("network", "scan", 23),
     /// Explicitly identify services at selected numeric TCP or UDP endpoints.
-    #[command(after_long_help = identify::arguments::AFTER_LONG_HELP)]
-    Identify(identify::arguments::Args) = "identify" => ("network", "identify", 24),
+    #[command(after_long_help = network::identify::arguments::AFTER_LONG_HELP)]
+    Identify(network::identify::arguments::Args) = "identify" => ("network", "identify", 24),
     /// Identify qualified OS families from bounded raw packet observations.
     #[command(after_long_help = "Requires a native raw packet provider and explicit destination authorization. Conclusions are qualified inferences, not authenticated identities.\n\nExample:\n  packetcraftr network identify-os 192.0.2.10 --open-port 80 --closed-port 81")]
-    IdentifyOs(identify_os::Args) = "identify-os" => ("network", "identify-os", 25),
+    IdentifyOs(network::identify_os::Args) = "identify-os" => ("network", "identify-os", 25),
     /// Compute aggregate statistics over a capture file.
-    #[command(after_long_help = stats::arguments::AFTER_LONG_HELP)]
-    Stats(stats::arguments::Args) = "stats" => ("analyze", "stats", 8),
+    #[command(after_long_help = analyze::stats::arguments::AFTER_LONG_HELP)]
+    Stats(analyze::stats::arguments::Args) = "stats" => ("analyze", "stats", 8),
     /// Assemble TLS handshake sessions from a capture file.
-    #[command(after_long_help = tls::arguments::AFTER_LONG_HELP)]
-    Tls(tls::arguments::Args) = "tls" => ("analyze", "tls", 14),
+    #[command(after_long_help = analyze::tls::arguments::AFTER_LONG_HELP)]
+    Tls(analyze::tls::arguments::Args) = "tls" => ("analyze", "tls", 14),
     /// Run bounded, policy-gated traceroute probes.
     #[command(
-        long_about = traceroute::arguments::LONG_ABOUT,
-        after_long_help = traceroute::arguments::AFTER_LONG_HELP
+        long_about = network::traceroute::arguments::LONG_ABOUT,
+        after_long_help = network::traceroute::arguments::AFTER_LONG_HELP
     )]
-    Traceroute(traceroute::arguments::Args) = "traceroute" => ("network", "traceroute", 26),
+    Traceroute(network::traceroute::arguments::Args) = "traceroute" => ("network", "traceroute", 26),
     /// Run bounded DNS over UDP, TCP, or UDP with TCP fallback.
     #[command(
-        long_about = dns::arguments::LONG_ABOUT,
-        after_long_help = dns::arguments::AFTER_LONG_HELP
+        long_about = network::dns::arguments::LONG_ABOUT,
+        after_long_help = network::dns::arguments::AFTER_LONG_HELP
     )]
-    Dns(dns::arguments::Args) = "dns" => ("network", "dns", 27),
+    Dns(network::dns::arguments::Args) = "dns" => ("network", "dns", 27),
     /// Inspect captured UDP/TCP DNS messages and transaction evidence.
-    #[command(after_long_help = dns_read::arguments::AFTER_LONG_HELP)]
-    DnsRead(dns_read::arguments::Args) = "dns-read" => ("analyze", "dns", 11),
+    #[command(after_long_help = analyze::dns::arguments::AFTER_LONG_HELP)]
+    DnsRead(analyze::dns::arguments::Args) = "dns-read" => ("analyze", "dns", 11),
     /// Inspect cleartext HTTP/1 messages over captured TCP streams.
-    #[command(after_long_help = http::arguments::AFTER_LONG_HELP)]
-    Http(http::arguments::Args) = "http" => ("analyze", "http", 12),
+    #[command(after_long_help = analyze::http::arguments::AFTER_LONG_HELP)]
+    Http(analyze::http::arguments::Args) = "http" => ("analyze", "http", 12),
     #[command(
         about = "Inspect cleartext HTTP/2 and h2c over captured TCP streams.",
-        after_long_help = http2::arguments::AFTER_LONG_HELP
+        after_long_help = analyze::http2::arguments::AFTER_LONG_HELP
     )]
-    Http2(http2::arguments::Args) = "http2" => ("analyze", "http2", 13),
+    Http2(analyze::http2::arguments::Args) = "http2" => ("analyze", "http2", 13),
     /// Export streams and reassembled IP datagrams with their physical dependencies.
-    #[command(after_long_help = export::arguments::AFTER_LONG_HELP)]
-    Export(export::arguments::Args) = "export" => ("files", "export", 7),
+    #[command(after_long_help = files::export::arguments::AFTER_LONG_HELP)]
+    Export(files::export::arguments::Args) = "export" => ("files", "export", 7),
     /// Rewrite capture headers with checked lengths and transport checksums.
-    #[command(after_long_help = rewrite::arguments::AFTER_LONG_HELP)]
-    Rewrite(rewrite::arguments::Args) = "rewrite" => ("files", "rewrite", 6),
+    #[command(after_long_help = files::rewrite::arguments::AFTER_LONG_HELP)]
+    Rewrite(files::rewrite::arguments::Args) = "rewrite" => ("files", "rewrite", 6),
     /// Run bounded field-aware packet fuzzing.
-    #[command(after_long_help = fuzz::arguments::AFTER_LONG_HELP)]
-    Fuzz(fuzz::arguments::Args) = "fuzz" => ("packet", "fuzz", 3),
+    #[command(after_long_help = packet::fuzz::arguments::AFTER_LONG_HELP)]
+    Fuzz(packet::fuzz::arguments::Args) = "fuzz" => ("packet", "fuzz", 3),
     /// Enumerate passive interface-bound route decisions.
-    #[command(after_long_help = routes::AFTER_LONG_HELP)]
-    Routes(routes::Args) = "routes" => ("network", "routes", 17),
+    #[command(after_long_help = network::routes::AFTER_LONG_HELP)]
+    Routes(network::routes::Args) = "routes" => ("network", "routes", 17),
     /// Compare ingress and egress captures under explicit identity rules.
-    #[command(after_long_help = verify_forwarding::arguments::AFTER_LONG_HELP)]
-    VerifyForwarding(verify_forwarding::arguments::Args) = "verify-forwarding" => ("analyze", "verify-forwarding", 15),
+    #[command(after_long_help = analyze::verify_forwarding::arguments::AFTER_LONG_HELP)]
+    VerifyForwarding(analyze::verify_forwarding::arguments::Args) = "verify-forwarding" => ("analyze", "verify-forwarding", 15),
     /// Generate shell completions and man pages under a directory.
     #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all grouped paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
-    Documentation(documentation::Args) => ("reference", "documentation", 30),
+    Documentation(reference::documentation::Args) => ("reference", "documentation", 30),
     /// Print built-in references for packet expressions, filters, formats, and exit codes.
-    #[command(after_long_help = topics::AFTER_LONG_HELP)]
-    Topics(topics::Args) => ("reference", "topics", 29),
+    #[command(after_long_help = reference::topics::AFTER_LONG_HELP)]
+    Topics(reference::topics::Args) => ("reference", "topics", 29),
 }
 
 /// Workflow placement and compact identifiers used in machine output.

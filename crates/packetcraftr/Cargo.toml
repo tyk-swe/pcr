@@ -1,4 +1,6 @@
 [package]
+# Register domain suites explicitly; helpers are not standalone test targets.
+autotests = false
 name = "packetcraftr"
 description = "Policy-gated PacketcraftR workflows and evidence"
 version.workspace = true
@@ -9,6 +11,10 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 publish.workspace = true
+
+[[test]]
+name = "integration"
+path = "tests/integration/main.rs"
 
 [lints]
 workspace = true

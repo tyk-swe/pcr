@@ -15,6 +15,22 @@ measurement tests launch local Python children to exercise exit codes, timeouts,
 UTF-8 decoding, output limits, and POSIX descendant cleanup. The latter is skipped
 on non-POSIX systems. Temporary files and local children are cleaned up.
 
+## Suite ownership
+
+| Module | Coverage |
+| --- | --- |
+| `test_script_support.py` | Bounded JSON, file validation, aliases, and atomic report publication. |
+| `test_native_validation.py` | Native exchange evidence and namespace lifecycle validation. |
+| `test_benchmark_validation.py` | Scanner corpus, scheduling evidence, process measurement, and report input protection. |
+| `test_build_manifest.py` | Build identity, provenance, and manifest validation. |
+| `test_forwarding_consumer.py` | Forwarding consumer contracts and archive consumer checks. |
+| `test_release_evidence.py` | Release evidence and publication gates. |
+
+Place new regressions in the suite that owns the behavior. Keep common loading
+helpers in `support.py`; test modules should not import other test modules.
+Script entrypoints and shared fixture locations are indexed in
+[Codebase structure](../../docs/codebase-structure.md#tooling-index).
+
 `support.py` loads standalone scripts without executing their CLI entrypoints.
 Tests mutate retained positive fixtures and check both valid and contradictory
 reports. Keep positive controls for omitted evidence, additive metadata,

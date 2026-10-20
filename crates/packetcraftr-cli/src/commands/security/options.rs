@@ -27,7 +27,7 @@ impl From<SeverityArg> for Severity {
     }
 }
 #[derive(Clone, Copy, Debug, Args)]
-pub(super) struct Bounds {
+pub(in crate::commands) struct Bounds {
     /// Maximum retained security findings.
     #[arg(long, default_value_t = 4096)]
     pub(super) max_findings: usize,
@@ -39,7 +39,7 @@ pub(super) struct Bounds {
     pub(super) max_observations: usize,
     /// Maximum serialized result bytes, in every output format.
     #[arg(long, default_value_t = 16 * 1024 * 1024)]
-    pub(super) max_result_bytes: usize,
+    pub(in crate::commands) max_result_bytes: usize,
     /// Exit 1 when a finding meets or exceeds this severity.
     #[arg(long, value_enum)]
     pub(super) fail_on: Option<SeverityArg>,
@@ -55,7 +55,7 @@ impl Bounds {
                     || report.findings.iter().any(|finding| !finding.complete)))
     }
 
-    pub(super) fn core(self) -> Result<security::Limits, CliError> {
+    pub(in crate::commands) fn core(self) -> Result<security::Limits, CliError> {
         let limits = security::Limits {
             max_findings: self.max_findings,
             max_groups: self.max_groups,
@@ -67,7 +67,7 @@ impl Bounds {
         }
         Ok(limits)
     }
-    pub(super) fn resources(&self, settings: &mut Settings<'_>) {
+    pub(in crate::commands) fn resources(&self, settings: &mut Settings<'_>) {
         crate::resources::declare!(settings, self, [
             max_findings: Count @ ResultRetention preset(256, 4096),
             max_groups: Count @ ActiveState preset(256, 4096),

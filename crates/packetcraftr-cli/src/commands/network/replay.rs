@@ -1,0 +1,518 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+pub(in crate::commands) mod arguments;
+mod conversion;
+mod rendering;
+
+use std::io::{self, Read, Write};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
+
+use packetcraftr::PacketProviders;
+use packetcraftr::clock::Clock;
+use packetcraftr::replay::{
+    Event, FrameEvidence, Request, Source,
+    routing::{self, Routing, Rule},
+};
+use packetcraftr::route;
+use packetcraftr_core::capture_file as capture;
+use packetcraftr_core::capture_file::{Limits, Reader, Writer, compression};
+use packetcraftr_core::error::{BoundaryError, Kind};
+
+use self::arguments::Args;
+use crate::command_options::{InterfaceSelector, OfflineCaptureLimitsArgs};
+use crate::errors::{CliError, source_causes};
+use crate::filtering;
+use crate::input::open_capture_file;
+use crate::output::{self, contract::Format, stream::EncodeError};
+use crate::rendering::{
+    HumanWriteError, SourceCaptureWriter, StreamEncoder, emit_aggregate_with_stats,
+    finish_compressed_output, stream_capture_error, write_stdout_line_with_interrupt,
+};
+use conversion::{max_gap, timing};
+
+struct ReplayRun {
+    client: crate::system::Client,
+    request: Request<std::fs::File>,
+    filtered: bool,
+}
+
+impl crate::commands::Spec for Args {
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+        crate::output::contract::Format::Pcap,
+        crate::output::contract::Format::PcapNg,
+    ];
+    const CANCELLATION: bool = true;
+
+    fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
+        Some(&self.duration)
+    }
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [max_gap_ms: Milliseconds @ Operation]);
+        self.duration.resources(settings);
+        self.reader.resources(settings);
+        self.policy.resources(settings);
+    }
+
+    fn run(
+        self,
+        invocation: &crate::invocation::Invocation,
+    ) -> Result<crate::commands::CommandExit, CliError> {
+        let format = invocation.format;
+        let stream = &invocation.output;
+        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+    }
+}
+
+pub(super) fn run(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let compression = arguments.compression.for_output(format)?;
+    let ReplayRun {
+        client,
+        request,
+        filtered,
+    } = prepare(invocation, &arguments)?;
+    match format {
+        Format::Text => replay_text(
+            invocation,
+            &client,
+            request,
+            filtered,
+            stream.presentation(),
+        ),
+        Format::Json => replay_aggregate(invocation, &client, request),
+        Format::Ndjson => replay_stream(&client, request, stream),
+        Format::Pcap => replay_capture(
+            &client,
+            request,
+            CaptureSettings {
+                format: capture::Format::Pcap,
+                compression,
+            },
+        ),
+        Format::PcapNg => replay_capture(
+            &client,
+            request,
+            CaptureSettings {
+                format: capture::Format::PcapNg,
+                compression,
+            },
+        ),
+        other => other.unreachable(),
+    }
+}
+
+fn prepare(
+    invocation: &crate::invocation::Invocation,
+    arguments: &Args,
+) -> Result<ReplayRun, CliError> {
+    let policy = arguments.policy.clone().into_policy();
+    let capture_limits = OfflineCaptureLimitsArgs {
+        max_frames: policy.max_packets_per_operation,
+        max_bytes: policy.max_bytes_per_operation,
+        reader: arguments.reader,
+    };
+    capture_limits.validate()?;
+    let timing = timing(arguments)?;
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let max_frame_bytes = arguments.reader.max_frame_bytes;
+    let filter = filtering::optional_frame_selector(
+        arguments.filter.as_deref(),
+        &registry,
+        max_frame_bytes,
+    )?;
+    let rule_count = arguments.interface_maps.len() + arguments.filter_maps.len();
+    if rule_count > routing::MAX_RULES {
+        return Err(routing::Error::TooMany { count: rule_count }.into());
+    }
+    let fallback = arguments
+        .interface
+        .as_ref()
+        .map(crate::command_options::Selector::get)
+        .transpose()?
+        .map(route::Interface::from);
+    let interface = |text: &str| InterfaceSelector::parse(text).map(route::Interface::from);
+    let mut rules = Vec::with_capacity(rule_count);
+    for mapping in &arguments.interface_maps {
+        rules.push(Rule::parse_source(mapping, interface)?);
+    }
+    for mapping in &arguments.filter_maps {
+        rules.push(Rule::parse_filter(
+            mapping,
+            |expression| filtering::frame_selector(expression, &registry, max_frame_bytes),
+            interface,
+        )?);
+    }
+    let routing = Routing::new(rules, fallback)?;
+    policy.validate().map_err(CliError::classified)?;
+    let limits = packetcraftr::replay::Limits::from_policy(
+        &policy,
+        arguments.reader.max_frame_bytes,
+        arguments.duration.max_duration(),
+    );
+    limits.validate().map_err(CliError::classified)?;
+    let options = packetcraftr::replay::Options {
+        repeat: arguments.repeat,
+        inter_pass_delay: Duration::from_millis(arguments.inter_pass_delay_ms),
+        link_mode: arguments.link_mode.into(),
+        timing,
+        max_gap: max_gap(arguments)?,
+        limits,
+        allow_permissive_live: arguments.allow_permissive_live,
+    };
+    options.validate().map_err(CliError::classified)?;
+    let mut input = open_capture_file(invocation, &arguments.path, arguments.reader)?;
+    let reader = crate::input::snapshot_capture(
+        invocation,
+        &mut input,
+        arguments.reader,
+        capture::Limits {
+            max_frames: limits.max_source_frames,
+            max_bytes: arguments.reader.max_decoded_bytes,
+        },
+    )?;
+    let filtered = filter.is_some();
+    let mut request = Request::new(Source::seekable(reader), routing, options);
+    request.filter = filter;
+    Ok(ReplayRun {
+        client: crate::system::client(invocation, registry, policy, crate::system::Runtime::Client),
+        request,
+        filtered,
+    })
+}
+
+impl From<routing::Error> for CliError {
+    fn from(error: routing::Error) -> Self {
+        let message = match &error {
+            routing::Error::SourceSyntax => {
+                "--map-interface requires SOURCE_ID=OUTPUT_INTERFACE".into()
+            }
+            routing::Error::FilterSyntax => "--map-filter requires EXPR=>OUTPUT_INTERFACE".into(),
+            routing::Error::SourceId { .. } => {
+                "source interface must be an unsigned capture-global ID".into()
+            }
+            routing::Error::TooMany { .. } => {
+                format!(
+                    "replay permits at most {} interface rules",
+                    routing::MAX_RULES
+                )
+            }
+            _ => return Self::classified(error),
+        };
+        Self::wrapping(Kind::Usage, message, &error)
+    }
+}
+
+fn requested_interface<R>(request: &Request<R>) -> Option<route::Interface> {
+    request.routing.fallback().cloned()
+}
+
+struct CaptureSettings {
+    compression: crate::command_options::Compression,
+    format: capture::Format,
+}
+
+fn drive<P, K, R>(
+    client: &packetcraftr::Client<P, K>,
+    request: Request<R>,
+    sink: impl packetcraftr::Sink<Event, Ack = ()>,
+) -> Result<packetcraftr::replay::Report, CliError>
+where
+    P: PacketProviders,
+    K: Clock,
+    R: Read,
+{
+    client.replay(request, sink).map_err(CliError::classified)
+}
+
+fn replay_text<P: PacketProviders, K: Clock, R: Read>(
+    invocation: &crate::invocation::Invocation,
+    client: &packetcraftr::Client<P, K>,
+    request: Request<R>,
+    filtered: bool,
+    presentation: crate::rendering::Presentation,
+) -> Result<(), CliError> {
+    // The sink runs on a runtime worker, so it enters the invocation's deadline itself.
+    let worker_invocation = invocation.clone();
+    let report = drive(client, request, move |Event::Frame(evidence): Event| {
+        text_record_with(evidence, presentation, |args| {
+            write_stdout_line_with_interrupt(&worker_invocation, args)
+        })
+    })?;
+    rendering::render_summary(invocation, &report, filtered)
+}
+
+fn replay_aggregate<P: PacketProviders, K: Clock, R: Read>(
+    invocation: &crate::invocation::Invocation,
+    client: &packetcraftr::Client<P, K>,
+    request: Request<R>,
+) -> Result<(), CliError> {
+    let started = Instant::now();
+    let requested_interface = requested_interface(&request);
+    let link_mode = request.options.link_mode;
+    let frames = Arc::new(Mutex::new(Vec::new()));
+    let collected = Arc::clone(&frames);
+    let report = drive(client, request, move |Event::Frame(evidence): Event| {
+        let frame = output_frame(evidence)?;
+        collected
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(frame);
+        Ok(())
+    })?;
+    let frames = std::mem::take(&mut *frames.lock().unwrap_or_else(PoisonError::into_inner));
+    let stats = output::replay::stats(&report, started.elapsed());
+    let result = output::replay::Report::try_from((report, requested_interface, link_mode, frames))
+        .map_err(CliError::classified)?;
+    emit_aggregate_with_stats(
+        invocation,
+        output::contract::Command::Replay,
+        result,
+        Vec::new(),
+        stats,
+    )
+}
+
+fn replay_stream<P: PacketProviders, K: Clock, R: Read>(
+    client: &packetcraftr::Client<P, K>,
+    request: Request<R>,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let started = Instant::now();
+    let interface = requested_interface(&request);
+    let link_mode = request.options.link_mode;
+    let records = stream.clone();
+    let report = drive(client, request, move |Event::Frame(evidence): Event| {
+        render_stream_record(&records, evidence)
+    })?;
+    let stats = output::replay::stats(&report, started.elapsed());
+    let result = output::replay::Report::try_from((report, interface, link_mode, Vec::new()))
+        .map_err(CliError::classified)?;
+    Ok(stream.complete_with_stats(result, Vec::new(), stats)?)
+}
+
+fn replay_capture<P: PacketProviders, K: Clock, R: Read>(
+    client: &packetcraftr::Client<P, K>,
+    request: Request<R>,
+    settings: CaptureSettings,
+) -> Result<(), CliError> {
+    replay_capture_to(client, request, settings, io::stdout())
+}
+
+struct Shared<T>(Arc<Mutex<Option<T>>>);
+
+impl<T> Shared<T> {
+    fn new(value: T) -> Self {
+        Self(Arc::new(Mutex::new(Some(value))))
+    }
+
+    fn take(&self) -> Option<T> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).take()
+    }
+}
+
+impl<T> Clone for Shared<T> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<W: Write> Write for Shared<W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        match &mut *self.0.lock().unwrap_or_else(PoisonError::into_inner) {
+            Some(writer) => writer.write(bytes),
+            None => Err(io::Error::other(
+                "replay capture output is already finished",
+            )),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match &mut *self.0.lock().unwrap_or_else(PoisonError::into_inner) {
+            Some(writer) => writer.flush(),
+            None => Ok(()),
+        }
+    }
+}
+
+fn replay_capture_to<P, K, R, W>(
+    client: &packetcraftr::Client<P, K>,
+    request: Request<R>,
+    settings: CaptureSettings,
+    destination: W,
+) -> Result<(), CliError>
+where
+    P: PacketProviders,
+    K: Clock,
+    R: Read,
+    W: Write + Send + 'static,
+{
+    // Rejected before the destination is wrapped, so no compressed container is written.
+    if settings.format == capture::Format::Pcap
+        && request.source.reader().format() != capture::Format::Pcap
+    {
+        return Err(CliError::classified(
+            capture::Error::MetadataNotRepresentable {
+                format: settings.format,
+                field: "pcapng replay evidence",
+            },
+        ));
+    }
+    let destination = Shared::new(settings.compression.writer(destination)?);
+    let result = (|| {
+        let writer = Shared::new(capture_writer(
+            request.source.reader(),
+            destination.clone(),
+            settings.format,
+            request.options.limits,
+        )?);
+        let records = writer.clone();
+        let replayed =
+            drive(
+                client,
+                request,
+                move |Event::Frame(evidence): Event| match &mut *records
+                    .0
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                {
+                    Some(writer) => render_capture_record(writer, evidence),
+                    None => Err(output_failure(
+                        "replay capture output is already finished",
+                        io::Error::other("capture writer closed"),
+                    )),
+                },
+            );
+        let mut writer = writer.take();
+        replayed?;
+        writer
+            .as_mut()
+            .map_or(Ok(()), SourceCaptureWriter::flush)
+            .map_err(|source| stream_capture_error("flush capture output failed", source))
+    })();
+    let destination: compression::Output<W> = destination
+        .take()
+        .expect("only the command finishes the capture output");
+    finish_compressed_output(result, destination)
+}
+
+fn output_failure(
+    message: &'static str,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> BoundaryError {
+    let classification = CliError::new(Kind::Io, message).classification;
+    BoundaryError::with_source(message, classification, source_causes(&source), source)
+}
+
+fn output_frame(evidence: FrameEvidence) -> Result<output::replay::Frame, BoundaryError> {
+    output::replay::Frame::try_from(evidence)
+        .map_err(|source| output_failure("replay frame output failed", source))
+}
+
+fn text_record_with(
+    evidence: FrameEvidence,
+    presentation: crate::rendering::Presentation,
+    write_line: impl FnOnce(std::fmt::Arguments<'_>) -> Result<(), HumanWriteError>,
+) -> Result<(), BoundaryError> {
+    let result = output_frame(evidence)?;
+    write_line(format_args!(
+        "{}",
+        rendering::frame_line(&result, presentation)
+    ))
+    .map_err(|source| match source {
+        HumanWriteError::Interrupted(interrupted) => BoundaryError::from_error(interrupted),
+        HumanWriteError::Write(source) => output_failure("write stdout failed", source),
+    })
+}
+
+fn render_stream_record(
+    stream: &StreamEncoder,
+    evidence: FrameEvidence,
+) -> Result<(), BoundaryError> {
+    let result = output_frame(evidence)?;
+    stream
+        .emit_data(result, Vec::new())
+        .map_err(|error| match error {
+            EncodeError::Cancelled(cancelled) => BoundaryError::from_error(cancelled),
+            EncodeError::Deadline { source, .. } => BoundaryError::from_error(source),
+            error => output_failure("write replay record failed", error),
+        })
+}
+
+fn capture_writer<R: Read, W: Write>(
+    reader: &Reader<R>,
+    destination: W,
+    format: capture::Format,
+    limits: packetcraftr::replay::Limits,
+) -> Result<SourceCaptureWriter<W>, CliError> {
+    let writer = match format {
+        capture::Format::Pcap => classic_writer(reader, destination, limits)?,
+        capture::Format::PcapNg => Writer::pcapng_with_options(
+            destination,
+            capture::PcapNgOptions {
+                endianness: reader.endianness(),
+                max_size: limits.max_frame_bytes,
+                // --max-interfaces bounds each input section, not the one output section.
+                max_interfaces: capture::DEFAULT_MAX_TOTAL_INTERFACES,
+                stream_limits: stream_limits(limits),
+            },
+        )
+        .map_err(|source| stream_capture_error("initialize capture output failed", source))?,
+    };
+    Ok(SourceCaptureWriter::new(writer))
+}
+
+fn classic_writer<R: Read, W: Write>(
+    reader: &Reader<R>,
+    destination: W,
+    limits: packetcraftr::replay::Limits,
+) -> Result<Writer<W>, CliError> {
+    let interface = reader.interfaces()[0].clone();
+    let snap_length = usize::try_from(interface.snap_len).map_err(|_| {
+        CliError::new(
+            Kind::Usage,
+            "capture snap length exceeds the platform size limit",
+        )
+    })?;
+    Writer::pcap_with_options(
+        destination,
+        interface.link_type,
+        capture::PcapOptions {
+            endianness: reader.endianness(),
+            timestamp_resolution: interface.timestamp_resolution,
+            snap_len: snap_length,
+            max_size: limits.max_frame_bytes,
+            stream_limits: stream_limits(limits),
+        },
+    )
+    .map_err(|source| stream_capture_error("initialize capture output failed", source))
+}
+
+const fn stream_limits(limits: packetcraftr::replay::Limits) -> Limits {
+    Limits {
+        max_frames: limits.max_source_frames,
+        max_bytes: limits.max_transmitted_bytes,
+    }
+}
+
+fn render_capture_record<W: Write>(
+    writer: &mut SourceCaptureWriter<W>,
+    evidence: FrameEvidence,
+) -> Result<(), BoundaryError> {
+    writer
+        .write_source_frame(
+            evidence.frame.interface,
+            evidence.capture_interface,
+            evidence.frame,
+        )
+        .map_err(|source| output_failure("write capture output failed", source))
+}

@@ -1,16 +1,37 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
 import json
+import os
 from pathlib import Path
 import tempfile
+import tracemalloc
 import unittest
 from unittest.mock import patch
 
 from support import ROOT
+import script_support
 from script_support import distinct_paths, read_json, strict_json, write_json_atomic
 
 
 class StrictJsonTests(unittest.TestCase):
+    def test_json_tree_validation_has_depth_not_width_overhead(self):
+        value = list(range(20_000))
+        tracemalloc.start()
+        try:
+            script_support._validate_tree(value)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 256 * 1024)
+
+    @unittest.skipUnless(hasattr(os, 'mkfifo'), 'named pipes require POSIX')
+    def test_json_reader_rejects_fifo_without_waiting_for_writer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fifo = Path(directory) / 'report.json'
+            os.mkfifo(fifo)
+            with self.assertRaisesRegex(ValueError, 'regular file'):
+                script_support.read_json(fifo)
+
     def test_duplicate_keys_are_rejected_at_any_depth(self):
         for raw in ['{"a":1,"a":2}', '{"nested":{"a":1,"a":2}}']:
             with self.subTest(raw=raw), self.assertRaisesRegex(ValueError, 'duplicate'):
@@ -56,6 +77,17 @@ class StrictJsonTests(unittest.TestCase):
 
 
 class AtomicReportTests(unittest.TestCase):
+    def test_prepare_report_removes_stale_success_but_not_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, source = Path(directory) / 'report.json', Path(directory) / 'input'
+            source.write_bytes(b'input')
+            report.write_text('{"status":"passed"}')
+            script_support.prepare_report(report, source)
+            self.assertFalse(report.exists())
+            with self.assertRaises(ValueError):
+                script_support.prepare_report(source, source)
+            self.assertEqual(source.read_bytes(), b'input')
+
     def test_success_creates_parents_and_utf8_newline(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'nested/report.json'

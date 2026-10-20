@@ -14,43 +14,16 @@ pub(crate) use dispatch::run;
 pub use registry::Command;
 pub(crate) use registry::CommandLine;
 
-mod build;
-mod capture;
+mod analyze;
 mod dispatch;
-mod dissect;
-mod dns;
-mod dns_read;
-mod documentation;
-mod exchange;
 pub(crate) mod execution;
-mod expert;
-mod export;
-mod follow;
-mod fragment;
-mod fuzz;
-mod http;
-mod http2;
-mod identify;
-mod identify_os;
-mod interfaces;
-mod merge;
+mod files;
+mod network;
 mod offline_analysis;
-mod plan;
-mod protocols;
-mod read;
+mod packet;
+mod reference;
 pub(crate) mod registry;
-mod replay;
-mod rewrite;
-mod routes;
-mod scan;
 mod security;
-mod send;
-mod stats;
-
-mod tls;
-mod topics;
-mod traceroute;
-mod verify_forwarding;
 
 pub(crate) trait Spec: Sized {
     const FORMATS: &'static [Format];

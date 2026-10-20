@@ -7,7 +7,7 @@ use packetcraftr_core::security::{Report, Source};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-pub(super) fn read(path: &Path, limit: usize) -> Result<Vec<u8>, CliError> {
+pub(in crate::commands) fn read(path: &Path, limit: usize) -> Result<Vec<u8>, CliError> {
     if path == Path::new("-") {
         crate::input::read_stdin_bounded_allow_empty(
             limit,
@@ -19,7 +19,7 @@ pub(super) fn read(path: &Path, limit: usize) -> Result<Vec<u8>, CliError> {
 }
 
 /// A pipe has one consumer; reject ambiguous inputs before consuming any bytes.
-pub(super) fn validate_stdin_sources<'a>(
+pub(in crate::commands) fn validate_stdin_sources<'a>(
     paths: impl IntoIterator<Item = &'a Path>,
 ) -> Result<(), CliError> {
     if paths
@@ -34,7 +34,7 @@ pub(super) fn validate_stdin_sources<'a>(
     Ok(())
 }
 
-pub(super) fn source(path: &Path, bytes: &[u8]) -> Source {
+pub(in crate::commands) fn source(path: &Path, bytes: &[u8]) -> Source {
     Source {
         path: path.display().to_string(),
         sha256: Sha256::digest(bytes)
@@ -45,7 +45,7 @@ pub(super) fn source(path: &Path, bytes: &[u8]) -> Source {
 }
 
 /// Validate the published envelope before admitting an assessment's input report.
-pub(super) fn report(bytes: &[u8]) -> Result<Report, CliError> {
+pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
     let envelope: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|e| invalid(e.to_string()))?;
     let command = envelope["command"].as_str().unwrap_or("");

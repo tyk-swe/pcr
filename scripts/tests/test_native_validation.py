@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -30,6 +31,34 @@ def exchange_report():
 
 
 class NativeExchangeTests(unittest.TestCase):
+    def test_unicode_line_separators_are_json_content_not_ndjson_boundaries(self):
+        report = exchange_report()
+        records = [json.loads(line) for line in report['stdout'].splitlines()]
+        records[0]['future'] = 'a\u0085b\u2028c\u2029d'
+        report['stdout'] = '\n'.join(json.dumps(record, ensure_ascii=False) for record in records) + '\n'
+        native.validate_exchange(report)
+
+    def test_native_report_alias_is_rejected_before_running_or_writing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / 'binary'
+            binary.write_bytes(b'original executable')
+            argv = ['native-test', '--binary', str(binary), '--report', str(binary)]
+            with patch.object(sys, 'argv', argv), patch.object(native, 'run') as run:
+                with self.assertRaises(SystemExit):
+                    native.main()
+                run.assert_not_called()
+            self.assertEqual(binary.read_bytes(), b'original executable')
+
+    def test_exchange_always_joins_responder_after_command_timeout(self):
+        with patch.object(native.socket, 'socket') as sockets, \
+                patch.object(native.threading, 'Thread') as worker, \
+                patch.object(native.subprocess, 'run', side_effect=subprocess.TimeoutExpired('exchange', 10)):
+            sockets.return_value.__enter__.return_value.getsockname.return_value = ('127.0.0.1', 12345)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                native.exchange(Path('binary'), {})
+            worker.return_value.start.assert_called_once()
+            worker.return_value.join.assert_called_once_with(timeout=6)
+
     def test_positive_exchange_evidence(self):
         native.validate_exchange(exchange_report())
 

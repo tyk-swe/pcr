@@ -41,9 +41,9 @@ capture side; pass them to `verify` or `verify_with_limits`.
 
 ## Public behavior checks
 
-The retained CLI `forwarding_verification_contracts` integration module exercises
+The retained CLI `analyze::forwarding_verification_contracts` integration module exercises
 forwarding verdicts with generated local captures. Run it with:
 
 ```sh
-cargo test --locked -p packetcraftr-cli --no-default-features --test integration forwarding_verification_contracts
+cargo test --locked -p packetcraftr-cli --no-default-features --test integration analyze::forwarding_verification_contracts
 ```

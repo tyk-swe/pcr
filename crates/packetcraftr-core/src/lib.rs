@@ -6,6 +6,10 @@
 //! Runtime-neutral packet mechanics and bounded offline analysis.
 //!
 //! This portable foundation has no resolver, route lookup, live-capture, or transmission seam.
+//!
+//! Contributor navigation: `tests/integration/main.rs` registers the `analysis`,
+//! `capture_file`, `document`, and `security` domains in one binary. Shared capture
+//! and TLS fixtures live in `tests/common.rs` and `tests/common/`.
 
 macro_rules! display_via_as_str {
     ($type:ty) => {

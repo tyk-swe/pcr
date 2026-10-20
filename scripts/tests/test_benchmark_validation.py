@@ -231,6 +231,78 @@ class AdaptiveScenarioTests(unittest.TestCase):
 
 
 class ProcessMeasurementTests(unittest.TestCase):
+    def test_benchmark_report_aliases_are_rejected_before_execution(self):
+        specifications = (
+            ('benchmark-scanner', '--binary'),
+            ('benchmark-adaptive-scenarios', '--fixture-binary'),
+            ('compare-scheduling', '--baseline'),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'input'
+            source.write_bytes(b'original input')
+            for name, flag in specifications:
+                tool = load_script(name)
+                argv = [name, flag, str(source), '--report', str(source)]
+                if name == 'compare-scheduling':
+                    argv += ['--candidate', str(source)]
+                with self.subTest(name=name), patch.object(sys, 'argv', argv), self.assertRaises(SystemExit):
+                    tool.main()
+                self.assertEqual(source.read_bytes(), b'original input')
+
+    def test_failed_reader_start_cleans_up_the_child(self):
+        real_thread, real_popen = threading.Thread, subprocess.Popen
+        threads, children = [], []
+
+        def make_thread(*args, **kwargs):
+            if threads:
+                raise RuntimeError('thread resources unavailable')
+            thread = real_thread(*args, **kwargs)
+            threads.append(thread)
+            return thread
+
+        def popen(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            children.append(process)
+            return process
+
+        with patch.object(benchmark.threading, 'Thread', side_effect=make_thread), \
+                patch.object(benchmark.subprocess, 'Popen', side_effect=popen):
+            with self.assertRaisesRegex(RuntimeError, 'thread resources'):
+                benchmark.measured([sys.executable, '-S', '-c', 'import time; time.sleep(30)'])
+        self.assertEqual(len(children), 1)
+        self.assertIsNotNone(children[0].poll())
+        self.assertTrue(children[0].stdout.closed and children[0].stderr.closed)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+
+    def test_pipe_read_failure_cannot_publish_a_measurement(self):
+        real_popen = subprocess.Popen
+        children = []
+
+        class FailingPipe:
+            def __init__(self, source):
+                self.source = source
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.source.close()
+
+            def read(self, size):
+                raise OSError('injected pipe failure')
+
+        def popen(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            process.stdout = FailingPipe(process.stdout)
+            children.append(process)
+            return process
+
+        with patch.object(benchmark.subprocess, 'Popen', side_effect=popen):
+            with self.assertRaises(ValueError):
+                benchmark.measured([sys.executable, '-S', '-c', 'import time; time.sleep(30)'])
+        self.assertIsNotNone(children[0].poll())
+        self.assertTrue(children[0].stdout.source.closed)
+
     def test_exact_process_exit_stdout_stderr_and_memory(self):
         result = benchmark.measured([sys.executable, '-c', 'import sys; print("ok"); print("err", file=sys.stderr); sys.exit(7)'])
         self.assertEqual(result['exit_code'], 7)

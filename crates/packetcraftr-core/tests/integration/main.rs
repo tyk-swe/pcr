@@ -3,16 +3,12 @@
 
 //! `packetcraftr-core` integration tests, built as one binary.
 //!
-//! Each module is one test file. Sharing a binary compiles the helpers and
-//! links once, and runs every module in one parallel test pool.
+//! Domain modules register the retained suites in one shared parallel test pool.
 
-#[path = "../common/mod.rs"]
+#[path = "../common.rs"]
 mod common;
 
-mod analysis_control_contracts;
-mod analysis_provenance_contracts;
-mod capture_compression_contracts;
-mod capture_file_edge_contracts;
-mod document_limit_contracts;
-mod security_scan_contracts;
-mod tls_session_limit_contracts;
+mod analysis;
+mod capture_file;
+mod document;
+mod security;

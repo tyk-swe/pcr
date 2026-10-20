@@ -1,22 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Security command orchestration; input adaptation and presentation have separate owners.
+//! Shared security bounds, input handling, and result publication.
 
-mod assessment;
-mod audit;
-mod capture;
-mod input;
+pub(super) mod input;
 mod options;
-mod scan_diff;
-mod scan_input;
 
-pub(crate) use assessment::Assessment;
-pub(crate) use audit::{AuditHttp, AuditTls};
-pub(crate) use capture::{Beacons, Dns, Hunt};
-pub(crate) use scan_diff::ScanDiff;
-
-use super::{CommandExit, Spec};
+use super::CommandExit;
 use crate::{
     errors::CliError,
     invocation::Invocation,
@@ -25,18 +15,18 @@ use crate::{
         security::FindingRecord,
     },
 };
-use input::{read, source};
-use options::Bounds;
+pub(super) use input::{read, source};
+pub(super) use options::Bounds;
 use packetcraftr_core::{
     error::Kind,
     security::{self, Report},
 };
 
-fn invalid(message: impl Into<String>) -> CliError {
+pub(super) fn invalid(message: impl Into<String>) -> CliError {
     CliError::new(Kind::Usage, message)
 }
 
-fn publish(
+pub(super) fn publish(
     i: &Invocation,
     command: Command,
     report: Report,

@@ -37,16 +37,25 @@ fixture locations, and guidance on keeping public paths stable.
   spending, and preparation state belong to the operation that uses them.
 - Name modules for their domain and use module-qualified type names when the
   module supplies the context. Use `foo.rs` beside `foo/`, not `mod.rs`.
+- Place CLI implementations in `commands::{packet, files, analyze, network,
+  reference}` according to the registry's group assignment. Keep dispatch and
+  shared command infrastructure at the commands root; output contracts and
+  rendering retain their separate owners.
 - Prefer concrete types. Add traits or other abstractions when actual consumers
   need substitution or share meaningful behavior, rather than for one caller.
 - Preserve input validation, resource limits, and wire data. Authorize live
   operations before discovery or transmission. Use finite budgets and loopback,
   documentation addresses, or isolated networks in tests and examples.
 - Keep the retained public behavior tests in `crates/*/tests/integration/`,
-  registered in `main.rs`. Portable/native integration suites are supplemented
+  grouped by domain and registered through `domain.rs` from `main.rs` in one
+  `integration` binary per crate. Preserve mixed CLI suites under `contracts`
+  and shared fixtures under `tests/common.rs` and `tests/common/`. Anchor
+  embedded assets at `CARGO_MANIFEST_DIR`. Portable/native suites are supplemented
   by focused private Rust regressions. Standard-library Python regressions live
   in `scripts/tests/` and run with Python 3.10 or newer; see their
-  [guide](scripts/tests/README.md). Preserve fuzz targets, benchmarks,
+  [guide and ownership index](scripts/tests/README.md). Put regressions in the
+  owning suite and share helpers through `support.py`, without imports between
+  test modules. Preserve fuzz targets, benchmarks,
   documentation examples, and release packaging checks.
 - Keep schemas, examples, tests, and migration notes in sync with public contracts.
   Shared dependency updates must also update the fuzz manifest and lockfile.

@@ -4,6 +4,12 @@
 //! The PacketcraftR command-line application: argument parsing, provider
 //! composition, workflow dispatch, and rendering through the versioned
 //! [`output`] contract.
+//!
+//! Contributor navigation: command implementations live under
+//! `src/commands/{packet,files,analyze,network,reference}`. Shared dispatch and
+//! security helpers stay at the commands root; output and rendering keep their
+//! own modules. `tests/integration/main.rs` registers domain suites and mixed
+//! `contracts` in one binary, with fixtures in `tests/common.rs` and `tests/common/`.
 #![forbid(unsafe_code)]
 
 mod cancellation;

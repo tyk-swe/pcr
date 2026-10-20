@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Classic PCAP and pcapng fixtures and the file-versus-stdin parity runner. The
-// including test crate root must also declare `common` and `process_support`.
+// common module also registers the process helpers used by the parity runner.
 
 use std::io::Write;
 use std::path::Path;
@@ -16,8 +16,8 @@ use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::protocol::network::Ipv4;
 
+use crate::common::process::{decode_hex, run_with_stdin};
 use crate::common::{path_text, run};
-use crate::process_support::{decode_hex, run_with_stdin};
 
 /// 192.0.2.1:12345 → 198.51.100.2:9 UDP carrying "hello", TTL 64.
 pub(crate) const UDP_CLIENT: &str =

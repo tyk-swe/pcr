@@ -10,7 +10,7 @@ use crate::probe::Batch;
 use crate::probe::runner::BatchEvidence;
 use crate::target::SelectedAddress;
 
-use super::approval::ApprovedScan;
+use super::approval::Approved;
 use super::pacing::{Owed, settle};
 use super::pipelined::{add_stats, pipeline_options, prepared_limit};
 use crate::probe::{self, enforce_deadline};
@@ -100,7 +100,7 @@ pub(super) fn admit_adaptive<E: Pipelined>(
     request: &Request,
     executor: &mut E,
     deadline: &Deadline,
-    approved: &ApprovedScan,
+    approved: &Approved,
     reservation: usize,
 ) -> Result<[crate::scan::executor::AdaptiveAdmission; 2], Error> {
     let discovery = if request.discovery.runs() {

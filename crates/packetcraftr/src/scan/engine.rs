@@ -8,7 +8,7 @@ mod pacing;
 mod pipelined;
 
 use self::adaptive_execution::{admit_adaptive, execute_adaptive};
-use self::approval::approve_scan;
+use self::approval::approve;
 use self::neighbors::{ReachOutcome, discover_neighbors, reach_next_hop};
 use self::pacing::{Owed, settle};
 use self::pipelined::{StagePlan, add_stats, admit_pipelined, execute};
@@ -186,7 +186,7 @@ where
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     enforce_deadline(probe_error, deadline)?;
-    let approved = approve_scan(request, authorizer, deadline)?;
+    let approved = approve(request, authorizer, deadline)?;
     let options = &request.discovery;
     executor.resolves_neighbors(approved.resolves_neighbors);
     enforce_deadline(probe_error, deadline)?;

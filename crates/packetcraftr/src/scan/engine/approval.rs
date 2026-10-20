@@ -21,7 +21,7 @@ use crate::scan::error::probe_error;
 use crate::scan::plan::{adaptive_worst_case_duration, ip_worst_case_duration, probe_count};
 use crate::scan::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
 
-pub(super) struct ApprovedScan {
+pub(super) struct Approved {
     pub(super) planned_duration: std::time::Duration,
     pub(super) declared_target: String,
     pub(super) targets: Vec<SelectedAddress>,
@@ -34,13 +34,13 @@ pub(super) struct ApprovedScan {
     pub(super) resolves_neighbors: bool,
 }
 
-impl ApprovedScan {
+impl Approved {
     pub(super) fn addresses(&self) -> Vec<IpAddr> {
         self.targets.iter().map(|target| target.address).collect()
     }
 }
 
-pub(super) struct ScanPlan {
+pub(super) struct Plan {
     pub(super) total_probes: usize,
     pub(super) resolves_neighbors: bool,
     pub(super) neighbor_requests: usize,
@@ -48,11 +48,11 @@ pub(super) struct ScanPlan {
     pub(super) worst_case: Duration,
 }
 
-pub(super) fn approve_scan<A: Authorizer + ResolveTarget>(
+pub(super) fn approve<A: Authorizer + ResolveTarget>(
     request: &Request,
     authorizer: &mut A,
     deadline: &Deadline,
-) -> Result<ApprovedScan, Error> {
+) -> Result<Approved, Error> {
     let endpoints = request.planned_endpoints()?.to_vec();
     // Only the serial path reuses `collection` to retain each exchange's frames.
     if request.max_in_flight == 1 {
@@ -71,7 +71,7 @@ pub(super) fn approve_scan<A: Authorizer + ResolveTarget>(
             max_targets: request.limits.max_targets,
         },
         Error::TargetSelection,
-        |selected| plan_scan(request, &selected.targets, &endpoints),
+        |selected| plan(request, &selected.targets, &endpoints),
         |plan| {
             Ok(wire_limits(
                 u64::try_from(plan.total_probes.saturating_add(plan.neighbor_requests))
@@ -106,7 +106,7 @@ pub(super) fn approve_scan<A: Authorizer + ResolveTarget>(
         });
     }
 
-    Ok(ApprovedScan {
+    Ok(Approved {
         planned_duration: plan.worst_case,
         declared_target: selected.declared,
         targets: selected.targets,
@@ -120,11 +120,11 @@ pub(super) fn approve_scan<A: Authorizer + ResolveTarget>(
 /// Plans discovery and the scan as one budget: their probes, neighbor
 /// requests, wire bytes, and worst-case durations must fit the request's
 /// limits together, before discovery decides which hosts are scanned.
-pub(super) fn plan_scan(
+pub(super) fn plan(
     request: &Request,
     targets: &[SelectedAddress],
     endpoints: &[probe::Endpoint],
-) -> Result<ScanPlan, Error> {
+) -> Result<Plan, Error> {
     let overflow = || Error::InvalidLimit {
         field: "probes",
         value: u64::MAX,
@@ -291,7 +291,7 @@ pub(super) fn plan_scan(
     .try_fold(Duration::ZERO, Duration::checked_add)
     .ok_or_else(too_long)?;
     check_probe_duration(probe_error, worst_case, request.limits.max_duration)?;
-    Ok(ScanPlan {
+    Ok(Plan {
         total_probes,
         resolves_neighbors: resolves_next_hops || explicit_requests > 0,
         neighbor_requests,

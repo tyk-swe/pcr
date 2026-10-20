@@ -7,8 +7,9 @@ use super::super::{ConnectionState, Context, Decoded, Fault, Head, resources};
 use crate::analysis::application;
 use crate::analysis::http2::Error;
 use crate::analysis::http2::buffer::union_balanced;
+use crate::analysis::http2::headers::FieldRole;
 use crate::analysis::http2::model::{Certainty, IssueScope, Message, MessageKind, Status};
-use crate::analysis::http2::stream::{CLIENT, FieldRole, MessageBuilder, SERVER};
+use crate::analysis::http2::stream::{CLIENT, MessageBuilder, SERVER};
 use bytes::Bytes;
 
 impl ConnectionState {

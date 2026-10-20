@@ -5,6 +5,7 @@
 
 mod buffer;
 mod connection;
+mod headers;
 mod limits;
 mod model;
 mod settings;

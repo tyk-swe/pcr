@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Connection shutdown, partial-message flushing, and final resource teardown.
+
 use super::super::Error;
 use super::super::buffer::union_balanced;
 use super::super::model::{Certainty, Connection, IssueScope, Startup, Status};
@@ -9,8 +11,81 @@ use super::{ConnectionState, Context, DirectionPhase, Fault, Phase, resources};
 use crate::analysis::provenance::SourceSet;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use bytes::Bytes;
+use std::collections::HashMap;
 
 impl ConnectionState {
+    pub(crate) fn drain(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
+        let mut bytes = self.live - self.upgrade_charge;
+        let mut spans = 0usize;
+        for dir in self
+            .dirs
+            .iter_mut()
+            .flatten()
+            .chain(self.pending.iter_mut())
+        {
+            let pending = dir.buffer.len();
+            let dropped = dir.buffer.discard(pending);
+            let _ = dropped;
+            bytes += dir.charged;
+            spans += dir.charged_spans;
+            dir.charged = 0;
+            dir.charged_spans = 0;
+            dir.decoder = None;
+            dir.decoder_charge = 0;
+            dir.block_sources = HashMap::new();
+            dir.chain = None;
+        }
+        for stream in self.streams.values_mut() {
+            for msg in stream.msgs.iter_mut().flatten() {
+                spans += msg.charged_spans;
+            }
+        }
+        if let Some(prelude) = self.prelude.as_mut() {
+            for slot in [
+                prelude.live_request.as_mut(),
+                prelude.live_response.as_mut(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                spans += slot.charged_spans;
+            }
+            for offer in prelude.offers.values_mut() {
+                if let Some(msg) = offer.msg.as_mut() {
+                    spans += msg.charged_spans;
+                }
+            }
+        }
+        self.final_pending_settings.get_or_insert(
+            self.settings
+                .iter()
+                .map(|direction| direction.pending.len() as u64)
+                .sum(),
+        );
+        for direction in self.settings.iter_mut() {
+            direction.pending.clear();
+        }
+        self.final_pending_pings.get_or_insert(
+            self.pings
+                .iter()
+                .map(|pings| pings.values().sum::<u64>())
+                .sum::<u64>(),
+        );
+        for pings in self.pings.iter_mut() {
+            pings.clear();
+        }
+        self.live = self.upgrade_charge;
+        self.streams.clear();
+        self.closed.clear();
+        self.early_response_headers.clear();
+        self.pending_openers.clear();
+        self.closed_credit.clear();
+        self.prelude = None;
+        context.release_live(bytes);
+        *context.spans = context.spans.checked_sub(spans).expect("span release");
+        Ok(())
+    }
+
     pub(crate) fn close(
         &mut self,
         flow: &ScopedFlowKey,

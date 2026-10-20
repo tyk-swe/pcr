@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Connection and direction state, input buffering, and processing pumps.
+
 pub(crate) mod control;
 pub(crate) mod frames;
 pub(crate) mod lifecycle;
@@ -114,8 +116,8 @@ pub(crate) struct Decoded {
 }
 
 pub(crate) struct Head {
-    pub role: super::stream::FieldRole,
-    pub meta: super::stream::Meta,
+    pub role: super::headers::FieldRole,
+    pub meta: super::headers::Meta,
     pub flawed: bool,
 }
 
@@ -315,82 +317,6 @@ impl ConnectionState {
         }
     }
 
-    pub(crate) fn charge_conn(
-        &mut self,
-        context: &mut Context<'_>,
-        bytes: usize,
-    ) -> Result<(), Error> {
-        context.charge_live(bytes)?;
-        self.live = self.live.checked_add(bytes).expect("conn charge");
-        Ok(())
-    }
-
-    pub(crate) fn release_conn(&mut self, context: &mut Context<'_>, bytes: usize) {
-        context.release_live(bytes);
-        self.live = self.live.checked_sub(bytes).expect("conn release");
-    }
-
-    pub(crate) fn charge_dir(
-        dir: &mut DirectionState,
-        context: &mut Context<'_>,
-        bytes: usize,
-    ) -> Result<(), Error> {
-        context.charge_live(bytes)?;
-        dir.charged = dir.charged.checked_add(bytes).expect("dir charge");
-        Ok(())
-    }
-
-    pub(crate) fn release_dir(dir: &mut DirectionState, context: &mut Context<'_>, bytes: usize) {
-        context.release_live(bytes);
-        dir.charged = dir.charged.checked_sub(bytes).expect("dir release");
-    }
-
-    pub(crate) fn track_sources(
-        dir: &mut DirectionState,
-        context: &mut Context<'_>,
-        set: &SourceSet,
-    ) -> Result<(), Error> {
-        context.charge_sources(set)?;
-        dir.charged_spans += set.frames().len();
-        dir.charged += resources::SET_OVERHEAD + set.frames().len() * resources::SPAN_OVERHEAD;
-        Ok(())
-    }
-
-    pub(crate) fn release_dropped(
-        dir: &mut DirectionState,
-        dropped: Vec<SourceSet>,
-        context: &mut Context<'_>,
-    ) {
-        for set in dropped {
-            let frames = set.frames().len();
-            context.release_sources(&set);
-            dir.charged_spans -= frames;
-            dir.charged -= resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
-        }
-    }
-
-    pub(crate) fn decoder_sync(
-        &mut self,
-        dir_index: usize,
-        context: &mut Context<'_>,
-    ) -> Result<(), Error> {
-        let dir = self.dirs[dir_index].as_mut().ok_or(Error::Application(
-            application::Error::Sources {
-                number: self.number,
-            },
-        ))?;
-        if let Some(decoder) = dir.decoder.as_ref() {
-            let now = decoder.buffered_bytes();
-            if now > dir.decoder_charge {
-                Self::charge_dir(dir, context, now - dir.decoder_charge)?;
-            } else if now < dir.decoder_charge {
-                Self::release_dir(dir, context, dir.decoder_charge - now);
-            }
-            dir.decoder_charge = now;
-        }
-        Ok(())
-    }
-
     pub(crate) fn data(
         &mut self,
         delivery: &Delivery,
@@ -583,78 +509,6 @@ impl ConnectionState {
                 }
             }
         }
-    }
-
-    pub(crate) fn drain(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
-        let mut bytes = self.live - self.upgrade_charge;
-        let mut spans = 0usize;
-        for dir in self
-            .dirs
-            .iter_mut()
-            .flatten()
-            .chain(self.pending.iter_mut())
-        {
-            let pending = dir.buffer.len();
-            let dropped = dir.buffer.discard(pending);
-            let _ = dropped;
-            bytes += dir.charged;
-            spans += dir.charged_spans;
-            dir.charged = 0;
-            dir.charged_spans = 0;
-            dir.decoder = None;
-            dir.decoder_charge = 0;
-            dir.block_sources = HashMap::new();
-            dir.chain = None;
-        }
-        for stream in self.streams.values_mut() {
-            for msg in stream.msgs.iter_mut().flatten() {
-                spans += msg.charged_spans;
-            }
-        }
-        if let Some(prelude) = self.prelude.as_mut() {
-            for slot in [
-                prelude.live_request.as_mut(),
-                prelude.live_response.as_mut(),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                spans += slot.charged_spans;
-            }
-            for offer in prelude.offers.values_mut() {
-                if let Some(msg) = offer.msg.as_mut() {
-                    spans += msg.charged_spans;
-                }
-            }
-        }
-        self.final_pending_settings.get_or_insert(
-            self.settings
-                .iter()
-                .map(|direction| direction.pending.len() as u64)
-                .sum(),
-        );
-        for direction in self.settings.iter_mut() {
-            direction.pending.clear();
-        }
-        self.final_pending_pings.get_or_insert(
-            self.pings
-                .iter()
-                .map(|pings| pings.values().sum::<u64>())
-                .sum::<u64>(),
-        );
-        for pings in self.pings.iter_mut() {
-            pings.clear();
-        }
-        self.live = self.upgrade_charge;
-        self.streams.clear();
-        self.closed.clear();
-        self.early_response_headers.clear();
-        self.pending_openers.clear();
-        self.closed_credit.clear();
-        self.prelude = None;
-        context.release_live(bytes);
-        *context.spans = context.spans.checked_sub(spans).expect("span release");
-        Ok(())
     }
 
     fn pump_side(&mut self, side: usize, context: &mut Context<'_>) -> Result<(), Error> {

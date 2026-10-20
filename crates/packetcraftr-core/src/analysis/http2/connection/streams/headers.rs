@@ -7,10 +7,9 @@ use super::super::{
     ChainHead, ConnectionState, Context, Decoded, Evidence, Fault, Head, Phase, resources,
 };
 use crate::analysis::http2::Error;
+use crate::analysis::http2::headers::{FieldRole, validate};
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
-use crate::analysis::http2::stream::{
-    CLIENT, FieldRole, Phase as StreamPhase, SERVER, peer, validate,
-};
+use crate::analysis::http2::stream::{CLIENT, Phase as StreamPhase, SERVER, peer};
 
 const RESPONSE_AFTER_GOAWAY: &str =
     "the server responded on a client stream above its own GOAWAY last_stream_id";
@@ -318,14 +317,14 @@ impl ConnectionState {
                     },
                 )?;
                 failure = Some(Status::Malformed);
-                super::super::super::stream::Meta {
+                super::super::super::headers::Meta {
                     method: if role == FieldRole::Request {
-                        super::super::super::stream::request_method(&headers)
+                        super::super::super::headers::request_method(&headers)
                     } else {
                         None
                     },
                     status: if role == FieldRole::Response {
-                        super::super::super::stream::response_status(&headers)
+                        super::super::super::headers::response_status(&headers)
                     } else {
                         None
                     },

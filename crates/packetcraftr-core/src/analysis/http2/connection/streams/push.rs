@@ -5,10 +5,9 @@
 
 use super::super::{ConnectionState, Context, Decoded, Fault, resources};
 use crate::analysis::http2::Error;
+use crate::analysis::http2::headers::{FieldRole, validate};
 use crate::analysis::http2::model::{Certainty, IssueScope, MessageKind, Status};
-use crate::analysis::http2::stream::{
-    CLIENT, FieldRole, Phase as StreamPhase, SERVER, StreamState, peer, validate,
-};
+use crate::analysis::http2::stream::{CLIENT, Phase as StreamPhase, SERVER, StreamState, peer};
 use bytes::Bytes;
 
 impl ConnectionState {

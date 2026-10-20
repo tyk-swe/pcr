@@ -1,8 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Resource limits, charging, source tracking, and decoder accounting.
+
 use super::super::model::{Event, Status, Summary};
 use super::super::{Error, Limits};
+use super::{ConnectionState, DirectionState};
 use crate::analysis::application;
 use crate::analysis::provenance::SourceSet;
 use crate::budget::Deadline;
@@ -155,3 +158,81 @@ impl Context<'_> {
 
 // Two historical directional debts, stream key, and map-node overhead.
 pub(crate) const CLOSED_CREDIT_OVERHEAD: usize = 160;
+
+impl ConnectionState {
+    pub(crate) fn charge_conn(
+        &mut self,
+        context: &mut Context<'_>,
+        bytes: usize,
+    ) -> Result<(), Error> {
+        context.charge_live(bytes)?;
+        self.live = self.live.checked_add(bytes).expect("conn charge");
+        Ok(())
+    }
+
+    pub(crate) fn release_conn(&mut self, context: &mut Context<'_>, bytes: usize) {
+        context.release_live(bytes);
+        self.live = self.live.checked_sub(bytes).expect("conn release");
+    }
+
+    pub(crate) fn charge_dir(
+        dir: &mut DirectionState,
+        context: &mut Context<'_>,
+        bytes: usize,
+    ) -> Result<(), Error> {
+        context.charge_live(bytes)?;
+        dir.charged = dir.charged.checked_add(bytes).expect("dir charge");
+        Ok(())
+    }
+
+    pub(crate) fn release_dir(dir: &mut DirectionState, context: &mut Context<'_>, bytes: usize) {
+        context.release_live(bytes);
+        dir.charged = dir.charged.checked_sub(bytes).expect("dir release");
+    }
+
+    pub(crate) fn track_sources(
+        dir: &mut DirectionState,
+        context: &mut Context<'_>,
+        set: &SourceSet,
+    ) -> Result<(), Error> {
+        context.charge_sources(set)?;
+        dir.charged_spans += set.frames().len();
+        dir.charged += SET_OVERHEAD + set.frames().len() * SPAN_OVERHEAD;
+        Ok(())
+    }
+
+    pub(crate) fn release_dropped(
+        dir: &mut DirectionState,
+        dropped: Vec<SourceSet>,
+        context: &mut Context<'_>,
+    ) {
+        for set in dropped {
+            let frames = set.frames().len();
+            context.release_sources(&set);
+            dir.charged_spans -= frames;
+            dir.charged -= SET_OVERHEAD + frames * SPAN_OVERHEAD;
+        }
+    }
+
+    pub(crate) fn decoder_sync(
+        &mut self,
+        dir_index: usize,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
+        let dir = self.dirs[dir_index].as_mut().ok_or(Error::Application(
+            application::Error::Sources {
+                number: self.number,
+            },
+        ))?;
+        if let Some(decoder) = dir.decoder.as_ref() {
+            let now = decoder.buffered_bytes();
+            if now > dir.decoder_charge {
+                Self::charge_dir(dir, context, now - dir.decoder_charge)?;
+            } else if now < dir.decoder_charge {
+                Self::release_dir(dir, context, dir.decoder_charge - now);
+            }
+            dir.decoder_charge = now;
+        }
+        Ok(())
+    }
+}

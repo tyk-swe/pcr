@@ -98,7 +98,7 @@ fn http11(head: &Head) -> bool {
 }
 
 fn valid_request_target(method: &str, target: &[u8]) -> bool {
-    use super::stream::{valid_authority, valid_http_authority, valid_uri_path};
+    use super::headers::{valid_authority, valid_http_authority, valid_uri_path};
     if method == "CONNECT" {
         return valid_http_authority(target)
             && target.contains(&b':')
@@ -150,12 +150,12 @@ pub(crate) fn upgrade_offer(head: &Head) -> Result<Option<Vec<Setting>>, &'stati
     }
     let mut hosts = head.values("host");
     let host = hosts.next().ok_or("h2c request requires Host")?;
-    if hosts.next().is_some() || !super::stream::valid_http_authority(host) {
+    if hosts.next().is_some() || !super::headers::valid_http_authority(host) {
         return Err("h2c request requires exactly one valid Host authority");
     }
     if let StartLine::Request { target, .. } = &head.start
         && let Some((authority, default_port)) = absolute_form_authority(target)
-        && !super::stream::authorities_equal(authority, host, Some(default_port))
+        && !super::headers::authorities_equal(authority, host, Some(default_port))
     {
         return Err("h2c Host does not match the absolute-form target authority");
     }

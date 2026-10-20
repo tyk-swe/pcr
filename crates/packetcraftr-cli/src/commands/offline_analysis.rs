@@ -17,7 +17,7 @@ use crate::command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArg
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::output::contract::{Command, Format};
-use crate::rendering::{EventOutput, StreamEncoder, emit_aggregate, ip_event_sink};
+use crate::rendering::{EventOutput, emit_aggregate, ip_event_sink};
 
 pub(super) struct AnalysisSetup {
     pub(super) registry: Arc<Registry>,
@@ -109,8 +109,6 @@ pub(super) fn inspect<C: analysis::Collector>(
     invocation: &crate::invocation::Invocation,
     inspection: Inspection<'_>,
     collector: C,
-    format: Format,
-    stream: &StreamEncoder,
     mut publish: impl FnMut(&mut EventOutput<'_>, C::Event) -> Result<(), CliError>,
 ) -> Result<analysis::Outcome<C>, CliError> {
     let Inspection {
@@ -133,9 +131,11 @@ pub(super) fn inspect<C: analysis::Collector>(
     let mut reader = crate::input::open_capture(invocation, path, limits.capture.reader)?;
     let mut output = EventOutput::new(invocation, application.max_application_output_bytes);
     let outcome = session
-        .run(&mut reader, ip_event_sink(format, stream), |event| {
-            publish(&mut output, event).map_err(CliError::into_boundary_error)
-        })
+        .run(
+            &mut reader,
+            ip_event_sink(invocation.format, &invocation.output),
+            |event| publish(&mut output, event).map_err(CliError::into_boundary_error),
+        )
         .map_err(CliError::classified)?;
     if outcome.selected_absent() {
         return Err(CliError::new(Kind::Usage, "selected stream is not present"));
@@ -160,8 +160,6 @@ pub(super) fn require_tcp_stream(
 pub(super) fn complete_application<C, R>(
     invocation: &crate::invocation::Invocation,
     command: Command,
-    format: Format,
-    stream: &StreamEncoder,
     complete: C,
     report: impl FnOnce(C) -> R,
     render: impl FnOnce(&crate::invocation::Invocation, &C) -> Result<(), CliError>,
@@ -170,9 +168,12 @@ where
     C: serde::Serialize,
     R: serde::Serialize,
 {
-    match format {
+    match invocation.format {
         Format::Json => emit_aggregate(invocation, command, report(complete), Vec::new()),
-        Format::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
+        Format::Ndjson => invocation
+            .output
+            .complete(complete, Vec::new())
+            .map_err(Into::into),
         Format::Text => render(invocation, &complete),
         other => other.unreachable(),
     }

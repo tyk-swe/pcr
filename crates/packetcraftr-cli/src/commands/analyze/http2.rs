@@ -11,11 +11,7 @@ use crate::commands::offline_analysis::{
     Inspection, complete_application, inspect, require_tcp_stream,
 };
 use crate::errors::CliError;
-use crate::output::{
-    contract::{Command, Format},
-    http2 as wire,
-};
-use crate::rendering::StreamEncoder;
+use crate::output::{contract::Command, http2 as wire};
 
 impl crate::commands::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[
@@ -58,18 +54,12 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
-fn run(
-    invocation: &crate::invocation::Invocation,
-    args: Args,
-    format: Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
+    let stream = &invocation.output;
     args.application.validate_output()?;
     let mut ports = args.http2_ports.clone();
     ports.extend([80, 8080]);
@@ -91,8 +81,6 @@ fn run(
             selector,
         },
         collector,
-        format,
-        stream,
         |output, event| match event {
             Event::Frame(frame) => output.emit(
                 wire::Frame::try_from(*frame).map_err(CliError::classified)?,
@@ -123,8 +111,6 @@ fn run(
     complete_application(
         invocation,
         Command::Http2,
-        format,
-        stream,
         complete,
         |complete| wire::Report::from((frames, messages, issues, connections, complete)),
         rendering::render_complete,

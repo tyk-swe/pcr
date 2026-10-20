@@ -4,7 +4,12 @@
 use super::*;
 use crate::{
     invocation::Invocation,
-    output::{contract::Command, stream::StreamEncoder},
+    output::{
+        contract::Command,
+        resources::{Setting, Value},
+        stream::StreamEncoder,
+    },
+    resources::{Diagnostics, Enabled},
 };
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use serde::{Serialize, Serializer};
@@ -12,9 +17,9 @@ use std::{
     io::{self, Write},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[derive(Clone, Default)]
@@ -228,4 +233,126 @@ fn cancellation_during_serialization_refuses_write_and_terminal_cleanup_remains_
         .unwrap();
     assert_eq!(tape.writes.load(Ordering::Relaxed), 1);
     assert!(!invocation.output.is_complete());
+}
+
+fn stream_index_diagnostics() -> Arc<Diagnostics> {
+    Arc::new(Diagnostics::new(vec![(
+        Setting {
+            name: "stream_index".to_owned(),
+            value: Value::Number(1),
+            unit: "count".to_owned(),
+            stage: "operation".to_owned(),
+            scope: "Test stream index setting".to_owned(),
+            source: "default".to_owned(),
+            enabled: true,
+        },
+        Enabled::StreamIndex,
+    )]))
+}
+
+#[test]
+fn diagnostics_observe_live_settings_on_initial_and_replacement_outputs() {
+    for replace in [false, true] {
+        for diagnostics in [Some(stream_index_diagnostics()), None] {
+            let tape = Tape::default();
+            let encoder = StreamEncoder::new(Command::Http, tape.clone());
+            let invocation = if replace {
+                Invocation::new(
+                    Format::Ndjson,
+                    StreamEncoder::new(Command::Http, io::sink()).into(),
+                    None,
+                    Cancellation::default(),
+                    diagnostics.clone(),
+                )
+                .with_output(encoder.into())
+            } else {
+                Invocation::new(
+                    Format::Ndjson,
+                    encoder.into(),
+                    None,
+                    Cancellation::default(),
+                    diagnostics.clone(),
+                )
+            };
+            if let Some(diagnostics) = &diagnostics {
+                let count = Arc::new(AtomicUsize::new(0));
+                invocation
+                    .output
+                    .emit_data(record(&count, &serde_json::json!({"index": 0})), Vec::new())
+                    .unwrap();
+                diagnostics.stream_index_needed(false);
+            }
+            invocation
+                .output
+                .complete(serde_json::json!({"done": true}), Vec::new())
+                .unwrap();
+            let lines: Vec<serde_json::Value> = tape
+                .bytes
+                .lock()
+                .unwrap()
+                .split(|byte| *byte == b'\n')
+                .filter(|line| !line.is_empty())
+                .map(|line| serde_json::from_slice(line).unwrap())
+                .collect();
+            match &diagnostics {
+                Some(_) => {
+                    assert_eq!(lines.len(), 2);
+                    assert_eq!(
+                        lines[0]["resources"]["settings"][0]["enabled"],
+                        serde_json::json!(true)
+                    );
+                    assert_eq!(
+                        lines[1]["resources"]["settings"][0]["enabled"],
+                        serde_json::json!(false)
+                    );
+                }
+                None => {
+                    assert_eq!(lines.len(), 1);
+                    assert!(lines[0].get("resources").is_none());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn preexisting_encoder_deadline_survives_initial_and_replacement_configuration() {
+    for replace in [false, true] {
+        let tape = Tape::default();
+        let base = Instant::now();
+        let elapsed = Arc::new(AtomicU64::new(0));
+        let source = elapsed.clone();
+        let encoder = StreamEncoder::new(Command::Http, tape.clone()).with_deadline(Arc::new(
+            Deadline::with_time_source(Duration::from_secs(1), move || {
+                base + Duration::from_secs(source.load(Ordering::Relaxed))
+            }),
+        ));
+        let invocation = if replace {
+            Invocation::new(
+                Format::Ndjson,
+                StreamEncoder::new(Command::Http, io::sink()).into(),
+                Some(Duration::from_secs(3600)),
+                Cancellation::default(),
+                None,
+            )
+            .with_output(encoder.into())
+        } else {
+            Invocation::new(
+                Format::Ndjson,
+                encoder.into(),
+                Some(Duration::from_secs(3600)),
+                Cancellation::default(),
+                None,
+            )
+        };
+        elapsed.store(2, Ordering::Relaxed);
+        assert!(
+            invocation
+                .output
+                .complete(serde_json::json!({"done": true}), Vec::new())
+                .is_err()
+        );
+        assert!(!invocation.output.is_complete());
+        assert!(tape.bytes.lock().unwrap().is_empty());
+    }
 }

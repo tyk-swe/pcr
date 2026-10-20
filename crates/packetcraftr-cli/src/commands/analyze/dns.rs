@@ -9,11 +9,7 @@ use packetcraftr_core::analysis::dns::{Collector, Event};
 use self::arguments::Args;
 use crate::commands::offline_analysis::{Inspection, complete_application, inspect};
 use crate::errors::CliError;
-use crate::output::{
-    contract::{Command, Format},
-    dns_read as wire,
-};
-use crate::rendering::StreamEncoder;
+use crate::output::{contract::Command, dns_read as wire};
 
 impl crate::commands::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[
@@ -40,18 +36,12 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
-fn run(
-    invocation: &crate::invocation::Invocation,
-    args: Args,
-    format: Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
+    let stream = &invocation.output;
     args.application.validate_output()?;
     let mut ports = args.dns_ports;
     ports.push(53);
@@ -71,8 +61,6 @@ fn run(
                 .transpose()?,
         },
         collector,
-        format,
-        stream,
         |output, event| match event {
             Event::Message(value) => output.emit(
                 wire::Message::try_from(*value).map_err(CliError::classified)?,
@@ -98,8 +86,6 @@ fn run(
     complete_application(
         invocation,
         Command::DnsRead,
-        format,
-        stream,
         complete,
         |complete| wire::Report::from((messages, transactions, issues, complete)),
         rendering::render_complete,

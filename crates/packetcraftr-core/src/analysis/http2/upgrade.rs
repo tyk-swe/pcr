@@ -10,8 +10,8 @@ pub(crate) struct Prelude {
     pub offers: BTreeMap<u64, Offer>,
     pub client_body: Option<crate::protocol::application::http::BodyDecoder>,
     pub server_body: Option<crate::protocol::application::http::BodyDecoder>,
-    pub live_request: Option<super::stream::MsgBuild>,
-    pub live_response: Option<super::stream::MsgBuild>,
+    pub live_request: Option<super::stream::MessageBuilder>,
+    pub live_response: Option<super::stream::MessageBuilder>,
     pub upgraded: bool,
     pub body_charge: [usize; 2],
 }
@@ -24,7 +24,7 @@ pub(crate) struct Pending {
 
 pub(crate) struct Offer {
     pub settings: Vec<Setting>,
-    pub msg: Option<super::stream::MsgBuild>,
+    pub msg: Option<super::stream::MessageBuilder>,
 }
 
 impl Prelude {

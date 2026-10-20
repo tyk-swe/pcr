@@ -26,7 +26,7 @@ pub use model::{
 
 use crate::budget::Deadline;
 use crate::error::BoundaryError;
-use connection::{Conn, Cx, Phase};
+use connection::{ConnectionState, Context, Phase};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -38,7 +38,7 @@ use super::{
     session::{self, CollectorNeeds},
 };
 
-type ConnKey = (u64, u64);
+type ConnectionKey = (u64, u64);
 
 pub struct Collector {
     app_limits: application::Limits,
@@ -46,8 +46,8 @@ pub struct Collector {
     deadline: Option<Arc<Deadline>>,
     tcp: TcpSources,
     // Boxed so each delivery moves a pointer rather than the whole connection.
-    connections: BTreeMap<ConnKey, Box<Conn>>,
-    flow_index: BTreeMap<ScopedFlowKey, ConnKey>,
+    connections: BTreeMap<ConnectionKey, Box<ConnectionState>>,
+    flow_index: BTreeMap<ScopedFlowKey, ConnectionKey>,
     buffered: usize,
     retained: usize,
     spans: usize,
@@ -123,8 +123,8 @@ impl Collector {
         Ok(())
     }
 
-    fn with_cx<'a>(&'a mut self, out: &'a mut Vec<Event>) -> Cx<'a> {
-        Cx {
+    fn with_context<'a>(&'a mut self, out: &'a mut Vec<Event>) -> Context<'a> {
+        Context {
             limits: &self.limits,
             app: &self.app_limits,
             deadline: self.deadline.as_deref(),
@@ -160,13 +160,13 @@ impl Collector {
                             Status::Evicted,
                             "generation_replaced",
                             "the TCP tuple was reused for a newer connection",
-                            &mut self.with_cx(out),
+                            &mut self.with_context(out),
                         )?;
                     }
-                    conn.finish(&mut self.with_cx(out))?;
+                    conn.finish(&mut self.with_context(out))?;
                 }
                 let mut conn = self.connections.remove(&key).unwrap_or_else(|| {
-                    Box::new(Conn::new(
+                    Box::new(ConnectionState::new(
                         delivery.stream,
                         delivery.generation,
                         delivery.flow.clone(),
@@ -175,7 +175,7 @@ impl Collector {
                 if self.flow_index.get(&delivery.flow) != Some(&key) {
                     self.flow_index.insert(delivery.flow.clone(), key);
                 }
-                let result = conn.data(&delivery, number, &mut self.with_cx(out));
+                let result = conn.data(&delivery, number, &mut self.with_context(out));
                 self.connections.insert(key, conn);
                 result
             }
@@ -220,7 +220,7 @@ impl Collector {
                     return Ok(());
                 }
                 conn.number = number;
-                let result = conn.close(&flow, reset, &mut self.with_cx(out));
+                let result = conn.close(&flow, reset, &mut self.with_context(out));
                 self.connections.insert(key, conn);
                 result
             }
@@ -236,7 +236,7 @@ impl Collector {
         detail: &'static str,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
-        let keys: Vec<ConnKey> = self
+        let keys: Vec<ConnectionKey> = self
             .flow_index
             .iter()
             .filter(|(f, _)| *f == flow || f.reverse() == *flow)
@@ -247,7 +247,7 @@ impl Collector {
         for key in keys {
             if let Some(mut conn) = self.connections.remove(&key) {
                 conn.number = number;
-                conn.terminate(flow, status, code, detail, &mut self.with_cx(out))?;
+                conn.terminate(flow, status, code, detail, &mut self.with_context(out))?;
                 self.connections.insert(key, conn);
             }
         }
@@ -293,7 +293,7 @@ impl Collector {
             }
             let mut out = Vec::new();
             conn.number = run.frames_read;
-            conn.finish(&mut self.with_cx(&mut out))?;
+            conn.finish(&mut self.with_context(&mut out))?;
             emit(out)?;
         }
         if let Some(deadline) = self.deadline.as_deref() {

@@ -41,9 +41,8 @@ impl super::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        run(invocation, self, invocation.format, &invocation.output)
+            .map(|()| super::CommandExit::SUCCESS)
     }
 }
 
@@ -85,51 +84,44 @@ pub(super) fn run(
     match format {
         Format::Ndjson => {
             let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
-            let summary = {
-                let emit = emit;
-
-                client
-                    .exchange(request.clone(), emit)
-                    .map_err(CliError::classified)
-            }?;
+            let summary = client
+                .exchange(request.clone(), emit)
+                .map_err(CliError::classified)?;
             invocation.check()?;
-            (rendering::render_complete)(summary, stream)
+            rendering::render_complete(summary, stream)
         }
-        format => {
-            let report = (|| -> Result<_, CliError> {
+        _ => {
+            let report = {
                 let collector = packetcraftr::exchange::Collector::default();
                 let report = client
                     .exchange(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
-                collector.finish(report).map_err(CliError::classified)
-            })()?;
+                collector.finish(report).map_err(CliError::classified)?
+            };
             invocation.check()?;
             if format == Format::Json {
-                crate::rendering::emit_published(invocation, output::contract::Command::Exchange, {
-                    let report = report;
-
+                crate::rendering::emit_published(
+                    invocation,
+                    output::contract::Command::Exchange,
                     output::envelope::Published::<output::exchange::Report>::try_from(report)
-                        .map_err(CliError::classified)
-                }?)
+                        .map_err(CliError::classified)?,
+                )
             } else {
-                {
-                    let report = report;
-                    match format {
-                        Format::Text => {
-                            rendering::render_text(invocation, &report, stream.presentation())
-                        }
-                        Format::Pcap => {
-                            rendering::render_capture(&report, capture::Format::Pcap, compression)
-                        }
-                        Format::PcapNg => {
-                            rendering::render_capture(&report, capture::Format::PcapNg, compression)
-                        }
-                        Format::Json | Format::Ndjson => Err(CliError::new(
-                            Kind::Internal,
-                            "exchange machine formats dispatch before text rendering",
-                        )),
-                        other => other.unreachable(),
+                match format {
+                    Format::Text => {
+                        rendering::render_text(invocation, &report, stream.presentation())
                     }
+                    Format::Pcap => {
+                        rendering::render_capture(&report, capture::Format::Pcap, compression)
+                    }
+                    Format::PcapNg => {
+                        rendering::render_capture(&report, capture::Format::PcapNg, compression)
+                    }
+                    Format::Json | Format::Ndjson => Err(CliError::new(
+                        Kind::Internal,
+                        "exchange machine formats dispatch before text rendering",
+                    )),
+                    other => other.unreachable(),
                 }
             }
         }

@@ -5,17 +5,17 @@ use super::super::Error;
 use super::super::buffer::union_balanced;
 use super::super::model::{Certainty, Connection, IssueScope, Startup, Status};
 use super::super::stream::{CLIENT, SERVER};
-use super::{Conn, Cx, DirPhase, Fault, Phase, resources};
+use super::{ConnectionState, Context, DirectionPhase, Fault, Phase, resources};
 use crate::analysis::provenance::SourceSet;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use bytes::Bytes;
 
-impl Conn {
+impl ConnectionState {
     pub(crate) fn close(
         &mut self,
         flow: &ScopedFlowKey,
         reset: bool,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if reset {
             return self.terminate(
@@ -23,18 +23,18 @@ impl Conn {
                 Status::Reset,
                 "connection_reset",
                 "the TCP connection reset",
-                cx,
+                context,
             );
         }
         if !self.has_flow(flow) && self.has_flow(&flow.reverse()) {
-            self.charge_conn(cx, resources::DIR_OVERHEAD)?;
-            let mut dir = super::Dir::new(flow.clone());
+            self.charge_conn(context, resources::DIR_OVERHEAD)?;
+            let mut dir = super::DirectionState::new(flow.clone());
             dir.closed = true;
             if let Some(reverse) = self.side_of(&flow.reverse()) {
                 dir.phase = match self.phase {
-                    Phase::H2 => DirPhase::Frames,
-                    Phase::Prelude => DirPhase::Prelude,
-                    _ => DirPhase::Sniff,
+                    Phase::H2 => DirectionPhase::Frames,
+                    Phase::Prelude => DirectionPhase::Prelude,
+                    _ => DirectionPhase::Sniff,
                 };
                 self.dirs[1 - reverse] = Some(dir);
             } else {
@@ -45,18 +45,18 @@ impl Conn {
             dir.closed = true;
         }
         if self.phase == Phase::H2 {
-            self.pump(cx)?;
+            self.pump(context)?;
         }
         if self.phase == Phase::H2
             && let Some(side) = self.side_of(flow)
             && let Some(dir) = self.dirs[side].as_mut()
             && dir.buffer.is_empty()
             && dir.chain.is_none()
-            && dir.phase == DirPhase::Frames
+            && dir.phase == DirectionPhase::Frames
         {
             dir.fully_consumed_fin = true;
             if self.clean_start {
-                self.reconcile_pending_openers(side, cx)?;
+                self.reconcile_pending_openers(side, context)?;
                 if self.phase == Phase::Dead {
                     return Ok(());
                 }
@@ -69,7 +69,7 @@ impl Conn {
                 .is_some_and(|dir| dir.buffer.is_empty())
             && self.phase == Phase::H2
         {
-            self.issue(cx, Fault {
+            self.issue(context, Fault {
                 flow: flow.clone(),
                 http2_stream_id: Some(0),
                 scope: IssueScope::Connection,
@@ -80,11 +80,11 @@ impl Conn {
                 wire: Bytes::new(),
                 sources: None,
             })?;
-            self.fail(cx, Status::Malformed)?;
+            self.fail(context, Status::Malformed)?;
             return Ok(());
         }
         if let Some(grant) = self.side_of(flow) {
-            self.reconcile_closed_credit(1 - grant, None, cx)?;
+            self.reconcile_closed_credit(1 - grant, None, context)?;
             if self.phase == Phase::Dead {
                 return Ok(());
             }
@@ -99,7 +99,7 @@ impl Conn {
                 && self.clean_start
                 && let Some(parent) = self.parent_deferred.front().and_then(|msg| msg.promised_by)
             {
-                self.issue(cx, Fault {
+                self.issue(context, Fault {
                     flow: self.dir_flow(SERVER),
                     http2_stream_id: Some(parent),
                     scope: IssueScope::Connection,
@@ -110,14 +110,14 @@ impl Conn {
                     wire: Bytes::new(),
                     sources: None,
                 })?;
-                self.fail(cx, Status::Malformed)?;
+                self.fail(context, Status::Malformed)?;
                 return Ok(());
             }
             // Check before truncation handling discards any undecoded bytes.
             // A clean sender FIN excludes future DATA that could lower credit.
             let mut cursor = 0;
             loop {
-                cx.check_deadline()?;
+                context.check_deadline()?;
                 let Some(id) = self
                     .streams
                     .range((
@@ -130,14 +130,14 @@ impl Conn {
                     break;
                 };
                 cursor = id;
-                self.confirm_stream_window_overflow(side, id, cx)?;
+                self.confirm_stream_window_overflow(side, id, context)?;
             }
         }
         let deferred_ack = self
             .side_of(flow)
             .is_some_and(|side| self.waiting_settings_ack(side));
         if self.side_of(flow) == Some(SERVER) {
-            self.report_unmatched_response_at_eof(cx)?;
+            self.report_unmatched_response_at_eof(context)?;
         }
         let mut faults = Vec::new();
         if let Some(dir) = self.dir_mut(flow) {
@@ -148,13 +148,13 @@ impl Conn {
                 let sets = dir.buffer.contributors(partial);
                 let (wire, dropped) = dir.buffer.take(partial);
                 let sources = union_balanced(sets)?;
-                Self::release_dir(dir, cx, partial);
-                Self::release_dropped(dir, dropped, cx);
+                Self::release_dir(dir, context, partial);
+                Self::release_dropped(dir, dropped, context);
                 let detail = match phase {
-                    DirPhase::Sniff => "connection closed before startup was determined",
-                    DirPhase::Prelude => "connection closed mid HTTP/1 exchange",
-                    DirPhase::Preface => "connection closed inside the client preface",
-                    DirPhase::Frames => "connection closed mid-frame",
+                    DirectionPhase::Sniff => "connection closed before startup was determined",
+                    DirectionPhase::Prelude => "connection closed mid HTTP/1 exchange",
+                    DirectionPhase::Preface => "connection closed inside the client preface",
+                    DirectionPhase::Frames => "connection closed mid-frame",
                 };
                 faults.push(Fault {
                     flow: dir.flow.clone(),
@@ -169,9 +169,9 @@ impl Conn {
                 });
             }
             if let Some(chain) = dir.chain.take() {
-                Self::release_dir(dir, cx, chain.charged);
+                Self::release_dir(dir, context, chain.charged);
                 dir.charged_spans -= chain.charged_spans;
-                *cx.spans = cx
+                *context.spans = context
                     .spans
                     .checked_sub(chain.charged_spans)
                     .expect("chain spans");
@@ -189,7 +189,7 @@ impl Conn {
             }
         }
         for fault in faults {
-            self.issue(cx, fault)?;
+            self.issue(context, fault)?;
         }
         if let Some(side) = self.side_of(flow) {
             let ids: Vec<u32> = self
@@ -200,17 +200,17 @@ impl Conn {
                 .collect();
             let flushed = !ids.is_empty();
             for id in ids {
-                self.end_side(side, id, Status::Incomplete, cx)?;
+                self.end_side(side, id, Status::Incomplete, context)?;
             }
             if flushed {
                 self.worst(Status::Incomplete);
             }
-            self.maybe_done(cx);
+            self.maybe_done(context);
         }
         Ok(())
     }
 
-    fn maybe_done(&mut self, cx: &mut Cx<'_>) {
+    fn maybe_done(&mut self, context: &mut Context<'_>) {
         if self
             .dirs
             .iter()
@@ -229,8 +229,8 @@ impl Conn {
                 self.worst(Status::Incomplete);
             }
             for dir in self.dirs.iter_mut().flatten() {
-                cx.release_live(dir.charged);
-                *cx.spans -= dir.charged_spans;
+                context.release_live(dir.charged);
+                *context.spans -= dir.charged_spans;
                 dir.charged = 0;
                 dir.charged_spans = 0;
                 dir.decoder = None;
@@ -246,13 +246,13 @@ impl Conn {
         status: Status,
         code: &'static str,
         detail: &'static str,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if (self.done || matches!(self.phase, Phase::Dead)) && matches!(code, "tcp_evicted") {
             return Ok(());
         }
         self.issue(
-            cx,
+            context,
             Fault {
                 flow: flow.clone(),
                 http2_stream_id: None,
@@ -266,7 +266,7 @@ impl Conn {
             },
         )?;
         self.clean_start = false;
-        self.report_unmatched_response_at_eof(cx)?;
+        self.report_unmatched_response_at_eof(context)?;
         let mut partials: Vec<(ScopedFlowKey, Option<u32>, Bytes, Option<SourceSet>)> = Vec::new();
         for dir in self
             .dirs
@@ -279,14 +279,14 @@ impl Conn {
                 let sets = dir.buffer.contributors(partial);
                 let (wire, dropped) = dir.buffer.take(partial);
                 let sources = union_balanced(sets)?;
-                Self::release_dir(dir, cx, partial);
-                Self::release_dropped(dir, dropped, cx);
+                Self::release_dir(dir, context, partial);
+                Self::release_dropped(dir, dropped, context);
                 partials.push((dir.flow.clone(), None, wire, sources));
             }
             if let Some(mut chain) = dir.chain.take() {
-                Self::release_dir(dir, cx, chain.charged);
+                Self::release_dir(dir, context, chain.charged);
                 dir.charged_spans -= chain.charged_spans;
-                *cx.spans = cx
+                *context.spans = context
                     .spans
                     .checked_sub(chain.charged_spans)
                     .expect("chain spans");
@@ -312,7 +312,7 @@ impl Conn {
                 )
             };
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: stream_id,
@@ -326,22 +326,22 @@ impl Conn {
                 },
             )?;
         }
-        self.flush_messages(status, cx)?;
-        self.fail(cx, status)
+        self.flush_messages(status, context)?;
+        self.fail(context, status)
     }
 
-    pub(crate) fn fail(&mut self, cx: &mut Cx<'_>, status: Status) -> Result<(), Error> {
+    pub(crate) fn fail(&mut self, context: &mut Context<'_>, status: Status) -> Result<(), Error> {
         self.worst(status);
         self.phase = Phase::Dead;
         let mut faults = Vec::new();
         for dir in self.dirs.iter_mut().flatten() {
             if let Some(chain) = dir.chain.take() {
-                Self::release_dir(dir, cx, chain.charged);
+                Self::release_dir(dir, context, chain.charged);
                 dir.charged_spans = dir
                     .charged_spans
                     .checked_sub(chain.charged_spans)
                     .expect("chain spans");
-                *cx.spans = cx
+                *context.spans = context
                     .spans
                     .checked_sub(chain.charged_spans)
                     .expect("chain spans");
@@ -355,7 +355,7 @@ impl Conn {
         }
         for (flow, stream_id, wire, sets) in faults {
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
@@ -369,23 +369,23 @@ impl Conn {
                 },
             )?;
         }
-        self.flush_messages(status, cx)?;
+        self.flush_messages(status, context)?;
         Ok(())
     }
 
     pub(crate) fn flush_messages(
         &mut self,
         status: Status,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<usize, Error> {
         let mut pending_msgs = Vec::new();
         let promises = std::mem::take(&mut self.parent_deferred);
-        self.release_conn(cx, promises.len() * resources::PENDING_OVERHEAD);
+        self.release_conn(context, promises.len() * resources::PENDING_OVERHEAD);
         for msg in promises {
             pending_msgs.push((SERVER, msg.stream_id, msg));
         }
         let immediate = std::mem::take(&mut self.ack_deferred);
-        self.release_conn(cx, immediate.len() * resources::PENDING_OVERHEAD);
+        self.release_conn(context, immediate.len() * resources::PENDING_OVERHEAD);
         for (side, msg, _) in immediate {
             pending_msgs.push((side, msg.stream_id, msg));
         }
@@ -428,10 +428,13 @@ impl Conn {
         for mut msg in upgrade_evidence {
             let head = msg.upgrade_head.take().expect("upgrade request head");
             let sources = union_balanced(std::mem::take(&mut msg.sets))?;
-            self.release_conn(cx, msg.charged);
-            *cx.spans = cx.spans.checked_sub(msg.charged_spans).expect("msg spans");
+            self.release_conn(context, msg.charged);
+            *context.spans = context
+                .spans
+                .checked_sub(msg.charged_spans)
+                .expect("msg spans");
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(CLIENT),
                     http2_stream_id: None,
@@ -446,17 +449,20 @@ impl Conn {
             )?;
         }
         for msg in release {
-            self.release_conn(cx, msg.charged);
-            *cx.spans = cx.spans.checked_sub(msg.charged_spans).expect("msg spans");
+            self.release_conn(context, msg.charged);
+            *context.spans = context
+                .spans
+                .checked_sub(msg.charged_spans)
+                .expect("msg spans");
         }
         let emitted = pending_msgs.len();
         for (side, _, msg) in pending_msgs {
-            self.emit_message(side, msg, status, cx)?;
+            self.emit_message(side, msg, status, context)?;
         }
         Ok(emitted)
     }
 
-    pub(crate) fn release_prelude(&mut self, cx: &mut Cx<'_>) -> Result<(), Error> {
+    pub(crate) fn release_prelude(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
         let Some(prelude) = self.prelude.take() else {
             return Ok(());
         };
@@ -478,18 +484,18 @@ impl Conn {
             charged += msg.charged;
             spans += msg.charged_spans;
         }
-        self.release_conn(cx, release + charged);
-        *cx.spans = cx.spans.checked_sub(spans).expect("prelude spans");
+        self.release_conn(context, release + charged);
+        *context.spans = context.spans.checked_sub(spans).expect("prelude spans");
         Ok(())
     }
 
-    pub(crate) fn finish(mut self, cx: &mut Cx<'_>) -> Result<(), Error> {
-        cx.check_deadline()?;
+    pub(crate) fn finish(mut self, context: &mut Context<'_>) -> Result<(), Error> {
+        context.check_deadline()?;
         self.finalizing = true;
         if self.phase == Phase::H2 {
-            self.pump(cx)?;
+            self.pump(context)?;
         }
-        self.report_unmatched_response_at_eof(cx)?;
+        self.report_unmatched_response_at_eof(context)?;
         for side in [CLIENT, SERVER] {
             if let Some(dir) = self.dirs[side].as_mut() {
                 if !dir.buffer.is_empty() && !matches!(self.phase, Phase::Dead) {
@@ -497,11 +503,11 @@ impl Conn {
                     let sets = dir.buffer.contributors(partial);
                     let (wire, dropped) = dir.buffer.take(partial);
                     let sources = union_balanced(sets)?;
-                    Self::release_dir(dir, cx, partial);
-                    Self::release_dropped(dir, dropped, cx);
+                    Self::release_dir(dir, context, partial);
+                    Self::release_dropped(dir, dropped, context);
                     let flow = dir.flow.clone();
                     self.issue(
-                        cx,
+                        context,
                         Fault {
                             flow,
                             http2_stream_id: None,
@@ -521,7 +527,7 @@ impl Conn {
                     })
                 {
                     self.issue(
-                        cx,
+                        context,
                         Fault {
                             flow: self.dir_flow(side),
                             http2_stream_id: None,
@@ -543,11 +549,10 @@ impl Conn {
         }
         if !matches!(self.phase, Phase::Dead) {
             if matches!(self.phase, Phase::H2)
-                && (self
-                    .dirs
-                    .iter()
-                    .any(|dir| dir.as_ref().is_none_or(|dir| dir.phase != DirPhase::Frames))
-                    || self.settings.iter().any(|direction| !direction.seen)
+                && (self.dirs.iter().any(|dir| {
+                    dir.as_ref()
+                        .is_none_or(|dir| dir.phase != DirectionPhase::Frames)
+                }) || self.settings.iter().any(|direction| !direction.seen)
                     || self
                         .streams
                         .values()
@@ -591,20 +596,20 @@ impl Conn {
                     Status::Incomplete,
                     "capture_end",
                     "the capture ended before connection analysis completed",
-                    cx,
+                    context,
                 )?;
             }
-            let flushed = self.flush_messages(Status::Incomplete, cx)?;
+            let flushed = self.flush_messages(Status::Incomplete, context)?;
             if flushed > 0 {
                 self.worst(Status::Incomplete);
             }
         }
-        self.emit_connection(cx)?;
-        self.drain(cx)?;
+        self.emit_connection(context)?;
+        self.drain(context)?;
         Ok(())
     }
 
-    pub(crate) fn emit_connection(&mut self, cx: &mut Cx<'_>) -> Result<(), Error> {
+    pub(crate) fn emit_connection(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
         if self.emitted {
             return Ok(());
         }
@@ -618,14 +623,14 @@ impl Conn {
             + self.upgrade_sources.as_ref().map_or(0, |set| {
                 resources::SET_OVERHEAD + set.frames().len() * resources::SPAN_OVERHEAD
             });
-        cx.charge_retained(charge)?;
-        cx.summary.connections += 1;
+        context.charge_retained(charge)?;
+        context.summary.connections += 1;
         match self.startup {
-            Startup::PriorKnowledge => cx.summary.prior_knowledge_connections += 1,
-            Startup::H2c => cx.summary.upgraded_connections += 1,
-            Startup::Unknown => cx.summary.unsupported_connections += 1,
+            Startup::PriorKnowledge => context.summary.prior_knowledge_connections += 1,
+            Startup::H2c => context.summary.upgraded_connections += 1,
+            Startup::Unknown => context.summary.unsupported_connections += 1,
         }
-        cx.connection(Connection {
+        context.connection(Connection {
             stream: self.stream,
             generation: self.generation,
             flow: self.flow(),
@@ -651,7 +656,7 @@ impl Conn {
             upgrade_sources: self.upgrade_sources.take(),
         });
         let upgrade_charge = std::mem::take(&mut self.upgrade_charge);
-        self.release_conn(cx, upgrade_charge);
+        self.release_conn(context, upgrade_charge);
         Ok(())
     }
 }

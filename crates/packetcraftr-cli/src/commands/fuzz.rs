@@ -55,9 +55,8 @@ impl super::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<super::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| super::CommandExit::SUCCESS)
+        run(invocation, self, invocation.format, &invocation.output)
+            .map(|()| super::CommandExit::SUCCESS)
     }
 }
 
@@ -183,23 +182,19 @@ fn execute_offline(
                 let event = output::fuzz::Event::try_from(case).map_err(CliError::classified)?;
                 Ok(stream.emit_data(event, Vec::new())?)
             });
-            let summary = {
-                let emit = emit;
-
-                publish_offline(
-                    invocation,
-                    &request,
-                    packet.clone(),
-                    Arc::clone(&registry),
-                    emit,
-                )
-                .map_err(CliError::classified)
-            }?;
+            let summary = publish_offline(
+                invocation,
+                &request,
+                packet.clone(),
+                Arc::clone(&registry),
+                emit,
+            )
+            .map_err(CliError::classified)?;
             invocation.check()?;
-            (rendering::render_offline_complete)(summary, stream)
+            rendering::render_offline_complete(summary, stream)
         }
-        format => {
-            let report = (|| -> Result<_, CliError> {
+        _ => {
+            let report = {
                 let mut cases = Vec::new();
                 let summary = core::fuzz::run_observed(
                     &request,
@@ -216,28 +211,22 @@ fn execute_offline(
                     },
                 )
                 .map_err(CliError::classified)?;
-                Ok(core::fuzz::Report::from_summary(summary, cases))
-            })()?;
+                core::fuzz::Report::from_summary(summary, cases)
+            };
             invocation.check()?;
             if format == Format::Json {
-                crate::rendering::emit_published(invocation, output::contract::Command::Fuzz, {
-                    let report = report;
-
+                crate::rendering::emit_published(
+                    invocation,
+                    output::contract::Command::Fuzz,
                     output::envelope::Published::<output::fuzz::Report>::try_from(report)
-                        .map_err(CliError::classified)
-                }?)
+                        .map_err(CliError::classified)?,
+                )
             } else {
-                {
-                    let report = report;
-                    let _ = format;
-
-                    rendering::render_text(
-                        invocation,
-                        output::envelope::Published::try_from(report)
-                            .map_err(CliError::classified)?,
-                        stream.presentation(),
-                    )
-                }
+                rendering::render_text(
+                    invocation,
+                    output::envelope::Published::try_from(report).map_err(CliError::classified)?,
+                    stream.presentation(),
+                )
             }
         }
     }
@@ -264,44 +253,34 @@ fn execute_live(
                 let event = output::fuzz::Event::try_from(event).map_err(CliError::classified)?;
                 Ok(stream.emit_data(event, Vec::new())?)
             });
-            let summary = {
-                let emit = emit;
-
-                client
-                    .fuzz(request.clone(), emit)
-                    .map_err(CliError::classified)
-            }?;
+            let summary = client
+                .fuzz(request.clone(), emit)
+                .map_err(CliError::classified)?;
             invocation.check()?;
-            (rendering::render_live_complete)(summary, stream)
+            rendering::render_live_complete(summary, stream)
         }
-        format => {
-            let report = (|| -> Result<_, CliError> {
+        _ => {
+            let report = {
                 let collector = packetcraftr::fuzz::Collector::default();
                 let report = client
                     .fuzz(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
-                Ok(collector.finish(report))
-            })()?;
+                collector.finish(report)
+            };
             invocation.check()?;
             if format == Format::Json {
-                crate::rendering::emit_published(invocation, output::contract::Command::Fuzz, {
-                    let aggregate = report;
-
-                    output::envelope::Published::<output::fuzz::Report>::try_from(aggregate)
-                        .map_err(CliError::classified)
-                }?)
+                crate::rendering::emit_published(
+                    invocation,
+                    output::contract::Command::Fuzz,
+                    output::envelope::Published::<output::fuzz::Report>::try_from(report)
+                        .map_err(CliError::classified)?,
+                )
             } else {
-                {
-                    let aggregate = report;
-                    let _ = format;
-
-                    rendering::render_text(
-                        invocation,
-                        output::envelope::Published::try_from(aggregate)
-                            .map_err(CliError::classified)?,
-                        stream.presentation(),
-                    )
-                }
+                rendering::render_text(
+                    invocation,
+                    output::envelope::Published::try_from(report).map_err(CliError::classified)?,
+                    stream.presentation(),
+                )
             }
         }
     }

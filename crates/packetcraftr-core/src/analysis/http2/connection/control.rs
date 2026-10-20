@@ -4,17 +4,17 @@
 use super::super::model::{Certainty, IssueScope, Status};
 use super::super::stream::{Phase as StreamPhase, SERVER, peer};
 use super::super::{Error, settings};
-use super::{Conn, Cx, Evidence, Fault, resources};
+use super::{ConnectionState, Context, Evidence, Fault, resources};
 use crate::protocol::application::http2 as wire;
 
-impl Conn {
+impl ConnectionState {
     pub(crate) fn settings_frame(
         &mut self,
         side: usize,
         flags: u8,
         settings: Vec<wire::Setting>,
         evidence: Evidence,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if flags & 0x1 != 0 {
             let Some(acked) = self.settings[super::super::stream::peer(side)].acknowledge() else {
@@ -52,7 +52,7 @@ impl Conn {
                     Status::Incomplete
                 };
                 self.issue(
-                    cx,
+                    context,
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: None,
@@ -72,7 +72,7 @@ impl Conn {
                 )?;
                 if let Some((wire, sets)) = peer_ack {
                     self.issue(
-                        cx,
+                        context,
                         Fault {
                             flow: self.dir_flow(peer(side)),
                             http2_stream_id: None,
@@ -91,12 +91,12 @@ impl Conn {
                         },
                     )?;
                 }
-                self.fail(cx, status)?;
+                self.fail(context, status)?;
                 return Ok(());
             };
             let mut overflow = false;
             for (id, stream) in &mut self.streams {
-                cx.check_deadline()?;
+                context.check_deadline()?;
                 if stream.phase != StreamPhase::Closed {
                     let owner = if stream.by_client {
                         super::super::stream::CLIENT
@@ -122,9 +122,9 @@ impl Conn {
                 }
             }
             drop(acked.window_grants);
-            self.release_conn(cx, acked.charged);
+            self.release_conn(context, acked.charged);
             for debt in self.closed_credit.values_mut() {
-                cx.check_deadline()?;
+                context.check_deadline()?;
                 if let Some(window) = debt[side].as_mut() {
                     *window += acked.window_delta;
                     if *window >= 0 {
@@ -132,10 +132,10 @@ impl Conn {
                     }
                 }
             }
-            self.release_resolved_credit(cx);
+            self.release_resolved_credit(context);
             if overflow {
                 self.issue(
-                    cx,
+                    context,
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: None,
@@ -148,7 +148,7 @@ impl Conn {
                         sources: evidence.sources.clone(),
                     },
                 )?;
-                self.fail(cx, Status::Malformed)?;
+                self.fail(context, Status::Malformed)?;
                 return Ok(());
             }
             if let Some(dir) = self.dirs[side].as_mut()
@@ -167,15 +167,15 @@ impl Conn {
                     decoder.permit_table_size(pending.final_values.header_table_size);
                 }
             }
-            self.decoder_sync(side, cx)?;
-            self.reconcile_closed_credit(side, None, cx)?;
-            self.release_ack_deferred_messages(cx)?;
+            self.decoder_sync(side, context)?;
+            self.reconcile_closed_credit(side, None, context)?;
+            self.release_ack_deferred_messages(context)?;
             return Ok(());
         }
-        if self.settings[side].pending.len() + 1 > cx.limits.max_pending_settings {
+        if self.settings[side].pending.len() + 1 > context.limits.max_pending_settings {
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: None,
@@ -188,7 +188,7 @@ impl Conn {
                     sources: evidence.sources,
                 },
             )?;
-            self.fail(cx, Status::Limit)?;
+            self.fail(context, Status::Limit)?;
             return Ok(());
         }
         let resume_peer = self.waiting_settings_ack(peer(side));
@@ -200,9 +200,9 @@ impl Conn {
                 .streams
                 .len()
                 .saturating_mul(resources::CLOSED_STREAM_OVERHEAD);
-        self.charge_conn(cx, pending.charged)?;
+        self.charge_conn(context, pending.charged)?;
         for (id, stream) in &self.streams {
-            cx.check_deadline()?;
+            context.check_deadline()?;
             pending
                 .window_grants
                 .insert(*id, stream.window_granted[peer(side)]);
@@ -219,7 +219,7 @@ impl Conn {
         let invalid = !issues.is_empty();
         for issue in issues {
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: None,
@@ -234,7 +234,7 @@ impl Conn {
             )?;
         }
         if invalid {
-            self.fail(cx, Status::Malformed)?;
+            self.fail(context, Status::Malformed)?;
         } else if resume_peer {
             self.resume_side = Some(peer(side));
         }
@@ -247,7 +247,7 @@ impl Conn {
         stream_id: u32,
         increment: u32,
         evidence: Evidence,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let grant = peer(side);
         if stream_id == 0 {
@@ -257,7 +257,7 @@ impl Conn {
                     .as_ref()
                     .is_some_and(|dir| dir.closed && dir.buffer.is_empty());
                 self.issue(
-                    cx,
+                    context,
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: Some(0),
@@ -279,7 +279,7 @@ impl Conn {
                     },
                 )?;
                 if confirmed {
-                    self.fail(cx, Status::Malformed)?;
+                    self.fail(context, Status::Malformed)?;
                 }
             }
             return Ok(());
@@ -291,7 +291,7 @@ impl Conn {
                     debt[grant] = None;
                 }
             }
-            self.release_credit(stream_id, cx);
+            self.release_credit(stream_id, context);
         }
         let Some(stream) = self.streams.get_mut(&stream_id) else {
             let owner = if stream_id.is_multiple_of(2) {
@@ -305,7 +305,7 @@ impl Conn {
             let confirmed_idle =
                 self.clean_start && (side == owner || self.opener_exhausted(owner));
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
@@ -323,9 +323,9 @@ impl Conn {
                 },
             )?;
             if confirmed_idle {
-                self.fail(cx, Status::Malformed)?;
+                self.fail(context, Status::Malformed)?;
             } else {
-                self.retain_pending_opener(stream_id, "window_update_unknown_stream", cx)?;
+                self.retain_pending_opener(stream_id, "window_update_unknown_stream", context)?;
             }
             return Ok(());
         };
@@ -340,9 +340,9 @@ impl Conn {
         }
         if stream.send_window[grant] > settings::WINDOW_MAX {
             let confirmed =
-                stream.ended[grant] && self.stream_window_overflows(grant, stream_id, cx)?;
+                stream.ended[grant] && self.stream_window_overflows(grant, stream_id, context)?;
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
@@ -364,7 +364,7 @@ impl Conn {
                 },
             )?;
             if confirmed {
-                self.close_stream(stream_id, Status::Malformed, None, cx)?;
+                self.close_stream(stream_id, Status::Malformed, None, context)?;
             }
         }
         Ok(())
@@ -375,7 +375,7 @@ impl Conn {
         &mut self,
         side: usize,
         only_stream: Option<u32>,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<bool, Error> {
         if self.phase != super::Phase::H2
             || !self.clean_start
@@ -386,27 +386,27 @@ impl Conn {
             return Ok(false);
         }
         if self.send_window[side] < 0 {
-            self.issue(cx, Fault {
+            self.issue(context, Fault {
                 flow: self.dir_flow(side), http2_stream_id: Some(0),
                 scope: IssueScope::Connection, certainty: Certainty::Confirmed,
                 status: Status::Malformed, code: "connection_window_exceeded",
                 detail: "DATA exhausted connection credit after the granting direction ended; prior DATA evidence is retained".into(),
                 wire: bytes::Bytes::new(), sources: None,
             })?;
-            self.fail(cx, Status::Malformed)?;
+            self.fail(context, Status::Malformed)?;
             return Ok(true);
         }
         // A not-yet-ACKed SETTINGS increase may already have supplied credit.
         let mut delta = 0i64;
         let mut extra = 0i64;
         for pending in &self.settings[peer(side)].pending {
-            cx.check_deadline()?;
+            context.check_deadline()?;
             delta += pending.window_delta;
             extra = extra.max(delta);
         }
         let mut cursor = 0;
         loop {
-            cx.check_deadline()?;
+            context.check_deadline()?;
             let id = match only_stream {
                 Some(id) if cursor == 0 => Some(id),
                 Some(_) => None,
@@ -426,7 +426,7 @@ impl Conn {
             if self.streams.get(&id).is_some_and(|stream| {
                 stream.credit_exceeded[side] && stream.send_window[side] + extra < 0
             }) {
-                self.issue(cx, Fault {
+                self.issue(context, Fault {
                     flow: self.dir_flow(side), http2_stream_id: Some(id),
                     scope: IssueScope::Stream, certainty: Certainty::Confirmed,
                     status: Status::Malformed, code: "stream_window_exceeded",
@@ -434,7 +434,7 @@ impl Conn {
                     wire: bytes::Bytes::new(), sources: None,
                 })?;
                 self.streams.get_mut(&id).expect("stream").credit_exceeded[side] = false;
-                self.close_stream(id, Status::Malformed, None, cx)?;
+                self.close_stream(id, Status::Malformed, None, context)?;
                 if only_stream.is_some() {
                     return Ok(true);
                 }
@@ -442,7 +442,7 @@ impl Conn {
         }
         let mut cursor = 0;
         loop {
-            cx.check_deadline()?;
+            context.check_deadline()?;
             let id = match only_stream {
                 Some(id) if cursor == 0 => Some(id),
                 Some(_) => None,
@@ -465,7 +465,7 @@ impl Conn {
                 .and_then(|debt| debt[side])
                 .is_some_and(|window| window + extra < 0)
             {
-                self.issue(cx, Fault {
+                self.issue(context, Fault {
                     flow: self.dir_flow(side), http2_stream_id: Some(id),
                     scope: IssueScope::Stream, certainty: Certainty::Confirmed,
                     status: Status::Malformed, code: "stream_window_exceeded",
@@ -473,42 +473,46 @@ impl Conn {
                     wire: bytes::Bytes::new(), sources: None,
                 })?;
                 self.closed_credit.get_mut(&id).expect("debt")[side] = None;
-                self.release_credit(id, cx);
+                self.release_credit(id, context);
             }
         }
         Ok(false)
     }
 
-    pub(crate) fn retain_closed_credit(&mut self, id: u32, cx: &mut Cx<'_>) -> Result<(), Error> {
+    pub(crate) fn retain_closed_credit(
+        &mut self,
+        id: u32,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
         let stream = self.streams.get(&id).expect("stream");
         let debt = std::array::from_fn(|side| {
             (stream.credit_exceeded[side] && stream.send_window[side] < 0)
                 .then_some(stream.send_window[side])
         });
         if debt.iter().any(Option::is_some) && !self.closed_credit.contains_key(&id) {
-            self.charge_conn(cx, resources::CLOSED_CREDIT_OVERHEAD)?;
+            self.charge_conn(context, resources::CLOSED_CREDIT_OVERHEAD)?;
             self.closed_credit.insert(id, debt);
         }
         Ok(())
     }
 
-    fn release_credit(&mut self, id: u32, cx: &mut Cx<'_>) {
+    fn release_credit(&mut self, id: u32, context: &mut Context<'_>) {
         if self
             .closed_credit
             .get(&id)
             .is_some_and(|debt| debt.iter().all(Option::is_none))
         {
             self.closed_credit.remove(&id);
-            self.release_conn(cx, resources::CLOSED_CREDIT_OVERHEAD);
+            self.release_conn(context, resources::CLOSED_CREDIT_OVERHEAD);
         }
     }
 
-    fn release_resolved_credit(&mut self, cx: &mut Cx<'_>) {
+    fn release_resolved_credit(&mut self, context: &mut Context<'_>) {
         let before = self.closed_credit.len();
         self.closed_credit
             .retain(|_, debt| debt.iter().any(Option::is_some));
         self.release_conn(
-            cx,
+            context,
             (before - self.closed_credit.len()) * resources::CLOSED_CREDIT_OVERHEAD,
         );
     }
@@ -518,13 +522,13 @@ impl Conn {
         side: usize,
         last_stream_id: u32,
         evidence: Evidence,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if let Some(previous) = self.goaway[side]
             && last_stream_id > previous
         {
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: None,
@@ -537,7 +541,7 @@ impl Conn {
                     sources: evidence.sources.clone(),
                 },
             )?;
-            self.fail(cx, Status::Malformed)?;
+            self.fail(context, Status::Malformed)?;
             return Ok(());
         }
         let previous_last = self.goaway[side];
@@ -551,15 +555,15 @@ impl Conn {
         // IDs, rather than revisiting every completed stream for every frame.
         let mut capacity = self.streams.len();
         for _ in self.closed.range(closed_range) {
-            cx.check_deadline()?;
+            context.check_deadline()?;
             capacity += 1;
         }
         let scratch = capacity * size_of::<u32>();
-        cx.charge_live(scratch)?;
+        context.charge_live(scratch)?;
         let result = (|| {
             let mut emitted = Vec::with_capacity(capacity);
             for (id, stream) in &mut self.streams {
-                cx.check_deadline()?;
+                context.check_deadline()?;
                 let initiated_by_receiver = stream.by_client == (side == SERVER);
                 if *id > last_stream_id && initiated_by_receiver {
                     if !stream.unprocessed && stream.ended[peer(side)] {
@@ -569,14 +573,14 @@ impl Conn {
                 }
             }
             for (id, _) in self.closed.range(closed_range) {
-                cx.check_deadline()?;
+                context.check_deadline()?;
                 let initiated_by_receiver = !id.is_multiple_of(2) == (side == SERVER);
                 if initiated_by_receiver {
                     emitted.push(*id);
                 }
             }
             for id in emitted {
-                self.issue(cx, Fault {
+                self.issue(context, Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(id),
                     scope: IssueScope::Stream,
@@ -590,19 +594,19 @@ impl Conn {
             }
             Ok(())
         })();
-        cx.release_live(scratch);
+        context.release_live(scratch);
         result
     }
 }
 
-impl Conn {
+impl ConnectionState {
     pub(crate) fn ping_frame(
         &mut self,
         side: usize,
         flags: u8,
         opaque: [u8; 8],
         evidence: Evidence,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         const PING_ENTRY: usize = 64;
         if flags & 0x1 != 0 {
@@ -612,12 +616,12 @@ impl Conn {
                     *count -= 1;
                     if *count == 0 {
                         pending.remove(&opaque);
-                        self.release_conn(cx, PING_ENTRY);
+                        self.release_conn(context, PING_ENTRY);
                     }
                 }
                 None => {
                     self.issue(
-                        cx,
+                        context,
                         Fault {
                             flow: self.dir_flow(side),
                             http2_stream_id: None,
@@ -639,7 +643,7 @@ impl Conn {
             *count += 1;
             return Ok(());
         }
-        self.charge_conn(cx, PING_ENTRY)?;
+        self.charge_conn(context, PING_ENTRY)?;
         self.pings[side].insert(opaque, 1);
         Ok(())
     }

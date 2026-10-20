@@ -3,7 +3,7 @@
 
 //! DATA payload validation, stream flow control, and message body retention.
 
-use super::super::{Conn, Cx, Evidence, Fault, resources};
+use super::super::{ConnectionState, Context, Evidence, Fault, resources};
 use crate::analysis::http2::Error;
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
 use crate::analysis::http2::stream::{CLIENT, SERVER, peer};
@@ -16,12 +16,12 @@ pub(super) struct DataHead {
     pub(super) end_stream: bool,
 }
 
-impl Conn {
+impl ConnectionState {
     pub(super) fn data_frame(
         &mut self,
         head: DataHead,
         evidence: Evidence,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let DataHead {
             side,
@@ -41,7 +41,7 @@ impl Conn {
         if self.send_window[side] < -(1i64 << 31) {
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
@@ -54,12 +54,12 @@ impl Conn {
                     sources: evidence.sources.clone(),
                 },
             )?;
-            self.fail(cx, Status::Malformed)?;
+            self.fail(context, Status::Malformed)?;
             return Ok(());
         } else if length > 0 && self.send_window[side] < 0 {
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
@@ -73,7 +73,9 @@ impl Conn {
                 },
             )?;
         }
-        if self.send_window[side] < 0 && self.reconcile_closed_credit(side, Some(stream_id), cx)? {
+        if self.send_window[side] < 0
+            && self.reconcile_closed_credit(side, Some(stream_id), context)?
+        {
             return Ok(());
         }
         // In-flight peer DATA after a reset still consumes connection credit,
@@ -102,7 +104,7 @@ impl Conn {
                     .get(&stream_id)
                     .is_none_or(|early| !early.final_seen || early.ended)
             {
-                self.issue(cx, Fault {
+                self.issue(context, Fault {
                     flow: self.dir_flow(side), http2_stream_id: Some(stream_id),
                     scope: IssueScope::Stream, certainty: Certainty::Confirmed,
                     status: Status::Malformed, code: "data_without_headers",
@@ -110,9 +112,9 @@ impl Conn {
                     wire: evidence.wire, sources: evidence.sources,
                 })?;
                 if !self.early_response_headers.contains_key(&stream_id) {
-                    cx.check_streams()?;
+                    context.check_streams()?;
                     self.admitted_streams += 1;
-                    self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
+                    self.charge_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
                 }
                 self.early_response_headers
                     .entry(stream_id)
@@ -134,7 +136,7 @@ impl Conn {
             {
                 early.ended = true;
                 self.issue(
-                    cx,
+                    context,
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: Some(stream_id),
@@ -160,7 +162,7 @@ impl Conn {
             }
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
@@ -194,7 +196,7 @@ impl Conn {
                 },
             )?;
             if !closed && !uncertain {
-                self.fail(cx, Status::Malformed)?;
+                self.fail(context, Status::Malformed)?;
             }
             return Ok(());
         };
@@ -203,7 +205,7 @@ impl Conn {
             let preserve_delayed_request = side == SERVER && stream.early_response.is_some();
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
@@ -221,9 +223,9 @@ impl Conn {
                 },
             )?;
             if reserved {
-                self.fail(cx, Status::Malformed)?;
+                self.fail(context, Status::Malformed)?;
             } else if !preserve_delayed_request {
-                self.close_stream(stream_id, Status::Malformed, None, cx)?;
+                self.close_stream(stream_id, Status::Malformed, None, context)?;
             }
             return Ok(());
         }
@@ -234,7 +236,7 @@ impl Conn {
         if stream.send_window[side] < -(1i64 << 31) {
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
@@ -247,12 +249,12 @@ impl Conn {
                     sources: evidence.sources.clone(),
                 },
             )?;
-            self.close_stream(stream_id, Status::Malformed, None, cx)?;
+            self.close_stream(stream_id, Status::Malformed, None, context)?;
             return Ok(());
         } else if length > 0 && stream.send_window[side] < 0 {
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
@@ -266,7 +268,7 @@ impl Conn {
                 },
             )?;
         }
-        if self.reconcile_closed_credit(side, Some(stream_id), cx)? {
+        if self.reconcile_closed_credit(side, Some(stream_id), context)? {
             return Ok(());
         }
         let stream = self.streams.get_mut(&stream_id).expect("stream");
@@ -274,7 +276,7 @@ impl Conn {
         if data_bytes > 0 && (trace_content || (stream.response_bodyless && side == SERVER)) {
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
@@ -303,7 +305,7 @@ impl Conn {
         {
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
@@ -325,10 +327,10 @@ impl Conn {
         if let Some(msg) = stream.msgs[side].as_mut() {
             msg.saw_body = true;
             msg.body_bytes = msg.body_bytes.saturating_add(data_bytes);
-            if msg.body_bytes > cx.limits.max_body_bytes {
+            if msg.body_bytes > context.limits.max_body_bytes {
                 let flow = self.dir_flow(side);
                 self.issue(
-                    cx,
+                    context,
                     Fault {
                         flow,
                         http2_stream_id: Some(stream_id),
@@ -341,24 +343,24 @@ impl Conn {
                         sources: evidence.sources.clone(),
                     },
                 )?;
-                self.fail(cx, Status::Limit)?;
+                self.fail(context, Status::Limit)?;
                 return Ok(());
             }
             if let Some(sources) = evidence.sources.clone() {
                 let charge =
                     resources::SET_OVERHEAD + sources.frames().len() * resources::SPAN_OVERHEAD;
-                self.charge_conn(cx, charge)?;
+                self.charge_conn(context, charge)?;
                 let stream = self.streams.get_mut(&stream_id).expect("stream");
                 if let Some(msg) = stream.msgs[side].as_mut() {
                     msg.charged += charge;
                     msg.charged_spans += sources.frames().len();
-                    cx.charge_spans(sources.frames().len())?;
+                    context.charge_spans(sources.frames().len())?;
                     msg.sets.push(sources);
                 }
             }
         } else if side == SERVER && stream.early_response.is_some_and(|early| early.final_seen) {
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
@@ -376,7 +378,7 @@ impl Conn {
         } else {
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
@@ -389,7 +391,7 @@ impl Conn {
                     sources: evidence.sources,
                 },
             )?;
-            self.close_stream(stream_id, Status::Malformed, None, cx)?;
+            self.close_stream(stream_id, Status::Malformed, None, context)?;
             return Ok(());
         }
         if self
@@ -398,9 +400,9 @@ impl Conn {
             .and_then(|stream| stream.msgs[side].as_ref())
             .is_some_and(|msg| msg.failure == Some(Status::Malformed))
         {
-            self.close_stream(stream_id, Status::Malformed, None, cx)?;
+            self.close_stream(stream_id, Status::Malformed, None, context)?;
         } else if end_stream {
-            self.end_side(side, stream_id, Status::Complete, cx)?;
+            self.end_side(side, stream_id, Status::Complete, context)?;
         }
         Ok(())
     }

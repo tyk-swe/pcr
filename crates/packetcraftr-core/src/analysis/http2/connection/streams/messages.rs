@@ -3,29 +3,29 @@
 
 //! Message construction, resource accounting, and ordered publication.
 
-use super::super::{Conn, Cx, Decoded, Fault, Head, resources};
+use super::super::{ConnectionState, Context, Decoded, Fault, Head, resources};
 use crate::analysis::application;
 use crate::analysis::http2::Error;
 use crate::analysis::http2::buffer::union_balanced;
 use crate::analysis::http2::model::{Certainty, IssueScope, Message, MessageKind, Status};
-use crate::analysis::http2::stream::{CLIENT, FieldRole, MsgBuild, SERVER};
+use crate::analysis::http2::stream::{CLIENT, FieldRole, MessageBuilder, SERVER};
 use bytes::Bytes;
 
-impl Conn {
+impl ConnectionState {
     pub(crate) fn new_message(
         &mut self,
         stream_id: u32,
         kind: MessageKind,
-        cx: &mut Cx<'_>,
-    ) -> Result<MsgBuild, Error> {
-        let index = cx.check_messages()?;
-        let mut msg = MsgBuild::new(index, stream_id, kind);
-        self.charge_conn(cx, resources::MESSAGE_OVERHEAD)?;
+        context: &mut Context<'_>,
+    ) -> Result<MessageBuilder, Error> {
+        let index = context.check_messages()?;
+        let mut msg = MessageBuilder::new(index, stream_id, kind);
+        self.charge_conn(context, resources::MESSAGE_OVERHEAD)?;
         msg.charged = resources::MESSAGE_OVERHEAD;
         Ok(msg)
     }
 
-    fn msg_content_charge(msg: &MsgBuild) -> usize {
+    fn msg_content_charge(msg: &MessageBuilder) -> usize {
         msg.headers
             .iter()
             .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
@@ -45,28 +45,28 @@ impl Conn {
     pub(crate) fn emit_message(
         &mut self,
         side: usize,
-        build: MsgBuild,
+        build: MessageBuilder,
         status: Status,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if status == Status::Complete
             && (self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER))
         {
-            self.charge_conn(cx, resources::PENDING_OVERHEAD)?;
+            self.charge_conn(context, resources::PENDING_OVERHEAD)?;
             self.ack_deferred.push_back((side, build, status));
             return Ok(());
         }
-        self.emit_message_with_completion(side, build, status, status == Status::Complete, cx)
+        self.emit_message_with_completion(side, build, status, status == Status::Complete, context)
             .map(|_| ())
     }
 
     pub(super) fn emit_message_with_completion(
         &mut self,
         side: usize,
-        mut build: MsgBuild,
+        mut build: MessageBuilder,
         status: Status,
         complete: bool,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<Status, Error> {
         let (cl_exempt, connect_cl_illegal) = match build.status_code {
             Some(status) => {
@@ -86,7 +86,7 @@ impl Conn {
         };
         if connect_cl_illegal {
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(build.stream_id),
@@ -108,7 +108,7 @@ impl Conn {
         {
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: Some(build.stream_id),
@@ -130,12 +130,12 @@ impl Conn {
             }),
         )?;
         let compression_sources = union_balanced(std::mem::take(&mut build.compression))?;
-        self.release_conn(cx, build.charged);
-        *cx.spans = cx
+        self.release_conn(context, build.charged);
+        *context.spans = context
             .spans
             .checked_sub(build.charged_spans)
             .expect("msg spans");
-        cx.charge_retained(
+        context.charge_retained(
             Self::msg_content_charge(&build)
                 + resources::EVENT_OVERHEAD
                 + resources::MESSAGE_OVERHEAD
@@ -145,7 +145,7 @@ impl Conn {
                     resources::SET_OVERHEAD + set.frames().len() * resources::SPAN_OVERHEAD
                 }),
         )?;
-        cx.message(Message {
+        context.message(Message {
             index: build.index,
             stream: self.stream,
             generation: self.generation,
@@ -172,7 +172,7 @@ impl Conn {
         stream_id: u32,
         head: Head,
         decoded: Decoded,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let Head { role, meta, flawed } = head;
         let Decoded {
@@ -193,7 +193,7 @@ impl Conn {
                 }));
             }
         };
-        let mut msg = self.new_message(stream_id, kind, cx)?;
+        let mut msg = self.new_message(stream_id, kind, context)?;
         if flawed {
             msg.failure = Some(Status::Malformed);
         }
@@ -202,7 +202,7 @@ impl Conn {
             .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
             .sum::<usize>()
             + block.len();
-        self.charge_conn(cx, content_charge)?;
+        self.charge_conn(context, content_charge)?;
         msg.charged += content_charge;
         msg.headers = headers;
         msg.header_blocks.push(block);
@@ -211,8 +211,8 @@ impl Conn {
         if let Some(sources) = block_sources {
             let frames = sources.frames().len();
             let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
-            self.charge_conn(cx, charge)?;
-            cx.charge_spans(frames)?;
+            self.charge_conn(context, charge)?;
+            context.charge_spans(frames)?;
             msg.charged += charge;
             msg.charged_spans += frames;
             msg.sets.push(sources);
@@ -220,8 +220,8 @@ impl Conn {
         if let Some(set) = compression {
             let frames = set.frames().len();
             let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
-            self.charge_conn(cx, charge)?;
-            cx.charge_spans(frames)?;
+            self.charge_conn(context, charge)?;
+            context.charge_spans(frames)?;
             msg.charged += charge;
             msg.charged_spans += frames;
             msg.compression.push(set);
@@ -251,37 +251,40 @@ impl Conn {
                 } else {
                     Status::Complete
                 },
-                cx,
+                context,
             )?;
         } else {
             let stream = self.streams.get_mut(&stream_id).expect("stream");
             stream.msgs[side] = Some(msg);
         }
         if role == FieldRole::Request {
-            self.release_parent_promises(stream_id, cx)?;
+            self.release_parent_promises(stream_id, context)?;
         }
         Ok(())
     }
 
-    pub(crate) fn release_ack_deferred_messages(&mut self, cx: &mut Cx<'_>) -> Result<(), Error> {
+    pub(crate) fn release_ack_deferred_messages(
+        &mut self,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
         if self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER) {
             return Ok(());
         }
         let immediate = std::mem::take(&mut self.ack_deferred);
-        self.release_conn(cx, immediate.len() * resources::PENDING_OVERHEAD);
+        self.release_conn(context, immediate.len() * resources::PENDING_OVERHEAD);
         for (side, msg, status) in immediate {
-            cx.check_deadline()?;
-            self.emit_message(side, msg, status, cx)?;
+            context.check_deadline()?;
+            self.emit_message(side, msg, status, context)?;
         }
         let scratch = self
             .streams
             .len()
             .saturating_mul(2 * size_of::<(usize, u32)>());
-        cx.charge_live(scratch)?;
+        context.charge_live(scratch)?;
         let result = (|| {
             let mut completed = Vec::with_capacity(self.streams.len().saturating_mul(2));
             for (id, stream) in &self.streams {
-                cx.check_deadline()?;
+                context.check_deadline()?;
                 for side in [CLIENT, SERVER] {
                     if stream.ended[side] && stream.msgs[side].is_some() {
                         completed.push((side, *id));
@@ -289,12 +292,12 @@ impl Conn {
                 }
             }
             for (side, id) in completed {
-                cx.check_deadline()?;
-                self.end_side(side, id, Status::Complete, cx)?;
+                context.check_deadline()?;
+                self.end_side(side, id, Status::Complete, context)?;
             }
             Ok(())
         })();
-        cx.release_live(scratch);
+        context.release_live(scratch);
         result
     }
 }

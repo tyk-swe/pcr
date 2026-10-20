@@ -8,15 +8,19 @@ use super::super::Error;
 use super::super::buffer::union_balanced;
 use super::super::model::{Certainty, IssueScope, Status};
 use super::super::stream::{CLIENT, peer};
-use super::{ChainHead, Conn, Cx, Evidence, Fault, Pos, resources};
+use super::{ChainHead, ConnectionState, Context, Evidence, Fault, Pos, resources};
 use crate::protocol::application::http2 as wire;
 use bytes::Bytes;
 
 use data::DataHead;
 
-impl Conn {
-    pub(crate) fn frame_step(&mut self, side: usize, cx: &mut Cx<'_>) -> Result<bool, Error> {
-        cx.check_deadline()?;
+impl ConnectionState {
+    pub(crate) fn frame_step(
+        &mut self,
+        side: usize,
+        context: &mut Context<'_>,
+    ) -> Result<bool, Error> {
+        context.check_deadline()?;
         if self.waiting_settings_ack(side) {
             return Ok(false);
         }
@@ -30,8 +34,10 @@ impl Conn {
                 return Ok(false);
             }
             let header = Bytes::copy_from_slice(&dir.buffer.bytes()[..9]);
-            if let Err(error) = wire::parse_frame_for_analysis(&header, cx.limits.max_frame_bytes) {
-                return self.frame_fault(side, error, cx);
+            if let Err(error) =
+                wire::parse_frame_for_analysis(&header, context.limits.max_frame_bytes)
+            {
+                return self.frame_fault(side, error, context);
             }
             let length = usize::try_from(u32::from_be_bytes([0, header[0], header[1], header[2]]))
                 .expect("24-bit frame length");
@@ -42,10 +48,10 @@ impl Conn {
                 let sets = dir.buffer.contributors(9);
                 let (_, dropped) = dir.buffer.take(9);
                 let sources = union_balanced(sets)?;
-                Self::release_dir(dir, cx, 9);
-                Self::release_dropped(dir, dropped, cx);
+                Self::release_dir(dir, context, 9);
+                Self::release_dropped(dir, dropped, context);
                 self.issue(
-                    cx,
+                    context,
                     Fault {
                         flow,
                         http2_stream_id: None,
@@ -59,7 +65,7 @@ impl Conn {
                         sources,
                     },
                 )?;
-                self.fail(cx, Status::Malformed)?;
+                self.fail(context, Status::Malformed)?;
                 return Ok(true);
             }
             if dir.buffer.len() < 9 + length {
@@ -93,29 +99,30 @@ impl Conn {
                     limit: total,
                 },
             ))?;
-        cx.charge_live(scratch)?;
-        let result = (|conn: &mut Self, cx: &mut Cx<'_>| -> Result<bool, Error> {
+        context.charge_live(scratch)?;
+        let result = (|conn: &mut Self, context: &mut Context<'_>| -> Result<bool, Error> {
             let dir = conn.dirs[side].as_mut().expect("dir");
             let wire_bytes = Bytes::copy_from_slice(&dir.buffer.bytes()[..total]);
-            let parsed = wire::parse_frame_for_analysis(&wire_bytes, cx.limits.max_frame_bytes);
+            let parsed =
+                wire::parse_frame_for_analysis(&wire_bytes, context.limits.max_frame_bytes);
             match parsed {
                 Ok(Some((frame, _))) => {
-                    cx.check_frames()?;
+                    context.check_frames()?;
                     let dir = conn.dirs[side].as_mut().expect("dir");
                     let sets = dir.buffer.contributors(total);
                     let dropped = dir.buffer.discard(total);
-                    Self::release_dir(dir, cx, total);
-                    Self::release_dropped(dir, dropped, cx);
+                    Self::release_dir(dir, context, total);
+                    Self::release_dropped(dir, dropped, context);
                     let sources = union_balanced(sets)?;
                     conn.frames += 1;
-                    conn.handle_frame(side, frame, wire_bytes, sources, cx)?;
+                    conn.handle_frame(side, frame, wire_bytes, sources, context)?;
                     Ok(true)
                 }
                 Ok(None) => Ok(false),
-                Err(error) => conn.frame_fault(side, error, cx),
+                Err(error) => conn.frame_fault(side, error, context),
             }
-        })(self, cx);
-        cx.release_live(scratch);
+        })(self, context);
+        context.release_live(scratch);
         result
     }
 
@@ -123,7 +130,7 @@ impl Conn {
         &mut self,
         side: usize,
         error: wire::Error,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<bool, Error> {
         let dir = self.dirs[side].as_mut().expect("dir");
         let bytes = dir.buffer.bytes();
@@ -143,7 +150,7 @@ impl Conn {
             if bytes.len() < total {
                 return Ok(false);
             }
-            cx.check_frames()?;
+            context.check_frames()?;
             self.frames += 1;
             total
         } else {
@@ -157,8 +164,8 @@ impl Conn {
         let sets = dir.buffer.contributors(take);
         let (wire, dropped) = dir.buffer.take(take);
         let sources = union_balanced(sets)?;
-        Self::release_dir(dir, cx, take);
-        Self::release_dropped(dir, dropped, cx);
+        Self::release_dir(dir, context, take);
+        Self::release_dropped(dir, dropped, context);
         let flow = dir.flow.clone();
         let (status, code, detail) = match &error {
             _ if interrupted_chain => (
@@ -175,7 +182,7 @@ impl Conn {
             }
         };
         self.issue(
-            cx,
+            context,
             Fault {
                 flow,
                 http2_stream_id: stream_id,
@@ -193,9 +200,9 @@ impl Conn {
             },
         )?;
         if !stream_error {
-            self.fail(cx, status)?;
+            self.fail(context, status)?;
         } else if let Some(id) = stream_id {
-            self.reject_priority_stream(side, id, cx)?;
+            self.reject_priority_stream(side, id, context)?;
         }
         Ok(true)
     }
@@ -206,7 +213,7 @@ impl Conn {
         frame: wire::Frame,
         wire_bytes: Bytes,
         sources: Option<crate::analysis::provenance::SourceSet>,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let header = frame.header.clone();
         let stream_id = header.stream_id;
@@ -217,7 +224,7 @@ impl Conn {
             if header.frame_type != 0x9 || stream_id != chained {
                 let flow = self.dir_flow(side);
                 self.issue(
-                    cx,
+                    context,
                     Fault {
                         flow,
                         http2_stream_id: Some(stream_id),
@@ -230,13 +237,13 @@ impl Conn {
                         sources: sources.clone(),
                     },
                 )?;
-                self.fail(cx, Status::Malformed)?;
+                self.fail(context, Status::Malformed)?;
                 return Ok(());
             }
         } else if header.frame_type == 0x9 {
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
@@ -249,7 +256,7 @@ impl Conn {
                     sources: sources.clone(),
                 },
             )?;
-            self.fail(cx, Status::Malformed)?;
+            self.fail(context, Status::Malformed)?;
             return Ok(());
         }
         let receiver = &self.settings[peer(side)];
@@ -257,7 +264,7 @@ impl Conn {
         if header.length > effective_max {
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: (stream_id != 0).then_some(stream_id),
@@ -282,7 +289,7 @@ impl Conn {
         {
             let flow = self.dir_flow(side);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: (stream_id != 0).then_some(stream_id),
@@ -313,7 +320,7 @@ impl Conn {
         };
         if let Some(detail) = semantic_error {
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: (stream_id != 0).then_some(stream_id),
@@ -331,7 +338,7 @@ impl Conn {
                 },
             )?;
             if stream_id == 0 {
-                self.fail(cx, Status::Malformed)?;
+                self.fail(context, Status::Malformed)?;
                 return Ok(());
             }
         }
@@ -339,9 +346,9 @@ impl Conn {
             // Invalid control values remain in the issue's exact wire evidence,
             // rather than being emitted as a valid typed control payload.
             if self.streams.contains_key(&stream_id) {
-                self.close_stream(stream_id, Status::Malformed, None, cx)?;
+                self.close_stream(stream_id, Status::Malformed, None, context)?;
             } else if matches!(frame.payload, wire::Payload::Priority(_)) {
-                self.reject_priority_stream(side, stream_id, cx)?;
+                self.reject_priority_stream(side, stream_id, context)?;
             } else if matches!(frame.payload, wire::Payload::WindowUpdate { increment: 0 }) {
                 // Preserve the idle/closed/capture-delayed classification even
                 // when the control value itself is invalid.
@@ -353,12 +360,12 @@ impl Conn {
                         wire: wire_bytes,
                         sources,
                     },
-                    cx,
+                    context,
                 )?;
             }
             return Ok(());
         }
-        self.emit_frame(side, &frame, &wire_bytes, sources.clone(), cx)?;
+        self.emit_frame(side, &frame, &wire_bytes, sources.clone(), context)?;
         self.apply_frame(
             side,
             frame,
@@ -366,7 +373,7 @@ impl Conn {
                 wire: wire_bytes,
                 sources,
             },
-            cx,
+            context,
         )
     }
 
@@ -376,7 +383,7 @@ impl Conn {
         frame: &wire::Frame,
         wire_bytes: &Bytes,
         sources: Option<crate::analysis::provenance::SourceSet>,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let (control, payload_wire, data_bytes, padding_bytes) = match &frame.payload {
             wire::Payload::Data { data, padding } => (None, None, data.len() as u64, padding.len()),
@@ -414,13 +421,13 @@ impl Conn {
                 number: self.number,
             },
         ))?;
-        cx.charge_retained(
+        context.charge_retained(
             retained
                 + resources::EVENT_OVERHEAD
                 + resources::SET_OVERHEAD
                 + sources.frames().len() * resources::SPAN_OVERHEAD,
         )?;
-        cx.frame(super::super::model::Frame {
+        context.frame(super::super::model::Frame {
             index: self.frames,
             stream: self.stream,
             generation: self.generation,
@@ -441,7 +448,7 @@ impl Conn {
         side: usize,
         frame: wire::Frame,
         evidence: Evidence,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let flags = frame.header.flags;
         let stream_id = frame.header.stream_id;
@@ -460,7 +467,7 @@ impl Conn {
                 Certainty::Indeterminate
             };
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: None,
@@ -474,7 +481,7 @@ impl Conn {
                 },
             )?;
             if certainty == Certainty::Confirmed {
-                self.fail(cx, Status::Malformed)?;
+                self.fail(context, Status::Malformed)?;
                 return Ok(());
             }
         }
@@ -491,7 +498,7 @@ impl Conn {
                     wire: Bytes::copy_from_slice(&evidence.wire[..9]),
                     sources: evidence.sources,
                 },
-                cx,
+                context,
             ),
             wire::Payload::Headers {
                 fragment, priority, ..
@@ -503,12 +510,12 @@ impl Conn {
                 },
                 fragment,
                 evidence,
-                cx,
+                context,
                 flags & 0x4 != 0,
             ),
-            wire::Payload::Reset { .. } => self.reset_stream(side, stream_id, evidence, cx),
+            wire::Payload::Reset { .. } => self.reset_stream(side, stream_id, evidence, context),
             wire::Payload::Settings(settings) => {
-                self.settings_frame(side, flags, settings, evidence, cx)
+                self.settings_frame(side, flags, settings, evidence, context)
             }
             wire::Payload::PushPromise {
                 promised_stream_id,
@@ -521,19 +528,19 @@ impl Conn {
                 },
                 fragment,
                 evidence,
-                cx,
+                context,
                 flags & 0x4 != 0,
             ),
-            wire::Payload::Ping(opaque) => self.ping_frame(side, flags, opaque, evidence, cx),
+            wire::Payload::Ping(opaque) => self.ping_frame(side, flags, opaque, evidence, context),
             wire::Payload::Priority(_) | wire::Payload::Unknown(_) => Ok(()),
             wire::Payload::Goaway { last_stream_id, .. } => {
-                self.goaway_frame(side, last_stream_id, evidence, cx)
+                self.goaway_frame(side, last_stream_id, evidence, context)
             }
             wire::Payload::WindowUpdate { increment } => {
-                self.window_update(side, stream_id, increment, evidence, cx)
+                self.window_update(side, stream_id, increment, evidence, context)
             }
             wire::Payload::Continuation(fragment) => {
-                self.block_continue(side, stream_id, fragment, flags, evidence, cx)
+                self.block_continue(side, stream_id, fragment, flags, evidence, context)
             }
         }
     }

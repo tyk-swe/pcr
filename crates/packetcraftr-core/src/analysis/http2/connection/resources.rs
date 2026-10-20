@@ -26,7 +26,7 @@ pub(crate) const PRELUDE_BODY_RESERVE: usize = 4
         + crate::protocol::application::http::MAX_START_LINE)
     + crate::protocol::application::http::MAX_HEADERS * HEADER_OVERHEAD * 2;
 
-pub(crate) struct Cx<'a> {
+pub(crate) struct Context<'a> {
     pub limits: &'a Limits,
     pub app: &'a application::Limits,
     pub deadline: Option<&'a Deadline>,
@@ -40,7 +40,7 @@ pub(crate) struct Cx<'a> {
     pub out: &'a mut Vec<Event>,
 }
 
-impl Cx<'_> {
+impl Context<'_> {
     pub(crate) fn check_deadline(&self) -> Result<(), Error> {
         if let Some(deadline) = self.deadline {
             deadline.enforce()?;

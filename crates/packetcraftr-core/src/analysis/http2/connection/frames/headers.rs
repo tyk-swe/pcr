@@ -3,7 +3,9 @@
 
 //! Header-block assembly and bounded HPACK decoding.
 
-use super::super::{Chain, ChainHead, Conn, Cx, Decoded, Evidence, Fault, Pos, resources};
+use super::super::{
+    Chain, ChainHead, ConnectionState, Context, Decoded, Evidence, Fault, Pos, resources,
+};
 use crate::analysis::http2::Error;
 use crate::analysis::http2::buffer::union_balanced;
 use crate::analysis::http2::model::{Certainty, Header, IssueScope, Status};
@@ -13,24 +15,24 @@ use crate::protocol::application::http2::hpack;
 use bytes::Bytes;
 use std::collections::HashSet;
 
-impl Conn {
+impl ConnectionState {
     pub(super) fn block_start(
         &mut self,
         at: Pos,
         head: ChainHead,
         fragment: Bytes,
         evidence: Evidence,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
         end_headers: bool,
     ) -> Result<(), Error> {
         let Pos { side, stream_id } = at;
         let Evidence { wire, sources } = evidence;
-        if fragment.len() > cx.limits.max_header_block_bytes {
-            self.limited_block(cx, side, stream_id, wire, sources)?;
+        if fragment.len() > context.limits.max_header_block_bytes {
+            self.limited_block(context, side, stream_id, wire, sources)?;
             return Ok(());
         }
         let charge = fragment.len() + resources::HEADER_OVERHEAD;
-        cx.charge_live(charge)?;
+        context.charge_live(charge)?;
         let mut chain = Chain {
             stream_id,
             head,
@@ -41,8 +43,8 @@ impl Conn {
             charged_spans: 0,
         };
         if let Some(sources) = sources.clone() {
-            if let Err(error) = cx.charge_sources(&sources) {
-                cx.release_live(charge);
+            if let Err(error) = context.charge_sources(&sources) {
+                context.release_live(charge);
                 return Err(error);
             }
             chain.charged_spans += sources.frames().len();
@@ -50,17 +52,17 @@ impl Conn {
                 resources::SET_OVERHEAD + sources.frames().len() * resources::SPAN_OVERHEAD;
             chain.sets.push(sources);
         }
-        if chain.bytes.len() > cx.limits.max_header_block_bytes {
-            cx.release_live(chain.charged);
-            *cx.spans = cx
+        if chain.bytes.len() > context.limits.max_header_block_bytes {
+            context.release_live(chain.charged);
+            *context.spans = context
                 .spans
                 .checked_sub(chain.charged_spans)
                 .expect("chain spans");
-            self.limited_block(cx, side, stream_id, wire, sources)?;
+            self.limited_block(context, side, stream_id, wire, sources)?;
             return Ok(());
         }
         if end_headers {
-            self.block_done(side, chain, cx)
+            self.block_done(side, chain, context)
         } else {
             let dir = self.dirs[side].as_mut().expect("dir");
             dir.charged += chain.charged;
@@ -77,7 +79,7 @@ impl Conn {
         fragment: Bytes,
         flags: u8,
         evidence: Evidence,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let Evidence { wire, sources } = evidence;
         let dir = self.dirs[side].as_mut().expect("dir");
@@ -87,29 +89,29 @@ impl Conn {
         dir.charged -= chain.charged;
         dir.charged_spans -= chain.charged_spans;
         debug_assert_eq!(chain.stream_id, stream_id);
-        if chain.bytes.len() + fragment.len() > cx.limits.max_header_block_bytes
-            || chain.frames + 1 > cx.limits.max_continuations + 1
+        if chain.bytes.len() + fragment.len() > context.limits.max_header_block_bytes
+            || chain.frames + 1 > context.limits.max_continuations + 1
         {
-            cx.release_live(chain.charged);
-            *cx.spans = cx
+            context.release_live(chain.charged);
+            *context.spans = context
                 .spans
                 .checked_sub(chain.charged_spans)
                 .expect("chain spans");
-            self.limited_block(cx, side, stream_id, wire, sources)?;
+            self.limited_block(context, side, stream_id, wire, sources)?;
             return Ok(());
         }
-        if let Err(error) = cx.charge_live(fragment.len()) {
-            cx.release_live(chain.charged);
-            *cx.spans -= chain.charged_spans;
+        if let Err(error) = context.charge_live(fragment.len()) {
+            context.release_live(chain.charged);
+            *context.spans -= chain.charged_spans;
             return Err(error);
         }
         chain.bytes.extend_from_slice(&fragment);
         chain.charged += fragment.len();
         chain.frames += 1;
         if let Some(sources) = sources.clone() {
-            if let Err(error) = cx.charge_sources(&sources) {
-                cx.release_live(chain.charged);
-                *cx.spans = cx
+            if let Err(error) = context.charge_sources(&sources) {
+                context.release_live(chain.charged);
+                *context.spans = context
                     .spans
                     .checked_sub(chain.charged_spans)
                     .expect("chain spans");
@@ -121,7 +123,7 @@ impl Conn {
             chain.sets.push(sources);
         }
         if flags & 0x4 != 0 {
-            self.block_done(side, chain, cx)
+            self.block_done(side, chain, context)
         } else {
             let dir = self.dirs[side].as_mut().expect("dir");
             dir.charged += chain.charged;
@@ -133,7 +135,7 @@ impl Conn {
 
     fn limited_block(
         &mut self,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
         side: usize,
         stream_id: u32,
         wire: Bytes,
@@ -141,7 +143,7 @@ impl Conn {
     ) -> Result<(), Error> {
         let flow = self.dir_flow(side);
         self.issue(
-            cx,
+            context,
             Fault {
                 flow,
                 http2_stream_id: Some(stream_id),
@@ -154,13 +156,18 @@ impl Conn {
                 sources,
             },
         )?;
-        self.fail(cx, Status::Limit)
+        self.fail(context, Status::Limit)
     }
 
-    fn block_done(&mut self, side: usize, mut chain: Chain, cx: &mut Cx<'_>) -> Result<(), Error> {
-        cx.release_live(chain.charged);
-        *cx.spans -= chain.charged_spans;
-        cx.check_deadline()?;
+    fn block_done(
+        &mut self,
+        side: usize,
+        mut chain: Chain,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
+        context.release_live(chain.charged);
+        *context.spans -= chain.charged_spans;
+        context.check_deadline()?;
         let bytes = chain.bytes.freeze();
         let stream_id = chain.stream_id;
         let origin = self.next_origin;
@@ -169,34 +176,37 @@ impl Conn {
         let block_sources = union_balanced(block_sets)?;
         let dir = self.dirs[side].as_mut().expect("dir");
         if let Some(sources) = block_sources.clone() {
-            Self::track_sources(dir, cx, &sources)?;
+            Self::track_sources(dir, context, &sources)?;
             let dir = self.dirs[side].as_mut().expect("dir");
             dir.block_sources.insert(origin, sources);
-            Self::charge_dir(dir, cx, resources::ORIGIN_ENTRY_OVERHEAD)?;
+            Self::charge_dir(dir, context, resources::ORIGIN_ENTRY_OVERHEAD)?;
         }
         let scratch = 6usize
-            .checked_mul(cx.limits.max_header_bytes)
+            .checked_mul(context.limits.max_header_bytes)
             .and_then(|v| {
                 v.checked_add(
                     2usize.saturating_mul(
-                        cx.limits
+                        context
+                            .limits
                             .max_headers
                             .saturating_mul(size_of::<hpack::Field>()),
                     ),
                 )
             })
-            .and_then(|v| v.checked_add(2usize.saturating_mul(cx.limits.max_table_bytes)))
+            .and_then(|v| v.checked_add(2usize.saturating_mul(context.limits.max_table_bytes)))
             .and_then(|v| v.checked_add(2usize.saturating_mul(bytes.len())))
             .ok_or(Error::Application(
                 crate::analysis::application::Error::Limit {
                     field: "hpack_scratch",
-                    limit: cx.limits.max_header_bytes,
+                    limit: context.limits.max_header_bytes,
                 },
             ))?;
-        cx.charge_live(scratch)?;
+        context.charge_live(scratch)?;
         let result = (|| {
             let updates = hpack::table_size_updates(&bytes, &mut || {
-                cx.check_deadline().map_err(hpack::DecodeError::Interrupted)
+                context
+                    .check_deadline()
+                    .map_err(hpack::DecodeError::Interrupted)
             });
             let mut ambiguous_minimum = false;
             let decoded = match updates {
@@ -227,7 +237,9 @@ impl Conn {
                         decoder.require_table_minimum(minimum);
                     }
                     let decoded = decoder.decode_checked(&bytes, origin, &mut || {
-                        cx.check_deadline().map_err(hpack::DecodeError::Interrupted)
+                        context
+                            .check_deadline()
+                            .map_err(hpack::DecodeError::Interrupted)
                     });
                     if decoded.is_ok() {
                         self.settings[peer(side)].uncertain_table_minimum = None;
@@ -245,7 +257,7 @@ impl Conn {
                 Err(hpack::DecodeError::Interrupted(error)) => return Err(error),
             };
             if decoded.is_ok() && ambiguous_minimum {
-                self.issue(cx, Fault {
+                self.issue(context, Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
                     scope: IssueScope::Compression,
@@ -257,7 +269,7 @@ impl Conn {
                     sources: block_sources.clone(),
                 })?;
             }
-            self.decoder_sync(side, cx)?;
+            self.decoder_sync(side, context)?;
             match decoded {
                 Err(error) => {
                     let flow = self.dir_flow(side);
@@ -266,7 +278,7 @@ impl Conn {
                         _ => ("hpack_decode", Status::Malformed),
                     };
                     self.issue(
-                        cx,
+                        context,
                         Fault {
                             flow,
                             http2_stream_id: Some(stream_id),
@@ -279,11 +291,11 @@ impl Conn {
                             sources: block_sources,
                         },
                     )?;
-                    self.fail(cx, status)?;
+                    self.fail(context, status)?;
                     Ok(())
                 }
                 Ok(block) => {
-                    cx.check_deadline()?;
+                    context.check_deadline()?;
                     let mut compression_sets: Vec<crate::analysis::provenance::SourceSet> =
                         Vec::new();
                     {
@@ -291,7 +303,7 @@ impl Conn {
                         let mut seen = HashSet::new();
                         for field in &block.fields {
                             for origin in &field.origins {
-                                cx.check_deadline()?;
+                                context.check_deadline()?;
                                 if !seen.insert(*origin) {
                                     continue;
                                 }
@@ -328,8 +340,8 @@ impl Conn {
                             .collect();
                         for id in removed {
                             if let Some(set) = dir.block_sources.remove(&id) {
-                                Self::release_dropped(dir, vec![set], cx);
-                                Self::release_dir(dir, cx, resources::ORIGIN_ENTRY_OVERHEAD);
+                                Self::release_dropped(dir, vec![set], context);
+                                Self::release_dir(dir, context, resources::ORIGIN_ENTRY_OVERHEAD);
                             }
                         }
                     }
@@ -338,7 +350,7 @@ impl Conn {
                     {
                         let flow = self.dir_flow(side);
                         self.issue(
-                        cx,
+                        context,
                         Fault {
                             flow,
                             http2_stream_id: Some(stream_id),
@@ -374,12 +386,12 @@ impl Conn {
                             sources: block_sources,
                             compression,
                         },
-                        cx,
+                        context,
                     )
                 }
             }
         })();
-        cx.release_live(scratch);
+        context.release_live(scratch);
         result
     }
 }

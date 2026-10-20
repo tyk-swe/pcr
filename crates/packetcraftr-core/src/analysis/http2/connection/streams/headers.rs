@@ -3,7 +3,9 @@
 
 //! Request, response, and trailer semantics for decoded stream headers.
 
-use super::super::{ChainHead, Conn, Cx, Decoded, Evidence, Fault, Head, Phase, resources};
+use super::super::{
+    ChainHead, ConnectionState, Context, Decoded, Evidence, Fault, Head, Phase, resources,
+};
 use crate::analysis::http2::Error;
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
 use crate::analysis::http2::stream::{
@@ -13,31 +15,31 @@ use crate::analysis::http2::stream::{
 const RESPONSE_AFTER_GOAWAY: &str =
     "the server responded on a client stream above its own GOAWAY last_stream_id";
 
-impl Conn {
+impl ConnectionState {
     pub(crate) fn headers_block(
         &mut self,
         side: usize,
         stream_id: u32,
         head: ChainHead,
         decoded: Decoded,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         match head {
             ChainHead::Headers {
                 end_stream,
                 malformed,
             } => {
-                self.stream_headers(side, stream_id, end_stream, malformed, decoded, cx)?;
+                self.stream_headers(side, stream_id, end_stream, malformed, decoded, context)?;
                 if malformed
                     && !matches!(self.phase, Phase::Dead)
                     && self.streams.contains_key(&stream_id)
                 {
-                    self.close_stream(stream_id, Status::Malformed, None, cx)?;
+                    self.close_stream(stream_id, Status::Malformed, None, context)?;
                 }
                 Ok(())
             }
             ChainHead::PushPromise { promised } => {
-                self.push_promise(side, stream_id, promised, decoded, cx)
+                self.push_promise(side, stream_id, promised, decoded, context)
             }
         }
     }
@@ -49,7 +51,7 @@ impl Conn {
         end_stream: bool,
         malformed: bool,
         decoded: Decoded,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let Decoded {
             headers,
@@ -75,7 +77,7 @@ impl Conn {
                 &headers,
                 end_stream,
                 &block_evidence,
-                cx,
+                context,
             )?
         {
             return Ok(());
@@ -94,7 +96,7 @@ impl Conn {
                 || stream_id <= self.max_initiated[if client_initiated { CLIENT } else { SERVER }]
             {
                 self.issue(
-                    cx,
+                    context,
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: Some(stream_id),
@@ -110,7 +112,7 @@ impl Conn {
                 return Ok(());
             }
             if side == CLIENT && client_initiated {
-                self.begin_stream(side, stream_id, Some(&block_evidence), cx)?;
+                self.begin_stream(side, stream_id, Some(&block_evidence), context)?;
             } else {
                 let (code, detail) = if side == SERVER && client_initiated {
                     (
@@ -128,7 +130,7 @@ impl Conn {
                     && !self.opener_exhausted(CLIENT)
                     && (!self.clean_start || stream_id > self.max_initiated[CLIENT]);
                 self.issue(
-                    cx,
+                    context,
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: Some(stream_id),
@@ -150,12 +152,12 @@ impl Conn {
                     },
                 )?;
                 if delayed_opener {
-                    self.retain_pending_opener(stream_id, code, cx)?;
+                    self.retain_pending_opener(stream_id, code, context)?;
                 }
                 if delayed_opener && !self.early_response_headers.contains_key(&stream_id) {
-                    cx.check_streams()?;
+                    context.check_streams()?;
                     self.admitted_streams += 1;
-                    self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
+                    self.charge_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
                     self.early_response_headers
                         .insert(stream_id, Default::default());
                 }
@@ -193,7 +195,7 @@ impl Conn {
                         }
                         Err((code, detail)) => {
                             self.issue(
-                                cx,
+                                context,
                                 Fault {
                                     flow: self.dir_flow(side),
                                     http2_stream_id: Some(stream_id),
@@ -218,7 +220,7 @@ impl Conn {
                 // Keep the bounded, sourced header-block evidence without inventing
                 // request correlation. A delayed client opener can still be admitted.
                 if !delayed_opener {
-                    self.fail(cx, Status::Malformed)?;
+                    self.fail(context, Status::Malformed)?;
                 }
                 return Ok(());
             }
@@ -229,7 +231,7 @@ impl Conn {
             .is_some_and(|stream| stream.phase != StreamPhase::Reserved && stream.ended[side])
         {
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
@@ -242,7 +244,7 @@ impl Conn {
                     sources: block_sources,
                 },
             )?;
-            return self.close_stream(stream_id, Status::Malformed, None, cx);
+            return self.close_stream(stream_id, Status::Malformed, None, context);
         }
         let (role, new_head) = {
             let Some(stream) = self.streams.get(&stream_id) else {
@@ -254,7 +256,7 @@ impl Conn {
                         (FieldRole::Response, true)
                     } else {
                         self.issue(
-                            cx,
+                            context,
                             Fault {
                                 flow: self.dir_flow(side),
                                 http2_stream_id: Some(stream_id),
@@ -267,7 +269,7 @@ impl Conn {
                                 sources: block_sources,
                             },
                         )?;
-                        self.fail(cx, Status::Malformed)?;
+                        self.fail(context, Status::Malformed)?;
                         return Ok(());
                     }
                 }
@@ -293,7 +295,7 @@ impl Conn {
         {
             stream.phase = StreamPhase::Open;
             self.active[SERVER] += 1;
-            if self.enforce_concurrency(SERVER, stream_id, Some(&block_evidence), cx)? {
+            if self.enforce_concurrency(SERVER, stream_id, Some(&block_evidence), context)? {
                 return Ok(());
             }
         }
@@ -302,7 +304,7 @@ impl Conn {
             Ok(meta) => meta,
             Err(detail) => {
                 self.issue(
-                    cx,
+                    context,
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: Some(stream_id),
@@ -337,7 +339,7 @@ impl Conn {
             && self.goaway[SERVER].is_some_and(|last| stream_id > last)
         {
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
@@ -360,7 +362,7 @@ impl Conn {
                 .is_some_and(|msg| matches!(msg.status_code, Some(204 | 304)))
         {
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
@@ -377,7 +379,7 @@ impl Conn {
         }
         if role == FieldRole::Trailer && !end_stream {
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
@@ -397,7 +399,7 @@ impl Conn {
             && end_stream
         {
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
@@ -414,7 +416,7 @@ impl Conn {
         }
         if meta.protocol {
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
@@ -448,7 +450,7 @@ impl Conn {
                     sources: block_sources,
                     compression,
                 },
-                cx,
+                context,
             )?;
             if let Some(status) = failure
                 && let Some(stream) = self.streams.get_mut(&stream_id)
@@ -464,7 +466,7 @@ impl Conn {
                 .is_some_and(|msg| msg.trailers_seen);
             if trailer_conflict {
                 self.issue(
-                    cx,
+                    context,
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: Some(stream_id),
@@ -493,7 +495,7 @@ impl Conn {
                     .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
                     .sum::<usize>()
                     + block.len();
-                self.charge_conn(cx, added)?;
+                self.charge_conn(context, added)?;
                 let stream = self.streams.get_mut(&stream_id).expect("stream");
                 if let Some(msg) = stream.msgs[side].as_mut() {
                     msg.charged += added;
@@ -502,8 +504,8 @@ impl Conn {
                     if let Some(sources) = block_sources {
                         let frames = sources.frames().len();
                         let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
-                        self.charge_conn(cx, charge)?;
-                        cx.charge_spans(frames)?;
+                        self.charge_conn(context, charge)?;
+                        context.charge_spans(frames)?;
                         let msg = self
                             .streams
                             .get_mut(&stream_id)
@@ -516,8 +518,8 @@ impl Conn {
                     if let Some(set) = compression {
                         let frames = set.frames().len();
                         let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
-                        self.charge_conn(cx, charge)?;
-                        cx.charge_spans(frames)?;
+                        self.charge_conn(context, charge)?;
+                        context.charge_spans(frames)?;
                         let msg = self
                             .streams
                             .get_mut(&stream_id)
@@ -531,7 +533,7 @@ impl Conn {
             } else {
                 failure = Some(Status::Malformed);
                 self.issue(
-                    cx,
+                    context,
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: Some(stream_id),
@@ -551,9 +553,9 @@ impl Conn {
         }
         if failure == Some(Status::Malformed) {
             // Preserve the decoded field section before applying its stream error.
-            self.close_stream(stream_id, Status::Malformed, None, cx)?;
+            self.close_stream(stream_id, Status::Malformed, None, context)?;
         } else if end_stream {
-            self.end_side(side, stream_id, Status::Complete, cx)?;
+            self.end_side(side, stream_id, Status::Complete, context)?;
         }
         Ok(())
     }
@@ -565,7 +567,7 @@ impl Conn {
         headers: &[super::super::super::model::Header],
         end_stream: bool,
         evidence: &Evidence,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<bool, Error> {
         if !early.final_seen && !early.ended {
             return Ok(false);
@@ -574,7 +576,7 @@ impl Conn {
             || early.forbids_trailers
             || !end_stream
             || validate(FieldRole::Trailer, headers).is_err();
-        self.issue(cx, Fault {
+        self.issue(context, Fault {
             flow: self.dir_flow(SERVER), http2_stream_id: Some(id), scope: IssueScope::Stream,
             certainty: if invalid { Certainty::Confirmed } else { Certainty::Indeterminate },
             status: if invalid { Status::Malformed } else { Status::Incomplete },
@@ -593,7 +595,7 @@ impl Conn {
                 } else {
                     Status::Incomplete
                 },
-                cx,
+                context,
             )?;
         } else if let Some(state) = self.early_response_headers.get_mut(&id) {
             state.ended = true;

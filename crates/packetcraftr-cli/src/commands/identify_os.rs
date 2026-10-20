@@ -11,7 +11,7 @@ use crate::{
     errors::CliError,
     input::{InputKind, read_bounded_file},
     output::{self, contract::Format},
-    rendering::{StreamEncoder, write_stdout_line},
+    rendering::write_stdout_line,
     system::{Runtime, prepare_workflow},
 };
 
@@ -152,52 +152,35 @@ impl super::Spec for Args {
                         .map(|_| ())
                         .map_err(CliError::from)
                 });
-                let summary = {
-                    let emit = emit;
-
-                    client
-                        .identify_os(request.clone(), emit)
-                        .map_err(CliError::classified)
-                }?;
+                let summary = client
+                    .identify_os(request.clone(), emit)
+                    .map_err(CliError::classified)?;
                 invocation.check()?;
-                {
-                    let report = summary;
-                    let stream: &StreamEncoder = stream;
-
-                    stream
-                        .complete_published(output::envelope::Published::<output::os::Event>::from(
-                            report,
-                        ))
-                        .map(|_| ())
-                        .map_err(CliError::from)
-                }
+                stream
+                    .complete_published(output::envelope::Published::<output::os::Event>::from(
+                        summary,
+                    ))
+                    .map(|_| ())
+                    .map_err(CliError::from)
             }
-            format => {
-                let report = (|| -> Result<_, CliError> {
+            _ => {
+                let report = {
                     let collector = library::Collector::default();
                     let report = client
                         .identify_os(request.clone(), collector.clone())
                         .map_err(CliError::classified)?;
-                    collector.finish(report).map_err(CliError::classified)
-                })()?;
+                    collector.finish(report).map_err(CliError::classified)?
+                };
                 invocation.check()?;
                 if format == Format::Json {
                     crate::rendering::emit_published(
                         invocation,
                         output::contract::Command::IdentifyOs,
-                        {
-                            let report = report;
-
-                            output::envelope::Published::<output::os::Report>::try_from(report)
-                                .map_err(CliError::classified)
-                        }?,
+                        output::envelope::Published::<output::os::Report>::try_from(report)
+                            .map_err(CliError::classified)?,
                     )
                 } else {
-                    {
-                        let aggregate = report;
-                        let _ = format;
-                        render(invocation, aggregate.report, stream.presentation())
-                    }
+                    render(invocation, report.report, stream.presentation())
                 }
             }
         }?;

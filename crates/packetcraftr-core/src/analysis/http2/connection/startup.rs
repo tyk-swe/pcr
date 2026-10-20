@@ -5,7 +5,7 @@ use super::super::Error;
 use super::super::buffer::union_balanced;
 use super::super::model::{Certainty, IssueScope, Startup, Status};
 use super::super::upgrade::Prelude;
-use super::{CLIENT, Conn, Cx, DirPhase, Fault, PREFACE_LEN, Phase, SERVER};
+use super::{CLIENT, ConnectionState, Context, DirectionPhase, Fault, PREFACE_LEN, Phase, SERVER};
 use crate::protocol::application::http;
 use crate::protocol::application::http2 as wire;
 use crate::protocol::application::http2::hpack;
@@ -77,14 +77,14 @@ pub(crate) fn classify(bytes: &[u8]) -> Verdict {
     }
 }
 
-impl Conn {
-    pub(crate) fn elect(&mut self, cx: &mut Cx<'_>) -> Result<(), Error> {
+impl ConnectionState {
+    pub(crate) fn elect(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
         for index in 0..self.pending.len() {
             match classify(self.pending[index].buffer.bytes()) {
                 Verdict::Wait => continue,
                 Verdict::Tls => {
                     self.status = Status::Unsupported;
-                    self.fail(cx, Status::Unsupported)?;
+                    self.fail(context, Status::Unsupported)?;
                     return Ok(());
                 }
                 Verdict::Garbage => {
@@ -92,23 +92,23 @@ impl Conn {
                     continue;
                 }
                 Verdict::Prior => {
-                    self.elect_client(index, Startup::PriorKnowledge, cx)?;
+                    self.elect_client(index, Startup::PriorKnowledge, context)?;
                     if let Some(dir) = self.dirs[CLIENT].as_mut() {
-                        dir.phase = DirPhase::Preface;
+                        dir.phase = DirectionPhase::Preface;
                     }
                     self.phase = Phase::H2;
                     return Ok(());
                 }
                 Verdict::Prelude => {
-                    self.elect_client(index, Startup::Unknown, cx)?;
+                    self.elect_client(index, Startup::Unknown, context)?;
                     if let Some(dir) = self.dirs[CLIENT].as_mut() {
-                        dir.phase = DirPhase::Prelude;
+                        dir.phase = DirectionPhase::Prelude;
                     }
                     for dir in self.dirs[SERVER].iter_mut() {
-                        dir.phase = DirPhase::Prelude;
+                        dir.phase = DirectionPhase::Prelude;
                     }
                     self.prelude = Some(Prelude::new());
-                    self.charge_conn(cx, super::resources::DIR_OVERHEAD)?;
+                    self.charge_conn(context, super::resources::DIR_OVERHEAD)?;
                     self.phase = Phase::Prelude;
                     return Ok(());
                 }
@@ -121,28 +121,32 @@ impl Conn {
         &mut self,
         index: usize,
         startup: Startup,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let mut pending = std::mem::take(&mut self.pending);
         let mut client = pending.swap_remove(index);
-        client.decoder = Some(hpack::Decoder::new(cx.limits.hpack())?);
+        client.decoder = Some(hpack::Decoder::new(context.limits.hpack())?);
         self.startup = startup;
         self.dirs[CLIENT] = Some(client);
         for mut dir in pending {
             if !dir.buffer.is_empty() {
                 self.clean_start = false;
             }
-            dir.decoder = Some(hpack::Decoder::new(cx.limits.hpack())?);
+            dir.decoder = Some(hpack::Decoder::new(context.limits.hpack())?);
             dir.phase = match startup {
-                Startup::PriorKnowledge => DirPhase::Frames,
-                _ => DirPhase::Prelude,
+                Startup::PriorKnowledge => DirectionPhase::Frames,
+                _ => DirectionPhase::Prelude,
             };
             self.dirs[SERVER] = Some(dir);
         }
         Ok(())
     }
 
-    pub(crate) fn preface_step(&mut self, side: usize, cx: &mut Cx<'_>) -> Result<bool, Error> {
+    pub(crate) fn preface_step(
+        &mut self,
+        side: usize,
+        context: &mut Context<'_>,
+    ) -> Result<bool, Error> {
         let dir = self.dirs[side].as_mut().ok_or(Error::Application(
             crate::analysis::application::Error::Sources {
                 number: self.number,
@@ -155,10 +159,10 @@ impl Conn {
             let sets = dir.buffer.contributors(take);
             let (wire, dropped) = dir.buffer.take(take);
             let sources = union_balanced(sets)?;
-            Self::release_dir(dir, cx, take);
-            Self::release_dropped(dir, dropped, cx);
+            Self::release_dir(dir, context, take);
+            Self::release_dropped(dir, dropped, context);
             self.issue(
-                cx,
+                context,
                 Fault {
                     flow,
                     http2_stream_id: None,
@@ -171,17 +175,17 @@ impl Conn {
                     sources,
                 },
             )?;
-            self.fail(cx, Status::Malformed)?;
+            self.fail(context, Status::Malformed)?;
             return Ok(true);
         }
         if dir.buffer.len() < PREFACE_LEN {
             return Ok(false);
         }
         let dropped = dir.buffer.discard(PREFACE_LEN);
-        Self::release_dir(dir, cx, PREFACE_LEN);
-        Self::release_dropped(dir, dropped, cx);
+        Self::release_dir(dir, context, PREFACE_LEN);
+        Self::release_dropped(dir, dropped, context);
         if let Some(dir) = self.dirs[side].as_mut() {
-            dir.phase = DirPhase::Frames;
+            dir.phase = DirectionPhase::Frames;
         }
         Ok(true)
     }

@@ -18,7 +18,7 @@ pub(crate) enum Phase {
     Closed,
 }
 
-pub(crate) struct MsgBuild {
+pub(crate) struct MessageBuilder {
     pub index: u64,
     pub stream_id: u32,
     pub kind: MessageKind,
@@ -40,7 +40,7 @@ pub(crate) struct MsgBuild {
     pub charged_spans: usize,
 }
 
-impl MsgBuild {
+impl MessageBuilder {
     pub(crate) fn new(index: u64, stream_id: u32, kind: MessageKind) -> Self {
         Self {
             index,
@@ -81,7 +81,7 @@ pub(crate) struct StreamState {
     pub promised_by: Option<u32>,
     pub ended: [bool; 2],
     pub request: Option<u64>,
-    pub msgs: [Option<MsgBuild>; 2],
+    pub msgs: [Option<MessageBuilder>; 2],
     pub send_window: [i64; 2],
     pub credit_exceeded: [bool; 2],
     pub window_granted: [i64; 2],

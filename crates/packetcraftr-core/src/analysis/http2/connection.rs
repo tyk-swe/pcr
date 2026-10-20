@@ -9,13 +9,13 @@ pub(crate) mod resources;
 pub(crate) mod startup;
 pub(crate) mod streams;
 
-pub(crate) use resources::Cx;
+pub(crate) use resources::Context;
 
 use super::Error;
 use super::buffer::SourceBuffer;
 use super::model::{Certainty, Issue, IssueScope, Startup, Status};
 use super::settings::DirectionSettings;
-use super::stream::{CLIENT, MsgBuild, SERVER, StreamState};
+use super::stream::{CLIENT, MessageBuilder, SERVER, StreamState};
 use super::upgrade::Prelude;
 use crate::analysis::application::{self, Delivery};
 use crate::analysis::provenance::SourceSet;
@@ -35,7 +35,7 @@ pub(crate) enum Phase {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DirPhase {
+pub(crate) enum DirectionPhase {
     Sniff,
     Prelude,
     Preface,
@@ -57,9 +57,9 @@ pub(crate) enum ChainHead {
     PushPromise { promised: u32 },
 }
 
-pub(crate) struct Dir {
+pub(crate) struct DirectionState {
     pub flow: ScopedFlowKey,
-    pub phase: DirPhase,
+    pub phase: DirectionPhase,
     pub buffer: SourceBuffer,
     pub decoder: Option<hpack::Decoder>,
     pub decoder_charge: usize,
@@ -73,11 +73,11 @@ pub(crate) struct Dir {
     pub charged: usize,
     pub charged_spans: usize,
 }
-impl Dir {
+impl DirectionState {
     pub(crate) fn new(flow: ScopedFlowKey) -> Self {
         Self {
             flow,
-            phase: DirPhase::Sniff,
+            phase: DirectionPhase::Sniff,
             buffer: SourceBuffer::new(),
             decoder: None,
             decoder_charge: 0,
@@ -136,15 +136,15 @@ pub(crate) struct ClosedStream {
     pub request: Option<u64>,
 }
 
-pub(crate) struct Conn {
+pub(crate) struct ConnectionState {
     pub stream: u64,
     pub generation: u64,
     pub first_flow: ScopedFlowKey,
     pub startup: Startup,
     pub status: Status,
     pub phase: Phase,
-    pub pending: Vec<Dir>,
-    pub dirs: [Option<Dir>; 2],
+    pub pending: Vec<DirectionState>,
+    pub dirs: [Option<DirectionState>; 2],
     pub prelude: Option<Prelude>,
     pub streams: BTreeMap<u32, StreamState>,
     pub closed: BTreeMap<u32, ClosedStream>,
@@ -174,11 +174,11 @@ pub(crate) struct Conn {
     pub finalizing: bool,
     pub resume_side: Option<usize>,
     pub pending_openers: BTreeMap<u32, &'static str>,
-    pub parent_deferred: VecDeque<MsgBuild>,
-    pub ack_deferred: VecDeque<(usize, MsgBuild, Status)>,
+    pub parent_deferred: VecDeque<MessageBuilder>,
+    pub ack_deferred: VecDeque<(usize, MessageBuilder, Status)>,
 }
 
-impl Conn {
+impl ConnectionState {
     pub(crate) fn new(stream: u64, generation: u64, flow: ScopedFlowKey) -> Self {
         Self {
             stream,
@@ -245,7 +245,7 @@ impl Conn {
             .unwrap_or_else(|| self.flow())
     }
 
-    pub(crate) fn dir_mut(&mut self, flow: &ScopedFlowKey) -> Option<&mut Dir> {
+    pub(crate) fn dir_mut(&mut self, flow: &ScopedFlowKey) -> Option<&mut DirectionState> {
         self.dirs
             .iter_mut()
             .flatten()
@@ -263,14 +263,14 @@ impl Conn {
         self.side_of(flow).is_some() || self.pending.iter().any(|dir| dir.flow == *flow)
     }
 
-    pub(crate) fn issue(&mut self, cx: &mut Cx<'_>, fault: Fault) -> Result<(), Error> {
+    pub(crate) fn issue(&mut self, context: &mut Context<'_>, fault: Fault) -> Result<(), Error> {
         let charge = fault.wire.len()
             + fault.detail.len()
             + resources::ISSUE_OVERHEAD
             + resources::EVENT_OVERHEAD;
-        cx.charge_retained(charge)?;
+        context.charge_retained(charge)?;
         if let Some(sources) = &fault.sources {
-            cx.charge_retained(
+            context.charge_retained(
                 resources::SET_OVERHEAD + sources.frames().len() * resources::SPAN_OVERHEAD,
             )?;
         }
@@ -278,7 +278,7 @@ impl Conn {
         let number = self
             .issue_frame_number(&fault.sources)
             .unwrap_or(self.number);
-        cx.issue(Issue {
+        context.issue(Issue {
             number,
             stream: self.stream,
             generation: self.generation,
@@ -315,49 +315,65 @@ impl Conn {
         }
     }
 
-    pub(crate) fn charge_conn(&mut self, cx: &mut Cx<'_>, bytes: usize) -> Result<(), Error> {
-        cx.charge_live(bytes)?;
+    pub(crate) fn charge_conn(
+        &mut self,
+        context: &mut Context<'_>,
+        bytes: usize,
+    ) -> Result<(), Error> {
+        context.charge_live(bytes)?;
         self.live = self.live.checked_add(bytes).expect("conn charge");
         Ok(())
     }
 
-    pub(crate) fn release_conn(&mut self, cx: &mut Cx<'_>, bytes: usize) {
-        cx.release_live(bytes);
+    pub(crate) fn release_conn(&mut self, context: &mut Context<'_>, bytes: usize) {
+        context.release_live(bytes);
         self.live = self.live.checked_sub(bytes).expect("conn release");
     }
 
-    pub(crate) fn charge_dir(dir: &mut Dir, cx: &mut Cx<'_>, bytes: usize) -> Result<(), Error> {
-        cx.charge_live(bytes)?;
+    pub(crate) fn charge_dir(
+        dir: &mut DirectionState,
+        context: &mut Context<'_>,
+        bytes: usize,
+    ) -> Result<(), Error> {
+        context.charge_live(bytes)?;
         dir.charged = dir.charged.checked_add(bytes).expect("dir charge");
         Ok(())
     }
 
-    pub(crate) fn release_dir(dir: &mut Dir, cx: &mut Cx<'_>, bytes: usize) {
-        cx.release_live(bytes);
+    pub(crate) fn release_dir(dir: &mut DirectionState, context: &mut Context<'_>, bytes: usize) {
+        context.release_live(bytes);
         dir.charged = dir.charged.checked_sub(bytes).expect("dir release");
     }
 
     pub(crate) fn track_sources(
-        dir: &mut Dir,
-        cx: &mut Cx<'_>,
+        dir: &mut DirectionState,
+        context: &mut Context<'_>,
         set: &SourceSet,
     ) -> Result<(), Error> {
-        cx.charge_sources(set)?;
+        context.charge_sources(set)?;
         dir.charged_spans += set.frames().len();
         dir.charged += resources::SET_OVERHEAD + set.frames().len() * resources::SPAN_OVERHEAD;
         Ok(())
     }
 
-    pub(crate) fn release_dropped(dir: &mut Dir, dropped: Vec<SourceSet>, cx: &mut Cx<'_>) {
+    pub(crate) fn release_dropped(
+        dir: &mut DirectionState,
+        dropped: Vec<SourceSet>,
+        context: &mut Context<'_>,
+    ) {
         for set in dropped {
             let frames = set.frames().len();
-            cx.release_sources(&set);
+            context.release_sources(&set);
             dir.charged_spans -= frames;
             dir.charged -= resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
         }
     }
 
-    pub(crate) fn decoder_sync(&mut self, dir_index: usize, cx: &mut Cx<'_>) -> Result<(), Error> {
+    pub(crate) fn decoder_sync(
+        &mut self,
+        dir_index: usize,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
         let dir = self.dirs[dir_index].as_mut().ok_or(Error::Application(
             application::Error::Sources {
                 number: self.number,
@@ -366,9 +382,9 @@ impl Conn {
         if let Some(decoder) = dir.decoder.as_ref() {
             let now = decoder.buffered_bytes();
             if now > dir.decoder_charge {
-                Self::charge_dir(dir, cx, now - dir.decoder_charge)?;
+                Self::charge_dir(dir, context, now - dir.decoder_charge)?;
             } else if now < dir.decoder_charge {
-                Self::release_dir(dir, cx, dir.decoder_charge - now);
+                Self::release_dir(dir, context, dir.decoder_charge - now);
             }
             dir.decoder_charge = now;
         }
@@ -379,7 +395,7 @@ impl Conn {
         &mut self,
         delivery: &Delivery,
         number: u64,
-        cx: &mut Cx<'_>,
+        context: &mut Context<'_>,
     ) -> Result<(), Error> {
         self.number = number;
         if matches!(self.phase, Phase::Dead) {
@@ -388,23 +404,24 @@ impl Conn {
         if self.dir_mut(&delivery.flow).is_none() {
             let elected = self.dirs[CLIENT].is_some();
             if elected && self.dirs[SERVER].is_none() {
-                let mut dir = Dir::new(delivery.flow.clone());
-                let mut decoder = hpack::Decoder::new(cx.limits.hpack())?;
+                let mut dir = DirectionState::new(delivery.flow.clone());
+                let mut decoder = hpack::Decoder::new(context.limits.hpack())?;
                 decoder.permit_table_size(self.settings[CLIENT].advertised.header_table_size);
                 for pending in &self.settings[CLIENT].pending {
                     decoder.permit_table_size(pending.final_values.header_table_size);
                 }
                 dir.decoder = Some(decoder);
                 dir.phase = match self.phase {
-                    Phase::H2 => DirPhase::Frames,
-                    Phase::Prelude => DirPhase::Prelude,
-                    _ => DirPhase::Sniff,
+                    Phase::H2 => DirectionPhase::Frames,
+                    Phase::Prelude => DirectionPhase::Prelude,
+                    _ => DirectionPhase::Sniff,
                 };
-                self.charge_conn(cx, resources::DIR_OVERHEAD)?;
+                self.charge_conn(context, resources::DIR_OVERHEAD)?;
                 self.dirs[SERVER] = Some(dir);
             } else if !elected && self.pending.len() < 2 {
-                self.charge_conn(cx, resources::DIR_OVERHEAD)?;
-                self.pending.push(Dir::new(delivery.flow.clone()));
+                self.charge_conn(context, resources::DIR_OVERHEAD)?;
+                self.pending
+                    .push(DirectionState::new(delivery.flow.clone()));
             }
         }
         if !delivery.bytes.is_empty()
@@ -421,7 +438,7 @@ impl Conn {
             let want = want.min(remaining);
             if want == 0 {
                 let before = self.buffered_len();
-                self.pump(cx)?;
+                self.pump(context)?;
                 if self.buffered_len() == before {
                     return Err(Error::Application(application::Error::Limit {
                         field: "stalled_input",
@@ -429,19 +446,19 @@ impl Conn {
                     }));
                 }
                 if matches!(self.phase, Phase::Dead) {
-                    return self.drain(cx);
+                    return self.drain(context);
                 }
                 continue;
             }
             let chunk = delivery.bytes.slice(cursor..cursor + want);
             let dir = self.dir_mut(&delivery.flow).expect("dir");
-            Self::charge_dir(dir, cx, chunk.len())?;
-            Self::track_sources(dir, cx, &delivery.sources)?;
+            Self::charge_dir(dir, context, chunk.len())?;
+            Self::track_sources(dir, context, &delivery.sources)?;
             dir.buffer.push(chunk, delivery.sources.clone());
             cursor += want;
-            self.pump(cx)?;
+            self.pump(context)?;
             if matches!(self.phase, Phase::Dead) {
-                return self.drain(cx);
+                return self.drain(context);
             }
         }
         Ok(())
@@ -493,8 +510,8 @@ impl Conn {
             .find(|dir| dir.flow == *flow)
             .or_else(|| self.pending.iter().find(|dir| dir.flow == *flow))?;
         Some(match dir.phase {
-            DirPhase::Preface => PREFACE_LEN.saturating_sub(dir.buffer.len()),
-            DirPhase::Frames => {
+            DirectionPhase::Preface => PREFACE_LEN.saturating_sub(dir.buffer.len()),
+            DirectionPhase::Frames => {
                 if dir.buffer.len() < 9 {
                     9 - dir.buffer.len()
                 } else {
@@ -505,7 +522,7 @@ impl Conn {
                     (9 + length).saturating_sub(dir.buffer.len())
                 }
             }
-            DirPhase::Prelude => {
+            DirectionPhase::Prelude => {
                 let head_pending = match self.side_of(&dir.flow) {
                     Some(CLIENT) => self
                         .prelude
@@ -525,7 +542,7 @@ impl Conn {
                     4096
                 }
             }
-            DirPhase::Sniff => {
+            DirectionPhase::Sniff => {
                 if dir.buffer.len() < PREFACE_LEN {
                     PREFACE_LEN - dir.buffer.len()
                 } else {
@@ -535,28 +552,28 @@ impl Conn {
         })
     }
 
-    fn pump(&mut self, cx: &mut Cx<'_>) -> Result<(), Error> {
+    fn pump(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
         loop {
-            cx.check_deadline()?;
+            context.check_deadline()?;
             match self.phase {
-                Phase::Dead => return self.drain(cx),
+                Phase::Dead => return self.drain(context),
                 Phase::Sniff => {
-                    self.elect(cx)?;
+                    self.elect(context)?;
                     if matches!(self.phase, Phase::Sniff) {
                         return Ok(());
                     }
                 }
                 Phase::Prelude | Phase::H2 => {
                     if let Some(side) = self.resume_side.take() {
-                        self.pump_side(side, cx)?;
+                        self.pump_side(side, context)?;
                         continue;
                     }
                     let before = self.buffered_len();
-                    self.pump_side(CLIENT, cx)?;
+                    self.pump_side(CLIENT, context)?;
                     if self.resume_side.is_some() {
                         continue;
                     }
-                    self.pump_side(SERVER, cx)?;
+                    self.pump_side(SERVER, context)?;
                     if self.resume_side.is_some() {
                         continue;
                     }
@@ -568,7 +585,7 @@ impl Conn {
         }
     }
 
-    pub(crate) fn drain(&mut self, cx: &mut Cx<'_>) -> Result<(), Error> {
+    pub(crate) fn drain(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
         let mut bytes = self.live - self.upgrade_charge;
         let mut spans = 0usize;
         for dir in self
@@ -635,12 +652,12 @@ impl Conn {
         self.pending_openers.clear();
         self.closed_credit.clear();
         self.prelude = None;
-        cx.release_live(bytes);
-        *cx.spans = cx.spans.checked_sub(spans).expect("span release");
+        context.release_live(bytes);
+        *context.spans = context.spans.checked_sub(spans).expect("span release");
         Ok(())
     }
 
-    fn pump_side(&mut self, side: usize, cx: &mut Cx<'_>) -> Result<(), Error> {
+    fn pump_side(&mut self, side: usize, context: &mut Context<'_>) -> Result<(), Error> {
         loop {
             if matches!(self.phase, Phase::Dead) {
                 return Ok(());
@@ -648,14 +665,14 @@ impl Conn {
             let Some(dir) = self.dirs[side].as_ref() else {
                 return Ok(());
             };
-            if dir.buffer.is_empty() || (dir.closed && dir.phase != DirPhase::Frames) {
+            if dir.buffer.is_empty() || (dir.closed && dir.phase != DirectionPhase::Frames) {
                 return Ok(());
             }
             let progressed = match dir.phase {
-                DirPhase::Preface => self.preface_step(side, cx)?,
-                DirPhase::Prelude => self.prelude_step(side, cx)?,
-                DirPhase::Frames => self.frame_step(side, cx)?,
-                DirPhase::Sniff => false,
+                DirectionPhase::Preface => self.preface_step(side, context)?,
+                DirectionPhase::Prelude => self.prelude_step(side, context)?,
+                DirectionPhase::Frames => self.frame_step(side, context)?,
+                DirectionPhase::Sniff => false,
             };
             if !progressed || self.resume_side.is_some() {
                 return Ok(());

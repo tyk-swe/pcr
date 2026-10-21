@@ -5,9 +5,7 @@
 //!
 //! All platform-specific and potentially unsafe I/O is contained here.
 //!
-//! Contributor navigation: `tests/integration/main.rs` registers the `io`,
-//! `capture`, and `resources` domains in one binary. Native unit regressions
-//! stay beside the platform and resource implementations they exercise.
+//! Unit tests stay beside the implementations they exercise.
 
 #[forbid(unsafe_code)]
 pub mod bounded;

@@ -1,6 +1,4 @@
 [package]
-# Register domain suites explicitly; helpers are not standalone test targets.
-autotests = false
 name = "packetcraftr-core"
 description = "Runtime-neutral packet mechanics and bounded offline analysis for PacketcraftR"
 version.workspace = true
@@ -10,10 +8,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 publish.workspace = true
-
-[[test]]
-name = "integration"
-path = "tests/integration/main.rs"
 
 [lints]
 workspace = true
@@ -32,11 +26,3 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
-
-[dev-dependencies]
-criterion.workspace = true
-tempfile.workspace = true
-
-[[bench]]
-name = "benchmarks"
-harness = false

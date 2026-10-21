@@ -130,7 +130,7 @@ pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> 
         actual: Duration::MAX,
         limit: request.limits.max_duration,
     };
-    let exchange = request.timeout.checked_mul(hops).ok_or_else(&overflow)?;
+    let exchange = request.timeout.checked_mul(hops).ok_or_else(overflow)?;
     let delay = rate_delay(
         probe_error,
         "probes_per_second",
@@ -138,6 +138,6 @@ pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> 
         request.probes_per_second,
     )?
     .checked_mul(hops.saturating_sub(1))
-    .ok_or_else(&overflow)?;
+    .ok_or_else(overflow)?;
     exchange.checked_add(delay).ok_or_else(overflow)
 }

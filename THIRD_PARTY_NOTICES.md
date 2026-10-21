@@ -144,11 +144,9 @@ exception. Other new TLS packages reuse the workspace's existing build and
 platform dependencies where their version constraints permit it. No broader
 license or duplicate-version exemption is introduced.
 
-Schema contract tests use jsonschema 0.59.0 through ahash 0.8.12, which requires
-getrandom 0.3.4. That version has a separate exact duplicate exception alongside
-ring's 0.2.17; direct project randomness remains on 0.4.3. The configured target
-graph also requires exact older versions of bitflags, errno, and libloading
-through pcap, nix through rtnetlink, and syn through proc-macro dependencies.
+The configured target graph also requires exact older versions of bitflags,
+errno, and libloading through pcap, nix through rtnetlink, and syn through
+proc-macro dependencies.
 `deny.toml` documents those exceptions and continues to reject other duplicates.
 
 The transport records bounded whole presented DER certificates as observations

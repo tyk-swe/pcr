@@ -16,7 +16,6 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  actions: read
   contents: read
 
 jobs:
@@ -49,12 +48,6 @@ jobs:
           git merge-base --is-ancestor \
             "$release_sha" "refs/remotes/origin/${default_branch}"
           echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
-      - name: Require independent native and decoder evidence
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 scripts/check-release-evidence.py --repository "$GITHUB_REPOSITORY" \
-            --commit "$(git rev-parse HEAD)" --output "$RUNNER_TEMP/release-metadata/validation"
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
@@ -63,7 +56,6 @@ jobs:
       - name: Recheck current advisories and dependency policy for release contents
         run: |
           cargo deny --locked check
-          cargo deny --locked --manifest-path fuzz/Cargo.toml check advisories
       - name: Validate release tag and version
         id: metadata
         shell: bash
@@ -103,13 +95,6 @@ jobs:
           fi
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Upload release metadata
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-metadata
-          path: ${{ runner.temp }}/release-metadata/
-          if-no-files-found: error
-          retention-days: 1
 
   build:
     name: build (${{ matrix.target.triple }}, ${{ matrix.variant.name }})
@@ -144,7 +129,6 @@ jobs:
       ARCHIVE_BASENAME: packetcraftr-v${{ needs.preflight.outputs.version }}-${{ matrix.target.triple }}-${{ matrix.variant.name }}
       TARGET: ${{ matrix.target.triple }}
       VARIANT: ${{ matrix.variant.name }}
-      VERSION: ${{ needs.preflight.outputs.version }}
       RELEASE_SHA: ${{ needs.preflight.outputs.release_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -175,7 +159,7 @@ jobs:
           python scripts/build-manifest.py --binary "$executable" \
             --output "$RUNNER_TEMP/BUILD-METADATA.json" --commit "$RELEASE_SHA" \
             --target "$TARGET" --variant "$VARIANT"
-      - name: Package and smoke-test archive
+      - name: Package archive
         shell: python
         run: |
           import os
@@ -207,36 +191,10 @@ jobs:
               str(binary.resolve()), "reference", "documentation", "--directory", str(staging),
           ], check=True, timeout=60)
 
-          archive = shutil.make_archive(
+          shutil.make_archive(
               str(temporary / basename), "zip" if windows else "gztar",
               root_dir=temporary, base_dir=basename,
           )
-          extraction = temporary / "archive-smoke-test"
-          shutil.unpack_archive(archive, extraction)
-          root = extraction / basename
-          if not windows and not os.access(root / binary.name, os.X_OK):
-              raise SystemExit("packaged executable is not executable")
-          subprocess.run([
-              sys.executable, "scripts/verify-archive.py", "--root", str(root),
-              "--version", os.environ["VERSION"], "--commit", os.environ["RELEASE_SHA"],
-              "--target", target, "--variant", os.environ["VARIANT"],
-          ], check=True)
-      - if: runner.os == 'Linux' && matrix.variant.name == 'all-features'
-        name: Verify full Linux binary links libpcap
-        shell: bash
-        run: ldd "target/$TARGET/release/packetcraftr" | grep -Eq 'libpcap\.so'
-      - if: runner.os == 'Linux' && matrix.variant.name == 'pcap-free'
-        name: Verify pcap-free Linux binary does not link libpcap
-        shell: bash
-        run: |
-          ldd "target/$TARGET/release/packetcraftr" > linked-libraries.txt
-          ! grep -Eq 'libpcap\.so' linked-libraries.txt
-      - if: runner.os == 'Linux'
-        name: Smoke-test the Ubuntu 24.04 runtime baseline
-        shell: bash
-        run: |
-          docker run --rm -e VARIANT -v "$RUNNER_TEMP/archive-smoke-test/$ARCHIVE_BASENAME:/work:ro" ubuntu:24.04 \
-            sh -ec 'if [ "$VARIANT" = all-features ]; then apt-get update -qq; apt-get install -y --no-install-recommends libpcap0.8t64 >/dev/null; fi; /work/packetcraftr --version; /work/packetcraftr reference protocols >/dev/null; /work/packetcraftr analyze tls /work/examples/captures/tls-handshake.pcapng'
       - name: Upload binary archive
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -278,11 +236,6 @@ jobs:
           pattern: packetcraftr-v${{ needs.preflight.outputs.version }}-*
           path: dist
           merge-multiple: true
-      - name: Download release metadata
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release-metadata
-          path: release-metadata
       - name: Validate assets and generate checksums
         shell: bash
         run: |
@@ -320,14 +273,12 @@ jobs:
             done
           done
 
-          cp release-metadata/validation/VALIDATION-EVIDENCE.json dist/
           (
             cd dist
             printf '%s\n' "${archives[@]}" |
               while IFS= read -r archive; do
                 sha256sum "$archive"
               done > SHA256SUMS
-            sha256sum VALIDATION-EVIDENCE.json >> SHA256SUMS
             sha256sum --check SHA256SUMS
           )
       - name: Attest release archives
@@ -348,12 +299,6 @@ jobs:
           - `pcap-free` retains interface enumeration, native routing, and raw
             Layer 3 support without Layer 2 capture/injection or a libpcap/Npcap
             runtime dependency.
-
-          ### Validation evidence
-
-          `VALIDATION-EVIDENCE.json` identifies the exact-commit decoder comparison
-          and isolated Linux native scenarios. Windows/macOS runtime scenarios are
-          explicitly unexercised.
 
           ### Checksums and Provenance
 

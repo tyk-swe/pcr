@@ -7,8 +7,7 @@ import pathlib
 import re
 import subprocess
 
-from script_support import prepare_report, read_json, write_json_atomic
-from validation_evidence import digest, valid_digest
+from script_support import digest, prepare_report, read_json, valid_digest, write_json_atomic
 
 COMMAND_TIMEOUT = 30
 REQUIRED_FIELDS = ('binary', 'binary_sha256', 'version', 'commit', 'target',

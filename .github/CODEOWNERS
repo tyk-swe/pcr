@@ -22,7 +22,6 @@
 /crates/packetcraftr-netio/src/interface/** @tyk-swe
 /crates/packetcraftr-netio/src/workers.rs @tyk-swe
 /crates/packetcraftr-netio/src/workers/** @tyk-swe
-/crates/packetcraftr-netio/tests/** @tyk-swe
 
 /crates/packetcraftr/src/exchange.rs @tyk-swe
 /crates/packetcraftr/src/exchange/** @tyk-swe
@@ -35,15 +34,10 @@
 /crates/packetcraftr/src/identify.rs @tyk-swe
 /crates/packetcraftr/src/identify/** @tyk-swe
 /crates/packetcraftr/data/service-* @tyk-swe @rkdxodud-tyk
-/crates/packetcraftr/tests/** @tyk-swe
 
 # CLI group implementations and shared command infrastructure.
 /crates/packetcraftr-cli/src/commands.rs @tyk-swe
 /crates/packetcraftr-cli/src/commands/** @tyk-swe
-
-# Domain tests and fixtures retain review of published contracts.
-/crates/packetcraftr-core/tests/** @tyk-swe @rkdxodud-tyk
-/crates/packetcraftr-cli/tests/** @tyk-swe @rkdxodud-tyk
 
 /crates/packetcraftr-cli/src/output.rs @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-cli/src/output/** @tyk-swe @rkdxodud-tyk

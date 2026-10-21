@@ -1,8 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Private work counters are compiled only into core's unit-test target. Public
-// protocol behavior is covered by the retained integration contracts.
+// Private work counters are compiled only into core's unit-test target.
 use super::{Accumulator, SourceFrame, Tracker, work};
 use std::time::UNIX_EPOCH;
 

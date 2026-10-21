@@ -1,6 +1,6 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Shared, validated inventory for packaging and extracted-archive validation."""
+"""Validated inventory for release packaging."""
 from pathlib import Path, PurePosixPath
 
 from script_support import read_json

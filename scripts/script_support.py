@@ -2,15 +2,17 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Bounded JSON and atomic report publication for repository tools.
 
-This module uses only the standard library so packaged checks remain standalone.
+This module uses only the standard library so repository tools remain standalone.
 It is not a decoder for the product's public output contracts.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
 from pathlib import Path
+import re
 import stat
 import tempfile
 from typing import Any
@@ -146,18 +148,22 @@ def distinct_paths(output: Path, *inputs: Path) -> None:
             raise ValueError(f'output aliases input: {source}')
 
 
-def same_json(left: Any, right: Any) -> bool:
-    """Structural equality that does not confuse JSON booleans with numbers."""
-    if type(left) is not type(right):
-        return False
-    if isinstance(left, dict):
-        return left.keys() == right.keys() and all(same_json(left[key], right[key]) for key in left)
-    if isinstance(left, list):
-        return len(left) == len(right) and all(same_json(a, b) for a, b in zip(left, right))
-    return left == right
-
-
 def prepare_report(output: Path, *inputs: Path) -> None:
     """Check aliases before removing a stale success report for a new attempt."""
     distinct_paths(output, *inputs)
     Path(output).unlink(missing_ok=True)
+
+
+def valid_digest(value, width=64):
+    return isinstance(value, str) and re.fullmatch(r'[0-9a-f]{' + str(width) + r'}', value) is not None
+
+
+def digest(path):
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError(f'digest input is not a regular file: {path}')
+    hasher = hashlib.sha256()
+    with path.open('rb') as source:
+        for block in iter(lambda: source.read(65536), b''):
+            hasher.update(block)
+    return hasher.hexdigest()

@@ -58,15 +58,11 @@ maintenance:
     Review each proposed request against the cited standard and its read-only
     behavior. Re-review source redistribution terms and entry provenance;
     update entry dates and bump this independent version and the corpus
-    version together. Run the service identification acceptance script;
-    update schemas and examples if document syntax changes. New signatures
-    require original, declared fixtures and retain unauthenticated confidence.
+    version together. Run the unit tests; update schemas and examples if
+    document syntax changes. New signatures require original, declared fixtures
+    and retain unauthenticated confidence.
 
 coverage:
-  - fixture: "scripts/test-service-identification.py"
-    covers: |
-      HTTP and HTTPS nginx claims over IPv4 and IPv6 loopback, current-schema
-      NDJSON, exact request/response bytes, provenance, and TLS observations.
   - fixture: "crates/packetcraftr/data/service-probes.training.v1.json"
     covers: |
       smtp-postfix-training -> postfix-claim; smtp-exim-training -> exim-claim;

@@ -8,8 +8,7 @@
 //! Contributor navigation: command implementations live under
 //! `src/commands/{packet,files,analyze,network,reference}`. Shared dispatch and
 //! security helpers stay at the commands root; output and rendering keep their
-//! own modules. `tests/integration/main.rs` registers domain suites and mixed
-//! `contracts` in one binary, with fixtures in `tests/common.rs` and `tests/common/`.
+//! own modules. Unit tests stay beside the implementations they exercise.
 #![forbid(unsafe_code)]
 
 mod cancellation;

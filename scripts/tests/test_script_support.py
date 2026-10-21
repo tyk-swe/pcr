@@ -13,6 +13,20 @@ import script_support
 from script_support import distinct_paths, read_json, strict_json, write_json_atomic
 
 
+class DigestTests(unittest.TestCase):
+    def test_digest_rejects_non_regular_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, 'regular file'):
+                script_support.digest(directory)
+
+    def test_digest_matches_sha256(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'binary'
+            path.write_bytes(b'abc')
+            self.assertEqual(script_support.digest(path),
+                             'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
+
+
 class StrictJsonTests(unittest.TestCase):
     def test_json_tree_validation_has_depth_not_width_overhead(self):
         value = list(range(20_000))

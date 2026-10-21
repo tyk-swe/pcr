@@ -7,11 +7,6 @@
 *.swp
 *~
 
-# Files the CI workflows write into the working tree
-linked-libraries.txt
-fuzz/fuzz-run-metadata.txt
-fuzz/crash-*
-
-# Local Python validation caches
+# Local Python caches
 __pycache__/
 *.py[cod]

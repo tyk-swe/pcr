@@ -11,8 +11,6 @@ use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
 
-#[cfg(test)]
-pub(crate) use connect::start_on;
 pub use connect::{ConnectBudget, PendingConnect, start_connect};
 pub use error::Error;
 pub use exchange::exchange;

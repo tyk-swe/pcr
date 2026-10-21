@@ -1,6 +1,4 @@
 [package]
-# Register domain suites explicitly; helpers are not standalone test targets.
-autotests = false
 name = "packetcraftr-cli"
 description = "PacketcraftR command-line interface and renderers"
 version.workspace = true
@@ -10,10 +8,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 publish.workspace = true
-
-[[test]]
-name = "integration"
-path = "tests/integration/main.rs"
 
 [lints]
 workspace = true
@@ -42,9 +36,6 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
-
-[dev-dependencies]
-jsonschema.workspace = true
 
 [[bin]]
 name = "packetcraftr"

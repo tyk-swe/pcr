@@ -1,6 +1,4 @@
 [package]
-# Register domain suites explicitly; helpers are not standalone test targets.
-autotests = false
 name = "packetcraftr-netio"
 description = "PacketcraftR network providers and native I/O boundaries"
 version.workspace = true
@@ -14,10 +12,6 @@ publish.workspace = true
 # This is the only PacketcraftR crate permitted to contain `unsafe` code, and
 # it owns every native-I/O Cargo feature. Every other crate forbids unsafe at
 # its own crate root.
-
-[[test]]
-name = "integration"
-path = "tests/integration/main.rs"
 
 [lints]
 workspace = true

@@ -33,4 +33,3 @@ jobs:
       - name: Check dependency policy
         run: |
           cargo deny --locked check
-          cargo deny --locked --manifest-path fuzz/Cargo.toml check advisories

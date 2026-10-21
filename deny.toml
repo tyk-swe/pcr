@@ -62,8 +62,6 @@ highlight = "simplest-path"
 skip = [
     # Ring 0.17.14 requires getrandom 0.2; direct randomness uses 0.4.
     { name = "getrandom", version = "=0.2.17" },
-    # jsonschema 0.59 uses ahash 0.8.12, which requires getrandom 0.3.
-    { name = "getrandom", version = "=0.3.4" },
     # rtnetlink 0.23 requires nix 0.30; ctrlc 3.5 uses 0.31 for portable signals.
     { name = "nix", version = "=0.30.1" },
     # pcap 2.5 pins these older runtime and build dependencies.

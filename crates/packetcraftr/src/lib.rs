@@ -3,10 +3,7 @@
 
 //! Policy-gated live workflows, budgets, and evidence.
 //!
-//! Contributor navigation: `tests/integration/main.rs` registers the `dns`,
-//! `policy`, `scan`, `send`, and `audit` domains in one binary. Shared providers
-//! register through `tests/common.rs`; scanner fixture conditions and providers
-//! stay in `tests/common/scanner_fixture/`, where examples also import them.
+//! Unit tests stay beside the implementations they exercise.
 //!
 //! ```rust,no_run
 //! use packetcraftr::{Client, SystemProviders, policy::Policy, send};

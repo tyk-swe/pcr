@@ -50,8 +50,6 @@ pub(crate) struct Pool {
     state: Mutex<State>,
     changed: Condvar,
     retirement_service: Mutex<Option<reaper::ReaperService>>,
-    #[cfg(test)]
-    fail_retirement_start: AtomicBool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -121,8 +119,6 @@ impl Pool {
             state: Mutex::new(State::default()),
             changed: Condvar::new(),
             retirement_service: Mutex::new(None),
-            #[cfg(test)]
-            fail_retirement_start: AtomicBool::new(false),
         }
     }
 
@@ -212,10 +208,6 @@ impl Pool {
         let mut service = lock(&self.retirement_service);
         if let Some(service) = &*service {
             return Ok(service.client());
-        }
-        #[cfg(test)]
-        if self.fail_retirement_start.swap(false, Ordering::Relaxed) {
-            return Err(std::io::Error::other("injected retirement initialization failure").into());
         }
         // Initialization publishes no client before every cleanup worker exists.
         // A failure leaves None, so a later operation can retry once.

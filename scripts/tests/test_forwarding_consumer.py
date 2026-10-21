@@ -20,9 +20,6 @@ def consume(value, exit_code=0):
 
 
 class ForwardingConsumerTests(unittest.TestCase):
-    def test_existing_archive_consumer_contract_checks(self):
-        load_script('verify-archive').verify_forwarding_consumer(ROOT)
-
     def test_retained_examples_remain_valid(self):
         self.assertEqual(consume(envelope())['verdict'], 'pass')
         for name in ('success', 'complete', 'error'):

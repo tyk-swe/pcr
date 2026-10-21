@@ -57,7 +57,7 @@ jobs:
             --commit "$(git rev-parse HEAD)" --output "$RUNNER_TEMP/release-metadata/validation"
       - name: Install the pinned toolchain
         run: rustup toolchain install
-      - uses: taiki-e/install-action@84f5ac3124727fb3d284d4d22ee9ab3654fd09a6 # v2.87.7
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-deny@0.20.2
       - name: Recheck current advisories and dependency policy for release contents
@@ -141,7 +141,7 @@ jobs:
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Upload release metadata
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-metadata
           path: ${{ runner.temp }}/release-metadata/
@@ -275,7 +275,7 @@ jobs:
           docker run --rm -e VARIANT -v "$RUNNER_TEMP/archive-smoke-test/$ARCHIVE_BASENAME:/work:ro" ubuntu:24.04 \
             sh -ec 'if [ "$VARIANT" = all-features ]; then apt-get update -qq; apt-get install -y --no-install-recommends libpcap0.8t64 >/dev/null; fi; /work/packetcraftr --version; /work/packetcraftr reference protocols >/dev/null; /work/packetcraftr analyze tls /work/examples/captures/tls-handshake.pcapng'
       - name: Upload binary archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ env.ARCHIVE_BASENAME }}
           path: ${{ runner.temp }}/${{ env.ARCHIVE_BASENAME }}.${{ matrix.target.archive_extension }}
@@ -310,13 +310,13 @@ jobs:
             "+refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
           test "$(git rev-parse "${RELEASE_TAG}^{commit}")" = "$RELEASE_SHA"
       - name: Download binary archives
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: packetcraftr-v${{ needs.preflight.outputs.version }}-*
           path: dist
           merge-multiple: true
       - name: Download release metadata
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-metadata
           path: release-metadata

@@ -28,7 +28,7 @@ match_same_arms = "warn"
 mod_module_files = "deny"
 
 [workspace.dependencies]
-webpki-roots = "1.0.9"
+webpki-roots = "1.0.10"
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency
 # pins the shared workspace version. Bump these with `workspace.package.version`.
 packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.3", default-features = false }
@@ -39,33 +39,33 @@ anstream = "1.0.0"
 getrandom = { version = "0.4.3", features = ["std"] }
 bytes = { version = "1.12.1", features = ["serde"] }
 flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
-zstd = { version = "0.14.0", default-features = false }
-clap = { version = "4.6.6", features = ["derive"] }
-clap_lex = "1.1.0"
-clap_complete = "4.6.9"
+zstd = { version = "0.14.3", default-features = false }
+clap = { version = "4.6.7", features = ["derive"] }
+clap_lex = "1.1.1"
+clap_complete = "4.6.11"
 clap_mangen = "0.3.3"
 ctrlc = { version = "3.5.2", features = ["termination"] }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
-noyalib = { version = "0.0.53", default-features = false, features = ["std", "fast-int", "fast-float"] }
-jsonschema = { version = "0.55.0", default-features = false }
+noyalib = { version = "0.0.58", default-features = false, features = ["std", "fast-int", "fast-float"] }
+jsonschema = { version = "0.59.0", default-features = false }
 # RustCrypto hashes for TLS client fingerprints: MD5 for JA3, SHA-256 for JA4.
 md5 = { package = "md-5", version = "0.11.0", default-features = false }
-sha2 = { version = "0.11.0", default-features = false }
+sha2 = { version = "0.11.1", default-features = false }
 # Linear-time substring search for the display-filter `contains` operator.
 memchr = { version = "2.8.3", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
-serde_json = { version = "1.0.151", features = ["unbounded_depth"] }
+serde_json = { version = "1.0.154", features = ["unbounded_depth"] }
 tempfile = "3.27.0"
-thiserror = "2.0.20"
-rustls = { version = "0.23.45", default-features = false, features = ["std", "ring", "tls12"] }
+thiserror = "2.0.21"
+rustls = { version = "0.23.46", default-features = false, features = ["std", "ring", "tls12"] }
 
 futures-util = { version = "0.3.34", default-features = false }
-libc = { version = "0.2.189", default-features = false }
+libc = { version = "0.2.191", default-features = false }
 libloading = "0.9.0"
 pcap = { version = "2.5.0", default-features = false }
 rtnetlink = { version = "0.23.0", default-features = false, features = ["tokio_socket"] }
 socket2 = { version = "0.6.5", default-features = false, features = ["all"] }
-tokio = { version = "1.53.1", default-features = false, features = ["rt"] }
+tokio = { version = "1.54.0", default-features = false, features = ["rt"] }
 windows = { version = "0.62.2", default-features = false, features = [
     "std",
     "Win32_Foundation",

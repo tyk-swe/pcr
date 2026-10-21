@@ -6,6 +6,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+- Refresh Rust dependencies and pinned CI actions, use Rust 1.99.1 for
+  development, and retain Rust 1.98.1 compatibility with dedicated MSRV checks.
+  Centralize the fuzz nightly toolchain and use Noya's stream-end validation
+  while preserving single-document YAML parsing and resource limits.
+
 - Correct first-header HSTS handling, directive parsing and duplicate detection,
   CSP directive precedence/case handling, and cookie attribute whitespace and
   final SameSite interpretation without disclosing cookie values.

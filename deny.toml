@@ -28,17 +28,17 @@ allow = [
 # redistribution notices are included in THIRD_PARTY_NOTICES.md and archives.
 [[licenses.exceptions]]
 name = "zstd"
-version = "=0.14.0"
+version = "=0.14.3"
 allow = ["BSD-3-Clause"]
 
 [[licenses.exceptions]]
 name = "zstd-safe"
-version = "=8.0.0"
+version = "=8.2.0"
 allow = ["BSD-3-Clause"]
 
 [[licenses.exceptions]]
 name = "zstd-sys"
-version = "=2.1.0"
+version = "=2.1.2"
 allow = ["BSD-3-Clause"]
 
 # Rustls uses this exact constant-time primitives crate. Its BSD notice is
@@ -52,7 +52,7 @@ allow = ["BSD-3-Clause"]
 # dependency's data license is reproduced in THIRD_PARTY_NOTICES.md.
 [[licenses.exceptions]]
 name = "webpki-roots"
-version = "=1.0.9"
+version = "=1.0.10"
 allow = ["CDLA-Permissive-2.0"]
 
 [bans]
@@ -62,11 +62,12 @@ highlight = "simplest-path"
 skip = [
     # Ring 0.17.14 requires getrandom 0.2; direct randomness uses 0.4.
     { name = "getrandom", version = "=0.2.17" },
+    # jsonschema 0.59 uses ahash 0.8.12, which requires getrandom 0.3.
+    { name = "getrandom", version = "=0.3.4" },
     # rtnetlink 0.23 requires nix 0.30; ctrlc 3.5 uses 0.31 for portable signals.
     { name = "nix", version = "=0.30.1" },
     # pcap 2.5 pins these older runtime and build dependencies.
     { name = "bitflags", version = "=1.3.2" },
-    { name = "windows-sys", version = "=0.36.1" },
     { name = "errno", version = "=0.2.8" },
     { name = "libloading", version = "=0.8.9" },
     # Current proc-macro dependencies still span syn 2 and syn 3.

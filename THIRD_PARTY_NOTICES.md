@@ -1,7 +1,7 @@
 # Third-party notices
 
 Required distribution notices are unabridged below; Cargo.lock pins dependencies.
-Zstd adapters use zstd 0.14.0, zstd-safe 8.0.0, and zstd-sys 2.1.0+zstd.1.5.7.
+Zstd adapters use zstd 0.14.3, zstd-safe 8.2.0, and zstd-sys 2.1.2+zstd.1.5.7.
 
 ## Rust Zstd bindings
 
@@ -113,7 +113,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ## Active TLS transport dependency review
 
-The active observation transport uses rustls 0.23.45 with only `std`, `ring`,
+The active observation transport uses rustls 0.23.46 with only `std`, `ring`,
 and `tls12` enabled. Rustls owns TLS parsing and state in Rust; ring 0.17.14
 bundles its cryptographic C/assembly implementation. No system TLS library,
 system trust store, root-certificate bundle, DNS resolver, or OpenSSL runtime
@@ -128,9 +128,9 @@ future advisory checks.
 
 | Dependency | Reviewed version | License used |
 | --- | --- | --- |
-| rustls | 0.23.45 | ISC |
+| rustls | 0.23.46 | ISC |
 | rustls-pki-types | 1.15.1 | MIT |
-| rustls-webpki | 0.103.15 | ISC |
+| rustls-webpki | 0.103.16 | ISC |
 | ring | 0.17.14 | ISC, Apache-2.0, MIT (bundled components) |
 | untrusted | 0.9.0 | ISC |
 | subtle | 2.6.1 | BSD-3-Clause |
@@ -143,6 +143,13 @@ randomness uses 0.4.3; the exact older version has a documented duplicate
 exception. Other new TLS packages reuse the workspace's existing build and
 platform dependencies where their version constraints permit it. No broader
 license or duplicate-version exemption is introduced.
+
+Schema contract tests use jsonschema 0.59.0 through ahash 0.8.12, which requires
+getrandom 0.3.4. That version has a separate exact duplicate exception alongside
+ring's 0.2.17; direct project randomness remains on 0.4.3. The configured target
+graph also requires exact older versions of bitflags, errno, and libloading
+through pcap, nix through rtnetlink, and syn through proc-macro dependencies.
+`deny.toml` documents those exceptions and continues to reject other duplicates.
 
 The transport records bounded whole presented DER certificates as observations
 and verifies TLS handshake signatures. It makes no certificate-chain, time,
@@ -651,7 +658,7 @@ DEALINGS IN THE SOFTWARE.
 
 ## WebPKI bundled Mozilla trust anchors
 
-webpki-roots 1.0.9 (https://github.com/rustls/webpki-roots) supplies the
+webpki-roots 1.0.10 (https://github.com/rustls/webpki-roots) supplies the
 bundled CA trust store used by TLS audits. Its data license follows.
 
 # Community Data License Agreement - Permissive - Version 2.0

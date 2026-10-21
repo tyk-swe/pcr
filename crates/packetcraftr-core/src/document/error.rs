@@ -8,10 +8,6 @@ use crate::error::{Classification, Classified, Kind, Source};
 use super::types::{DocumentLimits, Limit};
 
 #[derive(Debug, Error)]
-#[error("{0}")]
-pub(super) struct Refused(pub(super) String);
-
-#[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
     #[error("packet document has {actual} bytes, exceeding limit {limit}")]

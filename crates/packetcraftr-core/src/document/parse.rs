@@ -5,8 +5,10 @@ mod budget;
 mod buffered;
 mod seed;
 
-use serde::Deserialize;
-use serde::de::{self, DeserializeSeed};
+#[cfg(test)]
+mod tests;
+
+use serde::de::DeserializeSeed;
 
 use super::error::Error;
 use super::types::{DOCUMENT_BASE_CONTAINER_DEPTH, DocumentLimits, Format, Limit, Packet};
@@ -58,16 +60,10 @@ impl Packet {
                 let document = seed
                     .deserialize(&mut deserializer)
                     .map_err(|source| map_yaml_parse_error(source, &budget, limits))?;
-                match de::IgnoredAny::deserialize(&mut deserializer) {
-                    Ok(_) => Err(Error::Parse {
-                        format: "YAML",
-                        source: crate::error::Source::new(super::error::Refused(
-                            "multiple YAML documents are not supported".to_owned(),
-                        )),
-                    }),
-                    Err(source) if yaml_stream_ended(&source) => Ok(document),
-                    Err(source) => Err(map_yaml_parse_error(source, &budget, limits)),
-                }
+                deserializer
+                    .end()
+                    .map_err(|source| map_yaml_parse_error(source, &budget, limits))?;
+                Ok(document)
             }
         }
     }
@@ -89,16 +85,6 @@ fn yaml_config(limits: &DocumentLimits) -> noyalib::ParserConfig {
         .max_merge_keys(0)
         .duplicate_key_policy(noyalib::DuplicateKeyPolicy::Error)
         .strict_booleans(true)
-}
-
-/// The deserializer reports exhaustion as a scanner error; match only its exact message.
-fn yaml_stream_ended(error: &noyalib::Error) -> bool {
-    match error {
-        noyalib::Error::Parse(message) | noyalib::Error::ParseWithLocation { message, .. } => {
-            message == "parser has already finished"
-        }
-        _ => false,
-    }
 }
 
 fn document_container_depth(max_nesting: usize) -> usize {

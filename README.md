@@ -67,7 +67,11 @@ loader. Build from source for other environments.
 
 ### Build from source
 
-Install the toolchain in `rust-toolchain.toml` (also declared in `Cargo.toml`).
+Development builds use Rust 1.99.1, pinned in `rust-toolchain.toml` with Clippy and
+rustfmt. The minimum supported compiler remains Rust 1.98.1, declared in
+`Cargo.toml` and `fuzz/Cargo.toml`; CI checks portable and all-feature workspace
+targets with that compiler. Fuzzing uses its own nightly pin in
+`fuzz/rust-toolchain.toml`, selected when running commands from `fuzz/`.
 All profiles need a C compiler for rustls/ring; no system TLS library is needed.
 Linux Layer 2 builds also need `libpcap-dev`.
 

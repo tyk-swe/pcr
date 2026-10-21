@@ -55,8 +55,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install nightly toolchain for libfuzzer
-        run: rustup toolchain install nightly-2026-08-28 --component llvm-tools-preview
-      - uses: taiki-e/install-action@84f5ac3124727fb3d284d4d22ee9ab3654fd09a6 # v2.87.7
+        run: rustup toolchain install
+        working-directory: fuzz
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-fuzz@0.13.2
       - name: Restore latest successful target corpus
@@ -78,7 +79,7 @@ jobs:
         run: |
           # A failing test before `&&` does not trip errexit, so fail explicitly.
           [[ "$FUZZ_SECONDS" =~ ^[0-9]+$ ]] && (( FUZZ_SECONDS >= 1 && FUZZ_SECONDS <= 900 )) || { echo "FUZZ_SECONDS must be 1..=900" >&2; exit 1; }
-          rustc +nightly-2026-08-28 --version --verbose > fuzz-run-metadata.txt
+          rustc --version --verbose > fuzz-run-metadata.txt
           git rev-parse HEAD >> fuzz-run-metadata.txt
           sha256sum Cargo.lock >> fuzz-run-metadata.txt
           printf 'target=%s seconds=%s\n' '${{ matrix.target }}' "$FUZZ_SECONDS" >> fuzz-run-metadata.txt
@@ -101,15 +102,15 @@ jobs:
           esac
           # Prebuilt cargo-fuzz may default to its own musl build target;
           # AddressSanitizer needs the runner's dynamically linked GNU target.
-          cargo +nightly-2026-08-28 fuzz run --target x86_64-unknown-linux-gnu "${{ matrix.target }}" "${corpus[@]}" -- "${dictionary[@]}" -max_total_time="$FUZZ_SECONDS" -rss_limit_mb=2048 -max_len=1048576
+          cargo fuzz run --target x86_64-unknown-linux-gnu "${{ matrix.target }}" "${corpus[@]}" -- "${dictionary[@]}" -max_total_time="$FUZZ_SECONDS" -rss_limit_mb=2048 -max_len=1048576
         working-directory: fuzz
       - name: Minimize and bound successful corpus
         working-directory: fuzz
         run: |
-          cargo +nightly-2026-08-28 fuzz cmin --target x86_64-unknown-linux-gnu "${{ matrix.target }}" "corpora/${{ matrix.target }}" -- -max_total_time=60 -rss_limit_mb=2048
+          cargo fuzz cmin --target x86_64-unknown-linux-gnu "${{ matrix.target }}" "corpora/${{ matrix.target }}" -- -max_total_time=60 -rss_limit_mb=2048
           test "$(du -sm 'corpora/${{ matrix.target }}' | cut -f1)" -le 32
       - name: Persist successful target corpus
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-corpus-${{ matrix.target }}
           path: fuzz/corpora/${{ matrix.target }}/*
@@ -117,7 +118,7 @@ jobs:
           retention-days: 30
       - name: Upload artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-artifacts-${{ matrix.target }}
           path: |

@@ -30,10 +30,10 @@ pub(super) fn emit_event(event: followup::Event, stream: &StreamEncoder) -> Resu
 }
 
 pub(super) fn emit_complete(
-    streamed: super::Streamed,
+    streamed: super::raw::Streamed,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let super::Streamed {
+    let super::raw::Streamed {
         mut report,
         endpoints,
         plan,

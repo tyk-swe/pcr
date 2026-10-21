@@ -7,14 +7,24 @@ use crate::output::{self, contract::Format};
 use crate::system::{Client, Runtime, client};
 use crate::{errors::CliError, rendering::StreamEncoder};
 
+/// The validated connect-scan boundary.
+pub(super) struct Request {
+    pub(super) followup: followup::ConnectRequest,
+    pub(super) plan: output::scan::plan::Plan,
+    pub(super) policy: crate::command_options::HostnamePolicyArgs,
+}
+
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
-    request: followup::ConnectRequest,
-    plan: output::scan::plan::Plan,
-    policy: crate::command_options::HostnamePolicyArgs,
+    request: Request,
     format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let Request {
+        followup: request,
+        plan,
+        policy,
+    } = request;
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     let client: Client = client(

@@ -64,7 +64,7 @@ jobs:
         run: |
           cargo deny --locked check
           cargo deny --locked --manifest-path fuzz/Cargo.toml check advisories
-      - name: Validate tag and extract changelog section
+      - name: Validate release tag and version
         id: metadata
         shell: bash
         run: |
@@ -96,43 +96,6 @@ jobs:
             echo "tag '$RELEASE_TAG' does not match packetcraftr-cli version '$expected_tag'" >&2
             exit 1
           fi
-
-          mkdir -p "$RUNNER_TEMP/release-metadata"
-          python3 - "$version" "$RUNNER_TEMP/release-metadata/changelog.md" <<'PY'
-          import datetime
-          import pathlib
-          import re
-          import sys
-
-          version = sys.argv[1]
-          destination = pathlib.Path(sys.argv[2])
-          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
-          heading = re.compile(
-              rf"^## \[{re.escape(version)}\] - (\d{{4}}-\d{{2}}-\d{{2}})$",
-              re.MULTILINE,
-          )
-          matches = list(heading.finditer(changelog))
-          if len(matches) != 1:
-              raise SystemExit(
-                  f"expected exactly one dated CHANGELOG.md section for {version}, "
-                  f"found {len(matches)}"
-              )
-
-          try:
-              datetime.date.fromisoformat(matches[0].group(1))
-          except ValueError as error:
-              raise SystemExit(f"invalid changelog date for {version}: {error}") from error
-
-          section_start = matches[0].end()
-          next_heading = re.search(r"^## \[", changelog[section_start:], re.MULTILINE)
-          section_end = (
-              section_start + next_heading.start() if next_heading else len(changelog)
-          )
-          section = changelog[section_start:section_end].strip()
-          if not section:
-              raise SystemExit(f"CHANGELOG.md section for {version} is empty")
-          destination.write_text(f"{section}\n", encoding="utf-8")
-          PY
 
           prerelease=false
           if [[ "$version" == *-* ]]; then
@@ -377,9 +340,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp release-metadata/changelog.md release-notes.md
-          cat >> release-notes.md <<'EOF'
-
+          cat > release-notes.md <<'EOF'
           ### Binary variants
 
           - `all-features` includes Layer 2 capture and injection. Linux and macOS

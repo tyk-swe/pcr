@@ -263,7 +263,7 @@
       "version": null,
       "metadata": {
         "source": "PacketcraftR project-authored fixture",
-        "reference": "docs/scanner-data-policy.md",
+        "reference": "crates/packetcraftr/data/service-probes.provenance.yaml",
         "license": "AGPL-3.0-only",
         "maintainer": "tyk-swe",
         "updated": "2026-10-09"
@@ -278,7 +278,7 @@
       "version": null,
       "metadata": {
         "source": "PacketcraftR project-authored fixture",
-        "reference": "docs/scanner-data-policy.md",
+        "reference": "crates/packetcraftr/data/service-probes.provenance.yaml",
         "license": "AGPL-3.0-only",
         "maintainer": "tyk-swe",
         "updated": "2026-10-09"

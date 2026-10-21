@@ -27,7 +27,7 @@ source:
     copyrightable descriptions or source selection; the project's original
     selection and document remain AGPL-3.0-only. No NVD endorsement,
     vulnerability assertion, or verified software identity is implied. Nmap
-    content remains excluded by docs/scanner-data-policy.md.
+    content remains excluded from this dataset.
 
 transforms:
   - step: "author"

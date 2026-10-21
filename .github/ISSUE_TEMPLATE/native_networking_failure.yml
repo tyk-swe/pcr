@@ -10,8 +10,9 @@ body:
       value: |
         Use this form for failures involving native interfaces, routes, capture,
         Layer 2 injection, raw Layer 3 sockets, libpcap, or Npcap. Sanitize
-        interface data and packet contents. Follow SECURITY.md instead for
-        privilege bypasses, memory-safety issues, or exploitable malformed input.
+        interface data and packet contents. Report privilege bypasses,
+        memory-safety issues, or exploitable malformed input privately to
+        mail@mail.tyk.sh.
 
   - type: checkboxes
     id: preflight

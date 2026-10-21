@@ -91,7 +91,7 @@ class ReleaseAssetTests(unittest.TestCase):
         assets.validate_manifest(assets.MANIFEST)
 
     def test_inventory_shape_is_explicit(self):
-        for value in ([], {}, {'schema': 'packetcraftr.release-assets/v1', 'source_assets': 'README.md'}):
+        for value in ([], {}, {'schema': 'packetcraftr.release-assets/v1', 'source_assets': 'LICENSE'}):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 assets.validate_manifest(value)
 

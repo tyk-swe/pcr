@@ -6,7 +6,6 @@
 .vscode/
 *.swp
 *~
-.claude/settings.local.json
 
 # Files the CI workflows write into the working tree
 linked-libraries.txt

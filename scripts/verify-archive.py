@@ -139,8 +139,7 @@ def verify(root, version, commit, target, variant):
     json.loads(cli('--output', 'json', 'packet', 'build', '--packet-file',
                    'examples/documents/packet-ipv4-udp.json'))
 
-    # Run the commands published in docs/analysis-resources.md from the archive,
-    # and keep their clock and encapsulation evidence equal to the shipped examples.
+    # Keep the archive's clock and encapsulation evidence equal to the shipped examples.
     for capture, example, options in (
         ('clock-regression.pcap', 'output-stats-clock.json',
          ('--table', 'io', '--interval-ms', '1000')),

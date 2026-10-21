@@ -8,9 +8,8 @@ body:
     attributes:
       value: |
         Thanks for helping improve PacketcraftR. Remove secrets, credentials,
-        public targets, and sensitive packet contents before submitting. Use
-        the security policy instead when exploitation or policy bypass may be
-        involved.
+        public targets, and sensitive packet contents before submitting. Report
+        potential exploitation or policy bypass privately to mail@mail.tyk.sh.
 
   - type: checkboxes
     id: preflight

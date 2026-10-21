@@ -16,7 +16,7 @@ source:
   license_rationale: |
     Every entry is authored in this repository. Each pairs a port number with
     the RFC section that states it as the protocol's port and a short
-    project-chosen name for that protocol; the scanner data policy accepts
+    project-chosen name for that protocol. The catalog contains only
     project-authored data and RFC constants with citation. No IANA registry
     text, Nmap data, or other scanner database was copied or consulted to
     build or rank the list, so no third-party terms apply.
@@ -35,6 +35,6 @@ maintenance:
     Entries change only by review against the cited RFC. A change of meaning
     or a new entry bumps `version` here and in the data file; a new kind of
     source (for example a registry export) requires a new license review
-    under docs/scanner-data-policy.md before it is merged.
+    before it is merged.
 
 coverage: []

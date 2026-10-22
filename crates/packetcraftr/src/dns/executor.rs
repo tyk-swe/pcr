@@ -10,9 +10,10 @@ use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
 use crate::Stats;
 use crate::clock::Clock;
-use crate::correlation::{self, Transport as ProbeTransport};
+use crate::engine::correlation::{self, Transport as ProbeTransport};
+use crate::engine::execution::{Executor, ExecutorFault};
 use crate::evidence::ExecutionPermit;
-use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, WorkflowOverrides};
+use crate::exchange::{WorkflowExecutor, WorkflowOverrides};
 use crate::providers::{PacketProviders, TcpProviders};
 use packetcraftr_core::error::BoundaryError;
 
@@ -40,7 +41,7 @@ pub(crate) struct ExchangeEvidence {
     pub(crate) stats: Stats,
 }
 
-impl crate::execution::Receipt for ExchangeEvidence {
+impl crate::engine::execution::Receipt for ExchangeEvidence {
     fn permit(&self) -> ExecutionPermit {
         self.permit
     }
@@ -50,7 +51,7 @@ impl crate::execution::Receipt for ExchangeEvidence {
     }
 }
 
-impl crate::execution::Step for Exchange {
+impl crate::engine::execution::Step for Exchange {
     type Evidence = ExchangeEvidence;
 }
 
@@ -114,7 +115,7 @@ pub(super) fn validate_capture(
     collection.validate().map_err(BoundaryError::from_error)
 }
 
-impl<P: PacketProviders, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
+impl<P: PacketProviders, K: Clock> Executor<Exchange> for WorkflowExecutor<'_, P, K> {
     fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         validate_capture(&exchange.limits, &self.collection)?;
         let max_responses = exchange.limits.evidence.max_frames;
@@ -180,7 +181,7 @@ impl<P: PacketProviders, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P
 }
 
 /// Kernel TCP honors no route override: `Request::validate` refuses them before any query.
-impl<P: TcpProviders, K: Clock> TcpQuerier for ExchangeExecutor<'_, P, K> {
+impl<P: TcpProviders, K: Clock> TcpQuerier for WorkflowExecutor<'_, P, K> {
     fn query(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error> {
         let response = super::tcp::query(
             super::tcp::Request {

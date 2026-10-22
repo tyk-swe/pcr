@@ -22,12 +22,15 @@ pub struct Limits {
     pub max_undecoded: usize,
 }
 
+/// Undecoded frames a workflow's evidence keeps by default.
+pub(crate) const DEFAULT_MAX_UNDECODED_FRAMES: usize = 64;
+
 impl Default for Limits {
     fn default() -> Self {
         Self {
             max_frames: packetcraftr_netio::capture::MAX_CAPTURE_QUEUE_FRAMES,
             max_bytes: packetcraftr_netio::capture::MAX_CAPTURE_QUEUE_BYTES,
-            max_undecoded: crate::scan::DEFAULT_MAX_UNDECODED_FRAMES,
+            max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
         }
     }
 }
@@ -37,7 +40,7 @@ impl Limits {
         &self,
         invalid: impl Fn(&'static str, u64, String) -> E,
     ) -> Result<(), E> {
-        crate::execution::limits::check_limits(
+        crate::engine::execution::limits::check_limits(
             &[
                 (
                     "max_evidence_frames",

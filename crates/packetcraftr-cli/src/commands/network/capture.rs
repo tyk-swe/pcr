@@ -3,6 +3,7 @@
 
 pub(in crate::commands) mod arguments;
 mod files;
+mod frames;
 mod rendering;
 
 mod writer;
@@ -15,7 +16,7 @@ use crate::output::{
 use crate::{
     errors::CliError,
     filtering,
-    rendering::StreamEncoder,
+    invocation::StreamEncoder,
     system::{Runtime, client, resolve},
 };
 use packetcraftr_core::{capture_file, error::Kind};
@@ -26,21 +27,14 @@ use std::{
 };
 
 use self::files::Files;
+use self::frames::{Decoding, Destinations};
 use crate::command_options::Compression;
 use crate::output;
-use crate::rendering::{FieldTree, render_frame_text, render_frame_tree, write_hex_line};
-use packetcraftr::capture::{self as workflow, Control, Event, Source};
+use crate::rendering::FieldTree;
+use packetcraftr::capture::{self as workflow, Control, Event};
 use packetcraftr::policy::{CaptureBudget, Policy};
-use packetcraftr_core::filter::{FrameDecoder, FrameSelector};
-use packetcraftr_core::{
-    self as core,
-    capture_file::compression,
-    decode::DecodedPacket,
-    error::{BoundaryError, Classified},
-    frame::Frame,
-    registry::Registry,
-};
-use std::io;
+use packetcraftr_core::error::Classified;
+use packetcraftr_core::filter::FrameSelector;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 impl crate::commands::Spec for Args {
@@ -256,59 +250,6 @@ fn validate_output(args: &Args, format: Format) -> Result<Compression, CliError>
     Ok(compression)
 }
 
-/// Selection decodes a kept frame once and parks it so emission republishes
-/// the same dissection; decoded state never outlives one frame.
-struct Decoding {
-    frames: FrameDecoder,
-    parked: Option<(u64, DecodedPacket)>,
-    /// Set by `--tree`; text frames then list each layer's fields.
-    tree: Option<FieldTree>,
-}
-
-impl Decoding {
-    fn prepare(
-        dissect: bool,
-        projector: bool,
-        filter: Option<&str>,
-        registry: &Arc<Registry>,
-        snap_length: usize,
-    ) -> Result<Option<Self>, CliError> {
-        if !dissect && !projector {
-            return Ok(None);
-        }
-        Ok(Some(Self {
-            frames: filtering::frame_decoder(registry, filter, snap_length)?,
-            parked: None,
-            tree: None,
-        }))
-    }
-
-    fn select(&mut self, source_frame: u64, frame: &Frame) -> Result<bool, CliError> {
-        let Some(decoded) = self
-            .frames
-            .decode_selected(source_frame, frame)
-            .map_err(|error| filtering::frame_error(source_frame, error))?
-        else {
-            return Ok(false);
-        };
-        self.parked = Some((source_frame, decoded));
-        Ok(true)
-    }
-
-    fn take_or_decode(
-        &mut self,
-        source_frame: u64,
-        frame: &Frame,
-    ) -> Result<DecodedPacket, CliError> {
-        if let Some((number, decoded)) = self.parked.take()
-            && number == source_frame
-        {
-            return Ok(decoded);
-        }
-        self.frames.decode(frame).map_err(CliError::classified)
-    }
-}
-
 struct Output<'a> {
     format: Format,
     compression: Compression,
@@ -318,104 +259,6 @@ struct Output<'a> {
     files: Option<Files>,
     stream: &'a StreamEncoder,
 }
-struct Destinations {
-    files: Option<Files>,
-    writer: Option<capture_file::Writer<compression::Output<io::Stdout>>>,
-    projector: Option<crate::rendering::Projector>,
-    format: Format,
-    compression: Compression,
-    limits: capture_file::Limits,
-}
-
-impl Destinations {
-    fn start(&mut self, sources: Vec<Source>) -> Result<(), BoundaryError> {
-        if let Some(files) = &mut self.files {
-            files
-                .initialize(sources)
-                .map_err(BoundaryError::from_error)?;
-        } else if matches!(self.format, Format::Pcap | Format::PcapNg) {
-            let destination = compression::Output::new(io::stdout(), self.compression.format())
-                .map_err(BoundaryError::from_error)?;
-            self.writer = Some(
-                writer::initialize(
-                    destination,
-                    if self.format == Format::Pcap {
-                        capture_file::Format::Pcap
-                    } else {
-                        capture_file::Format::PcapNg
-                    },
-                    &sources,
-                    self.limits,
-                )
-                .map_err(BoundaryError::from_error)?,
-            );
-        }
-        Ok(())
-    }
-
-    fn frame(
-        &mut self,
-        invocation: &crate::invocation::Invocation,
-        decoding: Option<&Mutex<Decoding>>,
-        source_frame: u64,
-        elapsed: Duration,
-        frame: Frame,
-    ) -> Result<Control, BoundaryError> {
-        let control = if let Some(files) = &mut self.files {
-            files
-                .write(&frame, source_frame, elapsed)
-                .map_err(BoundaryError::from_error)?
-        } else {
-            Control::Continue
-        };
-        if control == Control::StopBefore {
-            return Ok(control);
-        }
-        let mut decoding = decoding.map(lock);
-        emit_frame(
-            invocation,
-            decoding.as_deref_mut(),
-            self.projector.as_mut(),
-            &mut self.writer,
-            source_frame,
-            frame,
-        )
-        .map_err(CliError::into_boundary_error)?;
-        Ok(control)
-    }
-
-    /// Finalizes every initialized destination even when capture or a consumer
-    /// failed; finalization failures chain behind `error`.
-    fn finish(
-        &mut self,
-        mut error: Option<CliError>,
-    ) -> (Option<CliError>, Option<output::capture::Files>) {
-        let file_finish = self
-            .files
-            .as_mut()
-            .map(Files::finish)
-            .transpose()
-            .map_err(CliError::classified);
-        let binary_finish = self
-            .writer
-            .take()
-            .map(|writer| writer.into_inner().finish())
-            .transpose()
-            .map_err(CliError::classified);
-        let files = self.files.as_ref().map(Files::report);
-        for failure in [file_finish.err(), binary_finish.err()]
-            .into_iter()
-            .flatten()
-        {
-            error = Some(match error.take() {
-                Some(primary) => primary.with_secondary("output finalization", failure),
-                None => failure,
-            });
-        }
-        (error, files)
-    }
-}
-
 fn file_limits(policy: &Policy) -> capture_file::Limits {
     let budget = CaptureBudget::new(policy);
     capture_file::Limits {
@@ -530,85 +373,4 @@ fn drive<P: packetcraftr::CaptureProviders>(
 /// A panic in the selector or sink leaves the state as it was, which finalization still needs.
 fn lock<T>(state: &Mutex<T>) -> MutexGuard<'_, T> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-fn emit_frame(
-    invocation: &crate::invocation::Invocation,
-    decoding: Option<&mut Decoding>,
-    projector: Option<&mut crate::rendering::Projector>,
-    writer: &mut Option<capture_file::Writer<compression::Output<io::Stdout>>>,
-    source_frame: u64,
-    frame: Frame,
-) -> Result<(), CliError> {
-    let stream = &invocation.output;
-    let format = invocation.format;
-    if let Some(decoding) = decoding {
-        let decoded = decoding.take_or_decode(source_frame, &frame)?;
-        let tree = decoding.tree.as_mut();
-        if let Some(projector) = projector {
-            let values = projector
-                .projection
-                .values(
-                    &core::filter::Context::frame(&decoded, source_frame),
-                    projector.remaining(),
-                )
-                .map_err(CliError::classified)?;
-            return projector.emit(source_frame, values, stream);
-        }
-        return match format {
-            Format::Text => {
-                let stack = output::frame::Stack::from(&decoded);
-                let frame =
-                    output::frame::Captured::try_from(frame).map_err(CliError::classified)?;
-                let source_frame = source_frame.try_into().map_err(CliError::classified)?;
-                match tree {
-                    Some(tree) => {
-                        render_frame_tree(invocation, source_frame, &frame, Some(&stack), tree)
-                    }
-                    None => render_frame_text(
-                        invocation,
-                        source_frame,
-                        &frame,
-                        Some(&stack),
-                        stream.presentation(),
-                    ),
-                }
-            }
-            Format::Ndjson => output::read::Frame::try_from((source_frame, frame, &decoded))
-                .map_err(CliError::classified)
-                .and_then(|record| stream.emit_data(record, Vec::new()).map_err(Into::into)),
-            Format::Json | Format::Hex | Format::Pcap | Format::PcapNg => Err(CliError::new(
-                packetcraftr_core::error::Kind::Internal,
-                "decoded output requires text or NDJSON",
-            )),
-            other => other.unreachable(),
-        };
-    }
-    match format {
-        Format::Text => output::frame::Captured::try_from(frame)
-            .map_err(CliError::classified)
-            .and_then(|frame| {
-                let source_frame = source_frame.try_into().map_err(CliError::classified)?;
-                render_frame_text(
-                    invocation,
-                    source_frame,
-                    &frame,
-                    None,
-                    stream.presentation(),
-                )
-            }),
-        Format::Hex => output::frame::Captured::try_from(frame)
-            .map_err(CliError::classified)
-            .and_then(|frame| write_hex_line(frame.bytes())),
-        Format::Ndjson => output::read::Frame::try_from((source_frame, frame))
-            .map_err(CliError::classified)
-            .and_then(|record| stream.emit_data(record, Vec::new()).map_err(Into::into)),
-        Format::Json => Ok(()),
-        Format::Pcap | Format::PcapNg => writer::write_frame(
-            writer.as_mut().expect("writer initialized before frames"),
-            frame,
-        )
-        .map_err(CliError::classified),
-        other => other.unreachable(),
-    }
 }

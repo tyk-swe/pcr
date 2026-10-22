@@ -54,8 +54,8 @@ pub(super) struct Best {
     pub(super) responder: IpAddr,
 }
 impl Best {
-    pub(super) fn key(&self) -> crate::execution::evidence::CandidateKey<'_, IpAddr> {
-        crate::execution::evidence::CandidateKey {
+    pub(super) fn key(&self) -> crate::engine::execution::evidence::CandidateKey<'_, IpAddr> {
+        crate::engine::execution::evidence::CandidateKey {
             rank: self.rank,
             tie_break: self.responder,
             latency: self.response.latency,

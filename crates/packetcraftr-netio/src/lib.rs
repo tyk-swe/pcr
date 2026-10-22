@@ -5,6 +5,22 @@
 //!
 //! All platform-specific and potentially unsafe I/O is contained here.
 //!
+//! # Layers
+//!
+//! Modules depend only on their own layer or a lower one:
+//!
+//! | Layer | Modules |
+//! | --- | --- |
+//! | 1. Primitives | `deadline`, `link`, `bounded` |
+//! | 2. Infrastructure | `unsupported`, `resources`, `workers` |
+//! | 3. Provider contracts | `error`, `interface`, `route`, `capture`, `transmit`, `tcp`, `udp`, `tls`, `resolution` |
+//! | 4. Native backends | `platform` |
+//!
+//! The one sanctioned upward edge is dispatch: a contract's system provider
+//! calls its `platform` implementation, which in turn returns that contract's
+//! types. `platform` is the only module that may contain `unsafe` code; every
+//! other module forbids it.
+//!
 //! Unit tests stay beside the implementations they exercise.
 
 #[forbid(unsafe_code)]

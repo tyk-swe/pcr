@@ -7,7 +7,6 @@
 mod capture;
 mod common;
 mod dispatch;
-mod execution_context;
 #[cfg(native_route)]
 mod interface;
 #[cfg(native_route)]
@@ -28,4 +27,3 @@ pub(crate) use dispatch::{
 };
 #[cfg(native_layer2)]
 pub(crate) use dispatch::{open_capture, timestamp_types};
-pub(crate) use execution_context::{ExecutionContext, current as execution_context};

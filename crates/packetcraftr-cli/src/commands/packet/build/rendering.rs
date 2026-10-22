@@ -15,7 +15,7 @@ pub(super) fn render_packet(
     invocation: &crate::invocation::Invocation,
     built: core::build::BuiltPacket,
     format: Format,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     match format {
         Format::Text => {

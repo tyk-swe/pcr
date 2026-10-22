@@ -51,7 +51,10 @@ pub(crate) struct Args {
     /// dns.id, dhcpv4.transaction_id, and vxlan.vni and geneve.vni. Header
     /// edits apply first when combined with them; conflicts with --rules-file.
     #[arg(long = "set", value_name = "FIELD=VALUE", value_parser = assignment)]
-    #[allow(rustdoc::invalid_html_tags)]
+    #[allow(
+        rustdoc::invalid_html_tags,
+        reason = "clap prints this doc comment verbatim as --help text; it is not rustdoc markup"
+    )]
     pub(crate) sets: Vec<FieldAssignment>,
     /// Remap IP addresses, OLD=NEW; repeatable. Each side is an address or an
     /// equal-length CIDR prefix whose host bits carry over, so
@@ -103,7 +106,10 @@ pub(crate) struct Args {
     pub(crate) destination_port: Option<u16>,
     /// Replace the outer VLAN stack; repeat VID or TPID:VID[:PRIORITY[:DEI]].
     #[arg(long = "vlan", value_parser = vlan, conflicts_with = "strip_vlans")]
-    #[allow(rustdoc::broken_intra_doc_links)]
+    #[allow(
+        rustdoc::broken_intra_doc_links,
+        reason = "clap prints this doc comment verbatim as --help text; it is not rustdoc markup"
+    )]
     pub(crate) vlans: Vec<VlanRewrite>,
     /// Remove the outer VLAN stack.
     #[arg(long)]

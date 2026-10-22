@@ -1,0 +1,141 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use std::borrow::Cow;
+use std::net::IpAddr;
+
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::packet::Packet;
+use packetcraftr_netio::Error as LiveIoError;
+
+use crate::Client;
+use crate::Error;
+use crate::clock::Clock;
+use crate::providers::TransmitProviders;
+use crate::route::{Error as RouteError, Interface, Options, Plan, plan as plan_route};
+
+/// The boundary itself is expired: no time remains once nothing is left.
+#[must_use]
+pub(crate) fn expired(deadline: &Deadline) -> bool {
+    !matches!(deadline.remaining(), Ok(remaining) if !remaining.is_zero())
+}
+
+pub(crate) fn ensure_preparation_deadline(deadline: &Deadline) -> Result<(), Error> {
+    if expired(deadline) {
+        return Err(LiveIoError::DeadlineExceeded {
+            operation: "preparing the exchange",
+        }
+        .into());
+    }
+    Ok(())
+}
+
+/// Where a passive route lookup looks, and the deadline it runs under.
+pub(crate) struct RouteLookup<'a, R> {
+    pub(crate) routes: &'a R,
+    /// The interface identities already resolved for this client or operation.
+    pub(crate) interfaces: &'a crate::route::ResolvedInterface,
+    pub(crate) deadline: &'a Deadline,
+}
+
+impl<P: TransmitProviders, K: Clock> Client<P, K> {
+    /// Passive dry planning: route, source, and interface lookup only.
+    pub fn plan(
+        &self,
+        packet: &Packet,
+        destination: Option<IpAddr>,
+        options: &Options,
+        deadline: &Deadline,
+    ) -> Result<Plan, Error> {
+        self.authorize_and_plan(
+            packet,
+            destination,
+            options,
+            RouteLookup {
+                routes: self.providers.route_provider(),
+                interfaces: &self.interfaces,
+                deadline,
+            },
+            || Ok(()),
+        )
+    }
+
+    /// Authorizes `packet` and `destination`, calls `before_lookup`, then
+    /// plans the route through `lookup` and authorizes what the plan selected.
+    pub(crate) fn authorize_and_plan<R: packetcraftr_netio::route::Provider>(
+        &self,
+        packet: &Packet,
+        destination: Option<IpAddr>,
+        options: &Options,
+        lookup: RouteLookup<'_, R>,
+        before_lookup: impl FnOnce() -> Result<(), Error>,
+    ) -> Result<Plan, Error> {
+        let RouteLookup {
+            routes,
+            interfaces,
+            deadline,
+        } = lookup;
+        self.policy.validate()?;
+        if let Some(destination) = destination {
+            self.policy.authorize_destination(destination)?;
+        }
+        // Authorize every declared outer and SRH destination before a
+        // provider can observe one. The completed plan is checked again below
+        // so provider-derived selections cannot bypass policy either.
+        self.policy.authorize_packet_destinations(packet)?;
+        before_lookup()?;
+        let options = self.resolve_interface(options, deadline, interfaces)?;
+        let plan =
+            plan_route(packet, destination, &options, routes, deadline).inspect_err(|error| {
+                self.forget_rejected_interface(&options, error, deadline, interfaces);
+            })?;
+        self.policy.authorize_packet_sources(packet, &plan)?;
+        for destination in &plan.visited_destinations {
+            self.policy.authorize_destination(*destination)?;
+        }
+        Ok(plan)
+    }
+
+    /// A rejected route may mean the memoized identity no longer names a
+    /// device; an interrupted lookup says nothing about the interface.
+    fn forget_rejected_interface(
+        &self,
+        options: &Options,
+        error: &RouteError,
+        deadline: &Deadline,
+        interfaces: &crate::route::ResolvedInterface,
+    ) {
+        let rejected = matches!(
+            error,
+            RouteError::RouteLookup { .. }
+                | RouteError::InterfaceLookup { .. }
+                | RouteError::InterfaceMismatch { .. }
+        );
+        if rejected
+            && deadline.enforce().is_ok()
+            && let Some(id) = options.interface.as_ref().and_then(Interface::id)
+        {
+            interfaces.forget(id);
+        }
+    }
+
+    fn resolve_interface<'o>(
+        &self,
+        options: &'o Options,
+        deadline: &Deadline,
+        interfaces: &crate::route::ResolvedInterface,
+    ) -> Result<Cow<'o, Options>, Error> {
+        let Some(selector) = options
+            .interface
+            .as_ref()
+            .filter(|selector| selector.id().is_none())
+        else {
+            return Ok(Cow::Borrowed(options));
+        };
+        let id = interfaces.resolve(selector, self.providers.interface_provider(), deadline)?;
+        Ok(Cow::Owned(Options {
+            interface: Some(id.into()),
+            ..options.clone()
+        }))
+    }
+}

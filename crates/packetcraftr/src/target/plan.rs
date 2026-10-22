@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Target planning: a passive preview of the addresses a selection admits.
+
 use std::collections::HashSet;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -10,12 +12,10 @@ use serde::Serialize;
 use packetcraftr_core::budget::Cancelled;
 use packetcraftr_core::error::{BoundaryError, Classification, Classified, Coordinate, Kind};
 
-use super::{
-    DeclaredTargets, Family, FamilyGate, SelectedAddress, Selection, SelectionError, Specification,
-    Target, admit_selection, wire_limits,
-};
+use super::{Family, SelectedAddress, Selection, SelectionError, Specification, Target};
 use crate::Client;
 use crate::clock::Clock;
+use crate::engine::admission::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
 use crate::providers::TargetProviders;
 
 #[derive(Clone, Debug, Serialize)]
@@ -111,9 +111,9 @@ impl Classified for Error {
     }
 }
 
-fn selection_error(step: u64, failure: crate::execution::Failure) -> Error {
+fn selection_error(step: u64, failure: crate::engine::execution::Failure) -> Error {
     match failure {
-        crate::execution::Failure::InvalidLimit {
+        crate::engine::execution::Failure::InvalidLimit {
             field,
             value,
             reason,
@@ -122,18 +122,18 @@ fn selection_error(step: u64, failure: crate::execution::Failure) -> Error {
             value,
             reason,
         },
-        crate::execution::Failure::Authorization(source) => Error::Authorization(source),
-        crate::execution::Failure::DurationLimit(source) => {
+        crate::engine::execution::Failure::Authorization(source) => Error::Authorization(source),
+        crate::engine::execution::Failure::DurationLimit(source) => {
             let _step = step;
 
             source.into()
         }
-        crate::execution::Failure::Interrupted(source) => {
+        crate::engine::execution::Failure::Interrupted(source) => {
             let _step = step;
 
             source.into()
         }
-        crate::execution::Failure::Clock(_source) => {
+        crate::engine::execution::Failure::Clock(_source) => {
             let _step = step;
 
             BoundaryError::internal_execution(
@@ -143,12 +143,12 @@ fn selection_error(step: u64, failure: crate::execution::Failure) -> Error {
             )
             .into()
         }
-        crate::execution::Failure::Execution(source) => {
+        crate::engine::execution::Failure::Execution(source) => {
             let _step = step;
 
             Error::Authorization(source)
         }
-        crate::execution::Failure::InvalidEvidence(_source) => {
+        crate::engine::execution::Failure::InvalidEvidence(_source) => {
             let _step = step;
 
             BoundaryError::internal_execution(
@@ -158,7 +158,7 @@ fn selection_error(step: u64, failure: crate::execution::Failure) -> Error {
             )
             .into()
         }
-        crate::execution::Failure::StatsOverflow(_source) => {
+        crate::engine::execution::Failure::StatsOverflow(_source) => {
             let _step = step;
 
             BoundaryError::internal_execution(
@@ -211,6 +211,7 @@ impl<P: TargetProviders, K: Clock> Client<P, K> {
                     family: family.label(),
                 }),
                 max_targets: request.max_targets,
+                resolved: None,
             },
             Error::TargetSelection,
             |_| Ok(()),

@@ -13,10 +13,11 @@ use super::super::error::probe_error;
 use super::super::plan::{adaptive_worst_case_duration, probe_count, worst_case_duration};
 use super::super::{Error, Request, Stage};
 use super::{execution, invalid};
-use crate::execution::rate_delay;
+use crate::engine::admission::{DeclaredTargets, FamilyGate, admit_selection};
+use crate::engine::execution::rate_delay;
 use crate::policy::{Authorizer, Operation, SocketLimits, SocketOperation};
 use crate::probe;
-use crate::target::{DeclaredTargets, FamilyGate, ResolveTarget, SelectedAddress, admit_selection};
+use crate::target::{ResolveTarget, SelectedAddress};
 
 pub(super) struct Planned {
     /// Discovery ports, probed on every target before the scan stage.
@@ -67,6 +68,7 @@ pub(super) fn planned<A: Authorizer + ResolveTarget>(
             selection: &request.targets,
             family: FamilyGate::new(request.address_family, Error::family),
             max_targets: request.limits.max_targets,
+            resolved: None,
         },
         Error::TargetSelection,
         |selected| {

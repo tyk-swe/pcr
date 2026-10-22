@@ -26,7 +26,7 @@ pub(super) fn render_frame(
 pub(super) fn render_message(
     invocation: &crate::invocation::Invocation,
     message: &wire::Message,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let frames = comma_separated(message.sources.iter().map(|source| source.number));
     write_stdout_line(

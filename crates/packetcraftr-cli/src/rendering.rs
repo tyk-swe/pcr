@@ -42,11 +42,11 @@ pub(crate) use machine::{
     emit_json, emit_published,
 };
 
-pub(crate) use ndjson::{OUTPUT_TIMEOUT_MS, stdout_stream, write_unattributed_error};
+pub(crate) use ndjson::{stdout_stream, write_unattributed_error};
 
 pub(crate) use projection::{Projector, missing_fields_error};
 pub(crate) use retained::{Retained, omitted_diagnostic};
 pub(crate) use stdout::{write_hex_line, write_raw};
 pub(crate) use style::terminal_document;
 
-pub(crate) use presentation::{Presentation, StreamEncoder, table_row};
+pub(crate) use presentation::table_row;

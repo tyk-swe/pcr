@@ -7,9 +7,8 @@ use self::arguments::Args;
 use crate::output::{self, contract::Format};
 use crate::{
     errors::CliError,
-    rendering::{
-        StreamEncoder, emit_aggregate, write_capture_file, write_hex_line, write_stdout_line,
-    },
+    invocation::StreamEncoder,
+    rendering::{emit_aggregate, write_capture_file, write_hex_line, write_stdout_line},
 };
 use packetcraftr_core::{self as core, frame::Frame};
 

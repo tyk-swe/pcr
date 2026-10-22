@@ -7,6 +7,7 @@ use packetcraftr_core::error::Coordinate;
 use packetcraftr_core::error::Kind;
 
 use crate::output;
+use crate::output::envelope::source_causes;
 
 #[derive(Debug)]
 pub(crate) struct CliError {
@@ -141,12 +142,6 @@ impl From<output::contract::Error> for CliError {
 }
 
 /// The source's text, then its distinct sources, for errors whose message omits the source.
-pub(crate) fn source_causes(source: &(impl std::error::Error + ?Sized)) -> Vec<String> {
-    std::iter::once(source.to_string())
-        .chain(packetcraftr_core::error::source_chain(source))
-        .collect()
-}
-
 const fn fallback_code(kind: Kind) -> &'static str {
     match kind {
         Kind::Usage => "cli.error",

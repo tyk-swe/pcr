@@ -13,17 +13,9 @@ use packetcraftr_core::packet::Packet;
 use super::Error;
 use super::Request;
 use super::error::probe_error;
-use crate::execution::rate_delay;
-use crate::probe::{self, Batch};
+use crate::engine::execution::rate_delay;
+use crate::probe::{self, Batch, Stage};
 use packetcraftr_core::error::BoundaryError;
-
-/// The workflow stage a probe belongs to. Discovery probes come first and
-/// share one sequence space with the scan probes after them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Stage {
-    Discovery,
-    Scan,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Probe {

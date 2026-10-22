@@ -10,7 +10,7 @@ mod pipelined;
 use self::adaptive_execution::{admit_adaptive, execute_adaptive};
 use self::approval::approve;
 use self::neighbors::{ReachOutcome, discover_neighbors, reach_next_hop};
-use self::pacing::{Owed, settle};
+use self::pacing::Owed;
 use self::pipelined::{StagePlan, add_stats, admit_pipelined, execute};
 
 pub(crate) use self::adaptive_execution::adaptive_reservation;
@@ -22,7 +22,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
-use crate::execution::publisher;
+use crate::engine::execution::publisher;
 use crate::policy::Authorizer;
 use crate::probe::runner::BatchEvidence;
 use crate::providers::{PacketProviders, TargetProviders};
@@ -36,9 +36,10 @@ use super::discovery::{self, Composer};
 use super::error::{duration_limit, probe_error};
 use super::evidence::ProbeClassifier;
 use super::executor::{AdaptiveAdmission, ClientExecutor, Pipelined};
-use super::plan::{Stage, probe_count};
+use super::plan::probe_count;
 use super::report::RttAccumulator;
 use super::{ClassificationCounts, Event, Report, Request, Scheduling};
+use crate::probe::Stage;
 use crate::probe::enforce_deadline;
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
@@ -50,7 +51,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::execution::Operation::new(self, request.limits.max_duration);
+        let operation = crate::engine::execution::Operation::new(self, request.limits.max_duration);
         self.scan_in(request, sink, &operation)
     }
 
@@ -58,13 +59,14 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         &self,
         request: Request,
         sink: S,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
     {
         let policy = operation.policy(&self.policy);
-        let mut admission = crate::execution::Admission::new(&policy, self.providers.resolver());
+        let mut admission =
+            crate::engine::admission::Admission::new(&policy, self.providers.resolver());
         let publish = publisher(
             &operation.runtime,
             sink,
@@ -83,42 +85,53 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     }
 }
 
-#[allow(clippy::large_enum_variant)]
+/// What sends one raw scan's probes and neighbor requests: the request, its
+/// executor, the operation's clock and deadline, and the rate pause its
+/// transmissions still owe.
+struct Prober<'a, E, C> {
+    request: &'a Request,
+    executor: &'a mut E,
+    clock: &'a mut C,
+    deadline: &'a mut Deadline,
+    /// Transmissions whose rate pause is still owed, waited out just before
+    /// the next one so the operation's last transmission leaves no pause.
+    owed: Owed,
+}
+
 enum Scheduler {
     Fixed {
         peak: usize,
     },
-    Adaptive {
-        controller: Controller,
-        reservation: usize,
-        admissions: [AdaptiveAdmission; 2],
-    },
+    /// Boxed: the controller's state dwarfs the fixed peak counter.
+    Adaptive(Box<AdaptiveScheduler>),
+}
+
+struct AdaptiveScheduler {
+    controller: Controller,
+    reservation: usize,
+    /// The discovery and scan stages' admissions, in that order.
+    admissions: [AdaptiveAdmission; 2],
 }
 
 impl Scheduler {
     fn controller(&self) -> Option<&Controller> {
         match self {
             Self::Fixed { .. } => None,
-            Self::Adaptive { controller, .. } => Some(controller),
+            Self::Adaptive(adaptive) => Some(&adaptive.controller),
         }
     }
 
     fn controller_mut(&mut self) -> Option<&mut Controller> {
         match self {
             Self::Fixed { .. } => None,
-            Self::Adaptive { controller, .. } => Some(controller),
+            Self::Adaptive(adaptive) => Some(&mut adaptive.controller),
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn execute_stage<E, C, F>(
         &mut self,
-        request: &Request,
-        executor: &mut E,
-        clock: &mut C,
-        deadline: &mut Deadline,
+        prober: &mut Prober<'_, E, C>,
         evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
-        owed: &mut Owed,
         plan: &StagePlan<'_>,
         preceding: &crate::Stats,
     ) -> Result<crate::Stats, Error>
@@ -128,33 +141,25 @@ impl Scheduler {
         F: FnMut(Event, &Deadline) -> Result<(), Error>,
     {
         match self {
-            Self::Fixed { peak } => execute(
-                request, executor, clock, deadline, evidence, plan, preceding, peak,
-            ),
-            Self::Adaptive {
-                controller,
-                reservation,
-                admissions,
-            } => {
+            Self::Fixed { peak } => execute(prober, evidence, plan, preceding, peak),
+            Self::Adaptive(adaptive) => {
+                let AdaptiveScheduler {
+                    controller,
+                    reservation,
+                    admissions,
+                } = &mut **adaptive;
                 let admission = match plan.stage {
                     Stage::Discovery => &admissions[0],
                     Stage::Scan => &admissions[1],
                 };
                 execute_adaptive(
-                    request,
-                    executor,
-                    clock,
-                    deadline,
+                    prober,
                     evidence,
+                    plan,
+                    preceding,
                     controller,
-                    plan.stage,
-                    plan.targets,
-                    plan.endpoints,
-                    plan.first_sequence,
-                    owed,
                     *reservation,
                     admission,
-                    preceding,
                 )
             }
         }
@@ -165,7 +170,7 @@ impl Scheduler {
             Self::Fixed { peak } => {
                 super::adaptive::fixed_scheduling(Ceilings::default(), peak, retries_started)
             }
-            Self::Adaptive { controller, .. } => controller.finish(Ceilings::default()),
+            Self::Adaptive(adaptive) => adaptive.controller.finish(Ceilings::default()),
         }
     }
 }
@@ -202,11 +207,11 @@ where
             for target in &approved.targets {
                 controller.host_index(target);
             }
-            Scheduler::Adaptive {
+            Scheduler::Adaptive(Box::new(AdaptiveScheduler {
                 controller,
                 reservation,
                 admissions,
-            }
+            }))
         }
         None => {
             if request.max_in_flight > 1 || request.has_ip_probes() {
@@ -273,22 +278,22 @@ where
     }
     let mut composer = Composer::new(&approved.targets, options.mode, options.unresponsive);
     let mut stats = crate::Stats::default();
-    // Transmissions whose rate pause is still owed, waited out just before
-    // the next one so the operation's last transmission leaves no pause.
-    let mut owed = Owed::default();
+    let mut prober = Prober {
+        request,
+        executor,
+        clock,
+        deadline,
+        owed: Owed::default(),
+    };
     let mut scan_sequence = 0;
     if options.runs() {
         let mut sendable = vec![true; approved.targets.len()];
         if options.neighbor {
             sendable = discover_neighbors(
-                request,
+                &mut prober,
                 &approved.targets,
-                executor,
-                clock,
-                deadline,
                 &mut composer,
                 &mut stats,
-                &mut owed,
                 scheduler.controller_mut(),
             )?;
         }
@@ -298,13 +303,9 @@ where
                     continue;
                 }
                 match reach_next_hop(
-                    request,
-                    executor,
-                    clock,
-                    deadline,
+                    &mut prober,
                     target,
                     &mut stats,
-                    &mut owed,
                     0,
                     scheduler.controller_mut(),
                 )? {
@@ -358,24 +359,15 @@ where
             request.collection.capture.snap_length,
         );
         if !probe_targets.is_empty() && !options.probes.is_empty() {
-            settle(request, clock, deadline, &mut owed, &mut stats)?;
+            prober.settle(&mut stats)?;
         }
-        let discovered = scheduler.execute_stage(
-            request,
-            executor,
-            clock,
-            deadline,
-            &mut evidence,
-            &mut owed,
-            &discovery,
-            &stats,
-        )?;
+        let discovered = scheduler.execute_stage(&mut prober, &mut evidence, &discovery, &stats)?;
         add_stats(&mut stats, &discovered, scan_sequence)?;
         composer.observe_all(evidence.classifier_mut().discovery.drain(..))?;
         if discovered.packets_attempted > 0 {
             // When the stage's last probe left is not known on the operation's
             // clock, so its whole pause stays owed.
-            owed.owe(1, None);
+            prober.owed.owe(1, None);
         }
     }
     if let Some(controller) = scheduler.controller() {
@@ -390,13 +382,9 @@ where
             // Discovery answers for a target it reached; without it, a
             // scan target no frame can reach fails the scan.
             match reach_next_hop(
-                request,
-                executor,
-                clock,
-                deadline,
+                &mut prober,
                 target,
                 &mut stats,
-                &mut owed,
                 scan_sequence,
                 scheduler.controller_mut(),
             )? {
@@ -424,18 +412,9 @@ where
         request.collection.capture.snap_length,
     );
     if !scanned.is_empty() && !approved.endpoints.is_empty() {
-        settle(request, clock, deadline, &mut owed, &mut stats)?;
+        prober.settle(&mut stats)?;
     }
-    let scanned = scheduler.execute_stage(
-        request,
-        executor,
-        clock,
-        deadline,
-        &mut evidence,
-        &mut owed,
-        &scan,
-        &stats,
-    )?;
+    let scanned = scheduler.execute_stage(&mut prober, &mut evidence, &scan, &stats)?;
     add_stats(
         &mut stats,
         &scanned,

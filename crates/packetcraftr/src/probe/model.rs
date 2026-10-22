@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use crate::correlation::Transport;
+use crate::engine::correlation::Transport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Endpoint {
@@ -110,4 +110,12 @@ impl std::fmt::Display for Status {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.as_str())
     }
+}
+
+/// The workflow stage a probe belongs to. Discovery probes come first and
+/// share one sequence space with the scan probes after them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Stage {
+    Discovery,
+    Scan,
 }

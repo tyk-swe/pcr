@@ -39,7 +39,7 @@ impl PlannedProbe {
             IpAddr::V4(destination) => packet.push(Ipv4 {
                 destination,
                 ttl: 64,
-                identification: crate::correlation::nonzero_ipv4_identification(u64::from(
+                identification: crate::engine::correlation::nonzero_ipv4_identification(u64::from(
                     self.identity,
                 )),
                 dont_fragment: true,
@@ -53,7 +53,7 @@ impl PlannedProbe {
         };
         if self.kind == Some(Probe::Echo) {
             let mut body =
-                crate::correlation::icmp_identity(0x4f, u64::from(self.identity)).to_vec();
+                crate::engine::correlation::icmp_identity(0x4f, u64::from(self.identity)).to_vec();
             body.extend_from_slice(&self.identity.to_be_bytes());
             match self.address {
                 IpAddr::V4(_) => packet.push(Icmpv4 {
@@ -121,7 +121,7 @@ impl PlannedProbe {
         } else {
             BuiltinProtocol::Tcp
         };
-        if !crate::correlation::packet_shape_matches(sent, &[network, transport]) {
+        if !crate::engine::correlation::packet_shape_matches(sent, &[network, transport]) {
             return false;
         }
         let expected = self.packet();

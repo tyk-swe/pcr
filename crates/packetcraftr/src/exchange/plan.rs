@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{Collection, Error, Request, Window};
-use crate::preparation::{Admitted, PreparedPacket};
+use crate::engine::preparation::{Admitted, PreparedPacket};
 use crate::route::CachedProvider;
 use crate::{Client, clock::Clock, providers::PacketProviders};
 
@@ -10,7 +10,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub(super) fn prepare_exchange(
         &self,
         request: Request,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
     ) -> Result<Prepared, Error> {
         self.check_cancelled()?;
         request.validate()?;

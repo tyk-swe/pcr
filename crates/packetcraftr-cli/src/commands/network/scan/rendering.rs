@@ -18,7 +18,7 @@ use crate::rendering::{
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
     published: output::envelope::Published<output::scan::Report>,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
         result,
@@ -275,7 +275,7 @@ pub(super) fn sctp_scan_text(sctp_scan: output::scan::plan::SctpScan) -> String 
 
 fn visible_probes(
     probes: &[output::scan::Probe],
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> impl Iterator<Item = &output::scan::Probe> {
     probes.iter().filter(move |evidence| {
         presentation.verbose
@@ -292,7 +292,7 @@ fn render_probe_text(
     invocation: &crate::invocation::Invocation,
     lead: &str,
     evidence: &output::scan::Probe,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     write_stdout_line(
         invocation,
@@ -427,7 +427,7 @@ fn listed<T: std::fmt::Display>(values: &[T]) -> String {
 pub(super) fn render_connect_text(
     invocation: &crate::invocation::Invocation,
     report: &output::scan::connect::Report,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     render_plan_text(invocation, &report.summary.plan)?;
     for endpoint in &report.endpoints {

@@ -22,13 +22,15 @@ use packetcraftr_core::error::{BoundaryError, Kind};
 
 use self::arguments::Args;
 use crate::command_options::{InterfaceSelector, OfflineCaptureLimitsArgs};
-use crate::errors::{CliError, source_causes};
+use crate::errors::CliError;
 use crate::filtering;
 use crate::input::open_capture_file;
+use crate::invocation::StreamEncoder;
+use crate::output::envelope::source_causes;
 use crate::output::{self, contract::Format, stream::EncodeError};
 use crate::rendering::{
-    HumanWriteError, SourceCaptureWriter, StreamEncoder, emit_aggregate_with_stats,
-    finish_compressed_output, stream_capture_error, write_stdout_line_with_interrupt,
+    HumanWriteError, SourceCaptureWriter, emit_aggregate_with_stats, finish_compressed_output,
+    stream_capture_error, write_stdout_line_with_interrupt,
 };
 use conversion::{max_gap, timing};
 
@@ -239,7 +241,7 @@ fn replay_text<P: PacketProviders, K: Clock, R: Read>(
     client: &packetcraftr::Client<P, K>,
     request: Request<R>,
     filtered: bool,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     // The sink runs on a runtime worker, so it enters the invocation's deadline itself.
     let worker_invocation = invocation.clone();
@@ -420,7 +422,7 @@ fn output_frame(evidence: FrameEvidence) -> Result<output::replay::Frame, Bounda
 
 fn text_record_with(
     evidence: FrameEvidence,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
     write_line: impl FnOnce(std::fmt::Arguments<'_>) -> Result<(), HumanWriteError>,
 ) -> Result<(), BoundaryError> {
     let result = output_frame(evidence)?;

@@ -5,7 +5,7 @@ use packetcraftr::scan::{connect, followup};
 
 use crate::output::{self, contract::Format};
 use crate::system::{Client, Runtime, client};
-use crate::{errors::CliError, rendering::StreamEncoder};
+use crate::{errors::CliError, invocation::StreamEncoder};
 
 /// The validated connect-scan boundary.
 pub(super) struct Request {

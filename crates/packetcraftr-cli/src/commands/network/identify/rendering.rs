@@ -8,7 +8,7 @@ use crate::rendering::{duration_text, write_stdout_line};
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
     report: &Report,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     for record in &report.records {
         write_stdout_line(

@@ -11,10 +11,11 @@ use packetcraftr_core::analysis;
 use crate::output;
 
 use crate::errors::CliError;
+use crate::invocation::StreamEncoder;
 use crate::rendering::Retained;
 use crate::rendering::{
-    StreamEncoder, comma_separated, duration_text, emit_aggregate, encapsulation_text,
-    optional_display, write_stdout_line,
+    comma_separated, duration_text, emit_aggregate, encapsulation_text, optional_display,
+    write_stdout_line,
 };
 
 use analysis::tls::{ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING};
@@ -160,7 +161,7 @@ fn render_empty(
     )
 }
 
-fn session_line_with(session: &Session, presentation: crate::rendering::Presentation) -> String {
+fn session_line_with(session: &Session, presentation: crate::invocation::Presentation) -> String {
     if presentation.verbose {
         return session_line(session);
     }

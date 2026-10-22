@@ -20,9 +20,8 @@ use packetcraftr_core::error::Kind;
 use self::arguments::Args;
 use crate::errors::CliError;
 use crate::input::{apply_overrides, read_recipe};
-use crate::rendering::{
-    StreamEncoder, render_diagnostics_stderr, stream_capture_error, stream_limits,
-};
+use crate::invocation::StreamEncoder;
+use crate::rendering::{render_diagnostics_stderr, stream_capture_error, stream_limits};
 
 impl crate::commands::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[

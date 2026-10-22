@@ -7,7 +7,8 @@ use self::arguments::{Args, OrderArg};
 use crate::output::{self, contract::Format};
 use crate::{
     errors::CliError,
-    rendering::{StreamEncoder, emit_aggregate, write_summary_line},
+    invocation::StreamEncoder,
+    rendering::{emit_aggregate, write_summary_line},
 };
 use packetcraftr_core::{capture_file, error::Kind};
 use std::path::Path;

@@ -3,8 +3,8 @@
 
 use packetcraftr_core::analysis;
 
-use super::StreamEncoder;
 use crate::errors::CliError;
+use crate::invocation::StreamEncoder;
 use crate::output::contract::Format;
 
 pub(crate) fn ip_event_sink(

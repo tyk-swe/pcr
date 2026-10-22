@@ -167,9 +167,9 @@ impl Classified for Error {
     }
 }
 
-pub(crate) fn probe_error(step: u64, failure: crate::execution::Failure) -> Error {
+pub(crate) fn probe_error(step: u64, failure: crate::engine::execution::Failure) -> Error {
     match failure {
-        crate::execution::Failure::InvalidLimit {
+        crate::engine::execution::Failure::InvalidLimit {
             field,
             value,
             reason,
@@ -178,28 +178,28 @@ pub(crate) fn probe_error(step: u64, failure: crate::execution::Failure) -> Erro
             value,
             reason,
         },
-        crate::execution::Failure::Authorization(source) => Error::Authorization(source),
-        crate::execution::Failure::DurationLimit(source) => {
+        crate::engine::execution::Failure::Authorization(source) => Error::Authorization(source),
+        crate::engine::execution::Failure::DurationLimit(source) => {
             let _sequence = step;
 
             source.into()
         }
-        crate::execution::Failure::Interrupted(source) => {
+        crate::engine::execution::Failure::Interrupted(source) => {
             let _sequence = step;
 
             source.into()
         }
-        crate::execution::Failure::Clock(source) => {
+        crate::engine::execution::Failure::Clock(source) => {
             let sequence = step;
 
             Error::Clock { sequence, source }
         }
-        crate::execution::Failure::Execution(source) => {
+        crate::engine::execution::Failure::Execution(source) => {
             let sequence = step;
 
             Error::Execution { sequence, source }
         }
-        crate::execution::Failure::InvalidEvidence(source) => {
+        crate::engine::execution::Failure::InvalidEvidence(source) => {
             let sequence = step;
 
             Error::InvalidEvidence {
@@ -207,7 +207,7 @@ pub(crate) fn probe_error(step: u64, failure: crate::execution::Failure) -> Erro
                 message: WORKFLOW.describe_evidence(&source),
             }
         }
-        crate::execution::Failure::StatsOverflow(_source) => {
+        crate::engine::execution::Failure::StatsOverflow(_source) => {
             let sequence = step;
 
             Error::StatisticsOverflow { sequence }

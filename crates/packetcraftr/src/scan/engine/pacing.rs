@@ -6,8 +6,9 @@ use std::time::{Duration, Instant};
 use packetcraftr_core::budget::Deadline;
 
 use crate::clock::Clock;
-use crate::execution::{pause, rate_delay};
+use crate::engine::execution::{pause, rate_delay};
 
+use super::Prober;
 use super::pipelined::add_stats;
 use crate::scan::Error;
 use crate::scan::Request;
@@ -33,27 +34,30 @@ impl Owed {
     }
 }
 
-/// Waits out the rate for the `owed` transmissions sent since the last
-/// wait, just before the next one is sent. Time already spent since the last
-/// of them began, such as its wait for a reply, counts toward the pause.
-pub(super) fn settle<C: Clock>(
-    request: &Request,
-    clock: &mut C,
-    deadline: &mut Deadline,
-    owed: &mut Owed,
-    stats: &mut crate::Stats,
-) -> Result<(), Error> {
-    let Owed {
-        transmissions,
-        since,
-    } = std::mem::take(owed);
-    if transmissions == 0 {
-        return Ok(());
+impl<E, C: Clock> Prober<'_, E, C> {
+    /// Waits out the rate for the transmissions owed since the last wait,
+    /// just before the next one is sent. Time already spent since the last
+    /// of them began, such as its wait for a reply, counts toward the pause.
+    pub(super) fn settle(&mut self, stats: &mut crate::Stats) -> Result<(), Error> {
+        let Owed {
+            transmissions,
+            since,
+        } = std::mem::take(&mut self.owed);
+        if transmissions == 0 {
+            return Ok(());
+        }
+        let spent = since.map_or(Duration::ZERO, |since| {
+            self.clock.now().saturating_duration_since(since)
+        });
+        pace(
+            self.request,
+            self.clock,
+            self.deadline,
+            transmissions,
+            spent,
+            stats,
+        )
     }
-    let spent = since.map_or(Duration::ZERO, |since| {
-        clock.now().saturating_duration_since(since)
-    });
-    pace(request, clock, deadline, transmissions, spent, stats)
 }
 
 /// Waits out the request rate for `items` probes already sent, less the

@@ -5,94 +5,31 @@
 //! Selection and method checks stay here so list, connect, and raw modes share
 //! their precedence and diagnostics.
 
+mod request;
+
 use std::path::Path;
 use std::time::Duration;
 
 use packetcraftr::probe::Transport;
-use packetcraftr::scan::{discovery, followup, method, profile::curated};
+use packetcraftr::scan::{followup, method};
 use packetcraftr_core::error::Kind;
 
-use super::arguments::{
-    self, AdaptiveArgs, Args, DiscoveryProbe, IpProtocolTerm, PortTerm, UnresponsiveHosts,
-};
-use super::selection::{
-    DiscoveryRequest, EndpointRequest, ingest_targets, load_udp_profiles, read_udp_payload,
-    transports,
-};
+use super::arguments::{self, Args};
+use super::inputs::ingest_targets;
+use super::selection::{EndpointRequest, transports};
 use super::{connect, list, raw, traceroute};
-use crate::command_options::{AddressFamily, CaptureLimitsArgs, MaxDurationArgs, TimeoutArgs};
 use crate::errors::CliError;
 use crate::input::manifest;
 use crate::output;
-use crate::system::collection;
+use request::{
+    DiscoveryInputs, EndpointInputs, LimitInputs, RequestInputs, ScheduleInputs, UdpInputs,
+    build_request,
+};
 
 pub(super) enum Planned {
     List(list::Request),
     Connect(connect::Request),
     Raw(raw::Request),
-}
-
-struct EndpointInputs {
-    transports: Vec<Transport>,
-    tcp_scan: packetcraftr::scan::TcpScan,
-    sctp_scan: packetcraftr::scan::SctpScan,
-    ports: Vec<PortTerm>,
-    exclude_ports: Vec<PortTerm>,
-    ip_protocols: Vec<IpProtocolTerm>,
-    exclude_ip_protocols: Vec<IpProtocolTerm>,
-}
-
-struct DiscoveryInputs {
-    mode: Option<arguments::Discovery>,
-    probes: Vec<DiscoveryProbe>,
-    ports: Vec<PortTerm>,
-    ip_protocols: Vec<IpProtocolTerm>,
-    unresponsive: Option<UnresponsiveHosts>,
-}
-
-struct UdpInputs {
-    payload_hex: Option<String>,
-    payload_file: Option<std::path::PathBuf>,
-    profiles: Option<std::path::PathBuf>,
-    curated: bool,
-}
-
-struct LimitInputs {
-    capture: CaptureLimitsArgs,
-    max_prepared_bytes: usize,
-    max_targets: usize,
-    max_ports: usize,
-    max_probes: usize,
-    max_undecoded: usize,
-    duration: MaxDurationArgs,
-}
-
-struct ScheduleInputs {
-    max_in_flight: usize,
-    attempts: u32,
-    adaptive: AdaptiveArgs,
-    timeout: TimeoutArgs,
-    rate: Option<u32>,
-}
-
-struct RequestInputs {
-    endpoints: EndpointInputs,
-    discovery: DiscoveryInputs,
-    udp: UdpInputs,
-    limits: LimitInputs,
-    schedule: ScheduleInputs,
-    family: AddressFamily,
-    targets: packetcraftr::target::Selection,
-    origins: Vec<manifest::Declaration>,
-    route_options: packetcraftr::route::Options,
-}
-
-struct Built {
-    request: packetcraftr::scan::Request,
-    excluded_endpoints: usize,
-    curated: Option<output::scan::plan::CuratedPayloads>,
-    discovery_excluded: usize,
-    queue_limits: packetcraftr_netio::capture::Limits,
 }
 
 pub(super) fn prepare(arguments: Args) -> Result<Planned, CliError> {
@@ -412,156 +349,6 @@ fn validate_list_options(
     Ok(())
 }
 
-fn build_request(inputs: RequestInputs) -> Result<Built, CliError> {
-    let RequestInputs {
-        endpoints,
-        discovery,
-        udp,
-        limits,
-        schedule,
-        family,
-        targets,
-        origins,
-        route_options,
-    } = inputs;
-    let EndpointInputs {
-        transports,
-        tcp_scan,
-        sctp_scan,
-        ports,
-        exclude_ports,
-        ip_protocols,
-        exclude_ip_protocols,
-    } = endpoints;
-    let prepared_discovery = DiscoveryRequest {
-        mode: discovery.mode,
-        probes: discovery.probes,
-        ports: discovery.ports,
-        exclude_ports: exclude_ports.clone(),
-        ip_protocols: discovery.ip_protocols,
-        exclude_ip_protocols: exclude_ip_protocols.clone(),
-        unresponsive: discovery.unresponsive,
-        max_ports: limits.max_ports,
-    }
-    .prepare()?;
-    let scanning = prepared_discovery.options.mode != discovery::Mode::Only;
-    let mut endpoint_request = EndpointRequest {
-        transports: transports.clone(),
-        ports,
-        exclude_ports,
-        ip_protocols,
-        exclude_ip_protocols,
-        max_ports: limits.max_ports,
-    };
-    if prepared_discovery.options.runs() {
-        endpoint_request.retain_scan_exclusions(&prepared_discovery.port_transports);
-    }
-    // Discovery has already consumed these shared exclusions. A port scan
-    // must not reject exclusions that apply to its IP discovery stage.
-    if transports != [Transport::Ip]
-        && prepared_discovery.options.runs()
-        && prepared_discovery
-            .options
-            .probes
-            .iter()
-            .any(|probe| matches!(probe, packetcraftr::probe::Endpoint::Ip { .. }))
-    {
-        endpoint_request.clear_ip_exclusions();
-    }
-    let udp_required = (scanning && transports.contains(&Transport::Udp))
-        || prepared_discovery
-            .options
-            .probes
-            .iter()
-            .any(|probe| probe.transport() == Transport::Udp);
-    let udp_payload = read_udp_payload(
-        udp_required,
-        udp.payload_hex.as_deref(),
-        udp.payload_file.as_deref(),
-    )?;
-    let operator_profiles = load_udp_profiles(udp.profiles.as_deref(), udp_required)?;
-    if udp.curated && !udp_required {
-        return Err(CliError::new(
-            Kind::Usage,
-            "--curated-udp-payloads requires UDP scan or discovery probes",
-        ));
-    }
-    let queue_limits = limits.capture.into_limits();
-    let max_duration = limits.duration.max_duration();
-    let scan_limits = packetcraftr::scan::Limits {
-        max_prepared_bytes: limits.max_prepared_bytes,
-        max_targets: limits.max_targets,
-        max_ports: limits.max_ports,
-        max_probes: limits.max_probes,
-        max_duration,
-        evidence: packetcraftr::evidence::Limits {
-            max_frames: queue_limits.max_frames,
-            max_bytes: queue_limits.max_bytes,
-            max_undecoded: limits.max_undecoded,
-        },
-    };
-    scan_limits.validate().map_err(CliError::classified)?;
-    let selected = if scanning {
-        endpoint_request.select()?
-    } else if endpoint_request.has_includes() {
-        return Err(CliError::new(
-            Kind::Usage,
-            "--discovery only probes no scan port; remove --ports and --ip-protocols",
-        ));
-    } else {
-        packetcraftr::scan::Selected {
-            endpoints: Vec::new(),
-            excluded: 0,
-        }
-    };
-    let (udp_profiles, curated) = if udp.curated {
-        let mut planned = selected.endpoints.clone();
-        for probe in &prepared_discovery.options.probes {
-            if !planned.contains(probe) {
-                planned.push(*probe);
-            }
-        }
-        let mut merged = curated::merge(operator_profiles, &planned);
-        let profiles = std::mem::take(&mut merged.profiles);
-        (profiles, Some(merged.into()))
-    } else {
-        (operator_profiles, None)
-    };
-    let request = packetcraftr::scan::Request {
-        max_in_flight: schedule.max_in_flight,
-        targets,
-        target_sources: origins.iter().map(ToString::to_string).collect(),
-        udp_payload,
-        udp_profiles,
-        address_family: family.into(),
-        endpoints: selected.endpoints,
-        tcp_scan,
-        sctp_scan,
-        discovery: prepared_discovery.options,
-        attempts: schedule.attempts,
-        adaptive: schedule.adaptive.into_adaptive(
-            schedule.timeout.timeout(),
-            max_duration,
-            schedule.max_in_flight,
-        ),
-        timeout: schedule.timeout.timeout(),
-        probes_per_second: schedule.rate,
-        limits: scan_limits,
-        route: route_options,
-        collection: collection(schedule.timeout.timeout(), queue_limits)?,
-    };
-    if !tcp_scan.is_syn() || !sctp_scan.is_init() {
-        request.validate().map_err(CliError::classified)?;
-    }
-    Ok(Built {
-        request,
-        excluded_endpoints: selected.excluded,
-        curated,
-        discovery_excluded: prepared_discovery.excluded,
-        queue_limits,
-    })
-}
-
 fn publication_plan(
     selection: method::Selection,
     request: &packetcraftr::scan::Request,
@@ -612,53 +399,4 @@ fn raw_capability(
 }
 
 #[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::{validate_list_options, validate_stdin_consumers};
-    use crate::commands::network::scan::arguments::Discovery;
-
-    fn usage_message(error: crate::errors::CliError) -> String {
-        assert_eq!(error.exit_code(), 2);
-        error.to_string()
-    }
-
-    #[test]
-    fn rejects_multiple_stdin_consumers() {
-        let error =
-            validate_stdin_consumers(&[PathBuf::from("-")], &[PathBuf::from("-")], None, None)
-                .unwrap_err();
-        assert_eq!(
-            usage_message(error),
-            "stdin (`-`) can supply at most one of --targets-file, --exclude-file, --udp-payload-file, or --udp-profiles"
-        );
-    }
-
-    #[test]
-    fn list_rejects_discovery() {
-        let error = validate_list_options(true, Some(Discovery::Before), &None, false).unwrap_err();
-        assert_eq!(
-            usage_message(error),
-            "--list sends no probe; remove --discovery, --reverse-dns, and --traceroute"
-        );
-    }
-
-    #[test]
-    fn list_rejects_reverse_dns() {
-        let error =
-            validate_list_options(true, None, &Some("192.0.2.53".to_owned()), false).unwrap_err();
-        assert_eq!(
-            usage_message(error),
-            "--list sends no probe; remove --discovery, --reverse-dns, and --traceroute"
-        );
-    }
-
-    #[test]
-    fn list_rejects_traceroute() {
-        let error = validate_list_options(true, None, &None, true).unwrap_err();
-        assert_eq!(
-            usage_message(error),
-            "--list sends no probe; remove --discovery, --reverse-dns, and --traceroute"
-        );
-    }
-}
+mod tests;

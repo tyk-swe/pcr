@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 use packetcraftr_core::{diagnostic::Diagnostic, error::BoundaryError, frame::Frame};
 
 use super::{Error, Match, Observation, Probe};
-use crate::{Sink, Stats, execution::Shared};
+use crate::{Sink, Stats, engine::execution::Shared};
 
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {

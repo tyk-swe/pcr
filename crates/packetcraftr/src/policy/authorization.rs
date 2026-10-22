@@ -8,8 +8,8 @@ use packetcraftr_core::{
     packet::MacAddress, packet::Packet, protocol::link::Ethernet, protocol::semantics,
 };
 
+use super::address::is_public;
 use super::model::{Error, MAX_DESTINATION_CONSTRAINTS, MAX_RESOLVED_ADDRESSES, Policy};
-use crate::address::is_public;
 use crate::target::{
     Authorized, Error as TargetError, Hostname, Resolver, Target, distinct_addresses,
 };

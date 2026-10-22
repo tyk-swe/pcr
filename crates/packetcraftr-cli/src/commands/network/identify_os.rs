@@ -191,7 +191,7 @@ impl crate::commands::Spec for Args {
 fn render(
     invocation: &crate::invocation::Invocation,
     report: library::Report,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     write_stdout_line(
         invocation,

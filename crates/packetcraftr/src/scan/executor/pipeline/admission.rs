@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     clock::Clock,
-    execution::ExchangeExecutor,
+    exchange::WorkflowExecutor,
     probe::Batch,
     providers::{CaptureProviders, PacketProviders},
     scan::{Probe, executor::PipelineOptions},
@@ -19,7 +19,7 @@ use packetcraftr_netio::{capture, interface};
 /// Admits `batches` as [`super::run`] would and keeps nothing, so a stage over its
 /// preparation limit fails before anything is sent.
 pub(in crate::scan::executor) fn admit<P: PacketProviders, K: Clock>(
-    executor: &ExchangeExecutor<'_, P, K>,
+    executor: &WorkflowExecutor<'_, P, K>,
     batches: &[Batch<Probe>],
     options: &PipelineOptions,
 ) -> Result<(), BoundaryError> {
@@ -144,7 +144,7 @@ fn source_metadata<P: CaptureProviders>() -> usize {
 }
 
 pub(in crate::scan::executor) fn admit_adaptive<P: PacketProviders, K: Clock>(
-    executor: &ExchangeExecutor<'_, P, K>,
+    executor: &WorkflowExecutor<'_, P, K>,
     batches: &[Batch<Probe>],
     options: &PipelineOptions,
     summary: &mut AdaptiveAdmission,

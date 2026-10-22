@@ -1,8 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::execution::{ExchangeExecutor, Executor};
-use crate::execution::{ExecutorFault, WorkflowOverrides};
+use crate::engine::execution::Executor;
+use crate::engine::execution::ExecutorFault;
+use crate::exchange::WorkflowExecutor;
+use crate::exchange::WorkflowOverrides;
 use crate::probe::{Batch, Evidence, Transport};
 use packetcraftr_core::error::BoundaryError;
 
@@ -17,7 +19,7 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "use homogeneous bounded hop batches and retain at least one response per probe",
 );
 
-impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ExchangeExecutor<'_, P, K> {
+impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for WorkflowExecutor<'_, P, K> {
     fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let first = validate_batch(batch)?;
 

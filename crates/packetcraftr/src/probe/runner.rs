@@ -13,9 +13,9 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
 use crate::clock::Clock;
+use crate::engine::execution::Executor;
+use crate::engine::execution::{Context, Grant, Receipt, rate_delay};
 use crate::evidence::ExecutionPermit;
-use crate::execution::Executor;
-use crate::execution::{Context, Grant, Receipt, rate_delay};
 use crate::{Stats, evidence::SentPacket};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,7 +103,7 @@ impl Receipt for Evidence {
     }
 }
 
-impl<P> crate::execution::Step for Batch<P> {
+impl<P> crate::engine::execution::Step for Batch<P> {
     type Evidence = Evidence;
 }
 

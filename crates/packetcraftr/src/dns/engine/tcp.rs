@@ -9,12 +9,13 @@ use packetcraftr_core::budget::Deadline;
 use crate::Stats;
 use crate::clock::Clock;
 use crate::dns::tcp::{Category as TcpCategory, Error as TcpError};
+use crate::engine::admission::resolve_selected;
+use crate::engine::execution::Executor;
+use crate::engine::execution::Receipt;
 use crate::evidence::ExecutionPermit;
-use crate::execution::Executor;
-use crate::execution::Receipt;
 use crate::policy::Authorizer;
 use crate::target::ResolveTarget;
-use crate::target::{Family, Target, resolve_selected};
+use crate::target::{Family, Target};
 
 use super::super::error::{Error, EvidenceFault, attempt_error};
 use super::super::evidence::{

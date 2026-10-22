@@ -16,9 +16,9 @@ use packetcraftr_core::{
 
 use super::{Event, Observation, ProbeEvidence, plan::PlannedProbe};
 use crate::{
-    correlation,
+    engine::correlation,
+    engine::execution::evidence::Passed,
     evidence::SentPacket,
-    execution::evidence::Passed,
     probe::runner::{Classifier, Outcome, UnsolicitedCapture},
 };
 

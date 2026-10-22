@@ -7,11 +7,12 @@ use std::time::Duration;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::link::Mode;
 
-use crate::execution::rate_delay;
+use crate::engine::admission::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
+use crate::engine::execution::rate_delay;
 use crate::policy::Authorizer;
 use crate::probe::{check_collection_evidence, check_probe_count, check_probe_duration};
 use crate::target::ResolveTarget;
-use crate::target::{DeclaredTargets, FamilyGate, SelectedAddress, admit_selection, wire_limits};
+use crate::target::SelectedAddress;
 
 use crate::neighbor::{needs_resolution, request_wire_bytes};
 use crate::probe;
@@ -69,6 +70,7 @@ pub(super) fn approve<A: Authorizer + ResolveTarget>(
             selection: &request.targets,
             family: FamilyGate::new(request.address_family, Error::family),
             max_targets: request.limits.max_targets,
+            resolved: None,
         },
         Error::TargetSelection,
         |selected| plan(request, &selected.targets, &endpoints),

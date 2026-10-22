@@ -14,7 +14,7 @@ crate::evidence::limits_serde!(
 
 use packetcraftr_netio::deadline::MAX_WAIT;
 
-use crate::execution::limits::{check_limits, check_rate, duration_violation};
+use crate::engine::execution::limits::{check_limits, check_rate, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 

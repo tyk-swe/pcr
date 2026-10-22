@@ -14,7 +14,7 @@ use crate::output;
 use self::arguments::Args;
 use crate::command_options::parse_target;
 use crate::errors::CliError;
-use crate::rendering::StreamEncoder;
+use crate::invocation::StreamEncoder;
 use crate::system::{Runtime, prepare_workflow};
 
 impl crate::commands::Spec for Args {

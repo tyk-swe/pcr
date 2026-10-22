@@ -3,6 +3,7 @@
 
 //! Fail-closed live traffic policy for protocol tests and authorized diagnostics.
 
+mod address;
 mod authorization;
 mod capture;
 mod model;

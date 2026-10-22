@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::execution::evidence::Passed;
+use crate::engine::execution::evidence::Passed;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use super::plan::packet::sent_probe_matches;
 use super::profile;
 use super::report::RttAccumulator;
 use super::{Classification, Event, Probe, ProbeEvidence, Reply, SctpScan, Stage, TcpScan};
-use crate::correlation::{Correlation, Transport};
+use crate::engine::correlation::{Correlation, Transport};
 use crate::evidence::SentPacket;
 use crate::probe;
 use crate::probe::runner::{Classifier, NO_RESPONSE_REASON, Outcome};
@@ -37,7 +37,7 @@ pub fn classify_response(
     request: &Packet,
     response: &DecodedPacket,
 ) -> Option<CorrelatedResponse> {
-    let observation = crate::correlation::observe(registry, transport, request, response)?;
+    let observation = crate::engine::correlation::observe(registry, transport, request, response)?;
     let classification = match observation.correlation {
         Correlation::TcpReset
         | Correlation::SctpAbort

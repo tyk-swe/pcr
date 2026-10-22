@@ -51,7 +51,7 @@ impl Window {
 
     /// Whether the window has closed. Its end itself is closed.
     pub(crate) fn expired(&self) -> bool {
-        crate::planning::expired(&self.deadline)
+        crate::engine::planning::expired(&self.deadline)
     }
 
     pub(crate) fn ends_at(&self) -> Instant {

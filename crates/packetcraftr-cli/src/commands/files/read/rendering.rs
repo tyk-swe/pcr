@@ -6,9 +6,8 @@ use crate::output::contract::Format;
 use crate::output;
 
 use crate::errors::CliError;
-use crate::rendering::{
-    FieldTree, StreamEncoder, render_frame_text, render_frame_tree, write_hex_line,
-};
+use crate::invocation::StreamEncoder;
+use crate::rendering::{FieldTree, render_frame_text, render_frame_tree, write_hex_line};
 
 pub(super) fn render_record(
     invocation: &crate::invocation::Invocation,

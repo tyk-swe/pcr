@@ -17,8 +17,9 @@ use super::super::{Error, Request, Stage};
 use super::planning::StagePlan;
 use super::{Outcome, ProbeEvidence, execution};
 use crate::clock::Clock;
+use crate::engine::admission::approve_operation;
 use crate::policy::{Authorizer, Operation, SocketOperation};
-use crate::target::{ResolveTarget, approve_operation};
+use crate::target::ResolveTarget;
 
 pub(super) struct Active<S> {
     pub(super) pending: tcp::PendingConnect<S>,
@@ -33,58 +34,71 @@ pub(super) struct Active<S> {
     pub(super) selection: Option<super::super::adaptive::Selection>,
 }
 
-/// `None` means every native connect admission is still held, for example by
-/// a cancelled attempt whose provider call has not returned or a finished one
-/// whose worker has not yet released it, so the caller retries this endpoint.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn admit_next<Q, A>(
-    request: &Request,
-    stage: &StagePlan<'_>,
-    next: usize,
-    authorizer: &mut A,
-    deadline: &Deadline,
-    provider: &Arc<Q>,
-    budget: &tcp::ConnectBudget,
-    clock: &impl Clock,
-) -> Result<Option<Active<Q::Stream>>, Error>
+/// What approves and starts one connect scan's connection attempts: the
+/// request, the policy authorizer, the TCP provider and the native connect
+/// budget it starts attempts under, and the operation's clock and deadline.
+pub(super) struct Connector<'a, Q, A, C> {
+    pub(super) request: &'a Request,
+    pub(super) authorizer: &'a mut A,
+    pub(super) provider: &'a Arc<Q>,
+    pub(super) budget: &'a tcp::ConnectBudget,
+    pub(super) clock: &'a C,
+    pub(super) deadline: &'a mut Deadline,
+}
+
+impl<Q, A, C> Connector<'_, Q, A, C>
 where
     Q: Provider + 'static,
     Q::Stream: 'static,
     A: Authorizer + ResolveTarget,
+    C: Clock,
 {
-    let endpoints = stage.targets.len() * stage.ports.len();
-    let (endpoint, scope) = stage.endpoint(next % endpoints);
-    let attempt = (next / endpoints) as u32 + 1;
-    let sequence = stage.first_sequence + next as u64;
-    let final_endpoints = [endpoint];
-    let operation = SocketOperation::new(&final_endpoints, *stage.limits)
-        .map_err(|source| execution(sequence, source))?;
-    approve_operation(
-        authorizer,
-        Operation::Socket(operation),
-        deadline,
-        probe_error,
-    )?;
-    let timeout = deadline.bounded_timeout(request.timeout)?;
-    let admitted = clock.now();
-    let scheduled_at = SystemTime::now();
-    let pending = match budget.start(Arc::clone(provider), endpoint, &deadline.for_wait(timeout)?) {
-        Ok(pending) => pending,
-        Err(tcp::Error::Capacity { .. }) => return Ok(None),
-        Err(source) => return Err(execution(sequence, source)),
-    };
-    Ok(Some(Active {
-        pending,
-        sequence,
-        stage: stage.stage,
-        endpoint,
-        scope,
-        attempt,
-        started: admitted,
-        scheduled_at,
-        timeout,
-        selection: None,
-    }))
+    /// `None` means every native connect admission is still held, for example by
+    /// a cancelled attempt whose provider call has not returned or a finished one
+    /// whose worker has not yet released it, so the caller retries this endpoint.
+    pub(super) fn admit_next(
+        &mut self,
+        stage: &StagePlan<'_>,
+        next: usize,
+    ) -> Result<Option<Active<Q::Stream>>, Error> {
+        let endpoints = stage.targets.len() * stage.ports.len();
+        let (endpoint, scope) = stage.endpoint(next % endpoints);
+        let attempt = (next / endpoints) as u32 + 1;
+        let sequence = stage.first_sequence + next as u64;
+        let final_endpoints = [endpoint];
+        let operation = SocketOperation::new(&final_endpoints, *stage.limits)
+            .map_err(|source| execution(sequence, source))?;
+        approve_operation(
+            self.authorizer,
+            Operation::Socket(operation),
+            self.deadline,
+            probe_error,
+        )?;
+        let timeout = self.deadline.bounded_timeout(self.request.timeout)?;
+        let admitted = self.clock.now();
+        let scheduled_at = SystemTime::now();
+        let pending = match self.budget.start(
+            Arc::clone(self.provider),
+            endpoint,
+            &self.deadline.for_wait(timeout)?,
+        ) {
+            Ok(pending) => pending,
+            Err(tcp::Error::Capacity { .. }) => return Ok(None),
+            Err(source) => return Err(execution(sequence, source)),
+        };
+        Ok(Some(Active {
+            pending,
+            sequence,
+            stage: stage.stage,
+            endpoint,
+            scope,
+            attempt,
+            started: admitted,
+            scheduled_at,
+            timeout,
+            selection: None,
+        }))
+    }
 }
 
 pub(super) fn settle_active<S: tcp::Stream>(

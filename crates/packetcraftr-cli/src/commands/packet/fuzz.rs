@@ -16,7 +16,7 @@ use crate::output;
 use self::arguments::Args;
 use crate::errors::CliError;
 use crate::input::read_recipe;
-use crate::rendering::StreamEncoder;
+use crate::invocation::StreamEncoder;
 use crate::system::{Runtime, Workflow, prepare_workflow};
 
 struct PreparedLive {

@@ -7,6 +7,21 @@
 //!
 //! This portable foundation has no resolver, route lookup, live-capture, or transmission seam.
 //!
+//! # Layers
+//!
+//! Modules depend only on their own layer or a lower one:
+//!
+//! | Layer | Modules |
+//! | --- | --- |
+//! | 1. Kernel | `error`, `diagnostic`, `budget`, `field`, `layer`, `layout`, `codec`, `packet`, `registry`, `matcher`, `frame`, `template` |
+//! | 2. Packet mechanics | `protocol`, `build`, `decode`, `expression`, `transform`, `conversation`, `document` |
+//! | 3. Captures and filters | `capture_file`, `filter` |
+//! | 4. Offline analysis | `analysis`, `security`, `fuzz` |
+//!
+//! The kernel's data model is deliberately one unit: layers, codecs, fields,
+//! packets, and the registry refer to one another, so they are not ordered
+//! among themselves.
+//!
 //! Unit tests stay beside the implementations they exercise.
 
 macro_rules! display_via_as_str {

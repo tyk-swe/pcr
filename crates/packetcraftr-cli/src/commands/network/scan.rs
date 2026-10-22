@@ -3,6 +3,7 @@
 
 pub(in crate::commands) mod arguments;
 mod connect;
+mod inputs;
 mod list;
 mod preparation;
 mod raw;

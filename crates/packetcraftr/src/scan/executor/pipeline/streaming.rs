@@ -10,7 +10,7 @@ use super::{
 use crate::{
     Stats,
     clock::Clock,
-    execution::ExchangeExecutor,
+    exchange::WorkflowExecutor,
     providers::PacketProviders,
     scan::{
         error::probe_error,
@@ -25,7 +25,7 @@ use std::time::Duration;
 /// preparation is bounded by the live window; the controller supplies later
 /// attempts only after settlements release capacity.
 pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
-    executor: &ExchangeExecutor<'_, P, K>,
+    executor: &WorkflowExecutor<'_, P, K>,
     options: PipelineOptions,
     admission: &AdaptiveAdmission,
     attempts: usize,
@@ -67,7 +67,7 @@ pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
             .map_err(|source| {
                 BoundaryError::from_error(probe_error(
                     0,
-                    crate::execution::Failure::Clock(Box::new(source)),
+                    crate::engine::execution::Failure::Clock(Box::new(source)),
                 ))
             })?;
     };

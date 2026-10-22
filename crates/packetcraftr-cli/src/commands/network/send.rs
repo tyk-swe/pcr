@@ -87,7 +87,7 @@ pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
     format: Format,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let compression = arguments.send.compression.for_output(format)?;
     let prepared = prepare(invocation, arguments)?;

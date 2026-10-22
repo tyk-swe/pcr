@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+mod help;
+
 use clap::Subcommand;
 use serde::Serialize;
 
@@ -39,7 +41,10 @@ macro_rules! commands {
     ) => {
         /// The parsed subcommand with its arguments.
         #[derive(Debug, Subcommand)]
-        #[allow(dead_code, clippy::large_enum_variant)]
+        #[allow(
+            clippy::large_enum_variant,
+            reason = "never constructed: it only supplies clap's leaf definitions"
+        )]
         enum LeafDefinitions {
             $(
                 $(#[$attribute])*
@@ -49,7 +54,10 @@ macro_rules! commands {
         }
 
         #[derive(Debug)]
-        #[allow(clippy::large_enum_variant)]
+        #[allow(
+            clippy::large_enum_variant,
+            reason = "parsed once per process, so boxing the largest arguments saves nothing"
+        )]
         pub(crate) enum CommandLine {
             $( $variant($arguments), )*
         }
@@ -83,7 +91,7 @@ macro_rules! commands {
                 }
             }
 
-            pub(super) fn start(self, launch: Launch<'_>) -> std::process::ExitCode {
+            pub(crate) fn start(self, launch: Launch<'_>) -> std::process::ExitCode {
                 match self {
                     $(
                         Self::$variant(arguments) => {
@@ -347,8 +355,7 @@ impl clap::Subcommand for CommandLine {
                     .find_subcommand(entry.identifier)
                     .expect("registered command")
                     .clone();
-                workflow =
-                    workflow.subcommand(crate::cli::help::leaf(leaf.name(entry.name), entry));
+                workflow = workflow.subcommand(help::leaf(leaf.name(entry.name), entry));
             }
             command = command.subcommand(workflow);
         }

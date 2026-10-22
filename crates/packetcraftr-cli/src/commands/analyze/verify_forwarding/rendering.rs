@@ -8,8 +8,9 @@ use packetcraftr_core::field;
 
 use super::arguments::Args;
 use crate::errors::CliError;
+use crate::invocation::StreamEncoder;
 use crate::rendering::omitted_diagnostic;
-use crate::rendering::{StreamEncoder, emit_json, write_stdout_line};
+use crate::rendering::{emit_json, write_stdout_line};
 
 pub(super) fn render(
     invocation: &crate::invocation::Invocation,

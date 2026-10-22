@@ -9,7 +9,8 @@ use super::{evidence::classify, plan::PlannedProbe};
 use crate::{
     Client, Stats,
     clock::Clock,
-    execution::{ExchangeExecutor, Executor, ExecutorFault, WorkflowOverrides},
+    engine::execution::{Executor, ExecutorFault},
+    exchange::{WorkflowExecutor, WorkflowOverrides},
     neighbor::Resolver,
     probe::runner::{Batch, Evidence},
     providers::PacketProviders,
@@ -39,7 +40,7 @@ pub(super) trait OsExecutor: Executor<Batch<PlannedProbe>> {
 
 pub(super) struct Native<'a, P, K> {
     pub client: &'a Client<P, K>,
-    pub operation: &'a mut crate::execution::Operation,
+    pub operation: &'a mut crate::engine::execution::Operation,
     pub preparation_timeout: Duration,
     pub send: crate::send::Options,
     pub collection: crate::exchange::Collection,
@@ -89,7 +90,7 @@ impl<P: PacketProviders, K: Clock> OsExecutor for Native<'_, P, K> {
                 1,
             )
             .map_err(BoundaryError::from_error)?;
-        crate::preparation::authorize_neighbor_request(
+        crate::engine::preparation::authorize_neighbor_request(
             &self.operation.policy(&self.client.policy),
             &request,
             plan,
@@ -135,7 +136,7 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<PlannedProbe>> for Native<'_, 
             return Err(FAULT.invalid("OS batches contain exactly one probe"));
         };
         let client = self.client;
-        let executor = ExchangeExecutor::new(
+        let executor = WorkflowExecutor::new(
             client,
             self.operation,
             self.send.clone(),

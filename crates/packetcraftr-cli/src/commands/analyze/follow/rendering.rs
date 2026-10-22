@@ -10,10 +10,9 @@ use packetcraftr_core::analysis;
 use crate::output;
 
 use crate::errors::CliError;
+use crate::invocation::StreamEncoder;
 use crate::rendering::{Retained, omitted_diagnostic};
-use crate::rendering::{
-    StreamEncoder, emit_aggregate, emit_stderr_message, write_raw, write_stdout_line,
-};
+use crate::rendering::{emit_aggregate, emit_stderr_message, write_raw, write_stdout_line};
 
 use analysis::StreamRef;
 use analysis::follow::{Chunk, Summary};

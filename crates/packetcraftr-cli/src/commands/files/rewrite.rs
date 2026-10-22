@@ -12,7 +12,8 @@ use crate::output::{
 use crate::{
     errors::CliError,
     filtering,
-    rendering::{Retained, StreamEncoder, emit_aggregate, write_summary_line},
+    invocation::StreamEncoder,
+    rendering::{Retained, emit_aggregate, write_summary_line},
 };
 use packetcraftr_core::{
     budget::Deadline,

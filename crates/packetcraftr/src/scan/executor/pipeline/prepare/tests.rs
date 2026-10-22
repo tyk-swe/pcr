@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::{
-    execution::Operation,
+    engine::execution::Operation,
     scan::{Probe, Stage},
     target::ResolvedZone,
 };
@@ -26,10 +26,10 @@ fn probe(sequence: u64, address: IpAddr, scope: Option<ResolvedZone>) -> Probe {
 
 #[test]
 fn route_map_scope_source_table_and_materialized_names_have_distinct_charges() {
-    let client = crate::preparation::tests::client_for_plan();
+    let client = crate::engine::preparation::tests::client_for_plan();
     let operation = Operation::new(&client, Duration::from_secs(10));
     let deadline = operation.deadline(&client, Duration::from_secs(10));
-    let executor = ExchangeExecutor::new(
+    let executor = WorkflowExecutor::new(
         &client,
         &operation,
         crate::send::Options {
@@ -111,13 +111,13 @@ fn optional_previews_preserve_the_minimum_admitted_resource_profile() {
         "descriptor charge covers preview handle and bounded eviction-stack capacity"
     );
     for hosts in [1, 8] {
-        let mut client = crate::preparation::tests::client_for_plan();
+        let mut client = crate::engine::preparation::tests::client_for_plan();
         Arc::make_mut(&mut client.policy)
             .allowed_destinations
             .clear();
         let operation = Operation::new(&client, Duration::from_secs(10));
         let deadline = operation.deadline(&client, Duration::from_secs(10));
-        let executor = ExchangeExecutor::new(
+        let executor = WorkflowExecutor::new(
             &client,
             &operation,
             crate::send::Options {

@@ -15,7 +15,6 @@ pub(crate) enum Runtime {
     Fuzz,
     Capture,
     ScanConnect,
-    OutputWriter,
 }
 
 impl Runtime {
@@ -26,7 +25,6 @@ impl Runtime {
             Self::Fuzz => "fuzz_progress",
             Self::Capture => "capture_progress",
             Self::ScanConnect => "scan_connect",
-            Self::OutputWriter => "output_writer",
         }
     }
 }
@@ -35,12 +33,7 @@ pub(crate) fn runtime(
     invocation: &crate::invocation::Invocation,
     runtime: Runtime,
 ) -> packetcraftr::runtime::Runtime {
-    let instance = match runtime {
-        Runtime::OutputWriter => {
-            packetcraftr::runtime::Runtime::new(1).expect("a capacity of one is within the ceiling")
-        }
-        _ => packetcraftr::runtime::Runtime::default(),
-    };
+    let instance = packetcraftr::runtime::Runtime::default();
     invocation.register_runtime(runtime.name(), &instance);
     instance
 }

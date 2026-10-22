@@ -7,8 +7,7 @@ use std::time::SystemTime;
 
 use super::report::{Basis, NotTraced, Selection};
 use super::request::{Request, Strategy};
-use crate::probe::{self, Transport};
-use crate::scan::{self, Reply, Stage};
+use crate::probe::{Reply, Stage, Transport};
 use crate::target::SelectedAddress;
 
 /// A probe a host answered during a scan, kept with the evidence that makes
@@ -25,61 +24,6 @@ pub struct Observed {
     pub reply: Reply,
     /// When the scan captured the reply.
     pub observed_at: Option<SystemTime>,
-}
-
-/// The probe each responsive host's scan results support tracing with.
-///
-/// Only a reply from the host itself qualifies, so a router's ICMP error never
-/// does. A TCP SYN/ACK is preferred over a TCP reset, which is preferred over
-/// an ICMP echo reply; ties go to the lowest scan sequence. UDP replies are not
-/// selected: a UDP trace changes the destination port on every probe, so one
-/// observed port would not cover the probes sent. The result is ordered by the
-/// chosen probe's sequence.
-#[must_use]
-pub fn observed(scan: &scan::Aggregate) -> Vec<Observed> {
-    let mut best: HashMap<IpAddr, (u8, Observed)> = HashMap::new();
-    let probes = scan
-        .discovery
-        .iter()
-        .chain(scan.endpoints.iter().flat_map(|endpoint| &endpoint.probes));
-    for probe in probes {
-        let Some(reply) = probe.reply else {
-            continue;
-        };
-        if probe.status != probe::Status::Response
-            || probe.scope.is_some()
-            || probe.responder != Some(probe.address)
-        {
-            continue;
-        }
-        let (rank, transport, destination_port) = match (reply, probe.transport) {
-            (Reply::TcpSynAck, Transport::Tcp) => (3, Transport::Tcp, probe.port),
-            (Reply::TcpReset, Transport::Tcp) => (2, Transport::Tcp, probe.port),
-            (Reply::IcmpEchoReply, Transport::Icmp) => (1, Transport::Icmp, None),
-            _ => continue,
-        };
-        if transport == Transport::Tcp && probe.port.is_none_or(|port| port == 0) {
-            continue;
-        }
-        let candidate = Observed {
-            address: probe.address,
-            transport,
-            destination_port,
-            stage: probe.stage,
-            sequence: probe.sequence,
-            reply,
-            observed_at: probe.received_at,
-        };
-        let better = best.get(&probe.address).is_none_or(|(held, current)| {
-            rank > *held || (rank == *held && candidate.sequence < current.sequence)
-        });
-        if better {
-            best.insert(probe.address, (rank, candidate));
-        }
-    }
-    let mut chosen: Vec<_> = best.into_values().map(|(_, observed)| observed).collect();
-    chosen.sort_by_key(|observed| observed.sequence);
-    chosen
 }
 
 pub(super) enum Choice {

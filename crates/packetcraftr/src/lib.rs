@@ -3,6 +3,30 @@
 
 //! Policy-gated live workflows, budgets, and evidence.
 //!
+//! # Layers
+//!
+//! Modules depend only on their own layer or a lower one:
+//!
+//! | Layer | Modules |
+//! | --- | --- |
+//! | 1. Foundation | `clock`, `deadline`, `engine::stats`, `engine::correlation` |
+//! | 2. Environment | `error`, `policy`, `target` (model and selection), `route`, `neighbor`, `providers`, `runtime`, `client` |
+//! | 3. Engine | `engine::{admission, planning, preparation, execution}`, `evidence` |
+//! | 4. Primitives | `send`, `exchange`, `capture`, `probe` |
+//! | 5. Workflows | `dns`, `traceroute`, `os`, `identify`, `replay`, `fuzz`, `audit`, `target::plan` |
+//! | 6. Composite | `scan`, which follows up with traces and reverse DNS |
+//!
+//! `engine` is private plumbing every live workflow shares. A type a lower
+//! layer defines may be re-exported under the workflow that names it, such as
+//! `send::Options`, `exchange::Response`, and `scan::{Reply, Stage}`.
+//! Hand-offs from scan results to later workflows live with `scan`, for
+//! example `scan::Aggregate::trace_observations`.
+//!
+//! The one deliberate cycle is `policy` and `target`: policy resolves and
+//! authorizes targets, and a target error can carry the policy refusal behind it.
+//!
+//! Each `impl Client` block lives with the module that owns its operation.
+//!
 //! Unit tests stay beside the implementations they exercise.
 //!
 //! ```rust,no_run
@@ -28,29 +52,21 @@
 
 #![forbid(unsafe_code)]
 
-mod address;
 pub mod audit;
 pub mod capture;
 mod client;
 pub mod clock;
-mod correlation;
-pub mod deadline {
-    /// Allowance for a passive route or interface lookup whose operation has no deadline.
-    pub const PASSIVE_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
-}
+pub mod deadline;
 pub mod dns;
+mod engine;
 mod error;
 pub mod evidence;
 pub mod exchange;
-mod execution;
 pub mod fuzz;
 pub mod identify;
-mod mtu;
 pub mod neighbor;
 pub mod os;
-mod planning;
 pub mod policy;
-mod preparation;
 pub mod probe;
 mod providers;
 pub mod replay;
@@ -58,15 +74,14 @@ pub mod route;
 pub mod runtime;
 pub mod scan;
 pub mod send;
-mod stats;
 pub mod target;
 pub mod traceroute;
 
 pub use client::Client;
+pub use engine::execution::{Delivery, Sink};
+pub use engine::stats::{Stats, StatsOverflow};
 pub use error::{Error, NeighborSpent};
-pub use execution::{Delivery, Sink};
 pub use providers::{
     CaptureProviders, PacketProviders, ProviderSet, SystemProviders, TargetProviders, TcpProviders,
     TransmitProviders, TransmitSet, UdpProviders,
 };
-pub use stats::{Stats, StatsOverflow};

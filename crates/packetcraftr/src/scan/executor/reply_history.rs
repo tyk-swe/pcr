@@ -62,7 +62,7 @@ impl ReplyHistory {
         let current = response_protocol(probe.endpoint, path.source.is_ipv6());
         counts.iter().enumerate().any(|(protocol, &count)| {
             count > u8::from(protocol == usize::from(current))
-                && crate::correlation::outer_has_protocol(response, protocol as u8)
+                && crate::engine::correlation::outer_has_protocol(response, protocol as u8)
         })
     }
 }

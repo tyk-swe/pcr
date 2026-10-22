@@ -6,8 +6,9 @@ use std::time::Duration;
 use crate::command_options::{AddressFamily, HostnamePolicyArgs};
 use crate::errors::CliError;
 use crate::input::manifest::Declaration;
+use crate::invocation::StreamEncoder;
 use crate::output::{self, contract::Format};
-use crate::rendering::{StreamEncoder, write_stdout_line, write_summary_line};
+use crate::rendering::{write_stdout_line, write_summary_line};
 use crate::system::{Runtime, client};
 use packetcraftr::target::{Selection, plan};
 use packetcraftr_core::diagnostic::Diagnostic;
@@ -69,6 +70,7 @@ pub(super) fn run(
             crate::rendering::render_diagnostics_text(invocation, &diagnostics)
         }
         Format::Json => {
+            let origins = published_origins(&origins);
             let published = output::scan::list::Report::new(report, &origins, ports, ip_protocols);
             crate::rendering::emit_aggregate(
                 invocation,
@@ -78,6 +80,7 @@ pub(super) fn run(
             )
         }
         Format::Ndjson => {
+            let origins = published_origins(&origins);
             let published = output::scan::list::Report::new(report, &origins, ports, ip_protocols);
             for target in &published.targets {
                 stream.emit_data(output::scan::list::TargetEvent::from(target), Vec::new())?;
@@ -88,6 +91,19 @@ pub(super) fn run(
         }
         other => other.unreachable(),
     }
+}
+
+/// Each declaration's published origin, at its declaration index.
+fn published_origins(declarations: &[Declaration]) -> Vec<output::scan::list::Origin> {
+    declarations
+        .iter()
+        .zip(0_u32..)
+        .map(|(declaration, index)| output::scan::list::Origin {
+            index,
+            source: declaration.source.to_string(),
+            line: declaration.line,
+        })
+        .collect()
 }
 
 /// The same warning a live scan raises for a coalesced declaration, naming where it was declared.

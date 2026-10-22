@@ -85,7 +85,10 @@ pub(crate) struct Args {
     /// the field selects every layer or every readable field. Reports always
     /// publish numeric layer indexes.
     #[arg(long = "field", value_delimiter = ',', value_name = "SELECTOR")]
-    #[allow(rustdoc::invalid_html_tags)]
+    #[allow(
+        rustdoc::invalid_html_tags,
+        reason = "clap prints this doc comment verbatim as --help text; it is not rustdoc markup"
+    )]
     pub(crate) fields: Vec<String>,
     /// Strict or permissive packet construction for generated cases.
     #[arg(long, value_enum, default_value_t = BuildMode::Strict)]

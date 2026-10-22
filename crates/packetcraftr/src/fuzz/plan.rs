@@ -7,7 +7,7 @@ use packetcraftr_netio::deadline::MAX_WAIT;
 
 use super::Request;
 use super::error::{Error, case_error};
-use crate::execution::rate_delay;
+use crate::engine::execution::rate_delay;
 
 pub(super) fn worst_case_duration(request: &Request, cases: usize) -> Result<Duration, Error> {
     let exchange = request

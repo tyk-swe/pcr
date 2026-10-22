@@ -38,6 +38,14 @@ impl TryFrom<Coordinate> for ErrorContext {
     }
 }
 
+/// The causes an [`Error`] records for `source`: its own message, then
+/// every source beneath it.
+pub(crate) fn source_causes(source: &(impl std::error::Error + ?Sized)) -> Vec<String> {
+    std::iter::once(source.to_string())
+        .chain(packetcraftr_core::error::source_chain(source))
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Error {
     pub code: String,

@@ -11,7 +11,7 @@ use packetcraftr_core::packet::Packet;
 use super::Error;
 use super::Request;
 use super::error::probe_error;
-use crate::execution::rate_delay;
+use crate::engine::execution::rate_delay;
 use crate::probe::{self, Batch, Transport};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

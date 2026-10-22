@@ -5,7 +5,8 @@ use std::io::{self, Write};
 
 use packetcraftr_core::error::{Classification, Kind};
 
-use crate::errors::{CliError, source_causes};
+use crate::errors::CliError;
+use crate::output::envelope::source_causes;
 
 pub(super) fn stdout_error(operation: &str, source: io::Error) -> CliError {
     CliError::from_classification(

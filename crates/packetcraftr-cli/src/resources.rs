@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 mod settings;
+
+/// The default NDJSON per-write wait, in milliseconds.
+pub(crate) const OUTPUT_TIMEOUT_MS: u64 = 1000;
+
 pub(crate) use settings::{
     Enabled, Field, Preset, PresetDefaults, SettingValue, Settings, Stage, Unit, collect_settings,
     declare, policy_value,

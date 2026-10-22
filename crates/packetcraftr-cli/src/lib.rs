@@ -5,14 +5,30 @@
 //! composition, workflow dispatch, and rendering through the versioned
 //! [`output`] contract.
 //!
-//! Contributor navigation: command implementations live under
-//! `src/commands/{packet,files,analyze,network,reference}`. Shared dispatch and
-//! security helpers stay at the commands root; output and rendering keep their
-//! own modules. Unit tests stay beside the implementations they exercise.
+//! # Layers
+//!
+//! Modules depend only on their own layer or a lower one:
+//!
+//! | Layer | Modules |
+//! | --- | --- |
+//! | 1. Published contract | `output` |
+//! | 2. Foundation | `errors`, `filtering`, `cancellation`, `resources` |
+//! | 3. Options | `command_options` |
+//! | 4. Invocation | `invocation`: one command's output stream, deadline, cancellation, and diagnostics |
+//! | 5. Inputs, system, and presentation | `input`, `system`, `rendering`, `staged_output` |
+//! | 6. Commands | `commands`: implementations by `--help` group, the registry, and dispatch |
+//! | 7. Application shell | `app`: process entry, argument parsing, and help |
+//!
+//! Two upward edges are deliberate. `output::contract::Command` is generated
+//! by the command registry, so published identifiers and the parser come from
+//! one declaration. `commands::reference` reads `app::cli` because it
+//! documents the application itself.
+//!
+//! Unit tests stay beside the implementations they exercise.
 #![forbid(unsafe_code)]
 
+mod app;
 mod cancellation;
-mod cli;
 mod command_options;
 mod commands;
 mod errors;
@@ -23,10 +39,9 @@ pub mod output;
 mod rendering;
 mod resources;
 mod staged_output;
-mod startup;
 mod system;
 
 #[must_use]
 pub fn main() -> std::process::ExitCode {
-    startup::run()
+    app::run()
 }

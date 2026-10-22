@@ -15,13 +15,14 @@ use super::{
 use crate::{
     Client, Sink,
     clock::Clock,
+    engine::admission::{FamilyGate, admit_operation, wire_limits},
     policy::Authorizer,
     probe::{
         Workflow,
         runner::{Batch, BatchEvidence, run_planned},
     },
     providers::{PacketProviders, TargetProviders},
-    target::{Family, FamilyGate, ResolveTarget, admit_operation, wire_limits},
+    target::{Family, ResolveTarget},
 };
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
@@ -31,14 +32,19 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         sink: S,
     ) -> Result<Report, Error> {
         request.validate()?;
-        let mut operation = crate::execution::Operation::new(self, request.limits.max_duration);
+        let mut operation =
+            crate::engine::execution::Operation::new(self, request.limits.max_duration);
         let mut deadline = operation.deadline(self, request.limits.max_duration);
-        let publish =
-            crate::execution::publisher(&self.runtime, sink, Error::Deadline, Error::Output)?;
+        let publish = crate::engine::execution::publisher(
+            &self.runtime,
+            sink,
+            Error::Deadline,
+            Error::Output,
+        )?;
         let mut clock = self.clock.clone();
         let mut authorizer = self.admission();
         operation.neighbors = self.neighbors.for_operation(1);
-        operation.neighbor_mode = crate::execution::NeighborMode::Cached;
+        operation.neighbor_mode = crate::engine::execution::NeighborMode::Cached;
         operation.packet_limit = request.limits.max_probes as u64;
         operation.byte_limit = request.limits.max_probes as u64 * super::MAX_WIRE_BYTES;
         let mut executor = Native {
@@ -255,7 +261,10 @@ where
     let retained_evidence_bytes = evidence.retained_evidence_bytes() + preparation_bytes;
     drop(evidence);
     stats.checked_add_assign(&prep_stats).map_err(|source| {
-        (probe_error)(sequence, crate::execution::Failure::StatsOverflow(source))
+        (probe_error)(
+            sequence,
+            crate::engine::execution::Failure::StatsOverflow(source),
+        )
     })?;
     let observations = state.observations();
     let complete = !state.incomplete();

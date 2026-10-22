@@ -6,14 +6,15 @@ use packetcraftr_core as core;
 use packetcraftr_core::error::Kind;
 
 use crate::errors::CliError;
+use crate::invocation::StreamEncoder;
 use crate::rendering::{
-    StreamEncoder, captured_frame_text, render_diagnostics_text, spaced_hex, write_stdout_line,
+    captured_frame_text, render_diagnostics_text, spaced_hex, write_stdout_line,
 };
 
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
     published: output::envelope::Published<output::fuzz::Report>,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
         result,

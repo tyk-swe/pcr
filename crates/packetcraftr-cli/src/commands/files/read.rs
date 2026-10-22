@@ -19,7 +19,8 @@ use packetcraftr_core::error::Kind;
 use self::arguments::Args;
 use crate::errors::CliError;
 use crate::input::open_capture;
-use crate::rendering::{FieldTree, StreamEncoder, finish_compressed_output};
+use crate::invocation::StreamEncoder;
+use crate::rendering::{FieldTree, finish_compressed_output};
 
 use capture_output::CaptureOutput;
 use selection::{Selection, prepare_decoding};

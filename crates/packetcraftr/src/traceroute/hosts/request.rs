@@ -8,10 +8,9 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_netio::deadline::MAX_WAIT;
 
 use super::selection::Observed;
-use crate::execution::limits::{check_limits, duration_violation};
-use crate::execution::rate_delay;
-use crate::probe::Transport;
-use crate::scan::Reply;
+use crate::engine::execution::limits::{check_limits, duration_violation};
+use crate::engine::execution::rate_delay;
+use crate::probe::{Reply, Transport};
 use crate::target::{Family, Selection, Target};
 use crate::traceroute::error::probe_error;
 use crate::traceroute::request::{Bounds, check_collection, check_destination_port, tcp_payload};
@@ -56,7 +55,7 @@ pub struct Request {
     /// [`Target::Address`] and [`Target::ScopedAddress`] values are
     /// accepted, so this handoff adds no hostname resolution of its own.
     pub resolved_targets: Option<Vec<Target>>,
-    /// Responsive probes a scan observed; see [`observed`](super::observed).
+    /// Responsive probes a scan observed; see [`Aggregate::trace_observations`](crate::scan::Aggregate::trace_observations).
     pub observed: Vec<Observed>,
     /// UDP and TCP probes only; ICMP ignores it. `None` uses 49151, just
     /// below the source ports a scan's generated UDP probes use, so a reply

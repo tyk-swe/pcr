@@ -1,11 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{Aggregate, Error, Report};
+use super::{Aggregate, Error, Report, Response};
 use crate::evidence::SentPacket;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, frame::Frame};
 use std::sync::Arc;
-use std::time::Duration;
 
 pub(crate) struct WorkflowEvidence {
     pub(crate) observation_quality: packetcraftr_netio::capture::ObservationQuality,
@@ -18,13 +17,6 @@ pub(crate) struct WorkflowEvidence {
 pub(crate) struct UnsolicitedIngress {
     pub(crate) received_at: Option<std::time::Instant>,
     pub(crate) correlation_expired: bool,
-}
-
-#[derive(Clone, Debug)]
-pub struct Response {
-    pub request_index: usize,
-    pub response: DecodedPacket,
-    pub latency: Duration,
 }
 
 #[derive(Clone, Debug)]

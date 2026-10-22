@@ -10,44 +10,23 @@ use clap::ArgMatches;
 use packetcraftr_core::error::Kind;
 
 use super::{CommandExit, Generate, Spec};
-use crate::cli::Parsed;
 use crate::errors::{CANCELLED_EXIT_CODE, CliError};
+use crate::invocation::StreamEncoder;
 use crate::output;
 use crate::output::contract::{Command, Format};
-use crate::rendering::{
-    OUTPUT_TIMEOUT_MS, StreamEncoder, emit_json, emit_stderr_error, stdout_stream,
-};
+use crate::rendering::{emit_json, emit_stderr_error, stdout_stream};
 use crate::resources::Preset;
 
-pub(crate) fn run(parsed: Parsed) -> ExitCode {
-    let Parsed {
-        cli,
-        matches,
-        definition,
-    } = parsed;
-    cli.command.start(Launch {
-        format: output::contract::Format::from(cli.format),
-        presentation: crate::rendering::Presentation {
-            verbose: cli.verbose,
-        },
-        resource_diagnostics: cli.resource_diagnostics,
-        resource_preset: cli.resource_preset,
-        output_timeout_ms: cli.output_timeout_ms,
-        force_binary_stdout: cli.force_binary_stdout,
-        matches: &matches,
-        definition: &definition,
-    })
-}
-
-pub(super) struct Launch<'a> {
-    format: output::contract::Format,
-    presentation: crate::rendering::Presentation,
-    resource_diagnostics: bool,
-    resource_preset: Option<Preset>,
-    output_timeout_ms: Option<u64>,
-    force_binary_stdout: bool,
-    matches: &'a ArgMatches,
-    definition: &'a clap::Command,
+/// The global options and parsed matches a command launches with.
+pub(crate) struct Launch<'a> {
+    pub(crate) format: output::contract::Format,
+    pub(crate) presentation: crate::invocation::Presentation,
+    pub(crate) resource_diagnostics: bool,
+    pub(crate) resource_preset: Option<Preset>,
+    pub(crate) output_timeout_ms: Option<u64>,
+    pub(crate) force_binary_stdout: bool,
+    pub(crate) matches: &'a ArgMatches,
+    pub(crate) definition: &'a clap::Command,
 }
 
 impl Launch<'_> {
@@ -121,7 +100,8 @@ impl Launch<'_> {
                 &invocation,
                 command,
                 std::time::Duration::from_millis(
-                    self.output_timeout_ms.unwrap_or(OUTPUT_TIMEOUT_MS),
+                    self.output_timeout_ms
+                        .unwrap_or(crate::resources::OUTPUT_TIMEOUT_MS),
                 ),
             ) {
                 Ok(stream) => stream,

@@ -3,8 +3,8 @@
 use super::{Planned, limit};
 use crate::{
     clock::Clock,
-    execution::ExchangeExecutor,
-    preparation::{AdmittedCost, Admitting, AuthorizedRoute, RetainedAdmission},
+    engine::preparation::{AdmittedCost, Admitting, AuthorizedRoute, RetainedAdmission},
+    exchange::WorkflowExecutor,
     providers::PacketProviders,
     scan::executor::PipelineOptions,
 };
@@ -32,7 +32,7 @@ pub(super) struct AdmittedProbe {
 /// Admits every probe before any neighbor discovery, charging the prepared
 /// descriptions the pipeline may hold at once against `max_prepared_bytes`.
 pub(super) fn plan<'c, P: PacketProviders, K: Clock>(
-    executor: &'c ExchangeExecutor<'_, P, K>,
+    executor: &'c WorkflowExecutor<'_, P, K>,
     planned: &[Planned<'_>],
     options: &PipelineOptions,
     deadline: Instant,
@@ -51,7 +51,7 @@ pub(super) fn plan<'c, P: PacketProviders, K: Clock>(
 }
 
 pub(super) fn plan_with_limit<'c, P: PacketProviders, K: Clock>(
-    executor: &'c ExchangeExecutor<'_, P, K>,
+    executor: &'c WorkflowExecutor<'_, P, K>,
     planned: &[Planned<'_>],
     options: &PipelineOptions,
     deadline: Instant,
@@ -102,7 +102,7 @@ pub(super) fn plan_with_limit<'c, P: PacketProviders, K: Clock>(
         .map_err(|error| {
             BoundaryError::from_error(crate::scan::error::probe_error(
                 0,
-                crate::execution::Failure::StatsOverflow(error),
+                crate::engine::execution::Failure::StatsOverflow(error),
             ))
         })?;
     let mut admission = client

@@ -11,7 +11,8 @@ use packetcraftr_core::frame::Frame;
 
 use super::LinkCaptureWriter;
 use super::stdout::stdout_error;
-use crate::errors::{CliError, source_causes};
+use crate::errors::CliError;
+use crate::output::envelope::source_causes;
 
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 

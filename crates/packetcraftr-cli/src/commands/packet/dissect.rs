@@ -57,7 +57,7 @@ pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
     format: Format,
-    stream: &crate::rendering::StreamEncoder,
+    stream: &crate::invocation::StreamEncoder,
 ) -> Result<(), CliError> {
     arguments
         .tree
@@ -161,7 +161,7 @@ fn render_text(
     invocation: &crate::invocation::Invocation,
     decoded: &DecodedPacket,
     tree: Option<&mut FieldTree>,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     write_summary_line(
         invocation,

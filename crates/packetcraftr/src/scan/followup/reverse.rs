@@ -164,7 +164,7 @@ impl Lookup {
     pub(super) fn run<P, K>(
         &self,
         client: &Client<P, K>,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
         hosts: &[Host],
         started: Instant,
         last_sent: Option<Instant>,
@@ -200,9 +200,11 @@ impl Lookup {
         let mut batch_operation = operation.clone();
         batched(
             hosts,
-            pause,
-            self.batch_size(),
-            last_sent,
+            Batching {
+                size: self.batch_size(),
+                pause,
+                last_sent,
+            },
             &deadline,
             self.template.limits.evidence.max_bytes,
             || client.now(),
@@ -241,7 +243,7 @@ impl Lookup {
     pub(super) fn authorize<P, K>(
         &self,
         client: &Client<P, K>,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
         hosts: &[Host],
     ) -> Result<(), String>
     where
@@ -272,7 +274,7 @@ impl Lookup {
     pub(super) fn lookup<P, K>(
         &self,
         client: &Client<P, K>,
-        operation: &mut crate::execution::Operation,
+        operation: &mut crate::engine::execution::Operation,
         addresses: &[IpAddr],
         remaining: Duration,
     ) -> Result<(Vec<ReverseLookup>, Stats, Option<Instant>), dns::Error>
@@ -423,15 +425,23 @@ impl Lookup {
     }
 }
 
-/// Looks `hosts` up in batches spaced by `pause` until `deadline`, keeping
+/// How reverse lookups are split into batches and spaced from the
+/// operation's earlier transmissions.
+struct Batching {
+    /// Hosts looked up together.
+    size: usize,
+    /// The rate's pause between the last transmission and a batch's first question.
+    pause: Duration,
+    /// When the operation last transmitted, if it has.
+    last_sent: Option<Instant>,
+}
+
+/// Looks `hosts` up in batches spaced by `batching` until `deadline`, keeping
 /// their names within `name_budget` bytes. Cancellation and pacing failures
 /// stop the operation before any further question waits or sends.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn batched(
+fn batched(
     hosts: &[Host],
-    pause: Duration,
-    batch_size: usize,
-    last_sent: Option<Instant>,
+    batching: Batching,
     deadline: &Deadline,
     mut name_budget: usize,
     now: impl Fn() -> Instant,
@@ -450,8 +460,12 @@ pub(super) fn batched(
         .filter(|(_, host)| host.state != State::NoResponse)
         .map(|(index, _)| index)
         .collect();
-    let mut last_sent = last_sent;
-    for chunk in selected.chunks(batch_size) {
+    let Batching {
+        size,
+        pause,
+        mut last_sent,
+    } = batching;
+    for chunk in selected.chunks(size) {
         deadline.check_cancelled()?;
         // Only what remains of the pause since the last transmission is owed;
         // its replies' wait already spaced it from this batch.
@@ -512,7 +526,7 @@ pub(super) fn retain_names(lookup: &mut ReverseLookup, budget: &mut usize) {
 pub(super) fn names<P, K>(
     lookup: Option<&Lookup>,
     client: &Client<P, K>,
-    operation: &crate::execution::Operation,
+    operation: &crate::engine::execution::Operation,
     hosts: &[Host],
     started: Instant,
     last_sent: Option<Instant>,

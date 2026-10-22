@@ -14,15 +14,14 @@ use super::report::{Event, Report};
 use super::request::{Request, overflow};
 use super::selection::{Choice, choose};
 use crate::clock::Clock;
-use crate::execution::{ExchangeExecutor, Executor, publisher, rate_delay};
+use crate::engine::admission::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
+use crate::engine::execution::{Executor, publisher, rate_delay};
+use crate::exchange::WorkflowExecutor;
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_planned};
 use crate::probe::{Batch, Transport, check_probe_count, check_probe_duration, enforce_deadline};
 use crate::providers::{PacketProviders, TargetProviders};
-use crate::target::{
-    DeclaredTargets, FamilyGate, ResolveTarget, SelectedAddress, admit_resolved_selection,
-    admit_selection, wire_limits,
-};
+use crate::target::{ResolveTarget, SelectedAddress};
 use crate::traceroute::error::probe_error;
 use crate::traceroute::request::tcp_payload;
 use crate::traceroute::{Error, MAX_PROBE_BYTES, Probe, WORKFLOW};
@@ -36,7 +35,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::execution::Operation::new(self, request.limits.max_duration);
+        let operation = crate::engine::execution::Operation::new(self, request.limits.max_duration);
         self.trace_hosts_in(request, sink, &operation)
     }
 
@@ -44,18 +43,24 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         &self,
         request: Request,
         sink: S,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
     {
         let mut operation = operation.clone();
         let policy = operation.policy(&self.policy);
-        let mut admission = crate::execution::Admission::new(&policy, self.providers.resolver());
+        let mut admission =
+            crate::engine::admission::Admission::new(&policy, self.providers.resolver());
         let publish = publisher(
             &operation.runtime,
             sink,
-            |error| (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error)),
+            |error| {
+                (probe_error)(
+                    0_u64,
+                    crate::engine::execution::Failure::DurationLimit(error),
+                )
+            },
             |source| Error::Output { source },
         )?;
         let send = crate::send::Options {
@@ -67,7 +72,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         // The trace resolves its own neighbors, so its executor authorizes
         // each neighbor request like a probe whether or not the caller did.
         request.validate()?;
-        operation.neighbor_mode = crate::execution::NeighborMode::Authorized;
+        operation.neighbor_mode = crate::engine::execution::NeighborMode::Authorized;
         if request.route.link_mode != packetcraftr_netio::link::Mode::Layer3
             && (request.strategy.is_some() || !request.observed.is_empty())
         {
@@ -90,7 +95,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
                 request.probes_per_second,
             )?;
         }
-        let mut executor = super::executor::ClientExecutor::new(ExchangeExecutor::new(
+        let mut executor = super::executor::ClientExecutor::new(WorkflowExecutor::new(
             self,
             &operation,
             send,
@@ -113,7 +118,10 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             .stats
             .checked_add_assign(&report.neighbor_stats.clone())
             .map_err(|source| {
-                (probe_error)(0_u64, crate::execution::Failure::StatsOverflow(source))
+                (probe_error)(
+                    0_u64,
+                    crate::engine::execution::Failure::StatsOverflow(source),
+                )
             })?;
         Ok(report)
     }
@@ -192,45 +200,28 @@ fn approve<A: Authorizer + ResolveTarget>(
     deadline: &Deadline,
 ) -> Result<Approved, Error> {
     request.validate()?;
+    // An exact resolved handoff re-authorizes every supplied target; the
+    // bounded declaration still validates and gates for the report.
     let declared = DeclaredTargets {
         selection: &request.targets,
         family: FamilyGate::new(request.address_family, Error::family),
         max_targets: request.max_targets,
+        resolved: request.resolved_targets.as_deref(),
     };
-    // An exact resolved handoff re-authorizes every supplied target; the
-    // bounded declaration still validates and gates for the report.
-    let (selected, plan) = if let Some(resolved) = &request.resolved_targets {
-        admit_resolved_selection(
-            authorizer,
-            deadline,
-            probe_error,
-            declared,
-            resolved,
-            Error::TargetSelection,
-            |selected| plan_hosts(request, &selected.targets),
-            |plan| {
-                Ok(wire_limits(
-                    u64::try_from(plan.transmissions).unwrap_or(u64::MAX),
-                    plan.maximum_bytes,
-                ))
-            },
-        )?
-    } else {
-        admit_selection(
-            authorizer,
-            deadline,
-            probe_error,
-            declared,
-            Error::TargetSelection,
-            |selected| plan_hosts(request, &selected.targets),
-            |plan| {
-                Ok(wire_limits(
-                    u64::try_from(plan.transmissions).unwrap_or(u64::MAX),
-                    plan.maximum_bytes,
-                ))
-            },
-        )?
-    };
+    let (selected, plan) = admit_selection(
+        authorizer,
+        deadline,
+        probe_error,
+        declared,
+        Error::TargetSelection,
+        |selected| plan_hosts(request, &selected.targets),
+        |plan| {
+            Ok(wire_limits(
+                u64::try_from(plan.transmissions).unwrap_or(u64::MAX),
+                plan.maximum_bytes,
+            ))
+        },
+    )?;
     Ok(Approved {
         declared_target: selected.declared.clone(),
         resolved_addresses: selected.addresses(),

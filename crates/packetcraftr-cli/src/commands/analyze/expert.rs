@@ -12,7 +12,7 @@ use self::arguments::Args;
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
-use crate::rendering::StreamEncoder;
+use crate::invocation::StreamEncoder;
 
 impl crate::commands::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[

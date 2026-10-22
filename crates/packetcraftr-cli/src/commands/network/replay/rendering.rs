@@ -7,7 +7,7 @@ use crate::rendering::{duration_text, spaced_hex, write_summary_line};
 
 pub(super) fn frame_line(
     frame: &output::replay::Frame,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> String {
     format!(
         "{}: sent {} bytes via {} (index {}, {}) dlt={} {}",

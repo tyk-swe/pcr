@@ -8,8 +8,8 @@ use packetcraftr::scan::followup;
 
 use super::traceroute;
 use crate::errors::CliError;
+use crate::invocation::StreamEncoder;
 use crate::output::{self, contract::Format};
-use crate::rendering::StreamEncoder;
 use crate::system::{Runtime, prepare_workflow};
 
 /// The fully validated raw scan boundary. Preparation has already selected

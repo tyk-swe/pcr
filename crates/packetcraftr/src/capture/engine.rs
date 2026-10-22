@@ -34,7 +34,7 @@ impl<P: CaptureProviders, K: Clock> Client<P, K> {
         let started = self.now();
         let deadline = self.deadline(window);
         let report = self.plan_capture(&group_request, window, started, &deadline)?;
-        let mut publisher = match crate::execution::publisher(
+        let mut publisher = match crate::engine::execution::publisher(
             &self.runtime,
             sink,
             |deadline| Cause::Consumer(BoundaryError::from_error(deadline)),

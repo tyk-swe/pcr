@@ -5,13 +5,13 @@ use crate::{
     Stats,
     clock::Clock,
     evidence::ExecutionPermit,
-    probe::{self, Batch, runner::BatchEvidence},
+    probe::{self, Batch, Stage, runner::BatchEvidence},
     scan::{
         self, Error, Event, Probe, Request,
         adaptive::{Controller, Outcome, Selection, Work},
         evidence::ProbeClassifier,
         executor::{PipelineBatch, PipelineEvent, PipelineFeed, PipelinePoll},
-        plan::{Stage, packet::sent_probe_matches},
+        plan::packet::sent_probe_matches,
     },
     target::SelectedAddress,
 };

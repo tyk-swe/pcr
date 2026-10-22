@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 use serde::Serialize;
 
 use crate::Sink;
-use crate::execution::Shared;
+use crate::engine::execution::Shared;
 use crate::probe::index_or_push;
 use packetcraftr_core::error::BoundaryError;
 

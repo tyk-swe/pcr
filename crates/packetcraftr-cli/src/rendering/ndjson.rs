@@ -9,12 +9,11 @@ use packetcraftr_core::budget::Deadline;
 
 use crate::errors::CliError;
 
+use crate::invocation::StreamEncoder;
 use crate::output;
-
-use super::StreamEncoder;
+use crate::resources::OUTPUT_TIMEOUT_MS;
 
 /// Per-write ceiling when `--output-timeout-ms` is absent.
-pub(crate) const OUTPUT_TIMEOUT_MS: u64 = 1000;
 const OUTPUT_TIMEOUT: Duration = Duration::from_millis(OUTPUT_TIMEOUT_MS);
 
 pub(crate) fn stdout_stream(
@@ -22,7 +21,7 @@ pub(crate) fn stdout_stream(
     command: output::contract::Command,
     timeout: Duration,
 ) -> Result<StreamEncoder, CliError> {
-    let runtime = crate::system::runtime(invocation, crate::system::Runtime::OutputWriter);
+    let runtime = invocation.output_writer_runtime();
     output::stream::StreamEncoder::new_bounded(command, io::stdout(), &runtime, timeout)
         .map(|stream| StreamEncoder::from(stream).with_terminal_error_timeout(OUTPUT_TIMEOUT))
         .map_err(CliError::classified)
@@ -33,7 +32,7 @@ pub(crate) fn write_unattributed_error(
     command: Option<output::contract::Command>,
     error: output::envelope::Error,
 ) -> Result<(), CliError> {
-    let runtime = crate::system::runtime(invocation, crate::system::Runtime::OutputWriter);
+    let runtime = invocation.output_writer_runtime();
     let sink = Worker::new_in(&runtime, move |error| {
         output::stream::write_unattributed_error(io::stdout(), command, error)
             .map_err(|error| CliError::from(error).into_boundary_error())

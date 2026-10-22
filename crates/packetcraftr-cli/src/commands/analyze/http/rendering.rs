@@ -8,7 +8,7 @@ use crate::rendering::{comma_separated, optional_display, write_stdout_line, wri
 pub(super) fn render_message(
     invocation: &crate::invocation::Invocation,
     message: &wire::Message,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let start = match &message.start {
         Some(wire::StartLine::Request { method, target, .. }) => {

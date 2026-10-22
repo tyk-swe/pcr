@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::BTreeSet;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,38 +19,6 @@ use crate::policy::{Operation, Policy, SocketOperation};
 pub struct Endpoint {
     pub address: SocketAddr,
     pub transport: Transport,
-}
-
-impl Endpoint {
-    /// Select only scan endpoints inferred open, plus UDP's open-or-filtered
-    /// endpoints. Selection itself sends nothing; the caller must invoke identify.
-    pub fn from_scan(endpoint: &crate::scan::Endpoint) -> Option<Self> {
-        use crate::scan::State;
-        let state = endpoint.inference.as_ref()?.state?;
-        let transport = match endpoint.transport {
-            crate::probe::Transport::Tcp if state == State::Open => Transport::Tcp,
-            crate::probe::Transport::Udp
-                if matches!(state, State::Open | State::OpenOrFiltered) =>
-            {
-                Transport::Udp
-            }
-            _ => return None,
-        };
-        let port = endpoint.port?;
-        let address = match endpoint.address {
-            std::net::IpAddr::V4(address) => SocketAddr::new(address.into(), port),
-            std::net::IpAddr::V6(address) => SocketAddr::V6(SocketAddrV6::new(
-                address,
-                port,
-                0,
-                endpoint
-                    .scope
-                    .as_ref()
-                    .map_or(0, |scope| scope.interface.index),
-            )),
-        };
-        Some(Self { address, transport })
-    }
 }
 
 /// attempt_error and application bytes available within one budget scope.

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::cell::Cell;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,11 +13,18 @@ use packetcraftr::runtime::{Runtime, Worker};
 use serde::Serialize;
 
 use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Kind};
 
 use super::contract::Command;
-use super::envelope::{Envelope, Error, Published, Stats};
-use crate::errors::source_causes;
+use super::envelope::{Envelope, Error, Published, Stats, source_causes};
+
+mod error;
+mod record;
+
+pub use error::EncodeError;
+pub use record::MAX_RECORD_BYTES;
+pub(crate) use record::MeteredError;
+use record::{Counted, ResultMeter, serialize_line, serialize_line_metered};
 
 pub trait StreamRecord: Serialize {
     fn event_name(&self) -> &'static str;
@@ -424,203 +430,6 @@ fn check_publication_budget(
             })?;
     }
     Ok(())
-}
-
-#[derive(Debug)]
-pub(crate) enum MeteredError {
-    Limit,
-    Encode(EncodeError),
-    Serialize(serde_json::Error),
-}
-
-struct ResultMeter {
-    limit: usize,
-    active: Cell<bool>,
-    bytes: Cell<usize>,
-    exceeded: Cell<bool>,
-    value_failed: Cell<bool>,
-}
-
-impl ResultMeter {
-    fn new(limit: usize) -> Self {
-        Self {
-            limit,
-            active: Cell::new(false),
-            bytes: Cell::new(0),
-            exceeded: Cell::new(false),
-            value_failed: Cell::new(false),
-        }
-    }
-}
-
-struct Counted<'a, T> {
-    value: T,
-    meter: Option<&'a ResultMeter>,
-}
-impl<T: Serialize> Serialize for Counted<'_, T> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        if let Some(meter) = self.meter {
-            meter.active.set(true);
-        }
-        let result = self.value.serialize(serializer);
-        if let Some(meter) = self.meter {
-            meter.active.set(false);
-            meter.value_failed.set(result.is_err());
-        }
-        result
-    }
-}
-
-/// Maximum encoded NDJSON record bytes, including its newline.
-pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
-
-fn serialize_line(record: &impl Serialize, sequence: u64) -> Result<Vec<u8>, EncodeError> {
-    serialize_line_with_limit(record, sequence, MAX_RECORD_BYTES)
-}
-
-fn serialize_line_with_limit(
-    record: &impl Serialize,
-    sequence: u64,
-    limit: usize,
-) -> Result<Vec<u8>, EncodeError> {
-    serialize_line_metered(record, sequence, limit, None)
-}
-
-fn serialize_line_metered(
-    record: &impl Serialize,
-    sequence: u64,
-    limit: usize,
-    meter: Option<&ResultMeter>,
-) -> Result<Vec<u8>, EncodeError> {
-    struct BoundedLine<'a> {
-        meter: Option<&'a ResultMeter>,
-        bytes: Vec<u8>,
-        limit: usize,
-        exceeded: bool,
-    }
-    impl Write for BoundedLine<'_> {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            if let Some(meter) = self.meter.filter(|meter| meter.active.get()) {
-                if bytes.len() > meter.limit.saturating_sub(meter.bytes.get()) {
-                    meter.exceeded.set(true);
-                    return Err(io::Error::other(
-                        "application JSON value byte ceiling exceeded",
-                    ));
-                }
-                meter.bytes.set(meter.bytes.get() + bytes.len());
-            }
-            if bytes.len() > self.limit.saturating_sub(self.bytes.len()) {
-                self.exceeded = true;
-                return Err(io::Error::other("NDJSON record byte ceiling exceeded"));
-            }
-            let required = self.bytes.len() + bytes.len();
-            if required > self.bytes.capacity() {
-                let capacity = required
-                    .max(self.bytes.capacity().saturating_mul(2))
-                    .min(self.limit);
-                self.bytes
-                    .try_reserve_exact(capacity - self.bytes.len())
-                    .map_err(io::Error::other)?;
-            }
-            self.bytes.extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-    let mut line = BoundedLine {
-        meter,
-        bytes: Vec::new(),
-        limit,
-        exceeded: false,
-    };
-    let result = serde_json::to_writer(&mut line, record);
-    if line.exceeded || limit == 0 {
-        return Err(EncodeError::RecordLimit { sequence, limit });
-    }
-    result.map_err(|source| EncodeError::Serialize { sequence, source })?;
-    if let Err(source) = line.write_all(b"\n") {
-        if line.exceeded {
-            return Err(EncodeError::RecordLimit { sequence, limit });
-        }
-        return Err(EncodeError::Serialize {
-            sequence,
-            source: serde_json::Error::io(source),
-        });
-    }
-    Ok(line.bytes)
-}
-
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum EncodeError {
-    #[error("NDJSON {phase} exceeded the operation publication deadline")]
-    Deadline {
-        phase: &'static str,
-        #[source]
-        source: packetcraftr_core::budget::DeadlineExceeded,
-    },
-    #[error(transparent)]
-    Cancelled(#[from] packetcraftr_core::budget::Cancelled),
-    #[error(
-        "NDJSON record at sequence {sequence} exceeds {limit} encoded bytes; operation is incomplete"
-    )]
-    RecordLimit { sequence: u64, limit: usize },
-    #[error("data records must declare a nonterminal event kind")]
-    ReservedEvent,
-    #[error("NDJSON stream is already terminated")]
-    Terminal,
-    #[error("NDJSON stream output has already failed")]
-    Failed,
-    #[error("NDJSON stream state lock was poisoned")]
-    Poisoned,
-    #[error("NDJSON sequence overflowed")]
-    SequenceOverflow,
-    #[error("NDJSON record at sequence {sequence} failed to serialize")]
-    Serialize {
-        sequence: u64,
-        #[source]
-        source: serde_json::Error,
-    },
-    #[error("NDJSON stream is incomplete: record at sequence {sequence} failed to write")]
-    Write {
-        sequence: u64,
-        #[source]
-        source: io::Error,
-    },
-}
-
-impl Classified for EncodeError {
-    fn classification(&self) -> Classification {
-        match self {
-            Self::Deadline { .. } => Classification::new(
-                "io.output_deadline",
-                Kind::Io,
-                Some(
-                    "treat the operation as incomplete; serialization and publication share the remaining duration budget",
-                ),
-            ),
-            Self::Cancelled(source) => source.classification(),
-            Self::RecordLimit { .. } => Classification::new(
-                "io.output_record_limit",
-                Kind::Io,
-                Some(
-                    "reduce record contents or select a smaller input; account for earlier records",
-                ),
-            ),
-            Self::Write { .. } => Classification::new(
-                "io.stdout",
-                Kind::Io,
-                Some("inspect the output sink and account for records already written"),
-            ),
-            _ => Classification::new(
-                "internal.ndjson_stream",
-                Kind::Internal,
-                Some("treat the structured stream as incomplete"),
-            ),
-        }
-    }
 }
 
 #[cfg(test)]

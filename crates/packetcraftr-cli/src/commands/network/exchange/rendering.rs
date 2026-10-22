@@ -7,14 +7,13 @@ use packetcraftr_core::diagnostic::Diagnostic;
 use crate::output;
 
 use crate::errors::CliError;
-use crate::rendering::{
-    StreamEncoder, render_diagnostics_text, write_capture_file, write_stdout_line,
-};
+use crate::invocation::StreamEncoder;
+use crate::rendering::{render_diagnostics_text, write_capture_file, write_stdout_line};
 
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
     result: &packetcraftr::exchange::Aggregate,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     write_stdout_line(
         invocation,

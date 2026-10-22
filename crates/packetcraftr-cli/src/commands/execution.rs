@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::{errors::CliError, invocation::Invocation, rendering::StreamEncoder};
+use crate::{
+    errors::CliError,
+    invocation::{Invocation, StreamEncoder},
+};
 use packetcraftr::{Delivery, Sink};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;

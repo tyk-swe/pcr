@@ -5,7 +5,6 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use bytes::Bytes;
-use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 use packetcraftr_core::protocol::{
     application::dns::Dns,
     network::{Ipv4, Ipv6},
@@ -13,8 +12,8 @@ use packetcraftr_core::protocol::{
 };
 use packetcraftr_core::{layer::Raw, packet::Packet};
 
-use crate::correlation::nonzero_ipv4_identification;
-use crate::execution::rate_delay;
+use crate::engine::correlation::nonzero_ipv4_identification;
+use crate::engine::execution::rate_delay;
 use crate::policy::{DnsOperation, LimitOverflow, SocketLimits, WireLimits};
 
 use super::error::{Error, attempt_error};
@@ -214,37 +213,5 @@ pub(super) fn udp_dissects_as_dns(source_port: u16, destination_port: u16) -> bo
 
 /// A retried query must not give an off-path spoofer a second chance at the same tuple.
 pub(super) fn rotated_source_port(base: u16, attempt: u32) -> u16 {
-    crate::correlation::ephemeral_source_port(base, u64::from(attempt.saturating_sub(1)))
-}
-
-/// Callers needing reproducible experiments supply a fixed identity in `Request` instead.
-pub fn unpredictable_transaction_id() -> Result<u16, BoundaryError> {
-    random_u16(getrandom::fill)
-}
-
-/// Retries rotate deterministically from this random base, not with independent entropy.
-pub fn unpredictable_source_port() -> Result<u16, BoundaryError> {
-    random_u16(getrandom::fill).map(|value| {
-        crate::correlation::ephemeral_source_port(
-            crate::correlation::EPHEMERAL_SOURCE_PORT_BASE,
-            u64::from(value),
-        )
-    })
-}
-
-fn random_u16(
-    fill: impl FnOnce(&mut [u8]) -> Result<(), getrandom::Error>,
-) -> Result<u16, BoundaryError> {
-    let mut bytes = [0; 2];
-    fill(&mut bytes).map_err(|source| {
-        BoundaryError::with_source(
-            "could not obtain system randomness for DNS identity",
-            Classification::new("io.dns_entropy", Kind::Io, None),
-            std::iter::once(source.to_string())
-                .chain(packetcraftr_core::error::source_chain(&source))
-                .collect(),
-            source,
-        )
-    })?;
-    Ok(u16::from_ne_bytes(bytes))
+    crate::engine::correlation::ephemeral_source_port(base, u64::from(attempt.saturating_sub(1)))
 }

@@ -13,7 +13,7 @@ use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;
-use crate::rendering::StreamEncoder;
+use crate::invocation::StreamEncoder;
 use crate::system::{Prepared, placeholder, prepare_live};
 
 impl crate::commands::Spec for Args {

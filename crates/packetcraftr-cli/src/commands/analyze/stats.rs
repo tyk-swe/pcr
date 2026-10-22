@@ -68,7 +68,7 @@ pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
     format: Format,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     arguments.validate_selection()?;
     let table = Table::from(arguments.table);

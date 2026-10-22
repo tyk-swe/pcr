@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::errors::CliError;
+use crate::invocation::StreamEncoder;
 use crate::output::{
     self,
     contract::{Command, Format},
 };
 use crate::rendering::{
-    StreamEncoder, document_spelling, emit_aggregate_with_stats, render_diagnostics_stderr,
+    document_spelling, emit_aggregate_with_stats, render_diagnostics_stderr,
     render_diagnostics_text, write_stdout_line, write_summary_line,
 };
 

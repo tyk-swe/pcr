@@ -8,7 +8,7 @@ use packetcraftr_netio::capture::{Limits as CaptureQueueLimits, MAX_CAPTURE_QUEU
 use packetcraftr_netio::deadline::MAX_WAIT;
 
 use super::Error;
-use crate::execution::limits::duration_violation;
+use crate::engine::execution::limits::duration_violation;
 
 pub const DEFAULT_MAX_UNMATCHED_FRAMES: usize = MAX_CAPTURE_QUEUE_FRAMES;
 pub const DEFAULT_MAX_RESPONSES: usize = MAX_CAPTURE_QUEUE_FRAMES;

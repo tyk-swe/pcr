@@ -5,12 +5,12 @@ use crate::probe::Workflow;
 
 pub const DEFAULT_ATTEMPTS: u32 = 1;
 pub const DEFAULT_MAX_PORTS: usize = 1_024;
-pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = 64;
+pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = crate::evidence::DEFAULT_MAX_UNDECODED_FRAMES;
 pub const MAX_ATTEMPTS: u32 = 32;
 pub const MAX_IN_FLIGHT: usize = 1_024;
 pub const MAX_PROBES: usize = 100_000;
 pub(crate) const MAX_PREPARED_BYTES: usize = 256 * 1024 * 1024;
-pub const MAX_RATE: u32 = crate::execution::limits::MAX_RATE;
+pub const MAX_RATE: u32 = crate::engine::execution::limits::MAX_RATE;
 /// Maximum UDP payload accepted for either IP family, before final MTU checks.
 pub const MAX_UDP_PAYLOAD_BYTES: usize =
     packetcraftr_core::document::udp_profiles::MAX_PAYLOAD_BYTES;
@@ -42,16 +42,17 @@ mod sctp;
 mod selection;
 mod tcp;
 
+pub use crate::probe::{Reply, Stage};
 pub use adaptive::{Adaptive, Condition, ConditionKind, HostIdentity, Scheduling, SchedulingMode};
 pub use error::{Error, PipelineFailure};
 pub use evidence::{CorrelatedResponse, classify_response};
 pub use inference::{DiagnosticMethod, DiagnosticRule, Inference, Rule, State};
 pub use ip_protocol::{IpProtocolSelection, IpProtocolSpec, select_ip_protocols};
 pub use measurement::{Coverage, Measurement, Qualification};
-pub use plan::{Probe, Stage};
+pub use plan::Probe;
 pub use report::{
     Aggregate, Attribution, Classification, ClassificationCounts, Collector, Endpoint, Event,
-    PendingEvidence, ProbeEvidence, Reply, Report, Rtt, SentProbe, Unattributed,
+    PendingEvidence, ProbeEvidence, Report, Rtt, SentProbe, Unattributed,
 };
 pub use request::{Limits, PortSpec, Request, select_ports};
 pub use sctp::SctpScan;
@@ -61,7 +62,7 @@ pub use selection::{
 };
 pub use tcp::TcpScan;
 
-pub(crate) use executor::NeighborBounds;
+use executor::NeighborBounds;
 
 /// A bundled data set a result drew on, named with its own version.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

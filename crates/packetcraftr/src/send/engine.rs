@@ -18,7 +18,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::execution::Operation::new(self, std::time::Duration::MAX);
+        let operation = crate::engine::execution::Operation::new(self, std::time::Duration::MAX);
         self.send_in(request, sink, &operation)
     }
 
@@ -26,7 +26,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         &self,
         request: Request,
         sink: S,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
@@ -52,7 +52,7 @@ impl<P: TransmitProviders, K: Clock> Client<P, K> {
             ));
         }
         request.send.plan.link_mode = packetcraftr_netio::link::Mode::Layer3;
-        let operation = crate::execution::Operation::new(self, std::time::Duration::MAX);
+        let operation = crate::engine::execution::Operation::new(self, std::time::Duration::MAX);
         self.send_prepared_in(request, sink, &operation, |stream, packet| {
             stream.prepare_layer3(packet)
         })
@@ -62,11 +62,12 @@ impl<P: TransmitProviders, K: Clock> Client<P, K> {
         &self,
         request: Request,
         sink: S,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
         mut prepare: impl FnMut(
-            &mut crate::preparation::Streaming<'_, P, K>,
+            &mut crate::engine::preparation::Streaming<'_, P, K>,
             packetcraftr_core::packet::Packet,
-        ) -> Result<crate::preparation::PreparedPacket, crate::Error>,
+        )
+            -> Result<crate::engine::preparation::PreparedPacket, crate::Error>,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
@@ -74,7 +75,7 @@ impl<P: TransmitProviders, K: Clock> Client<P, K> {
         let plan = super::plan::Plan::try_from(&request)?;
         let started = self.now();
         let mut stream = self.streaming_in(&request.send, plan.packet_count, operation)?;
-        let mut publish = crate::execution::publisher(
+        let mut publish = crate::engine::execution::publisher(
             &operation.runtime,
             sink,
             |deadline| Error::Output {

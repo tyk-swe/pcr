@@ -18,7 +18,7 @@ pub(super) fn render_text(
     report: &analysis::stats::Report,
     frames_read: u64,
     diagnostics: &[core::diagnostic::Diagnostic],
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     write_summary_line(
         invocation,

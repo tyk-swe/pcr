@@ -8,8 +8,9 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::packet::Packet;
 
 use crate::clock::Clock;
+use crate::engine::execution::{Executor, ExecutorFault, Receipt};
 use crate::evidence::ExecutionPermit;
-use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, Receipt};
+use crate::exchange::WorkflowExecutor;
 use crate::providers::PacketProviders;
 use packetcraftr_core::error::BoundaryError;
 
@@ -25,7 +26,7 @@ pub(crate) struct CaseStep {
     pub(crate) timeout: Duration,
 }
 
-impl crate::execution::Step for CaseStep {
+impl crate::engine::execution::Step for CaseStep {
     type Evidence = CaseEvidence;
 }
 
@@ -49,7 +50,7 @@ impl Receipt for CaseEvidence {
     }
 }
 
-impl<P: PacketProviders, K: Clock> Executor<CaseStep> for ExchangeExecutor<'_, P, K> {
+impl<P: PacketProviders, K: Clock> Executor<CaseStep> for WorkflowExecutor<'_, P, K> {
     fn execute(&mut self, case: &CaseStep) -> Result<CaseEvidence, BoundaryError> {
         let exchange = self
             .client

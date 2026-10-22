@@ -10,15 +10,16 @@ use crate::probe::Batch;
 use crate::probe::runner::BatchEvidence;
 use crate::target::SelectedAddress;
 
+use super::Prober;
 use super::approval::Approved;
-use super::pacing::{Owed, settle};
-use super::pipelined::{add_stats, pipeline_options, prepared_limit};
+use super::pipelined::{StagePlan, add_stats, pipeline_options, prepared_limit};
+use crate::probe::Stage;
 use crate::probe::{self, enforce_deadline};
 use crate::scan::Error;
 use crate::scan::error::probe_error;
 use crate::scan::evidence::ProbeClassifier;
 use crate::scan::executor::Pipelined;
-use crate::scan::plan::{Stage, probe_count};
+use crate::scan::plan::probe_count;
 use crate::scan::{Event, Probe, Request};
 
 pub(in crate::scan) fn adaptive_batches<'r>(
@@ -179,37 +180,36 @@ pub(super) fn admit_adaptive<E: Pipelined>(
     Ok(summaries)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn execute_adaptive<E, C, F>(
-    request: &Request,
-    executor: &mut E,
-    clock: &mut C,
-    deadline: &mut Deadline,
+    prober: &mut Prober<'_, E, C>,
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
+    plan: &StagePlan<'_>,
+    preceding: &crate::Stats,
     controller: &mut crate::scan::adaptive::Controller,
-    stage: Stage,
-    targets: &[SelectedAddress],
-    endpoints: &[probe::Endpoint],
-    first_sequence: u64,
-    owed: &mut Owed,
     reservation: usize,
     admission: &crate::scan::executor::AdaptiveAdmission,
-    preceding: &crate::Stats,
 ) -> Result<crate::Stats, Error>
 where
     E: Pipelined,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    let request = prober.request;
+    let StagePlan {
+        targets,
+        endpoints,
+        stage,
+        first_sequence,
+    } = *plan;
     let mut stats = crate::Stats::default();
     if targets.is_empty() || endpoints.is_empty() {
         return Ok(stats);
     }
-    enforce_deadline(probe_error, deadline)?;
-    settle(request, clock, deadline, owed, &mut stats)?;
+    enforce_deadline(probe_error, prober.deadline)?;
+    prober.settle(&mut stats)?;
     let mut prefix = preceding.clone();
     add_stats(&mut prefix, &stats, first_sequence)?;
-    let mut options = pipeline_options(request, deadline, prefix, reservation)?;
+    let mut options = pipeline_options(request, prober.deadline, prefix, reservation)?;
     options.max_in_flight = options
         .max_in_flight
         .min(targets.len().saturating_mul(endpoints.len()))
@@ -223,12 +223,13 @@ where
             stage,
             first_sequence,
         },
-        deadline,
-        clock,
+        prober.deadline,
+        prober.clock,
         evidence,
         controller,
     );
-    let result = executor
+    let result = prober
+        .executor
         .execute_stream(options, admission, attempts, &mut feed)
         .map_err(|source| Error::PipelineExecution { source })?;
     if !feed.settled()
@@ -242,7 +243,7 @@ where
     let last_sent = feed.last_sent;
     drop(feed);
     if result.packets_attempted > 0 {
-        owed.owe(1, last_sent);
+        prober.owed.owe(1, last_sent);
     }
     add_stats(&mut stats, &result, first_sequence)?;
     Ok(stats)

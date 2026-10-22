@@ -7,8 +7,8 @@ use super::{Descriptor, Pipeline, limit};
 use crate::{
     Stats,
     clock::Clock,
+    engine::execution::evidence::candidate_precedes,
     evidence::RetentionError,
-    execution::evidence::candidate_precedes,
     probe::Evidence,
     providers::PacketProviders,
     scan::{Attribution, Reply, executor::PipelineEvent},

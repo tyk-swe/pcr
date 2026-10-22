@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::rendering::StreamEncoder;
+use crate::invocation::StreamEncoder;
 
 use crate::output;
 
@@ -14,7 +14,7 @@ use crate::rendering::{
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
     published: output::envelope::Published<output::traceroute::Report>,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
         result,
@@ -82,7 +82,7 @@ pub(in crate::commands) fn render_probe_text(
     invocation: &crate::invocation::Invocation,
     lead: &str,
     probe: &output::traceroute::Probe,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     write_stdout_line(
         invocation,

@@ -5,7 +5,7 @@
 
 use packetcraftr::scan::followup;
 
-use crate::{errors::CliError, output, rendering::StreamEncoder};
+use crate::{errors::CliError, invocation::StreamEncoder, output};
 
 pub(super) fn emit_event(event: followup::Event, stream: &StreamEncoder) -> Result<(), CliError> {
     match event {

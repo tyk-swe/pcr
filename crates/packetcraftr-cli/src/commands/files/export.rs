@@ -10,7 +10,8 @@ use crate::output::{
 };
 use crate::{
     errors::CliError,
-    rendering::{StreamEncoder, emit_aggregate, write_summary_line},
+    invocation::StreamEncoder,
+    rendering::{emit_aggregate, write_summary_line},
 };
 use packetcraftr_core::{analysis, capture_file};
 

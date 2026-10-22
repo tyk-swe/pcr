@@ -24,12 +24,9 @@ use packetcraftr_core::budget::{Deadline, Interrupted};
 use rtnetlink::{Handle, new_connection};
 
 use crate::{
-    platform::{
-        common::{os_error, refused},
-        execution_context::{ExecutionContext, NAMESPACE_PATH},
-    },
+    platform::common::{os_error, refused},
     route,
-    workers::{self, Task, Waited},
+    workers::{self, ExecutionContext, NAMESPACE_PATH, Task, Waited},
 };
 
 const NETLINK_QUEUE_DEPTH: usize = crate::workers::CAPACITY;

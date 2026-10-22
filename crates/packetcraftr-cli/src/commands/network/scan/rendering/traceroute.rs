@@ -15,7 +15,7 @@ use crate::{errors::CliError, output};
 pub(super) fn render_traceroute_text(
     invocation: &crate::invocation::Invocation,
     trace: &output::traceroute::hosts::Report,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     use output::traceroute::hosts::Basis;
 

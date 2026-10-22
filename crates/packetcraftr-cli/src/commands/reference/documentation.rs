@@ -8,9 +8,10 @@ use clap::{CommandFactory, ValueEnum};
 use clap_complete::{Generator, Shell};
 use packetcraftr_core::error::{Classification, Kind};
 
-use crate::cli::Cli;
-use crate::errors::{CliError, source_causes};
+use crate::app::cli::Cli;
+use crate::errors::CliError;
 use crate::output::contract::Format;
+use crate::output::envelope::source_causes;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

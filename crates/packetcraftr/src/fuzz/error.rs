@@ -119,9 +119,9 @@ pub(super) fn duration_limit(error: DeadlineExceeded) -> Error {
     }
 }
 
-pub(crate) fn case_error(step: u64, failure: crate::execution::Failure) -> Error {
+pub(crate) fn case_error(step: u64, failure: crate::engine::execution::Failure) -> Error {
     match failure {
-        crate::execution::Failure::InvalidLimit {
+        crate::engine::execution::Failure::InvalidLimit {
             field,
             value,
             reason,
@@ -130,28 +130,28 @@ pub(crate) fn case_error(step: u64, failure: crate::execution::Failure) -> Error
             value,
             reason,
         },
-        crate::execution::Failure::Authorization(source) => Error::Authorization(source),
-        crate::execution::Failure::DurationLimit(source) => {
+        crate::engine::execution::Failure::Authorization(source) => Error::Authorization(source),
+        crate::engine::execution::Failure::DurationLimit(source) => {
             let _case_index = step;
 
             duration_limit(source)
         }
-        crate::execution::Failure::Interrupted(source) => {
+        crate::engine::execution::Failure::Interrupted(source) => {
             let _case_index = step;
 
             source.into_error()
         }
-        crate::execution::Failure::Clock(source) => {
+        crate::engine::execution::Failure::Clock(source) => {
             let case_index = step;
 
             Error::Clock { case_index, source }
         }
-        crate::execution::Failure::Execution(source) => {
+        crate::engine::execution::Failure::Execution(source) => {
             let case_index = step;
 
             Error::Execution { case_index, source }
         }
-        crate::execution::Failure::InvalidEvidence(source) => {
+        crate::engine::execution::Failure::InvalidEvidence(source) => {
             let case_index = step;
 
             Error::InvalidEvidence {
@@ -159,7 +159,7 @@ pub(crate) fn case_error(step: u64, failure: crate::execution::Failure) -> Error
                 message: source.describe("case", "fuzz"),
             }
         }
-        crate::execution::Failure::StatsOverflow(_source) => {
+        crate::engine::execution::Failure::StatsOverflow(_source) => {
             let case_index = step;
 
             Error::StatisticsOverflow { case_index }

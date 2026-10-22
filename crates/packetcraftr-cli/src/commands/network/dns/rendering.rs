@@ -3,7 +3,7 @@
 
 use std::net::{IpAddr, SocketAddr};
 
-use crate::rendering::StreamEncoder;
+use crate::invocation::StreamEncoder;
 
 use packetcraftr_core::error::Kind;
 
@@ -18,7 +18,7 @@ use crate::rendering::{
 pub(super) fn render_batch_text(
     invocation: &crate::invocation::Invocation,
     published: output::envelope::Published<output::dns::BatchResult>,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
         result,
@@ -62,7 +62,7 @@ pub(super) fn render_batch_text(
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
     published: output::envelope::Published<output::dns::Report>,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
         result,

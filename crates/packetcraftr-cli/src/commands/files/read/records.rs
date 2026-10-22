@@ -13,9 +13,10 @@ use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::commands::increment_counter;
 use crate::errors::CliError;
 use crate::filtering;
+use crate::invocation::StreamEncoder;
 use crate::output;
 use crate::output::contract::Format;
-use crate::rendering::{FieldTree, StreamEncoder};
+use crate::rendering::FieldTree;
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,

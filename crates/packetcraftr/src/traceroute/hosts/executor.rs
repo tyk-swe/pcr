@@ -10,18 +10,19 @@ use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 
 use crate::Stats;
 use crate::clock::Clock;
-use crate::execution::{ExchangeExecutor, Executor};
+use crate::engine::execution::Executor;
+use crate::exchange::WorkflowExecutor;
 use crate::probe::{Batch, Evidence};
 use crate::providers::PacketProviders;
 use crate::traceroute::Probe;
 
 pub(super) struct ClientExecutor<'c, P, K> {
-    inner: ExchangeExecutor<'c, P, K>,
+    inner: WorkflowExecutor<'c, P, K>,
     neighbor_stats: Stats,
 }
 
 impl<'c, P, K> ClientExecutor<'c, P, K> {
-    pub(super) fn new(inner: ExchangeExecutor<'c, P, K>) -> Self {
+    pub(super) fn new(inner: WorkflowExecutor<'c, P, K>) -> Self {
         Self {
             inner,
             neighbor_stats: Stats::default(),

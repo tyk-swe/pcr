@@ -8,9 +8,7 @@ use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::registry::Registry;
 
 use crate::clock::{Clock, SystemClock};
-use crate::execution::Admission;
 use crate::policy::Policy;
-use crate::providers::TargetProviders;
 use crate::runtime::Runtime;
 use crate::{Error, neighbor, route};
 
@@ -100,13 +98,6 @@ impl<P, K: Clock> Client<P, K> {
 
     pub fn providers(&self) -> &P {
         &self.providers
-    }
-
-    pub(crate) fn admission(&self) -> Admission<'_>
-    where
-        P: TargetProviders,
-    {
-        Admission::new(&self.policy, self.providers.resolver())
     }
 
     pub(crate) fn deadline(&self, limit: Duration) -> Deadline {

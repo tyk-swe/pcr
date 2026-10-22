@@ -16,7 +16,7 @@ use self::arguments::Args;
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
-use crate::rendering::StreamEncoder;
+use crate::invocation::StreamEncoder;
 
 use analysis::StreamTransport;
 use analysis::tls::{Collector, Limits as TlsLimits, Selector, SniPattern, Status};

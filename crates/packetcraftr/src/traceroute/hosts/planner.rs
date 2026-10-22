@@ -334,7 +334,7 @@ fn cache_index(address: IpAddr, transport: Transport) -> usize {
 /// generated UDP range, so a replayed scan response can never share a probe's
 /// tuple. An explicit `source_port` still takes it back on the caller's
 /// responsibility.
-const SCAN_FOLLOWUP_SOURCE_PORT: u16 = crate::correlation::EPHEMERAL_SOURCE_PORT_BASE - 1;
+const SCAN_FOLLOWUP_SOURCE_PORT: u16 = crate::engine::correlation::EPHEMERAL_SOURCE_PORT_BASE - 1;
 
 impl Current {
     fn below(&self, request: &Request, hop_limit: u8, then: impl Fn(u8) -> Mode) -> Mode {

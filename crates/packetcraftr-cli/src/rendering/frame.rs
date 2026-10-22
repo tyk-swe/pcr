@@ -27,7 +27,7 @@ pub(crate) fn render_frame_text(
     source_frame: output::frame::SourceFrame,
     frame: &output::frame::Captured,
     decoded: Option<&output::frame::Stack>,
-    presentation: super::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     render_frame(invocation, source_frame, frame, decoded, None, presentation)
 }
@@ -46,7 +46,7 @@ pub(crate) fn render_frame_tree(
         frame,
         decoded,
         Some(tree),
-        super::Presentation { verbose: true },
+        crate::invocation::Presentation { verbose: true },
     )
 }
 
@@ -56,7 +56,7 @@ fn render_frame(
     frame: &output::frame::Captured,
     decoded: Option<&output::frame::Stack>,
     tree: Option<&mut FieldTree>,
-    presentation: super::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     match decoded {
         None => write_stdout_line(
@@ -343,7 +343,10 @@ impl fmt::Display for CapturedFrameText<'_> {
     }
 }
 
-fn frame_summary(frame: &output::frame::Captured, presentation: super::Presentation) -> String {
+fn frame_summary(
+    frame: &output::frame::Captured,
+    presentation: crate::invocation::Presentation,
+) -> String {
     if presentation.verbose {
         captured_frame_text(frame).to_string()
     } else {

@@ -8,13 +8,14 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
-use crate::execution::{ExchangeExecutor, Executor, publisher};
+use crate::engine::admission::{FamilyGate, admit_operation, wire_limits};
+use crate::engine::execution::{Executor, publisher};
+use crate::exchange::WorkflowExecutor;
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::probe::{Batch, check_probe_count, check_probe_duration};
 use crate::providers::{PacketProviders, TargetProviders};
 use crate::target::ResolveTarget;
-use crate::target::{FamilyGate, admit_operation, wire_limits};
 use crate::{Client, Sink};
 
 use super::Error;
@@ -34,7 +35,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::execution::Operation::new(self, request.limits.max_duration);
+        let operation = crate::engine::execution::Operation::new(self, request.limits.max_duration);
         self.traceroute_in(request, sink, &operation)
     }
 
@@ -42,17 +43,23 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         &self,
         request: Request,
         sink: S,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
     {
         let policy = operation.policy(&self.policy);
-        let mut admission = crate::execution::Admission::new(&policy, self.providers.resolver());
+        let mut admission =
+            crate::engine::admission::Admission::new(&policy, self.providers.resolver());
         let publish = publisher(
             &operation.runtime,
             sink,
-            |error| (probe_error)(0_u64, crate::execution::Failure::DurationLimit(error)),
+            |error| {
+                (probe_error)(
+                    0_u64,
+                    crate::engine::execution::Failure::DurationLimit(error),
+                )
+            },
             |source| Error::Output { source },
         )?;
         let send = crate::send::Options {
@@ -65,7 +72,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             &request,
             &mut admission,
             &operation.registry,
-            &mut ExchangeExecutor::new(self, operation, send, request.collection.clone()),
+            &mut WorkflowExecutor::new(self, operation, send, request.collection.clone()),
             &mut self.clock.clone(),
             &mut operation.deadline(self, request.limits.max_duration),
             publish,

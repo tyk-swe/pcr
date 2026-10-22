@@ -16,7 +16,7 @@ use crate::rendering::{
 pub(super) fn render_message(
     invocation: &crate::invocation::Invocation,
     message: &wire::Message,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let flow = &message.flow.flow;
     write_stdout_line(

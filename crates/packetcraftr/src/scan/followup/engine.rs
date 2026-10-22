@@ -12,7 +12,7 @@ use crate::scan::{self, connect};
 use crate::{Client, Sink};
 
 use super::reverse::{Lookup, last_transmission, names};
-use super::trace::{Retained, Stage};
+use super::trace::{Handoff, Retained, Stage};
 use super::{ConnectReport, ConnectRequest, Error, Event, Report, Request};
 
 impl<P, K> Client<P, K>
@@ -44,10 +44,11 @@ where
         // The same absolute deadline parents the streamed scan, trace, and
         // lookups, so their setup cannot extend its expiry; it starts before
         // the `started` marker so it cannot end later.
-        let mut operation = crate::execution::Operation::new(self, scan.limits.max_duration);
-        operation.neighbor_mode = crate::execution::NeighborMode::Authorized;
+        let mut operation =
+            crate::engine::execution::Operation::new(self, scan.limits.max_duration);
+        operation.neighbor_mode = crate::engine::execution::NeighborMode::Authorized;
         if lookup.is_some() {
-            operation.scan_neighbors(&scan)?;
+            crate::scan::NeighborBounds::authorize(&scan, &mut operation)?;
         }
         let started = self.now();
         let delivery = sink.delivery();
@@ -63,7 +64,7 @@ where
         let scan_sink = Arc::clone(&sink);
         let scan_report = self.scan_in(
             scan,
-            crate::execution::forwarding(delivery, move |event: scan::Event, control| {
+            crate::engine::execution::forwarding(delivery, move |event: scan::Event, control| {
                 observing
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -113,11 +114,13 @@ where
             let streamed = stage.stream(
                 self,
                 &trace_operation,
-                &aggregate,
-                retained,
-                started,
-                scan_sent,
-                crate::execution::forwarding(delivery, move |event, control| {
+                Handoff {
+                    scan: &aggregate,
+                    retained,
+                    started,
+                    last_sent: scan_sent,
+                },
+                crate::engine::execution::forwarding(delivery, move |event, control| {
                     publish(&trace_sink, Event::Trace(event), control)
                 }),
             )?;
@@ -172,12 +175,13 @@ where
             .as_ref()
             .map(|reverse| Lookup::new(reverse, &scan))
             .transpose()?;
-        let mut operation = crate::execution::Operation::new(self, scan.limits.max_duration);
+        let mut operation =
+            crate::engine::execution::Operation::new(self, scan.limits.max_duration);
         if reverse_dns
             .as_ref()
             .is_some_and(|reverse| reverse.transport != crate::dns::TransportMode::Tcp)
         {
-            operation.scan_neighbors(&scan)?;
+            crate::scan::NeighborBounds::authorize(&scan, &mut operation)?;
         }
         let started = self.now();
         // Probe events stream as they settle; the tracker keeps only what
@@ -187,13 +191,16 @@ where
         let delivery = sink.delivery();
         let report = self.scan_connect_in(
             scan,
-            crate::execution::forwarding(delivery, move |event: connect::Event, control| {
-                Sink::publish(&mut tracked, event.clone())?;
-                match control {
-                    Some(control) => sink.publish_controlled(event, control),
-                    None => sink.publish(event),
-                }
-            }),
+            crate::engine::execution::forwarding(
+                delivery,
+                move |event: connect::Event, control| {
+                    Sink::publish(&mut tracked, event.clone())?;
+                    match control {
+                        Some(control) => sink.publish_controlled(event, control),
+                        None => sink.publish(event),
+                    }
+                },
+            ),
             &operation,
         )?;
         let aggregate = tracker.finish(report.clone())?;

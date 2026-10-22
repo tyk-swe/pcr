@@ -10,7 +10,7 @@ use serde::Serialize;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
-use crate::execution::Shared;
+use crate::engine::execution::Shared;
 use crate::probe::{self, Transport, index_or_push};
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;

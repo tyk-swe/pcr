@@ -23,19 +23,21 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::execution::Operation::new(self, std::time::Duration::MAX);
+        let operation = crate::engine::execution::Operation::new(self, std::time::Duration::MAX);
         let stop = request.stop;
         let collection = self.deadline(request.timeout);
         // Post-window events get one more finite allowance; they cannot fall inside the window.
         let finalization_limit = request.timeout;
         let mut finalization: Option<Deadline> = None;
-        let mut publish =
-            crate::execution::publisher(&self.runtime, sink, exchange_deadline_error, |source| {
-                source
-            })
-            .map_err(|source| Error::Output {
-                source: Box::new(source),
-            })?;
+        let mut publish = crate::engine::execution::publisher(
+            &self.runtime,
+            sink,
+            exchange_deadline_error,
+            |source| source,
+        )
+        .map_err(|source| Error::Output {
+            source: Box::new(source),
+        })?;
         let prepared = self.prepare_exchange(request, &operation)?;
         let mut answered = AnsweredRequests::new(prepared.packets.len());
         let mut stop_predicate =
@@ -62,7 +64,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub(crate) fn exchange_hooked(
         &self,
         request: Request,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
         workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
         stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
     ) -> Result<super::WorkflowEvidence, Error> {

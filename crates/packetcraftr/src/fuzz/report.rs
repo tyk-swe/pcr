@@ -3,7 +3,7 @@
 
 use packetcraftr_core::{frame::Frame, fuzz as packet_fuzz};
 
-use crate::execution::Shared;
+use crate::engine::execution::Shared;
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 

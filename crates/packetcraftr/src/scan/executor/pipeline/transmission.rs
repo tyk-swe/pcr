@@ -5,7 +5,7 @@
 use super::{Pending, Pipeline, check, limit, max_wait_secs, prepare::AdmittedProbe};
 use crate::{
     clock::Clock,
-    preparation::RebuildError,
+    engine::preparation::RebuildError,
     providers::PacketProviders,
     scan::{executor::PipelineEvent, plan::replies_overlap},
 };

@@ -8,13 +8,15 @@ use crate::probe::Batch;
 use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::target::SelectedAddress;
 
+use super::Prober;
+use crate::probe::Stage;
 use crate::probe::{self, enforce_deadline};
 use crate::scan::Error;
 use crate::scan::error::{duration_limit, probe_error};
 use crate::scan::evidence::ProbeClassifier;
 use crate::scan::executor::{PipelineEvent, PipelineOptions, Pipelined};
 use crate::scan::plan::packet::sent_probe_matches;
-use crate::scan::plan::{Stage, build_batches, probe_count};
+use crate::scan::plan::{build_batches, probe_count};
 use crate::scan::{Event, Probe, Request};
 
 /// One stage's probes: every endpoint on every target, attempt by attempt,
@@ -56,12 +58,8 @@ impl StagePlan<'_> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn execute<E, C, F>(
-    request: &Request,
-    executor: &mut E,
-    clock: &mut C,
-    deadline: &mut Deadline,
+    prober: &mut Prober<'_, E, C>,
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Error>,
     plan: &StagePlan<'_>,
     preceding: &crate::Stats,
@@ -72,17 +70,18 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    let request = prober.request;
     if plan.targets.is_empty() || plan.endpoints.is_empty() {
         return Ok(crate::Stats::default());
     }
-    enforce_deadline(probe_error, deadline)?;
+    enforce_deadline(probe_error, prober.deadline)?;
     if !plan.uses_pipeline(request) {
         let probes = run_batches(
             plan.batches(request),
             request.probes_per_second,
-            deadline,
-            clock,
-            executor,
+            prober.deadline,
+            prober.clock,
+            prober.executor,
             evidence,
         )?;
         *peak = (*peak).max(usize::from(probes.packets_attempted > 0));
@@ -91,9 +90,9 @@ where
         // A pipeline's failure reports the operation's traffic before it too.
         let (probes, wave_peak) = run_pipelined(
             request,
-            executor,
+            prober.executor,
             evidence,
-            deadline,
+            prober.deadline,
             plan,
             preceding.clone(),
         )?;
@@ -194,7 +193,6 @@ pub(super) struct PipelineOutcome {
     pub(super) peak_pending: usize,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn drive_pipeline<E, F>(
     request: &Request,
     executor: &mut E,

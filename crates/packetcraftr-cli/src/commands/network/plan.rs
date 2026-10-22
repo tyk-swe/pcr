@@ -74,7 +74,7 @@ pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     arguments: Args,
     format: Format,
-    presentation: crate::rendering::Presentation,
+    presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let Args { route, policy } = arguments;
     let plan = prepare_plan(invocation, route, policy.into_policy())?;

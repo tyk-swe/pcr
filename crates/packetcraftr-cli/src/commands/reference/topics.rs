@@ -125,7 +125,7 @@ fn formats() -> String {
         })
         .max()
         .unwrap_or(0);
-    let mut help = String::from(crate::cli::output_formats_help());
+    let mut help = String::from(crate::app::cli::output_formats_help());
     help.push_str(
         "\n\nSelect one with --output FORMAT, before or after the subcommand. Binary formats \
          (raw, pcap, pcapng) refuse an interactive terminal unless --force-binary-stdout is \
@@ -154,6 +154,6 @@ fn exit_codes() -> String {
     format!(
         "Exit codes\n\n{}\nFor codes 2 through 70, the word after the code is the `error.kind` of the same \
          failure in JSON and NDJSON output; a cancellation reports kind `io`.\n",
-        crate::cli::exit_codes_help()
+        crate::app::cli::exit_codes_help()
     )
 }

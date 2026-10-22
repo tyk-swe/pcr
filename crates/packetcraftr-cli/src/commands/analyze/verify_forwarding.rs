@@ -18,8 +18,8 @@ use crate::commands::offline_analysis::{self, AnalysisSetup};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::open_capture_hashed;
+use crate::invocation::StreamEncoder;
 use crate::output::verify_forwarding::CaptureSource;
-use crate::rendering::StreamEncoder;
 
 const VERDICT_NOT_PASS: u8 = 1;
 
@@ -105,25 +105,22 @@ pub(super) fn run(
                 .any(|filter| filter.requirements().stream_index),
     );
 
-    let (ingress, ingress_source) = collect(
+    let collection = Collection {
         invocation,
-        &prepared,
-        &arguments.ingress,
-        arguments.limits.capture.reader,
+        prepared: &prepared,
+        rules: &rules,
+        bounds: arguments.limits.capture.reader,
+        max_evidence_bytes: arguments.max_evidence_bytes,
+    };
+    let (ingress, ingress_source) = collection.collect(
         forwarding::Side::Ingress,
+        &arguments.ingress,
         ingress_filter.as_ref(),
-        &rules,
-        arguments.max_evidence_bytes,
     )?;
-    let (egress, egress_source) = collect(
-        invocation,
-        &prepared,
-        &arguments.egress,
-        arguments.limits.capture.reader,
+    let (egress, egress_source) = collection.collect(
         forwarding::Side::Egress,
+        &arguments.egress,
         egress_filter.as_ref(),
-        &rules,
-        arguments.max_evidence_bytes,
     )?;
     let deadline = invocation.deadline.clone();
     let report = forwarding::verify_with_limits(
@@ -170,46 +167,62 @@ fn compile_selection(
         .transpose()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn collect(
-    invocation: &crate::invocation::Invocation,
-    prepared: &AnalysisSetup,
-    path: &Path,
+/// What collecting either side's evidence shares: the invocation, the
+/// analysis setup, the forwarding rules, and the reader and evidence bounds.
+struct Collection<'a> {
+    invocation: &'a crate::invocation::Invocation,
+    prepared: &'a AnalysisSetup,
+    rules: &'a forwarding::Rules,
     bounds: CaptureReaderBoundsArgs,
-    side: forwarding::Side,
-    filter: Option<&Filter>,
-    rules: &forwarding::Rules,
     max_evidence_bytes: usize,
-) -> Result<(forwarding::SideInput, CaptureSource), CliError> {
-    let (mut reader, fingerprint) = open_capture_hashed(invocation, path, bounds)?;
-    // Select physical packets in the callback: pipeline filters also see
-    // reconstructed datagrams, whose provenance this report cannot represent.
-    let mut options = prepared.options(invocation);
-    let mut requirements = rules.requirements();
-    if let Some(filter) = filter {
-        requirements = requirements.union(filter.requirements());
-    }
-    options.plan = analysis::Plan::physical(requirements);
-    let mut collector = forwarding::Collector::new(rules, side, max_evidence_bytes);
-    let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
-        if let Some(filter) = filter
-            && !filter
-                .matches(&record.physical_context())
-                .map_err(|error| CliError::classified(error).into_boundary_error())?
-        {
-            return Ok(());
+}
+
+impl Collection<'_> {
+    /// Reads `path` as `side`'s capture, keeping the physical packets
+    /// `filter` selects.
+    fn collect(
+        &self,
+        side: forwarding::Side,
+        path: &Path,
+        filter: Option<&Filter>,
+    ) -> Result<(forwarding::SideInput, CaptureSource), CliError> {
+        let Self {
+            invocation,
+            prepared,
+            rules,
+            bounds,
+            max_evidence_bytes,
+        } = *self;
+        let (mut reader, fingerprint) = open_capture_hashed(invocation, path, bounds)?;
+        // Select physical packets in the callback: pipeline filters also see
+        // reconstructed datagrams, whose provenance this report cannot represent.
+        let mut options = prepared.options(invocation);
+        let mut requirements = rules.requirements();
+        if let Some(filter) = filter {
+            requirements = requirements.union(filter.requirements());
         }
-        collector
-            .observe(&record)
-            .map_err(|error| CliError::classified(error).into_boundary_error())
-    })
-    .map_err(CliError::classified)?;
-    invocation.check()?;
-    Ok((
-        forwarding::SideInput {
-            frames_read: summary.frames_read,
-            observations: collector.into_observations(),
-        },
-        fingerprint.finish(),
-    ))
+        options.plan = analysis::Plan::physical(requirements);
+        let mut collector = forwarding::Collector::new(rules, side, max_evidence_bytes);
+        let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
+            if let Some(filter) = filter
+                && !filter
+                    .matches(&record.physical_context())
+                    .map_err(|error| CliError::classified(error).into_boundary_error())?
+            {
+                return Ok(());
+            }
+            collector
+                .observe(&record)
+                .map_err(|error| CliError::classified(error).into_boundary_error())
+        })
+        .map_err(CliError::classified)?;
+        invocation.check()?;
+        Ok((
+            forwarding::SideInput {
+                frames_read: summary.frames_read,
+                observations: collector.into_observations(),
+            },
+            fingerprint.finish(),
+        ))
+    }
 }

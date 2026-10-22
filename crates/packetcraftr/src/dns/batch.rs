@@ -8,9 +8,10 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
-use crate::execution::{Context, Executor, Shared};
+use crate::engine::admission::approve_operation;
+use crate::engine::execution::{Context, Executor, Shared};
 use crate::policy::{Authorizer, DnsOperation, LimitOverflow, Operation, WireLimits};
-use crate::target::{ResolveTarget, approve_operation};
+use crate::target::ResolveTarget;
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 

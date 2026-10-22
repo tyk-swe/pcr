@@ -8,7 +8,6 @@ use super::{
     Scope,
     plan::{IpProtocols, Ports},
 };
-use crate::input::manifest::Declaration;
 use crate::output::stream::StreamRecord;
 use packetcraftr::target::plan;
 
@@ -20,16 +19,6 @@ pub struct Origin {
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<u32>,
-}
-
-impl Origin {
-    pub(crate) fn new(index: u32, declaration: &Declaration) -> Self {
-        Self {
-            index,
-            source: declaration.source.to_string(),
-            line: declaration.line,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -79,9 +68,10 @@ pub struct Report {
 }
 
 impl Report {
+    /// `origins` holds each declaration's origin at its declaration index.
     pub(crate) fn new(
         report: plan::Report,
-        declarations: &[Declaration],
+        origins: &[Origin],
         ports: Option<Ports>,
         ip_protocols: Option<IpProtocols>,
     ) -> Self {
@@ -99,22 +89,14 @@ impl Report {
                     origins: target
                         .declarations
                         .iter()
-                        .filter_map(|index| {
-                            declarations
-                                .get(*index as usize)
-                                .map(|declaration| Origin::new(*index, declaration))
-                        })
+                        .filter_map(|index| origins.get(*index as usize).cloned())
                         .collect(),
                 })
                 .collect(),
             duplicates: report
                 .duplicates
                 .iter()
-                .filter_map(|index| {
-                    declarations
-                        .get(*index as usize)
-                        .map(|declaration| Origin::new(*index, declaration))
-                })
+                .filter_map(|index| origins.get(*index as usize).cloned())
                 .collect(),
             ports,
             ip_protocols,

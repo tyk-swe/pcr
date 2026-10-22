@@ -8,7 +8,7 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
 
 use crate::Sink;
-use crate::execution::Shared;
+use crate::engine::execution::Shared;
 use crate::probe::{Transport, index_or_push};
 use crate::scan::{self, Coverage, Error, Measurement, Stage, inference};
 

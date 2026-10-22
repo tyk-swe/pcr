@@ -1,10 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+mod contract;
 mod pipeline;
 mod registry;
 mod reply_history;
 
+pub(crate) use contract::{
+    NextHopResolution, PipelineBatch, PipelineEvent, PipelineFeed, PipelineOptions, PipelinePoll,
+    Pipelined,
+};
 pub(super) use pipeline::AdaptiveAdmission;
 pub(super) use pipeline::limit;
 
@@ -16,10 +21,11 @@ use std::time::Duration;
 use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
-use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, WorkflowOverrides};
+use crate::engine::execution::{Executor, ExecutorFault};
+use crate::exchange::{WorkflowExecutor, WorkflowOverrides};
 use crate::probe::{Batch, Evidence};
 use crate::providers::PacketProviders;
-use crate::{Client, Stats, evidence::SentPacket};
+use crate::{Client, Stats};
 use packetcraftr_core::error::BoundaryError;
 
 use super::Probe;
@@ -39,148 +45,12 @@ pub(super) const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "use one correlated probe per scan batch and retain at least one response",
 );
 
-#[derive(Clone, Debug)]
-pub(crate) struct PipelineOptions {
-    pub(crate) max_in_flight: usize,
-    pub(crate) probes_per_second: Option<u32>,
-    pub(crate) max_duration: Duration,
-    /// Exact operation control, including inherited cancellation and ceilings.
-    pub(crate) control: Deadline,
-    pub(crate) max_prepared_bytes: usize,
-    pub(crate) max_evidence_frames: usize,
-    pub(crate) max_evidence_bytes: usize,
-    /// The operation's statistics before this pipeline, which its failure
-    /// reports with its own.
-    pub(crate) preceding: Stats,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) enum PipelineEvent {
-    Sent {
-        index: usize,
-        sent: Arc<SentPacket>,
-    },
-    Omitted {
-        index: usize,
-    },
-    Completed {
-        index: usize,
-        execution: Evidence,
-    },
-    Undecoded {
-        frame: packetcraftr_core::frame::Frame,
-    },
-    /// A correlated frame no probe outcome carries.
-    Unattributed {
-        frame: packetcraftr_core::frame::Frame,
-        attribution: crate::scan::Attribution,
-        sequence: Option<u64>,
-    },
-    Diagnostic(packetcraftr_core::diagnostic::Diagnostic),
-    Qualification(super::Qualification),
-}
-
-/// One controller-selected attempt. The driver owns only its bounded active
-/// and recent descriptors; IDs are stable for the entire stage.
-pub(crate) struct PipelineBatch {
-    pub(crate) index: usize,
-    pub(crate) batch: Batch<Probe>,
-    pub(crate) host_deadline: Option<std::time::Instant>,
-}
-
-pub(crate) struct PipelinePoll {
-    pub(crate) batches: Vec<PipelineBatch>,
-    pub(crate) next_ready: Option<std::time::Instant>,
-    pub(crate) done: bool,
-}
-
-/// The raw controller's private substitution boundary with acquisition. It
-/// selects work and consumes each settlement immediately; capture never chooses
-/// a retry, endpoint, host window or inference policy on its own.
-pub(crate) trait PipelineFeed {
-    fn poll(
-        &mut self,
-        capacity: usize,
-        now: std::time::Instant,
-    ) -> Result<PipelinePoll, BoundaryError>;
-    fn event(&mut self, event: PipelineEvent) -> Result<(), BoundaryError>;
-}
-
-pub(crate) trait Pipelined: Executor<Batch<Probe>> {
-    fn execute_stream(
-        &mut self,
-        options: PipelineOptions,
-        admission: &AdaptiveAdmission,
-        attempts: usize,
-        feed: &mut dyn PipelineFeed,
-    ) -> Result<Stats, BoundaryError>;
-
-    fn execute_pipeline(
-        &mut self,
-        batches: &[Batch<Probe>],
-        options: PipelineOptions,
-        emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
-    ) -> Result<Stats, BoundaryError>;
-
-    /// Admits a pipelined stage's probes as [`Self::execute_pipeline`]
-    /// would, sending nothing, so its preparation limit fails before any
-    /// traffic.
-    fn admit_pipeline(
-        &mut self,
-        batches: &[Batch<Probe>],
-        options: &PipelineOptions,
-    ) -> Result<(), BoundaryError>;
-
-    fn admit_adaptive_pipeline(
-        &mut self,
-        batches: &[Batch<Probe>],
-        options: &PipelineOptions,
-        summary: &mut AdaptiveAdmission,
-    ) -> Result<(), BoundaryError>;
-
-    /// Sends at most one ARP or NDP request for `target` and reports what
-    /// it learned with the exchange's statistics. A routed target's next hop
-    /// is never sent a request.
-    fn resolve_neighbor(
-        &mut self,
-        target: &SelectedAddress,
-        timeout: Duration,
-        deadline: &Deadline,
-    ) -> Result<(Neighbor, Stats), BoundaryError>;
-
-    /// Resolves the neighbor `target`'s probes send their frames to, its own
-    /// or its gateway's, unless the operation already knows it, and reports
-    /// the request's statistics. A stage resolves its targets before any
-    /// probe arms a capture, so each probe's materialization finds the
-    /// answer cached.
-    fn resolve_next_hop(
-        &mut self,
-        target: &SelectedAddress,
-        deadline: &Deadline,
-    ) -> Result<NextHopResolution, BoundaryError>;
-
-    /// Whether resolving `target`'s neighbor, explicitly as discovery does or
-    /// for its probes, would send a request, so the engine waits out a pause
-    /// owed by an earlier transmission only before one.
-    fn requests_neighbor(
-        &mut self,
-        target: &SelectedAddress,
-        explicit: bool,
-        deadline: &Deadline,
-    ) -> Result<bool, BoundaryError>;
-
-    /// Learns whether any probe of the operation resolves a link-layer
-    /// neighbor, before the first resolution or exchange. Bounds that could
-    /// not hold a reply then never apply to a resolver no probe uses.
-    fn resolves_neighbors(&mut self, resolves: bool);
-}
-
 pub(crate) struct ClientExecutor<'c, P, K> {
     reply_history: reply_history::ReplyHistory,
     client: &'c Client<P, K>,
     bindings: Vec<(u16, packetcraftr_core::layer::Id)>,
-    operation: crate::execution::Operation,
-    configured: Option<crate::execution::Operation>,
+    operation: crate::engine::execution::Operation,
+    configured: Option<crate::engine::execution::Operation>,
     send: crate::send::Options,
     collection: crate::exchange::Collection,
     neighbors: NeighborBounds,
@@ -191,15 +61,6 @@ pub(crate) struct ClientExecutor<'c, P, K> {
     /// before a stage. The plan budgets no second, so a later stage whose
     /// route needs another neighbor fails instead of sending it.
     requested: HashSet<(IpAddr, Option<interface::Id>)>,
-}
-
-/// What resolving a target's next hop found.
-#[derive(Debug, Default)]
-pub(crate) struct NextHopResolution {
-    /// The requests it sent.
-    pub(crate) stats: Stats,
-    /// Why no frame can reach the target: its next hop stayed silent.
-    pub(crate) silence: Option<BoundaryError>,
 }
 
 /// How a scan bounds every neighbor resolution of its operation.
@@ -251,13 +112,28 @@ impl NeighborBounds {
             self.max_neighbors,
         )
     }
+
+    /// Bounds `operation`'s neighbor resolution for the scan `request` and
+    /// paces its neighbor requests at the scan's probe rate.
+    pub(crate) fn authorize(
+        request: &Request,
+        operation: &mut crate::engine::execution::Operation,
+    ) -> Result<(), crate::neighbor::Error> {
+        operation.neighbors = Self::of(request).narrow(&operation.neighbors)?;
+        operation.neighbor_mode = crate::engine::execution::NeighborMode::Authorized;
+        operation.neighbor_pause = request
+            .probes_per_second
+            .and_then(|rate| Duration::from_secs(1).checked_div(rate))
+            .unwrap_or_default();
+        Ok(())
+    }
 }
 
 impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
     pub(crate) fn new(
         client: &'c Client<P, K>,
         request: &Request,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
     ) -> Self {
         Self {
             reply_history: reply_history::ReplyHistory::new(request.has_ip_probes()),
@@ -278,10 +154,10 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
         }
     }
 
-    fn exchange(&mut self) -> Result<ExchangeExecutor<'_, P, K>, BoundaryError> {
+    fn exchange(&mut self) -> Result<WorkflowExecutor<'_, P, K>, BoundaryError> {
         let (send, collection) = (self.send.clone(), self.collection.clone());
         let client = self.client;
-        Ok(ExchangeExecutor::new(
+        Ok(WorkflowExecutor::new(
             client,
             self.configured()?,
             send,
@@ -292,7 +168,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
     fn with_reply_history<R>(
         &mut self,
         run: impl FnOnce(
-            &ExchangeExecutor<'_, P, K>,
+            &WorkflowExecutor<'_, P, K>,
             &mut reply_history::ReplyHistory,
         ) -> Result<R, BoundaryError>,
     ) -> Result<R, BoundaryError> {
@@ -309,7 +185,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
 
     /// The client every exchange and neighbor resolution of the operation
     /// shares.
-    fn configured(&mut self) -> Result<&crate::execution::Operation, BoundaryError> {
+    fn configured(&mut self) -> Result<&crate::engine::execution::Operation, BoundaryError> {
         Ok(match &mut self.configured {
             Some(client) => client,
             configured => {
@@ -322,7 +198,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
                 // A stage resolves each probe's link-layer neighbor before
                 // its exchanges, through the resolver they all share, so a
                 // probe whose route now needs another sends it no request.
-                client.neighbor_mode = crate::execution::NeighborMode::Cached;
+                client.neighbor_mode = crate::engine::execution::NeighborMode::Cached;
                 client.neighbors = self
                     .neighbors
                     .narrow(&client.neighbors)
@@ -552,7 +428,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         let client = self.configured()?;
         // The resolver sends exactly this frame, so its final bytes are checked
         // like a prepared packet's.
-        crate::preparation::authorize_neighbor_request(
+        crate::engine::preparation::authorize_neighbor_request(
             &client.policy(&services.policy),
             &request,
             plan,
@@ -643,7 +519,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         }
         let services = self.client;
         let client = self.configured()?;
-        crate::preparation::authorize_neighbor_request(
+        crate::engine::preparation::authorize_neighbor_request(
             &client.policy(&services.policy),
             &request,
             plan,

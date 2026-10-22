@@ -228,9 +228,9 @@ impl fmt::Display for EvidenceFault {
     }
 }
 
-pub(crate) fn attempt_error(step: u64, failure: crate::execution::Failure) -> Error {
+pub(crate) fn attempt_error(step: u64, failure: crate::engine::execution::Failure) -> Error {
     match failure {
-        crate::execution::Failure::InvalidLimit {
+        crate::engine::execution::Failure::InvalidLimit {
             field,
             value,
             reason,
@@ -239,20 +239,20 @@ pub(crate) fn attempt_error(step: u64, failure: crate::execution::Failure) -> Er
             value,
             reason,
         },
-        crate::execution::Failure::Authorization(source) => Error::Authorization(source),
-        crate::execution::Failure::DurationLimit(source) => Error::from(source),
-        crate::execution::Failure::Interrupted(source) => Error::from(source),
-        crate::execution::Failure::Clock(source) => {
+        crate::engine::execution::Failure::Authorization(source) => Error::Authorization(source),
+        crate::engine::execution::Failure::DurationLimit(source) => Error::from(source),
+        crate::engine::execution::Failure::Interrupted(source) => Error::from(source),
+        crate::engine::execution::Failure::Clock(source) => {
             let attempt = step as u32;
 
             Error::Clock { attempt, source }
         }
-        crate::execution::Failure::Execution(source) => {
+        crate::engine::execution::Failure::Execution(source) => {
             let attempt = step as u32;
 
             Error::Execution { attempt, source }
         }
-        crate::execution::Failure::InvalidEvidence(source) => {
+        crate::engine::execution::Failure::InvalidEvidence(source) => {
             let attempt = step as u32;
 
             Error::InvalidEvidence {
@@ -260,7 +260,7 @@ pub(crate) fn attempt_error(step: u64, failure: crate::execution::Failure) -> Er
                 fault: EvidenceFault::Exchange(source),
             }
         }
-        crate::execution::Failure::StatsOverflow(_) => {
+        crate::engine::execution::Failure::StatsOverflow(_) => {
             let attempt = step as u32;
 
             Error::StatisticsOverflow { attempt }

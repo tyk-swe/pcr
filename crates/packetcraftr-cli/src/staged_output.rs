@@ -19,7 +19,8 @@ use std::path::{Path, PathBuf};
 use packetcraftr_core::error::{Classification, Kind};
 
 use crate::cancellation::StagedRegistration;
-use crate::errors::{CliError, source_causes};
+use crate::errors::CliError;
+use crate::output::envelope::source_causes;
 
 const CLASSIFICATION: Classification = Classification::new(
     "io.output_file",

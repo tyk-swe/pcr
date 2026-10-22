@@ -8,7 +8,8 @@ use crate::output::{
 };
 use crate::{
     errors::CliError,
-    rendering::{StreamEncoder, bounded_json_len, emit_aggregate, write_raw},
+    invocation::StreamEncoder,
+    rendering::{bounded_json_len, emit_aggregate, write_raw},
 };
 use packetcraftr_core::{self as core, filter::Projection};
 use std::io::{self, Write};

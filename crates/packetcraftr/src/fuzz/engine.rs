@@ -7,9 +7,10 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{build::Builder, fuzz as packet_fuzz, registry::Registry};
 
 use crate::clock::Clock;
-use crate::execution::{Context, ExchangeExecutor, Executor, Grant, publisher, rate_delay};
+use crate::engine::execution::{Context, Executor, Grant, publisher, rate_delay};
+use crate::engine::preparation::exact_bytes;
+use crate::exchange::WorkflowExecutor;
 use crate::policy::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireLimits};
-use crate::preparation::exact_bytes;
 use crate::providers::PacketProviders;
 use crate::{Client, Sink};
 
@@ -26,13 +27,13 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         S: Sink<Event, Ack = ()>,
     {
         let operation =
-            crate::execution::Operation::new(self, request.campaign.limits.max_duration);
+            crate::engine::execution::Operation::new(self, request.campaign.limits.max_duration);
         let mut deadline = operation.deadline(self, request.campaign.limits.max_duration);
         let publish = publisher(&self.runtime, sink, duration_limit, |source| {
             Error::Output { source }
         })?;
         let mut executor =
-            ExchangeExecutor::new(self, &operation, request.send(), request.collection.clone());
+            WorkflowExecutor::new(self, &operation, request.send(), request.collection.clone());
         let mut authorization = self.policy.as_ref();
         run(
             &request,

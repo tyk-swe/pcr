@@ -5,8 +5,9 @@ use packetcraftr_core as core;
 
 use super::arguments::Args;
 use crate::errors::CliError;
+use crate::invocation::StreamEncoder;
 use crate::output::contract::{Command, Format};
-use crate::rendering::{Projector, StreamEncoder};
+use crate::rendering::Projector;
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,

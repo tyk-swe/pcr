@@ -1,21 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::IpAddr;
-
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::template::{DEFAULT_MAX_TEMPLATE_PACKETS, Template};
 
-use super::Error;
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Options {
-    pub destination: Option<IpAddr>,
-    pub plan: crate::route::Options,
-    pub build: packetcraftr_core::build::Options,
-    /// Second explicit opt-in required in addition to policy approval.
-    pub allow_permissive_live: bool,
-}
+use super::{Error, Options};
 
 #[derive(Clone, Debug)]
 pub struct Request {

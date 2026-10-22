@@ -1,10 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+mod encoder;
+
+pub(crate) use encoder::{Presentation, StreamEncoder};
+
 use crate::{
     errors::CliError,
     output::{contract::Format, envelope::Envelope},
-    rendering::StreamEncoder,
     resources::Diagnostics,
 };
 use packetcraftr_core::budget::{Cancellation, Deadline, Interrupted};
@@ -118,6 +121,15 @@ impl Invocation {
         if let Some(diagnostics) = &self.diagnostics {
             diagnostics.register_runtime(name, runtime);
         }
+    }
+
+    /// A single-worker runtime for this invocation's output writer, reported
+    /// in its resource diagnostics.
+    pub(crate) fn output_writer_runtime(&self) -> packetcraftr::runtime::Runtime {
+        let runtime = packetcraftr::runtime::Runtime::new(1)
+            .expect("a capacity of one is within the ceiling");
+        self.register_runtime("output_writer", &runtime);
+        runtime
     }
 
     pub(crate) fn stream_index_needed(&self, needed: bool) {

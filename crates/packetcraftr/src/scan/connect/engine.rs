@@ -13,14 +13,15 @@ use super::super::error::{duration_limit, probe_error};
 use super::super::report::RttAccumulator;
 use super::super::{Error, Request, Stage};
 use super::accounting::{Progress, record};
-use super::attempts::{Active, admit_next, connect_outcome, settle_active};
+use super::attempts::{Active, Connector, connect_outcome, settle_active};
 use super::planning::{StagePlan, planned};
 use super::{Event, ProbeEvidence, Report, Stats, execution, invalid};
 use crate::clock::Clock;
+use crate::engine::admission::approve_operation;
 use crate::policy::{Authorizer, Operation, SocketOperation};
 use crate::probe::enforce_deadline;
 use crate::providers::{TargetProviders, TcpOf, TcpProviders};
-use crate::target::{ResolveTarget, approve_operation};
+use crate::target::ResolveTarget;
 use crate::{Client, Sink};
 
 impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
@@ -31,7 +32,7 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::execution::Operation::new(self, request.limits.max_duration);
+        let operation = crate::engine::execution::Operation::new(self, request.limits.max_duration);
         self.scan_connect_in(request, sink, &operation)
     }
 
@@ -39,17 +40,18 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
         &self,
         request: Request,
         sink: S,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
     {
         let policy = operation.policy(&self.policy);
-        let mut admission = crate::execution::Admission::new(&policy, self.providers.resolver());
+        let mut admission =
+            crate::engine::admission::Admission::new(&policy, self.providers.resolver());
         let started = self.now();
         let mut deadline = operation.deadline(self, request.limits.max_duration);
         let mut publish =
-            crate::execution::publisher(&operation.runtime, sink, Error::from, |source| {
+            crate::engine::execution::publisher(&operation.runtime, sink, Error::from, |source| {
                 Error::Output { source }
             })?;
         run(
@@ -88,6 +90,14 @@ where
         std::mem::size_of::<Active<Q::Stream>>(),
     )?;
     let budget = tcp::ConnectBudget::new(request.max_in_flight);
+    let mut connector = Connector {
+        request,
+        authorizer,
+        provider,
+        budget: &budget,
+        clock,
+        deadline,
+    };
     let mut controller = request.adaptive.map(|config| {
         super::super::adaptive::Controller::new(config, request.timeout, request.max_in_flight)
     });
@@ -105,13 +115,8 @@ where
     let discovery = StagePlan::new(request, &planned, Stage::Discovery, &targets, 0)?;
     let scan_sequence = discovery.count as u64;
     run_stage(
-        request,
+        &mut connector,
         &discovery,
-        authorizer,
-        provider,
-        &budget,
-        clock,
-        deadline,
         &mut progress,
         &mut emit,
         controller.as_mut(),
@@ -126,13 +131,8 @@ where
     let scanned = scanned(&targets, &hosts);
     let scan = StagePlan::new(request, &planned, Stage::Scan, &scanned, scan_sequence)?;
     run_stage(
-        request,
+        &mut connector,
         &scan,
-        authorizer,
-        provider,
-        &budget,
-        clock,
-        deadline,
         &mut progress,
         &mut emit,
         controller.as_mut(),
@@ -142,7 +142,7 @@ where
             hosts[index].scan = Scan::Incomplete;
         }
     }
-    enforce_deadline(probe_error, deadline)?;
+    enforce_deadline(probe_error, connector.deadline)?;
     let Progress {
         mut stats,
         rtt,
@@ -173,15 +173,9 @@ where
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_stage<Q, A, C, F>(
-    request: &Request,
+    connector: &mut Connector<'_, Q, A, C>,
     stage: &StagePlan<'_>,
-    authorizer: &mut A,
-    provider: &Arc<Q>,
-    budget: &tcp::ConnectBudget,
-    clock: &C,
-    deadline: &mut Deadline,
     progress: &mut Progress,
     emit: &mut F,
     controller: Option<&mut super::super::adaptive::Controller>,
@@ -194,22 +188,18 @@ where
     F: FnMut(ProbeEvidence, &Deadline) -> Result<(), Error>,
 {
     if let Some(controller) = controller {
-        return run_stage_adaptive(
-            request, stage, authorizer, provider, budget, clock, deadline, progress, emit,
-            controller,
-        );
+        return run_stage_adaptive(connector, stage, progress, emit, controller);
     }
+    let request = connector.request;
+    let clock = connector.clock;
     let mut active: Vec<Active<Q::Stream>> = Vec::new();
     let effective = request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS);
     let mut next = 0usize;
     while next < stage.count || !active.is_empty() {
-        enforce_deadline(probe_error, deadline)?;
+        enforce_deadline(probe_error, connector.deadline)?;
         let mut admission_held = false;
         while next < stage.count && active.len() < effective && clock.now() >= progress.next_start {
-            let Some(admitted) = admit_next(
-                request, stage, next, authorizer, deadline, provider, budget, clock,
-            )?
-            else {
+            let Some(admitted) = connector.admit_next(stage, next)? else {
                 admission_held = true;
                 break;
             };
@@ -224,13 +214,13 @@ where
         }
         let mut index = 0;
         while index < active.len() {
-            enforce_deadline(probe_error, deadline)?;
+            enforce_deadline(probe_error, connector.deadline)?;
             let Some((_, probe)) = settle_active(&mut active, index, clock.now())? else {
                 index += 1;
                 continue;
             };
             record(request, progress, &probe)?;
-            emit(probe, deadline)?;
+            emit(probe, connector.deadline)?;
         }
         if next < stage.count || !active.is_empty() {
             let mut wait = Duration::from_millis(1);
@@ -238,26 +228,22 @@ where
                 wait = wait.min(progress.next_start.saturating_duration_since(clock.now()));
             }
             if !wait.is_zero() {
-                deadline.start_accounting(Duration::ZERO)?;
-                clock.sleep(wait, deadline).map_err(|source| Error::Clock {
-                    sequence: stage.first_sequence + next as u64,
-                    source: Box::new(source),
-                })?;
+                connector.deadline.start_accounting(Duration::ZERO)?;
+                clock
+                    .sleep(wait, connector.deadline)
+                    .map_err(|source| Error::Clock {
+                        sequence: stage.first_sequence + next as u64,
+                        source: Box::new(source),
+                    })?;
             }
         }
     }
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_stage_adaptive<Q, A, C, F>(
-    request: &Request,
+    connector: &mut Connector<'_, Q, A, C>,
     stage: &StagePlan<'_>,
-    authorizer: &mut A,
-    provider: &Arc<Q>,
-    budget: &tcp::ConnectBudget,
-    clock: &C,
-    deadline: &mut Deadline,
     progress: &mut Progress,
     emit: &mut F,
     controller: &mut super::super::adaptive::Controller,
@@ -269,6 +255,14 @@ where
     C: Clock,
     F: FnMut(ProbeEvidence, &Deadline) -> Result<(), Error>,
 {
+    let (request, provider, budget, clock) = (
+        connector.request,
+        connector.provider,
+        connector.budget,
+        connector.clock,
+    );
+    let authorizer = &mut *connector.authorizer;
+    let deadline = &mut *connector.deadline;
     let mut work = controller.open_stage(
         stage.targets,
         stage.ports.len(),

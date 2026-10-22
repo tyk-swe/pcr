@@ -1,45 +1,35 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::diagnostic::Diagnostic;
-use packetcraftr_core::error::BoundaryError;
-use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
-use crate::execution::Context;
-use crate::execution::evidence::{
-    EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector,
-};
-use crate::execution::{ExchangeExecutor, Executor, publisher};
+use crate::engine::admission::approve_operation;
+use crate::engine::execution::Context;
+use crate::engine::execution::evidence::EvidenceState;
+use crate::engine::execution::{Executor, publisher};
+use crate::exchange::WorkflowExecutor;
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation, WireLimits};
 use crate::providers::{PacketProviders, TargetProviders, TcpProviders};
 use crate::target::ResolveTarget;
-use crate::target::{FamilyGate, approve_operation, resolve_selected};
 use crate::{Client, Sink, Stats};
 
 use super::EVIDENCE_DIAGNOSTICS;
-use super::error::{Error, EvidenceFault, attempt_error};
-use super::evidence::validate_dns_execution;
-use super::evidence::{
-    ResponseClassification, candidate_evidence, classify_response, timeout_evidence,
-};
-use super::executor::{Exchange, ExchangeEvidence, TcpQuerier};
+use super::error::{Error, attempt_error};
+use super::executor::{Exchange, TcpQuerier};
 use super::plan::{OperationLimits, operation_limits};
-use super::plan::{Probe, rotated_source_port};
-use super::{
-    AttemptEvidence, Event, EventContext, Limits, Outcome, Record, Report, Request, Section,
-    Transport, TransportMode, UndecodedEvidence, ValidatedResponse, batch,
-};
+use super::{Event, EventContext, Outcome, Report, Request, batch};
 
+mod attempts;
 mod tcp;
+
+use attempts::Retries;
 
 impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K> {
     /// Runs one bounded DNS query and publishes its events as each becomes final.
@@ -49,7 +39,7 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::execution::Operation::new(self, request.limits.max_duration);
+        let operation = crate::engine::execution::Operation::new(self, request.limits.max_duration);
         self.dns_in(request, sink, &operation)
     }
 
@@ -57,13 +47,14 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
         &self,
         request: Request,
         sink: S,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
     {
         let policy = operation.policy(&self.policy);
-        let mut admission = crate::execution::Admission::new(&policy, self.providers.resolver());
+        let mut admission =
+            crate::engine::admission::Admission::new(&policy, self.providers.resolver());
         let mut deadline = operation.deadline(self, request.limits.max_duration);
         let publish = publisher(&operation.runtime, sink, Error::from, |source| {
             Error::Output { source }
@@ -72,7 +63,7 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
             &request,
             &mut admission,
             &operation.registry,
-            &mut ExchangeExecutor::new(
+            &mut WorkflowExecutor::new(
                 self,
                 operation,
                 send_options(&request),
@@ -103,7 +94,7 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     pub(crate) fn dns_limits_in<Q: std::borrow::Borrow<Request>>(
         &self,
         questions: impl IntoIterator<Item = Q>,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
     ) -> Result<DnsOperation, Error> {
         batch::limits(questions, u64::from(operation.neighbors.max_attempts()))
     }
@@ -114,7 +105,7 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     where
         S: Sink<batch::Event, Ack = ()>,
     {
-        let operation = crate::execution::Operation::new(self, request.max_duration()?);
+        let operation = crate::engine::execution::Operation::new(self, request.max_duration()?);
         self.dns_batch_in(request, sink, &operation)
     }
 
@@ -122,13 +113,14 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
         &self,
         request: batch::Request,
         sink: S,
-        operation: &crate::execution::Operation,
+        operation: &crate::engine::execution::Operation,
     ) -> Result<batch::Report, Error>
     where
         S: Sink<batch::Event, Ack = ()>,
     {
         let policy = operation.policy(&self.policy);
-        let mut admission = crate::execution::Admission::new(&policy, self.providers.resolver());
+        let mut admission =
+            crate::engine::admission::Admission::new(&policy, self.providers.resolver());
         let mut deadline = operation.deadline(self, request.max_duration()?);
         let publish = publisher(&operation.runtime, sink, Error::from, |source| {
             Error::Output { source }
@@ -138,7 +130,7 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
             &request,
             &mut admission,
             &operation.registry,
-            &mut ExchangeExecutor::new(
+            &mut WorkflowExecutor::new(
                 self,
                 operation,
                 send_options(first),
@@ -269,425 +261,4 @@ impl<'a> PreparedOperation<'a> {
         }
         .execute()
     }
-}
-
-struct Retries<'a, A, E, C, F> {
-    request: &'a Request,
-    authorizer: &'a mut A,
-    registry: &'a Registry,
-    executor: &'a mut E,
-    execution: Context<'a, C, Error>,
-    query: Bytes,
-    delay: Duration,
-    context: Arc<EventContext>,
-    report: &'a mut Report,
-    evidence: EvidenceState,
-    emit: &'a mut F,
-}
-
-struct ProbeAttempt {
-    execution: ExchangeEvidence,
-    timeout: Duration,
-    attempt_deadline: Deadline,
-}
-
-/// The neighbor requests a failed query's route sent, which the error its
-/// exchange returned carries.
-fn spent_on_neighbors(error: &BoundaryError) -> Option<Stats> {
-    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
-    std::iter::from_fn(|| {
-        let current = cause?;
-        cause = current.source();
-        Some(current)
-    })
-    .find_map(|cause| {
-        // Transparent wrappers forward their sources, so the carrier is found
-        // as the error a chain link holds rather than as a link of its own.
-        let error = match cause.downcast_ref::<crate::exchange::Error>() {
-            Some(crate::exchange::Error::Preparation(error)) => error,
-            _ => cause.downcast_ref::<crate::Error>()?,
-        };
-        match error {
-            crate::Error::NeighborSpent(spent) => Some(spent.stats.clone()),
-            _ => None,
-        }
-    })
-}
-
-impl<A, E, C, F> Retries<'_, A, E, C, F>
-where
-    A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpQuerier,
-    C: Clock,
-    F: FnMut(Event, &Deadline) -> Result<(), Error>,
-{
-    fn execute(mut self) -> Result<(), Error> {
-        let result = self.execute_attempts();
-        self.report.stats = self.execution.into_stats();
-        result
-    }
-
-    fn execute_attempts(&mut self) -> Result<(), Error> {
-        let mut last_attempt = 1;
-        for attempt in 1..=self.request.attempts {
-            last_attempt = attempt;
-            if self.execute_attempt(attempt)? {
-                break;
-            }
-        }
-        self.execution.enforce(u64::from(last_attempt))?;
-        self.report.completion.validate()?;
-        Ok(())
-    }
-
-    fn execute_attempt(&mut self, attempt: u32) -> Result<bool, Error> {
-        self.wait_before_attempt(attempt)?;
-        let probe = self.prepare_probe(attempt)?;
-        if self.request.transport == TransportMode::Tcp {
-            let mut attempt_deadline = self.execution.deadline().for_wait(self.request.timeout)?;
-            return self.query_over_tcp(&probe, &mut attempt_deadline);
-        }
-        let ProbeAttempt {
-            mut execution,
-            timeout,
-            mut attempt_deadline,
-        } = self.execute_probe(&probe)?;
-        self.record_diagnostics(attempt, execution.diagnostics.drain(..))?;
-        let sent_at = execution.sent.timing().freshness_marker().wall_clock();
-        let best = select_response(
-            self.registry,
-            &probe,
-            &mut execution,
-            self.request.limits,
-            timeout,
-            || self.execution.enforce(u64::from(attempt)),
-        )?;
-        let udp = match best {
-            Some(candidate) => candidate_evidence(&probe, sent_at, candidate, &mut self.evidence),
-            None => timeout_evidence(&probe, sent_at),
-        };
-        self.record_diagnostics(attempt, [])?;
-        let udp_status = udp.evidence.status;
-        self.emit_attempt(udp.evidence)?;
-        self.retain_undecoded(attempt, execution.undecoded)?;
-        let terminal = match udp.response {
-            None => {
-                self.record_failure_outcome(udp_status);
-                false
-            }
-            Some(_)
-                if udp_status == Outcome::Truncated
-                    && self.request.transport == TransportMode::UdpThenTcp =>
-            {
-                self.report.completion.fallback_attempted = true;
-                self.query_over_tcp(&probe, &mut attempt_deadline)?
-            }
-            Some(response) => {
-                self.accept_response(attempt, Transport::Udp, response)?;
-                true
-            }
-        };
-        Ok(terminal)
-    }
-
-    fn query_over_tcp(
-        &mut self,
-        probe: &Probe,
-        attempt_deadline: &mut Deadline,
-    ) -> Result<bool, Error> {
-        let tcp = self.execute_tcp_query(probe, attempt_deadline)?;
-        let tcp_status = tcp.evidence.status;
-        self.emit_attempt(tcp.evidence)?;
-        if tcp_status != Outcome::Response {
-            self.record_failure_outcome(tcp_status);
-            return Ok(false);
-        }
-        let response = tcp.response.ok_or(Error::InvalidEvidence {
-            attempt: probe.attempt,
-            fault: EvidenceFault::TcpResponseMissing,
-        })?;
-        self.accept_response(probe.attempt, Transport::Tcp, response)?;
-        Ok(true)
-    }
-
-    fn record_failure_outcome(&mut self, candidate: Outcome) {
-        if candidate.retry_rank() > self.report.completion.outcome.retry_rank() {
-            self.report.completion.outcome = candidate;
-        }
-    }
-
-    fn wait_before_attempt(&mut self, attempt: u32) -> Result<(), Error> {
-        if attempt == 1 {
-            return Ok(());
-        }
-        self.execution.pace(u64::from(attempt), self.delay)
-    }
-
-    fn prepare_probe(&mut self, attempt: u32) -> Result<Probe, Error> {
-        self.execution.enforce(u64::from(attempt))?;
-        let resolved = resolve_selected(
-            self.authorizer,
-            &self.request.server,
-            self.request.address_family,
-            self.execution.deadline(),
-            attempt_error,
-        );
-        self.execution.enforce(u64::from(attempt))?;
-        let resolved = resolved?;
-        if resolved.targets.iter().any(|target| target.scope.is_some()) {
-            return Err(Error::ScopedServer {
-                server: resolved.declared,
-            });
-        }
-        self.report.server = resolved.declared.clone();
-        let addresses = resolved.addresses();
-        FamilyGate::new(self.request.address_family, |family| Error::Family {
-            family: family.label(),
-        })
-        .require(&resolved.targets)?;
-        for address in &addresses {
-            if !self.report.resolved_addresses.contains(address) {
-                self.report.resolved_addresses.push(*address);
-            }
-        }
-        let address_index = usize::try_from(attempt)
-            .unwrap_or(1)
-            .saturating_sub(1)
-            .checked_rem(addresses.len())
-            .unwrap_or(0);
-        // address_index is a remainder modulo addresses.len(), which is non-empty
-        let server_address = addresses[address_index];
-        if self.request.transport != TransportMode::Udp
-            && let IpAddr::V6(address) = server_address
-            && address.is_unicast_link_local()
-        {
-            return Err(Error::TcpLinkLocal { address });
-        }
-        Ok(Probe {
-            attempt,
-            server_address,
-            server_port: self.request.server_port,
-            source_port: rotated_source_port(self.request.source_port, attempt),
-            transaction_id: self.request.transaction_id,
-            query_name: self.report.query_name.clone(),
-            query_type: self.request.query_type,
-            query: self.query.clone(),
-        })
-    }
-
-    fn execute_probe(&mut self, probe: &Probe) -> Result<ProbeAttempt, Error> {
-        let limits = self.request.limits;
-        // The attempt window is shared with a TCP fallback, which gets only what the exchange left.
-        let mut attempt_deadline = Deadline::new(self.request.timeout);
-        let started = self.execution.now();
-        let mut spent = None;
-        let stepped = self.execution.step(
-            u64::from(probe.attempt),
-            self.request.timeout,
-            &mut *self.executor,
-            |executor, grant| {
-                let execution = executor.execute(&Exchange {
-                    probe: probe.clone(),
-                    timeout: grant.timeout,
-                    limits,
-                    permit: grant.permit,
-                });
-                // Read before the step can replace the error with the
-                // deadline's or the cancellation's.
-                spent = execution.as_ref().err().and_then(spent_on_neighbors);
-                execution
-            },
-            |_, execution, grant, _| {
-                validate_dns_execution(probe, execution, limits, grant.timeout)
-            },
-        );
-        let (execution, grant) = match stepped {
-            Ok(stepped) => stepped,
-            Err(error) => {
-                // A failed query still spent its route's neighbor requests
-                // and their wait.
-                if let Some(mut neighbor) = spent {
-                    neighbor.elapsed = self.execution.now().saturating_duration_since(started);
-                    self.execution
-                        .account(u64::from(probe.attempt), &neighbor)?;
-                }
-                return Err(error);
-            }
-        };
-        let _ = attempt_deadline.account(execution.stats.elapsed);
-        // The neighbor requests the query's route sent count with the query;
-        // the exchange's elapsed already spans their wait.
-        let neighbor =
-            execution
-                .sent
-                .route()
-                .neighbor_stats()
-                .map_err(|source| Error::Execution {
-                    attempt: probe.attempt,
-                    source: BoundaryError::from_error(source),
-                })?;
-        self.execution
-            .account(u64::from(probe.attempt), &neighbor)?;
-        Ok(ProbeAttempt {
-            execution,
-            timeout: grant.timeout,
-            attempt_deadline,
-        })
-    }
-
-    fn emit_attempt(&mut self, evidence: AttemptEvidence) -> Result<(), Error> {
-        self.publish(
-            evidence.attempt,
-            Event::Attempt {
-                context: Arc::clone(&self.context),
-                evidence,
-            },
-        )
-    }
-
-    fn accept_response(
-        &mut self,
-        attempt: u32,
-        transport: Transport,
-        response: ValidatedResponse,
-    ) -> Result<(), Error> {
-        let ValidatedResponse {
-            metadata,
-            answers,
-            authorities,
-            additionals,
-            rejected_records,
-        } = response;
-        self.report.completion.outcome = if metadata.truncated {
-            Outcome::Truncated
-        } else {
-            Outcome::Response
-        };
-        self.report.completion.accepted_transport = Some(transport);
-        for (section, records) in [
-            (Section::Answer, answers),
-            (Section::Authority, authorities),
-            (Section::Additional, additionals),
-        ] {
-            for record in records {
-                self.emit_record(attempt, transport, section, record)?;
-            }
-        }
-        for record in rejected_records {
-            self.publish(
-                attempt,
-                Event::Rejected {
-                    attempt,
-                    transport,
-                    context: Arc::clone(&self.context),
-                    record,
-                },
-            )?;
-        }
-        self.report.completion.response = Some(metadata);
-        Ok(())
-    }
-
-    fn emit_record(
-        &mut self,
-        attempt: u32,
-        transport: Transport,
-        section: Section,
-        record: Record,
-    ) -> Result<(), Error> {
-        self.publish(
-            attempt,
-            Event::Record {
-                attempt,
-                transport,
-                context: Arc::clone(&self.context),
-                section,
-                record,
-            },
-        )
-    }
-
-    fn publish(&mut self, attempt: u32, event: Event) -> Result<(), Error> {
-        (self.emit)(event, self.execution.deadline())?;
-        self.execution.enforce(u64::from(attempt))
-    }
-
-    fn retain_undecoded(&mut self, attempt: u32, frames: Vec<Frame>) -> Result<(), Error> {
-        self.evidence.retain_undecoded(
-            frames,
-            &mut AttemptEvents {
-                attempt,
-                execution: &self.execution,
-                emit: &mut *self.emit,
-            },
-        )
-    }
-
-    fn record_diagnostics(
-        &mut self,
-        attempt: u32,
-        diagnostics: impl IntoIterator<Item = Diagnostic>,
-    ) -> Result<(), Error> {
-        self.evidence.record_diagnostics(
-            diagnostics,
-            &mut AttemptEvents {
-                attempt,
-                execution: &self.execution,
-                emit: &mut *self.emit,
-            },
-        )?;
-        self.execution.enforce(u64::from(attempt))
-    }
-}
-
-struct AttemptEvents<'e, 'a, C, F> {
-    attempt: u32,
-    execution: &'e Context<'a, C, Error>,
-    emit: &'e mut F,
-}
-
-impl<C, F> EvidenceSink for AttemptEvents<'_, '_, C, F>
-where
-    C: Clock,
-    F: FnMut(Event, &Deadline) -> Result<(), Error>,
-{
-    type Error = Error;
-
-    fn undecoded(&mut self, frame: Frame) -> Result<(), Error> {
-        (self.emit)(
-            Event::Undecoded(UndecodedEvidence {
-                attempt: self.attempt,
-                frame,
-            }),
-            self.execution.deadline(),
-        )
-    }
-
-    fn diagnostic(&mut self, diagnostic: Diagnostic) -> Result<(), Error> {
-        (self.emit)(Event::Diagnostic(diagnostic), self.execution.deadline())
-    }
-
-    fn check(&mut self) -> Result<(), Error> {
-        self.execution.enforce(u64::from(self.attempt))
-    }
-}
-
-fn select_response<'a>(
-    registry: &Registry,
-    probe: &Probe,
-    execution: &'a mut ExchangeEvidence,
-    limits: Limits,
-    timeout: Duration,
-    check: impl FnMut() -> Result<(), Error>,
-) -> Result<Option<ResponseCandidate<'a, ResponseClassification>>, Error> {
-    let sent_packet = &execution.sent.built().packet;
-    // Validation admits only responses to the single query, request index 0.
-    ResponseSelector::new(&mut execution.responses).select(
-        0,
-        timeout,
-        |response| classify_response(registry, probe, sent_packet, response, limits.message),
-        ResponseClassification::rank,
-        |_| (),
-        check,
-    )
 }

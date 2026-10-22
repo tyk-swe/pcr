@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use super::OUTPUT_TIMEOUT_MS;
 use std::collections::BTreeMap;
 
 use clap::{ArgMatches, ValueEnum, parser::ValueSource};
@@ -9,7 +10,6 @@ use crate::output::{
     contract::Format,
     resources::{Setting, Value},
 };
-use crate::rendering::OUTPUT_TIMEOUT_MS;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub(crate) enum Preset {
@@ -372,9 +372,7 @@ pub(crate) fn collect_settings(
     format: Format,
     declare: impl FnOnce(&mut Settings<'_>),
 ) -> Vec<(Setting, Enabled)> {
-    let selected = matches
-        .subcommand()
-        .map(|_| crate::cli::leaf(definition, matches));
+    let selected = matches.subcommand().map(|_| leaf(definition, matches));
     let mut settings = Settings {
         target: Target::Diagnostics(Diagnostics {
             root: (definition, matches),
@@ -394,4 +392,18 @@ pub(crate) fn collect_settings(
         report.stream_output();
     }
     report.declared.into_values().collect()
+}
+
+/// Resolves a validated invocation to its leaf without dropping value sources.
+fn leaf<'a>(
+    mut definition: &'a clap::Command,
+    mut matches: &'a ArgMatches,
+) -> (&'a clap::Command, &'a ArgMatches) {
+    while let Some((name, nested)) = matches.subcommand() {
+        definition = definition
+            .find_subcommand(name)
+            .expect("validated subcommand");
+        matches = nested;
+    }
+    (definition, matches)
 }

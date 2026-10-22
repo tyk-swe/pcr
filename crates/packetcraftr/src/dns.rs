@@ -3,7 +3,7 @@
 
 //! Bounded DNS query construction, response validation, and retry execution.
 
-use crate::execution::evidence::EvidenceDiagnosticDescriptor;
+use crate::engine::execution::evidence::EvidenceDiagnosticDescriptor;
 
 pub const HEADER_BYTES: usize = 12;
 pub const DEFAULT_SERVER_PORT: u16 = 53;
@@ -15,7 +15,7 @@ pub const DEFAULT_MAX_TXT_BYTES: usize = 16_384;
 pub const DEFAULT_MAX_REJECTED_RECORDS: usize = 128;
 pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = 32;
 pub const MAX_ATTEMPTS: u32 = 32;
-pub const MAX_RATE: u32 = crate::execution::limits::MAX_RATE;
+pub const MAX_RATE: u32 = crate::engine::execution::limits::MAX_RATE;
 
 const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor = EvidenceDiagnosticDescriptor::new(
     "dns.evidence_limit",
@@ -61,7 +61,8 @@ pub use report::{
 };
 pub use request::{EdnsRequest, Limits, MessageLimits, QueryType, Request, TransportMode};
 
-pub use plan::{Probe, unpredictable_source_port, unpredictable_transaction_id};
+pub use crate::engine::correlation::{unpredictable_source_port, unpredictable_transaction_id};
+pub use plan::Probe;
 pub use reverse::{ptr_names, reverse_name};
 
 use packetcraftr_core::protocol::application::dns::{

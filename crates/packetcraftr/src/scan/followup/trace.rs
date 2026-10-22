@@ -54,6 +54,17 @@ impl Retained {
     }
 }
 
+/// What the finished scan hands its trace stage.
+pub(super) struct Handoff<'a> {
+    pub(super) scan: &'a scan::Aggregate,
+    /// The evidence the scan already holds against the shared budget.
+    pub(super) retained: Retained,
+    /// When the operation started, so the trace runs in what remains of it.
+    pub(super) started: Instant,
+    /// When the scan last transmitted, if it did, so the trace keeps its rate.
+    pub(super) last_sent: Option<Instant>,
+}
+
 pub(super) struct Streamed {
     pub(super) report: hosts::Report,
     pub(super) last_sent: Option<Instant>,
@@ -109,12 +120,15 @@ impl Stage {
     /// `now`, and the evidence budget the scan has not already retained.
     pub(super) fn request(
         &self,
-        scan: &scan::Aggregate,
-        retained: Retained,
-        started: Instant,
+        handoff: &Handoff<'_>,
         now: Instant,
-        last_sent: Option<Instant>,
     ) -> Result<hosts::Request, Error> {
+        let Handoff {
+            scan,
+            retained,
+            started,
+            last_sent,
+        } = *handoff;
         let resolved = scan
             .hosts
             .iter()
@@ -127,7 +141,7 @@ impl Stage {
                 })
             })
             .collect::<Result<_, Error>>()?;
-        let observed = hosts::observed(scan);
+        let observed = scan.trace_observations();
         let covered: std::collections::HashSet<_> =
             observed.iter().map(|observed| observed.address).collect();
         // A host only sends trace probes when it is unscoped and an
@@ -221,22 +235,18 @@ impl Stage {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn stream<P, K>(
         &self,
         client: &Client<P, K>,
-        operation: &crate::execution::Operation,
-        scan: &scan::Aggregate,
-        retained: Retained,
-        started: Instant,
-        last_sent: Option<Instant>,
+        operation: &crate::engine::execution::Operation,
+        handoff: Handoff<'_>,
         emit: impl Sink<hosts::Event, Ack = ()>,
     ) -> Result<Streamed, Error>
     where
         P: PacketProviders + TargetProviders,
         K: Clock,
     {
-        let request = self.request(scan, retained, started, client.now(), last_sent)?;
+        let request = self.request(&handoff, client.now())?;
         let latest = Arc::new(Mutex::new(None::<Instant>));
         let observed = Arc::clone(&latest);
         let settled = client.clock.clone();
@@ -246,7 +256,7 @@ impl Stage {
         // fresh one.
         let report = client.trace_hosts_in(
             request,
-            crate::execution::forwarding(delivery, move |event: hosts::Event, control| {
+            crate::engine::execution::forwarding(delivery, move |event: hosts::Event, control| {
                 // The probe's wall-clock sent_at is evidence, not a pacing
                 // marker: the monotonic marker is when its event settled.
                 if let hosts::Event::Probe(_) = &event {

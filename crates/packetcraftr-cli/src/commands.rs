@@ -1,6 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Command implementations, grouped as in `--help`; the registry that
+//! declares every command once; and the dispatch that launches one.
+
 use std::time::Duration;
 
 use packetcraftr_core::error::Kind;
@@ -10,7 +13,7 @@ use crate::errors::CliError;
 use crate::output::contract::Format;
 use crate::resources::Settings;
 
-pub(crate) use dispatch::run;
+pub(crate) use dispatch::Launch;
 pub use registry::Command;
 pub(crate) use registry::CommandLine;
 

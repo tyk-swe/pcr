@@ -15,7 +15,7 @@ use self::arguments::{Args, Direction};
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
-use crate::rendering::StreamEncoder;
+use crate::invocation::StreamEncoder;
 
 use analysis::follow::{Chunk, Collector};
 use rendering::State;

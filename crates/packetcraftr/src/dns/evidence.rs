@@ -14,9 +14,9 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::bounded;
 
-use crate::correlation::{self, Transport as ProbeTransport};
-use crate::execution::evidence::{EvidenceState, ResponseCandidate};
-use crate::execution::validation::{
+use crate::engine::correlation::{self, Transport as ProbeTransport};
+use crate::engine::execution::evidence::{EvidenceState, ResponseCandidate};
+use crate::engine::execution::validation::{
     validate_aggregate_evidence_limits, validate_capture_statistics_evidence,
     validate_response_frames_and_deadlines, validate_sent_byte_accounting,
 };

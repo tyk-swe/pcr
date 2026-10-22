@@ -1,21 +1,23 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod admission;
+//! Live targets: addresses, scoped addresses, and hostnames, and the declared
+//! selections that expand to them.
+//!
+//! The model and selection types sit below the engine, which admits them for
+//! an operation. [`plan`] is a workflow of its own: it previews what a
+//! selection admits without sending traffic.
+
 mod model;
 pub mod plan;
+mod resolver;
 mod selection;
-mod workflow;
-
-pub(crate) use admission::{
-    DeclaredTargets, FamilyGate, admit_operation, admit_resolved_selection, admit_selection,
-};
 
 pub use model::{
-    Authorized, BlockingResolver, Error, Family, Hostname, ResolvedZone, Resolver, ScopedAddress,
-    SelectedAddress, SystemResolver, Target, Zone, requires_scope,
+    Error, Family, Hostname, ResolvedZone, ScopedAddress, SelectedAddress, Target, Zone,
+    requires_scope,
 };
-pub(crate) use model::{ResolveTarget, distinct_addresses, valid_zone_interface};
+pub use resolver::{Authorized, BlockingResolver, Resolver, SystemResolver};
+pub(crate) use resolver::{ResolveTarget, distinct_addresses, valid_zone_interface};
 pub(crate) use selection::MAX_CANDIDATES;
 pub use selection::{Network, Selection, SelectionError, Specification};
-pub(crate) use workflow::{approve_operation, resolve_selected, wire_limits};

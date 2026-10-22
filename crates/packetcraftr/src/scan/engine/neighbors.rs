@@ -7,11 +7,10 @@ use packetcraftr_core::error::BoundaryError;
 use crate::clock::Clock;
 use crate::target::SelectedAddress;
 
-use super::pacing::{Owed, settle};
+use super::Prober;
 use super::pipelined::add_stats;
 use crate::probe::enforce_deadline;
 use crate::scan::Error;
-use crate::scan::Request;
 use crate::scan::discovery::{self, Composer};
 use crate::scan::error::probe_error;
 use crate::scan::executor::Pipelined;
@@ -67,50 +66,49 @@ fn host_deadline(
 ///
 /// Returns the targets a frame can still be sent to: a target whose own
 /// resolution stayed silent accepts nothing, so later stages skip it.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
-    request: &Request,
+    prober: &mut Prober<'_, E, C>,
     targets: &[SelectedAddress],
-    executor: &mut E,
-    clock: &mut C,
-    deadline: &mut Deadline,
     composer: &mut Composer,
     stats: &mut crate::Stats,
-    owed: &mut Owed,
     controller: Option<&mut crate::scan::adaptive::Controller>,
 ) -> Result<Vec<bool>, Error> {
+    let request = prober.request;
     let mut sendable = vec![true; targets.len()];
     let mut controller = controller;
     for (index, target) in targets.iter().enumerate() {
-        let Ok(host) = start_host(&mut controller, target, clock.now()) else {
+        let Ok(host) = start_host(&mut controller, target, prober.clock.now()) else {
             sendable[index] = false;
             continue;
         };
         let mut attempts = 0;
         let mut last: Option<discovery::Neighbor> = None;
         let neighbor = loop {
-            if host_expired(&mut controller, host, clock.now()) {
+            if host_expired(&mut controller, host, prober.clock.now()) {
                 break last;
             }
             // A pause owed by an earlier request is waited out only before
             // another; a target answered without one leaves it owed.
-            if requests_neighbor(executor, target, true, deadline)? {
-                settle(request, clock, deadline, owed, stats)?;
+            if requests_neighbor(prober.executor, target, true, prober.deadline)? {
+                prober.settle(stats)?;
             }
-            enforce_deadline(probe_error, deadline)?;
-            if host_expired(&mut controller, host, clock.now()) {
+            enforce_deadline(probe_error, prober.deadline)?;
+            if host_expired(&mut controller, host, prober.clock.now()) {
                 break last;
             }
             let timeout = host.map_or(request.timeout, |h| {
                 controller.as_deref().map_or(request.timeout, |c| {
-                    request.timeout.min(c.host_remaining(h, clock.now()))
+                    request.timeout.min(c.host_remaining(h, prober.clock.now()))
                 })
             });
-            let began = clock.now();
-            let (neighbor, exchange) = match executor.resolve_neighbor(target, timeout, deadline) {
+            let began = prober.clock.now();
+            let resolved = prober
+                .executor
+                .resolve_neighbor(target, timeout, prober.deadline);
+            let (neighbor, exchange) = match resolved {
                 Ok(resolved) => resolved,
                 Err(source) => {
-                    if host_expired(&mut controller, host, clock.now()) {
+                    if host_expired(&mut controller, host, prober.clock.now()) {
                         break last;
                     }
                     return Err(Error::Neighbor {
@@ -121,7 +119,7 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
             };
             // A resolver stopped by the deadline reports silence; the deadline
             // decides instead.
-            enforce_deadline(probe_error, deadline)?;
+            enforce_deadline(probe_error, prober.deadline)?;
             if neighbor.attempts > 1 {
                 return Err(Error::InvalidEvidence {
                     sequence: 0,
@@ -133,10 +131,10 @@ pub(super) fn discover_neighbors<E: Pipelined, C: Clock>(
             }
             add_stats(stats, &exchange, 0)?;
             let sent = neighbor.attempts > 0;
-            owed.owe(usize::from(sent), Some(began));
+            prober.owed.owe(usize::from(sent), Some(began));
             attempts += neighbor.attempts;
             let silent = matches!(neighbor.outcome, discovery::NeighborOutcome::Silent);
-            if silent && host_expired(&mut controller, host, clock.now()) {
+            if silent && host_expired(&mut controller, host, prober.clock.now()) {
                 break last;
             }
             let neighbor = discovery::Neighbor {
@@ -183,37 +181,39 @@ pub(super) enum ReachOutcome {
 /// Resolves `target`'s next hop before its stage arms any capture, so no
 /// resolution's capture overlaps a probe's and each request joins `stats`.
 /// Returns why the target is unreachable when its next hop stayed silent.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn reach_next_hop<E: Pipelined, C: Clock>(
-    request: &Request,
-    executor: &mut E,
-    clock: &mut C,
-    deadline: &mut Deadline,
+    prober: &mut Prober<'_, E, C>,
     target: &SelectedAddress,
     stats: &mut crate::Stats,
-    owed: &mut Owed,
     sequence: u64,
     mut controller: Option<&mut crate::scan::adaptive::Controller>,
 ) -> Result<ReachOutcome, Error> {
-    let Ok(host) = start_host(&mut controller, target, clock.now()) else {
+    let Ok(host) = start_host(&mut controller, target, prober.clock.now()) else {
         return Ok(ReachOutcome::HostExpired);
     };
-    let scoped = host_deadline(&controller, host, deadline, clock.now())?;
-    let needs_request =
-        requests_neighbor(executor, target, false, scoped.as_ref().unwrap_or(deadline))?;
+    let scoped = host_deadline(&controller, host, prober.deadline, prober.clock.now())?;
+    let needs_request = requests_neighbor(
+        prober.executor,
+        target,
+        false,
+        scoped.as_ref().unwrap_or(prober.deadline),
+    )?;
     if needs_request {
-        settle(request, clock, deadline, owed, stats)?;
+        prober.settle(stats)?;
     }
-    enforce_deadline(probe_error, deadline)?;
-    if host_expired(&mut controller, host, clock.now()) {
+    enforce_deadline(probe_error, prober.deadline)?;
+    if host_expired(&mut controller, host, prober.clock.now()) {
         return Ok(ReachOutcome::HostExpired);
     }
-    let began = clock.now();
-    let scoped = host_deadline(&controller, host, deadline, began)?;
-    let resolved = match executor.resolve_next_hop(target, scoped.as_ref().unwrap_or(deadline)) {
+    let began = prober.clock.now();
+    let scoped = host_deadline(&controller, host, prober.deadline, began)?;
+    let resolved = prober
+        .executor
+        .resolve_next_hop(target, scoped.as_ref().unwrap_or(prober.deadline));
+    let resolved = match resolved {
         Ok(resolved) => resolved,
         Err(source) => {
-            if host_expired(&mut controller, host, clock.now()) {
+            if host_expired(&mut controller, host, prober.clock.now()) {
                 return Ok(ReachOutcome::HostExpired);
             }
             return Err(Error::Neighbor {
@@ -224,15 +224,15 @@ pub(super) fn reach_next_hop<E: Pipelined, C: Clock>(
     };
     // A resolver stopped by the deadline reports silence; the deadline
     // decides instead.
-    enforce_deadline(probe_error, deadline)?;
+    enforce_deadline(probe_error, prober.deadline)?;
     add_stats(stats, &resolved.stats, sequence)?;
     // A request spends the rate like a probe, so it is spaced from the next
     // request or the stage's first probe.
     let requests = usize::try_from(resolved.stats.packets_attempted).unwrap_or(usize::MAX);
-    owed.owe(requests, Some(began));
+    prober.owed.owe(requests, Some(began));
     Ok(match resolved.silence {
         Some(source) => {
-            if host_expired(&mut controller, host, clock.now()) {
+            if host_expired(&mut controller, host, prober.clock.now()) {
                 return Ok(ReachOutcome::HostExpired);
             }
             ReachOutcome::Silent(source)

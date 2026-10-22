@@ -10,7 +10,7 @@ use packetcraftr_core::capture_file::{Format, Interface, Reader};
 use packetcraftr_core::frame::Frame;
 
 use crate::clock::Clock;
-use crate::execution::{self, Paused};
+use crate::engine::execution::{self, Paused};
 use crate::policy::WireLimits;
 use crate::providers::PacketProviders;
 use crate::route::{self, Materialized as MaterializedRoute, Plan as RoutePlan};

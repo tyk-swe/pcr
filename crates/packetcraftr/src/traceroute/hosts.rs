@@ -18,4 +18,4 @@ pub use report::{
     State, UndecodedEvidence,
 };
 pub use request::{Request, Reuse, Strategy};
-pub use selection::{Observed, observed};
+pub use selection::Observed;

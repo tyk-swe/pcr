@@ -11,7 +11,7 @@ use packetcraftr_core::frame::Frame;
 
 use super::request::{Reuse, Strategy};
 use super::selection::Observed;
-use crate::execution::Shared;
+use crate::engine::execution::Shared;
 use crate::probe::index_or_push;
 use crate::target::ResolvedZone;
 use crate::traceroute::{Error, Hop, ProbeEvidence, Termination};

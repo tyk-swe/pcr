@@ -18,8 +18,9 @@ use crate::scan::{PendingEvidence, PipelineFailure, Probe, SentProbe};
 use crate::{
     Client, Stats,
     clock::Clock,
+    engine::execution::{limits::check_rate, rate_delay},
     evidence::{RetentionBudget, SentPacket},
-    execution::{ExchangeExecutor, limits::check_rate, rate_delay},
+    exchange::WorkflowExecutor,
     providers::{CaptureProviders, PacketProviders},
     scan::error::probe_error,
 };
@@ -153,7 +154,7 @@ fn check<P: PacketProviders, K: Clock>(
     Ok(())
 }
 pub(super) fn run<P: PacketProviders, K: Clock>(
-    executor: &ExchangeExecutor<'_, P, K>,
+    executor: &WorkflowExecutor<'_, P, K>,
     batches: &[Batch<Probe>],
     options: PipelineOptions,
     emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
@@ -208,7 +209,7 @@ impl BatchStorage<'_> {
 struct Descriptor<'a> {
     batch: BatchStorage<'a>,
     host_deadline: Option<Instant>,
-    route: Option<Box<crate::preparation::AuthorizedRoute>>,
+    route: Option<Box<crate::engine::preparation::AuthorizedRoute>>,
 }
 impl Descriptor<'_> {
     fn probe(&self) -> &Probe {
@@ -243,7 +244,7 @@ struct InitialState<'a, P, K> {
 
 struct Pipeline<'a, P: PacketProviders, K> {
     history: &'a mut super::reply_history::ReplyHistory,
-    executor: &'a ExchangeExecutor<'a, P, K>,
+    executor: &'a WorkflowExecutor<'a, P, K>,
     descriptions: BTreeMap<usize, Descriptor<'a>>,
     ready: BTreeMap<usize, AdmittedProbe>,
     armed_ready: BTreeSet<usize>,
@@ -279,7 +280,7 @@ struct Pipeline<'a, P: PacketProviders, K> {
 
 impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
     fn open(
-        executor: &'a ExchangeExecutor<'a, P, K>,
+        executor: &'a WorkflowExecutor<'a, P, K>,
         batches: &'a [Batch<Probe>],
         options: PipelineOptions,
         deadline: Instant,
@@ -325,7 +326,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
     }
 
     fn assemble(
-        executor: &'a ExchangeExecutor<'a, P, K>,
+        executor: &'a WorkflowExecutor<'a, P, K>,
         options: PipelineOptions,
         deadline: Instant,
         started: Instant,

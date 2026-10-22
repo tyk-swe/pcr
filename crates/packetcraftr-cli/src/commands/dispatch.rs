@@ -14,8 +14,11 @@ use crate::errors::{CANCELLED_EXIT_CODE, CliError};
 use crate::invocation::StreamEncoder;
 use crate::output;
 use crate::output::contract::{Command, Format};
-use crate::rendering::{emit_json, emit_stderr_error, stdout_stream};
+use crate::rendering::{emit_json, emit_stderr_error, report_structured_error, stdout_stream};
 use crate::resources::Preset;
+
+#[cfg(test)]
+mod tests;
 
 /// The global options and parsed matches a command launches with.
 pub(crate) struct Launch<'a> {
@@ -106,8 +109,7 @@ impl Launch<'_> {
             ) {
                 Ok(stream) => stream,
                 Err(error) => {
-                    let _ = emit_stderr_error(&error);
-                    return ExitCode::from(error.exit_code());
+                    return stderr_failure(&error, error.exit_code(), emit_stderr_error);
                 }
             };
             invocation = invocation.with_output(stream);
@@ -148,11 +150,6 @@ impl Launch<'_> {
                     .check()
                     .map_err(CliError::classified)
                 {
-                    if format == output::contract::Format::Json {
-                        // A second stdout document would invalidate the completed JSON.
-                        let _ = emit_stderr_error(&error);
-                        return ExitCode::from(CANCELLED_EXIT_CODE);
-                    }
                     return command_failure(&invocation, command, error);
                 }
                 match require_success_terminal(format, stream) {
@@ -192,54 +189,82 @@ fn command_failure(
     command: output::contract::Command,
     error: CliError,
 ) -> ExitCode {
+    command_failure_with(invocation, command, error, emit_json, emit_stderr_error)
+}
+
+fn command_failure_with(
+    invocation: &crate::invocation::Invocation,
+    command: output::contract::Command,
+    mut error: CliError,
+    json: impl FnOnce(
+        &crate::invocation::Invocation,
+        &output::envelope::Envelope<()>,
+    ) -> Result<(), CliError>,
+    stderr: impl Fn(&CliError) -> Result<(), CliError>,
+) -> ExitCode {
     let format = invocation.format;
     let cancelled = invocation.cancellation.is_cancelled();
     let invocation = &invocation.terminal();
     let stream = &invocation.output;
     let open = stream.is_open();
-    let error = if format == output::contract::Format::Ndjson && !open && !stream.is_terminal() {
-        let causes = std::iter::once(error.message).chain(error.causes).collect();
-        CliError::from_classification(
-            packetcraftr_core::error::Classification::new(
-                "io.stdout",
-                Kind::Io,
-                Some("treat the structured stream as incomplete"),
-            ),
-            "NDJSON stream is incomplete; output is unavailable for a terminal record",
-            causes,
-        )
-    } else {
-        error
-    };
-    let exit_code = if cancelled {
+    let incomplete = format == Format::Ndjson && !open && !stream.is_terminal();
+    if incomplete {
+        let primary = std::mem::replace(
+            &mut error.message,
+            "NDJSON stream is incomplete; output is unavailable for a terminal record".to_owned(),
+        );
+        error.causes.insert(0, primary);
+        error.classification = packetcraftr_core::error::Classification::new(
+            "io.stdout",
+            Kind::Io,
+            Some("treat the structured stream as incomplete"),
+        );
+    }
+    let output_failed = incomplete
+        || (format == Format::Json
+            && invocation.json_attempted()
+            && error.classification.code == "io.stdout");
+    let exit_code = if cancelled && !output_failed {
         CANCELLED_EXIT_CODE
     } else {
         error.exit_code()
     };
-    let (emitted, report_write_error) = match format {
-        output::contract::Format::Json => (
-            emit_json(
-                invocation,
-                &invocation.decorate(output::envelope::Envelope::<()>::error(
-                    Some(command),
-                    error.output_error(),
-                )),
-            ),
-            true,
+    match format {
+        Format::Json if !invocation.json_attempted() => report_structured_error(
+            error,
+            exit_code,
+            |error| {
+                json(
+                    invocation,
+                    &invocation.decorate(output::envelope::Envelope::<()>::error(
+                        Some(command),
+                        error.output_error(),
+                    )),
+                )
+            },
+            stderr,
         ),
-        output::contract::Format::Ndjson if open => (
-            stream
-                .emit_error(error.output_error())
-                .map_err(CliError::from),
-            true,
+        Format::Ndjson if open => report_structured_error(
+            error,
+            exit_code,
+            |error| {
+                stream
+                    .emit_error(error.output_error())
+                    .map_err(CliError::from)
+            },
+            stderr,
         ),
-        _ => (emit_stderr_error(&error), false),
-    };
-    if let Err(write_error) = emitted {
-        if report_write_error {
-            let _ = emit_stderr_error(&write_error);
-        }
-        return ExitCode::from(write_error.exit_code());
+        _ => stderr_failure(&error, exit_code, stderr),
     }
-    ExitCode::from(exit_code)
+}
+
+fn stderr_failure(
+    error: &CliError,
+    exit_code: u8,
+    stderr: impl FnOnce(&CliError) -> Result<(), CliError>,
+) -> ExitCode {
+    match stderr(error) {
+        Ok(()) => ExitCode::from(exit_code),
+        Err(write_error) => ExitCode::from(write_error.exit_code()),
+    }
 }

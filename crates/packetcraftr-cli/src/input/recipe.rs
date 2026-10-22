@@ -39,7 +39,7 @@ fn resolve_recipe(
     registry: &core::registry::Registry,
     max_layers: usize,
 ) -> Result<Packet, CliError> {
-    let (input, declared) = match (packet, packet_file) {
+    let (input, declared, source_name) = match (packet, packet_file) {
         (Some(expression), None) => return parse_expression(&expression, registry, max_layers),
         (None, Some(path)) => {
             let bytes = read_bounded_file(
@@ -48,12 +48,14 @@ fn resolve_recipe(
                 InputKind::Recipe,
             )?;
             let input = String::from_utf8(bytes).map_err(|source| {
-                CliError::new(
+                CliError::wrapping(
                     Kind::Usage,
-                    format!("packet document is not UTF-8: {source}"),
+                    format!("packet document {} is not UTF-8", path.display()),
+                    &source,
                 )
             })?;
-            (input, core::document::Format::from_path(&path))
+            let declared = core::document::Format::from_path(&path);
+            (input, declared, path.display().to_string())
         }
         (None, None) => {
             let bytes = read_stdin_bounded(
@@ -61,14 +63,15 @@ fn resolve_recipe(
                 InputKind::Recipe,
             )?;
             let input = String::from_utf8(bytes).map_err(|source| {
-                CliError::new(Kind::Usage, format!("stdin recipe is not UTF-8: {source}"))
+                CliError::wrapping(Kind::Usage, "stdin recipe is not UTF-8", &source)
             })?;
-            (input, None)
+            (input, None, "stdin".to_owned())
         }
         (Some(_), Some(_)) => unreachable!("clap enforces recipe source conflicts"),
     };
     core::document::recipe::parse(&input, declared, registry, max_layers)
         .map_err(CliError::classified)
+        .map_err(|error| error.with_input(source_name))
 }
 
 fn apply_payload_file(
@@ -206,4 +209,27 @@ fn parse_expression(
         },
     )
     .map_err(CliError::classified)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_handling_recipe_decoding_and_parsing_keep_file_and_causes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("packet.json");
+        let registry = core::protocol::builtin::registry();
+        for (bytes, code) in [
+            (b"\xff".as_slice(), "cli.error"),
+            (b"{".as_slice(), "cli.document_syntax"),
+        ] {
+            std::fs::write(&path, bytes).unwrap();
+            let error = resolve_recipe(None, Some(path.clone()), &registry, 16).unwrap_err();
+            assert_eq!(error.classification.code, code);
+            assert_eq!(error.classification.kind, Kind::Usage);
+            assert!(error.message.contains(&path.display().to_string()));
+            assert!(!error.causes.is_empty());
+        }
+    }
 }

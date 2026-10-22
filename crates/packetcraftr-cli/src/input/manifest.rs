@@ -151,9 +151,7 @@ pub(crate) fn read_with_budget(
     for source in sources {
         let source_name = source.declaration_source();
         let bytes = match source {
-            ManifestSource::File(path) => {
-                read_file_capped(path, budget.remaining_bytes, MANIFEST_KIND)?
-            }
+            ManifestSource::File(path) => read_file_capped(path, budget.remaining_bytes)?,
             ManifestSource::Stdin => {
                 if budget.stdin_used {
                     return Err(manifest_error(
@@ -178,10 +176,13 @@ pub(crate) fn read_with_budget(
         }
         budget.remaining_bytes -= bytes.len();
         let text = std::str::from_utf8(&bytes).map_err(|error| {
-            manifest_error(
-                &source_name,
-                Some(line_at(&bytes, error.valid_up_to())),
-                "manifest must be UTF-8 text",
+            CliError::wrapping(
+                Kind::Usage,
+                format!(
+                    "{source_name}:{}: manifest must be UTF-8 text",
+                    line_at(&bytes, error.valid_up_to()),
+                ),
+                &error,
             )
         })?;
         for (line, physical) in (1_u32..).zip(text.lines()) {
@@ -243,4 +244,25 @@ fn manifest_error(source: &DeclarationSource, line: Option<u32>, message: &str) 
         None => format!("{source}: {message}"),
     };
     CliError::new(Kind::Usage, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_handling_manifest_utf8_keeps_physical_line_and_decode_cause() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("targets.txt");
+        std::fs::write(&path, b"# comment\n\n\xff").unwrap();
+        let error = read_with_budget(
+            &[ManifestSource::File(path.clone())],
+            &mut ManifestBounds::default().budget(),
+        )
+        .unwrap_err();
+        assert!(error.message.starts_with(&format!("{}:3:", path.display())));
+        assert_eq!(error.classification.kind, Kind::Usage);
+        assert_eq!(error.causes.len(), 1);
+        assert!(error.causes[0].contains("utf-8"));
+    }
 }

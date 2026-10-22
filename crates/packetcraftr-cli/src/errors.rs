@@ -83,6 +83,16 @@ impl CliError {
         self
     }
 
+    pub(crate) fn context(&self) -> Option<Coordinate> {
+        self.context
+    }
+
+    /// Adds an input location without replacing the classified failure's details.
+    pub(crate) fn with_input(mut self, input: impl std::fmt::Display) -> Self {
+        self.message = format!("{input}: {}", self.message);
+        self
+    }
+
     pub(crate) fn into_boundary_error(self) -> packetcraftr_core::error::BoundaryError {
         packetcraftr_core::error::BoundaryError::new(self.message, self.classification, self.causes)
             .with_context(self.context)
@@ -184,5 +194,62 @@ pub(crate) const fn exit_code_description(kind: Kind) -> &'static str {
         Kind::Io => "a system or network operation failed.",
         Kind::Policy => "the traffic policy denied the operation.",
         Kind::Internal => "an invariant failed; please report it.",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_handling_context_and_secondary_failure_preserve_primary_details() {
+        let classification = Classification::new("packet.test", Kind::Packet, Some("repair input"));
+        let capture = output::capture::Snapshot {
+            summary: output::capture::Summary {
+                requested_interfaces: Vec::new(),
+                sources: Vec::new(),
+                frames_delivered: 3,
+                stop_reason: output::capture::StopReason::Failure,
+                capture_statistics_complete: false,
+                files: None,
+            },
+            stats: Default::default(),
+        };
+        let scan = output::scan::Failure {
+            stats: Default::default(),
+            pending: Vec::new(),
+            failed_probe: None,
+            capture_sources: Vec::new(),
+        };
+        let error = CliError::from_classification(
+            classification,
+            "invalid packet",
+            vec!["root cause".into()],
+        )
+        .with_context(Some(Coordinate::SourceFrame(3)))
+        .with_capture(capture.clone())
+        .with_scan(scan.clone())
+        .with_input("capture.pcap")
+        .with_secondary(
+            "error reporting",
+            CliError::wrapping(
+                Kind::Io,
+                "write stdout failed",
+                &std::io::Error::new(std::io::ErrorKind::BrokenPipe, "consumer closed"),
+            ),
+        );
+        let published = error.output_error();
+        assert_eq!(error.classification, classification);
+        assert_eq!(
+            published.context,
+            Some(output::envelope::ErrorContext::SourceFrame(3))
+        );
+        assert_eq!(published.capture.as_deref(), Some(&capture));
+        assert_eq!(published.scan.as_deref(), Some(&scan));
+        assert!(published.message.contains("capture.pcap: invalid packet"));
+        assert_eq!(
+            published.causes,
+            ["root cause", "write stdout failed", "consumer closed"]
+        );
     }
 }

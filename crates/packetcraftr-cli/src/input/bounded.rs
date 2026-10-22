@@ -142,6 +142,7 @@ pub(crate) fn read_bounded_file(
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
     require_non_empty(read_bounded_file_allow_empty(path, max_bytes, kind)?, kind)
+        .map_err(|error| error.with_input(path.display()))
 }
 
 pub(crate) fn read_bounded_file_allow_empty(
@@ -149,7 +150,8 @@ pub(crate) fn read_bounded_file_allow_empty(
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    read_bounded_allow_empty(open_file(path)?, max_bytes, kind)
+    let bytes = read_file_capped(path, max_bytes)?;
+    require_bounded(bytes, max_bytes, kind).map_err(|error| error.with_input(path.display()))
 }
 
 pub(super) fn open_file(path: &Path) -> Result<File, CliError> {
@@ -177,7 +179,7 @@ struct FileIo {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("read {label} input failed")]
+#[error("read {label} input from stdin failed")]
 struct InputRead {
     label: &'static str,
     #[source]
@@ -237,6 +239,10 @@ fn read_bounded_allow_empty(
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
     let bytes = read_capped(reader, max_bytes).map_err(|source| input_read_error(kind, source))?;
+    require_bounded(bytes, max_bytes, kind)
+}
+
+fn require_bounded(bytes: Vec<u8>, max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {
     if bytes.len() > max_bytes {
         return Err(kind.oversized_error(bytes.len(), max_bytes));
     }
@@ -244,12 +250,16 @@ fn read_bounded_allow_empty(
 }
 
 /// Reads at most `max_bytes + 1` bytes of `path`, leaving the oversize decision to the caller.
-pub(crate) fn read_file_capped(
+pub(crate) fn read_file_capped(path: &Path, max_bytes: usize) -> Result<Vec<u8>, CliError> {
+    read_file_reader_capped(open_file(path)?, path, max_bytes)
+}
+
+fn read_file_reader_capped(
+    reader: impl Read,
     path: &Path,
     max_bytes: usize,
-    kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    read_capped(open_file(path)?, max_bytes).map_err(|source| input_read_error(kind, source))
+    read_capped(reader, max_bytes).map_err(|source| file_io_error("read", path, source))
 }
 
 /// Reads at most `max_bytes + 1` bytes of redirected stdin, leaving the oversize decision to the
@@ -278,4 +288,57 @@ fn read_capped(reader: impl Read, max_bytes: usize) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     reader.take(read_limit).read_to_end(&mut bytes)?;
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct FailingReader;
+
+    impl Read for FailingReader {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::other("injected read failure"))
+        }
+    }
+
+    #[test]
+    fn error_handling_reads_retain_file_or_stdin_and_causes() {
+        let path = Path::new("inputs/targets.txt");
+        let error = read_file_reader_capped(FailingReader, path, 16).unwrap_err();
+        assert!(error.message.contains(&path.display().to_string()));
+        assert_eq!(error.classification.kind, Kind::Io);
+        assert_eq!(error.causes, ["injected read failure"]);
+
+        let error = read_bounded(FailingReader, 16, InputKind::Manifest).unwrap_err();
+        assert!(error.message.contains("stdin"));
+        assert_eq!(error.causes, ["injected read failure"]);
+    }
+
+    #[test]
+    fn error_handling_file_bounds_and_missing_files_retain_paths_and_codes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("frame.bin");
+        let error = read_bounded_file(&path, 1, InputKind::Frame).unwrap_err();
+        assert_eq!(error.classification.kind, Kind::Io);
+        assert!(error.message.contains(&path.display().to_string()));
+        assert!(!error.causes.is_empty());
+
+        std::fs::write(&path, b"ab").unwrap();
+        let error = read_bounded_file(&path, 1, InputKind::Frame).unwrap_err();
+        assert_eq!(
+            error.classification,
+            core::decode::Error::PacketSizeLimit {
+                actual: 2,
+                limit: 1
+            }
+            .classification()
+        );
+        assert!(error.message.contains(&path.display().to_string()));
+
+        std::fs::write(&path, b"").unwrap();
+        let error = read_bounded_file(&path, 1, InputKind::Frame).unwrap_err();
+        assert_eq!(error.classification.code, "cli.input_source");
+        assert!(error.message.contains(&path.display().to_string()));
+    }
 }

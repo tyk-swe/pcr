@@ -11,7 +11,13 @@ use crate::{
     resources::Diagnostics,
 };
 use packetcraftr_core::budget::{Cancellation, Deadline, Interrupted};
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 /// One command's output, stop conditions, and optional resource diagnostics.
 /// Clones passed to workers share these bounds and diagnostics, never ambient state.
@@ -22,6 +28,7 @@ pub(crate) struct Invocation {
     pub(crate) deadline: Option<Arc<Deadline>>,
     pub(crate) cancellation: Cancellation,
     pub(crate) diagnostics: Option<Arc<Diagnostics>>,
+    json_attempted: Arc<AtomicBool>,
 }
 
 impl Invocation {
@@ -41,6 +48,7 @@ impl Invocation {
             deadline,
             cancellation,
             diagnostics,
+            json_attempted: Arc::new(AtomicBool::new(false)),
         }
         .configure_output()
     }
@@ -87,6 +95,21 @@ impl Invocation {
 
     pub(crate) fn check(&self) -> Result<(), CliError> {
         self.check_interrupted().map_err(interruption_error)
+    }
+
+    pub(crate) fn json_attempted(&self) -> bool {
+        self.json_attempted.load(Ordering::Relaxed)
+    }
+
+    /// An aggregate invocation may publish only one JSON document, even after failure.
+    pub(crate) fn begin_json(&self) -> Result<(), CliError> {
+        if self.json_attempted.swap(true, Ordering::Relaxed) {
+            return Err(CliError::new(
+                packetcraftr_core::error::Kind::Internal,
+                "JSON output publication was already attempted",
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) fn passive_lookup(&self) -> Deadline {

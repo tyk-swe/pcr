@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -39,6 +43,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - name: Install the pinned toolchain
         run: rustup toolchain install
+      - name: Restore Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
       - name: Format
         run: |
           cargo fmt --all -- --check
@@ -61,6 +74,11 @@ jobs:
           cargo doc --locked --workspace --no-default-features --no-deps --document-private-items
           cargo doc --locked --workspace --no-default-features --features packetcraftr-cli/native-layer3 --no-deps --document-private-items
           cargo doc --locked --workspace --all-features --no-deps --document-private-items
+      - name: Drop workspace artifacts from the Cargo cache
+        shell: bash
+        run: |
+          rm -rf target/*/incremental
+          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
 
   msrv:
     name: Linux minimum supported Rust
@@ -76,10 +94,24 @@ jobs:
           msrv="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["rust-version"])')"
           rustup toolchain install "$msrv" --profile minimal
           echo "version=$msrv" >> "$GITHUB_OUTPUT"
+      - name: Restore Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
       - name: Check every workspace target with portable and all features
         run: |
           cargo +${{ steps.msrv.outputs.version }} check --locked --workspace --all-targets --no-default-features
           cargo +${{ steps.msrv.outputs.version }} check --locked --workspace --all-targets --all-features
+      - name: Drop workspace artifacts from the Cargo cache
+        shell: bash
+        run: |
+          rm -rf target/*/incremental
+          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
 
   portable:
     name: Portable and pcap-free
@@ -89,6 +121,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the pinned toolchain
         run: rustup toolchain install
+      - name: Restore Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
       - name: Run library unit tests without default features
         run: cargo test --locked --workspace --lib --no-default-features
       - name: Compile library examples
@@ -97,9 +138,14 @@ jobs:
         run: cargo test --locked --lib -p packetcraftr-cli -p packetcraftr-netio --no-default-features --features packetcraftr-cli/native-layer3,packetcraftr-netio/native-layer3
       - name: Build the pcap-free CLI
         run: cargo build --locked -p packetcraftr-cli --no-default-features --features native-layer3
+      - name: Drop workspace artifacts from the Cargo cache
+        shell: bash
+        run: |
+          rm -rf target/*/incremental
+          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
 
-  platforms:
-    name: Native (${{ matrix.os }})
+  platforms-clippy:
+    name: Native clippy (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -111,6 +157,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the pinned toolchain
         run: rustup toolchain install
+      - name: Restore Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
       - name: Clippy for supported feature profiles
         shell: bash
         run: |
@@ -119,9 +174,42 @@ jobs:
           cargo clippy --locked --workspace --all-targets --no-default-features --features packetcraftr-cli/native-layer2 -- -D warnings
           cargo clippy --locked --workspace --all-targets --no-default-features --features packetcraftr-cli/native-layer3 -- -D warnings
           cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Drop workspace artifacts from the Cargo cache
+        shell: bash
+        run: |
+          rm -rf target/*/incremental
+          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+
+  platforms-test:
+    name: Native tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # The release workflow builds on these images; keep CI on the same baselines.
+        os: [macos-14, macos-15-intel, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: Restore Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
       - name: Run library unit tests with default features
         run: cargo test --locked --workspace --lib
       - name: Run library unit tests with all features
         run: cargo test --locked --workspace --lib --all-features
       - name: Run library unit tests without default features
         run: cargo test --locked --workspace --lib --no-default-features
+      - name: Drop workspace artifacts from the Cargo cache
+        shell: bash
+        run: |
+          rm -rf target/*/incremental
+          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +

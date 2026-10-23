@@ -76,3 +76,6 @@ windows = { version = "0.62.2", default-features = false, features = [
 # Packet offsets, lengths, and accounting must fail closed in optimized builds
 # just as they do in development builds.
 overflow-checks = true
+
+[profile.dev.package."*"]
+debug = false

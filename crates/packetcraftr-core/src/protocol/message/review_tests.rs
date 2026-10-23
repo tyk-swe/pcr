@@ -911,3 +911,13 @@ fn review_other_slow_protocols_remain_opaque_before_lacp_length_checks() {
             .is_err()
     );
 }
+
+#[test]
+fn review_rtsp_and_sip_methods_accept_the_token_grammar() {
+    for (name, version) in [("rtsp", "RTSP/1.0"), ("sip", "SIP/2.0")] {
+        for method in ["GET_PARAMETER", "SET_PARAMETER", "custom_method2"] {
+            let wire = format!("{method} * {version}\r\nContent-Length: 0\r\n\r\n");
+            review_round_trip(name, wire.as_bytes());
+        }
+    }
+}

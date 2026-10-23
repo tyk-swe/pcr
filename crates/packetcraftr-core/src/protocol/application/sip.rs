@@ -87,10 +87,7 @@ impl Sip {
                 && parts[1].len() == 3
                 && parts[1].bytes().all(|b| b.is_ascii_digit())
                 || parts[2] == "SIP/2.0"
-                    && !parts[0].is_empty()
-                    && parts[0]
-                        .bytes()
-                        .all(|b| b.is_ascii_uppercase() || b == b'-'))
+                    && super::text_message::is_token(NAME, parts[0].as_bytes()))
         {
             return Err(unsupported(NAME, "unsupported start line or version"));
         }

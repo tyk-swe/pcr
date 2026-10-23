@@ -872,3 +872,73 @@ fn review_modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
         );
     }
 }
+
+#[test]
+fn review_many_coalesced_messages_preserve_the_layer_budget_and_stream() {
+    use crate::{
+        codec::Addresses,
+        frame::{Frame, LinkType},
+        layer::Raw,
+        packet::Packet,
+        protocol::{builtin, link::Ethernet, network::Ipv4, transport::Tcp},
+    };
+    let registry = builtin::registry();
+    let builder = crate::build::Builder::new(registry.clone());
+    let mut packet = Packet::new();
+    packet.push(Ethernet::default());
+    packet.push(Ipv4::default());
+    packet.push(Tcp {
+        destination_port: 1883,
+        flags: Tcp::ACK,
+        ..Default::default()
+    });
+    packet.push(Raw::new(Bytes::from(b"\xc0\0".repeat(100))));
+    let built = builder
+        .build(packet, Addresses::default(), Default::default())
+        .unwrap();
+    let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, built.bytes.clone()).unwrap();
+    for max_layers in [4, 8, 64] {
+        let decoded = crate::decode::Dissector::new(registry.clone())
+            .decode(
+                frame.clone(),
+                crate::decode::Options {
+                    limits: crate::packet::Limits {
+                        max_layers,
+                        ..Default::default()
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(decoded.packet.len(), max_layers);
+        assert!(decoded.packet.get::<Raw>().is_some());
+        assert_eq!(
+            builder
+                .build(decoded.packet, Addresses::default(), Default::default())
+                .unwrap()
+                .bytes,
+            built.bytes
+        );
+    }
+    let mut writer = crate::capture_file::Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+    writer.write_frame(&frame).unwrap();
+    let capture = writer.into_inner();
+    let mut reader = crate::capture_file::Reader::new(&capture[..]).unwrap();
+    let collector =
+        Collector::new(Limits::default(), registry.clone(), [BuiltinProtocol::Mqtt]).unwrap();
+    let mut events = Vec::new();
+    let outcome = crate::analysis::Session::new(registry, Default::default(), collector)
+        .run(
+            &mut reader,
+            |_| Ok(()),
+            |event| {
+                events.push(event);
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(outcome.summary.complete_messages, 100);
+    assert_eq!(events.len(), 100);
+    assert!(events.iter().all(
+        |event| matches!(event, Event::Message(message) if message.status == Status::Complete)
+    ));
+}

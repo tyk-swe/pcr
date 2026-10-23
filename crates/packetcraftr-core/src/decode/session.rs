@@ -100,8 +100,30 @@ impl<'registry> DecodeSession<'registry> {
                 }
             };
             let layer = Self::validate_layer(codec.as_ref(), &cursor, decoded)?;
-            self.preserve_trailing_bytes(&cursor, &layer, allow_link_padding);
             let child = self.select_child(&layer);
+            if child.protocol == Some(layer.protocol)
+                && crate::protocol::BuiltinProtocol::from_id(layer.protocol)
+                    .is_some_and(crate::protocol::BuiltinProtocol::stream_decode)
+                && self
+                    .packet
+                    .len()
+                    .saturating_add(self.trailing.len())
+                    .saturating_add(2)
+                    > self.options.limits.max_layers
+            {
+                // Coalesced application messages are not additional encapsulation.
+                // Keep the remainder available to stream collectors within the layer budget.
+                self.preserve_raw(
+                    cursor.bytes.start,
+                    cursor.bytes.len(),
+                    Diagnostic::info(
+                        "decode.message_limit",
+                        "remaining coalesced messages preserved as Raw",
+                    ),
+                );
+                break;
+            }
+            self.preserve_trailing_bytes(&cursor, &layer, allow_link_padding);
             let next = self.commit_layer(cursor, layer, child)?;
             let Some(next) = next else {
                 break;

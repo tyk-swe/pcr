@@ -31,7 +31,7 @@ pub(super) fn encode(
     for h in &headers.0 {
         let key = data(h, "name", name)?;
         let value = data(h, "value", name)?;
-        if !valid_name(key) || !valid_value(value) {
+        if !valid_name(name, key) || !valid_value(value) {
             return Err(invalid(name, "invalid header"));
         }
         w.put(key)?;
@@ -124,7 +124,7 @@ fn parse_head(name: &'static str, b: &[u8]) -> Result<Head, Error> {
             pos = value_end + 2;
         }
         let value = &b[value_start..value_end];
-        if !valid_name(key) || !valid_value(value) {
+        if !valid_name(name, key) || !valid_value(value) {
             return Err(invalid(name, "invalid header"));
         }
         let key_name = key.trim_ascii_end();
@@ -156,13 +156,21 @@ fn parse_head(name: &'static str, b: &[u8]) -> Result<Head, Error> {
     })
 }
 
-fn valid_name(key: &[u8]) -> bool {
+fn valid_name(protocol: &'static str, key: &[u8]) -> bool {
     let name = key.trim_ascii_end();
-    !name.is_empty()
-        && key[name.len()..].iter().all(|b| matches!(b, b' ' | b'\t'))
-        && name
+    is_token(protocol, name) && key[name.len()..].iter().all(|b| matches!(b, b' ' | b'\t'))
+}
+
+pub(super) fn is_token(protocol: &'static str, value: &[u8]) -> bool {
+    let punctuation: &[u8] = if protocol == "sip" {
+        b"-.!%*_+`'~"
+    } else {
+        b"!#$%&'*+-.^_`|~"
+    };
+    !value.is_empty()
+        && value
             .iter()
-            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(b))
+            .all(|b| b.is_ascii_alphanumeric() || punctuation.contains(b))
 }
 
 fn valid_value(value: &[u8]) -> bool {

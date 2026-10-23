@@ -921,3 +921,40 @@ fn review_rtsp_and_sip_methods_accept_the_token_grammar() {
         }
     }
 }
+
+#[test]
+fn review_rtcp_reports_preserve_profile_extensions() {
+    let registry = builtin::registry();
+    let mut compound = Vec::new();
+    for (kind, base_length) in [(200, 24), (201, 4)] {
+        for count in [0, 1] {
+            let body_length = base_length + 24 * usize::from(count) + 4;
+            let mut wire = vec![0x80 | count, kind];
+            wire.extend_from_slice(&((body_length / 4) as u16).to_be_bytes());
+            wire.resize(4 + body_length - 4, 0);
+            wire.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+            review_round_trip("rtcp", &wire);
+            compound.extend_from_slice(&wire);
+        }
+        let mut truncated = vec![0x81, kind];
+        truncated.extend_from_slice(&((base_length / 4) as u16).to_be_bytes());
+        truncated.resize(base_length + 4, 0);
+        assert!(
+            registry
+                .codec("rtcp")
+                .unwrap()
+                .decode(
+                    truncated.into(),
+                    &DecodeContext {
+                        parent: None,
+                        registry: &registry,
+                        network: None,
+                        hop_limit: None,
+                        discriminator: None,
+                    }
+                )
+                .is_err()
+        );
+    }
+    review_round_trip("rtcp", &compound);
+}

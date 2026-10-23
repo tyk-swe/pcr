@@ -129,10 +129,10 @@ fn validate(b: &[u8]) -> Result<(), Error> {
         let b = &body[..n - pad];
         let count = usize::from(h & 31);
         match pt {
-            200 if b.len() != 24 + 24 * count => {
+            200 if b.len() < 24 + 24 * count => {
                 return Err(invalid(NAME, "invalid sender reports"));
             }
-            201 if b.len() != 4 + 24 * count => {
+            201 if b.len() < 4 + 24 * count => {
                 return Err(invalid(NAME, "invalid receiver reports"));
             }
             202 => {

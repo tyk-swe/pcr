@@ -11,6 +11,8 @@ use crate::rendering::{
     render_diagnostics_text, render_undecoded, write_stdout_line,
 };
 
+pub(super) mod multipath;
+
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
     published: output::envelope::Published<output::traceroute::Report>,

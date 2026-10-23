@@ -95,3 +95,10 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) policy: HostnamePolicyArgs,
 }
+
+impl Args {
+    pub(super) fn flow_count(&self) -> u16 {
+        self.flows
+            .unwrap_or(packetcraftr::traceroute::multipath::DEFAULT_FLOWS)
+    }
+}

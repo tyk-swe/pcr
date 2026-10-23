@@ -11,12 +11,26 @@ use packetcraftr::traceroute::multipath as library;
 use serde::Serialize;
 use std::{net::IpAddr, time::Duration};
 
+const MODE: &str = "multipath";
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Reply {
     pub responder: IpAddr,
     pub kind: packetcraftr::traceroute::ResponseKind,
     pub latency: Duration,
     pub frame: Captured,
+}
+
+impl TryFrom<library::Reply> for Reply {
+    type Error = Error;
+    fn try_from(value: library::Reply) -> Result<Self, Error> {
+        Ok(Self {
+            responder: value.responder,
+            kind: value.kind,
+            latency: value.latency,
+            frame: value.frame.try_into()?,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -47,14 +61,7 @@ impl TryFrom<library::ProbeEvidence> for Probe {
             replies: value
                 .replies
                 .into_iter()
-                .map(|reply| {
-                    Ok(Reply {
-                        responder: reply.responder,
-                        kind: reply.kind,
-                        latency: reply.latency,
-                        frame: reply.frame.try_into()?,
-                    })
-                })
+                .map(Reply::try_from)
                 .collect::<Result<_, Error>>()?,
         })
     }
@@ -65,6 +72,17 @@ pub struct Unmatched {
     pub sweep: u32,
     pub hop_limit: u8,
     pub frame: Captured,
+}
+
+impl TryFrom<library::Unmatched> for Unmatched {
+    type Error = Error;
+    fn try_from(value: library::Unmatched) -> Result<Self, Error> {
+        Ok(Self {
+            sweep: value.sweep,
+            hop_limit: value.hop_limit,
+            frame: value.frame.try_into()?,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -87,9 +105,9 @@ impl TryFrom<library::Aggregate> for Published<Report> {
     type Error = Error;
     fn try_from(value: library::Aggregate) -> Result<Self, Error> {
         let report = value.report;
-        Ok(Published::new(
+        Ok(Self::new(
             Report {
-                mode: "multipath",
+                mode: MODE,
                 target: report.target,
                 resolved_addresses: report.resolved_addresses,
                 destination: report.destination,
@@ -107,13 +125,7 @@ impl TryFrom<library::Aggregate> for Published<Report> {
                 unmatched: value
                     .unmatched
                     .into_iter()
-                    .map(|(sweep, hop_limit, frame)| {
-                        Ok(Unmatched {
-                            sweep,
-                            hop_limit,
-                            frame: frame.try_into()?,
-                        })
-                    })
+                    .map(Unmatched::try_from)
                     .collect::<Result<_, Error>>()?,
             },
             value.diagnostics,
@@ -169,37 +181,23 @@ impl TryFrom<library::Event> for Published<Event> {
             },
             library::Event::Topology(topology) => Detail::Topology { topology },
             library::Event::FlowComplete(completion) => Detail::FlowComplete { completion },
-            library::Event::Unmatched {
-                sweep,
-                hop_limit,
-                frame,
-            } => Detail::Unmatched {
-                unmatched: Unmatched {
-                    sweep,
-                    hop_limit,
-                    frame: frame.try_into()?,
-                },
+            library::Event::Unmatched(unmatched) => Detail::Unmatched {
+                unmatched: unmatched.try_into()?,
             },
             library::Event::Diagnostic(diagnostic) => {
                 diagnostics.push(diagnostic);
                 Detail::Diagnostic {}
             }
         };
-        Ok(Published::new(
-            Event {
-                mode: "multipath",
-                detail,
-            },
-            diagnostics,
-        ))
+        Ok(Self::new(Event { mode: MODE, detail }, diagnostics))
     }
 }
 
 impl From<library::Report> for Published<Event> {
     fn from(report: library::Report) -> Self {
-        Published::new(
+        Self::new(
             Event {
-                mode: "multipath",
+                mode: MODE,
                 detail: Detail::Complete {
                     target: report.target,
                     resolved_addresses: report.resolved_addresses,

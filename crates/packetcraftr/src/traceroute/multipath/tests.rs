@@ -64,15 +64,15 @@ fn source(v6: bool) -> IpAddr {
     if v6 { "fd00::2" } else { "10.0.0.2" }.parse().unwrap()
 }
 fn build(mut packet: Packet) -> BuiltPacket {
-    if let Some(ip) = packet.get_mut::<Ipv4>() {
-        if ip.source.is_unspecified() {
-            ip.source = "10.0.0.2".parse().unwrap();
-        }
+    if let Some(ip) = packet.get_mut::<Ipv4>()
+        && ip.source.is_unspecified()
+    {
+        ip.source = "10.0.0.2".parse().unwrap();
     }
-    if let Some(ip) = packet.get_mut::<Ipv6>() {
-        if ip.source.is_unspecified() {
-            ip.source = "fd00::2".parse().unwrap();
-        }
+    if let Some(ip) = packet.get_mut::<Ipv6>()
+        && ip.source.is_unspecified()
+    {
+        ip.source = "fd00::2".parse().unwrap();
     }
     Builder::new(builtin::registry())
         .build(packet, Default::default(), Default::default())

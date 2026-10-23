@@ -31,6 +31,13 @@ pub struct Reply {
 }
 
 #[derive(Clone, Debug)]
+pub struct Unmatched {
+    pub sweep: u32,
+    pub hop_limit: u8,
+    pub frame: Frame,
+}
+
+#[derive(Clone, Debug)]
 pub struct ProbeEvidence {
     pub sequence: u64,
     pub flow_id: u16,
@@ -56,6 +63,17 @@ pub struct Rtt {
     /// The lower median for even sample counts.
     pub median: Duration,
     pub maximum: Duration,
+}
+
+impl Rtt {
+    pub(super) fn from_sorted(samples: &[Duration]) -> Option<Self> {
+        Some(Self {
+            samples: samples.len(),
+            minimum: *samples.first()?,
+            median: samples[(samples.len() - 1) / 2],
+            maximum: *samples.last()?,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -90,6 +108,12 @@ pub struct TopologyUpdate {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub changes: Vec<Change>,
+}
+
+impl TopologyUpdate {
+    pub(super) fn is_empty(&self) -> bool {
+        self.nodes.is_empty() && self.edges.is_empty() && self.changes.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -137,11 +161,7 @@ pub enum Event {
     Probe(ProbeEvidence),
     Topology(TopologyUpdate),
     FlowComplete(FlowCompletion),
-    Unmatched {
-        sweep: u32,
-        hop_limit: u8,
-        frame: Frame,
-    },
+    Unmatched(Unmatched),
     Diagnostic(Diagnostic),
 }
 
@@ -163,7 +183,7 @@ pub struct Report {
 pub struct Aggregate {
     pub report: Report,
     pub probes: Vec<ProbeEvidence>,
-    pub unmatched: Vec<(u32, u8, Frame)>,
+    pub unmatched: Vec<Unmatched>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -173,7 +193,7 @@ pub struct Collector(Shared<Collected>);
 #[derive(Default)]
 struct Collected {
     probes: Vec<ProbeEvidence>,
-    unmatched: Vec<(u32, u8, Frame)>,
+    unmatched: Vec<Unmatched>,
     diagnostics: Vec<Diagnostic>,
     flows: Vec<Flow>,
     completions: Vec<FlowCompletion>,
@@ -194,11 +214,7 @@ impl Sink<Event> for Collector {
                     .is_some_and(|last| last.sequence >= probe.sequence);
                 state.probes.push(probe);
             }
-            Event::Unmatched {
-                sweep,
-                hop_limit,
-                frame,
-            } => state.unmatched.push((sweep, hop_limit, frame)),
+            Event::Unmatched(unmatched) => state.unmatched.push(unmatched),
             Event::Diagnostic(diagnostic) => state.diagnostics.push(diagnostic),
             Event::Flow(flow) => state.flows.push(flow),
             Event::FlowComplete(completion) => state.completions.push(completion),

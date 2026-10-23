@@ -45,6 +45,12 @@ pub struct Plan {
 }
 
 impl Plan {
+    pub(crate) fn same_egress(&self, other: &Self) -> bool {
+        self.packet_source == other.packet_source
+            && self.decision.interface == other.decision.interface
+            && self.mode == other.mode
+    }
+
     pub fn needs_neighbor_resolution(&self) -> bool {
         self.mode == Mode::Layer2
             && self.destination_mac.is_none()

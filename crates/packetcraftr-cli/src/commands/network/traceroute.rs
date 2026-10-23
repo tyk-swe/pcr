@@ -37,10 +37,7 @@ impl crate::commands::Spec for Args {
         ]);
         settings.declare(crate::resources::Field {
             id: "flows",
-            value: crate::resources::SettingValue::setting_value(&u32::from(
-                self.flows
-                    .unwrap_or(packetcraftr::traceroute::multipath::DEFAULT_FLOWS),
-            )),
+            value: crate::resources::SettingValue::setting_value(&u32::from(self.flow_count())),
             unit: crate::resources::Unit::Count,
             stage: crate::resources::Stage::Operation,
             enabled: self.multipath.into(),
@@ -68,6 +65,7 @@ pub(super) fn run(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let queue_limits = arguments.limits.clone().into_limits();
+    let flow_count = arguments.flow_count();
     let request = prepare_request(&arguments, queue_limits)?;
     let workflow = prepare_workflow(
         &arguments.route,
@@ -87,9 +85,7 @@ pub(super) fn run(
             &client,
             packetcraftr::traceroute::multipath::Request {
                 trace: request,
-                flows: arguments
-                    .flows
-                    .unwrap_or(packetcraftr::traceroute::multipath::DEFAULT_FLOWS),
+                flows: flow_count,
             },
             format,
             stream,
@@ -183,9 +179,7 @@ fn prepare_request(
         trace.collection = crate::system::collection(trace.timeout, queue_limits)?;
         packetcraftr::traceroute::multipath::Request {
             trace,
-            flows: arguments
-                .flows
-                .unwrap_or(packetcraftr::traceroute::multipath::DEFAULT_FLOWS),
+            flows: arguments.flow_count(),
         }
         .validate()
         .map_err(CliError::classified)?;

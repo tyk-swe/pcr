@@ -13,16 +13,11 @@ pub(super) struct Topology {
     previous_sweep: BTreeMap<(u16, u8), (u32, NodeKey, u64)>,
 }
 
-fn node(key: NodeKey, samples: &[Duration]) -> Node {
-    Node {
+fn node(key: NodeKey, samples: &[Duration]) -> Option<Node> {
+    Some(Node {
         key,
-        rtt: Rtt {
-            samples: samples.len(),
-            minimum: samples[0],
-            median: samples[(samples.len() - 1) / 2],
-            maximum: samples[samples.len() - 1],
-        },
-    }
+        rtt: Rtt::from_sorted(samples)?,
+    })
 }
 
 impl Topology {
@@ -39,7 +34,7 @@ impl Topology {
                 reply.latency,
             );
             update.nodes.retain(|node| node.key != key);
-            update.nodes.push(node(key, samples));
+            update.nodes.extend(node(key, samples));
         }
         let comparable = !probe.ambiguous && !probe.incomplete && !probe.replies.is_empty();
         let prior = self.previous_hop.remove(&probe.flow_id);
@@ -104,7 +99,7 @@ impl Topology {
             nodes: self
                 .nodes
                 .into_iter()
-                .map(|(key, samples)| node(key, &samples))
+                .filter_map(|(key, samples)| node(key, &samples))
                 .collect(),
             edges: self
                 .edges

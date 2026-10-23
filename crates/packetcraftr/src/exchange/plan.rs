@@ -40,6 +40,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     }
 
     /// Internal ordered batches share the complete template admission path.
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn prepare_packet_exchange<I>(
         &self,
         expansion_len: usize,
@@ -85,10 +86,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             if let Some(slot) = pinned.as_deref_mut() {
                 let expected = slot.get_or_insert_with(|| admitted_packet.plan().clone());
                 let actual = admitted_packet.plan();
-                if expected.packet_source != actual.packet_source
-                    || expected.decision.interface != actual.decision.interface
-                    || expected.mode != actual.mode
-                {
+                if !expected.same_egress(actual) {
                     return Err(Error::HeterogeneousRoute);
                 }
             }

@@ -205,15 +205,18 @@ impl Collector {
     ) -> Result<(), Error> {
         let (flow, stream, status, clean) = match event {
             application::Event::Data(data) => return self.data(data, output),
-            application::Event::Gap { flow, stream } => (flow, stream, Status::Gap, false),
-            application::Event::Conflict { flow, stream } => {
+            application::Event::Gap { flow, stream, .. } => (flow, stream, Status::Gap, false),
+            application::Event::Conflict { flow, stream, .. } => {
                 (flow, stream, Status::Conflict, false)
             }
-            application::Event::Evicted { flow, stream } => (flow, stream, Status::Evicted, false),
+            application::Event::Evicted { flow, stream, .. } => {
+                (flow, stream, Status::Evicted, false)
+            }
             application::Event::Closed {
                 flow,
                 stream,
                 reset,
+                ..
             } => (
                 flow,
                 stream,

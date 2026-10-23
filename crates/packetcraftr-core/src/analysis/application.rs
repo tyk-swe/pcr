@@ -196,19 +196,23 @@ pub(crate) enum Event {
     Gap {
         flow: ScopedFlowKey,
         stream: u64,
+        generation: u64,
     },
     Conflict {
         flow: ScopedFlowKey,
         stream: u64,
+        generation: u64,
     },
     Closed {
         flow: ScopedFlowKey,
         stream: u64,
+        generation: u64,
         reset: bool,
     },
     Evicted {
         flow: ScopedFlowKey,
         stream: u64,
+        generation: u64,
     },
 }
 #[derive(Clone)]
@@ -253,7 +257,18 @@ impl TcpSources {
     }
     pub(crate) fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, Error> {
         let mut output = Vec::new();
+        let previous_generation = record.tcp.and_then(|view| view.conversation).map(|c| {
+            (
+                c.index,
+                self.generations.get(&c.index).copied().unwrap_or(0),
+            )
+        });
         let mut incoming = self.admit(record, &mut output)?;
+        let previous_generation = previous_generation.filter(|(stream, generation)| {
+            self.generations
+                .get(stream)
+                .is_some_and(|current| current != generation)
+        });
         if let Some(incoming) = incoming.take_if(|incoming| incoming.after.is_none()) {
             self.insert(incoming.flow, incoming.span)?;
         }
@@ -278,7 +293,7 @@ impl TcpSources {
                 {
                     self.forget_spans(flow);
                 }
-                _ => self.event(event, record.number, &mut output)?,
+                _ => self.event(event, record.number, previous_generation, &mut output)?,
             }
             if let Some(incoming) = incoming.take_if(|incoming| incoming.after == Some(index)) {
                 self.insert(incoming.flow, incoming.span)?;
@@ -334,6 +349,7 @@ impl TcpSources {
                 output.push(Event::Evicted {
                     flow: flow.clone(),
                     stream: conversation.index,
+                    generation: self.generations[&conversation.index] - 1,
                 });
             }
         }
@@ -375,7 +391,7 @@ impl TcpSources {
     ) -> Result<Vec<Event>, Error> {
         let mut output = Vec::new();
         for event in events {
-            self.event(event, number, &mut output)?;
+            self.event(event, number, None, &mut output)?;
         }
         Ok(output)
     }
@@ -421,6 +437,7 @@ impl TcpSources {
         &mut self,
         event: &TcpEvent,
         number: u64,
+        previous_generation: Option<(u64, u64)>,
         output: &mut Vec<Event>,
     ) -> Result<(), Error> {
         let flow = match event {
@@ -433,6 +450,10 @@ impl TcpSources {
         let Some(&stream) = self.streams.get(flow) else {
             return Ok(());
         };
+        // A tuple-reuse SYN can evict old bytes before delivering the new generation.
+        let generation = previous_generation
+            .filter(|(previous, _)| *previous == stream)
+            .map_or(self.generations[&stream], |(_, generation)| generation);
         match event {
             TcpEvent::Data {
                 sequence, bytes, ..
@@ -483,12 +504,14 @@ impl TcpSources {
                     output.push(Event::Conflict {
                         flow: flow.clone(),
                         stream,
+                        generation,
                     });
                 }
             }
             TcpEvent::Gap { .. } => output.push(Event::Gap {
                 flow: flow.clone(),
                 stream,
+                generation,
             }),
             TcpEvent::Closed { reset, .. } => {
                 self.closed.insert(flow.clone());
@@ -498,6 +521,7 @@ impl TcpSources {
                 output.push(Event::Closed {
                     flow: flow.clone(),
                     stream,
+                    generation,
                     reset: *reset,
                 });
             }
@@ -506,6 +530,7 @@ impl TcpSources {
                 output.push(Event::Evicted {
                     flow: flow.clone(),
                     stream,
+                    generation,
                 });
             }
         }

@@ -164,6 +164,16 @@ impl Framer {
                 }
                 l
             }
+            "radius" => {
+                if b.len() < 4 {
+                    return Ok(None);
+                }
+                let len = usize::from(u16::from_be_bytes([b[2], b[3]]));
+                if !(20..=4096).contains(&len) {
+                    return Err(invalid(n, "RADIUS length outside 20..4096"));
+                }
+                len
+            }
             "stun" => {
                 if b.len() < 20 {
                     return Ok(None);

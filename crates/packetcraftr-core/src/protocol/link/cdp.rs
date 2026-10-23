@@ -143,17 +143,17 @@ impl Cdp {
     }
 }
 fn cdp_checksum(b: &[u8]) -> u16 {
-    let mut sum = 0u32;
+    let mut sum = 0u64;
     let (chunks, remainder) = b.as_chunks::<2>();
     for p in chunks {
-        sum += u32::from(u16::from_be_bytes([p[0], p[1]]));
+        sum += u64::from(u16::from_be_bytes([p[0], p[1]]));
     }
     if let Some(&v) = remainder.first() {
         // Cisco's legacy odd-byte checksum adjusts a sign-extended final byte.
         sum += if v & 0x80 != 0 {
-            0xff00 + u32::from(v - 1)
+            0xff00 + u64::from(v - 1)
         } else {
-            u32::from(v)
+            u64::from(v)
         };
     }
     while sum >> 16 != 0 {

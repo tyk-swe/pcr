@@ -93,6 +93,7 @@ fn gap_stops_direction_until_new_generation() {
         application::Event::Gap {
             flow: flow(),
             stream: 0,
+            generation: 0,
         },
         2,
         &mut out,
@@ -402,5 +403,197 @@ fn review_mqtt5_stays_opaque_in_both_directions_until_a_new_generation() {
                 .all(|event| matches!(event, Event::Message(message)
             if message.status == Status::Complete && message.generation == 1))
         );
+    }
+}
+
+#[test]
+fn review_events_before_the_first_delivery_disable_the_generation() {
+    for event in [
+        application::Event::Gap {
+            flow: flow(),
+            stream: 0,
+            generation: 0,
+        },
+        application::Event::Conflict {
+            flow: flow(),
+            stream: 0,
+            generation: 0,
+        },
+        application::Event::Evicted {
+            flow: flow(),
+            stream: 0,
+            generation: 0,
+        },
+        application::Event::Closed {
+            flow: flow(),
+            stream: 0,
+            generation: 0,
+            reset: true,
+        },
+    ] {
+        let mut collector = Collector::new(
+            Limits::default(),
+            crate::protocol::builtin::registry(),
+            [BuiltinProtocol::Mqtt],
+        )
+        .unwrap();
+        let tracker = Tracker::new(1 << 20, 32).unwrap();
+        let mut events = Vec::new();
+        collector.event(event, 1, &mut events).unwrap();
+        deliver(&mut collector, &tracker, 2, &[0xc0, 0], 0, &mut events);
+        assert!(
+            events
+                .iter()
+                .all(|event| !matches!(event, Event::Message(_)))
+        );
+        deliver_on(
+            &mut collector,
+            &tracker,
+            3,
+            flow().reverse(),
+            &[0xd0, 0],
+            0,
+            &mut events,
+        );
+        // A reset disables both directions, while other events affect just one.
+        let reset = matches!(&events[0], Event::Issue(issue) if issue.status == Status::Reset);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Event::Message(_)))
+                .count(),
+            usize::from(!reset)
+        );
+        deliver(&mut collector, &tracker, 4, &[0xc0, 0], 1, &mut events);
+        assert!(
+            matches!(events.last(), Some(Event::Message(message)) if message.status == Status::Complete && message.generation == 1)
+        );
+    }
+}
+
+#[test]
+fn review_amqp_unsupported_version_keeps_both_directions_opaque() {
+    let mut collector = Collector::new(
+        Limits::default(),
+        crate::protocol::builtin::registry(),
+        [BuiltinProtocol::Amqp],
+    )
+    .unwrap();
+    let tracker = Tracker::new(1 << 20, 32).unwrap();
+    let mut request = flow();
+    request.flow.destination_port = 5672;
+    let mut events = Vec::new();
+    let wire = b"AMQP\0\x01\0\0\0\0\0\x08\x02\0\0\0";
+    deliver_on(
+        &mut collector,
+        &tracker,
+        1,
+        request.clone(),
+        wire,
+        0,
+        &mut events,
+    );
+    deliver_on(
+        &mut collector,
+        &tracker,
+        2,
+        request.reverse(),
+        &wire[8..],
+        0,
+        &mut events,
+    );
+    assert!(events.iter().all(
+        |event| matches!(event, Event::Message(message) if message.status == Status::Unsupported)
+    ));
+    let (tail, summary) = collector.finish(&RunSummary::default()).unwrap();
+    assert!(tail.iter().all(
+        |event| matches!(event, Event::Message(message) if message.status == Status::Unsupported)
+    ));
+    assert_eq!(summary.unsupported_messages, 3);
+    assert_eq!(summary.malformed_messages, 0);
+}
+
+#[test]
+fn review_capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
+    use crate::{
+        codec::Addresses,
+        frame::{Frame, LinkType},
+        layer::Raw,
+        packet::Packet,
+        protocol::{builtin, link::Ethernet, network::Ipv4, transport::Tcp},
+    };
+    use std::time::Duration;
+
+    for conflict in [true, false] {
+        let registry = builtin::registry();
+        let builder = crate::build::Builder::new(registry.clone());
+        let mut writer = crate::capture_file::Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+        let mut segments: Vec<(u64, u32, u16, &[u8])> =
+            vec![(0, 100, Tcp::SYN, b""), (1, 103, Tcp::ACK, b"\0\x01ax")];
+        if conflict {
+            segments.extend([
+                (2, 103, Tcp::ACK, b"\0\x01ay" as &[u8]),
+                (3, 101, Tcp::ACK, b"\x30\x04" as &[u8]),
+            ]);
+        } else {
+            segments.push((122, 107, Tcp::ACK, b"\xc0\0"));
+        }
+        segments.extend([
+            (123, 200, Tcp::SYN, b"" as &[u8]),
+            (124, 201, Tcp::ACK, b"\xc0\0" as &[u8]),
+        ]);
+        for (seconds, sequence, flags, payload) in segments {
+            let mut packet = Packet::new();
+            packet.push(Ethernet::default());
+            packet.push(Ipv4 {
+                source: "192.0.2.1".parse().unwrap(),
+                destination: "192.0.2.2".parse().unwrap(),
+                ..Default::default()
+            });
+            packet.push(Tcp {
+                source_port: 40000,
+                destination_port: 1883,
+                sequence,
+                flags,
+                ..Default::default()
+            });
+            if !payload.is_empty() {
+                packet.push(Raw::new(Bytes::copy_from_slice(payload)));
+            }
+            let built = builder
+                .build(packet, Addresses::default(), Default::default())
+                .unwrap();
+            let frame = Frame::new(
+                UNIX_EPOCH + Duration::from_secs(seconds),
+                LinkType::ETHERNET,
+                built.bytes,
+            )
+            .unwrap();
+            writer.write_frame(&frame).unwrap();
+        }
+        let capture = writer.into_inner();
+        let mut reader = crate::capture_file::Reader::new(&capture[..]).unwrap();
+        let collector =
+            Collector::new(Limits::default(), registry.clone(), [BuiltinProtocol::Mqtt]).unwrap();
+        let mut events = Vec::new();
+        let outcome = crate::analysis::Session::new(registry, Default::default(), collector)
+            .run(
+                &mut reader,
+                |_| Ok(()),
+                |event| {
+                    events.push(event);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::Issue(issue)
+            if issue.status == if conflict { Status::Conflict } else { Status::Gap }))
+        );
+        assert_eq!(outcome.summary.complete_messages, 1, "{events:?}");
+        assert!(events.iter().any(|event| matches!(event, Event::Message(message)
+            if message.status == Status::Complete && message.generation == 1 && message.wire.as_ref() == b"\xc0\0")));
     }
 }

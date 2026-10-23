@@ -102,6 +102,7 @@ struct Connection {
     generation: u64,
     protocol: Option<BuiltinProtocol>,
     mqtt_level: Option<u8>,
+    unsupported_amqp: bool,
 }
 
 pub struct Collector {
@@ -111,6 +112,7 @@ pub struct Collector {
     tcp: TcpSources,
     connections: BTreeMap<u64, Connection>,
     directions: BTreeMap<ScopedFlowKey, Direction>,
+    stopped: BTreeMap<ScopedFlowKey, (u64, u64)>,
     buffered: usize,
     retained: usize,
     summary: Summary,
@@ -154,6 +156,7 @@ impl Collector {
             tcp: TcpSources::new(ports, limits),
             connections: BTreeMap::new(),
             directions: BTreeMap::new(),
+            stopped: BTreeMap::new(),
             buffered: 0,
             retained: 0,
             summary: Summary::default(),
@@ -193,8 +196,13 @@ impl Collector {
         {
             check()?;
             let mut out = Vec::new();
-            if let application::Event::Evicted { flow, .. } = event {
-                self.stop(&flow, Status::Incomplete, &mut out)?;
+            if let application::Event::Evicted {
+                flow,
+                stream,
+                generation,
+            } = event
+            {
+                self.stop(&flow, stream, generation, Status::Incomplete, &mut out)?;
             } else {
                 self.event(event, run.frames_read, &mut out)?;
             }
@@ -215,18 +223,32 @@ impl Collector {
         number: u64,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
-        let (flow, stream, status) = match event {
+        let (flow, stream, generation, status) = match event {
             application::Event::Data(data) => return self.data(data, out),
-            application::Event::Gap { flow, stream } => (flow, stream, Status::Gap),
-            application::Event::Conflict { flow, stream } => (flow, stream, Status::Conflict),
-            application::Event::Evicted { flow, stream } => (flow, stream, Status::Evicted),
+            application::Event::Gap {
+                flow,
+                stream,
+                generation,
+            } => (flow, stream, generation, Status::Gap),
+            application::Event::Conflict {
+                flow,
+                stream,
+                generation,
+            } => (flow, stream, generation, Status::Conflict),
+            application::Event::Evicted {
+                flow,
+                stream,
+                generation,
+            } => (flow, stream, generation, Status::Evicted),
             application::Event::Closed {
                 flow,
                 stream,
+                generation,
                 reset,
             } => (
                 flow,
                 stream,
+                generation,
                 if reset {
                     Status::Reset
                 } else {
@@ -242,9 +264,9 @@ impl Collector {
                 status,
             }));
         }
-        self.stop(&flow, status, out)?;
+        self.stop(&flow, stream, generation, status, out)?;
         if status == Status::Reset {
-            self.stop(&flow.reverse(), status, out)?;
+            self.stop(&flow.reverse(), stream, generation, status, out)?;
         }
         Ok(())
     }
@@ -268,11 +290,16 @@ impl Collector {
                 generation: data.generation,
                 protocol: p,
                 mqtt_level: None,
+                unsupported_amqp: false,
             },
         );
         p
     }
     fn data(&mut self, data: application::Delivery, out: &mut Vec<Event>) -> Result<(), Error> {
+        if self.stopped.get(&data.flow) == Some(&(data.stream, data.generation)) {
+            return Ok(());
+        }
+        self.stopped.remove(&data.flow);
         let Some(protocol) = self.select(&data) else {
             return Ok(());
         };
@@ -303,7 +330,7 @@ impl Collector {
             self.limits
                 .check_source_spans(d.sources.as_ref().unwrap().len())?;
             let mut offset = 0;
-            while offset < d.buffer.len() && !d.disabled {
+            while offset < d.buffer.len() && !d.disabled && !self.opaque(&d) {
                 match d
                     .framer
                     .progress(&d.buffer[offset..], self.limits.max_buffer_bytes)
@@ -365,6 +392,19 @@ impl Collector {
         Ok(())
     }
     fn decode(&mut self, message: &mut Message) {
+        if message.protocol == BuiltinProtocol::Amqp
+            && message.wire.starts_with(b"AMQP")
+            && message.wire.as_ref() != b"AMQP\0\0\x09\x01"
+        {
+            self.connections
+                .get_mut(&message.stream)
+                .expect("selected connection exists")
+                .unsupported_amqp = true;
+            message.status = Status::Unsupported;
+            message.error =
+                Some("only AMQP 0-9-1 is supported; connection bytes remain opaque".into());
+            return;
+        }
         if message.protocol == BuiltinProtocol::Mqtt {
             let connection = self
                 .connections
@@ -454,12 +494,16 @@ impl Collector {
         &mut self,
         flow: &ScopedFlowKey,
         d: &mut Direction,
-        status: Status,
-        error: Option<String>,
+        mut status: Status,
+        mut error: Option<String>,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
         if d.buffer.is_empty() {
             return Ok(());
+        }
+        if status == Status::Incomplete && self.opaque(d) {
+            status = Status::Unsupported;
+            error = Some("AMQP connection uses an unsupported protocol version".into());
         }
         self.buffered -= d.buffer.len();
         let wire = Bytes::from(std::mem::take(&mut d.buffer));
@@ -487,15 +531,27 @@ impl Collector {
     fn stop(
         &mut self,
         flow: &ScopedFlowKey,
+        stream: u64,
+        generation: u64,
         status: Status,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
+        self.stopped.insert(flow.clone(), (stream, generation));
         if let Some(mut d) = self.directions.remove(flow) {
-            self.flush(flow, &mut d, status, None, out)?;
-            d.disabled = true;
+            if d.stream == stream && d.generation == generation {
+                self.flush(flow, &mut d, status, None, out)?;
+                d.disabled = true;
+            }
             self.directions.insert(flow.clone(), d);
         }
         Ok(())
+    }
+    fn opaque(&self, direction: &Direction) -> bool {
+        self.connections
+            .get(&direction.stream)
+            .is_some_and(|connection| {
+                connection.generation == direction.generation && connection.unsupported_amqp
+            })
     }
 }
 impl session::Collector for Collector {

@@ -10,9 +10,19 @@ use crate::protocol::message::*;
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
+const FIELDS: &[crate::layer::FieldSchema] = &[
+    member("element_id", field::Kind::Unsigned, &[]),
+    member("length", field::Kind::Unsigned, &[]),
+    member("enterprise", field::Kind::Unsigned, &[]),
+];
+const RECORDS: &[crate::layer::FieldSchema] = &[
+    member("template_id", field::Kind::Unsigned, &[]),
+    member("scope_count", field::Kind::Unsigned, &[]),
+    member("fields", field::Kind::List, FIELDS),
+];
 const SETS: &[crate::layer::FieldSchema] = &[
     member("id", field::Kind::Unsigned, &[]),
-    member("records", field::Kind::List, &[]),
+    member("records", field::Kind::List, RECORDS),
     member("data", field::Kind::Bytes, &[]),
     member("padding", field::Kind::Bytes, &[]),
 ];
@@ -95,7 +105,8 @@ impl Ipfix {
                         u16::try_from(fields.len())
                             .map_err(|_| invalid(NAME, "too many fields"))?,
                     )?;
-                    if id == 3 {
+                    // Withdrawals omit Scope Field Count even in an Options Template Set.
+                    if id == 3 && !fields.is_empty() {
                         body.u16(
                             u16::try_from(number(rec, "scope_count", NAME)?)
                                 .map_err(|_| invalid(NAME, "scope count overflow"))?,
@@ -176,7 +187,7 @@ impl Ipfix {
             if matches!(id, 2 | 3) {
                 let mut p = Reader::new(NAME, b);
                 let mut records = Vec::new();
-                while p.left() >= if id == 2 { 4 } else { 6 } {
+                while p.left() >= 4 {
                     count += 1;
                     if count > MAX_RECORDS {
                         return Err(invalid(NAME, "too many templates"));
@@ -187,7 +198,7 @@ impl Ipfix {
                         return Err(invalid(NAME, "too many fields"));
                     }
                     count += fields;
-                    let scope = if id == 3 { p.u16()? } else { 0 };
+                    let scope = if id == 3 && fields != 0 { p.u16()? } else { 0 };
                     if scope as usize > fields {
                         return Err(invalid(NAME, "scope count exceeds fields"));
                     }

@@ -242,17 +242,29 @@ macro_rules! message_codec {
                 let bytes = layer.encode_wire(context)?;
                 crate::protocol::common::ensure_encode_budget(name, bytes.len(), context)?;
                 let decoded_context = crate::codec::DecodeContext {
-                    parent: None,
+                    parent: context
+                        .index
+                        .checked_sub(1)
+                        .and_then(|index| context.packet.layer(index))
+                        .map(|parent| *parent.protocol_id()),
                     registry: context.registry,
                     network: crate::protocol::network::resolve_envelope(name, context).ok(),
                     hop_limit: None,
                     discriminator: None,
                 };
                 let mut diagnostics = Vec::new();
-                let materialized = match $ty::parse_wire(
-                    bytes::Bytes::copy_from_slice(&bytes),
-                    &decoded_context,
-                ) {
+                let validated =
+                    crate::protocol::framing::packet_length(name, &bytes, decoded_context.parent)
+                        .and_then(|length| {
+                            if length != bytes.len() {
+                                return Err(crate::protocol::common::invalid(
+                                    name,
+                                    "encoded message does not match its framing length",
+                                ));
+                            }
+                            $ty::parse_wire(bytes::Bytes::copy_from_slice(&bytes), &decoded_context)
+                        });
+                let materialized = match validated {
                     Ok(layer) => layer,
                     Err(error) if context.mode == crate::codec::Mode::Permissive => {
                         diagnostics.push(crate::diagnostic::Diagnostic::warning(

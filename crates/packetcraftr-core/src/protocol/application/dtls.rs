@@ -10,11 +10,18 @@ use crate::protocol::message::*;
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
+const HANDSHAKES: &[crate::layer::FieldSchema] = &[
+    member("message_type", field::Kind::Unsigned, &[]),
+    member("length", field::Kind::Unsigned, &[]),
+    member("message_sequence", field::Kind::Unsigned, &[]),
+    member("offset", field::Kind::Unsigned, &[]),
+    member("data", field::Kind::Bytes, &[]),
+];
 const RECORDS: &[crate::layer::FieldSchema] = &[
     member("content_type", field::Kind::Unsigned, &[]),
     member("epoch", field::Kind::Unsigned, &[]),
     member("sequence", field::Kind::Unsigned, &[]),
-    member("handshakes", field::Kind::List, &[]),
+    member("handshakes", field::Kind::List, HANDSHAKES),
     member("data", field::Kind::Bytes, &[]),
 ];
 #[derive(Clone, Debug, PartialEq, Eq, Default)]

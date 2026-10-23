@@ -111,30 +111,36 @@ impl EthernetIp {
             return Err(invalid(NAME, "sender context requires eight bytes"));
         }
         let mut p = Writer::new(NAME, c.remaining_packet_bytes);
-        match self.command {
-            0x65 => {
-                p.le16(self.protocol_version)?;
-                p.le16(self.flags)?;
-            }
-            0x66 => {}
-            0x6f | 0x70 => {
-                p.le32(self.interface_handle)?;
-                p.le16(self.timeout)?;
-                p.le16(
-                    u16::try_from(self.items.0.len())
-                        .map_err(|_| invalid(NAME, "too many items"))?,
-                )?;
-                for r in &self.items.0 {
-                    let v = data(r, "data", NAME)?;
-                    p.le16(
-                        u16::try_from(number(r, "kind", NAME)?)
-                            .map_err(|_| invalid(NAME, "item kind overflow"))?,
-                    )?;
-                    p.le16(u16::try_from(v.len()).map_err(|_| invalid(NAME, "item too long"))?)?;
-                    p.put(v)?;
+        if self.status != 0 {
+            p.put(&self.data)?;
+        } else {
+            match self.command {
+                0x65 => {
+                    p.le16(self.protocol_version)?;
+                    p.le16(self.flags)?;
                 }
+                0x66 => {}
+                0x6f | 0x70 => {
+                    p.le32(self.interface_handle)?;
+                    p.le16(self.timeout)?;
+                    p.le16(
+                        u16::try_from(self.items.0.len())
+                            .map_err(|_| invalid(NAME, "too many items"))?,
+                    )?;
+                    for r in &self.items.0 {
+                        let v = data(r, "data", NAME)?;
+                        p.le16(
+                            u16::try_from(number(r, "kind", NAME)?)
+                                .map_err(|_| invalid(NAME, "item kind overflow"))?,
+                        )?;
+                        p.le16(
+                            u16::try_from(v.len()).map_err(|_| invalid(NAME, "item too long"))?,
+                        )?;
+                        p.put(v)?;
+                    }
+                }
+                _ => p.put(&self.data)?,
             }
-            _ => p.put(&self.data)?,
         }
         let mut w = Writer::new(NAME, c.remaining_packet_bytes);
         w.le16(self.command)?;
@@ -161,6 +167,10 @@ impl EthernetIp {
             options: r.le32()?,
             ..Self::default()
         };
+        if s.status != 0 {
+            s.data = Bytes::copy_from_slice(r.rest());
+            return Ok(s);
+        }
         match command {
             0x65 => {
                 s.protocol_version = r.le16()?;

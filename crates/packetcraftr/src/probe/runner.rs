@@ -3,6 +3,7 @@
 
 mod batch_evidence;
 
+pub(crate) use batch_evidence::validate_batch_evidence;
 pub(crate) use batch_evidence::{BatchEvidence, Classifier, NO_RESPONSE_REASON, Outcome};
 
 use std::borrow::BorrowMut;

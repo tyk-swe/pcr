@@ -22,15 +22,47 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             collection,
             stop: _,
         } = request;
+        let count = template.expansion_len().map_err(crate::Error::from)?;
+        self.prepare_packet_exchange(
+            count,
+            || {
+                let packets = template
+                    .expand(max_template_packets)
+                    .map_err(crate::Error::from)?;
+                Ok(packets.map(|packet| packet.map_err(crate::Error::from)))
+            },
+            &send,
+            timeout,
+            collection,
+            operation,
+            None,
+        )
+    }
+
+    /// Internal ordered batches share the complete template admission path.
+    pub(super) fn prepare_packet_exchange<I>(
+        &self,
+        expansion_len: usize,
+        expand: impl FnOnce() -> Result<I, Error>,
+        send: &crate::send::Options,
+        timeout: std::time::Duration,
+        collection: Collection,
+        operation: &crate::engine::execution::Operation,
+        mut pinned: Option<&mut Option<crate::route::Plan>>,
+    ) -> Result<Prepared, Error>
+    where
+        I: ExactSizeIterator<Item = Result<packetcraftr_core::packet::Packet, crate::Error>>,
+    {
+        self.check_cancelled()?;
+        collection.validate()?;
         let window = Window::open(&self.clock, timeout, self.cancellation.clone())
             .ok_or_else(|| Error::InvalidRequest {
                 field: "timeout",
                 message: "cannot be represented by the platform monotonic clock".to_owned(),
             })?
             .with_parent(operation.deadline.clone());
-        let expansion_len = template.expansion_len().map_err(crate::Error::from)?;
         let packet_count = u64::try_from(expansion_len).unwrap_or(u64::MAX);
-        let mut admission = self.admitting_in(&send, packet_count, window.deadline(), operation)?;
+        let mut admission = self.admitting_in(send, packet_count, window.deadline(), operation)?;
         if expansion_len == 0 {
             return Err(crate::Error::Template {
                 message: "template expanded to no packets".to_owned(),
@@ -38,9 +70,8 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             }
             .into());
         }
-        let mut expanded_packets = template
-            .expand(max_template_packets)
-            .map_err(crate::Error::from)?;
+        // Preserve count admission before template validation and expansion.
+        let mut expanded_packets = expand()?;
         let routes = CachedProvider::new(self.providers.route());
         let mut admitted: Vec<Admitted> = Vec::with_capacity(expanded_packets.len());
         loop {
@@ -49,8 +80,18 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             let Some(expanded_packet) = expanded_packets.next() else {
                 break;
             };
-            let packet = expanded_packet.map_err(crate::Error::from)?;
+            let packet = expanded_packet?;
             let admitted_packet = admission.admit(packet, &routes)?;
+            if let Some(slot) = pinned.as_deref_mut() {
+                let expected = slot.get_or_insert_with(|| admitted_packet.plan().clone());
+                let actual = admitted_packet.plan();
+                if expected.packet_source != actual.packet_source
+                    || expected.decision.interface != actual.decision.interface
+                    || expected.mode != actual.mode
+                {
+                    return Err(Error::HeterogeneousRoute);
+                }
+            }
             if let Some(first_packet) = admitted.first()
                 && !first_packet.shares_route_with(&admitted_packet)
             {

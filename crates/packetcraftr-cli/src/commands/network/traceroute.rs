@@ -4,6 +4,7 @@
 use crate::output::contract::Format;
 
 pub(in crate::commands) mod arguments;
+mod multipath;
 pub(super) mod rendering;
 
 use packetcraftr_netio as net;
@@ -34,6 +35,17 @@ impl crate::commands::Spec for Args {
             max_probes: Count @ Operation,
             max_undecoded: Count @ ResultRetention,
         ]);
+        settings.declare(crate::resources::Field {
+            id: "flows",
+            value: crate::resources::SettingValue::setting_value(&u32::from(
+                self.flows
+                    .unwrap_or(packetcraftr::traceroute::multipath::DEFAULT_FLOWS),
+            )),
+            unit: crate::resources::Unit::Count,
+            stage: crate::resources::Stage::Operation,
+            enabled: self.multipath.into(),
+            preset: None,
+        });
         self.timeout.resources(settings);
         self.duration.resources(settings);
         self.limits.resources(settings);
@@ -69,6 +81,20 @@ pub(super) fn run(
         collection: workflow.collection,
         ..request
     };
+    if arguments.multipath {
+        return multipath::run(
+            invocation,
+            &client,
+            packetcraftr::traceroute::multipath::Request {
+                trace: request,
+                flows: arguments
+                    .flows
+                    .unwrap_or(packetcraftr::traceroute::multipath::DEFAULT_FLOWS),
+            },
+            format,
+            stream,
+        );
+    }
     match format {
         Format::Ndjson => {
             let emit = crate::commands::execution::emitter(invocation, rendering::emit_event);
@@ -152,6 +178,64 @@ fn prepare_request(
         route: packetcraftr::route::Options::default(),
         collection: packetcraftr::exchange::Collection::default(),
     };
-    request.validate().map_err(CliError::classified)?;
+    if arguments.multipath {
+        let mut trace = request.clone();
+        trace.collection = crate::system::collection(trace.timeout, queue_limits)?;
+        packetcraftr::traceroute::multipath::Request {
+            trace,
+            flows: arguments
+                .flows
+                .unwrap_or(packetcraftr::traceroute::multipath::DEFAULT_FLOWS),
+        }
+        .validate()
+        .map_err(CliError::classified)?;
+    } else {
+        request.validate().map_err(CliError::classified)?;
+    }
     Ok(request)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{CommandFactory, FromArgMatches};
+
+    fn arguments(extra: &[&str]) -> Result<Args, clap::Error> {
+        let mut argv = vec!["packetcraftr", "network", "traceroute", "10.0.0.9"];
+        argv.extend_from_slice(extra);
+        let matches = crate::app::cli::Cli::command().try_get_matches_from(argv)?;
+        let matches = matches
+            .subcommand_matches("network")
+            .unwrap()
+            .subcommand_matches("traceroute")
+            .unwrap();
+        Args::from_arg_matches(matches)
+    }
+
+    #[test]
+    fn multipath_arguments_require_opt_in_and_preserve_legacy_defaults() {
+        assert!(arguments(&["--flows", "2"]).is_err());
+        assert!(arguments(&["--multipath", "--flows", "65"]).is_err());
+        assert!(arguments(&["--multipath", "--flows", "0"]).is_err());
+        let legacy = arguments(&[]).unwrap();
+        assert!(!legacy.multipath);
+        assert!(legacy.flows.is_none());
+        let mut args = arguments(&[
+            "--multipath",
+            "--flows",
+            "1",
+            "--attempts",
+            "3",
+            "--max-undecoded",
+            "1",
+        ])
+        .unwrap();
+        let mut limits = args.limits.clone().into_limits();
+        limits.max_frames = 1;
+        // Three sweeps require capacity for one concurrent flow, not three attempts.
+        assert!(prepare_request(&args, limits).is_ok());
+        args.source_port = Some(u16::MAX);
+        args.flows = Some(2);
+        assert!(prepare_request(&args, args.limits.clone().into_limits()).is_err());
+    }
 }

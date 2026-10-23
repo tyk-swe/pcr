@@ -175,6 +175,34 @@ fn packet(bytes: usize) -> Packet {
 }
 
 #[test]
+fn multipath_source_change_is_rejected_before_capture_or_transmission() {
+    let (client, routes, _, tx) = fixture();
+    let operation = Execution::new(&client, Duration::from_secs(10));
+    let options = options();
+    let prepared = client
+        .streaming_in(&options, 1, &operation)
+        .unwrap()
+        .prepare(packet(1))
+        .unwrap();
+    let mut pinned = Some(prepared.route().plan.clone());
+    routes.decision.lock().unwrap().selected_source = Some("10.0.0.3".parse().unwrap());
+    let result = client.exchange_packets(
+        vec![packet(1)],
+        &options,
+        Duration::from_secs(1),
+        crate::exchange::Collection::default(),
+        &operation,
+        &mut |_, _, _| false,
+        &mut pinned,
+    );
+    assert!(matches!(
+        result,
+        Err(crate::exchange::Error::HeterogeneousRoute)
+    ));
+    assert!(tx.0.lock().unwrap().is_empty());
+}
+
+#[test]
 fn route_name_accounting_uses_owned_capacities_and_counts_scoped_names() {
     let (client, _, interfaces, _) = fixture();
     let operation = Execution::new(&client, Duration::from_secs(10));

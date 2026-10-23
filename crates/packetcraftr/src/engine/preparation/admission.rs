@@ -79,6 +79,10 @@ pub(super) struct Retained {
 }
 
 impl Admitted {
+    pub(crate) fn plan(&self) -> &route::Plan {
+        &self.plan
+    }
+
     pub(crate) fn packet(&self) -> &Packet {
         &self.packet
     }

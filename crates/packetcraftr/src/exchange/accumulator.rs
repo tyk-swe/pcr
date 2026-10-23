@@ -38,6 +38,8 @@ pub(crate) type WorkflowResponseMatcher<'a> =
 pub(crate) type WorkflowStopPredicate<'a> = dyn FnMut(usize, &Packet, &DecodedPacket) -> bool + 'a;
 
 pub(crate) struct Accumulator {
+    /// Internal workflows with stronger wire identities bypass generic matching.
+    pub(crate) authoritative_matcher: bool,
     pub(crate) ingress_unknown: bool,
     refused_reply: bool,
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
@@ -91,6 +93,7 @@ pub(crate) enum ProcessOutcome {
 impl Accumulator {
     pub(crate) fn new(requests: usize) -> Self {
         Self {
+            authoritative_matcher: false,
             ingress_unknown: false,
             refused_reply: false,
             unsolicited: Vec::new(),

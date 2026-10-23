@@ -356,14 +356,24 @@ fn quoted_ip_matches(request: &Packet, quoted: &QuotedProbe<'_>) -> bool {
     }
 }
 
-struct QuotedProbe<'a> {
-    source: IpAddr,
-    destination: IpAddr,
-    protocol: u8,
-    ipv4_identification: Option<u16>,
-    ipv6_flow_label: Option<u32>,
-    declared_payload_len: usize,
-    payload: &'a [u8],
+/// A bounded view of the original datagram quoted by an ICMP message.
+/// This is parsing evidence only; callers must still validate the outer error,
+/// addresses, checksums, and their own request identity.
+pub struct QuotedProbe<'a> {
+    pub source: IpAddr,
+    pub destination: IpAddr,
+    pub protocol: u8,
+    pub ipv4_identification: Option<u16>,
+    pub ipv6_flow_label: Option<u32>,
+    pub declared_payload_len: usize,
+    pub payload: &'a [u8],
+}
+
+/// Reads a directly received ICMP quotation with at least eight transport bytes.
+pub fn quoted_probe(response: &Packet) -> Option<QuotedProbe<'_>> {
+    let (_, layer) = directly_received_icmp(response)?;
+    let message = IcmpMessage::of(layer)?;
+    parse_quoted_probe(message.body.get(4..)?, true)
 }
 
 const MIN_QUOTED_TRANSPORT_LEN: usize = 8;

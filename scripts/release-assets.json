@@ -186,6 +186,8 @@
     "examples/documents/output-traceroute-complete.json",
     "examples/documents/output-traceroute-error.json",
     "examples/documents/output-traceroute-event.json",
+    "examples/documents/output-traceroute-multipath-stream.ndjson",
+    "examples/documents/output-traceroute-multipath-success.json",
     "examples/documents/output-traceroute-success.json",
     "examples/documents/output-traceroute-undecoded-event.json",
     "examples/documents/output-verify-forwarding-complete.json",

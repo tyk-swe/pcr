@@ -15,6 +15,47 @@ use crate::providers::PacketProviders;
 use crate::{Client, Sink};
 
 impl<P: PacketProviders, K: Clock> Client<P, K> {
+    /// Exact packet batches with mandatory workflow identity validation.
+    pub(crate) fn exchange_packets(
+        &self,
+        packets: Vec<Packet>,
+        send: &crate::send::Options,
+        timeout: std::time::Duration,
+        collection: super::Collection,
+        operation: &crate::engine::execution::Operation,
+        matcher: &mut WorkflowResponseMatcher<'_>,
+        pinned: &mut Option<crate::route::Plan>,
+    ) -> Result<super::WorkflowEvidence, Error> {
+        let prepared = self.prepare_packet_exchange(
+            packets.len(),
+            || Ok(packets.into_iter().map(Ok)),
+            send,
+            timeout,
+            collection,
+            operation,
+            Some(pinned),
+        )?;
+        let mut transaction = self.arm_capture(prepared, operation)?;
+        transaction.captured.authoritative_matcher = true;
+        let response_deadline = transaction.window.ends_at();
+        let mut observed = Observed::default();
+        let (report, unsolicited_ingress, observation_quality) = transaction.execute(
+            self.providers.transmit(),
+            Some(matcher),
+            None,
+            &mut |event| {
+                observed.observe(event);
+                Ok(())
+            },
+        )?;
+        Ok(super::WorkflowEvidence {
+            observation_quality,
+            aggregate: observed.finish(report)?,
+            unsolicited_ingress,
+            response_deadline,
+        })
+    }
+
     /// Runs one capture-ready exchange and publishes each event when final.
     /// The sink's runtime worker and every packet are admitted before neighbor discovery or
     /// capture starts.

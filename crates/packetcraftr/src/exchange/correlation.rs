@@ -212,7 +212,7 @@ impl Accumulator {
         received_at: Option<Instant>,
         decoded: DecodedPacket,
         context: ProcessContext<'_>,
-        matcher: Option<&mut WorkflowResponseMatcher<'_>>,
+        mut matcher: Option<&mut WorkflowResponseMatcher<'_>>,
     ) -> ProcessOutcome {
         let integrity_failure = decoded
             .diagnostics
@@ -239,13 +239,32 @@ impl Accumulator {
             );
         }
 
-        let attribution = match select_attribution(
-            context.registry,
-            context.sent,
-            received_at,
-            &decoded,
-            context.window,
-        ) {
+        let selected = if self.authoritative_matcher {
+            let mut winners = Vec::new();
+            if let (Some(received_at), Some(matches)) = (received_at, matcher.as_deref_mut()) {
+                for (index, sent) in context.sent.iter().enumerate() {
+                    if context.window.expired() {
+                        return self.expire_decoded(identity, Some(received_at), decoded, context);
+                    }
+                    if received_at <= context.window.ends_at()
+                        && capture_follows_send(received_at, sent.timing())
+                        && matches(index, &sent.built().packet, &decoded)
+                    {
+                        winners.push(index);
+                    }
+                }
+            }
+            Ok(attribution(&winners))
+        } else {
+            select_attribution(
+                context.registry,
+                context.sent,
+                received_at,
+                &decoded,
+                context.window,
+            )
+        };
+        let attribution = match selected {
             Ok(attribution) => attribution,
             Err(CorrelationDeadlineExpired) => {
                 return self.expire_decoded(identity, received_at, decoded, context);

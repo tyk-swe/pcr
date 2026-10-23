@@ -21,7 +21,9 @@ use crate::{
 pub(crate) use dns::DnsMatcher;
 pub(crate) use echo::EchoMatcher;
 pub(super) use quoted_icmp::quoted_identity;
-pub use quoted_icmp::{IcmpErrorKind, QuotedTransport, quoted_icmp_error};
+pub use quoted_icmp::{
+    IcmpErrorKind, QuotedProbe, QuotedTransport, quoted_icmp_error, quoted_probe,
+};
 pub(crate) use reverse_flow::ReverseFlowMatcher;
 pub use sctp::{SctpResponseKind, sctp_response_kind};
 

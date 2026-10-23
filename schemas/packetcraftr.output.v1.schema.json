@@ -2792,7 +2792,14 @@
           "const": "traceroute"
         },
         "result": {
-          "$ref": "#/$defs/tracerouteResult"
+          "oneOf": [
+            {
+              "$ref": "#/$defs/tracerouteResult"
+            },
+            {
+              "$ref": "#/$defs/multipathResult"
+            }
+          ]
         }
       },
       "required": [
@@ -3618,6 +3625,222 @@
                 }
               ],
               "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "flow"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "mode",
+                "flow"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "multipath"
+                },
+                "flow": {
+                  "$ref": "#/$defs/multipathFlow"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "probe"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "mode",
+                "probe"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "multipath"
+                },
+                "probe": {
+                  "$ref": "#/$defs/multipathProbe"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "topology"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "mode",
+                "topology"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "multipath"
+                },
+                "topology": {
+                  "$ref": "#/$defs/multipathTopology"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "flow_complete"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "mode",
+                "completion"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "multipath"
+                },
+                "completion": {
+                  "$ref": "#/$defs/multipathCompletion"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "unmatched"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "mode",
+                "unmatched"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "multipath"
+                },
+                "unmatched": {
+                  "$ref": "#/$defs/multipathUnmatched"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "mode",
+                "target",
+                "resolved_addresses",
+                "destination",
+                "strategy",
+                "summary",
+                "flow_summaries"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "multipath"
+                },
+                "target": {
+                  "type": "string"
+                },
+                "resolved_addresses": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/ipAddress"
+                  },
+                  "minItems": 1
+                },
+                "destination": {
+                  "$ref": "#/$defs/ipAddress"
+                },
+                "strategy": {
+                  "enum": [
+                    "udp",
+                    "tcp",
+                    "icmp"
+                  ]
+                },
+                "summary": {
+                  "$ref": "#/$defs/multipathSummary"
+                },
+                "flow_summaries": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/multipathFlowSummary"
+                  }
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "diagnostic"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "multipath"
+                }
+              },
+              "additionalProperties": true
             }
           },
           "required": [
@@ -18344,6 +18567,601 @@
           }
         }
       ]
+    },
+    "multipathFlow": {
+      "type": "object",
+      "required": [
+        "id",
+        "destination",
+        "strategy",
+        "source",
+        "source_port",
+        "destination_port",
+        "icmp_identifier",
+        "ipv6_flow_label"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "destination": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "strategy": {
+          "enum": [
+            "udp",
+            "tcp",
+            "icmp"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "source_port": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destination_port": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "icmp_identifier": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ipv6_flow_label": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048575
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathNodeKey": {
+      "type": "object",
+      "required": [
+        "hop_limit",
+        "responder"
+      ],
+      "properties": {
+        "hop_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "responder": {
+          "$ref": "#/$defs/ipAddress"
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathRtt": {
+      "type": "object",
+      "required": [
+        "samples",
+        "minimum",
+        "median",
+        "maximum"
+      ],
+      "properties": {
+        "samples": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minimum": {
+          "$ref": "#/$defs/duration"
+        },
+        "median": {
+          "$ref": "#/$defs/duration"
+        },
+        "maximum": {
+          "$ref": "#/$defs/duration"
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathNode": {
+      "type": "object",
+      "required": [
+        "hop_limit",
+        "responder",
+        "rtt"
+      ],
+      "properties": {
+        "hop_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "responder": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "rtt": {
+          "$ref": "#/$defs/multipathRtt"
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathEdge": {
+      "type": "object",
+      "required": [
+        "from",
+        "to",
+        "evidence"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/multipathNodeKey"
+        },
+        "to": {
+          "$ref": "#/$defs/multipathNodeKey"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/uint64"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathChange": {
+      "type": "object",
+      "required": [
+        "flow_id",
+        "hop_limit",
+        "previous_sweep",
+        "sweep",
+        "before",
+        "after",
+        "evidence"
+      ],
+      "properties": {
+        "flow_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "hop_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "previous_sweep": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "sweep": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "before": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "after": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uint64"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathTopology": {
+      "type": "object",
+      "required": [
+        "nodes",
+        "edges",
+        "changes"
+      ],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/multipathNode"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/multipathEdge"
+          }
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/multipathChange"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathCompletion": {
+      "type": "object",
+      "required": [
+        "flow_id",
+        "sweep",
+        "completion",
+        "last_hop"
+      ],
+      "properties": {
+        "flow_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "sweep": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "completion": {
+          "enum": [
+            "destination_reached",
+            "unreachable",
+            "maximum_hops",
+            "timeout"
+          ]
+        },
+        "last_hop": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathReply": {
+      "type": "object",
+      "required": [
+        "responder",
+        "kind",
+        "latency",
+        "frame"
+      ],
+      "properties": {
+        "responder": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "kind": {
+          "enum": [
+            "intermediate",
+            "destination_reached",
+            "unreachable"
+          ]
+        },
+        "latency": {
+          "$ref": "#/$defs/duration"
+        },
+        "frame": {
+          "$ref": "#/$defs/frame"
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathProbe": {
+      "type": "object",
+      "required": [
+        "sequence",
+        "flow_id",
+        "sweep",
+        "hop_limit",
+        "sent_at",
+        "replies_seen",
+        "ambiguous",
+        "incomplete",
+        "replies"
+      ],
+      "properties": {
+        "sequence": {
+          "$ref": "#/$defs/uint64"
+        },
+        "flow_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "sweep": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "hop_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "sent_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "replies_seen": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ambiguous": {
+          "type": "boolean"
+        },
+        "incomplete": {
+          "type": "boolean"
+        },
+        "replies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/multipathReply"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathUnmatched": {
+      "type": "object",
+      "required": [
+        "sweep",
+        "hop_limit",
+        "frame"
+      ],
+      "properties": {
+        "sweep": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "hop_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "frame": {
+          "$ref": "#/$defs/frame"
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathSummary": {
+      "type": "object",
+      "required": [
+        "planned_probes",
+        "probes_sent",
+        "answered_probes",
+        "unanswered_probes",
+        "replies_seen",
+        "ambiguous_probes",
+        "cleanup_packets",
+        "retained_evidence_bytes",
+        "omitted_frames",
+        "sweeps_completed",
+        "nodes",
+        "edges",
+        "branch_points",
+        "rejoin_points",
+        "changes",
+        "incomplete"
+      ],
+      "properties": {
+        "planned_probes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "probes_sent": {
+          "$ref": "#/$defs/uint64"
+        },
+        "answered_probes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unanswered_probes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "replies_seen": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ambiguous_probes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "cleanup_packets": {
+          "$ref": "#/$defs/uint64"
+        },
+        "retained_evidence_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "omitted_frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "sweeps_completed": {
+          "$ref": "#/$defs/uint64"
+        },
+        "nodes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "edges": {
+          "$ref": "#/$defs/uint64"
+        },
+        "branch_points": {
+          "$ref": "#/$defs/uint64"
+        },
+        "rejoin_points": {
+          "$ref": "#/$defs/uint64"
+        },
+        "changes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "incomplete": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathResult": {
+      "type": "object",
+      "required": [
+        "mode",
+        "target",
+        "resolved_addresses",
+        "destination",
+        "strategy",
+        "summary",
+        "flows",
+        "completions",
+        "topology",
+        "probes",
+        "unmatched",
+        "flow_summaries"
+      ],
+      "properties": {
+        "mode": {
+          "const": "multipath"
+        },
+        "target": {
+          "type": "string"
+        },
+        "resolved_addresses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ipAddress"
+          },
+          "minItems": 1
+        },
+        "destination": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "strategy": {
+          "enum": [
+            "udp",
+            "tcp",
+            "icmp"
+          ]
+        },
+        "summary": {
+          "$ref": "#/$defs/multipathSummary"
+        },
+        "flows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/multipathFlow"
+          }
+        },
+        "completions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/multipathCompletion"
+          }
+        },
+        "topology": {
+          "$ref": "#/$defs/multipathTopology"
+        },
+        "probes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/multipathProbe"
+          }
+        },
+        "unmatched": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/multipathUnmatched"
+          }
+        },
+        "flow_summaries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/multipathFlowSummary"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "multipathFlowSummary": {
+      "type": "object",
+      "required": [
+        "flow_id",
+        "probes_sent",
+        "answered_probes",
+        "unanswered_probes",
+        "ambiguous_probes",
+        "sweeps_reached",
+        "destination_rtt"
+      ],
+      "properties": {
+        "probes_sent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "answered_probes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unanswered_probes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ambiguous_probes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sweeps_reached": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flow_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "destination_rtt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/multipathRtt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
     }
   }
 }

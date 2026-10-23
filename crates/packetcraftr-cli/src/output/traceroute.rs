@@ -7,6 +7,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 pub mod hosts;
+pub mod multipath;
 
 use super::contract::Error;
 use super::envelope::Published;

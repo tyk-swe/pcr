@@ -31,6 +31,7 @@ mod error;
 mod evidence;
 mod executor;
 pub mod hosts;
+pub mod multipath;
 mod plan;
 mod report;
 mod request;

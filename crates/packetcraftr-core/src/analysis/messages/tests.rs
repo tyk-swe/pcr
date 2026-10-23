@@ -942,3 +942,73 @@ fn review_many_coalesced_messages_preserve_the_layer_budget_and_stream() {
         |event| matches!(event, Event::Message(message) if message.status == Status::Complete)
     ));
 }
+
+#[test]
+fn review_declared_buffer_limits_are_policy_errors_for_every_segmentation() {
+    let mut mqtt = vec![0x30, 103, 0, 1, b'a'];
+    mqtt.extend_from_slice(&[b'x'; 100]);
+    let mut resp = b"$100\r\n".to_vec();
+    resp.extend_from_slice(&[b'x'; 100]);
+    resp.extend_from_slice(b"\r\n");
+    for (protocol, port, header, wire) in [
+        (BuiltinProtocol::Mqtt, 1883, 2, mqtt),
+        (BuiltinProtocol::Resp, 6379, 6, resp),
+    ] {
+        for limit in [16, wire.len()] {
+            for split in [header, wire.len()] {
+                let mut collector = Collector::new(
+                    Limits {
+                        max_buffer_bytes: limit,
+                        ..Default::default()
+                    },
+                    crate::protocol::builtin::registry(),
+                    [protocol],
+                )
+                .unwrap();
+                let tracker = Tracker::new(1 << 20, 32).unwrap();
+                let mut f = flow();
+                f.flow.destination_port = port;
+                let mut events = Vec::new();
+                let mut result = Ok(());
+                for (index, chunk) in [&wire[..split], &wire[split..]].into_iter().enumerate() {
+                    if chunk.is_empty() || result.is_err() {
+                        break;
+                    }
+                    result = collector.data(
+                        application::Delivery {
+                            flow: f.clone(),
+                            stream: 0,
+                            generation: 0,
+                            bytes: Bytes::copy_from_slice(chunk),
+                            sources: tracker
+                                .single(SourceFrame {
+                                    number: index as u64 + 1,
+                                    timestamp: UNIX_EPOCH,
+                                })
+                                .unwrap(),
+                        },
+                        &mut events,
+                    );
+                }
+                if limit < wire.len() {
+                    assert!(
+                        matches!(
+                            result,
+                            Err(Error::Limit {
+                                field: "max_buffer_bytes",
+                                limit: 16
+                            })
+                        ),
+                        "{result:?}"
+                    );
+                    assert!(events.is_empty());
+                } else {
+                    result.unwrap();
+                    assert!(
+                        matches!(events.as_slice(), [Event::Message(message)] if message.status == Status::Complete)
+                    );
+                }
+            }
+        }
+    }
+}

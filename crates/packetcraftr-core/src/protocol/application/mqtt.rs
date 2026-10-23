@@ -238,6 +238,12 @@ impl Mqtt {
                 s.keep_alive = r.u16()?;
                 s.client_id = r.bytes16()?;
                 let flags = s.connect_flags;
+                if flags & 2 == 0 && s.client_id.is_empty() {
+                    return Err(invalid(
+                        NAME,
+                        "persistent sessions require a client identifier",
+                    ));
+                }
                 if flags & 1 != 0
                     || flags & 4 == 0 && flags & 0x38 != 0
                     || (flags >> 3) & 3 == 3

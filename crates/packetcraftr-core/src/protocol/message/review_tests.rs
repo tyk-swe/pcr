@@ -958,3 +958,64 @@ fn review_rtcp_reports_preserve_profile_extensions() {
     }
     review_round_trip("rtcp", &compound);
 }
+
+#[test]
+fn review_mqtt_persistent_sessions_require_a_client_identifier() {
+    use crate::protocol::application::mqtt::Mqtt;
+    let registry = builtin::registry();
+    for (flags, client_id) in [
+        (0, b"".as_slice()),
+        (2, b""),
+        (0, b"client"),
+        (2, b"client"),
+    ] {
+        let valid = flags & 2 != 0 || !client_id.is_empty();
+        let mut packet = Packet::new();
+        packet.push(Mqtt {
+            packet_type: 1,
+            connect_flags: flags,
+            client_id: Bytes::copy_from_slice(client_id),
+            ..Default::default()
+        });
+        assert_eq!(
+            crate::build::Builder::new(registry.clone())
+                .build(packet, Addresses::default(), Default::default())
+                .is_ok(),
+            valid
+        );
+        let mut wire = vec![
+            0x10,
+            (12 + client_id.len()) as u8,
+            0,
+            4,
+            b'M',
+            b'Q',
+            b'T',
+            b'T',
+            4,
+            flags,
+            0,
+            60,
+            0,
+            client_id.len() as u8,
+        ];
+        wire.extend_from_slice(client_id);
+        assert_eq!(
+            registry
+                .codec("mqtt")
+                .unwrap()
+                .decode(
+                    wire.into(),
+                    &DecodeContext {
+                        parent: None,
+                        registry: &registry,
+                        network: None,
+                        hop_limit: None,
+                        discriminator: None,
+                    }
+                )
+                .is_ok(),
+            valid
+        );
+    }
+}

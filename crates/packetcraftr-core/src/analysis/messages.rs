@@ -413,7 +413,13 @@ impl Collector {
                         }
                     }
                     Ok(None) => break,
-                    Err(error) => {
+                    Err(crate::protocol::framing::Error::BufferLimit { limit }) => {
+                        return Err(Error::Limit {
+                            field: "max_buffer_bytes",
+                            limit,
+                        });
+                    }
+                    Err(crate::protocol::framing::Error::Codec(error)) => {
                         let status = if matches!(error, crate::codec::Error::Unsupported { .. }) {
                             Status::Unsupported
                         } else {

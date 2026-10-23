@@ -33,7 +33,7 @@ pub(super) fn render_message(
         ),
     )?;
     if let Some(fields) = &message.fields {
-        render_dns_fields(invocation, fields)?;
+        render_dns_fields(invocation, &fields.to_map())?;
     }
     if presentation.verbose {
         for source in &message.sources {

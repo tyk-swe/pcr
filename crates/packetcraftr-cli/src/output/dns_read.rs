@@ -13,7 +13,7 @@ use packetcraftr_core::{
     field,
     layer::Layer,
 };
-use serde::Serialize;
+use serde::{Serialize, ser::SerializeMap};
 use std::collections::BTreeMap;
 
 published_enum! {
@@ -56,6 +56,50 @@ fn sources(value: &SourceSet) -> Result<Vec<Source>, Error> {
     value.frames().iter().map(Source::try_from).collect()
 }
 
+#[derive(Debug)]
+pub struct Fields(packetcraftr_core::protocol::application::dns::Dns);
+
+impl Fields {
+    pub fn to_map(&self) -> BTreeMap<String, field::Value> {
+        self.0
+            .schema()
+            .fields
+            .iter()
+            .filter(|field| field.name != "wire")
+            .filter_map(|field| {
+                self.0
+                    .field(field.name)
+                    .map(|value| (field.name.to_owned(), value))
+            })
+            .collect()
+    }
+}
+
+impl Serialize for Fields {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut names: Vec<&'static str> = self
+            .0
+            .schema()
+            .fields
+            .iter()
+            .map(|field| field.name)
+            .filter(|name| *name != "wire")
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        let mut map = serializer.serialize_map(None)?;
+        for name in names {
+            if let Some(value) = self.0.field(name) {
+                map.serialize_entry(name, &value)?;
+            }
+        }
+        map.end()
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct Message {
     pub index: u64,
@@ -67,7 +111,7 @@ pub struct Message {
     pub wire_hex: String,
     pub framing_hex: String,
     pub declared_length: Option<u16>,
-    pub fields: Option<BTreeMap<String, field::Value>>,
+    pub fields: Option<Fields>,
     pub error: Option<String>,
     pub sources: Vec<Source>,
 }
@@ -84,17 +128,7 @@ impl TryFrom<dns::Message> for Message {
             wire_hex: compact_hex(&message.wire),
             framing_hex: compact_hex(&message.framing_bytes),
             declared_length: message.declared_length,
-            fields: message.dns.as_ref().map(|dns| {
-                dns.schema()
-                    .fields
-                    .iter()
-                    .filter(|field| field.name != "wire")
-                    .filter_map(|field| {
-                        dns.field(field.name)
-                            .map(|value| (field.name.to_owned(), value))
-                    })
-                    .collect()
-            }),
+            fields: message.dns.map(Fields),
             error: message.error.map(|error| error.to_string()),
             sources: sources(&message.sources)?,
         })
@@ -213,5 +247,36 @@ impl From<(Vec<Message>, Vec<Transaction>, Vec<Issue>, Complete)> for Report {
             issues,
             complete,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use packetcraftr_core::protocol::application::dns::{Dns, Limits};
+
+    const WIRE: &[u8] = &[
+        0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x03, b'w', b'w',
+        b'w', 0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 0x03, b'c', b'o', b'm', 0x00, 0x00,
+        0x01, 0x00, 0x01, 0xC0, 0x0C, 0x00, 0x05, 0x00, 0x01, 0x00, 0x00, 0x01, 0x2C, 0x00, 0x02,
+        0xC0, 0x10, 0xC0, 0x10, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x01, 0x2C, 0x00, 0x04, 93,
+        184, 216, 34,
+    ];
+
+    #[test]
+    fn fields_serialize_identically_to_the_eager_map() {
+        let dns = Dns::from_wire_with_limits(Bytes::from_static(WIRE), Limits::default()).unwrap();
+        let map = Fields(dns.clone()).to_map();
+        assert!(!map.is_empty());
+        assert!(map.contains_key("answers"));
+        assert_eq!(
+            serde_json::to_string_pretty(&Fields(dns.clone())).unwrap(),
+            serde_json::to_string_pretty(&map).unwrap(),
+        );
+        assert_eq!(
+            serde_json::to_string(&Fields(dns)).unwrap(),
+            serde_json::to_string(&map).unwrap(),
+        );
     }
 }

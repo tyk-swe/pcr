@@ -242,6 +242,10 @@ pub(crate) struct TcpSources {
     pub(crate) scopes: std::collections::BTreeMap<u32, Definition>,
 }
 impl TcpSources {
+    pub(crate) fn generation(&self, stream: u64) -> Option<u64> {
+        self.generations.get(&stream).copied()
+    }
+
     pub(crate) fn new(ports: Vec<u16>, limits: Limits) -> Self {
         Self {
             ports,

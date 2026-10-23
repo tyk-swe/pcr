@@ -710,3 +710,41 @@ fn review_resp_payloads_support_typed_edits_filters_and_projection() {
         }
     }
 }
+
+#[test]
+fn review_bacnet_segment_ack_requires_its_window_size() {
+    let ack = b"\x40\x01\x02\x01";
+    for len in 0..=ack.len() {
+        let registry = builtin::registry();
+        let mut packet = Packet::new();
+        packet.push(crate::protocol::application::bacnet_ip::BacnetIp {
+            data: Bytes::copy_from_slice(&ack[..len]),
+            ..Default::default()
+        });
+        assert_eq!(
+            crate::build::Builder::new(registry.clone())
+                .build(packet, Addresses::default(), Default::default())
+                .is_ok(),
+            len == 4
+        );
+        let mut wire = vec![0x81, 10, 0, (6 + len) as u8, 1, 0];
+        wire.extend_from_slice(&ack[..len]);
+        assert_eq!(
+            registry
+                .codec("bacnet_ip")
+                .unwrap()
+                .decode(
+                    wire.into(),
+                    &DecodeContext {
+                        parent: None,
+                        registry: &registry,
+                        network: None,
+                        hop_limit: None,
+                        discriminator: None,
+                    }
+                )
+                .is_ok(),
+            len == 4
+        );
+    }
+}

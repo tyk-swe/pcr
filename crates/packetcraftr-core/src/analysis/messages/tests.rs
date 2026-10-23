@@ -597,3 +597,164 @@ fn review_capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
             if message.status == Status::Complete && message.generation == 1 && message.wire.as_ref() == b"\xc0\0")));
     }
 }
+
+#[test]
+fn review_server_first_payload_uses_the_handshake_server_port() {
+    use crate::{
+        codec::Addresses,
+        frame::{Frame, LinkType},
+        packet::Packet,
+        protocol::{application::bgp::Bgp, builtin, link::Ethernet, network::Ipv4, transport::Tcp},
+    };
+    let registry = builtin::registry();
+    let builder = crate::build::Builder::new(registry.clone());
+    let mut writer = crate::capture_file::Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+    for (server, sequence, acknowledgment, flags, payload) in [
+        (false, 100, 0, Tcp::SYN, false),
+        (true, 900, 101, Tcp::SYN | Tcp::ACK, false),
+        (false, 101, 901, Tcp::ACK, false),
+        (true, 901, 101, Tcp::ACK, true),
+        (false, 101, 930, Tcp::ACK, true),
+    ] {
+        let mut packet = Packet::new();
+        packet.push(Ethernet::default());
+        packet.push(Ipv4 {
+            source: if server { "192.0.2.2" } else { "192.0.2.1" }
+                .parse()
+                .unwrap(),
+            destination: if server { "192.0.2.1" } else { "192.0.2.2" }
+                .parse()
+                .unwrap(),
+            ..Default::default()
+        });
+        packet.push(Tcp {
+            source_port: if server { 179 } else { 44818 },
+            destination_port: if server { 44818 } else { 179 },
+            sequence,
+            acknowledgment,
+            flags,
+            ..Default::default()
+        });
+        if payload {
+            packet.push(Bgp {
+                message_type: 1,
+                my_as: 64512,
+                identifier: "192.0.2.1".parse().unwrap(),
+                ..Default::default()
+            });
+        }
+        let built = builder
+            .build(packet, Addresses::default(), Default::default())
+            .unwrap();
+        writer
+            .write_frame(&Frame::new(UNIX_EPOCH, LinkType::ETHERNET, built.bytes).unwrap())
+            .unwrap();
+    }
+    let capture = writer.into_inner();
+    // Also cover captures that begin at the SYN-ACK rather than the initial SYN.
+    for skip_syn in [false, true] {
+        let mut reader = crate::capture_file::Reader::new(&capture[..]).unwrap();
+        if skip_syn {
+            reader.next_frame().unwrap();
+        }
+        let collector = Collector::new(
+            Limits::default(),
+            registry.clone(),
+            BuiltinProtocol::ALL
+                .iter()
+                .copied()
+                .filter(|p| p.stream_decode()),
+        )
+        .unwrap();
+        let mut events = Vec::new();
+        let outcome =
+            crate::analysis::Session::new(registry.clone(), Default::default(), collector)
+                .run(
+                    &mut reader,
+                    |_| Ok(()),
+                    |event| {
+                        events.push(event);
+                        Ok(())
+                    },
+                )
+                .unwrap();
+        assert_eq!(outcome.summary.complete_messages, 2, "{events:?}");
+        assert!(
+            events
+                .iter()
+                .all(|event| matches!(event, Event::Message(message)
+            if message.status == Status::Complete && message.protocol == BuiltinProtocol::Bgp))
+        );
+    }
+}
+
+#[test]
+fn review_sip_keepalives_across_deliveries_do_not_disable_messages() {
+    let message = b"OPTIONS sip:service SIP/2.0\r\nContent-Length: 0\r\n\r\n";
+    let mut bytes = b"\r\n".to_vec();
+    bytes.extend_from_slice(message);
+    bytes.extend_from_slice(b"\r\n\r\n");
+    bytes.extend_from_slice(message);
+    bytes.extend_from_slice(b"\r\n");
+    for split in 1..bytes.len() {
+        let mut collector = Collector::new(
+            Limits::default(),
+            crate::protocol::builtin::registry(),
+            [BuiltinProtocol::Sip],
+        )
+        .unwrap();
+        let tracker = Tracker::new(1 << 20, 32).unwrap();
+        let mut f = flow();
+        f.flow.destination_port = 5060;
+        let mut events = Vec::new();
+        deliver_on(
+            &mut collector,
+            &tracker,
+            1,
+            f.clone(),
+            &bytes[..split],
+            0,
+            &mut events,
+        );
+        deliver_on(
+            &mut collector,
+            &tracker,
+            2,
+            f,
+            &bytes[split..],
+            0,
+            &mut events,
+        );
+        assert_eq!(events.len(), 2, "split {split}: {events:?}");
+        for (event, start) in events.iter().zip([2, 6 + message.len()]) {
+            let Event::Message(decoded) = event else {
+                panic!("unexpected issue");
+            };
+            assert_eq!(decoded.status, Status::Complete);
+            assert_eq!(decoded.wire.as_ref(), message);
+            let expected: Vec<_> = [
+                (split > start).then_some(1),
+                (split < start + message.len()).then_some(2),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            assert_eq!(
+                decoded
+                    .sources
+                    .iter()
+                    .map(|source| source.number)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+        assert_eq!(collector.buffered, 0);
+        assert!(
+            collector
+                .finish(&RunSummary::default())
+                .unwrap()
+                .0
+                .is_empty()
+        );
+    }
+}

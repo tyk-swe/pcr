@@ -167,7 +167,33 @@ impl Collector {
     }
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, Error> {
         let mut events = Vec::new();
-        for event in self.tcp.observe(record)? {
+        let deliveries = self.tcp.observe(record)?;
+        if let Some(tcp) = record.tcp
+            && tcp.header.flags & crate::protocol::transport::Tcp::SYN != 0
+            && let Some(conversation) = tcp.conversation
+            && let Some(generation) = self.tcp.generation(conversation.index)
+            && self
+                .connections
+                .get(&conversation.index)
+                .is_none_or(|connection| connection.generation != generation)
+        {
+            let flow = &conversation.flow.flow;
+            let server_port = if tcp.header.flags & crate::protocol::transport::Tcp::ACK == 0 {
+                flow.destination_port
+            } else {
+                flow.source_port
+            };
+            self.connections.insert(
+                conversation.index,
+                Connection {
+                    generation,
+                    protocol: self.protocol_for_port(server_port),
+                    mqtt_level: None,
+                    unsupported_amqp: false,
+                },
+            );
+        }
+        for event in deliveries {
             self.event(event, record.number, &mut events)?;
         }
         Ok(events)
@@ -278,12 +304,7 @@ impl Collector {
         }
         let p = [data.flow.flow.destination_port, data.flow.flow.source_port]
             .into_iter()
-            .find_map(|port| {
-                self.registry
-                    .child_for("tcp", Discriminator(u64::from(port)))
-                    .and_then(BuiltinProtocol::from_id)
-                    .filter(|p| self.selected.contains(p))
-            });
+            .find_map(|port| self.protocol_for_port(port));
         self.connections.insert(
             data.stream,
             Connection {
@@ -294,6 +315,12 @@ impl Collector {
             },
         );
         p
+    }
+    fn protocol_for_port(&self, port: u16) -> Option<BuiltinProtocol> {
+        self.registry
+            .child_for("tcp", Discriminator(u64::from(port)))
+            .and_then(BuiltinProtocol::from_id)
+            .filter(|p| self.selected.contains(p))
     }
     fn data(&mut self, data: application::Delivery, out: &mut Vec<Event>) -> Result<(), Error> {
         if self.stopped.get(&data.flow) == Some(&(data.stream, data.generation)) {
@@ -331,6 +358,19 @@ impl Collector {
                 .check_source_spans(d.sources.as_ref().unwrap().len())?;
             let mut offset = 0;
             while offset < d.buffer.len() && !d.disabled && !self.opaque(&d) {
+                // Stream-level SIP keepalives are not messages. A lone CR waits for
+                // the next delivery, so split CRLFs retain the same framing behavior.
+                if d.protocol == BuiltinProtocol::Sip && d.buffer[offset..].starts_with(b"\r\n") {
+                    offset += 2;
+                    self.buffered -= 2;
+                    d.framer = Framer::new(d.protocol.as_str());
+                    d.sources = if offset < d.buffer.len() {
+                        Some(Accumulator::new(&data.sources)?)
+                    } else {
+                        None
+                    };
+                    continue;
+                }
                 match d
                     .framer
                     .progress(&d.buffer[offset..], self.limits.max_buffer_bytes)

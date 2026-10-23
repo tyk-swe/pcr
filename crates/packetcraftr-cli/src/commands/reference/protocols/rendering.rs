@@ -7,14 +7,16 @@ use crate::rendering::write_stdout_line;
 
 pub(super) fn protocol_line(protocol: &output::protocols::Summary) -> String {
     format!(
-        "{} aliases=[{}] build={} dissect={} exact_round_trip={} matcher={} decode_only={}",
+        "{} aliases=[{}] build={} dissect={} exact_round_trip={} matcher={} decode_only={} stream_decode={} transports=[{}]",
         protocol.protocol,
         protocol.aliases.join(", "),
         protocol.build,
         protocol.dissect,
         protocol.exact_round_trip,
         protocol.matcher,
-        protocol.decode_only
+        protocol.decode_only,
+        protocol.stream_decode,
+        protocol.transports.join(", ")
     )
 }
 
@@ -39,6 +41,17 @@ pub(super) fn render_detail(
         invocation,
         format_args!("decode_only: {}", summary.decode_only),
     )?;
+    write_stdout_line(
+        invocation,
+        format_args!("stream_decode: {}", summary.stream_decode),
+    )?;
+    write_stdout_line(
+        invocation,
+        format_args!("transports: [{}]", summary.transports.join(", ")),
+    )?;
+    if let Some(coverage) = &summary.coverage {
+        write_stdout_line(invocation, format_args!("coverage: {coverage}"))?;
+    }
     write_stdout_line(invocation, format_args!("bindings:"))?;
     for binding in &protocol.bindings {
         write_stdout_line(

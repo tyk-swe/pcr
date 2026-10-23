@@ -12,7 +12,23 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "amqp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp"
+        ],
+        "stream_decode": true,
+        "coverage": "AMQP 0-9-1 frame envelopes; method arguments and content properties remain bytes."
       },
       {
         "protocol": "arp",
@@ -21,7 +37,37 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "bacnet_ip",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false,
+        "coverage": "BACnet/IP BVLC, NPDU and APDU envelopes; object values remain bytes."
+      },
+      {
+        "protocol": "bgp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp"
+        ],
+        "stream_decode": true,
+        "coverage": "BGP-4 OPEN, UPDATE, NOTIFICATION and KEEPALIVE; attributes retain original value bytes."
       },
       {
         "protocol": "bsd_loop",
@@ -32,7 +78,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "bsd_null",
@@ -43,7 +91,35 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "cdp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false,
+        "coverage": "CDP version 1/2 headers and ordered TLVs."
+      },
+      {
+        "protocol": "coap",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false,
+        "coverage": "CoAP version 1 headers, token, ordered options and payload."
       },
       {
         "protocol": "dhcpv4",
@@ -54,7 +130,11 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false
       },
       {
         "protocol": "dhcpv6",
@@ -65,7 +145,26 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false
+      },
+      {
+        "protocol": "dnp3",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp",
+          "udp"
+        ],
+        "stream_decode": true,
+        "coverage": "DNP3 link frames and interleaved CRCs, transport/application headers; no application-fragment assembly."
       },
       {
         "protocol": "dns",
@@ -74,7 +173,38 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": true,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [
+          "tcp",
+          "udp"
+        ],
+        "stream_decode": false
+      },
+      {
+        "protocol": "dtls",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false,
+        "coverage": "DTLS 1.2 records and handshake-fragment envelopes; no decryption or handshake reassembly."
+      },
+      {
+        "protocol": "eap",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false,
+        "coverage": "EAP request/response identity, notification and Nak; other methods retain their bytes."
       },
       {
         "protocol": "eapol",
@@ -83,7 +213,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "erspan",
@@ -92,7 +224,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "esp",
@@ -101,7 +235,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "etherip",
@@ -110,7 +246,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "ethernet",
@@ -123,7 +261,24 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "ethernet_ip",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp",
+          "udp"
+        ],
+        "stream_decode": true,
+        "coverage": "EtherNet/IP encapsulation, session/discovery and Common Packet Format items; CIP values remain bytes."
       },
       {
         "protocol": "geneve",
@@ -132,7 +287,11 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false
       },
       {
         "protocol": "gre",
@@ -141,7 +300,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "gtpu",
@@ -150,7 +311,11 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false
       },
       {
         "protocol": "http",
@@ -161,7 +326,11 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": true
+        "decode_only": true,
+        "transports": [
+          "tcp"
+        ],
+        "stream_decode": false
       },
       {
         "protocol": "icmpv4",
@@ -173,7 +342,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": true,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "icmpv6",
@@ -184,7 +355,23 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": true,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "iec104",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp"
+        ],
+        "stream_decode": true,
+        "coverage": "IEC 60870-5-104 I/S/U APDUs and ASDU envelopes; information objects remain bytes."
       },
       {
         "protocol": "igmp",
@@ -193,7 +380,24 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "ipfix",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp",
+          "udp"
+        ],
+        "stream_decode": true,
+        "coverage": "IPFIX version 10 template/options-template records and opaque data sets; no template cache."
       },
       {
         "protocol": "ipv4",
@@ -205,7 +409,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "ipv6",
@@ -216,7 +422,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "ipv6_destination_options",
@@ -228,7 +436,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "ipv6_fragment",
@@ -240,7 +450,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "ipv6_hop_by_hop",
@@ -253,7 +465,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "ipv6_srh",
@@ -265,7 +479,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "l2tpv3",
@@ -274,7 +490,35 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "lacp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false,
+        "coverage": "LACP version 1 actor, partner and collector information; marker packets remain opaque."
+      },
+      {
+        "protocol": "ldap",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp"
+        ],
+        "stream_decode": true,
+        "coverage": "LDAPv3 message envelope, Bind/Search/Unbind operations and BER fields; SASL/TLS are opaque."
       },
       {
         "protocol": "linux_sll",
@@ -285,7 +529,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "linux_sll2",
@@ -296,7 +542,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "llc",
@@ -305,7 +553,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "lldp",
@@ -314,7 +564,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "malformed",
@@ -323,7 +575,37 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "memcached",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp"
+        ],
+        "stream_decode": true,
+        "coverage": "Binary request and response envelopes; ASCII/meta variants remain opaque."
+      },
+      {
+        "protocol": "modbus_tcp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp"
+        ],
+        "stream_decode": true,
+        "coverage": "MBAP headers and function PDUs, including functions 1-6/15/16 and exceptions; direction-ambiguous PDUs remain bytes."
       },
       {
         "protocol": "mpls",
@@ -332,7 +614,37 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "mqtt",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp"
+        ],
+        "stream_decode": true,
+        "coverage": "MQTT 3.1.1 control packets; MQTT 5 is opaque."
+      },
+      {
+        "protocol": "netflowv5",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false,
+        "coverage": "NetFlow version 5 header and fixed-width flow records."
       },
       {
         "protocol": "ntp",
@@ -341,7 +653,49 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false
+      },
+      {
+        "protocol": "opcua_tcp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp"
+        ],
+        "stream_decode": true,
+        "coverage": "OPC UA TCP HEL/ACK/ERR/RHE and SecureConversation chunk envelopes; encrypted service bodies remain bytes."
+      },
+      {
+        "protocol": "ospfv2",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false,
+        "coverage": "OSPFv2 packet headers, Hello fields and packet/LSA envelopes."
+      },
+      {
+        "protocol": "ospfv3",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false,
+        "coverage": "OSPFv3 packet headers, Hello fields and packet/LSA envelopes."
       },
       {
         "protocol": "padding",
@@ -352,7 +706,21 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "pim",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false,
+        "coverage": "PIM version 2 Hello and Join/Prune; other message bodies are opaque."
       },
       {
         "protocol": "ppp",
@@ -361,7 +729,45 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "ppp_ipcp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false,
+        "coverage": "IPCP configuration and termination messages with ordered options."
+      },
+      {
+        "protocol": "ppp_ipv6cp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false,
+        "coverage": "IPv6CP configuration and termination messages with ordered options."
+      },
+      {
+        "protocol": "ppp_lcp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false,
+        "coverage": "PPP LCP configuration, termination, reject and echo messages."
       },
       {
         "protocol": "pppoe",
@@ -370,7 +776,23 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "radius",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false,
+        "coverage": "RADIUS envelope and ordered attributes; authenticators are supplied bytes."
       },
       {
         "protocol": "raw",
@@ -382,7 +804,12 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [
+          "tcp",
+          "udp"
+        ],
+        "stream_decode": false
       },
       {
         "protocol": "raw_ip",
@@ -393,7 +820,93 @@
         "dissect": true,
         "exact_round_trip": false,
         "matcher": false,
-        "decode_only": true
+        "decode_only": true,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "resp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp"
+        ],
+        "stream_decode": true,
+        "coverage": "RESP2 scalar values and bounded recursive arrays."
+      },
+      {
+        "protocol": "ripng",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false,
+        "coverage": "RIPng requests/responses and IPv6 route entries."
+      },
+      {
+        "protocol": "ripv2",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false,
+        "coverage": "RIPv2 requests/responses and route entries; authentication entries are opaque."
+      },
+      {
+        "protocol": "rtcp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false,
+        "coverage": "RTCP version 2 compound SR/RR/SDES/BYE/APP packets."
+      },
+      {
+        "protocol": "rtp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false,
+        "coverage": "RTP version 2 CSRCs, extensions, padding and opaque media payload."
+      },
+      {
+        "protocol": "rtsp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp"
+        ],
+        "stream_decode": true,
+        "coverage": "RTSP/1.0 messages and interleaved binary frames."
       },
       {
         "protocol": "sctp",
@@ -402,7 +915,38 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": true,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "sflow",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false,
+        "coverage": "sFlow version 5 flow/counter sample and record envelopes."
+      },
+      {
+        "protocol": "sip",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp",
+          "udp"
+        ],
+        "stream_decode": true,
+        "coverage": "SIP/2.0 start lines, ordered headers and explicit Content-Length bodies."
       },
       {
         "protocol": "snap",
@@ -411,7 +955,37 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "snmp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false,
+        "coverage": "SNMPv1/v2c community PDUs and ordered BER variable bindings; SNMPv3 remains opaque."
+      },
+      {
+        "protocol": "ssdp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false,
+        "coverage": "SSDP M-SEARCH, NOTIFY and HTTP/1.1 response headers."
       },
       {
         "protocol": "stp",
@@ -420,7 +994,24 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
+      },
+      {
+        "protocol": "stun",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false,
+        "transports": [
+          "tcp",
+          "udp"
+        ],
+        "stream_decode": true,
+        "coverage": "RFC 8489 STUN header, Binding method and ordered attributes; integrity bytes are opaque."
       },
       {
         "protocol": "syslog",
@@ -429,7 +1020,11 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false
       },
       {
         "protocol": "tcp",
@@ -438,7 +1033,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": true,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "tftp",
@@ -447,7 +1044,11 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false
       },
       {
         "protocol": "tls",
@@ -458,7 +1059,11 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [
+          "tcp"
+        ],
+        "stream_decode": false
       },
       {
         "protocol": "udp",
@@ -467,7 +1072,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": true,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "vlan",
@@ -479,7 +1086,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "vlan8021ad",
@@ -492,7 +1101,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "vrrp",
@@ -501,7 +1112,9 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [],
+        "stream_decode": false
       },
       {
         "protocol": "vxlan",
@@ -510,7 +1123,11 @@
         "dissect": true,
         "exact_round_trip": true,
         "matcher": false,
-        "decode_only": false
+        "decode_only": false,
+        "transports": [
+          "udp"
+        ],
+        "stream_decode": false
       }
     ]
   },

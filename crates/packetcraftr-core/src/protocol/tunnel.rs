@@ -34,3 +34,12 @@ pub use vxlan::Vxlan;
 pub(crate) use vxlan::VxlanCodec;
 
 const VNI_MAX: u32 = 0x00ff_ffff;
+
+pub mod ppp_lcp;
+pub(crate) use ppp_lcp::PppLcpCodec;
+
+pub mod ppp_ipcp;
+pub(crate) use ppp_ipcp::PppIpcpCodec;
+
+pub mod ppp_ipv6cp;
+pub(crate) use ppp_ipv6cp::PppIpv6cpCodec;

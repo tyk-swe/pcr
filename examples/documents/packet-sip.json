@@ -1,0 +1,244 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 2048
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 63112
+        },
+        "destination": {
+          "type": "ipv4",
+          "value": "192.0.2.2"
+        },
+        "dont_fragment": {
+          "type": "bool",
+          "value": false
+        },
+        "dscp_ecn": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "fragment_offset": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "identification": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "more_fragments": {
+          "type": "bool",
+          "value": false
+        },
+        "options": {
+          "type": "bytes",
+          "value": []
+        },
+        "protocol": {
+          "type": "unsigned",
+          "value": 6
+        },
+        "reserved_flag": {
+          "type": "bool",
+          "value": false
+        },
+        "source": {
+          "type": "ipv4",
+          "value": "192.0.2.1"
+        },
+        "total_length": {
+          "type": "unsigned",
+          "value": 107
+        },
+        "ttl": {
+          "type": "unsigned",
+          "value": 64
+        }
+      }
+    },
+    {
+      "protocol": "tcp",
+      "fields": {
+        "acknowledgment": {
+          "type": "unsigned",
+          "value": 900
+        },
+        "checksum": {
+          "type": "unsigned",
+          "value": 22150
+        },
+        "destination_port": {
+          "type": "unsigned",
+          "value": 5060
+        },
+        "flags": {
+          "type": "unsigned",
+          "value": 24
+        },
+        "options": {
+          "type": "list",
+          "value": []
+        },
+        "reserved_bits": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "sequence": {
+          "type": "unsigned",
+          "value": 100
+        },
+        "source_port": {
+          "type": "unsigned",
+          "value": 40000
+        },
+        "urgent_pointer": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "window": {
+          "type": "unsigned",
+          "value": 65535
+        }
+      }
+    },
+    {
+      "protocol": "sip",
+      "fields": {
+        "body": {
+          "type": "bytes",
+          "value": []
+        },
+        "headers": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "name": {
+                  "type": "bytes",
+                  "value": [
+                    67,
+                    83,
+                    101,
+                    113
+                  ]
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    32,
+                    49,
+                    32,
+                    79,
+                    80,
+                    84,
+                    73,
+                    79,
+                    78,
+                    83
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "name": {
+                  "type": "bytes",
+                  "value": [
+                    67,
+                    111,
+                    110,
+                    116,
+                    101,
+                    110,
+                    116,
+                    45,
+                    76,
+                    101,
+                    110,
+                    103,
+                    116,
+                    104
+                  ]
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    32,
+                    48
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "start_line": {
+          "type": "bytes",
+          "value": [
+            79,
+            80,
+            84,
+            73,
+            79,
+            78,
+            83,
+            32,
+            115,
+            105,
+            112,
+            58,
+            115,
+            101,
+            114,
+            118,
+            105,
+            99,
+            101,
+            32,
+            83,
+            73,
+            80,
+            47,
+            50,
+            46,
+            48
+          ]
+        }
+      }
+    }
+  ]
+}

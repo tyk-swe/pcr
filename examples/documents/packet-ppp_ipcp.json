@@ -1,0 +1,110 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 34916
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "pppoe",
+      "fields": {
+        "code": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "length": {
+          "type": "unsigned",
+          "value": 12
+        },
+        "session_id": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "type": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "version": {
+          "type": "unsigned",
+          "value": 1
+        }
+      }
+    },
+    {
+      "protocol": "ppp",
+      "fields": {
+        "protocol": {
+          "type": "unsigned",
+          "value": 32801
+        }
+      }
+    },
+    {
+      "protocol": "ppp_ipcp",
+      "fields": {
+        "code": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "data": {
+          "type": "bytes",
+          "value": []
+        },
+        "identifier": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "options": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "kind": {
+                  "type": "unsigned",
+                  "value": 3
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    192,
+                    0,
+                    2,
+                    1
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

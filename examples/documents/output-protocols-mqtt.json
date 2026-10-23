@@ -1,0 +1,157 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "protocols",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "protocol": {
+      "protocol": "mqtt",
+      "aliases": [],
+      "build": true,
+      "dissect": true,
+      "exact_round_trip": true,
+      "matcher": false,
+      "decode_only": false,
+      "transports": [
+        "tcp"
+      ],
+      "stream_decode": true,
+      "coverage": "MQTT 3.1.1 control packets; MQTT 5 is opaque.",
+      "fields": [
+        {
+          "name": "packet_type",
+          "kind": "unsigned",
+          "required": false,
+          "derived": false,
+          "description": "MQTT control packet type 1 through 14"
+        },
+        {
+          "name": "flags",
+          "kind": "unsigned",
+          "required": false,
+          "derived": false,
+          "description": "MQTT fixed header flags"
+        },
+        {
+          "name": "connect_flags",
+          "kind": "unsigned",
+          "required": false,
+          "derived": false,
+          "description": "CONNECT flags"
+        },
+        {
+          "name": "keep_alive",
+          "kind": "unsigned",
+          "required": false,
+          "derived": false,
+          "description": "Keep-alive interval in seconds"
+        },
+        {
+          "name": "client_id",
+          "kind": "bytes",
+          "required": false,
+          "derived": false,
+          "description": "CONNECT client identifier"
+        },
+        {
+          "name": "will_topic",
+          "kind": "bytes",
+          "required": false,
+          "derived": false,
+          "description": "CONNECT will topic"
+        },
+        {
+          "name": "will_payload",
+          "kind": "bytes",
+          "required": false,
+          "derived": false,
+          "description": "CONNECT will payload"
+        },
+        {
+          "name": "user_name",
+          "kind": "bytes",
+          "required": false,
+          "derived": false,
+          "description": "CONNECT user name"
+        },
+        {
+          "name": "password",
+          "kind": "bytes",
+          "required": false,
+          "derived": false,
+          "description": "CONNECT password bytes"
+        },
+        {
+          "name": "topic",
+          "kind": "bytes",
+          "required": false,
+          "derived": false,
+          "description": "PUBLISH topic"
+        },
+        {
+          "name": "packet_id",
+          "kind": "unsigned",
+          "required": false,
+          "derived": false,
+          "description": "Packet identifier"
+        },
+        {
+          "name": "session_present",
+          "kind": "unsigned",
+          "required": false,
+          "derived": false,
+          "description": "CONNACK session-present flag"
+        },
+        {
+          "name": "return_code",
+          "kind": "unsigned",
+          "required": false,
+          "derived": false,
+          "description": "CONNACK return code"
+        },
+        {
+          "name": "payload",
+          "kind": "bytes",
+          "required": false,
+          "derived": false,
+          "description": "PUBLISH data or SUBACK return codes"
+        },
+        {
+          "name": "subscriptions",
+          "kind": "list",
+          "required": false,
+          "derived": false,
+          "description": "Ordered SUBSCRIBE or UNSUBSCRIBE topics",
+          "children": [
+            {
+              "name": "topic",
+              "kind": "bytes",
+              "required": false,
+              "derived": false,
+              "description": "topic"
+            },
+            {
+              "name": "qos",
+              "kind": "unsigned",
+              "required": false,
+              "derived": false,
+              "description": "qos"
+            }
+          ]
+        }
+      ],
+      "bindings": [
+        {
+          "parent": "mqtt",
+          "discriminator": 0
+        },
+        {
+          "parent": "tcp",
+          "discriminator": 1883
+        }
+      ],
+      "filter_fields": []
+    }
+  },
+  "diagnostics": []
+}

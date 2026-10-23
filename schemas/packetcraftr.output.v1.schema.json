@@ -74,7 +74,8 @@
             "audit-tls",
             "audit-http",
             "scan-diff",
-            "report"
+            "report",
+            "messages"
           ]
         },
         "mode": {
@@ -262,6 +263,9 @@
             },
             {
               "$ref": "#/$defs/securitySuccess"
+            },
+            {
+              "$ref": "#/$defs/messagesSuccess"
             }
           ]
         }
@@ -376,6 +380,9 @@
             },
             {
               "$ref": "#/$defs/securityStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/messagesStreamSuccess"
             }
           ]
         }
@@ -4485,6 +4492,21 @@
         },
         "decode_only": {
           "type": "boolean"
+        },
+        "transports": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "tcp",
+              "udp"
+            ]
+          }
+        },
+        "stream_decode": {
+          "type": "boolean"
+        },
+        "coverage": {
+          "type": "string"
         }
       },
       "additionalProperties": true
@@ -4547,6 +4569,21 @@
           "items": {
             "$ref": "#/$defs/protocolBinding"
           }
+        },
+        "transports": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "tcp",
+              "udp"
+            ]
+          }
+        },
+        "stream_decode": {
+          "type": "boolean"
+        },
+        "coverage": {
+          "type": "string"
         }
       },
       "additionalProperties": true
@@ -16160,7 +16197,8 @@
                 "http",
                 "dns",
                 "smtp",
-                "ftp"
+                "ftp",
+                "messages"
               ]
             },
             {
@@ -19162,6 +19200,354 @@
         }
       },
       "additionalProperties": true
+    },
+    "messageRecord": {
+      "type": "object",
+      "required": [
+        "index",
+        "stream",
+        "generation",
+        "flow",
+        "error",
+        "sources",
+        "protocol",
+        "status",
+        "wire_hex",
+        "packet"
+      ],
+      "properties": {
+        "index": {
+          "$ref": "#/$defs/uint64"
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "generation": {
+          "$ref": "#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "#/$defs/applicationFlow"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/applicationSource"
+          }
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "malformed",
+            "unsupported",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted"
+          ]
+        },
+        "wire_hex": {
+          "$ref": "#/$defs/hexBytes"
+        },
+        "packet": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/packetDocument"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "messageIssue": {
+      "type": "object",
+      "required": [
+        "number",
+        "flow",
+        "stream",
+        "status"
+      ],
+      "properties": {
+        "number": {
+          "$ref": "#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "#/$defs/applicationFlow"
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "malformed",
+            "unsupported",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "messagesSummary": {
+      "type": "object",
+      "required": [
+        "messages",
+        "complete_messages",
+        "incomplete_messages",
+        "malformed_messages",
+        "unsupported_messages",
+        "by_protocol"
+      ],
+      "properties": {
+        "messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "complete_messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "incomplete_messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "malformed_messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unsupported_messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "by_protocol": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/uint64"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "messagesComplete": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "summary",
+        "scopes",
+        "incomplete_datagrams",
+        "source_outcomes_omitted",
+        "ip_reassembly"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "#/$defs/uint64"
+        },
+        "summary": {
+          "$ref": "#/$defs/messagesSummary"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/captureScope"
+          }
+        },
+        "incomplete_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "#/$defs/ipReassemblyReport"
+        }
+      },
+      "additionalProperties": true
+    },
+    "messagesResult": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "summary",
+        "scopes",
+        "incomplete_datagrams",
+        "source_outcomes_omitted",
+        "ip_reassembly",
+        "messages",
+        "issues"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "#/$defs/uint64"
+        },
+        "summary": {
+          "$ref": "#/$defs/messagesSummary"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/captureScope"
+          }
+        },
+        "incomplete_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "#/$defs/ipReassemblyReport"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/messageRecord"
+          }
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/messageIssue"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "messagesSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "messages"
+        },
+        "result": {
+          "$ref": "#/$defs/messagesResult"
+        }
+      }
+    },
+    "messagesStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "event",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "messages"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "protocol_message"
+            },
+            "result": {
+              "$ref": "#/$defs/messageRecord"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "protocol_issue"
+            },
+            "result": {
+              "$ref": "#/$defs/messageIssue"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/messagesComplete"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_overlap_resolved"
+            },
+            "result": {
+              "$ref": "#/$defs/ipOverlapResolvedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_completed"
+            },
+            "result": {
+              "$ref": "#/$defs/ipDatagramCompletedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_incomplete"
+            },
+            "result": {
+              "$ref": "#/$defs/ipDatagramIncompleteEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
     }
   }
 }

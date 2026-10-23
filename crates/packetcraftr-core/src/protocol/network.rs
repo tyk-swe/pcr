@@ -49,3 +49,18 @@ pub(crate) use ipv6::{
 pub(crate) use raw_ip::RawIpCodec;
 pub use vrrp::Vrrp;
 pub(crate) use vrrp::VrrpCodec;
+
+pub mod ospfv2;
+pub(crate) use ospfv2::Ospfv2Codec;
+
+pub mod ospfv3;
+pub(crate) use ospfv3::Ospfv3Codec;
+
+pub mod ripv2;
+pub(crate) use ripv2::Ripv2Codec;
+
+pub mod ripng;
+pub(crate) use ripng::RipngCodec;
+
+pub mod pim;
+pub(crate) use pim::PimCodec;

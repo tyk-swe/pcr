@@ -49,6 +49,8 @@ pub enum Error {
     Limit { field: &'static str, limit: usize },
     #[error("application stream lacks physical source evidence at frame {number}")]
     Sources { number: u64 },
+    #[error("{protocol:?} is not a supported TCP message protocol")]
+    Protocol { protocol: String },
     #[error("application event output failed")]
     Output(#[source] crate::error::BoundaryError),
 }
@@ -58,6 +60,11 @@ impl Classified for Error {
             Self::Analysis(source) => source.classification(),
             Self::Provenance(source) => source.classification(),
             Self::Output(source) => source.classification(),
+            Self::Protocol { .. } => Classification::new(
+                "analysis.message_protocol",
+                Kind::Usage,
+                Some("select a protocol with stream_decode support in reference protocols"),
+            ),
             Self::Limit { .. } => Classification::new(
                 "policy.application_limit",
                 Kind::Policy,

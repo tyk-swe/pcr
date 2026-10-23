@@ -12,24 +12,35 @@ macro_rules! builtin_protocol_catalog {
     ($consumer:ident) => {
         $consumer! {
             Ah { canonical: "ah", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Ah], codec: AhCodec }
+            Amqp { canonical: "amqp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::amqp::Amqp], codec: AmqpCodec }
             Arp { canonical: "arp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Arp], codec: ArpCodec }
+            BacnetIp { canonical: "bacnet_ip", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::bacnet_ip::BacnetIp], codec: BacnetIpCodec }
+            Bgp { canonical: "bgp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::bgp::Bgp], codec: BgpCodec }
             BsdLoop { canonical: "bsd_loop", aliases: ["loop"], constructible: true, exact_round_trip: true, matcher: none, layer: [capture::BsdLoop], codec: BsdLoopCodec }
             BsdNull { canonical: "bsd_null", aliases: ["null"], constructible: true, exact_round_trip: true, matcher: none, layer: [capture::BsdNull], codec: BsdNullCodec }
+            Cdp { canonical: "cdp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::cdp::Cdp], codec: CdpCodec }
+            Coap { canonical: "coap", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::coap::Coap], codec: CoapCodec }
             Dhcpv4 { canonical: "dhcpv4", aliases: ["dhcp"], constructible: true, exact_round_trip: true, matcher: none, layer: [application::dhcp::Dhcpv4], codec: Dhcpv4Codec }
             Dhcpv6 { canonical: "dhcpv6", aliases: ["dhcp6"], constructible: true, exact_round_trip: true, matcher: none, layer: [application::dhcp::Dhcpv6], codec: Dhcpv6Codec }
+            Dnp3 { canonical: "dnp3", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::dnp3::Dnp3], codec: Dnp3Codec }
             Dns { canonical: "dns", aliases: [], constructible: true, exact_round_trip: true, matcher: dns, layer: [application::dns::Dns], codec: DnsCodec }
+            Dtls { canonical: "dtls", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::dtls::Dtls], codec: DtlsCodec }
+            Eap { canonical: "eap", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::eap::Eap], codec: EapCodec }
             Eapol { canonical: "eapol", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Eapol], codec: EapolCodec }
             Erspan { canonical: "erspan", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Erspan], codec: ErspanCodec }
             Esp { canonical: "esp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Esp], codec: EspCodec }
             Etherip { canonical: "etherip", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Etherip], codec: EtheripCodec }
             Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Ethernet], codec: EthernetCodec }
+            EthernetIp { canonical: "ethernet_ip", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::ethernet_ip::EthernetIp], codec: EthernetIpCodec }
             Geneve { canonical: "geneve", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Geneve], codec: GeneveCodec }
             Gre { canonical: "gre", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Gre], codec: GreCodec }
             Gtpu { canonical: "gtpu", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Gtpu], codec: GtpuCodec }
             Http { canonical: "http", aliases: ["http1"], constructible: false, exact_round_trip: true, matcher: none, layer: [application::http::Http], codec: HttpCodec }
             Icmpv4 { canonical: "icmpv4", aliases: ["icmp", "icmp4"], constructible: true, exact_round_trip: true, matcher: echo_v4, layer: [network::Icmpv4], codec: Icmpv4Codec }
             Icmpv6 { canonical: "icmpv6", aliases: ["icmp6"], constructible: true, exact_round_trip: true, matcher: echo_v6, layer: [network::Icmpv6], codec: Icmpv6Codec }
+            Iec104 { canonical: "iec104", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::iec104::Iec104], codec: Iec104Codec }
             Igmp { canonical: "igmp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [network::Igmp], codec: IgmpCodec }
+            Ipfix { canonical: "ipfix", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::ipfix::Ipfix], codec: IpfixCodec }
             Ipv4 { canonical: "ipv4", aliases: ["ip", "ip4"], constructible: true, exact_round_trip: true, matcher: none, layer: [network::Ipv4], codec: Ipv4Codec }
             Ipv6 { canonical: "ipv6", aliases: ["ip6"], constructible: true, exact_round_trip: true, matcher: none, layer: [network::Ipv6], codec: Ipv6Codec }
             Ipv6DestinationOptions { canonical: "ipv6_destination_options", aliases: ["destopts", "destination_options"], constructible: true, exact_round_trip: true, matcher: none, layer: [network::DestinationOptions], codec: DestinationOptionsCodec }
@@ -37,21 +48,46 @@ macro_rules! builtin_protocol_catalog {
             Ipv6HopByHop { canonical: "ipv6_hop_by_hop", aliases: ["hop", "hopopts", "hbh"], constructible: true, exact_round_trip: true, matcher: none, layer: [network::HopByHop], codec: HopByHopCodec }
             Ipv6Srh { canonical: "ipv6_srh", aliases: ["srh", "segment_routing"], constructible: true, exact_round_trip: true, matcher: none, layer: [network::SegmentRoutingHeader], codec: SegmentRoutingHeaderCodec }
             L2tpv3 { canonical: "l2tpv3", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::L2tpv3], codec: L2tpv3Codec }
+            Lacp { canonical: "lacp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::lacp::Lacp], codec: LacpCodec }
+            Ldap { canonical: "ldap", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::ldap::Ldap], codec: LdapCodec }
             LinuxSll { canonical: "linux_sll", aliases: ["sll"], constructible: true, exact_round_trip: true, matcher: none, layer: [capture::LinuxSll], codec: LinuxSllCodec }
             LinuxSll2 { canonical: "linux_sll2", aliases: ["sll2"], constructible: true, exact_round_trip: true, matcher: none, layer: [capture::LinuxSll2], codec: LinuxSll2Codec }
             Llc { canonical: "llc", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Llc], codec: LlcCodec }
             Lldp { canonical: "lldp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Lldp], codec: LldpCodec }
             Malformed { canonical: "malformed", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [crate::layer::Malformed], codec: MalformedCodec }
+            Memcached { canonical: "memcached", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::memcached::Memcached], codec: MemcachedCodec }
+            ModbusTcp { canonical: "modbus_tcp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::modbus_tcp::ModbusTcp], codec: ModbusTcpCodec }
             Mpls { canonical: "mpls", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Mpls], codec: MplsCodec }
+            Mqtt { canonical: "mqtt", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::mqtt::Mqtt], codec: MqttCodec }
+            Netflowv5 { canonical: "netflowv5", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::netflowv5::Netflowv5], codec: Netflowv5Codec }
             Ntp { canonical: "ntp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::ntp::Ntp], codec: NtpCodec }
+            OpcuaTcp { canonical: "opcua_tcp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::opcua_tcp::OpcuaTcp], codec: OpcuaTcpCodec }
+            Ospfv2 { canonical: "ospfv2", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [network::ospfv2::Ospfv2], codec: Ospfv2Codec }
+            Ospfv3 { canonical: "ospfv3", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [network::ospfv3::Ospfv3], codec: Ospfv3Codec }
             Padding { canonical: "padding", aliases: ["pad"], constructible: true, exact_round_trip: true, matcher: none, layer: [crate::layer::Padding], codec: PaddingCodec }
+            Pim { canonical: "pim", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [network::pim::Pim], codec: PimCodec }
             Ppp { canonical: "ppp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Ppp], codec: PppCodec }
+            PppIpcp { canonical: "ppp_ipcp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::ppp_ipcp::PppIpcp], codec: PppIpcpCodec }
+            PppIpv6cp { canonical: "ppp_ipv6cp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::ppp_ipv6cp::PppIpv6cp], codec: PppIpv6cpCodec }
+            PppLcp { canonical: "ppp_lcp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::ppp_lcp::PppLcp], codec: PppLcpCodec }
             Pppoe { canonical: "pppoe", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Pppoe], codec: PppoeCodec }
+            Radius { canonical: "radius", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::radius::Radius], codec: RadiusCodec }
             Raw { canonical: "raw", aliases: ["payload", "bytes"], constructible: true, exact_round_trip: true, matcher: none, layer: [crate::layer::Raw], codec: RawCodec }
             RawIp { canonical: "raw_ip", aliases: ["rawip"], constructible: false, exact_round_trip: false, matcher: none, layer: [], codec: RawIpCodec }
+            Resp { canonical: "resp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::resp::Resp], codec: RespCodec }
+            Ripng { canonical: "ripng", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [network::ripng::Ripng], codec: RipngCodec }
+            Ripv2 { canonical: "ripv2", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [network::ripv2::Ripv2], codec: Ripv2Codec }
+            Rtcp { canonical: "rtcp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::rtcp::Rtcp], codec: RtcpCodec }
+            Rtp { canonical: "rtp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::rtp::Rtp], codec: RtpCodec }
+            Rtsp { canonical: "rtsp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::rtsp::Rtsp], codec: RtspCodec }
             Sctp { canonical: "sctp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, layer: [transport::Sctp], codec: SctpCodec }
+            Sflow { canonical: "sflow", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::sflow::Sflow], codec: SflowCodec }
+            Sip { canonical: "sip", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::sip::Sip], codec: SipCodec }
             Snap { canonical: "snap", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Snap], codec: SnapCodec }
+            Snmp { canonical: "snmp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::snmp::Snmp], codec: SnmpCodec }
+            Ssdp { canonical: "ssdp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::ssdp::Ssdp], codec: SsdpCodec }
             Stp { canonical: "stp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Stp], codec: StpCodec }
+            Stun { canonical: "stun", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::stun::Stun], codec: StunCodec }
             Syslog { canonical: "syslog", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::syslog::Syslog], codec: SyslogCodec }
             Tcp { canonical: "tcp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, layer: [transport::Tcp], codec: TcpCodec }
             Tftp { canonical: "tftp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::tftp::Tftp], codec: TftpCodec }

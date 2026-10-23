@@ -78,6 +78,20 @@ impl Codec for EapolCodec {
             .map_err(|_| invalid(NAME, "body exceeds the EAPOL length range"))?;
 
         let mut diagnostics = Vec::new();
+        if context
+            .child
+            .is_some_and(<dyn Layer>::is::<super::eap::Eap>)
+            && layer.packet_type != 0
+        {
+            crate::protocol::common::strict_or_diagnostic(
+                NAME,
+                "build.eapol_type",
+                "packet_type",
+                "an EAP child requires EAPOL packet_type=0",
+                context,
+                &mut diagnostics,
+            )?;
+        }
         let (length, materialized_length) = resolve_u16(
             NAME,
             "length",
@@ -127,7 +141,10 @@ impl Codec for EapolCodec {
             next: if length == 0 {
                 Vec::new()
             } else {
-                vec![Discriminator(EAPOL_BODY)]
+                vec![
+                    Discriminator(256 + u64::from(header[1])),
+                    Discriminator(EAPOL_BODY),
+                ]
             },
             diagnostics: Vec::new(),
             stop: length == 0,

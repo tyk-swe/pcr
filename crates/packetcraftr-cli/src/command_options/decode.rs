@@ -24,7 +24,8 @@ pub(crate) struct DecodeArgs {
     #[arg(long = "tls-port", value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
     pub(crate) ports: Vec<u16>,
     /// Bind a port to a compatible codec, e.g. udp.port=5353:dns. TCP supports
-    /// dns/http/tls/raw; UDP supports dhcpv4/dhcpv6/dns/ntp/vxlan/geneve/gtpu/tftp/syslog/raw.
+    /// compatible built-in message codecs; see `reference protocols` for coverage.
+    /// The same bindings select compatible child codecs during packet construction.
     /// Explicit bindings override the same built-in selector; conflicting
     /// declarations are rejected.
     #[arg(long = "decode-as", value_name = "TRANSPORT.port=PORT:PROTOCOL")]
@@ -70,22 +71,12 @@ impl DecodeArgs {
             let child = default
                 .protocol_named(child)
                 .ok_or_else(|| error(format!("unknown decode-as protocol {child:?}")))?;
-            if !matches!(
-                (parent, child.as_str()),
-                ("tcp", "dns" | "http" | "tls" | "raw")
-                    | (
-                        "udp",
-                        "dhcpv4"
-                            | "dhcpv6"
-                            | "dns"
-                            | "ntp"
-                            | "vxlan"
-                            | "geneve"
-                            | "gtpu"
-                            | "tftp"
-                            | "syslog"
-                            | "raw"
-                    )
+            if !packetcraftr_core::protocol::BuiltinProtocol::from_id(child).is_some_and(
+                |protocol| {
+                    let parent = packetcraftr_core::protocol::BuiltinProtocol::from_name(parent)
+                        .expect("transport");
+                    protocol.supports_transport(parent)
+                },
             ) {
                 return Err(error(format!(
                     "{child} cannot be decoded directly under {parent}"

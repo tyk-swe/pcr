@@ -1,0 +1,80 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 34958
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "eapol",
+      "fields": {
+        "length": {
+          "type": "unsigned",
+          "value": 10
+        },
+        "packet_type": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "version": {
+          "type": "unsigned",
+          "value": 2
+        }
+      }
+    },
+    {
+      "protocol": "eap",
+      "fields": {
+        "code": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "data": {
+          "type": "bytes",
+          "value": [
+            97,
+            108,
+            105,
+            99,
+            101
+          ]
+        },
+        "identifier": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "method": {
+          "type": "unsigned",
+          "value": 1
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "messages",
+  "mode": "stream",
+  "sequence": 0,
+  "event": "protocol_message",
+  "status": "success",
+  "result": {
+    "index": 1,
+    "protocol": "mqtt",
+    "stream": 0,
+    "generation": 0,
+    "flow": {
+      "scope": 0,
+      "flow": {
+        "source": "192.0.2.1",
+        "source_port": 40000,
+        "destination": "192.0.2.2",
+        "destination_port": 1883
+      }
+    },
+    "status": "complete",
+    "wire_hex": "300400016178",
+    "packet": {
+      "schema": "packetcraftr.packet/v1",
+      "layers": [
+        {
+          "protocol": "mqtt",
+          "fields": {
+            "client_id": {
+              "type": "bytes",
+              "value": []
+            },
+            "connect_flags": {
+              "type": "unsigned",
+              "value": 2
+            },
+            "flags": {
+              "type": "unsigned",
+              "value": 0
+            },
+            "keep_alive": {
+              "type": "unsigned",
+              "value": 60
+            },
+            "packet_id": {
+              "type": "unsigned",
+              "value": 1
+            },
+            "packet_type": {
+              "type": "unsigned",
+              "value": 3
+            },
+            "password": {
+              "type": "bytes",
+              "value": []
+            },
+            "payload": {
+              "type": "bytes",
+              "value": [
+                120
+              ]
+            },
+            "return_code": {
+              "type": "unsigned",
+              "value": 0
+            },
+            "session_present": {
+              "type": "unsigned",
+              "value": 0
+            },
+            "subscriptions": {
+              "type": "list",
+              "value": []
+            },
+            "topic": {
+              "type": "bytes",
+              "value": [
+                97
+              ]
+            },
+            "user_name": {
+              "type": "bytes",
+              "value": []
+            },
+            "will_payload": {
+              "type": "bytes",
+              "value": []
+            },
+            "will_topic": {
+              "type": "bytes",
+              "value": []
+            }
+          }
+        }
+      ]
+    },
+    "error": null,
+    "sources": [
+      {
+        "number": 2,
+        "timestamp": {
+          "unix_seconds": 1700000001,
+          "nanoseconds": 0
+        }
+      },
+      {
+        "number": 3,
+        "timestamp": {
+          "unix_seconds": 1700000002,
+          "nanoseconds": 0
+        }
+      }
+    ]
+  },
+  "diagnostics": []
+}

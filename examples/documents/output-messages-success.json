@@ -1,0 +1,276 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "messages",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "messages": [
+      {
+        "index": 1,
+        "protocol": "mqtt",
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "192.0.2.2",
+            "destination_port": 1883
+          }
+        },
+        "status": "complete",
+        "wire_hex": "300400016178",
+        "packet": {
+          "schema": "packetcraftr.packet/v1",
+          "layers": [
+            {
+              "protocol": "mqtt",
+              "fields": {
+                "client_id": {
+                  "type": "bytes",
+                  "value": []
+                },
+                "connect_flags": {
+                  "type": "unsigned",
+                  "value": 2
+                },
+                "flags": {
+                  "type": "unsigned",
+                  "value": 0
+                },
+                "keep_alive": {
+                  "type": "unsigned",
+                  "value": 60
+                },
+                "packet_id": {
+                  "type": "unsigned",
+                  "value": 1
+                },
+                "packet_type": {
+                  "type": "unsigned",
+                  "value": 3
+                },
+                "password": {
+                  "type": "bytes",
+                  "value": []
+                },
+                "payload": {
+                  "type": "bytes",
+                  "value": [
+                    120
+                  ]
+                },
+                "return_code": {
+                  "type": "unsigned",
+                  "value": 0
+                },
+                "session_present": {
+                  "type": "unsigned",
+                  "value": 0
+                },
+                "subscriptions": {
+                  "type": "list",
+                  "value": []
+                },
+                "topic": {
+                  "type": "bytes",
+                  "value": [
+                    97
+                  ]
+                },
+                "user_name": {
+                  "type": "bytes",
+                  "value": []
+                },
+                "will_payload": {
+                  "type": "bytes",
+                  "value": []
+                },
+                "will_topic": {
+                  "type": "bytes",
+                  "value": []
+                }
+              }
+            }
+          ]
+        },
+        "error": null,
+        "sources": [
+          {
+            "number": 2,
+            "timestamp": {
+              "unix_seconds": 1700000001,
+              "nanoseconds": 0
+            }
+          },
+          {
+            "number": 3,
+            "timestamp": {
+              "unix_seconds": 1700000002,
+              "nanoseconds": 0
+            }
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "protocol": "mqtt",
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "192.0.2.2",
+            "destination_port": 1883
+          }
+        },
+        "status": "complete",
+        "wire_hex": "c000",
+        "packet": {
+          "schema": "packetcraftr.packet/v1",
+          "layers": [
+            {
+              "protocol": "mqtt",
+              "fields": {
+                "client_id": {
+                  "type": "bytes",
+                  "value": []
+                },
+                "connect_flags": {
+                  "type": "unsigned",
+                  "value": 2
+                },
+                "flags": {
+                  "type": "unsigned",
+                  "value": 0
+                },
+                "keep_alive": {
+                  "type": "unsigned",
+                  "value": 60
+                },
+                "packet_id": {
+                  "type": "unsigned",
+                  "value": 1
+                },
+                "packet_type": {
+                  "type": "unsigned",
+                  "value": 12
+                },
+                "password": {
+                  "type": "bytes",
+                  "value": []
+                },
+                "payload": {
+                  "type": "bytes",
+                  "value": []
+                },
+                "return_code": {
+                  "type": "unsigned",
+                  "value": 0
+                },
+                "session_present": {
+                  "type": "unsigned",
+                  "value": 0
+                },
+                "subscriptions": {
+                  "type": "list",
+                  "value": []
+                },
+                "topic": {
+                  "type": "bytes",
+                  "value": []
+                },
+                "user_name": {
+                  "type": "bytes",
+                  "value": []
+                },
+                "will_payload": {
+                  "type": "bytes",
+                  "value": []
+                },
+                "will_topic": {
+                  "type": "bytes",
+                  "value": []
+                }
+              }
+            }
+          ]
+        },
+        "error": null,
+        "sources": [
+          {
+            "number": 3,
+            "timestamp": {
+              "unix_seconds": 1700000002,
+              "nanoseconds": 0
+            }
+          }
+        ]
+      }
+    ],
+    "issues": [],
+    "frames_read": 3,
+    "frames_matched": 3,
+    "summary": {
+      "messages": 2,
+      "complete_messages": 2,
+      "incomplete_messages": 0,
+      "malformed_messages": 0,
+      "unsupported_messages": 0,
+      "by_protocol": {
+        "mqtt": 2
+      }
+    },
+    "scopes": [
+      {
+        "id": 0,
+        "interface": null,
+        "encapsulation": []
+      }
+    ],
+    "incomplete_datagrams": 0,
+    "source_outcomes_omitted": 0,
+    "ip_reassembly": {
+      "families": [
+        {
+          "family": "ipv4",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        },
+        {
+          "family": "ipv6",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        }
+      ],
+      "outcomes": [],
+      "outcomes_omitted": 0
+    }
+  },
+  "diagnostics": []
+}

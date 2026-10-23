@@ -1,0 +1,163 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 2048
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 63171
+        },
+        "destination": {
+          "type": "ipv4",
+          "value": "192.0.2.2"
+        },
+        "dont_fragment": {
+          "type": "bool",
+          "value": false
+        },
+        "dscp_ecn": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "fragment_offset": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "identification": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "more_fragments": {
+          "type": "bool",
+          "value": false
+        },
+        "options": {
+          "type": "bytes",
+          "value": []
+        },
+        "protocol": {
+          "type": "unsigned",
+          "value": 6
+        },
+        "reserved_flag": {
+          "type": "bool",
+          "value": false
+        },
+        "source": {
+          "type": "ipv4",
+          "value": "192.0.2.1"
+        },
+        "total_length": {
+          "type": "unsigned",
+          "value": 48
+        },
+        "ttl": {
+          "type": "unsigned",
+          "value": 64
+        }
+      }
+    },
+    {
+      "protocol": "tcp",
+      "fields": {
+        "acknowledgment": {
+          "type": "unsigned",
+          "value": 900
+        },
+        "checksum": {
+          "type": "unsigned",
+          "value": 27810
+        },
+        "destination_port": {
+          "type": "unsigned",
+          "value": 5672
+        },
+        "flags": {
+          "type": "unsigned",
+          "value": 24
+        },
+        "options": {
+          "type": "list",
+          "value": []
+        },
+        "reserved_bits": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "sequence": {
+          "type": "unsigned",
+          "value": 100
+        },
+        "source_port": {
+          "type": "unsigned",
+          "value": 40000
+        },
+        "urgent_pointer": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "window": {
+          "type": "unsigned",
+          "value": 65535
+        }
+      }
+    },
+    {
+      "protocol": "amqp",
+      "fields": {
+        "channel": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "class_id": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "frame_type": {
+          "type": "unsigned",
+          "value": 8
+        },
+        "method_id": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "payload": {
+          "type": "bytes",
+          "value": []
+        }
+      }
+    }
+  ]
+}

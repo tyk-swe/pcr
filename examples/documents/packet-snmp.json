@@ -1,0 +1,201 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 2048
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 63140
+        },
+        "destination": {
+          "type": "ipv4",
+          "value": "192.0.2.2"
+        },
+        "dont_fragment": {
+          "type": "bool",
+          "value": false
+        },
+        "dscp_ecn": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "fragment_offset": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "identification": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "more_fragments": {
+          "type": "bool",
+          "value": false
+        },
+        "options": {
+          "type": "bytes",
+          "value": []
+        },
+        "protocol": {
+          "type": "unsigned",
+          "value": 17
+        },
+        "reserved_flag": {
+          "type": "bool",
+          "value": false
+        },
+        "source": {
+          "type": "ipv4",
+          "value": "192.0.2.1"
+        },
+        "total_length": {
+          "type": "unsigned",
+          "value": 68
+        },
+        "ttl": {
+          "type": "unsigned",
+          "value": 64
+        }
+      }
+    },
+    {
+      "protocol": "udp",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 43375
+        },
+        "destination_port": {
+          "type": "unsigned",
+          "value": 161
+        },
+        "length": {
+          "type": "unsigned",
+          "value": 48
+        },
+        "source_port": {
+          "type": "unsigned",
+          "value": 40000
+        }
+      }
+    },
+    {
+      "protocol": "snmp",
+      "fields": {
+        "agent_address": {
+          "type": "ipv4",
+          "value": "0.0.0.0"
+        },
+        "community": {
+          "type": "bytes",
+          "value": [
+            112,
+            117,
+            98,
+            108,
+            105,
+            99
+          ]
+        },
+        "enterprise": {
+          "type": "bytes",
+          "value": []
+        },
+        "error_index": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "error_status": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "generic_trap": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "pdu_type": {
+          "type": "unsigned",
+          "value": 160
+        },
+        "request_id": {
+          "type": "signed",
+          "value": 1
+        },
+        "specific_trap": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "timestamp": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "varbinds": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "oid": {
+                  "type": "bytes",
+                  "value": [
+                    43,
+                    6,
+                    1,
+                    2,
+                    1,
+                    1,
+                    1,
+                    0
+                  ]
+                },
+                "tag": {
+                  "type": "unsigned",
+                  "value": 5
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": []
+                }
+              }
+            }
+          ]
+        },
+        "version": {
+          "type": "unsigned",
+          "value": 1
+        }
+      }
+    }
+  ]
+}

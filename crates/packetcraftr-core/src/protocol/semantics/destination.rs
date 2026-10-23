@@ -120,7 +120,43 @@ fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
         | BuiltinProtocol::Tftp
         | BuiltinProtocol::Http
         | BuiltinProtocol::Tls
-        | BuiltinProtocol::Vrrp => false,
+        | BuiltinProtocol::Vrrp
+        | BuiltinProtocol::Mqtt
+        | BuiltinProtocol::Coap
+        | BuiltinProtocol::Amqp
+        | BuiltinProtocol::Resp
+        | BuiltinProtocol::Memcached
+        | BuiltinProtocol::Ssdp
+        | BuiltinProtocol::Eap
+        | BuiltinProtocol::Lacp
+        | BuiltinProtocol::Cdp
+        | BuiltinProtocol::PppLcp
+        | BuiltinProtocol::PppIpcp
+        | BuiltinProtocol::PppIpv6cp
+        | BuiltinProtocol::Bgp
+        | BuiltinProtocol::Ospfv2
+        | BuiltinProtocol::Ospfv3
+        | BuiltinProtocol::Ripv2
+        | BuiltinProtocol::Ripng
+        | BuiltinProtocol::Pim
+        | BuiltinProtocol::Radius
+        | BuiltinProtocol::Snmp
+        | BuiltinProtocol::Ldap
+        | BuiltinProtocol::Netflowv5
+        | BuiltinProtocol::Ipfix
+        | BuiltinProtocol::Sflow
+        | BuiltinProtocol::Sip
+        | BuiltinProtocol::Rtsp
+        | BuiltinProtocol::Rtp
+        | BuiltinProtocol::Rtcp
+        | BuiltinProtocol::Stun
+        | BuiltinProtocol::Dtls
+        | BuiltinProtocol::ModbusTcp
+        | BuiltinProtocol::BacnetIp
+        | BuiltinProtocol::Dnp3
+        | BuiltinProtocol::EthernetIp
+        | BuiltinProtocol::Iec104
+        | BuiltinProtocol::OpcuaTcp => false,
     }
 }
 

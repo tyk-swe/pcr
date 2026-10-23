@@ -5,9 +5,14 @@
 
 pub mod application;
 pub mod builtin;
+mod capabilities;
 pub mod capture;
 mod catalog;
+pub use capabilities::{MESSAGE_PROTOCOLS, MessageProtocol};
 mod common;
+pub(crate) mod framing;
+mod message;
+pub use message::Records;
 pub mod headers;
 pub mod link;
 mod matcher;

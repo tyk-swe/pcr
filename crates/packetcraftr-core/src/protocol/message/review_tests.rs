@@ -748,3 +748,166 @@ fn review_bacnet_segment_ack_requires_its_window_size() {
         );
     }
 }
+
+#[test]
+fn review_sip_udp_preserves_excess_bytes_after_declared_body() {
+    let registry = builtin::registry();
+    let builder = crate::build::Builder::new(registry.clone());
+    let mut packet = Packet::new();
+    packet.push(Ethernet::default());
+    packet.push(Ipv4::default());
+    packet.push(Udp {
+        destination_port: 5060,
+        ..Default::default()
+    });
+    packet.push(Sip::default());
+    packet.push(crate::layer::Raw::new(Bytes::from_static(b"\r\nextra")));
+    let built = builder
+        .build(packet, Addresses::default(), Default::default())
+        .unwrap();
+    let decoded = crate::decode::Dissector::new(registry)
+        .decode(
+            Frame::without_timestamp(LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+            Default::default(),
+        )
+        .unwrap();
+    assert!(decoded.diagnostics.is_empty(), "{:?}", decoded.diagnostics);
+    assert!(decoded.packet.get::<Sip>().unwrap().body.is_empty());
+    assert_eq!(
+        decoded
+            .packet
+            .get::<crate::layer::Raw>()
+            .unwrap()
+            .bytes
+            .as_ref(),
+        b"\r\nextra"
+    );
+    assert_eq!(
+        builder
+            .build(decoded.packet, Addresses::default(), Default::default())
+            .unwrap()
+            .bytes,
+        built.bytes
+    );
+}
+
+#[test]
+fn review_outer_ethernet_padding_does_not_extend_datagram_framing() {
+    let registry = builtin::registry();
+    let builder = crate::build::Builder::new(registry.clone());
+    let mut packet = Packet::new();
+    packet.push(Ethernet::default());
+    packet.push(Ipv4::default());
+    packet.push(Udp {
+        destination_port: 5683,
+        ..Default::default()
+    });
+    packet.push(crate::protocol::application::coap::Coap::default());
+    let mut padded = builder
+        .build(packet, Addresses::default(), Default::default())
+        .unwrap()
+        .bytes
+        .to_vec();
+    padded.resize(60, 0);
+    let decoded = crate::decode::Dissector::new(registry)
+        .decode(
+            Frame::without_timestamp(LinkType::ETHERNET, Bytes::copy_from_slice(&padded)).unwrap(),
+            Default::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        decoded
+            .packet
+            .get::<crate::layer::Padding>()
+            .unwrap()
+            .outside_layer,
+        Some(1)
+    );
+    assert_eq!(
+        builder
+            .build(decoded.packet, Addresses::default(), Default::default())
+            .unwrap()
+            .bytes
+            .as_ref(),
+        padded
+    );
+}
+
+#[test]
+fn review_interleaved_rtsp_layout_only_contains_binary_fields() {
+    let registry = builtin::registry();
+    let mut packet = Packet::new();
+    packet.push(crate::protocol::application::rtsp::Rtsp {
+        interleaved: true,
+        channel: 7,
+        body: Bytes::from_static(b"\r\n\r\n"),
+        ..Default::default()
+    });
+    let built = crate::build::Builder::new(registry.clone())
+        .build(packet, Addresses::default(), Default::default())
+        .unwrap();
+    let fields = &built.layout.layer(0).unwrap().fields;
+    assert_eq!(
+        fields.iter().map(|field| field.name).collect::<Vec<_>>(),
+        ["interleaved", "channel", "body"]
+    );
+    assert_eq!(fields[1].range, crate::layout::ByteRange::new(1, 2));
+    assert_eq!(fields[2].range, crate::layout::ByteRange::new(4, 8));
+    let decoded = registry
+        .codec("rtsp")
+        .unwrap()
+        .decode(
+            built.bytes,
+            &DecodeContext {
+                parent: None,
+                registry: &registry,
+                network: None,
+                hop_limit: None,
+                discriminator: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(decoded.fields, *fields);
+}
+
+#[test]
+fn review_other_slow_protocols_remain_opaque_before_lacp_length_checks() {
+    let registry = builtin::registry();
+    for wire in [b"\x03\0\0\x01".as_slice(), b"\x02\x01", b"\x01\x02"] {
+        let decoded = registry
+            .codec("lacp")
+            .unwrap()
+            .decode(
+                Bytes::copy_from_slice(wire),
+                &DecodeContext {
+                    parent: Some(crate::layer::Id::new("ethernet")),
+                    registry: &registry,
+                    network: None,
+                    hop_limit: None,
+                    discriminator: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(decoded.layer.protocol_id().as_str(), "raw");
+        assert_eq!(
+            decoded.layer.field("bytes"),
+            Some(Bytes::copy_from_slice(wire).into())
+        );
+    }
+    assert!(
+        registry
+            .codec("lacp")
+            .unwrap()
+            .decode(
+                Bytes::from_static(b"\x01\x01"),
+                &DecodeContext {
+                    parent: None,
+                    registry: &registry,
+                    network: None,
+                    hop_limit: None,
+                    discriminator: None,
+                }
+            )
+            .is_err()
+    );
+}

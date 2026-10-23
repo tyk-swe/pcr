@@ -62,6 +62,21 @@ pub(crate) fn content_length(name: &'static str, head: &[u8]) -> Result<Option<u
     Ok(parse_head(name, head)?.length)
 }
 
+pub(crate) fn datagram_length(name: &'static str, bytes: &[u8]) -> Result<usize, Error> {
+    let head = parse_head(name, bytes)?;
+    let Some(length) = head.length else {
+        return Ok(bytes.len());
+    };
+    let end = head
+        .end
+        .checked_add(length)
+        .ok_or_else(|| invalid(name, "length overflow"))?;
+    if end > bytes.len() {
+        return Err(crate::protocol::common::truncated(name, end, bytes.len()));
+    }
+    Ok(end)
+}
+
 struct Head {
     start: Bytes,
     headers: Records,

@@ -47,7 +47,18 @@ impl Framer {
                 }
                 len
             }
-            "lacp" => 110,
+            "lacp" => {
+                let Some(&subtype) = b.first() else {
+                    return Ok(None);
+                };
+                if subtype != 1 || b.get(1).is_some_and(|version| *version != 1) {
+                    return Err(unsupported(
+                        n,
+                        "unsupported Slow Protocol subtype or LACP version",
+                    ));
+                }
+                110
+            }
             "mqtt" => {
                 if b.len() < 2 {
                     return Ok(None);
@@ -225,7 +236,7 @@ pub(crate) fn packet_length(
     parent: Option<crate::layer::Id>,
 ) -> Result<usize, Error> {
     if name == "sip" && parent == Some(crate::layer::Id::new("udp")) {
-        return Ok(b.len());
+        return super::application::text_message::datagram_length(name, b);
     }
     Framer::new(name)
         .progress(b, usize::MAX)?

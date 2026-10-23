@@ -19,6 +19,7 @@ pub struct Records(pub Vec<BTreeMap<String, field::Value>>);
 
 pub(crate) const MAX_RECORDS: usize = 4096;
 pub(crate) const MAX_NESTING: usize = 16;
+pub(crate) const OPAQUE_TAIL: u64 = 1;
 
 impl ReflectiveField for Records {
     fn reflective_value(&self) -> field::Value {
@@ -227,6 +228,8 @@ macro_rules! message_codec {
                 context: &crate::codec::EncodeContext<'_>,
             ) -> Result<crate::codec::Encoded, crate::codec::Error> {
                 let name = $schema().protocol.as_str();
+                let payload =
+                    crate::protocol::common::payload_without_padding(name, payload, context)?;
                 if !payload.is_empty()
                     && context.child.is_none_or(|child| {
                         child.protocol_id() != self.protocol_id()
@@ -313,7 +316,14 @@ macro_rules! message_codec {
                         result.fields = $layout(&input[..len]);
                         if input.len() > len {
                             result.payload_len = input.len() - len;
-                            result.next = vec![crate::registry::Discriminator(0)];
+                            let tail = if name == "sip"
+                                && context.parent == Some(crate::layer::Id::new("udp"))
+                            {
+                                crate::protocol::message::OPAQUE_TAIL
+                            } else {
+                                0
+                            };
+                            result.next = vec![crate::registry::Discriminator(tail)];
                             result.stop = false;
                         }
                         Ok(result)

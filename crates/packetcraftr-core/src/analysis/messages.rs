@@ -101,6 +101,7 @@ impl Direction {
 struct Connection {
     generation: u64,
     protocol: Option<BuiltinProtocol>,
+    server: Option<(std::net::IpAddr, u16)>,
     mqtt_level: Option<u8>,
     unsupported_amqp: bool,
 }
@@ -178,16 +179,17 @@ impl Collector {
                 .is_none_or(|connection| connection.generation != generation)
         {
             let flow = &conversation.flow.flow;
-            let server_port = if tcp.header.flags & crate::protocol::transport::Tcp::ACK == 0 {
-                flow.destination_port
+            let server = if tcp.header.flags & crate::protocol::transport::Tcp::ACK == 0 {
+                (flow.destination, flow.destination_port)
             } else {
-                flow.source_port
+                (flow.source, flow.source_port)
             };
             self.connections.insert(
                 conversation.index,
                 Connection {
                     generation,
-                    protocol: self.protocol_for_port(server_port),
+                    protocol: self.protocol_for_port(server.1),
+                    server: Some(server),
                     mqtt_level: None,
                     unsupported_amqp: false,
                 },
@@ -310,6 +312,7 @@ impl Collector {
             Connection {
                 generation: data.generation,
                 protocol: p,
+                server: None,
                 mqtt_level: None,
                 unsupported_amqp: false,
             },
@@ -484,11 +487,20 @@ impl Collector {
                 if let Some(modbus) =
                     layer.downcast_mut::<crate::protocol::application::modbus_tcp::ModbusTcp>()
                 {
-                    let response = self.registry.child_for(
-                        "tcp",
-                        Discriminator(u64::from(message.flow.flow.source_port)),
-                    ) == Some(crate::layer::Id::new("modbus_tcp"));
-                    if let Err(error) = modbus.interpret(response) {
+                    let flow = &message.flow.flow;
+                    let response = self.connections[&message.stream]
+                        .server
+                        .map(|server| server == (flow.source, flow.source_port))
+                        .or_else(|| {
+                            let source = self.protocol_for_port(flow.source_port)
+                                == Some(BuiltinProtocol::ModbusTcp);
+                            let destination = self.protocol_for_port(flow.destination_port)
+                                == Some(BuiltinProtocol::ModbusTcp);
+                            (source != destination).then_some(source)
+                        });
+                    if let Some(response) = response
+                        && let Err(error) = modbus.interpret(response)
+                    {
                         message.status = Status::Malformed;
                         message.error = Some(error.to_string());
                         return;

@@ -45,6 +45,25 @@ crate::reflective_layer! {
 fn rtsp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
     let _ = rtsp_layout();
     let mut fields = Vec::new();
+    if b.first() == Some(&b'$') {
+        fields.push(crate::layout::FieldLayout {
+            name: "interleaved",
+            range: crate::layout::ByteRange::new(0, 1),
+        });
+        if b.len() >= 2 {
+            fields.push(crate::layout::FieldLayout {
+                name: "channel",
+                range: crate::layout::ByteRange::new(1, 2),
+            });
+        }
+        if b.len() >= 4 {
+            fields.push(crate::layout::FieldLayout {
+                name: "body",
+                range: crate::layout::ByteRange::new(4, b.len()),
+            });
+        }
+        return fields;
+    }
     if let Some(first) = b.windows(2).position(|p| p == b"\r\n") {
         fields.push(crate::layout::FieldLayout {
             name: "start_line",

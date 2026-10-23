@@ -758,3 +758,117 @@ fn review_sip_keepalives_across_deliveries_do_not_disable_messages() {
         );
     }
 }
+
+#[test]
+fn review_modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
+    use crate::{
+        codec::Addresses,
+        frame::{Frame, LinkType},
+        packet::Packet,
+        protocol::{
+            application::modbus_tcp::ModbusTcp, builtin, link::Ethernet, network::Ipv4,
+            transport::Tcp,
+        },
+    };
+    let registry = Arc::new(
+        builtin::registry_with(|builder| {
+            builder
+                .bind("tcp", 1502, "modbus_tcp", i32::MAX)
+                .map(|_| ())
+        })
+        .unwrap(),
+    );
+    for handshake in [true, false] {
+        let builder = crate::build::Builder::new(registry.clone());
+        let mut writer = crate::capture_file::Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+        for (server, sequence, flags, payload) in [
+            (false, 100, Tcp::SYN, false),
+            (false, 101, Tcp::ACK, true),
+            (true, 901, Tcp::ACK, true),
+        ] {
+            if !handshake && !payload {
+                continue;
+            }
+            let mut packet = Packet::new();
+            packet.push(Ethernet::default());
+            packet.push(Ipv4 {
+                source: if server { "192.0.2.2" } else { "192.0.2.1" }
+                    .parse()
+                    .unwrap(),
+                destination: if server { "192.0.2.1" } else { "192.0.2.2" }
+                    .parse()
+                    .unwrap(),
+                ..Default::default()
+            });
+            packet.push(Tcp {
+                source_port: if server { 1502 } else { 502 },
+                destination_port: if server { 502 } else { 1502 },
+                sequence,
+                flags,
+                ..Default::default()
+            });
+            if payload {
+                packet.push(if server {
+                    ModbusTcp {
+                        form: "response".into(),
+                        data: Bytes::from_static(b"\0\x2a"),
+                        ..Default::default()
+                    }
+                } else {
+                    ModbusTcp::default()
+                });
+            }
+            let built = builder
+                .build(packet, Addresses::default(), Default::default())
+                .unwrap();
+            writer
+                .write_frame(&Frame::new(UNIX_EPOCH, LinkType::ETHERNET, built.bytes).unwrap())
+                .unwrap();
+        }
+        let capture = writer.into_inner();
+        let mut reader = crate::capture_file::Reader::new(&capture[..]).unwrap();
+        let collector = Collector::new(
+            Limits::default(),
+            registry.clone(),
+            [BuiltinProtocol::ModbusTcp],
+        )
+        .unwrap();
+        let mut events = Vec::new();
+        let outcome =
+            crate::analysis::Session::new(registry.clone(), Default::default(), collector)
+                .run(
+                    &mut reader,
+                    |_| Ok(()),
+                    |event| {
+                        events.push(event);
+                        Ok(())
+                    },
+                )
+                .unwrap();
+        assert_eq!(outcome.summary.complete_messages, 2, "{events:?}");
+        let forms: Vec<_> = events
+            .iter()
+            .map(|event| {
+                let Event::Message(message) = event else {
+                    panic!("unexpected event");
+                };
+                message
+                    .packet
+                    .as_ref()
+                    .unwrap()
+                    .get::<ModbusTcp>()
+                    .unwrap()
+                    .form
+                    .as_str()
+            })
+            .collect();
+        assert_eq!(
+            forms,
+            if handshake {
+                ["request", "response"]
+            } else {
+                ["raw", "raw"]
+            }
+        );
+    }
+}

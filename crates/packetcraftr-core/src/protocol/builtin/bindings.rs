@@ -432,7 +432,12 @@ fn register_messages(builder: &mut crate::registry::Builder) -> Result<(), crate
             )?;
             if protocol.stream_decode() {
                 // Zero continues typed frames; one permits a preserved opaque build tail.
-                builder.bind(protocol.as_str(), 1, "raw", 100)?;
+                builder.bind(
+                    protocol.as_str(),
+                    crate::protocol::message::OPAQUE_TAIL,
+                    "raw",
+                    100,
+                )?;
             }
             for (parent, ports) in [
                 (BuiltinProtocol::Tcp, info.tcp_ports),

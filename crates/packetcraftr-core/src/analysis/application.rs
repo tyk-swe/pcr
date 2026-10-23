@@ -49,6 +49,8 @@ pub enum Error {
     Limit { field: &'static str, limit: usize },
     #[error("application stream lacks physical source evidence at frame {number}")]
     Sources { number: u64 },
+    #[error("{protocol:?} is not a supported TCP message protocol")]
+    Protocol { protocol: String },
     #[error("application event output failed")]
     Output(#[source] crate::error::BoundaryError),
 }
@@ -58,6 +60,11 @@ impl Classified for Error {
             Self::Analysis(source) => source.classification(),
             Self::Provenance(source) => source.classification(),
             Self::Output(source) => source.classification(),
+            Self::Protocol { .. } => Classification::new(
+                "analysis.message_protocol",
+                Kind::Usage,
+                Some("select a protocol with stream_decode support in reference protocols"),
+            ),
             Self::Limit { .. } => Classification::new(
                 "policy.application_limit",
                 Kind::Policy,
@@ -189,19 +196,23 @@ pub(crate) enum Event {
     Gap {
         flow: ScopedFlowKey,
         stream: u64,
+        generation: u64,
     },
     Conflict {
         flow: ScopedFlowKey,
         stream: u64,
+        generation: u64,
     },
     Closed {
         flow: ScopedFlowKey,
         stream: u64,
+        generation: u64,
         reset: bool,
     },
     Evicted {
         flow: ScopedFlowKey,
         stream: u64,
+        generation: u64,
     },
 }
 #[derive(Clone)]
@@ -231,6 +242,10 @@ pub(crate) struct TcpSources {
     pub(crate) scopes: std::collections::BTreeMap<u32, Definition>,
 }
 impl TcpSources {
+    pub(crate) fn generation(&self, stream: u64) -> Option<u64> {
+        self.generations.get(&stream).copied()
+    }
+
     pub(crate) fn new(ports: Vec<u16>, limits: Limits) -> Self {
         Self {
             ports,
@@ -246,7 +261,18 @@ impl TcpSources {
     }
     pub(crate) fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, Error> {
         let mut output = Vec::new();
+        let previous_generation = record.tcp.and_then(|view| view.conversation).map(|c| {
+            (
+                c.index,
+                self.generations.get(&c.index).copied().unwrap_or(0),
+            )
+        });
         let mut incoming = self.admit(record, &mut output)?;
+        let previous_generation = previous_generation.filter(|(stream, generation)| {
+            self.generations
+                .get(stream)
+                .is_some_and(|current| current != generation)
+        });
         if let Some(incoming) = incoming.take_if(|incoming| incoming.after.is_none()) {
             self.insert(incoming.flow, incoming.span)?;
         }
@@ -271,7 +297,7 @@ impl TcpSources {
                 {
                     self.forget_spans(flow);
                 }
-                _ => self.event(event, record.number, &mut output)?,
+                _ => self.event(event, record.number, previous_generation, &mut output)?,
             }
             if let Some(incoming) = incoming.take_if(|incoming| incoming.after == Some(index)) {
                 self.insert(incoming.flow, incoming.span)?;
@@ -327,6 +353,7 @@ impl TcpSources {
                 output.push(Event::Evicted {
                     flow: flow.clone(),
                     stream: conversation.index,
+                    generation: self.generations[&conversation.index] - 1,
                 });
             }
         }
@@ -368,7 +395,7 @@ impl TcpSources {
     ) -> Result<Vec<Event>, Error> {
         let mut output = Vec::new();
         for event in events {
-            self.event(event, number, &mut output)?;
+            self.event(event, number, None, &mut output)?;
         }
         Ok(output)
     }
@@ -414,6 +441,7 @@ impl TcpSources {
         &mut self,
         event: &TcpEvent,
         number: u64,
+        previous_generation: Option<(u64, u64)>,
         output: &mut Vec<Event>,
     ) -> Result<(), Error> {
         let flow = match event {
@@ -426,6 +454,10 @@ impl TcpSources {
         let Some(&stream) = self.streams.get(flow) else {
             return Ok(());
         };
+        // A tuple-reuse SYN can evict old bytes before delivering the new generation.
+        let generation = previous_generation
+            .filter(|(previous, _)| *previous == stream)
+            .map_or(self.generations[&stream], |(_, generation)| generation);
         match event {
             TcpEvent::Data {
                 sequence, bytes, ..
@@ -476,12 +508,14 @@ impl TcpSources {
                     output.push(Event::Conflict {
                         flow: flow.clone(),
                         stream,
+                        generation,
                     });
                 }
             }
             TcpEvent::Gap { .. } => output.push(Event::Gap {
                 flow: flow.clone(),
                 stream,
+                generation,
             }),
             TcpEvent::Closed { reset, .. } => {
                 self.closed.insert(flow.clone());
@@ -491,6 +525,7 @@ impl TcpSources {
                 output.push(Event::Closed {
                     flow: flow.clone(),
                     stream,
+                    generation,
                     reset: *reset,
                 });
             }
@@ -499,6 +534,7 @@ impl TcpSources {
                 output.push(Event::Evicted {
                     flow: flow.clone(),
                     stream,
+                    generation,
                 });
             }
         }

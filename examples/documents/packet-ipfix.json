@@ -1,0 +1,227 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 2048
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 63143
+        },
+        "destination": {
+          "type": "ipv4",
+          "value": "192.0.2.2"
+        },
+        "dont_fragment": {
+          "type": "bool",
+          "value": false
+        },
+        "dscp_ecn": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "fragment_offset": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "identification": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "more_fragments": {
+          "type": "bool",
+          "value": false
+        },
+        "options": {
+          "type": "bytes",
+          "value": []
+        },
+        "protocol": {
+          "type": "unsigned",
+          "value": 6
+        },
+        "reserved_flag": {
+          "type": "bool",
+          "value": false
+        },
+        "source": {
+          "type": "ipv4",
+          "value": "192.0.2.1"
+        },
+        "total_length": {
+          "type": "unsigned",
+          "value": 76
+        },
+        "ttl": {
+          "type": "unsigned",
+          "value": 64
+        }
+      }
+    },
+    {
+      "protocol": "tcp",
+      "fields": {
+        "acknowledgment": {
+          "type": "unsigned",
+          "value": 900
+        },
+        "checksum": {
+          "type": "unsigned",
+          "value": 24145
+        },
+        "destination_port": {
+          "type": "unsigned",
+          "value": 4739
+        },
+        "flags": {
+          "type": "unsigned",
+          "value": 24
+        },
+        "options": {
+          "type": "list",
+          "value": []
+        },
+        "reserved_bits": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "sequence": {
+          "type": "unsigned",
+          "value": 100
+        },
+        "source_port": {
+          "type": "unsigned",
+          "value": 40000
+        },
+        "urgent_pointer": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "window": {
+          "type": "unsigned",
+          "value": 65535
+        }
+      }
+    },
+    {
+      "protocol": "ipfix",
+      "fields": {
+        "export_time": {
+          "type": "unsigned",
+          "value": 1700000000
+        },
+        "observation_domain": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "sequence": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "sets": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "id": {
+                  "type": "unsigned",
+                  "value": 2
+                },
+                "padding": {
+                  "type": "bytes",
+                  "value": []
+                },
+                "records": {
+                  "type": "list",
+                  "value": [
+                    {
+                      "type": "object",
+                      "value": {
+                        "fields": {
+                          "type": "list",
+                          "value": [
+                            {
+                              "type": "object",
+                              "value": {
+                                "element_id": {
+                                  "type": "unsigned",
+                                  "value": 8
+                                },
+                                "length": {
+                                  "type": "unsigned",
+                                  "value": 4
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "scope_count": {
+                          "type": "unsigned",
+                          "value": 0
+                        },
+                        "template_id": {
+                          "type": "unsigned",
+                          "value": 256
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "data": {
+                  "type": "bytes",
+                  "value": [
+                    192,
+                    0,
+                    2,
+                    1
+                  ]
+                },
+                "id": {
+                  "type": "unsigned",
+                  "value": 256
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

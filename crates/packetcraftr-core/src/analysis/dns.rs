@@ -290,13 +290,18 @@ impl Collector {
         events: &mut Vec<Event>,
     ) -> Result<(), Error> {
         let issue = match &event {
-            application::Event::Gap { flow, stream } => Some((flow, stream, Status::Gap)),
-            application::Event::Conflict { flow, stream } => Some((flow, stream, Status::Conflict)),
-            application::Event::Evicted { flow, stream } => Some((flow, stream, Status::Evicted)),
+            application::Event::Gap { flow, stream, .. } => Some((flow, stream, Status::Gap)),
+            application::Event::Conflict { flow, stream, .. } => {
+                Some((flow, stream, Status::Conflict))
+            }
+            application::Event::Evicted { flow, stream, .. } => {
+                Some((flow, stream, Status::Evicted))
+            }
             application::Event::Closed {
                 flow,
                 stream,
                 reset: true,
+                ..
             } => Some((flow, stream, Status::Reset)),
             _ => None,
         };

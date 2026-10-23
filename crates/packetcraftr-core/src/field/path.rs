@@ -112,6 +112,9 @@ impl Path {
             .find(|field| field.name == self.root || field.aliases.contains(&self.root.as_str()))?;
         let mut element = false;
         for part in &self.components {
+            if field.kind == field::Kind::Any {
+                return Some(field);
+            }
             match part {
                 Component::Name(name) => {
                     if field.kind != field::Kind::Object

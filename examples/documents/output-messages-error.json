@@ -1,0 +1,13 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "messages",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "cli.error",
+    "kind": "usage",
+    "message": "\"coap\" is not a supported TCP message protocol; see reference protocols",
+    "causes": []
+  },
+  "diagnostics": []
+}

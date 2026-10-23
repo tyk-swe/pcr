@@ -59,7 +59,7 @@ pub(super) fn run(
     let capture = arguments.capture.resolve(format)?;
     let maximum = arguments.template.max_template_packets;
     let axes = arguments.template.parse()?;
-    let registry = packetcraftr_core::protocol::builtin::registry();
+    let registry = arguments.decode.registry()?;
     let session =
         arguments
             .session

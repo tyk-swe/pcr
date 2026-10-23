@@ -1,0 +1,257 @@
+{
+  "source": "Synthetic, independently encoded wire-format examples; no captured user traffic.",
+  "protocols": [
+    {
+      "protocol": "mqtt",
+      "capture": "protocol-mqtt.pcap",
+      "wire_hex": "300400016178",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-mqtt.json"
+    },
+    {
+      "protocol": "coap",
+      "capture": "protocol-coap.pcap",
+      "wire_hex": "40011234b474657374",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-coap.json"
+    },
+    {
+      "protocol": "amqp",
+      "capture": "protocol-amqp.pcap",
+      "wire_hex": "08000000000000ce",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-amqp.json"
+    },
+    {
+      "protocol": "resp",
+      "capture": "protocol-resp.pcap",
+      "wire_hex": "2a320d0a24330d0a4745540d0a24310d0a780d0a",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-resp.json"
+    },
+    {
+      "protocol": "memcached",
+      "capture": "protocol-memcached.pcap",
+      "wire_hex": "800a00000000000000000000000000000000000000000000",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-memcached.json"
+    },
+    {
+      "protocol": "ssdp",
+      "capture": "protocol-ssdp.pcap",
+      "wire_hex": "4d2d534541524348202a20485454502f312e310d0a484f53543a203233392e3235352e3235352e3235303a313930300d0a0d0a",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-ssdp.json"
+    },
+    {
+      "protocol": "eap",
+      "capture": "protocol-eap.pcap",
+      "wire_hex": "0101000a01616c696365",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-eap.json"
+    },
+    {
+      "protocol": "lacp",
+      "capture": "protocol-lacp.pcap",
+      "wire_hex": "0101011480000200000000010001800000013f000000021480000200000000020001800000023f0000000310000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-lacp.json"
+    },
+    {
+      "protocol": "cdp",
+      "capture": "protocol-cdp.pcap",
+      "wire_hex": "02b4bcec0001000a737769746368",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-cdp.json"
+    },
+    {
+      "protocol": "ppp_lcp",
+      "capture": "protocol-ppp_lcp.pcap",
+      "wire_hex": "01010008010405dc",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-ppp_lcp.json"
+    },
+    {
+      "protocol": "ppp_ipcp",
+      "capture": "protocol-ppp_ipcp.pcap",
+      "wire_hex": "0101000a0306c0000201",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-ppp_ipcp.json"
+    },
+    {
+      "protocol": "ppp_ipv6cp",
+      "capture": "protocol-ppp_ipv6cp.pcap",
+      "wire_hex": "0101000e010a0200000000000001",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-ppp_ipv6cp.json"
+    },
+    {
+      "protocol": "bgp",
+      "capture": "protocol-bgp.pcap",
+      "wire_hex": "ffffffffffffffffffffffffffffffff001d0104fc00005ac000020100",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-bgp.json"
+    },
+    {
+      "protocol": "ospfv2",
+      "capture": "protocol-ospfv2.pcap",
+      "wire_hex": "0201002cc0000201000000003a9d00000000000000000000ffffff00000a0201000000280000000000000000",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-ospfv2.json"
+    },
+    {
+      "protocol": "ospfv3",
+      "capture": "protocol-ospfv3.pcap",
+      "wire_hex": "03010024c000020100000000dda000000000000101000013000a00280000000000000000",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-ospfv3.json"
+    },
+    {
+      "protocol": "ripv2",
+      "capture": "protocol-ripv2.pcap",
+      "wire_hex": "0202000000020000c6336400ffffff000000000000000002",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-ripv2.json"
+    },
+    {
+      "protocol": "ripng",
+      "capture": "protocol-ripng.pcap",
+      "wire_hex": "0201000020010db800010000000000000000000000004002",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-ripng.json"
+    },
+    {
+      "protocol": "pim",
+      "capture": "protocol-pim.pcap",
+      "wire_hex": "2000df93000100020069",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-pim.json"
+    },
+    {
+      "protocol": "snmp",
+      "capture": "protocol-snmp.pcap",
+      "wire_hex": "302602010104067075626c6963a019020101020100020100300e300c06082b060102010101000500",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-snmp.json"
+    },
+    {
+      "protocol": "radius",
+      "capture": "protocol-radius.pcap",
+      "wire_hex": "0107001b000000000000000000000000000000000107616c696365",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-radius.json"
+    },
+    {
+      "protocol": "ldap",
+      "capture": "protocol-ldap.pcap",
+      "wire_hex": "300c020101600702010304008000",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-ldap.json"
+    },
+    {
+      "protocol": "netflowv5",
+      "capture": "protocol-netflowv5.pcap",
+      "wire_hex": "00050001000003e86553f100000000000000000100000000c0000201c6336401c00002fe000100020000000a0000032000000064000000c89c4001bb00100600fc00fc0118180000",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-netflowv5.json"
+    },
+    {
+      "protocol": "ipfix",
+      "capture": "protocol-ipfix.pcap",
+      "wire_hex": "000a00246553f10000000000000000010002000c010000010008000401000008c0000201",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-ipfix.json"
+    },
+    {
+      "protocol": "sflow",
+      "capture": "protocol-sflow.pcap",
+      "wire_hex": "0000000500000001c00002010000000000000001000003e80000000100000001000000380000000100000001000000640000006400000000000000010000000200000001000000010000001000000001000000400000000000000000",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-sflow.json"
+    },
+    {
+      "protocol": "sip",
+      "capture": "protocol-sip.pcap",
+      "wire_hex": "4f5054494f4e53207369703a73657276696365205349502f322e300d0a435365713a2031204f5054494f4e530d0a436f6e74656e742d4c656e6774683a20300d0a0d0a",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-sip.json"
+    },
+    {
+      "protocol": "rtsp",
+      "capture": "protocol-rtsp.pcap",
+      "wire_hex": "4f5054494f4e53202a20525453502f312e300d0a435365713a20310d0a436f6e74656e742d4c656e6774683a20300d0a0d0a",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-rtsp.json"
+    },
+    {
+      "protocol": "rtp",
+      "capture": "protocol-rtp.pcap",
+      "wire_hex": "8060000100000001000000010001",
+      "decode_as": "udp.port=5004:rtp",
+      "packet_document": "examples/documents/packet-rtp.json"
+    },
+    {
+      "protocol": "rtcp",
+      "capture": "protocol-rtcp.pcap",
+      "wire_hex": "80c80006000000010000000000000000000000000000000000000000",
+      "decode_as": "udp.port=5005:rtcp",
+      "packet_document": "examples/documents/packet-rtcp.json"
+    },
+    {
+      "protocol": "stun",
+      "capture": "protocol-stun.pcap",
+      "wire_hex": "0101000c2112a442010101010101010101010101002000080001f523e112a643",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-stun.json"
+    },
+    {
+      "protocol": "dtls",
+      "capture": "protocol-dtls.pcap",
+      "wire_hex": "16fefd0000000000000000000c0e0000000000000000000000",
+      "decode_as": "udp.port=5684:dtls",
+      "packet_document": "examples/documents/packet-dtls.json"
+    },
+    {
+      "protocol": "modbus_tcp",
+      "capture": "protocol-modbus_tcp.pcap",
+      "wire_hex": "000100000006010300000002",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-modbus_tcp.json"
+    },
+    {
+      "protocol": "bacnet_ip",
+      "capture": "protocol-bacnet_ip.pcap",
+      "wire_hex": "810a000801001008",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-bacnet_ip.json"
+    },
+    {
+      "protocol": "dnp3",
+      "capture": "protocol-dnp3.pcap",
+      "wire_hex": "056405c001000004e921",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-dnp3.json"
+    },
+    {
+      "protocol": "ethernet_ip",
+      "capture": "protocol-ethernet_ip.pcap",
+      "wire_hex": "65000400000000000000000000000000000000000000000001000000",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-ethernet_ip.json"
+    },
+    {
+      "protocol": "iec104",
+      "capture": "protocol-iec104.pcap",
+      "wire_hex": "680407000000",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-iec104.json"
+    },
+    {
+      "protocol": "opcua_tcp",
+      "capture": "protocol-opcua_tcp.pcap",
+      "wire_hex": "48454c46380000000000000000200000002000000000000000000000180000006f70632e7463703a2f2f6c6f63616c686f73743a34383430",
+      "decode_as": null,
+      "packet_document": "examples/documents/packet-opcua_tcp.json"
+    }
+  ]
+}

@@ -24,3 +24,12 @@ pub use stp::Stp;
 pub(crate) use stp::StpCodec;
 pub use vlan::{Vlan, Vlan8021ad};
 pub(crate) use vlan::{Vlan8021adCodec, VlanCodec};
+
+pub mod eap;
+pub(crate) use eap::EapCodec;
+
+pub mod lacp;
+pub(crate) use lacp::LacpCodec;
+
+pub mod cdp;
+pub(crate) use cdp::CdpCodec;

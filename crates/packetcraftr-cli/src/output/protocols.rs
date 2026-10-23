@@ -32,6 +32,8 @@ pub enum Kind {
     List,
     #[serde(rename = "object")]
     Object,
+    #[serde(rename = "any")]
+    Any,
 }
 
 impl Kind {
@@ -48,6 +50,7 @@ impl Kind {
             Self::Mac => "mac",
             Self::List => "list",
             Self::Object => "object",
+            Self::Any => "any",
         }
     }
 }
@@ -73,6 +76,7 @@ impl TryFrom<field::Kind> for Kind {
             field::Kind::Mac => Self::Mac,
             field::Kind::List => Self::List,
             field::Kind::Object => Self::Object,
+            field::Kind::Any => Self::Any,
             _ => {
                 return Err(Error::Unpublished {
                     value: "protocol field kind",
@@ -91,6 +95,10 @@ pub struct Summary {
     pub exact_round_trip: bool,
     pub matcher: bool,
     pub decode_only: bool,
+    pub transports: Vec<String>,
+    pub stream_decode: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<String>,
 }
 
 impl From<BuiltinProtocol> for Summary {
@@ -107,6 +115,13 @@ impl From<BuiltinProtocol> for Summary {
             exact_round_trip: protocol.exact_round_trip(),
             matcher: protocol.has_matcher(),
             decode_only: !protocol.is_constructible(),
+            transports: [BuiltinProtocol::Tcp, BuiltinProtocol::Udp]
+                .into_iter()
+                .filter(|parent| protocol.supports_transport(*parent))
+                .map(|parent| parent.as_str().to_owned())
+                .collect(),
+            stream_decode: protocol.stream_decode(),
+            coverage: protocol.message_protocol().map(|p| p.coverage.to_owned()),
         }
     }
 }

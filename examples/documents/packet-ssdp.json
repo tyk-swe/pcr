@@ -1,0 +1,188 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 2048
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 63129
+        },
+        "destination": {
+          "type": "ipv4",
+          "value": "192.0.2.2"
+        },
+        "dont_fragment": {
+          "type": "bool",
+          "value": false
+        },
+        "dscp_ecn": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "fragment_offset": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "identification": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "more_fragments": {
+          "type": "bool",
+          "value": false
+        },
+        "options": {
+          "type": "bytes",
+          "value": []
+        },
+        "protocol": {
+          "type": "unsigned",
+          "value": 17
+        },
+        "reserved_flag": {
+          "type": "bool",
+          "value": false
+        },
+        "source": {
+          "type": "ipv4",
+          "value": "192.0.2.1"
+        },
+        "total_length": {
+          "type": "unsigned",
+          "value": 79
+        },
+        "ttl": {
+          "type": "unsigned",
+          "value": 64
+        }
+      }
+    },
+    {
+      "protocol": "udp",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 34971
+        },
+        "destination_port": {
+          "type": "unsigned",
+          "value": 1900
+        },
+        "length": {
+          "type": "unsigned",
+          "value": 59
+        },
+        "source_port": {
+          "type": "unsigned",
+          "value": 40000
+        }
+      }
+    },
+    {
+      "protocol": "ssdp",
+      "fields": {
+        "headers": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "name": {
+                  "type": "bytes",
+                  "value": [
+                    72,
+                    79,
+                    83,
+                    84
+                  ]
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    32,
+                    50,
+                    51,
+                    57,
+                    46,
+                    50,
+                    53,
+                    53,
+                    46,
+                    50,
+                    53,
+                    53,
+                    46,
+                    50,
+                    53,
+                    48,
+                    58,
+                    49,
+                    57,
+                    48,
+                    48
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "start_line": {
+          "type": "bytes",
+          "value": [
+            77,
+            45,
+            83,
+            69,
+            65,
+            82,
+            67,
+            72,
+            32,
+            42,
+            32,
+            72,
+            84,
+            84,
+            80,
+            47,
+            49,
+            46,
+            49
+          ]
+        }
+      }
+    }
+  ]
+}

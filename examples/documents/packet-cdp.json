@@ -1,0 +1,110 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 22
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "llc",
+      "fields": {
+        "control": {
+          "type": "bytes",
+          "value": [
+            3
+          ]
+        },
+        "dsap": {
+          "type": "unsigned",
+          "value": 170
+        },
+        "ssap": {
+          "type": "unsigned",
+          "value": 170
+        }
+      }
+    },
+    {
+      "protocol": "snap",
+      "fields": {
+        "oui": {
+          "type": "unsigned",
+          "value": 12
+        },
+        "protocol_id": {
+          "type": "unsigned",
+          "value": 8192
+        }
+      }
+    },
+    {
+      "protocol": "cdp",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 48364
+        },
+        "tlvs": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "kind": {
+                  "type": "unsigned",
+                  "value": 1
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    115,
+                    119,
+                    105,
+                    116,
+                    99,
+                    104
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "ttl": {
+          "type": "unsigned",
+          "value": 180
+        },
+        "version": {
+          "type": "unsigned",
+          "value": 2
+        }
+      }
+    }
+  ]
+}

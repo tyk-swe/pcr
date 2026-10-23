@@ -1,0 +1,166 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 2048
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 63166
+        },
+        "destination": {
+          "type": "ipv4",
+          "value": "192.0.2.2"
+        },
+        "dont_fragment": {
+          "type": "bool",
+          "value": false
+        },
+        "dscp_ecn": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "fragment_offset": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "identification": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "more_fragments": {
+          "type": "bool",
+          "value": false
+        },
+        "options": {
+          "type": "bytes",
+          "value": []
+        },
+        "protocol": {
+          "type": "unsigned",
+          "value": 17
+        },
+        "reserved_flag": {
+          "type": "bool",
+          "value": false
+        },
+        "source": {
+          "type": "ipv4",
+          "value": "192.0.2.1"
+        },
+        "total_length": {
+          "type": "unsigned",
+          "value": 42
+        },
+        "ttl": {
+          "type": "unsigned",
+          "value": 64
+        }
+      }
+    },
+    {
+      "protocol": "udp",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 19341
+        },
+        "destination_port": {
+          "type": "unsigned",
+          "value": 5004
+        },
+        "length": {
+          "type": "unsigned",
+          "value": 22
+        },
+        "source_port": {
+          "type": "unsigned",
+          "value": 40000
+        }
+      }
+    },
+    {
+      "protocol": "rtp",
+      "fields": {
+        "csrcs": {
+          "type": "list",
+          "value": []
+        },
+        "extension_data": {
+          "type": "bytes",
+          "value": []
+        },
+        "extension_profile": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "has_extension": {
+          "type": "bool",
+          "value": false
+        },
+        "marker": {
+          "type": "bool",
+          "value": false
+        },
+        "padding": {
+          "type": "bytes",
+          "value": []
+        },
+        "payload": {
+          "type": "bytes",
+          "value": [
+            0,
+            1
+          ]
+        },
+        "payload_type": {
+          "type": "unsigned",
+          "value": 96
+        },
+        "sequence": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "ssrc": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "timestamp": {
+          "type": "unsigned",
+          "value": 1
+        }
+      }
+    }
+  ]
+}

@@ -278,6 +278,9 @@ commands! {
     /// Compare ingress and egress captures under explicit identity rules.
     #[command(after_long_help = analyze::verify_forwarding::arguments::AFTER_LONG_HELP)]
     VerifyForwarding(analyze::verify_forwarding::arguments::Args) = "verify-forwarding" => ("analyze", "verify-forwarding", 15),
+    /// Decode protocol messages over reassembled TCP streams.
+    #[command(after_long_help = analyze::messages::AFTER_LONG_HELP)]
+    Messages(analyze::messages::Args) = "messages" => ("analyze", "messages", 38),
     /// Generate shell completions and man pages under a directory.
     #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all grouped paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
     Documentation(reference::documentation::Args) => ("reference", "documentation", 30),

@@ -50,8 +50,21 @@ pub(super) fn register(
             (BuiltinProtocol::Dns, 0, BuiltinProtocol::Raw, 0),
             (BuiltinProtocol::Arp, 0, BuiltinProtocol::Padding, 0),
             (BuiltinProtocol::Eapol, 0, BuiltinProtocol::Raw, 0),
+            (BuiltinProtocol::Eapol, 256, BuiltinProtocol::Eap, 100),
+            (BuiltinProtocol::Ah, 345, BuiltinProtocol::Ospfv3, 100),
+            (BuiltinProtocol::Snap, 0x000c2000, BuiltinProtocol::Cdp, 100),
+            (BuiltinProtocol::Ppp, 0xc021, BuiltinProtocol::PppLcp, 100),
+            (BuiltinProtocol::Ppp, 0x8021, BuiltinProtocol::PppIpcp, 100),
+            (
+                BuiltinProtocol::Ppp,
+                0x8057,
+                BuiltinProtocol::PppIpv6cp,
+                100,
+            ),
+            (BuiltinProtocol::Ppp, 0xc227, BuiltinProtocol::Eap, 100),
         ],
     )?;
+    register_messages(builder)?;
     register_tls(builder)?;
     super::filter_fields::register_filter_fields(builder)
 }
@@ -289,6 +302,7 @@ fn bind_common_ip_children(
                 100,
             ),
             (112, BuiltinProtocol::Vrrp, 100),
+            (103, BuiltinProtocol::Pim, 100),
             (115, BuiltinProtocol::L2tpv3, 100),
             (132, BuiltinProtocol::Sctp, 100),
             (
@@ -316,6 +330,7 @@ fn bind_ipv6_children(
         parent,
         &[
             (58, BuiltinProtocol::Icmpv6, 100),
+            (89, BuiltinProtocol::Ospfv3, 100),
             (59, BuiltinProtocol::Malformed, 100),
         ],
     )
@@ -357,6 +372,7 @@ fn bind_link_children(
             (0x888e, BuiltinProtocol::Eapol, 100),
             (0x88a8, BuiltinProtocol::Vlan8021ad, 100),
             (0x88cc, BuiltinProtocol::Lldp, 100),
+            (0x8809, BuiltinProtocol::Lacp, 100),
             (0x86dd, BuiltinProtocol::Ipv6, 100),
             (0, BuiltinProtocol::Raw, -100),
         ],
@@ -375,6 +391,7 @@ fn bind_ip_children(
         &[
             (icmp_number, BuiltinProtocol::Icmpv4, 100),
             (2, BuiltinProtocol::Igmp, 100),
+            (89, BuiltinProtocol::Ospfv2, 100),
         ],
     )
 }
@@ -396,6 +413,41 @@ fn bind_all(
 ) -> Result<(), crate::registry::Error> {
     for &(parent, discriminator, child, priority) in bindings {
         builder.bind(parent.as_str(), discriminator, child.as_str(), priority)?;
+    }
+    Ok(())
+}
+
+fn register_messages(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
+    for protocol in BuiltinProtocol::ALL {
+        if let Some(info) = protocol.message_protocol() {
+            builder.bind(
+                protocol.as_str(),
+                0,
+                if protocol.stream_decode() {
+                    protocol.as_str()
+                } else {
+                    "raw"
+                },
+                100,
+            )?;
+            if protocol.stream_decode() {
+                // Zero continues typed frames; one permits a preserved opaque build tail.
+                builder.bind(
+                    protocol.as_str(),
+                    crate::protocol::message::OPAQUE_TAIL,
+                    "raw",
+                    100,
+                )?;
+            }
+            for (parent, ports) in [
+                (BuiltinProtocol::Tcp, info.tcp_ports),
+                (BuiltinProtocol::Udp, info.udp_ports),
+            ] {
+                for &port in ports {
+                    builder.bind(parent.as_str(), u64::from(port), protocol.as_str(), 100)?;
+                }
+            }
+        }
     }
     Ok(())
 }

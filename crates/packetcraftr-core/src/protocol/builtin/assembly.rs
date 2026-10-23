@@ -31,6 +31,7 @@ use application::{
 };
 
 use super::bindings;
+use application::{AmqpCodec, CoapCodec, MemcachedCodec, MqttCodec, RespCodec, SsdpCodec};
 
 fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
     macro_rules! register_matcher {
@@ -133,3 +134,63 @@ pub fn registry_with_tls_ports(
 ) -> Result<crate::registry::Registry, crate::registry::Error> {
     registry_with(|builder| bindings::bind_tls_ports(builder, ports))
 }
+
+use crate::protocol::link::EapCodec;
+
+use crate::protocol::link::LacpCodec;
+
+use crate::protocol::link::CdpCodec;
+
+use crate::protocol::tunnel::PppLcpCodec;
+
+use crate::protocol::tunnel::PppIpcpCodec;
+
+use crate::protocol::tunnel::PppIpv6cpCodec;
+
+use crate::protocol::application::BgpCodec;
+
+use crate::protocol::network::Ospfv2Codec;
+
+use crate::protocol::network::Ospfv3Codec;
+
+use crate::protocol::network::Ripv2Codec;
+
+use crate::protocol::network::RipngCodec;
+
+use crate::protocol::network::PimCodec;
+
+use crate::protocol::application::RadiusCodec;
+
+use crate::protocol::application::SnmpCodec;
+
+use crate::protocol::application::LdapCodec;
+
+use crate::protocol::application::Netflowv5Codec;
+
+use crate::protocol::application::IpfixCodec;
+
+use crate::protocol::application::SflowCodec;
+
+use crate::protocol::application::SipCodec;
+
+use crate::protocol::application::RtspCodec;
+
+use crate::protocol::application::RtpCodec;
+
+use crate::protocol::application::RtcpCodec;
+
+use crate::protocol::application::StunCodec;
+
+use crate::protocol::application::DtlsCodec;
+
+use crate::protocol::application::ModbusTcpCodec;
+
+use crate::protocol::application::BacnetIpCodec;
+
+use crate::protocol::application::Dnp3Codec;
+
+use crate::protocol::application::EthernetIpCodec;
+
+use crate::protocol::application::Iec104Codec;
+
+use crate::protocol::application::OpcuaTcpCodec;

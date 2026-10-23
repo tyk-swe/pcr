@@ -308,6 +308,41 @@ impl ReflectiveField for i8 {
         Ok(())
     }
 }
+impl ReflectiveField for i32 {
+    fn reflective_value(&self) -> field::Value {
+        field::Value::Signed(i64::from(*self))
+    }
+
+    fn set_reflective_value(&mut self, value: field::Value) -> Result<(), Refusal> {
+        let value = match value {
+            field::Value::Signed(value) => value,
+            field::Value::Unsigned(value) => {
+                i64::try_from(value).map_err(|_| Refusal::OutOfRange)?
+            }
+            _ => return Err(Refusal::WrongType("signed")),
+        };
+        *self = Self::try_from(value).map_err(|_| Refusal::OutOfRange)?;
+        Ok(())
+    }
+}
+
+impl ReflectiveField for i64 {
+    fn reflective_value(&self) -> field::Value {
+        field::Value::Signed(*self)
+    }
+
+    fn set_reflective_value(&mut self, value: field::Value) -> Result<(), Refusal> {
+        let value = match value {
+            field::Value::Signed(value) => value,
+            field::Value::Unsigned(value) => {
+                Self::try_from(value).map_err(|_| Refusal::OutOfRange)?
+            }
+            _ => return Err(Refusal::WrongType("signed")),
+        };
+        *self = value;
+        Ok(())
+    }
+}
 
 impl ReflectiveField for bool {
     fn reflective_value(&self) -> field::Value {

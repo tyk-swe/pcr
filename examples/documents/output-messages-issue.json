@@ -1,0 +1,23 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "messages",
+  "mode": "stream",
+  "sequence": 0,
+  "event": "protocol_issue",
+  "status": "success",
+  "result": {
+    "number": 3,
+    "flow": {
+      "scope": 0,
+      "flow": {
+        "source": "192.0.2.1",
+        "source_port": 40000,
+        "destination": "192.0.2.2",
+        "destination_port": 1883
+      }
+    },
+    "stream": 0,
+    "status": "reset"
+  },
+  "diagnostics": []
+}

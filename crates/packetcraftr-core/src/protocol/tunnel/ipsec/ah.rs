@@ -30,10 +30,14 @@ fn ah_family_mismatch(under_ipv6: Option<bool>, child: Option<BuiltinProtocol>) 
     };
     match under_ipv6 {
         Some(false) => {
-            child == BuiltinProtocol::Icmpv6
+            child == BuiltinProtocol::Ospfv3
+                || child == BuiltinProtocol::Icmpv6
                 || (child.is_ipv6_extension() && child != BuiltinProtocol::Ah)
         }
-        Some(true) => matches!(child, BuiltinProtocol::Icmpv4 | BuiltinProtocol::Igmp),
+        Some(true) => matches!(
+            child,
+            BuiltinProtocol::Icmpv4 | BuiltinProtocol::Igmp | BuiltinProtocol::Ospfv2
+        ),
         None => false,
     }
 }
@@ -119,25 +123,32 @@ impl Codec for AhCodec {
             NAME,
             "next_header",
             &layer.next_header,
-            expected_discriminator(
-                NAME,
-                context,
-                ip_protocol::NO_NEXT_HEADER,
-                &layer.next_header,
-            ),
+            if context
+                .child
+                .is_some_and(<dyn Layer>::is::<crate::protocol::network::ospfv3::Ospfv3>)
+            {
+                ValueExpectation::Required(89)
+            } else {
+                expected_discriminator(
+                    NAME,
+                    context,
+                    ip_protocol::NO_NEXT_HEADER,
+                    &layer.next_header,
+                )
+            },
             context.mode,
             &mut diagnostics,
         )?;
         let selects_cross_family = context
             .registry
-            .child_for(NAME, Discriminator(u64::from(next_header)))
+            .child_for(NAME, Discriminator(ah_selector(next_header, under_ipv6)))
             .is_some_and(|selected| {
                 ah_family_mismatch(under_ipv6, BuiltinProtocol::from_id(selected))
             });
         if !selects_cross_family {
             validate_raw_child_discriminator(
                 NAME,
-                u64::from(next_header),
+                ah_selector(next_header, under_ipv6),
                 context,
                 &mut diagnostics,
             )?;
@@ -208,7 +219,7 @@ impl Codec for AhCodec {
         }
         let cross_family = context
             .registry
-            .child_for(NAME, Discriminator(u64::from(next_header)))
+            .child_for(NAME, Discriminator(ah_selector(next_header, under_ipv6)))
             .is_some_and(|selected| {
                 ah_family_mismatch(under_ipv6, BuiltinProtocol::from_id(selected))
             });
@@ -237,7 +248,7 @@ impl Codec for AhCodec {
             next: if cross_family {
                 Vec::new()
             } else {
-                vec![Discriminator(u64::from(next_header))]
+                vec![Discriminator(ah_selector(next_header, under_ipv6))]
             },
             diagnostics,
             stop: payload_len == 0,
@@ -316,4 +327,12 @@ fn validate_context(
         )?;
     }
     Ok((under_ipv6, diagnostics))
+}
+
+fn ah_selector(next_header: u8, ipv6: Option<bool>) -> u64 {
+    if next_header == 89 && ipv6 == Some(true) {
+        256 + 89
+    } else {
+        u64::from(next_header)
+    }
 }

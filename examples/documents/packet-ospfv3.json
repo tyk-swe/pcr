@@ -1,0 +1,159 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 34525
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "ipv6",
+      "fields": {
+        "destination": {
+          "type": "ipv6",
+          "value": "2001:db8::2"
+        },
+        "flow_label": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "hop_limit": {
+          "type": "unsigned",
+          "value": 64
+        },
+        "next_header": {
+          "type": "unsigned",
+          "value": 89
+        },
+        "payload_length": {
+          "type": "unsigned",
+          "value": 36
+        },
+        "source": {
+          "type": "ipv6",
+          "value": "2001:db8::1"
+        },
+        "traffic_class": {
+          "type": "unsigned",
+          "value": 0
+        }
+      }
+    },
+    {
+      "protocol": "ospfv3",
+      "fields": {
+        "area_id": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "auth_data": {
+          "type": "bytes",
+          "value": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "auth_type": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "backup_router": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "checksum": {
+          "type": "unsigned",
+          "value": 56736
+        },
+        "data": {
+          "type": "bytes",
+          "value": []
+        },
+        "dead_interval": {
+          "type": "unsigned",
+          "value": 40
+        },
+        "designated_router": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "hello_interval": {
+          "type": "unsigned",
+          "value": 10
+        },
+        "instance_id": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "interface_id": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "lsas": {
+          "type": "list",
+          "value": []
+        },
+        "neighbors": {
+          "type": "list",
+          "value": []
+        },
+        "network_mask": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "options": {
+          "type": "unsigned",
+          "value": 19
+        },
+        "packet_type": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "priority": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "reserved": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "router_id": {
+          "type": "unsigned",
+          "value": 3221225985
+        }
+      }
+    }
+  ]
+}

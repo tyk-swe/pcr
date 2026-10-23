@@ -1,0 +1,236 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 2048
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 63123
+        },
+        "destination": {
+          "type": "ipv4",
+          "value": "192.0.2.2"
+        },
+        "dont_fragment": {
+          "type": "bool",
+          "value": false
+        },
+        "dscp_ecn": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "fragment_offset": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "identification": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "more_fragments": {
+          "type": "bool",
+          "value": false
+        },
+        "options": {
+          "type": "bytes",
+          "value": []
+        },
+        "protocol": {
+          "type": "unsigned",
+          "value": 6
+        },
+        "reserved_flag": {
+          "type": "bool",
+          "value": false
+        },
+        "source": {
+          "type": "ipv4",
+          "value": "192.0.2.1"
+        },
+        "total_length": {
+          "type": "unsigned",
+          "value": 96
+        },
+        "ttl": {
+          "type": "unsigned",
+          "value": 64
+        }
+      }
+    },
+    {
+      "protocol": "tcp",
+      "fields": {
+        "acknowledgment": {
+          "type": "unsigned",
+          "value": 900
+        },
+        "checksum": {
+          "type": "unsigned",
+          "value": 9465
+        },
+        "destination_port": {
+          "type": "unsigned",
+          "value": 4840
+        },
+        "flags": {
+          "type": "unsigned",
+          "value": 24
+        },
+        "options": {
+          "type": "list",
+          "value": []
+        },
+        "reserved_bits": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "sequence": {
+          "type": "unsigned",
+          "value": 100
+        },
+        "source_port": {
+          "type": "unsigned",
+          "value": 40000
+        },
+        "urgent_pointer": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "window": {
+          "type": "unsigned",
+          "value": 65535
+        }
+      }
+    },
+    {
+      "protocol": "opcua_tcp",
+      "fields": {
+        "chunk_type": {
+          "type": "unsigned",
+          "value": 70
+        },
+        "data": {
+          "type": "bytes",
+          "value": []
+        },
+        "endpoint_null": {
+          "type": "bool",
+          "value": false
+        },
+        "endpoint_url": {
+          "type": "bytes",
+          "value": [
+            111,
+            112,
+            99,
+            46,
+            116,
+            99,
+            112,
+            58,
+            47,
+            47,
+            108,
+            111,
+            99,
+            97,
+            108,
+            104,
+            111,
+            115,
+            116,
+            58,
+            52,
+            56,
+            52,
+            48
+          ]
+        },
+        "max_chunk_count": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "max_message_size": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "message_type": {
+          "type": "bytes",
+          "value": [
+            72,
+            69,
+            76
+          ]
+        },
+        "protocol_version": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "reason": {
+          "type": "bytes",
+          "value": []
+        },
+        "reason_null": {
+          "type": "bool",
+          "value": false
+        },
+        "receive_buffer": {
+          "type": "unsigned",
+          "value": 8192
+        },
+        "secure_channel": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "send_buffer": {
+          "type": "unsigned",
+          "value": 8192
+        },
+        "server_uri": {
+          "type": "bytes",
+          "value": []
+        },
+        "server_uri_null": {
+          "type": "bool",
+          "value": false
+        },
+        "status_code": {
+          "type": "unsigned",
+          "value": 0
+        }
+      }
+    }
+  ]
+}

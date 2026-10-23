@@ -1,0 +1,237 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 2048
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 63108
+        },
+        "destination": {
+          "type": "ipv4",
+          "value": "192.0.2.2"
+        },
+        "dont_fragment": {
+          "type": "bool",
+          "value": false
+        },
+        "dscp_ecn": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "fragment_offset": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "identification": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "more_fragments": {
+          "type": "bool",
+          "value": false
+        },
+        "options": {
+          "type": "bytes",
+          "value": []
+        },
+        "protocol": {
+          "type": "unsigned",
+          "value": 17
+        },
+        "reserved_flag": {
+          "type": "bool",
+          "value": false
+        },
+        "source": {
+          "type": "ipv4",
+          "value": "192.0.2.1"
+        },
+        "total_length": {
+          "type": "unsigned",
+          "value": 100
+        },
+        "ttl": {
+          "type": "unsigned",
+          "value": 64
+        }
+      }
+    },
+    {
+      "protocol": "udp",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 5386
+        },
+        "destination_port": {
+          "type": "unsigned",
+          "value": 2055
+        },
+        "length": {
+          "type": "unsigned",
+          "value": 80
+        },
+        "source_port": {
+          "type": "unsigned",
+          "value": 40000
+        }
+      }
+    },
+    {
+      "protocol": "netflowv5",
+      "fields": {
+        "engine_id": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "engine_type": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "records": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "destination": {
+                  "type": "ipv4",
+                  "value": "198.51.100.1"
+                },
+                "destination_as": {
+                  "type": "unsigned",
+                  "value": 64513
+                },
+                "destination_mask": {
+                  "type": "unsigned",
+                  "value": 24
+                },
+                "destination_port": {
+                  "type": "unsigned",
+                  "value": 443
+                },
+                "first": {
+                  "type": "unsigned",
+                  "value": 100
+                },
+                "input": {
+                  "type": "unsigned",
+                  "value": 1
+                },
+                "last": {
+                  "type": "unsigned",
+                  "value": 200
+                },
+                "next_hop": {
+                  "type": "ipv4",
+                  "value": "192.0.2.254"
+                },
+                "octets": {
+                  "type": "unsigned",
+                  "value": 800
+                },
+                "output": {
+                  "type": "unsigned",
+                  "value": 2
+                },
+                "packets": {
+                  "type": "unsigned",
+                  "value": 10
+                },
+                "pad1": {
+                  "type": "unsigned",
+                  "value": 0
+                },
+                "pad2": {
+                  "type": "unsigned",
+                  "value": 0
+                },
+                "protocol": {
+                  "type": "unsigned",
+                  "value": 6
+                },
+                "source": {
+                  "type": "ipv4",
+                  "value": "192.0.2.1"
+                },
+                "source_as": {
+                  "type": "unsigned",
+                  "value": 64512
+                },
+                "source_mask": {
+                  "type": "unsigned",
+                  "value": 24
+                },
+                "source_port": {
+                  "type": "unsigned",
+                  "value": 40000
+                },
+                "tcp_flags": {
+                  "type": "unsigned",
+                  "value": 16
+                },
+                "tos": {
+                  "type": "unsigned",
+                  "value": 0
+                }
+              }
+            }
+          ]
+        },
+        "sampling": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "sequence": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "unix_nanoseconds": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "unix_seconds": {
+          "type": "unsigned",
+          "value": 1700000000
+        },
+        "uptime": {
+          "type": "unsigned",
+          "value": 1000
+        }
+      }
+    }
+  ]
+}

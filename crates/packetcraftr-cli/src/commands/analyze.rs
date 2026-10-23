@@ -14,3 +14,5 @@ pub(in crate::commands) mod security;
 pub(in crate::commands) mod stats;
 pub(in crate::commands) mod tls;
 pub(in crate::commands) mod verify_forwarding;
+
+pub(in crate::commands) mod messages;

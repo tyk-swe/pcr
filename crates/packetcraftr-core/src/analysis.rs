@@ -15,6 +15,7 @@ pub mod follow;
 pub mod forwarding;
 pub mod http;
 pub mod http2;
+pub mod messages;
 mod pipeline;
 pub mod provenance;
 pub mod reassembly;

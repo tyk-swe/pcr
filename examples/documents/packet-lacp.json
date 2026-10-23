@@ -1,0 +1,180 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "ether_type": {
+          "type": "unsigned",
+          "value": 34825
+        },
+        "source": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "protocol": "lacp",
+      "fields": {
+        "actor_key": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "actor_port": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "actor_port_priority": {
+          "type": "unsigned",
+          "value": 32768
+        },
+        "actor_state": {
+          "type": "unsigned",
+          "value": 63
+        },
+        "actor_system": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        },
+        "actor_system_priority": {
+          "type": "unsigned",
+          "value": 32768
+        },
+        "collector_delay": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "partner_key": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "partner_port": {
+          "type": "unsigned",
+          "value": 2
+        },
+        "partner_port_priority": {
+          "type": "unsigned",
+          "value": 32768
+        },
+        "partner_state": {
+          "type": "unsigned",
+          "value": 63
+        },
+        "partner_system": {
+          "type": "mac",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "partner_system_priority": {
+          "type": "unsigned",
+          "value": 32768
+        },
+        "reserved": {
+          "type": "bytes",
+          "value": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    }
+  ]
+}

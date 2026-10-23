@@ -112,26 +112,7 @@ impl Framer {
                         return Ok(None);
                     };
                     let end = start + offset + 4;
-                    let head = std::str::from_utf8(&b[..end])
-                        .map_err(|_| invalid(n, "header is not ASCII/UTF-8"))?;
-                    let mut length = None;
-                    for line in head.split("\r\n").skip(1).filter(|l| !l.is_empty()) {
-                        let (key, value) = line
-                            .split_once(':')
-                            .ok_or_else(|| invalid(n, "header lacks colon"))?;
-                        if key.eq_ignore_ascii_case("content-length")
-                            || (n == "sip" && key.eq_ignore_ascii_case("l"))
-                        {
-                            let value = value
-                                .trim()
-                                .parse::<usize>()
-                                .map_err(|_| invalid(n, "invalid Content-Length"))?;
-                            if length.is_some_and(|previous| previous != value) {
-                                return Err(invalid(n, "conflicting Content-Length"));
-                            }
-                            length = Some(value);
-                        }
-                    }
+                    let length = super::application::text_message::content_length(n, &b[..end])?;
                     // SIP stream messages require an explicit length. RTSP bodies default to empty.
                     if n == "sip" && length.is_none() {
                         return Err(invalid(n, "SIP over TCP requires Content-Length"));

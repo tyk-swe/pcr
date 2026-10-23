@@ -239,8 +239,16 @@ macro_rules! message_codec {
                     ));
                 }
                 let layer = crate::protocol::common::typed_layer::<$ty>(name, layer)?;
-                let bytes = layer.encode_wire(context)?;
+                let mut bytes = layer.encode_wire(context)?;
                 crate::protocol::common::ensure_encode_budget(name, bytes.len(), context)?;
+                let prefix_len = bytes.len();
+                // Peek at the suffix: framing must stop at this layer's prefix.
+                if let Some(&next) = payload.first() {
+                    bytes
+                        .try_reserve(1)
+                        .map_err(|_| crate::protocol::common::invalid(name, "allocation failed"))?;
+                    bytes.push(next);
+                }
                 let decoded_context = crate::codec::DecodeContext {
                     parent: context
                         .index
@@ -256,14 +264,18 @@ macro_rules! message_codec {
                 let validated =
                     crate::protocol::framing::packet_length(name, &bytes, decoded_context.parent)
                         .and_then(|length| {
-                            if length != bytes.len() {
+                            if length != prefix_len {
                                 return Err(crate::protocol::common::invalid(
                                     name,
                                     "encoded message does not match its framing length",
                                 ));
                             }
-                            $ty::parse_wire(bytes::Bytes::copy_from_slice(&bytes), &decoded_context)
+                            $ty::parse_wire(
+                                bytes::Bytes::copy_from_slice(&bytes[..prefix_len]),
+                                &decoded_context,
+                            )
                         });
+                bytes.truncate(prefix_len);
                 let materialized = match validated {
                     Ok(layer) => layer,
                     Err(error) if context.mode == crate::codec::Mode::Permissive => {

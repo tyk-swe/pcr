@@ -94,12 +94,12 @@ impl FieldSpec {
         }
     }
 
-    fn declared(schema: &FieldSchema) -> Self {
-        Self {
+    fn declared(schema: &FieldSchema) -> Option<Self> {
+        (schema.kind != field::Kind::Any).then_some(Self {
             kind: schema.kind,
             derived: schema.derived,
             structured: !schema.children.is_empty(),
-        }
+        })
     }
 }
 
@@ -253,7 +253,7 @@ fn specs_for(
                 path: path.to_owned(),
                 protocol: *protocol,
             })?;
-        specs.push(FieldSpec::declared(declared));
+        specs.extend(FieldSpec::declared(declared));
     }
     Ok(specs)
 }
@@ -294,7 +294,7 @@ fn resolve_selection<'a>(
         .parse::<crate::field::Path>()
         .map_err(|_| unknown())?;
     let declared = list.schema(schema).ok_or_else(&unknown)?;
-    if declared.kind != field::Kind::List || before.ends_with(']') {
+    if !matches!(declared.kind, field::Kind::List | field::Kind::Any) || before.ends_with(']') {
         return Err(syntax(format!(
             "`{path}` selects list elements, but `{before}` is not a list"
         )));
@@ -366,7 +366,7 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
                     occurrence,
                 },
                 slice: None,
-                specs: vec![FieldSpec::declared(declared)],
+                specs: FieldSpec::declared(declared).into_iter().collect(),
                 path: path.to_owned(),
             }));
         }
@@ -381,7 +381,7 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
                     occurrence,
                 },
                 slice: None,
-                specs: vec![FieldSpec::declared(declared)],
+                specs: FieldSpec::declared(declared).into_iter().collect(),
                 path: path.to_owned(),
             }));
         }
@@ -394,7 +394,7 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
                 occurrence,
             },
             slice: None,
-            specs: vec![FieldSpec::declared(declared)],
+            specs: FieldSpec::declared(declared).into_iter().collect(),
             path: path.to_owned(),
         }));
     }

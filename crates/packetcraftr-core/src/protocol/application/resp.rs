@@ -10,7 +10,10 @@ use crate::protocol::message::*;
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
-const RESP_FIELDS: &[crate::layer::FieldSchema] = &[member("kind", field::Kind::Text, &[])];
+const RESP_FIELDS: &[crate::layer::FieldSchema] = &[
+    member("kind", field::Kind::Text, &[]),
+    member("data", field::Kind::Any, &[]),
+];
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resp {
     pub value: RespValue,

@@ -430,6 +430,10 @@ fn register_messages(builder: &mut crate::registry::Builder) -> Result<(), crate
                 },
                 100,
             )?;
+            if protocol.stream_decode() {
+                // Zero continues typed frames; one permits a preserved opaque build tail.
+                builder.bind(protocol.as_str(), 1, "raw", 100)?;
+            }
             for (parent, ports) in [
                 (BuiltinProtocol::Tcp, info.tcp_ports),
                 (BuiltinProtocol::Udp, info.udp_ports),

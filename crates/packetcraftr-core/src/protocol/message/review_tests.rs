@@ -455,3 +455,258 @@ fn review_ipfix_and_dtls_nested_fields_support_editing_and_projection() {
         );
     }
 }
+
+#[test]
+fn review_unsupported_stream_tail_survives_strict_rebuild() {
+    let registry = builtin::registry();
+    let builder = crate::build::Builder::new(registry.clone());
+    let mut packet = Packet::new();
+    packet.push(Ethernet::default());
+    packet.push(Ipv4::default());
+    packet.push(Tcp {
+        destination_port: 1883,
+        ..Default::default()
+    });
+    packet.push(crate::layer::Raw::new(Bytes::from_static(b"\xc0\0\xf0\0")));
+    let built = builder
+        .build(packet, Addresses::default(), Default::default())
+        .unwrap();
+    let decoded = crate::decode::Dissector::new(registry)
+        .decode(
+            Frame::without_timestamp(LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+            Default::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        decoded.packet.layer(3).unwrap().protocol_id().as_str(),
+        "mqtt"
+    );
+    assert_eq!(
+        decoded.packet.layer(4).unwrap().protocol_id().as_str(),
+        "raw"
+    );
+    let rebuilt = builder
+        .build(decoded.packet, Addresses::default(), Default::default())
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+}
+
+#[test]
+fn review_datagram_messages_reject_unframed_opaque_tails() {
+    let mut packet = Packet::new();
+    packet.push(Ethernet::default());
+    packet.push(Ipv4::default());
+    packet.push(Udp {
+        destination_port: 5683,
+        ..Default::default()
+    });
+    packet.push(crate::protocol::application::coap::Coap::default());
+    packet.push(crate::layer::Raw::new(Bytes::from_static(b"\xff")));
+    let builder = crate::build::Builder::new(builtin::registry());
+    assert!(
+        builder
+            .build(packet.clone(), Addresses::default(), Default::default())
+            .is_err()
+    );
+    let built = builder
+        .build(
+            packet,
+            Addresses::default(),
+            crate::build::Options {
+                mode: Mode::Permissive,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(built.diagnostics.iter().any(|d| d.code == "build.message"));
+}
+
+#[test]
+fn review_folded_sip_and_rtsp_headers_preserve_bytes_and_frame_lengths() {
+    for (name, start) in [
+        ("sip", "OPTIONS sip:service SIP/2.0"),
+        ("rtsp", "OPTIONS * RTSP/1.0"),
+    ] {
+        let wire = format!("{start}\r\nSubject: a\r\n b\r\nContent-Length:\r\n\t4\r\n\r\nbody");
+        review_round_trip(name, wire.as_bytes());
+        for split in 1..wire.len() {
+            let mut framer = crate::protocol::framing::Framer::new(name);
+            assert_eq!(
+                framer.progress(&wire.as_bytes()[..split], 65536).unwrap(),
+                None
+            );
+            assert_eq!(
+                framer.progress(wire.as_bytes(), 65536).unwrap(),
+                Some(wire.len())
+            );
+        }
+        let registry = builtin::registry();
+        let decoded = registry
+            .codec(name)
+            .unwrap()
+            .decode(
+                Bytes::copy_from_slice(wire.as_bytes()),
+                &DecodeContext {
+                    parent: None,
+                    registry: &registry,
+                    network: None,
+                    hop_limit: None,
+                    discriminator: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            decoded
+                .layer
+                .field_path(&"headers[0].value".parse().unwrap()),
+            Some(Bytes::from_static(b" a\r\n b").into())
+        );
+    }
+    let mut sip = Sip::default();
+    sip.headers.0.push(record([
+        ("name", Bytes::from_static(b"Subject").into()),
+        ("value", Bytes::from_static(b" a\r\nInjected: value").into()),
+    ]));
+    let mut packet = Packet::new();
+    packet.push(sip);
+    assert!(
+        crate::build::Builder::new(builtin::registry())
+            .build(packet, Addresses::default(), Default::default())
+            .is_err()
+    );
+}
+
+#[test]
+fn review_amqp_content_headers_require_complete_property_flags() {
+    for (payload, valid) in [
+        (vec![0; 12], false),
+        (vec![0; 13], false),
+        (vec![0; 14], true),
+        (
+            {
+                let mut p = vec![0; 14];
+                p[13] = 1;
+                p
+            },
+            false,
+        ),
+        (
+            {
+                let mut p = vec![0; 16];
+                p[13] = 1;
+                p
+            },
+            true,
+        ),
+    ] {
+        let mut packet = Packet::new();
+        packet.push(crate::protocol::application::amqp::Amqp {
+            frame_type: 2,
+            channel: 1,
+            payload: Bytes::copy_from_slice(&payload),
+            ..Default::default()
+        });
+        assert_eq!(
+            crate::build::Builder::new(builtin::registry())
+                .build(packet, Addresses::default(), Default::default())
+                .is_ok(),
+            valid
+        );
+        let mut wire = vec![2, 0, 1];
+        wire.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        wire.extend_from_slice(&payload);
+        wire.push(0xce);
+        let registry = builtin::registry();
+        assert_eq!(
+            registry
+                .codec("amqp")
+                .unwrap()
+                .decode(
+                    wire.into(),
+                    &DecodeContext {
+                        parent: None,
+                        registry: &registry,
+                        network: None,
+                        hop_limit: None,
+                        discriminator: None,
+                    }
+                )
+                .is_ok(),
+            valid
+        );
+    }
+}
+
+#[test]
+fn review_resp_payloads_support_typed_edits_filters_and_projection() {
+    use crate::protocol::application::resp::{Resp, RespValue};
+    for (value, path, replacement, literal) in [
+        (
+            RespValue::Simple(Bytes::from_static(b"OK")),
+            "value.data",
+            Bytes::from_static(b"NEXT").into(),
+            "b\"NEXT\"",
+        ),
+        (
+            RespValue::Integer(7),
+            "value.data",
+            field::Value::Signed(9),
+            "9",
+        ),
+        (
+            RespValue::Array(Some(vec![RespValue::Simple(Bytes::from_static(b"OK"))])),
+            "value.data[0].data",
+            Bytes::from_static(b"NEXT").into(),
+            "b\"NEXT\"",
+        ),
+    ] {
+        let registry = builtin::registry();
+        let mut resp = Resp { value };
+        resp.set_field_path(&path.parse().unwrap(), replacement.clone())
+            .unwrap();
+        let mut packet = Packet::new();
+        packet.push(Ethernet::default());
+        packet.push(Ipv4::default());
+        packet.push(Tcp {
+            destination_port: 6379,
+            ..Default::default()
+        });
+        packet.push(resp);
+        let built = crate::build::Builder::new(registry.clone())
+            .build(packet, Addresses::default(), Default::default())
+            .unwrap();
+        let decoded = crate::decode::Dissector::new(registry.clone())
+            .decode(
+                Frame::without_timestamp(LinkType::ETHERNET, built.bytes).unwrap(),
+                Default::default(),
+            )
+            .unwrap();
+        let column = format!("resp#1.{path}");
+        let projection = crate::filter::Projection::compile([column.as_str()], &registry).unwrap();
+        let context = crate::filter::Context::frame(&decoded, 1);
+        assert_eq!(
+            projection.values(&context, 4096).unwrap(),
+            vec![Some(replacement)]
+        );
+        assert!(
+            crate::filter::Filter::compile(
+                &format!("{column} == {literal}"),
+                &registry,
+                Default::default()
+            )
+            .unwrap()
+            .matches(&context)
+            .unwrap()
+        );
+        if path.contains("[0]") {
+            let projection =
+                crate::filter::Projection::compile(["resp.value.data[*].data"], &registry).unwrap();
+            assert_eq!(
+                projection.values(&context, 4096).unwrap(),
+                vec![Some(field::Value::List(vec![
+                    Bytes::from_static(b"NEXT").into()
+                ]))]
+            );
+        }
+    }
+}

@@ -4676,7 +4676,8 @@
             "ipv6",
             "mac",
             "list",
-            "object"
+            "object",
+            "any"
           ]
         },
         "required": {

@@ -31,10 +31,7 @@ pub(super) fn encode(
     for h in &headers.0 {
         let key = data(h, "name", name)?;
         let value = data(h, "value", name)?;
-        if key.is_empty()
-            || key.iter().any(|b| !b.is_ascii_alphanumeric() && *b != b'-')
-            || value.iter().any(|b| matches!(*b, b'\r' | b'\n'))
-        {
+        if !valid_name(key) || !valid_value(value) {
             return Err(invalid(name, "invalid header"));
         }
         w.put(key)?;
@@ -50,6 +47,29 @@ pub(super) fn encode(
     Ok(w.bytes)
 }
 pub(super) fn parse(name: &'static str, b: &[u8]) -> Result<(Bytes, Records, Bytes), Error> {
+    let head = parse_head(name, b)?;
+    if head.length.is_some_and(|n| n != b.len() - head.end) {
+        return Err(invalid(name, "Content-Length does not match body"));
+    }
+    Ok((
+        head.start,
+        head.headers,
+        Bytes::copy_from_slice(&b[head.end..]),
+    ))
+}
+
+pub(crate) fn content_length(name: &'static str, head: &[u8]) -> Result<Option<usize>, Error> {
+    Ok(parse_head(name, head)?.length)
+}
+
+struct Head {
+    start: Bytes,
+    headers: Records,
+    length: Option<usize>,
+    end: usize,
+}
+
+fn parse_head(name: &'static str, b: &[u8]) -> Result<Head, Error> {
     let end = b
         .windows(4)
         .position(|b| b == b"\r\n\r\n")
@@ -77,19 +97,28 @@ pub(super) fn parse(name: &'static str, b: &[u8]) -> Result<(Bytes, Records, Byt
             .position(|v| *v == b':')
             .ok_or_else(|| invalid(name, "header lacks colon"))?;
         let key = &line[..colon];
-        let value = &line[colon + 1..];
-        if key.is_empty()
-            || key.iter().any(|b| !b.is_ascii_alphanumeric() && *b != b'-')
-            || value.iter().any(|b| matches!(*b, b'\r' | b'\n'))
-        {
+        let value_start = pos + colon + 1;
+        let mut value_end = pos + len;
+        pos = value_end + 2;
+        while pos < end - 2 && matches!(b[pos], b' ' | b'\t') {
+            let len = b[pos..end]
+                .windows(2)
+                .position(|v| v == b"\r\n")
+                .ok_or_else(|| invalid(name, "unterminated continuation"))?;
+            value_end = pos + len;
+            pos = value_end + 2;
+        }
+        let value = &b[value_start..value_end];
+        if !valid_name(key) || !valid_value(value) {
             return Err(invalid(name, "invalid header"));
         }
-        if key.eq_ignore_ascii_case(b"content-length")
-            || (name == "sip" && key.eq_ignore_ascii_case(b"l"))
+        let key_name = key.trim_ascii_end();
+        if key_name.eq_ignore_ascii_case(b"content-length")
+            || (name == "sip" && key_name.eq_ignore_ascii_case(b"l"))
         {
             let n = std::str::from_utf8(value)
                 .ok()
-                .and_then(|s| s.trim().parse::<usize>().ok())
+                .and_then(|s| s.replace("\r\n", " ").trim().parse::<usize>().ok())
                 .ok_or_else(|| invalid(name, "invalid Content-Length"))?;
             if length.is_some_and(|old| old != n) {
                 return Err(invalid(name, "conflicting Content-Length"));
@@ -103,10 +132,37 @@ pub(super) fn parse(name: &'static str, b: &[u8]) -> Result<(Bytes, Records, Byt
             ("name", Bytes::copy_from_slice(key).into()),
             ("value", Bytes::copy_from_slice(value).into()),
         ]));
-        pos += len + 2;
     }
-    if length.is_some_and(|n| n != b.len() - end) {
-        return Err(invalid(name, "Content-Length does not match body"));
+    Ok(Head {
+        start,
+        headers,
+        length,
+        end,
+    })
+}
+
+fn valid_name(key: &[u8]) -> bool {
+    let name = key.trim_ascii_end();
+    !name.is_empty()
+        && key[name.len()..].iter().all(|b| matches!(b, b' ' | b'\t'))
+        && name
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(b))
+}
+
+fn valid_value(value: &[u8]) -> bool {
+    let mut pos = 0;
+    while pos < value.len() {
+        match value[pos] {
+            b'\r'
+                if value.get(pos + 1) == Some(&b'\n')
+                    && matches!(value.get(pos + 2), Some(b' ' | b'\t')) =>
+            {
+                pos += 2;
+            }
+            b'\r' | b'\n' => return false,
+            _ => pos += 1,
+        }
     }
-    Ok((start, headers, Bytes::copy_from_slice(&b[end..])))
+    true
 }

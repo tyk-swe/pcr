@@ -219,6 +219,7 @@ pub(super) fn kind_name(kind: field::Kind) -> &'static str {
         field::Kind::Mac => "a MAC address",
         field::Kind::List => "a list",
         field::Kind::Object => "an object",
+        field::Kind::Any => "a value",
     }
 }
 
@@ -245,7 +246,7 @@ pub(super) fn compatible(spec: FieldSpec, literal: &Literal) -> bool {
             Literal::Ipv6(_) | Literal::Ipv6Net(..) | Literal::Range(Range::Ipv6(..))
         ),
         field::Kind::Mac => matches!(literal, Literal::Mac(_) | Literal::Bytes(_)),
-        field::Kind::List => true,
+        field::Kind::List | field::Kind::Any => true,
         field::Kind::Object => false,
     }
 }

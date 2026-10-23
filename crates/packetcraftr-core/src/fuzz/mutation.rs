@@ -40,6 +40,17 @@ fn boundary_value(
 ) -> field::Value {
     let selector = seed.wrapping_add(round);
     match field.kind {
+        field::Kind::Any => boundary_value(
+            &ResolvedField {
+                kind: original.kind(),
+                ..field.clone()
+            },
+            layer,
+            original,
+            seed,
+            round,
+            limits,
+        ),
         field::Kind::Bool => field::Value::Bool(!original.as_bool().unwrap_or(false)),
         field::Kind::Unsigned => {
             const FALLBACK: &[u64] = &[
@@ -231,6 +242,7 @@ pub(super) fn random_value(
     limits: Limits,
 ) -> field::Value {
     match kind {
+        field::Kind::Any => random_value(original.kind(), original, random, limits),
         field::Kind::Bool => field::Value::Bool(random.next_u64() & 1 != 0),
         field::Kind::Unsigned => field::Value::Unsigned(random.next_u64()),
         field::Kind::Signed => field::Value::Signed(random.next_u64() as i64),

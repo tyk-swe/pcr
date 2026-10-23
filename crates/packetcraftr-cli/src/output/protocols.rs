@@ -32,6 +32,8 @@ pub enum Kind {
     List,
     #[serde(rename = "object")]
     Object,
+    #[serde(rename = "any")]
+    Any,
 }
 
 impl Kind {
@@ -48,6 +50,7 @@ impl Kind {
             Self::Mac => "mac",
             Self::List => "list",
             Self::Object => "object",
+            Self::Any => "any",
         }
     }
 }
@@ -73,6 +76,7 @@ impl TryFrom<field::Kind> for Kind {
             field::Kind::Mac => Self::Mac,
             field::Kind::List => Self::List,
             field::Kind::Object => Self::Object,
+            field::Kind::Any => Self::Any,
             _ => {
                 return Err(Error::Unpublished {
                     value: "protocol field kind",

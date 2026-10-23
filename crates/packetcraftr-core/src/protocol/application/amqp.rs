@@ -88,8 +88,8 @@ impl Amqp {
         }
         w.put(&self.payload)?;
         w.u8(0xce)?;
-        if self.frame_type == 2 && self.payload.len() < 12 {
-            return Err(invalid(NAME, "short content header"));
+        if self.frame_type == 2 {
+            validate_content_header(&self.payload)?;
         }
         Ok(w.bytes)
     }
@@ -128,11 +128,19 @@ impl Amqp {
             s.method_id = p.u16()?;
             s.payload = Bytes::copy_from_slice(p.rest());
         } else {
-            if s.frame_type == 2 && len < 12 {
-                return Err(invalid(NAME, "short content header"));
+            if s.frame_type == 2 {
+                validate_content_header(payload)?;
             }
             s.payload = Bytes::copy_from_slice(payload);
         }
         Ok(s)
     }
+}
+
+fn validate_content_header(payload: &[u8]) -> Result<(), Error> {
+    let mut reader = Reader::new(NAME, payload);
+    reader.take(12)?;
+    // Every content header has at least one flags word; bit zero continues the list.
+    while reader.u16()? & 1 != 0 {}
+    Ok(())
 }

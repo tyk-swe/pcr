@@ -46,6 +46,8 @@ pub enum Kind {
     Mac,
     List,
     Object,
+    /// The value's type is determined at runtime, including nested values.
+    Any,
 }
 
 impl Kind {
@@ -61,6 +63,7 @@ impl Kind {
             Self::Mac => "mac",
             Self::List => "list",
             Self::Object => "object",
+            Self::Any => "any",
         }
     }
 }

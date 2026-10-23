@@ -36,7 +36,7 @@ pub(crate) fn byte_string_field(
 }
 
 pub mod mqtt;
-mod text_message;
+pub(crate) mod text_message;
 pub(crate) use mqtt::MqttCodec;
 pub mod coap;
 pub(crate) use coap::CoapCodec;

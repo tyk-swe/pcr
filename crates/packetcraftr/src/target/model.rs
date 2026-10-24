@@ -70,7 +70,7 @@ impl FromStr for Hostname {
                 ));
             }
         }
-        Ok(Self(hostname.to_ascii_lowercase()))
+        Ok(Self(value.to_ascii_lowercase()))
     }
 }
 

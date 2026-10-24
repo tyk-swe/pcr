@@ -188,9 +188,9 @@ fn validate_interface_hint(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct SourceAddressRank {
+    scope_match: bool,
     prefix_match: bool,
     matched_prefix_length: u8,
-    scope_match: bool,
 }
 
 fn fallback_source(addresses: &[interface::Address], destination: IpAddr) -> Option<IpAddr> {
@@ -240,5 +240,26 @@ fn address_scope(address: IpAddr) -> Scope {
     match classify_destination(address) {
         Scope::Multicast | Scope::Unspecified => Scope::Global,
         scope => scope,
+    }
+}
+
+#[cfg(test)]
+mod network_improvements {
+    use super::*;
+    #[test]
+    fn scope_precedes_prefix_specificity() {
+        let destination = "8.8.8.8".parse().unwrap();
+        let global = "9.1.1.1".parse().unwrap();
+        let addresses = [
+            interface::Address {
+                address: "10.0.0.1".parse().unwrap(),
+                prefix_length: 0,
+            },
+            interface::Address {
+                address: global,
+                prefix_length: 24,
+            },
+        ];
+        assert_eq!(fallback_source(&addresses, destination), Some(global));
     }
 }

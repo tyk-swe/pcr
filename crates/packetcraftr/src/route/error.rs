@@ -12,6 +12,14 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Interrupted(#[from] packetcraftr_core::budget::Interrupted),
+    #[error("interface selector {selector} matches more than one interface")]
+    AmbiguousInterface { selector: String },
+    #[error("route provider returned an incomplete interface identity: {interface:?}")]
+    InvalidRouteIdentity {
+        interface: packetcraftr_netio::interface::Id,
+    },
     #[error("route lookup for {destination} failed")]
     RouteLookup {
         destination: IpAddr,
@@ -118,6 +126,12 @@ impl Classified for Error {
         match self {
             Self::RouteLookup { failure, .. } | Self::InterfaceLookup { failure, .. } => *failure,
             Self::InterfaceDiscovery(error) => error.classification(),
+            Self::Interrupted(source) => source.classification(),
+            Self::AmbiguousInterface { .. } => Classification::new(
+                "io.ambiguous_interface",
+                Kind::Io,
+                Some("select a name or index matching exactly one interface"),
+            ),
             Self::UnknownInterface { .. } => Classification::new(
                 "io.device",
                 Kind::Io,
@@ -162,7 +176,8 @@ impl Classified for Error {
                 ),
             ),
             Self::Neighbor(error) => error.classification(),
-            Self::InterfaceMismatch { .. }
+            Self::InvalidRouteIdentity { .. }
+            | Self::InterfaceMismatch { .. }
             | Self::MissingNeighborSource { .. }
             | Self::MissingNeighborTarget { .. }
             | Self::MissingSourceMac { .. }

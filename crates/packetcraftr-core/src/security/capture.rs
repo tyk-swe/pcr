@@ -116,7 +116,7 @@ struct DnsGroup {
 }
 #[derive(Default)]
 struct BeaconGroup {
-    times: Vec<f64>,
+    times: Vec<std::time::Duration>,
     frames: Vec<u64>,
 }
 type DnsKey = (u32, IpAddr, u64, Option<String>);
@@ -138,15 +138,15 @@ pub struct Collector {
 }
 impl Collector {
     pub fn new(
-        mode: Mode,
+        mut mode: Mode,
         limits: Limits,
         app: application::Limits,
     ) -> Result<Self, BoundaryError> {
         limits.validate().map_err(BoundaryError::from_error)?;
-        match &mode {
+        match &mut mode {
             Mode::Dns(options) => options.validate().map_err(BoundaryError::from_error)?,
             Mode::Beacons(options) => options.validate().map_err(BoundaryError::from_error)?,
-            Mode::Hunt(_) => {}
+            Mode::Hunt(document) => document.validate().map_err(BoundaryError::from_error)?,
         }
         let hunt = matches!(mode, Mode::Hunt(_));
         let has_dns = !matches!(mode, Mode::Beacons(_));
@@ -587,5 +587,197 @@ mod tests {
                 .is_err()
         );
         assert_eq!(delivered, 1);
+    }
+}
+
+#[cfg(test)]
+mod improvement_tests {
+    use super::*;
+    use crate::security::indicators::{Indicator, Kind, SCHEMA};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    #[test]
+    fn directly_constructed_hunt_documents_are_validated_and_normalized() {
+        let document = |id: &str, value: &str| Document {
+            schema: SCHEMA.into(),
+            indicators: vec![Indicator {
+                id: id.into(),
+                kind: Kind::Domain,
+                value: value.into(),
+            }],
+        };
+        for doc in [
+            document("", "example.test"),
+            document("dns", "."),
+            Document {
+                schema: "unknown".into(),
+                indicators: vec![],
+            },
+        ] {
+            assert!(
+                Collector::new(
+                    Mode::Hunt(doc),
+                    Limits::default(),
+                    application::Limits::default()
+                )
+                .is_err()
+            );
+        }
+        let collector = Collector::new(
+            Mode::Hunt(document("dns", "EXAMPLE.TEST.")),
+            Limits::default(),
+            application::Limits::default(),
+        )
+        .unwrap();
+        let Mode::Hunt(doc) = collector.mode else {
+            panic!()
+        };
+        assert_eq!(doc.indicators[0].value, "example.test");
+    }
+
+    #[test]
+    fn nanosecond_beacon_intervals_retain_precision_at_modern_epochs() {
+        let options = BeaconOptions {
+            min_attempts: 3,
+            min_interval_seconds: 1e-10,
+            max_cv: 0.0,
+        };
+        let mut collector = Collector::new(
+            Mode::Beacons(options),
+            Limits::default(),
+            application::Limits::default(),
+        )
+        .unwrap();
+        let epoch = Duration::from_secs(1_800_000_000);
+        collector.beacons.insert(
+            (
+                0,
+                "192.0.2.1".parse().unwrap(),
+                "192.0.2.2".parse().unwrap(),
+                443,
+            ),
+            BeaconGroup {
+                times: vec![
+                    epoch,
+                    epoch + Duration::from_nanos(1),
+                    epoch + Duration::from_nanos(2),
+                ],
+                frames: vec![1, 2, 3],
+            },
+        );
+        collector
+            .finish_beacons(
+                options,
+                &analysis::Summary::default(),
+                &crate::budget::Deadline::new(Duration::from_secs(1)),
+            )
+            .unwrap();
+        assert_eq!(collector.report.findings.len(), 1);
+        assert_eq!(
+            collector.report.findings[0].evidence["mean_interval_seconds"],
+            json!(1e-9)
+        );
+    }
+
+    fn dns_event(name: &str) -> dns::Event {
+        use crate::analysis::{
+            StreamTransport,
+            provenance::{SourceFrame, Tracker},
+            reassembly::tcp::{FlowKey, ScopedFlowKey},
+            scope::Interner,
+        };
+        use crate::protocol::application::dns::{Dns, Question};
+        let mut message = Dns::default();
+        message.questions.push(Question {
+            name: name.parse().unwrap(),
+            query_type: 1,
+            class: 1,
+        });
+        dns::Event::Message(Box::new(dns::Message {
+            index: 1,
+            transport: StreamTransport::Udp,
+            stream: 1,
+            generation: 0,
+            flow: ScopedFlowKey {
+                scope: Interner::new().intern(None, vec![]).unwrap(),
+                flow: FlowKey {
+                    source: "192.0.2.1".parse().unwrap(),
+                    source_port: 1000,
+                    destination: "192.0.2.2".parse().unwrap(),
+                    destination_port: 53,
+                },
+            },
+            status: dns::Status::Complete,
+            wire: bytes::Bytes::new(),
+            declared_length: None,
+            framing_bytes: bytes::Bytes::new(),
+            dns: Some(message),
+            error: None,
+            sources: Tracker::new(4096, 8)
+                .unwrap()
+                .single(SourceFrame {
+                    number: 1,
+                    timestamp: UNIX_EPOCH + Duration::from_secs(100),
+                })
+                .unwrap(),
+        }))
+    }
+
+    #[test]
+    fn dns_checks_inner_labels_and_groups_by_following_domain_with_existing_budget() {
+        let options = DnsOptions {
+            min_label_length: 4,
+            min_entropy: 1.0,
+            min_labels: 1,
+            ..Default::default()
+        };
+        let mut collector = Collector::new(
+            Mode::Dns(options),
+            Limits::default(),
+            application::Limits::default(),
+        )
+        .unwrap();
+        collector
+            .dns_events(vec![dns_event("a.aBcD.Example.test.")])
+            .unwrap();
+        assert!(
+            collector
+                .dns_groups
+                .keys()
+                .any(|key| key.3.as_deref() == Some("example.test."))
+        );
+        assert!(
+            collector
+                .dns_groups
+                .values()
+                .any(|group| group.labels.contains(b"abcd".as_slice()))
+        );
+        assert!(
+            !collector
+                .dns_groups
+                .keys()
+                .any(|key| key.3.as_deref() == Some("."))
+        );
+        collector.dns_events(vec![dns_event("aBcD.")]).unwrap();
+        assert!(
+            !collector
+                .dns_groups
+                .keys()
+                .any(|key| key.3.as_deref() == Some("."))
+        );
+        let mut bounded = Collector::new(
+            Mode::Dns(options),
+            Limits {
+                max_groups: 1,
+                ..Default::default()
+            },
+            application::Limits::default(),
+        )
+        .unwrap();
+        assert!(
+            bounded
+                .dns_events(vec![dns_event("aBcD.eFgH.test.")])
+                .is_err()
+        );
     }
 }

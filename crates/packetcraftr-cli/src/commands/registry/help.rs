@@ -106,6 +106,7 @@ fn heading(id: &str) -> &'static str {
             | "table"
             | "frames"
             | "frame"
+            | "every"
             | "link_type"
             | "family"
     ) || id.starts_with("exclude")
@@ -129,18 +130,7 @@ pub(super) fn leaf(command: clap::Command, entry: &Entry) -> clap::Command {
         .get_after_long_help()
         .map(ToString::to_string)
         .unwrap_or_default();
-    let short_examples = examples
-        .split_once("Examples:\n")
-        .or_else(|| examples.split_once("Example:\n"))
-        .map(|(_, examples)| {
-            examples
-                .lines()
-                .take_while(|line| !line.trim().is_empty())
-                .take(3)
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .filter(|examples| !examples.is_empty());
+    let short_examples = short_examples(&examples);
     let formats = Command::ALL
         .iter()
         .find(|command| command.as_str() == entry.identifier)
@@ -195,4 +185,40 @@ pub(super) fn leaf(command: clap::Command, entry: &Entry) -> clap::Command {
         })
         .after_help(short)
         .after_long_help(full)
+}
+
+fn short_examples(help: &str) -> Option<String> {
+    let (_, examples) = help
+        .split_once("Examples:")
+        .or_else(|| help.split_once("Example:"))?;
+    let examples = examples
+        .trim_start_matches([' ', '\t', '\r', '\n'])
+        .lines()
+        .take_while(|line| !line.trim().is_empty())
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!examples.is_empty()).then_some(examples)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inline_and_block_examples_survive_short_help() {
+        assert_eq!(
+            short_examples("About.\n\nExample: packetcraftr packet build --help").as_deref(),
+            Some("packetcraftr packet build --help")
+        );
+        assert_eq!(
+            short_examples("Examples:\n  one\n  two\n\nDetails").as_deref(),
+            Some("one\n  two")
+        );
+    }
+
+    #[test]
+    fn every_is_a_frame_selection_option() {
+        assert_eq!(heading("every"), heading("frames"));
+    }
 }

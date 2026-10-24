@@ -27,6 +27,7 @@ pub fn plan<P: Provider>(
     provider: &P,
     deadline: &Deadline,
 ) -> Result<Plan, Error> {
+    deadline.live_remaining()?;
     let intent = PacketIntent::from_packet(packet, destination, options)?;
     let requested = requested_interface(options)?;
     let route = lookup_route(
@@ -231,28 +232,33 @@ fn lookup_route<P: Provider>(
     provider: &P,
     deadline: &Deadline,
 ) -> Result<Decision, Error> {
-    Ok(match intent.lookup_destination {
-        Some(lookup_destination) => provider
-            .lookup_with_preferences(lookup_destination, requested, preferred_source, deadline)
-            .map_err(|source| Error::RouteLookup {
-                destination: lookup_destination,
-                failure: source.classification(),
-                source: Box::new(source),
-            })?,
-        None => {
-            let interface = requested.ok_or(Error::MissingLayer2Interface)?;
-            provider
-                .lookup_interface(interface, deadline)
-                .map_err(|source| Error::InterfaceLookup {
-                    interface: interface.name.clone(),
+    deadline.live_remaining()?;
+    let result = (|| {
+        Ok(match intent.lookup_destination {
+            Some(lookup_destination) => provider
+                .lookup_with_preferences(lookup_destination, requested, preferred_source, deadline)
+                .map_err(|source| Error::RouteLookup {
+                    destination: lookup_destination,
                     failure: source.classification(),
                     source: Box::new(source),
-                })?
-                .ok_or_else(|| Error::InterfaceLookupUnsupported {
-                    interface: interface.name.clone(),
-                })?
-        }
-    })
+                })?,
+            None => {
+                let interface = requested.ok_or(Error::MissingLayer2Interface)?;
+                provider
+                    .lookup_interface(interface, deadline)
+                    .map_err(|source| Error::InterfaceLookup {
+                        interface: interface.name.clone(),
+                        failure: source.classification(),
+                        source: Box::new(source),
+                    })?
+                    .ok_or_else(|| Error::InterfaceLookupUnsupported {
+                        interface: interface.name.clone(),
+                    })?
+            }
+        })
+    })();
+    deadline.live_remaining()?;
+    result
 }
 
 fn validate_route_contract(
@@ -260,6 +266,11 @@ fn validate_route_contract(
     requested: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<(), Error> {
+    if route.interface.name.is_empty() || route.interface.index == 0 {
+        return Err(Error::InvalidRouteIdentity {
+            interface: route.interface.clone(),
+        });
+    }
     if let Some(requested) = requested
         && route.interface != *requested
     {

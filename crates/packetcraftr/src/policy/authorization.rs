@@ -163,38 +163,51 @@ impl Policy {
         resolver: &R,
         deadline: &packetcraftr_core::budget::Deadline,
     ) -> Result<Authorized, TargetError> {
+        deadline
+            .live_remaining()
+            .map_err(packetcraftr_core::error::BoundaryError::from_error)?;
         self.validate()?;
-        let selected = match target {
-            Target::Address(address) => vec![crate::target::SelectedAddress::new(*address)],
-            Target::ScopedAddress(scoped) => {
-                self.authorize_destination(scoped.address().into())?;
-                let interface = crate::target::valid_zone_interface(
-                    scoped.zone(),
-                    resolver.resolve_zone(scoped.zone(), deadline)?,
-                )?;
-                vec![crate::target::SelectedAddress {
-                    address: scoped.address().into(),
-                    scope: Some(crate::target::ResolvedZone {
-                        zone: scoped.zone().clone(),
-                        interface,
-                    }),
-                }]
-            }
-            Target::Hostname(hostname) => {
-                // This authorization must precede DNS, route lookup, capture,
-                // neighbor discovery, and transmission side effects.
-                self.authorize_hostname(hostname)?;
-                distinct_addresses(
-                    hostname,
-                    resolver.resolve_controlled(hostname, self.max_resolved_addresses, deadline)?,
-                    self.max_resolved_addresses,
-                )?
-                .into_iter()
-                .map(crate::target::SelectedAddress::new)
-                .collect()
-            }
-        };
-        self.authorize_selected(target, selected)
+        let result = (|| {
+            let selected = match target {
+                Target::Address(address) => vec![crate::target::SelectedAddress::new(*address)],
+                Target::ScopedAddress(scoped) => {
+                    self.authorize_destination(scoped.address().into())?;
+                    let interface = crate::target::valid_zone_interface(
+                        scoped.zone(),
+                        resolver.resolve_zone(scoped.zone(), deadline)?,
+                    )?;
+                    vec![crate::target::SelectedAddress {
+                        address: scoped.address().into(),
+                        scope: Some(crate::target::ResolvedZone {
+                            zone: scoped.zone().clone(),
+                            interface,
+                        }),
+                    }]
+                }
+                Target::Hostname(hostname) => {
+                    // This authorization must precede DNS, route lookup, capture,
+                    // neighbor discovery, and transmission side effects.
+                    self.authorize_hostname(hostname)?;
+                    distinct_addresses(
+                        hostname,
+                        resolver.resolve_controlled(
+                            hostname,
+                            self.max_resolved_addresses,
+                            deadline,
+                        )?,
+                        self.max_resolved_addresses,
+                    )?
+                    .into_iter()
+                    .map(crate::target::SelectedAddress::new)
+                    .collect()
+                }
+            };
+            self.authorize_selected(target, selected)
+        })();
+        deadline
+            .live_remaining()
+            .map_err(packetcraftr_core::error::BoundaryError::from_error)?;
+        result
     }
 
     fn authorize_selected(

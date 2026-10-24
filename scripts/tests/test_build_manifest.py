@@ -39,10 +39,21 @@ class BuildManifestTests(unittest.TestCase):
             manifest.validate_identity(document)
 
     def test_binary_name_is_not_an_archive_path(self):
-        for name in ['../packetcraftr', 'a/b', r'a\b', 'C:binary', '..', 'bad\nname']:
+        for name in ['../packetcraftr', 'a/b', r'a\b', 'C:binary', '..', 'bad\nname',
+                     'bad*name', 'bad?name', 'bad"name', 'bad<name', 'bad>name',
+                     'bad|name', 'name.', 'name ', 'CON.exe', 'lPt1', 'NUL', 'PRN  .x']:
             document = identity()
             document['binary'] = name
             with self.subTest(name=name), self.assertRaises(ValueError):
+                manifest.validate_identity(document)
+
+    def test_compiler_identity_preserves_multiline_but_rejects_controls(self):
+        document = identity()
+        document['rustc'] = 'rustc 1.98.1\r\nbinary:\trustc\nhost: test'
+        manifest.validate_identity(document)
+        for control in ('\x00', '\x1b', '\x7f', '\x85'):
+            document['rustc'] = 'rustc 1.98.1' + control
+            with self.subTest(control=control), self.assertRaisesRegex(ValueError, 'control'):
                 manifest.validate_identity(document)
 
     def test_version_is_an_unambiguous_product_line(self):

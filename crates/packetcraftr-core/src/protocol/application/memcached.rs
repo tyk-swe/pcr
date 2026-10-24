@@ -89,6 +89,28 @@ fn memcached_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
             range: crate::layout::ByteRange::new(16, 24),
         });
     }
+    if b.len() >= 24 {
+        let extras_end = 24 + usize::from(b[4]);
+        let key_end = extras_end + usize::from(u16::from_be_bytes([b[2], b[3]]));
+        let total = u32::from_be_bytes([b[8], b[9], b[10], b[11]]);
+        if let Some(body_end) = usize::try_from(total)
+            .ok()
+            .and_then(|n| 24usize.checked_add(n))
+        {
+            if key_end <= body_end && body_end <= b.len() {
+                for (name, start, end) in [
+                    ("extras", 24, extras_end),
+                    ("key", extras_end, key_end),
+                    ("value", key_end, body_end),
+                ] {
+                    fields.push(crate::layout::FieldLayout {
+                        name,
+                        range: crate::layout::ByteRange::new(start, end),
+                    });
+                }
+            }
+        }
+    }
     fields
 }
 message_codec!(

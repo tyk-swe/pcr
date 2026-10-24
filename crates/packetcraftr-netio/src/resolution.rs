@@ -127,20 +127,46 @@ pub fn system(
                 error,
             )
         })?;
-        let mut addresses = Vec::new();
-        for address in resolved.map(|socket| socket.ip()) {
-            if addresses.contains(&address) {
-                continue;
-            }
-            if addresses.len() >= limit {
-                return Err(BoundaryError::new(
-                    format!("hostname {hostname} exceeds the {limit}-address limit"),
-                    Classification::new("io.hostname_address_limit", Kind::Io, None),
-                    Vec::new(),
-                ));
-            }
-            addresses.push(address);
-        }
-        Ok(addresses)
+        retain_addresses(&hostname, resolved.map(|socket| socket.ip()), limit)
     })
+}
+
+fn retain_addresses(
+    hostname: &str,
+    resolved: impl IntoIterator<Item = IpAddr>,
+    limit: usize,
+) -> Result<Vec<IpAddr>, BoundaryError> {
+    let mut addresses = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for address in resolved {
+        if !seen.insert(address) {
+            continue;
+        }
+        if addresses.len() >= limit {
+            return Err(BoundaryError::new(
+                format!("hostname {hostname} exceeds the {limit}-address limit"),
+                Classification::new("io.hostname_address_limit", Kind::Io, None),
+                Vec::new(),
+            ));
+        }
+        addresses.push(address);
+    }
+    Ok(addresses)
+}
+
+#[cfg(test)]
+mod network_improvements {
+    use super::*;
+    #[test]
+    fn native_resolver_retains_unique_addresses_in_first_seen_order() {
+        let a = "127.0.0.1".parse().unwrap();
+        let b = "127.0.0.2".parse().unwrap();
+        assert_eq!(
+            retain_addresses("test.local", [b, a, b, a], 2).unwrap(),
+            [b, a]
+        );
+        assert!(retain_addresses("test.local", [b, b, a], 1).is_err());
+        assert!(retain_addresses("test.local", [a], 0).is_err());
+        assert!(retain_addresses("test.local", [], 0).unwrap().is_empty());
+    }
 }

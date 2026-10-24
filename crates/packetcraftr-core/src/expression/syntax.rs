@@ -73,9 +73,7 @@ struct TopLevelScanner<'a> {
     chars: std::str::CharIndices<'a>,
     quoted: bool,
     escaped: bool,
-    paren_depth: usize,
-    list_depth: usize,
-    object_depth: usize,
+    delimiters: Vec<char>,
 }
 
 impl<'a> TopLevelScanner<'a> {
@@ -84,9 +82,7 @@ impl<'a> TopLevelScanner<'a> {
             chars: input.char_indices(),
             quoted: false,
             escaped: false,
-            paren_depth: 0,
-            list_depth: 0,
-            object_depth: 0,
+            delimiters: Vec::new(),
         }
     }
 
@@ -109,34 +105,24 @@ impl<'a> TopLevelScanner<'a> {
             }
             let unbalanced = |character| ScanFailure::Unbalanced { offset, character };
             match character {
-                '{' => self.object_depth = self.object_depth.saturating_add(1),
-                '}' => {
-                    self.object_depth = self
-                        .object_depth
-                        .checked_sub(1)
-                        .ok_or_else(|| unbalanced(character))?;
-                }
-                '(' => self.paren_depth = self.paren_depth.saturating_add(1),
-                ')' => {
-                    let Some(depth) = self.paren_depth.checked_sub(1) else {
-                        return Err(unbalanced(character));
+                '{' | '(' | '[' => self.delimiters.push(character),
+                '}' | ')' | ']' => {
+                    let expected = match character {
+                        '}' => '{',
+                        ')' => '(',
+                        _ => '[',
                     };
-                    self.paren_depth = depth;
-                }
-                '[' => self.list_depth = self.list_depth.saturating_add(1),
-                ']' => {
-                    let Some(depth) = self.list_depth.checked_sub(1) else {
+                    if self.delimiters.pop() != Some(expected) {
                         return Err(unbalanced(character));
-                    };
-                    self.list_depth = depth;
+                    }
                 }
-                _ if self.paren_depth == 0 && self.list_depth == 0 && self.object_depth == 0 => {
+                _ if self.delimiters.is_empty() => {
                     return Ok(Some((offset, character)));
                 }
                 _ => {}
             }
         }
-        if self.quoted || self.paren_depth != 0 || self.list_depth != 0 || self.object_depth != 0 {
+        if self.quoted || !self.delimiters.is_empty() {
             Err(ScanFailure::Unterminated)
         } else {
             Ok(None)
@@ -147,4 +133,24 @@ impl<'a> TopLevelScanner<'a> {
 enum ScanFailure {
     Unbalanced { offset: usize, character: char },
     Unterminated,
+}
+
+#[cfg(test)]
+mod improvement_tests {
+    use super::*;
+    #[test]
+    fn crossed_delimiters_fail_at_the_crossing_and_quotes_are_preserved() {
+        for (input, offset) in [("([)]", 2), ("{[}]", 2), ("[(])", 2)] {
+            assert!(
+                matches!(split_top_level_bounded(0, input, ',', None), Err(Error::Syntax { offset: found, .. }) if found == offset)
+            );
+        }
+        assert_eq!(
+            split_top_level_bounded(0, r#"([{}]),"([)]",x"#, ',', None)
+                .unwrap()
+                .len(),
+            3
+        );
+        assert!(split_top_level_bounded(0, r#""escaped\"([)]""#, ',', None).is_ok());
+    }
 }

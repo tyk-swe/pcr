@@ -67,7 +67,11 @@ impl DecodeArgs {
                 _ => return Err(invalid()),
             };
             let (port, child) = target.split_once(':').ok_or_else(invalid)?;
-            let port = port.trim().parse::<u16>().map_err(|_| invalid())?;
+            let port = port.trim();
+            if port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(invalid());
+            }
+            let port = port.parse::<u16>().map_err(|_| invalid())?;
             let child = default
                 .protocol_named(child)
                 .ok_or_else(|| error(format!("unknown decode-as protocol {child:?}")))?;
@@ -105,6 +109,27 @@ impl DecodeArgs {
                 packetcraftr_core::error::source_chain(&source),
             )
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_as_ports_are_unsigned_decimal_with_whitespace() {
+        for port in ["+53", "-53", "", "0", "65536", "٥٣"] {
+            let args = DecodeArgs {
+                ports: vec![],
+                bindings: vec![format!("udp.port={port}:dns")],
+            };
+            assert!(args.registry().is_err(), "{port}");
+        }
+        let args = DecodeArgs {
+            ports: vec![],
+            bindings: vec![" udp.port = 0053 :dns".into()],
+        };
+        assert!(args.registry().is_ok());
     }
 }
 

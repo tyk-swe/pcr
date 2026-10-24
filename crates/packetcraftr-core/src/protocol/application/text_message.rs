@@ -131,9 +131,17 @@ fn parse_head(name: &'static str, b: &[u8]) -> Result<Head, Error> {
         if key_name.eq_ignore_ascii_case(b"content-length")
             || (name == "sip" && key_name.eq_ignore_ascii_case(b"l"))
         {
-            let n = std::str::from_utf8(value)
+            // Legal folding is checked above. Only SP and HTAB are optional whitespace.
+            let unfolded = std::str::from_utf8(value)
+                .map_err(|_| invalid(name, "invalid Content-Length"))?
+                .replace("\r\n", " ");
+            let digits = unfolded.trim_matches([' ', '\t']).as_bytes();
+            if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+                return Err(invalid(name, "invalid Content-Length"));
+            }
+            let n = std::str::from_utf8(digits)
                 .ok()
-                .and_then(|s| s.replace("\r\n", " ").trim().parse::<usize>().ok())
+                .and_then(|s| s.parse::<usize>().ok())
                 .ok_or_else(|| invalid(name, "invalid Content-Length"))?;
             if length.is_some_and(|old| old != n) {
                 return Err(invalid(name, "conflicting Content-Length"));

@@ -98,6 +98,30 @@ fn parse_stream(text: &str) -> Option<StreamRef> {
         "udp" => StreamTransport::Udp,
         _ => return None,
     };
+    if index.is_empty() || !index.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
     let index = index.parse::<u64>().ok()?;
     Some(StreamRef { transport, index })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_indexes_are_unsigned_decimal() {
+        for input in [
+            "tcp:+1",
+            "tcp:-1",
+            "tcp:",
+            "tcp: 1",
+            "tcp:١",
+            "tcp:18446744073709551616",
+        ] {
+            assert!(parse_stream(input).is_none(), "{input}");
+        }
+        assert_eq!(parse_stream("tcp:0").unwrap().index, 0);
+        assert_eq!(parse_stream("udp:001").unwrap().index, 1);
+    }
 }

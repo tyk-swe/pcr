@@ -74,6 +74,10 @@ fn rtsp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
                 name: "headers",
                 range: crate::layout::ByteRange::new(first + 2, end + 2),
             });
+            fields.push(crate::layout::FieldLayout {
+                name: "body",
+                range: crate::layout::ByteRange::new(end + 4, b.len()),
+            });
         }
     }
     fields
@@ -136,6 +140,7 @@ impl Rtsp {
                 && parts[1].len() == 3
                 && parts[1].bytes().all(|b| b.is_ascii_digit())
                 || parts[2] == "RTSP/1.0"
+                    && !parts[1].is_empty()
                     && super::text_message::is_token(NAME, parts[0].as_bytes()))
         {
             return Err(unsupported(NAME, "unsupported start line or version"));

@@ -60,14 +60,18 @@ impl SystemProvider {
     /// Interfaces without an IPv6 index are omitted on Windows.
     pub fn ipv6_interfaces(&self, deadline: &Deadline) -> Result<Vec<Info>, Error> {
         deadline.live_remaining().map_err(Error::interrupted)?;
-        validate_snapshot(super::platform::ipv6_interfaces(deadline)?)
+        let result = super::platform::ipv6_interfaces(deadline);
+        deadline.live_remaining().map_err(Error::interrupted)?;
+        validate_snapshot(result?)
     }
 }
 
 impl Provider for SystemProvider {
     fn interfaces(&self, deadline: &Deadline) -> Result<Vec<Info>, Error> {
         deadline.live_remaining().map_err(Error::interrupted)?;
-        validate_snapshot(super::platform::interfaces(deadline)?)
+        let result = super::platform::interfaces(deadline);
+        deadline.live_remaining().map_err(Error::interrupted)?;
+        validate_snapshot(result?)
     }
 }
 
@@ -77,9 +81,9 @@ impl Provider for SystemProvider {
 #[cfg_attr(not(native_layer2), allow(dead_code))]
 pub(crate) fn current(expected: &Id, deadline: &Deadline) -> Result<Info, crate::Error> {
     deadline.live_remaining().map_err(Error::interrupted)?;
-    let mut interfaces = validate_snapshot(super::platform::interfaces_for_identity(
-        expected, deadline,
-    )?)?;
+    let result = super::platform::interfaces_for_identity(expected, deadline);
+    deadline.live_remaining().map_err(Error::interrupted)?;
+    let mut interfaces = validate_snapshot(result?)?;
     if let Some(position) = interfaces
         .iter()
         .position(|interface| interface.id == *expected)

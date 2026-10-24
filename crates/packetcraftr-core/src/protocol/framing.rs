@@ -335,6 +335,9 @@ impl Resp {
             self.pos = end + 2;
             self.scan = self.pos;
             self.nodes += 1;
+            if self.remaining.len() >= super::message::MAX_NESTING {
+                return Err(invalid("resp", "value exceeds nesting limit").into());
+            }
             if self.nodes > super::message::MAX_RECORDS {
                 return Err(invalid("resp", "too many values").into());
             }
@@ -344,13 +347,19 @@ impl Resp {
                 let count = text
                     .parse::<i64>()
                     .map_err(|_| invalid("resp", "invalid length"))?;
+                if count.to_string().as_bytes() != value {
+                    return Err(unsupported("resp", "noncanonical number").into());
+                }
                 if count < -1 {
                     return Err(invalid("resp", "invalid negative length").into());
                 }
                 if count >= 0 && kind == b'$' {
                     self.bulk_end = Some(
                         self.pos
-                            .checked_add(count as usize)
+                            .checked_add(
+                                usize::try_from(count)
+                                    .map_err(|_| invalid("resp", "length overflow"))?,
+                            )
                             .and_then(|v| v.checked_add(2))
                             .ok_or_else(|| invalid("resp", "length overflow"))?,
                     );
@@ -366,10 +375,13 @@ impl Resp {
                     continue;
                 }
             } else if kind == b':' {
-                std::str::from_utf8(value)
+                let number = std::str::from_utf8(value)
                     .ok()
                     .and_then(|v| v.parse::<i64>().ok())
                     .ok_or_else(|| invalid("resp", "invalid integer"))?;
+                if number.to_string().as_bytes() != value {
+                    return Err(unsupported("resp", "noncanonical number").into());
+                }
             }
             if self.done() {
                 return Ok(Some(self.pos));

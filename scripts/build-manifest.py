@@ -7,7 +7,7 @@ import pathlib
 import re
 import subprocess
 
-from script_support import digest, prepare_report, read_json, valid_digest, write_json_atomic
+from script_support import digest, portable_basename, prepare_report, read_json, valid_digest, write_json_atomic
 
 COMMAND_TIMEOUT = 30
 REQUIRED_FIELDS = ('binary', 'binary_sha256', 'version', 'commit', 'target',
@@ -29,9 +29,7 @@ def validate_identity(document):
     for field in ('target', 'feature_variant'):
         if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', document[field]):
             raise ValueError(f'manifest {field} must be a portable identifier')
-    if (document['binary'] in ('.', '..')
-            or any(character in document['binary'] for character in '/\\:')
-            or any(ord(character) < 32 or ord(character) == 127 for character in document['binary'])):
+    if not portable_basename(document['binary']):
         raise ValueError('manifest binary must be a portable basename')
     if (not document['version'].startswith('packetcraftr ')
             or not document['version'][len('packetcraftr '):].strip()
@@ -40,6 +38,9 @@ def validate_identity(document):
         raise ValueError('manifest version must be one PacketcraftR version line')
     if not document['rustc'].startswith('rustc ') or not document['rustc'][len('rustc '):].strip():
         raise ValueError('manifest lacks Rust compiler identity')
+    if any((ord(character) < 32 and character not in '\t\r\n')
+           or 127 <= ord(character) <= 159 for character in document['rustc']):
+        raise ValueError('manifest Rust compiler identity contains control characters')
 
 
 def load_manifest(path):

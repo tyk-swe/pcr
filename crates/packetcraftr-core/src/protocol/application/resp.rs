@@ -211,8 +211,8 @@ impl RespValue {
                 .map(Self::Integer)
                 .map_err(|_| Refusal::OutOfRange),
             ("bulk", field::Value::Bytes(b)) => Ok(Self::Bulk(Some(b))),
-            ("null_bulk", _) => Ok(Self::Bulk(None)),
-            ("null_array", _) => Ok(Self::Array(None)),
+            ("null_bulk", field::Value::Bytes(b)) if b.is_empty() => Ok(Self::Bulk(None)),
+            ("null_array", field::Value::List(v)) if v.is_empty() => Ok(Self::Array(None)),
             ("array", field::Value::List(v)) => Ok(Self::Array(Some(
                 v.into_iter()
                     .map(|v| Self::from_value(v, depth + 1, count))

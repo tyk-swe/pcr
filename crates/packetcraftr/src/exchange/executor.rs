@@ -48,16 +48,18 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         let first_route = &first_packet.route().plan;
         ensure_preparation_deadline(prepared.window.deadline())?;
         self.check_cancelled()?;
-        let capture = self.providers.capture().arm_capture(
-            &CaptureRequest {
-                interface: first_route.decision.interface.clone(),
-                limits: prepared.collection.capture,
-                filter: None,
-                promiscuous: false,
-                native: Default::default(),
-            },
-            prepared.window.deadline(),
-        )?;
+        let capture_request = CaptureRequest {
+            interface: first_route.decision.interface.clone(),
+            limits: prepared.collection.capture,
+            filter: None,
+            promiscuous: false,
+            native: Default::default(),
+        };
+        capture_request.validate()?;
+        let capture = self
+            .providers
+            .capture()
+            .arm_capture(&capture_request, prepared.window.deadline())?;
         Ok(Transaction::new(
             Arc::clone(&operation.registry),
             capture,

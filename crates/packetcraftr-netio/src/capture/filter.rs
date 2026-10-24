@@ -175,9 +175,23 @@ fn is_bpf_keyword(atom: &str) -> bool {
         "icmp-echoreply icmp-unreach icmp-sourcequench icmp-redirect icmp-echo ",
         "icmp-routeradvert icmp-routersolicit icmp-timxceed icmp-paramprob icmp-tstamp ",
         "icmp-tstampreply icmp-ireq icmp-ireqreply icmp-maskreq icmp-maskreply tcpflags tcp-fin ",
-        "tcp-syn tcp-rst tcp-push tcp-ack tcp-urg ",
+        "tcp-syn tcp-rst tcp-push tcp-ack tcp-urg tcp-ece tcp-cwr ",
     );
     KEYWORDS
         .split_ascii_whitespace()
         .any(|keyword| atom == keyword)
+}
+
+#[cfg(test)]
+mod network_improvements {
+    use super::*;
+    #[test]
+    fn ecn_flags_are_numeric_symbols() {
+        let interface = InterfaceId {
+            name: "test0".into(),
+            index: 1,
+        };
+        assert!(validate(&interface, "tcp[tcpflags] & (tcp-ece|tcp-cwr) != 0").is_ok());
+        assert!(validate(&interface, "host example.test").is_err());
+    }
 }

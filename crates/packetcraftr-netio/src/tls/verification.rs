@@ -25,6 +25,18 @@ impl TrustStore {
         if bytes.is_empty() || bytes.len() > 1024 * 1024 {
             return Err("CA file must contain 1..1048576 bytes".into());
         }
+        // Certificate-only iterators skip other PEM sections. Reject them first,
+        // including unknown labels, rather than silently accepting a mixed bundle.
+        for line in bytes.split(|byte| *byte == b'\n' || *byte == b'\r') {
+            let line = line.trim_ascii();
+            if (line.windows(11).any(|window| window == b"-----BEGIN ")
+                && line != b"-----BEGIN CERTIFICATE-----")
+                || (line.windows(9).any(|window| window == b"-----END ")
+                    && line != b"-----END CERTIFICATE-----")
+            {
+                return Err("CA file contains a non-certificate PEM section".into());
+            }
+        }
         let mut roots = RootCertStore::empty();
         for cert in CertificateDer::pem_slice_iter(bytes) {
             roots
@@ -118,4 +130,25 @@ pub fn verify(evidence: &Evidence, name: &ServerName, roots: &TrustStore) -> Ver
         },
     };
     Verification { chain, name }
+}
+
+#[cfg(test)]
+mod network_improvements {
+    use super::*;
+    #[test]
+    fn ca_bundles_reject_every_other_pem_section() {
+        let certificate = include_bytes!("test-ca.pem");
+        assert!(TrustStore::from_pem(certificate).is_ok());
+        for label in ["PRIVATE KEY", "PUBLIC KEY", "UNKNOWN"] {
+            let section = format!("-----BEGIN {label}-----\nAQ==\n-----END {label}-----\n");
+            assert!(TrustStore::from_pem(section.as_bytes()).is_err());
+            let mut mixed = certificate.to_vec();
+            mixed.extend(section.as_bytes());
+            assert!(
+                TrustStore::from_pem(&mixed)
+                    .unwrap_err()
+                    .contains("non-certificate")
+            );
+        }
+    }
 }

@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use std::sync::Mutex;
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::Classified;
 use packetcraftr_netio::interface::Id as InterfaceId;
 
 type Decision = packetcraftr_netio::route::Decision;
@@ -59,7 +60,7 @@ fn cached<K: Clone + Eq + std::hash::Hash, V: Clone, E>(
 impl<R: packetcraftr_netio::route::Provider> packetcraftr_netio::route::Provider
     for CachedProvider<'_, R>
 {
-    type Error = R::Error;
+    type Error = super::Error;
 
     fn lookup_with_preferences(
         &self,
@@ -68,19 +69,23 @@ impl<R: packetcraftr_netio::route::Provider> packetcraftr_netio::route::Provider
         preferred_source: Option<IpAddr>,
         deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
+        deadline.live_remaining()?;
         let key = PreferenceKey {
             destination,
             interface_hint: interface_hint.cloned(),
             preferred_source,
         };
-        cached(&self.by_preference, key, || {
-            self.inner.lookup_with_preferences(
-                destination,
-                interface_hint,
-                preferred_source,
-                deadline,
-            )
-        })
+        let result = cached(&self.by_preference, key, || {
+            self.inner
+                .lookup_with_preferences(destination, interface_hint, preferred_source, deadline)
+                .map_err(|source| super::Error::RouteLookup {
+                    destination,
+                    failure: source.classification(),
+                    source: Box::new(source),
+                })
+        });
+        deadline.live_remaining()?;
+        result
     }
 
     fn lookup_interface(
@@ -88,8 +93,17 @@ impl<R: packetcraftr_netio::route::Provider> packetcraftr_netio::route::Provider
         interface: &InterfaceId,
         deadline: &Deadline,
     ) -> Result<Option<Decision>, Self::Error> {
-        cached(&self.by_interface, interface.clone(), || {
-            self.inner.lookup_interface(interface, deadline)
-        })
+        deadline.live_remaining()?;
+        let result = cached(&self.by_interface, interface.clone(), || {
+            self.inner
+                .lookup_interface(interface, deadline)
+                .map_err(|source| super::Error::InterfaceLookup {
+                    interface: interface.name.clone(),
+                    failure: source.classification(),
+                    source: Box::new(source),
+                })
+        });
+        deadline.live_remaining()?;
+        result
     }
 }

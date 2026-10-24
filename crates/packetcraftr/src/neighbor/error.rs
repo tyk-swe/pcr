@@ -11,6 +11,15 @@ use packetcraftr_core::{
 use super::Request;
 use packetcraftr_netio::{capture::Stats, interface::Id as InterfaceId};
 
+#[derive(Debug, Clone)]
+pub struct FailureEvidence {
+    /// Requests sent before an operational failure.
+    pub attempts: u32,
+    /// Evidence retained before that failure; capture counters are not settled.
+    pub captured: Box<[Frame]>,
+    pub evidence_truncated: bool,
+}
+
 /// The provider failures this wraps retain their own platform source, which
 /// is not comparable, so these failures are matched on rather than equated.
 #[derive(Debug, thiserror::Error, Clone)]
@@ -49,9 +58,10 @@ pub enum Error {
     State { message: String },
     #[error("neighbor resolution for {target} on {interface} failed while {operation}")]
     Io {
-        interface: String,
+        interface: Box<str>,
         target: IpAddr,
         operation: &'static str,
+        spent: Option<Box<FailureEvidence>>,
         #[source]
         source: packetcraftr_netio::Error,
     },
@@ -142,9 +152,10 @@ pub(super) fn map_io_error(
     error: packetcraftr_netio::Error,
 ) -> Error {
     Error::Io {
-        interface: request.interface.name.clone(),
+        interface: request.interface.name.clone().into_boxed_str(),
         target: request.target,
         operation,
+        spent: None,
         source: error,
     }
 }

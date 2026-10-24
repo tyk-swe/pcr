@@ -253,6 +253,7 @@ impl Mqtt {
                 }
                 if flags & 4 != 0 {
                     s.will_topic = r.bytes16()?;
+                    topic_name(&s.will_topic)?;
                     s.will_payload = r.bytes16()?;
                 }
                 if flags & 128 != 0 {
@@ -277,10 +278,7 @@ impl Mqtt {
             }
             3 => {
                 s.topic = r.bytes16()?;
-                mqtt_text(&s.topic)?;
-                if s.topic.is_empty() || s.topic.contains(&b'#') || s.topic.contains(&b'+') {
-                    return Err(invalid(NAME, "invalid PUBLISH topic"));
-                }
+                topic_name(&s.topic)?;
                 if s.flags & 6 != 0 {
                     s.packet_id = r.u16()?;
                 }
@@ -297,6 +295,14 @@ impl Mqtt {
                     mqtt_text(&topic)?;
                     if topic.is_empty() {
                         return Err(invalid(NAME, "empty subscription"));
+                    }
+                    let mut levels = topic.split(|b| *b == b'/').peekable();
+                    while let Some(level) = levels.next() {
+                        if level.contains(&b'+') && level != b"+"
+                            || level.contains(&b'#') && (level != b"#" || levels.peek().is_some())
+                        {
+                            return Err(invalid(NAME, "invalid subscription wildcard"));
+                        }
                     }
                     let mut item = record([("topic", topic.into())]);
                     if s.packet_type == 8 {
@@ -335,6 +341,14 @@ fn mqtt_text(b: &[u8]) -> Result<(), Error> {
     let s = std::str::from_utf8(b).map_err(|_| invalid(NAME, "invalid UTF-8 string"))?;
     if s.contains('\0') {
         return Err(invalid(NAME, "NUL in UTF-8 string"));
+    }
+    Ok(())
+}
+
+fn topic_name(topic: &[u8]) -> Result<(), Error> {
+    mqtt_text(topic)?;
+    if topic.is_empty() || topic.contains(&b'#') || topic.contains(&b'+') {
+        return Err(invalid(NAME, "invalid topic name"));
     }
     Ok(())
 }

@@ -3,7 +3,8 @@
 
 #[cfg(native_layer2)]
 mod activation;
-#[cfg(native_layer2)]
+#[cfg(any(native_layer2, test))]
+#[cfg_attr(not(native_layer2), allow(dead_code))]
 mod filter;
 mod group;
 mod limits;
@@ -164,6 +165,13 @@ pub struct Request {
 impl Request {
     pub fn validate(&self) -> Result<(), Error> {
         validate_filter_length(self.filter.as_deref())?;
+        if self.interface.name.is_empty() || self.interface.index == 0 {
+            return Err(Error::Device {
+                interface: self.interface.name.clone(),
+                message: "capture requires a non-empty interface name and nonzero index".to_owned(),
+                source: None,
+            });
+        }
         self.limits.validate()?;
         self.native.validate(&self.limits)
     }
@@ -171,6 +179,10 @@ impl Request {
 
 fn validate_filter_length(filter: Option<&str>) -> Result<(), Error> {
     match filter {
+        Some(filter) if filter.contains('\0') => Err(Error::InvalidCaptureFilter {
+            interface: String::new(),
+            message: "capture filter contains an interior NUL byte".to_owned(),
+        }),
         Some(filter) if filter.len() > MAX_FILTER_BYTES => Err(Error::CaptureFilterTooLong {
             length: filter.len(),
             maximum: MAX_FILTER_BYTES,
@@ -256,5 +268,106 @@ impl Provider for SystemProvider {
         deadline: &Deadline,
     ) -> Result<Vec<TimestampType>, Error> {
         system::timestamp_types(interface, deadline)
+    }
+}
+
+#[cfg(test)]
+mod network_improvements {
+    use super::*;
+    fn request() -> Request {
+        Request {
+            interface: InterfaceId {
+                name: "test0".into(),
+                index: 1,
+            },
+            limits: Limits::default(),
+            filter: None,
+            promiscuous: false,
+            native: Default::default(),
+        }
+    }
+    #[test]
+    fn invalid_group_never_calls_injected_capture_provider() {
+        struct RefuseCalls(std::sync::atomic::AtomicUsize);
+        impl Provider for RefuseCalls {
+            type Capture = Box<dyn Session>;
+            fn arm_capture(&self, _: &Request, _: &Deadline) -> Result<Self::Capture, Error> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err(Error::Capture {
+                    message: "unexpected provider activation".into(),
+                    source: None,
+                })
+            }
+        }
+        for identity in [
+            InterfaceId {
+                name: String::new(),
+                index: 1,
+            },
+            InterfaceId {
+                name: "test0".into(),
+                index: 0,
+            },
+        ] {
+            let provider = RefuseCalls(std::sync::atomic::AtomicUsize::new(0));
+            let request = request();
+            let group = GroupRequest {
+                interfaces: vec![identity],
+                limits: request.limits,
+                filter: None,
+                promiscuous: false,
+                native: Default::default(),
+            };
+            let result = Group::new(&group).and_then(|mut group| {
+                group.arm(&provider, &Deadline::new(std::time::Duration::from_secs(1)))
+            });
+            assert!(result.is_err());
+            assert_eq!(provider.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        }
+    }
+    #[test]
+    fn incomplete_capture_identities_and_nul_are_rejected() {
+        for id in [
+            InterfaceId {
+                name: String::new(),
+                index: 1,
+            },
+            InterfaceId {
+                name: "test0".into(),
+                index: 0,
+            },
+        ] {
+            let mut request = request();
+            request.interface = id.clone();
+            assert!(matches!(request.validate(), Err(Error::Device { .. })));
+            let group = GroupRequest {
+                interfaces: vec![id],
+                limits: request.limits,
+                filter: None,
+                promiscuous: false,
+                native: Default::default(),
+            };
+            assert!(matches!(
+                Group::<Box<dyn Session>>::new(&group),
+                Err(Error::InvalidCaptureGroup { .. })
+            ));
+        }
+        let mut request = request();
+        request.filter = Some("tcp\0 or udp".into());
+        assert!(matches!(
+            request.validate(),
+            Err(Error::InvalidCaptureFilter { .. })
+        ));
+        let group = GroupRequest {
+            interfaces: vec![request.interface],
+            limits: request.limits,
+            filter: request.filter,
+            promiscuous: false,
+            native: Default::default(),
+        };
+        assert!(matches!(
+            Group::<Box<dyn Session>>::new(&group),
+            Err(Error::InvalidCaptureFilter { .. })
+        ));
     }
 }

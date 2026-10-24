@@ -244,16 +244,16 @@ impl FieldEdits {
         checksums: ChecksumMode,
         registry: &Registry,
     ) -> Result<Self, Error> {
-        let edits = assignments
-            .iter()
-            .map(|assignment| FieldEdit::compile(assignment, registry))
-            .collect::<Result<Vec<_>, _>>()?;
-        if edits.len() > MAX_FIELD_ASSIGNMENTS {
+        if assignments.len() > MAX_FIELD_ASSIGNMENTS {
             return Err(Error::Limit {
                 field: Limit::FieldAssignments,
                 limit: MAX_FIELD_ASSIGNMENTS,
             });
         }
+        let edits = assignments
+            .iter()
+            .map(|assignment| FieldEdit::compile(assignment, registry))
+            .collect::<Result<Vec<_>, _>>()?;
         let mut seen = BTreeSet::new();
         for edit in &edits {
             if !seen.insert(edit.canonical.clone()) {
@@ -392,4 +392,35 @@ fn read_uint(bytes: &[u8], range: ByteRange) -> Result<u64, Error> {
 fn write_uint(bytes: &mut [u8], range: ByteRange, value: u64) {
     let width = range.end - range.start;
     bytes[range.start..range.end].copy_from_slice(&value.to_be_bytes()[8 - width..]);
+}
+
+#[cfg(test)]
+mod improvement_tests {
+    use super::*;
+    #[test]
+    fn assignment_limit_precedes_compilation() {
+        let registry = crate::protocol::builtin::registry();
+        let assignments = vec![
+            FieldAssignment {
+                field: "invalid".into(),
+                value: 0
+            };
+            MAX_FIELD_ASSIGNMENTS + 1
+        ];
+        assert!(matches!(
+            FieldEdits::compile(&assignments, ChecksumMode::Repair, &registry),
+            Err(Error::Limit {
+                field: Limit::FieldAssignments,
+                limit: MAX_FIELD_ASSIGNMENTS
+            })
+        ));
+        assert!(!matches!(
+            FieldEdits::compile(
+                &assignments[..MAX_FIELD_ASSIGNMENTS],
+                ChecksumMode::Repair,
+                &registry
+            ),
+            Err(Error::Limit { .. })
+        ));
+    }
 }

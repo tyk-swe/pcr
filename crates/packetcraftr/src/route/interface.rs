@@ -63,6 +63,7 @@ impl ResolvedInterface {
         provider: &N,
         deadline: &Deadline,
     ) -> Result<InterfaceId, Error> {
+        deadline.live_remaining()?;
         if let Some(id) = selector.id() {
             return Ok(id.clone());
         }
@@ -73,14 +74,20 @@ impl ResolvedInterface {
             return Ok(id.clone());
         }
         drop(cached);
-        let id = provider
-            .interfaces(deadline)?
+        let result = provider.interfaces(deadline);
+        deadline.live_remaining()?;
+        let mut matches = result?
             .into_iter()
             .map(|info| info.id)
-            .find(|id| selector.matches(id))
-            .ok_or_else(|| Error::UnknownInterface {
+            .filter(|id| selector.matches(id));
+        let id = matches.next().ok_or_else(|| Error::UnknownInterface {
+            selector: selector.to_string(),
+        })?;
+        if matches.any(|other| other != id) {
+            return Err(Error::AmbiguousInterface {
                 selector: selector.to_string(),
-            })?;
+            });
+        }
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) =
             Some((selector.clone(), id.clone()));
         Ok(id)

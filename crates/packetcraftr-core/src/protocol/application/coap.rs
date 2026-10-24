@@ -77,6 +77,39 @@ fn coap_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
             range: crate::layout::ByteRange::new(2, 4),
         });
     }
+    let ranges = (|| -> Result<_, Error> {
+        let mut r = Reader::new(NAME, b);
+        let token_len = usize::from(r.u8()? & 15);
+        if token_len > 8 {
+            return Err(invalid(NAME, "token exceeds eight bytes"));
+        }
+        r.take(3)?;
+        r.take(token_len)?;
+        let options_start = r.pos;
+        while r.left() > 0 {
+            let start = r.pos;
+            let header = r.u8()?;
+            if header == 255 {
+                return Ok((options_start, start, r.pos));
+            }
+            read_option(header >> 4, &mut r)?;
+            let len = read_option(header & 15, &mut r)?;
+            r.take(usize::try_from(len).map_err(|_| invalid(NAME, "option length overflow"))?)?;
+        }
+        Ok((options_start, r.pos, r.pos))
+    })();
+    if let Ok((options_start, options_end, payload_start)) = ranges {
+        for (name, start, end) in [
+            ("token", 4, options_start),
+            ("options", options_start, options_end),
+            ("payload", payload_start, b.len()),
+        ] {
+            fields.push(crate::layout::FieldLayout {
+                name,
+                range: crate::layout::ByteRange::new(start, end),
+            });
+        }
+    }
     fields
 }
 message_codec!(CoapCodec, Coap, coap_schema, coap_layout_wire);

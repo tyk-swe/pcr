@@ -54,7 +54,7 @@ impl Collector {
             self.group()?;
         }
         let g = self.beacons.entry(key).or_default();
-        g.times.push(time.as_secs_f64());
+        g.times.push(time);
         sample(
             &mut g.frames,
             &r.tcp_sources()
@@ -74,7 +74,11 @@ impl Collector {
             if run.clock.regressions > 0 || g.times.len() < o.min_attempts {
                 continue;
             }
-            let intervals: Vec<_> = g.times.windows(2).map(|w| w[1] - w[0]).collect();
+            let intervals: Vec<_> = g
+                .times
+                .windows(2)
+                .map(|w| w[1].saturating_sub(w[0]).as_secs_f64())
+                .collect();
             let mean = intervals.iter().sum::<f64>() / intervals.len() as f64;
             if mean < o.min_interval_seconds || intervals.iter().any(|x| *x <= 0.0) {
                 continue;

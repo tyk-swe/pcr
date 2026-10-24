@@ -50,6 +50,30 @@ fn invocation(format: Format, writer: Writer) -> Invocation {
 }
 
 #[test]
+fn generator_cancellation_maps_to_interrupt_status_after_diagnostic_write() {
+    let invocation = invocation(Format::Text, Writer::default());
+    invocation.cancellation.cancel();
+    let error = invocation.cancellation.check().unwrap_err();
+    let code = generation_exit(&invocation, Err(CliError::classified(error)), |error| {
+        assert_eq!(error.classification.code, "io.cancelled");
+        Ok(())
+    });
+    assert_eq!(code, ExitCode::from(CANCELLED_EXIT_CODE));
+}
+
+#[test]
+fn generator_diagnostic_write_failure_precedes_cancellation_status() {
+    let invocation = invocation(Format::Text, Writer::default());
+    invocation.cancellation.cancel();
+    let code = generation_exit(
+        &invocation,
+        Err(CliError::new(Kind::Io, "cancelled operation")),
+        |_| Err(CliError::new(Kind::Io, "stderr closed")),
+    );
+    assert_eq!(code, ExitCode::from(5));
+}
+
+#[test]
 fn error_handling_json_reporting_failure_keeps_original_diagnostics() {
     let invocation = invocation(Format::Json, Writer::default());
     let error = CliError::from_classification(

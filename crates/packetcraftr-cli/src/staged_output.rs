@@ -5,7 +5,9 @@
 //! read.
 //!
 //! A destination is staged as a temporary file inside its parent directory and
-//! published with a no-clobber rename. Both steps go through an
+//! published with a no-clobber rename. Documentation regeneration uses a
+//! separate replacement entrypoint for missing destinations or regular files,
+//! keeping the original until atomic rename. Both steps go through an
 //! [`OutputDirectory`] opened at staging time: with procfs, staging and
 //! publication address the directory handle itself, so a parent path retargeted
 //! by another local actor (symlink swap or a renamed and replaced directory)
@@ -173,6 +175,8 @@ pub(crate) struct StagedFile {
     /// The requested path, for messages and reports.
     destination: PathBuf,
     invocation: crate::invocation::Invocation,
+    replace: bool,
+    permissions: Option<std::fs::Permissions>,
     /// Declared last so the file is unlinked before its path is deregistered.
     _registration: StagedRegistration,
 }
@@ -184,6 +188,23 @@ impl StagedFile {
     pub(crate) fn stage(
         invocation: &crate::invocation::Invocation,
         destination: &Path,
+    ) -> Result<Self, CliError> {
+        Self::stage_mode(invocation, destination, false)
+    }
+
+    /// Stage regeneration of a missing or regular file. Other output remains
+    /// no-clobber through `stage` and `persist`.
+    pub(crate) fn stage_replacement(
+        invocation: &crate::invocation::Invocation,
+        destination: &Path,
+    ) -> Result<Self, CliError> {
+        Self::stage_mode(invocation, destination, true)
+    }
+
+    fn stage_mode(
+        invocation: &crate::invocation::Invocation,
+        destination: &Path,
+        replace: bool,
     ) -> Result<Self, CliError> {
         invocation.check()?;
         let Some(file_name) = file_name(destination) else {
@@ -197,6 +218,7 @@ impl StagedFile {
             ));
         };
         match std::fs::symlink_metadata(destination) {
+            Ok(metadata) if replace && metadata.is_file() => {}
             Ok(_) => {
                 return Err(CliError::from_classification(
                     CLASSIFICATION,
@@ -215,7 +237,25 @@ impl StagedFile {
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         let parent = OutputDirectory::open(requested, destination)?;
-        let file = tempfile::NamedTempFile::new_in(&parent.base)
+        let permissions = if replace {
+            replacement_permissions(&parent.join(file_name), destination)?
+        } else {
+            None
+        };
+        let builder = tempfile::Builder::new();
+        #[cfg(unix)]
+        let builder = {
+            use std::os::unix::fs::PermissionsExt;
+            let mut builder = builder;
+            // Match ordinary file creation (0666 filtered by the process umask)
+            // for new documentation, while other staged output stays private.
+            if replace && permissions.is_none() {
+                builder.permissions(std::fs::Permissions::from_mode(0o666));
+            }
+            builder
+        };
+        let file = builder
+            .tempfile_in(&parent.base)
             .map_err(|source| output("stage", destination, source))?;
         let registration = StagedRegistration::new(file.path());
         Ok(Self {
@@ -224,6 +264,8 @@ impl StagedFile {
             file_name: file_name.to_owned(),
             destination: destination.to_owned(),
             invocation: invocation.clone(),
+            replace,
+            permissions,
             _registration: registration,
         })
     }
@@ -237,6 +279,14 @@ impl StagedFile {
     /// publishing several files sync every file before persisting any.
     pub(crate) fn sync(&self) -> Result<(), CliError> {
         self.invocation.check()?;
+        // Apply the original mode after writing: Unix writes can clear set-ID
+        // bits. Sync both bytes and permissions before publication.
+        if let Some(permissions) = &self.permissions {
+            self.file
+                .as_file()
+                .set_permissions(permissions.clone())
+                .map_err(|source| output("set permissions for", &self.destination, source))?;
+        }
         self.file
             .as_file()
             .sync_all()
@@ -250,6 +300,9 @@ impl StagedFile {
         // not claim that the already-published artifact was unpublished.
         self.invocation.check()?;
         self.parent.verify_unchanged(&self.destination)?;
+        if self.replace {
+            replacement_permissions(&self.parent.join(&self.file_name), &self.destination)?;
+        }
         // `parent` is bound before `file` so it drops after it: a failed
         // rename unlinks the staged file through the still-open handle.
         let Self {
@@ -258,11 +311,40 @@ impl StagedFile {
             file_name,
             destination,
             _registration,
+            replace,
             ..
         } = self;
-        file.persist_noclobber(parent.join(&file_name))
-            .map_err(|error| output("publish", &destination, error.error))?;
+        if replace {
+            file.persist(parent.join(&file_name))
+                .map_err(|error| output("replace", &destination, error.error))?;
+        } else {
+            file.persist_noclobber(parent.join(&file_name))
+                .map_err(|error| output("publish", &destination, error.error))?;
+        }
         Ok(Published { destination })
+    }
+}
+
+fn replacement_permissions(
+    path: &Path,
+    destination: &Path,
+) -> Result<Option<std::fs::Permissions>, CliError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(Some(metadata.permissions())),
+        Ok(_) => Err(output(
+            "inspect replacement destination",
+            destination,
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "replacement requires a regular file or missing destination",
+            ),
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(output(
+            "inspect replacement destination",
+            destination,
+            source,
+        )),
     }
 }
 

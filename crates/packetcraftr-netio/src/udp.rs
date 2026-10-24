@@ -73,7 +73,7 @@ impl Provider for SystemProvider {
                 actual: peer,
             });
         }
-        let mut response = vec![0; max_response];
+        let mut response = vec![0; max_response + 1];
         let mut bytes_sent = 0;
         let mut bytes_read = 0;
         let outcome = 'exchange: {
@@ -103,11 +103,11 @@ impl Provider for SystemProvider {
                 }
                 match crate::platform::receive_datagram(&socket, &mut response) {
                     Ok((count, truncated)) => {
-                        bytes_read = count;
+                        bytes_read = count.min(max_response);
                         if let Err(source) = deadline.live_remaining() {
                             break 'exchange Outcome::interrupted(source);
                         }
-                        break 'exchange if truncated {
+                        break 'exchange if truncated || count > max_response {
                             Outcome::Truncated
                         } else {
                             Outcome::Complete
@@ -156,6 +156,42 @@ impl Classified for Error {
             Self::Interrupted(source) => source.classification(),
             Self::Limit => Classification::new("cli.udp_exchange_limit", Kind::Usage, None),
             Self::Peer { .. } => Classification::new("io.udp_peer", Kind::Io, None),
+        }
+    }
+}
+
+#[cfg(test)]
+mod network_improvements {
+    use super::*;
+    use std::time::Duration;
+    #[test]
+    fn retained_udp_response_limit_is_exact() {
+        for length in [0, 3, 4, 5, 64] {
+            let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+            server
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let endpoint = server.local_addr().unwrap();
+            let worker = std::thread::spawn(move || {
+                let mut request = [0; 16];
+                let (_, peer) = server.recv_from(&mut request).unwrap();
+                server.send_to(&vec![7; length], peer).unwrap();
+            });
+            let reply = SystemProvider
+                .exchange(
+                    endpoint,
+                    b"query",
+                    4,
+                    &Deadline::new(Duration::from_secs(2)),
+                )
+                .unwrap();
+            worker.join().unwrap();
+            assert_eq!(reply.exchange.response.len(), length.min(4));
+            match reply.exchange.outcome {
+                Outcome::Complete => assert!(length <= 4),
+                Outcome::Truncated => assert!(length > 4),
+                other => panic!("unexpected outcome: {other:?}"),
+            }
         }
     }
 }

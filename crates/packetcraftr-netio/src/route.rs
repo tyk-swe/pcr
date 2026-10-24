@@ -3,7 +3,8 @@
 
 mod error;
 mod models;
-#[cfg(native_route)]
+#[cfg(any(native_route, test))]
+#[cfg_attr(not(native_route), allow(dead_code))]
 pub(crate) mod normalize;
 
 use std::net::IpAddr;
@@ -54,7 +55,10 @@ impl Provider for SystemProvider {
     ) -> Result<Decision, Self::Error> {
         validate_preferred_source_family(destination, preferred_source)?;
         admit(deadline, "looking up a route")?;
-        crate::platform::route(destination, interface_hint, preferred_source, deadline)
+        let result =
+            crate::platform::route(destination, interface_hint, preferred_source, deadline);
+        admit(deadline, "looking up a route")?;
+        result
     }
 
     fn lookup_interface(
@@ -63,7 +67,9 @@ impl Provider for SystemProvider {
         deadline: &Deadline,
     ) -> Result<Option<Decision>, Self::Error> {
         admit(deadline, "looking up an interface route")?;
-        crate::platform::interface_route(interface, deadline).map(Some)
+        let result = crate::platform::interface_route(interface, deadline);
+        admit(deadline, "looking up an interface route")?;
+        result.map(Some)
     }
 }
 

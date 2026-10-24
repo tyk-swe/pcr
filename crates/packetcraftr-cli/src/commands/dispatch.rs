@@ -11,7 +11,7 @@ use packetcraftr_core::error::Kind;
 
 use super::{CommandExit, Generate, Spec};
 use crate::errors::{CANCELLED_EXIT_CODE, CliError};
-use crate::invocation::StreamEncoder;
+use crate::invocation::{Invocation, StreamEncoder};
 use crate::output;
 use crate::output::contract::{Command, Format};
 use crate::rendering::{emit_json, emit_stderr_error, report_structured_error, stdout_stream};
@@ -41,15 +41,15 @@ impl Launch<'_> {
             crate::cancellation::signal().clone(),
             None,
         );
-        match arguments.generate(&invocation, self.format) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => {
-                if let Err(write_error) = emit_stderr_error(&error) {
-                    return ExitCode::from(write_error.exit_code());
-                }
-                ExitCode::from(error.exit_code())
-            }
-        }
+        let result = crate::cancellation::install()
+            .and_then(|()| arguments.generate(&invocation, self.format))
+            .and_then(|()| {
+                invocation
+                    .cancellation
+                    .check()
+                    .map_err(CliError::classified)
+            });
+        generation_exit(&invocation, result, emit_stderr_error)
     }
 
     pub(super) fn publish<T: Spec>(
@@ -203,7 +203,7 @@ fn command_failure_with(
     stderr: impl Fn(&CliError) -> Result<(), CliError>,
 ) -> ExitCode {
     let format = invocation.format;
-    let cancelled = invocation.cancellation.is_cancelled();
+    let mut exit_code = failure_exit(invocation, &error);
     let invocation = &invocation.terminal();
     let stream = &invocation.output;
     let open = stream.is_open();
@@ -224,11 +224,9 @@ fn command_failure_with(
         || (format == Format::Json
             && invocation.json_attempted()
             && error.classification.code == "io.stdout");
-    let exit_code = if cancelled && !output_failed {
-        CANCELLED_EXIT_CODE
-    } else {
-        error.exit_code()
-    };
+    if output_failed {
+        exit_code = error.exit_code();
+    }
     match format {
         Format::Json if !invocation.json_attempted() => report_structured_error(
             error,
@@ -255,6 +253,31 @@ fn command_failure_with(
             stderr,
         ),
         _ => stderr_failure(&error, exit_code, stderr),
+    }
+}
+
+fn generation_exit(
+    invocation: &Invocation,
+    result: Result<(), CliError>,
+    stderr: impl Fn(&CliError) -> Result<(), CliError>,
+) -> ExitCode {
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            let exit_code = failure_exit(invocation, &error);
+            match stderr(&error) {
+                Ok(()) => ExitCode::from(exit_code),
+                Err(write_error) => ExitCode::from(write_error.exit_code()),
+            }
+        }
+    }
+}
+
+fn failure_exit(invocation: &Invocation, error: &CliError) -> u8 {
+    if invocation.cancellation.is_cancelled() {
+        CANCELLED_EXIT_CODE
+    } else {
+        error.exit_code()
     }
 }
 

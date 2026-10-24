@@ -43,16 +43,22 @@ impl Document {
         }
         let mut doc: Self =
             serde_json::from_slice(bytes).map_err(|e| Error::Invalid(e.to_string()))?;
-        if doc.schema != SCHEMA
-            || doc.indicators.is_empty()
-            || doc.indicators.len() > MAX_INDICATORS
+        doc.validate()?;
+        Ok(doc)
+    }
+
+    /// Validate indicator identities and normalize values for matching.
+    pub fn validate(&mut self) -> Result<(), Error> {
+        if self.schema != SCHEMA
+            || self.indicators.is_empty()
+            || self.indicators.len() > MAX_INDICATORS
         {
             return Err(Error::Invalid(
                 "expected indicators/v1 with 1..4096 indicators".into(),
             ));
         }
         let mut ids = BTreeSet::new();
-        for i in &mut doc.indicators {
+        for i in &mut self.indicators {
             if i.id.trim().is_empty()
                 || i.id.len() > 128
                 || i.id.chars().any(char::is_control)
@@ -88,7 +94,7 @@ impl Document {
                 )));
             }
         }
-        Ok(doc)
+        Ok(())
     }
 }
 fn valid_domain(s: &str) -> bool {

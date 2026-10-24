@@ -44,10 +44,40 @@ crate::reflective_layer! {
 }
 fn ldap_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
     let _ = ldap_layout();
-    let fields = Vec::new();
-    let _ = b;
+    let mut fields = Vec::new();
+    // Reader offsets include definite BER length headers; content ranges exclude them.
+    let ranges = (|| -> Result<_, Error> {
+        let mut top = Reader::new(NAME, b);
+        let content = ber::expect(&mut top, 0x30)?;
+        let base = top.pos - content.len();
+        let mut r = Reader::new(NAME, content);
+        let id = ber::expect(&mut r, 2)?;
+        let id_range = crate::layout::ByteRange::new(base + r.pos - id.len(), base + r.pos);
+        let operation_start = base + r.pos;
+        let (_, operation) = ber::take(&mut r)?;
+        let operation_range =
+            crate::layout::ByteRange::new(base + r.pos - operation.len(), base + r.pos);
+        Ok((
+            id_range,
+            operation_start,
+            operation_range,
+            base + r.pos,
+            base + content.len(),
+        ))
+    })();
+    if let Ok((id, tag, content, controls, end)) = ranges {
+        for (name, range) in [
+            ("message_id", id),
+            ("operation", crate::layout::ByteRange::new(tag, tag + 1)),
+            ("fields", content),
+            ("controls", crate::layout::ByteRange::new(controls, end)),
+        ] {
+            fields.push(crate::layout::FieldLayout { name, range });
+        }
+    }
     fields
 }
+
 message_codec!(LdapCodec, Ldap, ldap_schema, ldap_layout_wire);
 
 const NAME: &str = "ldap";

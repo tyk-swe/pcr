@@ -48,7 +48,9 @@ impl GroupRequest {
         self.native.validate(&self.limits)?;
         let mut identities = HashSet::new();
         for interface in &self.interfaces {
-            if interface.name.len() > MAX_INTERFACE_NAME_BYTES
+            if interface.name.is_empty()
+                || interface.index == 0
+                || interface.name.len() > MAX_INTERFACE_NAME_BYTES
                 || !identities.insert(interface.index)
             {
                 return Err(invalid("interface identities must be distinct and bounded"));

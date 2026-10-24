@@ -18,7 +18,7 @@ pub trait Clock: Clone + Send + Sync + 'static {
         Instant::now()
     }
 
-    /// Waits `delay`, returning early once `deadline`'s cancellation is signaled.
+    /// Waits `delay`, returning early once `deadline` expires or is cancelled.
     fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error>;
 }
 
@@ -29,7 +29,7 @@ impl Clock for SystemClock {
     type Error = Infallible;
 
     fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error> {
-        interruptible_sleep(delay, || deadline.check_cancelled().is_err());
+        interruptible_sleep(delay, || deadline.live_remaining().is_err());
         Ok(())
     }
 }

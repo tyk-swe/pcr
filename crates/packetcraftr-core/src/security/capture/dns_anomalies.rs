@@ -119,15 +119,21 @@ impl Collector {
                         } else {
                             for q in &d.questions {
                                 let labels = q.name.labels();
-                                let Some(first) = labels.first() else {
-                                    continue;
-                                };
-                                if first.len() >= o.min_label_length
-                                    && entropy(first) >= o.min_entropy
+                                // A qualifying label is grouped by the domain following it.
+                                // The final label has no following domain and cannot qualify.
+                                for (position, label) in labels
+                                    .iter()
+                                    .enumerate()
+                                    .take(labels.len().saturating_sub(1))
                                 {
+                                    if label.len() < o.min_label_length
+                                        || entropy(label) < o.min_entropy
+                                    {
+                                        continue;
+                                    }
                                     let suffix =
                                         crate::protocol::application::dns::Name::from_labels(
-                                            labels.iter().skip(1).cloned(),
+                                            labels.iter().skip(position + 1).cloned(),
                                         )
                                         .expect("decoded DNS labels are valid")
                                         .to_string()
@@ -144,7 +150,7 @@ impl Collector {
                                     let group = self.dns_groups.entry(key).or_default();
                                     group
                                         .labels
-                                        .insert(first.iter().map(u8::to_ascii_lowercase).collect());
+                                        .insert(label.iter().map(u8::to_ascii_lowercase).collect());
                                     sample(&mut group.frames, &frames);
                                 }
                             }

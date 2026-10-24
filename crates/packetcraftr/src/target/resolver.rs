@@ -216,8 +216,9 @@ pub(crate) fn distinct_addresses(
     limit: usize,
 ) -> Result<Vec<IpAddr>, Error> {
     let mut addresses = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for address in resolved {
-        if addresses.contains(&address) {
+        if !seen.insert(address) {
             continue;
         }
         if addresses.len() >= limit {

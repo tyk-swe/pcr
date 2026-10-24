@@ -21,6 +21,19 @@ MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_JSON_DEPTH = 64
 
 
+def portable_basename(value: str) -> bool:
+    """Whether a component is safe on Unix and Windows release filesystems."""
+    devices = {'con', 'prn', 'aux', 'nul', 'conin$', 'conout$'}
+    devices.update(f'{prefix}{digit}' for prefix in ('com', 'lpt')
+                   for digit in '123456789¹²³')
+    return (isinstance(value, str) and bool(value)
+            and value not in ('.', '..')
+            and not value.endswith((' ', '.'))
+            and not any(character in value for character in '/\\:*?"<>|')
+            and not any(ord(character) < 32 or ord(character) == 127 for character in value)
+            and value.split('.')[0].rstrip(' ').casefold() not in devices)
+
+
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:

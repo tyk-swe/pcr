@@ -112,27 +112,6 @@ impl DecodeArgs {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn decode_as_ports_are_unsigned_decimal_with_whitespace() {
-        for port in ["+53", "-53", "", "0", "65536", "٥٣"] {
-            let args = DecodeArgs {
-                ports: vec![],
-                bindings: vec![format!("udp.port={port}:dns")],
-            };
-            assert!(args.registry().is_err(), "{port}");
-        }
-        let args = DecodeArgs {
-            ports: vec![],
-            bindings: vec![" udp.port = 0053 :dns".into()],
-        };
-        assert!(args.registry().is_ok());
-    }
-}
-
 fn insert(
     bindings: &mut BTreeMap<(&'static str, u16), Id>,
     parent: &'static str,
@@ -162,4 +141,25 @@ fn error(message: impl Into<String>) -> CliError {
         message,
         Vec::new(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_as_ports_are_unsigned_decimal_with_whitespace() {
+        for port in ["+53", "-53", "", "0", "65536", "٥٣"] {
+            let args = DecodeArgs {
+                ports: vec![],
+                bindings: vec![format!("udp.port={port}:dns")],
+            };
+            assert!(args.registry().is_err(), "{port}");
+        }
+        let args = DecodeArgs {
+            ports: vec![],
+            bindings: vec![" udp.port = 0053 :dns".into()],
+        };
+        assert!(args.registry().is_ok());
+    }
 }

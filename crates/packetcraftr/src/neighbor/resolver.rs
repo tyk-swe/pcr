@@ -372,10 +372,24 @@ where
                 if wait.live_remaining().is_err() {
                     break;
                 }
-                let Some(captured_frame) = capture.next_captured_frame(&wait).map_err(|error| {
-                    map_io_error(request, "receiving discovery response", error)
-                })?
-                else {
+                let captured_frame = match capture.next_captured_frame(&wait) {
+                    Ok(captured_frame) => captured_frame,
+                    Err(source) => {
+                        let (captured, evidence_truncated) = evidence.into_evidence();
+                        let mut error =
+                            map_io_error(request, "receiving discovery response", source);
+                        let Error::Io { spent, .. } = &mut error else {
+                            unreachable!()
+                        };
+                        *spent = Some(Box::new(super::error::FailureEvidence {
+                            attempts: attempt,
+                            captured: captured.into_boxed_slice(),
+                            evidence_truncated,
+                        }));
+                        return Err(error);
+                    }
+                };
+                let Some(captured_frame) = captured_frame else {
                     break;
                 };
                 if wait.live_remaining().is_err() {
@@ -597,5 +611,114 @@ mod network_improvements {
             assert_eq!(transmitter.0.load(Ordering::SeqCst), expected as usize);
             assert_eq!(session.reads, if cancel_before_send { 1 } else { 2 });
         }
+    }
+
+    struct InterruptedSession {
+        metadata: capture::Metadata,
+        cancellation: Cancellation,
+        reads: usize,
+    }
+
+    impl capture::Session for InterruptedSession {
+        fn metadata(&self) -> &capture::Metadata {
+            &self.metadata
+        }
+
+        fn wait_ready(&mut self, _: &Deadline) -> Result<(), packetcraftr_netio::Error> {
+            Ok(())
+        }
+
+        fn next_captured_frame(
+            &mut self,
+            deadline: &Deadline,
+        ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
+            self.reads += 1;
+            match self.reads {
+                1 => Ok(None),
+                2 => Ok(Some(capture::Captured::new(
+                    Frame::new(
+                        std::time::SystemTime::now(),
+                        self.metadata.link_type,
+                        [0_u8; 60].to_vec(),
+                    )
+                    .unwrap(),
+                    Instant::now(),
+                ))),
+                _ => {
+                    self.cancellation.cancel();
+                    Err(deadline.check_cancelled().unwrap_err().into())
+                }
+            }
+        }
+
+        fn shutdown(&mut self) -> Result<(), packetcraftr_netio::Error> {
+            Ok(())
+        }
+
+        fn stats(&self) -> capture::Stats {
+            Default::default()
+        }
+    }
+
+    struct InterruptedCapture(std::sync::Mutex<Option<InterruptedSession>>);
+
+    impl capture::Provider for InterruptedCapture {
+        type Capture = InterruptedSession;
+
+        fn arm_capture(
+            &self,
+            _: &capture::Request,
+            _: &Deadline,
+        ) -> Result<Self::Capture, packetcraftr_netio::Error> {
+            Ok(self.0.lock().unwrap().take().unwrap())
+        }
+    }
+
+    #[test]
+    fn interrupted_read_retains_sent_attempt_and_capture_evidence() {
+        let request = Request {
+            interface: packetcraftr_netio::interface::Id {
+                name: "test0".into(),
+                index: 1,
+            },
+            interface_source: "192.168.1.1".parse().unwrap(),
+            interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
+            target: "192.168.1.2".parse().unwrap(),
+            vlan_tags: vec![],
+            mtu: 1500,
+            link_type: packetcraftr_core::frame::LinkType::ETHERNET,
+        };
+        let cancellation = Cancellation::default();
+        let parent =
+            Deadline::new(Duration::from_secs(1)).with_cancellation(Some(cancellation.clone()));
+        let deadline = Deadline::new(Duration::from_secs(1)).with_parent(Some(Arc::new(parent)));
+        let capture = InterruptedCapture(std::sync::Mutex::new(Some(InterruptedSession {
+            metadata: capture::Metadata {
+                interface: request.interface.clone(),
+                link_type: request.link_type,
+                snap_length: 1500,
+                native: Default::default(),
+            },
+            cancellation,
+            reads: 0,
+        })));
+        let transmitter = Transmitter(AtomicUsize::new(0));
+        let error = State::default()
+            .over(&transmitter, &capture)
+            .resolve(&request, &deadline)
+            .unwrap_err();
+        let Error::Io {
+            spent: Some(spent),
+            source,
+            ..
+        } = error
+        else {
+            panic!("expected an interrupted capture read");
+        };
+        assert_eq!(spent.attempts, 1);
+        assert_eq!(transmitter.0.load(Ordering::SeqCst), 1);
+        assert_eq!(spent.captured.len(), 1);
+        assert_eq!(spent.captured[0].bytes().as_ref(), [0_u8; 60]);
+        assert!(matches!(source, packetcraftr_netio::Error::Cancelled(_)));
     }
 }

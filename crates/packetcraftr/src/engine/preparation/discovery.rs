@@ -250,13 +250,16 @@ fn unanswered(error: &route::Error, request: Option<&crate::neighbor::Request>) 
 fn requests_sent(error: &crate::neighbor::Error) -> (u32, packetcraftr_netio::capture::Stats) {
     use crate::neighbor::Error;
     match error {
+        // Interrupted I/O and failed cleanup leave capture counters unsettled.
+        Error::Io {
+            spent: Some(spent), ..
+        } => (spent.attempts, Default::default()),
+        Error::Cleanup { attempts, .. } => (*attempts, Default::default()),
         Error::NotFound {
             attempts,
             capture_statistics,
             ..
         } => (*attempts, *capture_statistics),
-        // A failed shutdown leaves the capture's counters unsettled.
-        Error::Cleanup { attempts, .. } => (*attempts, Default::default()),
         Error::OperationAndCleanup { operation, .. } => requests_sent(operation),
         _ => (0, Default::default()),
     }

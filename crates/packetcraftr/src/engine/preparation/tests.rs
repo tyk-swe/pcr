@@ -175,6 +175,65 @@ fn packet(bytes: usize) -> Packet {
 }
 
 #[test]
+fn interrupted_neighbor_io_preserves_sent_request_statistics() {
+    let (client, routes, _, _) = fixture();
+    let operation = Execution::new(&client, Duration::from_secs(10));
+    let deadline = operation.deadline(&client, Duration::from_secs(10));
+    let options = Options {
+        plan: route::Options {
+            link_mode: Mode::Layer2,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut admission = client
+        .admitting_in(&options, 1, &deadline, &operation)
+        .unwrap();
+    let packet = packet(1);
+    let route = admission
+        .route_on(&packet, "10.0.0.1".parse().unwrap(), None)
+        .unwrap();
+    let admitted = admission.admit_on(packet, &route).unwrap();
+    let request = route::neighbor_request(&route.plan).unwrap();
+    routes.decision.lock().unwrap().source_mac = None;
+    let cancellation = Cancellation::default();
+    cancellation.cancel();
+    let result = admission
+        .discover()
+        .stages
+        .materialize_using(admitted, |_, _| {
+            Err(crate::neighbor::Error::Io {
+                interface: request.interface.name.clone().into_boxed_str(),
+                target: request.target,
+                operation: "receiving discovery response",
+                spent: Some(Box::new(crate::neighbor::FailureEvidence {
+                    attempts: 1,
+                    captured: Box::default(),
+                    evidence_truncated: false,
+                })),
+                source: LiveIoError::Cancelled(packetcraftr_core::budget::Cancelled),
+            }
+            .into())
+        });
+    let Err(error) = result else {
+        panic!("interrupted neighbor discovery unexpectedly succeeded");
+    };
+    let Error::NeighborSpent(spent) = error else {
+        panic!("expected sent-request evidence on the preparation failure");
+    };
+    assert_eq!(spent.stats.packets_attempted, 1);
+    assert_eq!(spent.stats.packets_completed, 1);
+    assert_eq!(
+        spent.stats.bytes,
+        crate::neighbor::request_frame(&request).unwrap().len() as u64
+    );
+    assert!(matches!(
+        spent.error,
+        Error::Plan(route::Error::Neighbor(_))
+    ));
+}
+
+#[test]
 fn multipath_source_change_is_rejected_before_capture_or_transmission() {
     let (client, routes, _, tx) = fixture();
     let operation = Execution::new(&client, Duration::from_secs(10));

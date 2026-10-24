@@ -41,7 +41,14 @@ impl Launch<'_> {
             crate::cancellation::signal().clone(),
             None,
         );
-        match arguments.generate(&invocation, self.format) {
+        match crate::cancellation::install()
+            .and_then(|()| arguments.generate(&invocation, self.format))
+            .and_then(|()| {
+                invocation
+                    .cancellation
+                    .check()
+                    .map_err(CliError::classified)
+            }) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 if let Err(write_error) = emit_stderr_error(&error) {

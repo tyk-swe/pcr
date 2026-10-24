@@ -242,7 +242,20 @@ impl StagedFile {
         } else {
             None
         };
-        let file = tempfile::NamedTempFile::new_in(&parent.base)
+        let builder = tempfile::Builder::new();
+        #[cfg(unix)]
+        let builder = {
+            use std::os::unix::fs::PermissionsExt;
+            let mut builder = builder;
+            // Match ordinary file creation (0666 filtered by the process umask)
+            // for new documentation, while other staged output stays private.
+            if replace && permissions.is_none() {
+                builder.permissions(std::fs::Permissions::from_mode(0o666));
+            }
+            builder
+        };
+        let file = builder
+            .tempfile_in(&parent.base)
             .map_err(|source| output("stage", destination, source))?;
         let registration = StagedRegistration::new(file.path());
         Ok(Self {

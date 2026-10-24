@@ -63,7 +63,7 @@ or its associated test module.
 | 43 | Same help module: place every in selection and decoding heading. | `every_is_a_frame_selection_option`: heading agrees with frames. |
 | 44 | [crates/packetcraftr-cli/src/command_options/selectors.rs](crates/packetcraftr-cli/src/command_options/selectors.rs): require nonempty ASCII decimal stream index. | `stream_indexes_are_unsigned_decimal`: signs, whitespace, Unicode digits, empty and overflow rejected; zero and leading zeros accepted. |
 | 45 | [crates/packetcraftr-cli/src/command_options/decode.rs](crates/packetcraftr-cli/src/command_options/decode.rs): trim then require decimal port digits before existing range validation. | `decode_as_ports_are_unsigned_decimal_with_whitespace`: signed/empty/Unicode/zero/overflow rejected; whitespace and leading zeros accepted. |
-| 46 | [crates/packetcraftr-cli/src/staged_output.rs](crates/packetcraftr-cli/src/staged_output.rs): separate replacement staging for missing/regular destinations with directory-bound atomic rename; existing artifacts remain no-clobber. | `regeneration_atomically_replaces_existing_regular_files`, `replacement_rejects_directory_and_symlink_destinations`: regeneration preserves mode, rejects directories/symlinks/socket, artifact staging refuses existing files. |
+| 46 | [crates/packetcraftr-cli/src/staged_output.rs](crates/packetcraftr-cli/src/staged_output.rs): separate replacement staging for missing/regular destinations with directory-bound atomic rename; existing artifacts remain no-clobber. | `regeneration_atomically_replaces_existing_regular_files`, `replacement_rejects_directory_and_symlink_destinations`: regeneration preserves mode, rejects directories/symlinks/socket, artifact staging refuses existing files; `new_documentation_uses_normal_creation_permissions` verifies every generated manual/completion matches ordinary creation permissions under the process umask. |
 | 47 | [crates/packetcraftr-cli/src/commands/reference/documentation.rs](crates/packetcraftr-cli/src/commands/reference/documentation.rs): render every completion/manual in memory, stage/write/sync all before first publication. | `write_and_sync_failures_leave_all_originals_intact`, `render_failure_and_unsupported_formats_do_not_create_directories`, `actual_render_includes_completions_and_grouped_manuals`: injected stage/write/sync/render failures preserve originals, real rendering produces nonempty unique files. |
 | 48 | Same documentation module: errors name operation/destination and already published prefix. | `publication_failure_reports_the_published_prefix_and_destination`, `cancellation_at_publication_reports_destination_and_published_prefix`: second destination failure/cancellation reports first file; its content is committed. |
 | 49 | [README.md](README.md): build profiles, native prerequisites, offline examples and generated references; package README and this map. | Reviewed against Cargo feature definitions, release workflow and command-owned examples; documentation-only verification. |
@@ -83,7 +83,7 @@ All Rust tests used `--locked --offline --lib --no-default-features`:
 | packetcraftr-netio / network_improvements | 7 passed |
 | packetcraftr-cli / command_options | 6 passed |
 | packetcraftr-cli / commands::registry::help | 2 passed |
-| packetcraftr-cli / documentation | 7 passed |
+| packetcraftr-cli / documentation | 8 passed under umask 022; new-file permissions case also passed under umask 077 |
 | Python test_release_assets.py | 6 passed |
 | Python test_build_manifest.py | 11 passed |
 

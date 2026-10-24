@@ -206,6 +206,34 @@ mod tests {
         ])
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn new_documentation_uses_normal_creation_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let reference = temporary.path().join("ordinary-file");
+        std::fs::write(&reference, b"reference").unwrap();
+        let expected = std::fs::metadata(&reference).unwrap().permissions().mode() & 0o777;
+        Args {
+            directory: temporary.path().into(),
+        }
+        .generate(&invocation(), Format::Text)
+        .unwrap();
+
+        for directory in ["completions", "man"] {
+            for entry in std::fs::read_dir(temporary.path().join(directory)).unwrap() {
+                let path = entry.unwrap().path();
+                assert_eq!(
+                    std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                    expected,
+                    "{} should have ordinary file creation permissions",
+                    path.display()
+                );
+            }
+        }
+    }
+
     #[test]
     fn regeneration_atomically_replaces_existing_regular_files() {
         let temporary = tempfile::tempdir().unwrap();

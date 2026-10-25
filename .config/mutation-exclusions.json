@@ -1,1153 +1,1153 @@
 [
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceComparisonOperator_IsNot_NotEq\", 0, [79, 23], [79, 29], {}]",
     "evidence": "All production max_bytes callers supply built-in integer budgets. For built-in JSON/config value types, type equality with int and type identity with int agree, including rejection of bool and float."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceComparisonOperator_IsNot_NotEq\", 1, [102, 23], [102, 29], {}]",
     "evidence": "All production max_bytes callers supply built-in integer budgets. For built-in JSON/config value types, type equality with int and type identity with int agree, including rejection of bool and float."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceFalseWithTrue\", 1, [123, 75], [123, 80], {}]",
     "evidence": "Before json.dumps, _validate_tree rejects every nonfinite float and nonstring object key recursively. Current callers supply JSON-compatible values, so enabling allow_nan cannot change an accepted output or rejection."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/NumberReplacer\", 32, [180, 46], [180, 51], {}]",
     "evidence": "The replacement block size remains positive. The loop feeds the same ordered file bytes to SHA-256 through EOF. Digest callers impose no read-block-size contract. Only chunking changes."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/script_support.py\", \"core/NumberReplacer\", 33, [180, 46], [180, 51], {}]",
     "evidence": "The replacement block size remains positive. The loop feeds the same ordered file bytes to SHA-256 through EOF. Digest callers impose no read-block-size contract. Only chunking changes."
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 0, [117, 34], [117, 35], {}]",
     "evidence": "Deferred annotation of rust, argument seed. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 0, [117, 34], [117, 35], {}]",
     "evidence": "Deferred annotation of rust, argument seed. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 0, [117, 34], [117, 35], {}]",
     "evidence": "Deferred annotation of rust, argument seed. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 0, [117, 34], [117, 35], {}]",
     "evidence": "Deferred annotation of rust, argument seed. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 0, [117, 34], [117, 35], {}]",
     "evidence": "Deferred annotation of rust, argument seed. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 0, [117, 34], [117, 35], {}]",
     "evidence": "Deferred annotation of rust, argument seed. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 0, [117, 34], [117, 35], {}]",
     "evidence": "Deferred annotation of rust, argument seed. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 0, [117, 34], [117, 35], {}]",
     "evidence": "Deferred annotation of rust, argument seed. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 0, [117, 34], [117, 35], {}]",
     "evidence": "Deferred annotation of rust, argument seed. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 0, [117, 34], [117, 35], {}]",
     "evidence": "Deferred annotation of rust, argument seed. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 0, [117, 34], [117, 35], {}]",
     "evidence": "Deferred annotation of rust, argument seed. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 1, [118, 45], [118, 46], {}]",
     "evidence": "Deferred annotation of rust, argument expected_inventory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 2, [118, 95], [118, 96], {}]",
     "evidence": "Deferred annotation of rust, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 1, [118, 45], [118, 46], {}]",
     "evidence": "Deferred annotation of rust, argument expected_inventory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 2, [118, 95], [118, 96], {}]",
     "evidence": "Deferred annotation of rust, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 1, [118, 45], [118, 46], {}]",
     "evidence": "Deferred annotation of rust, argument expected_inventory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 2, [118, 95], [118, 96], {}]",
     "evidence": "Deferred annotation of rust, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 1, [118, 45], [118, 46], {}]",
     "evidence": "Deferred annotation of rust, argument expected_inventory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 2, [118, 95], [118, 96], {}]",
     "evidence": "Deferred annotation of rust, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 1, [118, 45], [118, 46], {}]",
     "evidence": "Deferred annotation of rust, argument expected_inventory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 2, [118, 95], [118, 96], {}]",
     "evidence": "Deferred annotation of rust, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 1, [118, 45], [118, 46], {}]",
     "evidence": "Deferred annotation of rust, argument expected_inventory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 2, [118, 95], [118, 96], {}]",
     "evidence": "Deferred annotation of rust, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 1, [118, 45], [118, 46], {}]",
     "evidence": "Deferred annotation of rust, argument expected_inventory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 2, [118, 95], [118, 96], {}]",
     "evidence": "Deferred annotation of rust, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 1, [118, 45], [118, 46], {}]",
     "evidence": "Deferred annotation of rust, argument expected_inventory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 2, [118, 95], [118, 96], {}]",
     "evidence": "Deferred annotation of rust, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 1, [118, 45], [118, 46], {}]",
     "evidence": "Deferred annotation of rust, argument expected_inventory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 2, [118, 95], [118, 96], {}]",
     "evidence": "Deferred annotation of rust, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 1, [118, 45], [118, 46], {}]",
     "evidence": "Deferred annotation of rust, argument expected_inventory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 2, [118, 95], [118, 96], {}]",
     "evidence": "Deferred annotation of rust, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 1, [118, 45], [118, 46], {}]",
     "evidence": "Deferred annotation of rust, argument expected_inventory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 2, [118, 95], [118, 96], {}]",
     "evidence": "Deferred annotation of rust, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 3, [224, 75], [224, 76], {}]",
     "evidence": "Deferred annotation of run, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 3, [224, 75], [224, 76], {}]",
     "evidence": "Deferred annotation of run, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 3, [224, 75], [224, 76], {}]",
     "evidence": "Deferred annotation of run, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 3, [224, 75], [224, 76], {}]",
     "evidence": "Deferred annotation of run, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 3, [224, 75], [224, 76], {}]",
     "evidence": "Deferred annotation of run, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 3, [224, 75], [224, 76], {}]",
     "evidence": "Deferred annotation of run, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 3, [224, 75], [224, 76], {}]",
     "evidence": "Deferred annotation of run, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 3, [224, 75], [224, 76], {}]",
     "evidence": "Deferred annotation of run, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 3, [224, 75], [224, 76], {}]",
     "evidence": "Deferred annotation of run, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 3, [224, 75], [224, 76], {}]",
     "evidence": "Deferred annotation of run, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 3, [224, 75], [224, 76], {}]",
     "evidence": "Deferred annotation of run, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 4, [225, 27], [225, 28], {}]",
     "evidence": "Deferred annotation of run, argument context_path. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 4, [225, 27], [225, 28], {}]",
     "evidence": "Deferred annotation of run, argument context_path. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 4, [225, 27], [225, 28], {}]",
     "evidence": "Deferred annotation of run, argument context_path. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 4, [225, 27], [225, 28], {}]",
     "evidence": "Deferred annotation of run, argument context_path. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 4, [225, 27], [225, 28], {}]",
     "evidence": "Deferred annotation of run, argument context_path. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 4, [225, 27], [225, 28], {}]",
     "evidence": "Deferred annotation of run, argument context_path. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 4, [225, 27], [225, 28], {}]",
     "evidence": "Deferred annotation of run, argument context_path. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 4, [225, 27], [225, 28], {}]",
     "evidence": "Deferred annotation of run, argument context_path. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 4, [225, 27], [225, 28], {}]",
     "evidence": "Deferred annotation of run, argument context_path. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 4, [225, 27], [225, 28], {}]",
     "evidence": "Deferred annotation of run, argument context_path. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 4, [225, 27], [225, 28], {}]",
     "evidence": "Deferred annotation of run, argument context_path. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 5, [257, 36], [257, 37], {}]",
     "evidence": "Deferred annotation of run_target, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 6, [257, 65], [257, 66], {}]",
     "evidence": "Deferred annotation of run_target, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 7, [257, 87], [257, 88], {}]",
     "evidence": "Deferred annotation of run_target, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 5, [257, 36], [257, 37], {}]",
     "evidence": "Deferred annotation of run_target, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 6, [257, 65], [257, 66], {}]",
     "evidence": "Deferred annotation of run_target, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 7, [257, 87], [257, 88], {}]",
     "evidence": "Deferred annotation of run_target, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 5, [257, 36], [257, 37], {}]",
     "evidence": "Deferred annotation of run_target, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 6, [257, 65], [257, 66], {}]",
     "evidence": "Deferred annotation of run_target, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 7, [257, 87], [257, 88], {}]",
     "evidence": "Deferred annotation of run_target, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 5, [257, 36], [257, 37], {}]",
     "evidence": "Deferred annotation of run_target, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 6, [257, 65], [257, 66], {}]",
     "evidence": "Deferred annotation of run_target, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 7, [257, 87], [257, 88], {}]",
     "evidence": "Deferred annotation of run_target, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 5, [257, 36], [257, 37], {}]",
     "evidence": "Deferred annotation of run_target, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 6, [257, 65], [257, 66], {}]",
     "evidence": "Deferred annotation of run_target, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 7, [257, 87], [257, 88], {}]",
     "evidence": "Deferred annotation of run_target, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 5, [257, 36], [257, 37], {}]",
     "evidence": "Deferred annotation of run_target, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 6, [257, 65], [257, 66], {}]",
     "evidence": "Deferred annotation of run_target, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 7, [257, 87], [257, 88], {}]",
     "evidence": "Deferred annotation of run_target, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 5, [257, 36], [257, 37], {}]",
     "evidence": "Deferred annotation of run_target, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 6, [257, 65], [257, 66], {}]",
     "evidence": "Deferred annotation of run_target, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 7, [257, 87], [257, 88], {}]",
     "evidence": "Deferred annotation of run_target, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 5, [257, 36], [257, 37], {}]",
     "evidence": "Deferred annotation of run_target, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 6, [257, 65], [257, 66], {}]",
     "evidence": "Deferred annotation of run_target, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 7, [257, 87], [257, 88], {}]",
     "evidence": "Deferred annotation of run_target, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 5, [257, 36], [257, 37], {}]",
     "evidence": "Deferred annotation of run_target, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 6, [257, 65], [257, 66], {}]",
     "evidence": "Deferred annotation of run_target, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 7, [257, 87], [257, 88], {}]",
     "evidence": "Deferred annotation of run_target, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 5, [257, 36], [257, 37], {}]",
     "evidence": "Deferred annotation of run_target, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 6, [257, 65], [257, 66], {}]",
     "evidence": "Deferred annotation of run_target, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 7, [257, 87], [257, 88], {}]",
     "evidence": "Deferred annotation of run_target, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 5, [257, 36], [257, 37], {}]",
     "evidence": "Deferred annotation of run_target, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 6, [257, 65], [257, 66], {}]",
     "evidence": "Deferred annotation of run_target, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 7, [257, 87], [257, 88], {}]",
     "evidence": "Deferred annotation of run_target, return. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 8, [468, 66], [468, 67], {}]",
     "evidence": "Deferred annotation of reuse_context, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 8, [468, 66], [468, 67], {}]",
     "evidence": "Deferred annotation of reuse_context, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 8, [468, 66], [468, 67], {}]",
     "evidence": "Deferred annotation of reuse_context, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 8, [468, 66], [468, 67], {}]",
     "evidence": "Deferred annotation of reuse_context, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 8, [468, 66], [468, 67], {}]",
     "evidence": "Deferred annotation of reuse_context, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 8, [468, 66], [468, 67], {}]",
     "evidence": "Deferred annotation of reuse_context, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 8, [468, 66], [468, 67], {}]",
     "evidence": "Deferred annotation of reuse_context, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 8, [468, 66], [468, 67], {}]",
     "evidence": "Deferred annotation of reuse_context, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 8, [468, 66], [468, 67], {}]",
     "evidence": "Deferred annotation of reuse_context, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 8, [468, 66], [468, 67], {}]",
     "evidence": "Deferred annotation of reuse_context, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 8, [468, 66], [468, 67], {}]",
     "evidence": "Deferred annotation of reuse_context, argument context. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 10, [483, 31], [483, 32], {}]",
     "evidence": "Deferred annotation of check, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 11, [483, 70], [483, 71], {}]",
     "evidence": "Deferred annotation of check, argument context_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 10, [483, 31], [483, 32], {}]",
     "evidence": "Deferred annotation of check, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 11, [483, 70], [483, 71], {}]",
     "evidence": "Deferred annotation of check, argument context_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 10, [483, 31], [483, 32], {}]",
     "evidence": "Deferred annotation of check, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 11, [483, 70], [483, 71], {}]",
     "evidence": "Deferred annotation of check, argument context_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 10, [483, 31], [483, 32], {}]",
     "evidence": "Deferred annotation of check, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 11, [483, 70], [483, 71], {}]",
     "evidence": "Deferred annotation of check, argument context_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 10, [483, 31], [483, 32], {}]",
     "evidence": "Deferred annotation of check, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 11, [483, 70], [483, 71], {}]",
     "evidence": "Deferred annotation of check, argument context_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 10, [483, 31], [483, 32], {}]",
     "evidence": "Deferred annotation of check, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 11, [483, 70], [483, 71], {}]",
     "evidence": "Deferred annotation of check, argument context_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 10, [483, 31], [483, 32], {}]",
     "evidence": "Deferred annotation of check, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 11, [483, 70], [483, 71], {}]",
     "evidence": "Deferred annotation of check, argument context_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 10, [483, 31], [483, 32], {}]",
     "evidence": "Deferred annotation of check, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 11, [483, 70], [483, 71], {}]",
     "evidence": "Deferred annotation of check, argument context_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 10, [483, 31], [483, 32], {}]",
     "evidence": "Deferred annotation of check, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 11, [483, 70], [483, 71], {}]",
     "evidence": "Deferred annotation of check, argument context_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 10, [483, 31], [483, 32], {}]",
     "evidence": "Deferred annotation of check, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 11, [483, 70], [483, 71], {}]",
     "evidence": "Deferred annotation of check, argument context_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 10, [483, 31], [483, 32], {}]",
     "evidence": "Deferred annotation of check, argument seed_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 11, [483, 70], [483, 71], {}]",
     "evidence": "Deferred annotation of check, argument context_directory. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 12, [513, 29], [513, 30], {}]",
     "evidence": "Deferred annotation of main, argument argv. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 12, [513, 29], [513, 30], {}]",
     "evidence": "Deferred annotation of main, argument argv. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 12, [513, 29], [513, 30], {}]",
     "evidence": "Deferred annotation of main, argument argv. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 12, [513, 29], [513, 30], {}]",
     "evidence": "Deferred annotation of main, argument argv. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 12, [513, 29], [513, 30], {}]",
     "evidence": "Deferred annotation of main, argument argv. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 12, [513, 29], [513, 30], {}]",
     "evidence": "Deferred annotation of main, argument argv. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 12, [513, 29], [513, 30], {}]",
     "evidence": "Deferred annotation of main, argument argv. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 12, [513, 29], [513, 30], {}]",
     "evidence": "Deferred annotation of main, argument argv. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 12, [513, 29], [513, 30], {}]",
     "evidence": "Deferred annotation of main, argument argv. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 12, [513, 29], [513, 30], {}]",
     "evidence": "Deferred annotation of main, argument argv. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/run_mutation.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/run_mutation.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 12, [513, 29], [513, 30], {}]",
     "evidence": "Deferred annotation of main, argument argv. Source d99a92d44e7476e2acb096c9be30d84b734f630d1ac1e6095717ddc25ca0145b. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 0, [18, 40], [18, 41], {}]",
     "evidence": "Deferred annotation of resource_error, argument error. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 1, [18, 67], [18, 68], {}]",
     "evidence": "Deferred annotation of resource_error, return. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 0, [18, 40], [18, 41], {}]",
     "evidence": "Deferred annotation of resource_error, argument error. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 1, [18, 67], [18, 68], {}]",
     "evidence": "Deferred annotation of resource_error, return. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 0, [18, 40], [18, 41], {}]",
     "evidence": "Deferred annotation of resource_error, argument error. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 1, [18, 67], [18, 68], {}]",
     "evidence": "Deferred annotation of resource_error, return. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 0, [18, 40], [18, 41], {}]",
     "evidence": "Deferred annotation of resource_error, argument error. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 1, [18, 67], [18, 68], {}]",
     "evidence": "Deferred annotation of resource_error, return. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 0, [18, 40], [18, 41], {}]",
     "evidence": "Deferred annotation of resource_error, argument error. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 1, [18, 67], [18, 68], {}]",
     "evidence": "Deferred annotation of resource_error, return. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 0, [18, 40], [18, 41], {}]",
     "evidence": "Deferred annotation of resource_error, argument error. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 1, [18, 67], [18, 68], {}]",
     "evidence": "Deferred annotation of resource_error, return. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 0, [18, 40], [18, 41], {}]",
     "evidence": "Deferred annotation of resource_error, argument error. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 1, [18, 67], [18, 68], {}]",
     "evidence": "Deferred annotation of resource_error, return. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 0, [18, 40], [18, 41], {}]",
     "evidence": "Deferred annotation of resource_error, argument error. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 1, [18, 67], [18, 68], {}]",
     "evidence": "Deferred annotation of resource_error, return. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 0, [18, 40], [18, 41], {}]",
     "evidence": "Deferred annotation of resource_error, argument error. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 1, [18, 67], [18, 68], {}]",
     "evidence": "Deferred annotation of resource_error, return. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 0, [18, 40], [18, 41], {}]",
     "evidence": "Deferred annotation of resource_error, argument error. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 1, [18, 67], [18, 68], {}]",
     "evidence": "Deferred annotation of resource_error, return. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 0, [18, 40], [18, 41], {}]",
     "evidence": "Deferred annotation of resource_error, argument error. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 1, [18, 67], [18, 68], {}]",
     "evidence": "Deferred annotation of resource_error, return. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 2, [66, 93], [66, 94], {}]",
     "evidence": "Deferred annotation of MutationResult.addSubTest, argument err. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 2, [66, 93], [66, 94], {}]",
     "evidence": "Deferred annotation of MutationResult.addSubTest, argument err. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 2, [66, 93], [66, 94], {}]",
     "evidence": "Deferred annotation of MutationResult.addSubTest, argument err. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 2, [66, 93], [66, 94], {}]",
     "evidence": "Deferred annotation of MutationResult.addSubTest, argument err. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 2, [66, 93], [66, 94], {}]",
     "evidence": "Deferred annotation of MutationResult.addSubTest, argument err. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 2, [66, 93], [66, 94], {}]",
     "evidence": "Deferred annotation of MutationResult.addSubTest, argument err. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 2, [66, 93], [66, 94], {}]",
     "evidence": "Deferred annotation of MutationResult.addSubTest, argument err. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 2, [66, 93], [66, 94], {}]",
     "evidence": "Deferred annotation of MutationResult.addSubTest, argument err. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 2, [66, 93], [66, 94], {}]",
     "evidence": "Deferred annotation of MutationResult.addSubTest, argument err. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 2, [66, 93], [66, 94], {}]",
     "evidence": "Deferred annotation of MutationResult.addSubTest, argument err. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   },
   {
     "group": "scripts/mutation_test_runner.py",
-    "revision": "de6339bccfe4a58d08ebbcda76ba7b8b624940062b04a36c7228bcf7ab97bf53",
+    "revision": "4de814c4a84eba3a22401951228377de668db0070bf00cd4b499a735e40031a6",
     "identity": "[\"scripts/mutation_test_runner.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 2, [66, 93], [66, 94], {}]",
     "evidence": "Deferred annotation of MutationResult.addSubTest, argument err. Source f20804c61edfa051f60d62c812cd70d8b453b811660b6c5d6f2c9bf5917b5cd9. The remaining AST is unchanged and runtime callers do not resolve annotations. Exact surviving SDK diff reviewed"
   }

@@ -633,3 +633,387 @@ fn failure_status(error: &http::Error) -> Status {
         Status::Malformed
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        analysis::{self, Session},
+        budget::Deadline,
+        build::Builder,
+        capture_file::{Format, Reader, Writer},
+        error::Classified,
+        frame::{Frame, LinkType},
+        layer::Raw,
+        packet::Packet,
+        protocol::{builtin, network::Ipv4, transport::Tcp},
+        registry::Registry,
+    };
+    use std::{
+        io::Cursor,
+        net::{Ipv4Addr, SocketAddrV4},
+        sync::Arc,
+        time::{Duration, Instant, UNIX_EPOCH},
+    };
+
+    // HTTP/1 framing, informational responses and chunked trailers, checked 2026-10-25.
+    // https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3
+    // https://www.rfc-editor.org/rfc/rfc9112.html#section-7.1
+    const POST: &[u8] = b"POST /first HTTP/1.1\r\nHost: unit.test\r\nContent-Length: 3\r\n\r\n";
+    const HEAD: &[u8] = b"HEAD /second HTTP/1.1\r\nHost: unit.test\r\n\r\n";
+    const INFORMATIONAL: &[u8] = b"HTTP/1.1 103 Early Hints\r\nLink: </asset>\r\n\r\n";
+    const CHUNKED: &[u8] =
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTrailer: X-Trailer\r\n\r\n";
+    const HEAD_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\n";
+
+    #[derive(Clone, Copy)]
+    enum Lifecycle {
+        Session,
+        Direct,
+    }
+
+    fn registry() -> Arc<Registry> {
+        Arc::new(
+            builtin::registry_with(|builder| {
+                builder.bind("tcp", 40000, "raw", i32::MAX)?;
+                builder.bind("tcp", 8081, "raw", i32::MAX)?;
+                Ok(())
+            })
+            .unwrap(),
+        )
+    }
+
+    fn endpoints(response: bool) -> (SocketAddrV4, SocketAddrV4) {
+        let client = SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 40000);
+        let server = SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 80), 8081);
+        if response {
+            (server, client)
+        } else {
+            (client, server)
+        }
+    }
+
+    fn frame(number: u64, response: bool, mut header: Tcp, payload: &[u8]) -> Frame {
+        let (source, destination) = endpoints(response);
+        header.source_port = source.port();
+        header.destination_port = destination.port();
+        header.window = 4096;
+        let mut packet = Packet::new();
+        packet.push(Ipv4 {
+            source: *source.ip(),
+            destination: *destination.ip(),
+            ..Default::default()
+        });
+        packet.push(header);
+        if !payload.is_empty() {
+            packet.push(Raw::new(payload.to_vec()));
+        }
+        let built = Builder::new(registry())
+            .build(packet, Default::default(), Default::default())
+            .unwrap();
+        Frame::new(
+            UNIX_EPOCH + Duration::from_secs(100 + number),
+            LinkType::RAW,
+            built.bytes,
+        )
+        .unwrap()
+    }
+
+    fn frames(client: &[&[u8]], server: &[&[u8]]) -> Vec<Frame> {
+        let mut frames = vec![
+            frame(
+                1,
+                false,
+                Tcp {
+                    sequence: 100,
+                    flags: Tcp::SYN,
+                    ..Default::default()
+                },
+                &[],
+            ),
+            frame(
+                2,
+                true,
+                Tcp {
+                    sequence: 900,
+                    acknowledgment: 101,
+                    flags: Tcp::SYN | Tcp::ACK,
+                    ..Default::default()
+                },
+                &[],
+            ),
+            frame(
+                3,
+                false,
+                Tcp {
+                    sequence: 101,
+                    acknowledgment: 901,
+                    flags: Tcp::ACK,
+                    ..Default::default()
+                },
+                &[],
+            ),
+        ];
+        let mut client_sequence = 101;
+        for payload in client {
+            frames.push(frame(
+                frames.len() as u64 + 1,
+                false,
+                Tcp {
+                    sequence: client_sequence,
+                    acknowledgment: 901,
+                    flags: Tcp::ACK,
+                    ..Default::default()
+                },
+                payload,
+            ));
+            client_sequence += u32::try_from(payload.len()).unwrap();
+        }
+        let mut server_sequence = 901;
+        for payload in server {
+            frames.push(frame(
+                frames.len() as u64 + 1,
+                true,
+                Tcp {
+                    sequence: server_sequence,
+                    acknowledgment: client_sequence,
+                    flags: Tcp::ACK,
+                    ..Default::default()
+                },
+                payload,
+            ));
+            server_sequence += u32::try_from(payload.len()).unwrap();
+        }
+        frames
+    }
+
+    fn collect(
+        frames: &[Frame],
+        lifecycle: Lifecycle,
+        max_buffer_bytes: usize,
+    ) -> Result<(Vec<Event>, Summary, Vec<Definition>), analysis::Error> {
+        let mut writer = Writer::new(Vec::new(), Format::Pcap, LinkType::RAW).unwrap();
+        for frame in frames {
+            writer.write_frame(frame).unwrap();
+        }
+        let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+        let collector = Collector::new(
+            Limits {
+                max_messages: 16,
+                max_streams: 4,
+                max_buffer_bytes,
+                max_retained_bytes: 128 * 1024,
+                max_source_spans: 16,
+            },
+            [8081],
+            64,
+        )
+        .unwrap();
+        let now = Instant::now();
+        let options = analysis::Options {
+            deadline: Some(Arc::new(Deadline::with_time_source(
+                Duration::from_secs(30),
+                move || now,
+            ))),
+            tcp_events: matches!(lifecycle, Lifecycle::Direct),
+            track_sources: matches!(lifecycle, Lifecycle::Direct),
+            limits: analysis::Limits {
+                max_frames: 32,
+                max_bytes: 64 * 1024,
+                max_frame_bytes: 1024,
+                max_duration: Duration::MAX,
+                tcp: analysis::reassembly::tcp::Limits {
+                    idle_expiry: Duration::from_secs(60),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut events = Vec::new();
+        match lifecycle {
+            Lifecycle::Session => {
+                let outcome = Session::new(registry(), options, collector).run(
+                    &mut reader,
+                    |_| Ok(()),
+                    |event| {
+                        events.push(event);
+                        Ok(())
+                    },
+                )?;
+                Ok((events, outcome.summary, outcome.scopes))
+            }
+            Lifecycle::Direct => {
+                let mut collector = collector;
+                let run = analysis::run(&mut reader, registry(), &options, |record| {
+                    events.extend(<Collector as analysis::Collector>::observe(
+                        &mut collector,
+                        &record,
+                    )?);
+                    Ok(())
+                })?;
+                let scopes = <Collector as analysis::Collector>::scopes(&collector);
+                let (tail, summary) = <Collector as analysis::Collector>::finish(collector, &run)
+                    .map_err(analysis::Error::Collector)?;
+                events.extend(tail);
+                Ok((events, summary, scopes))
+            }
+        }
+    }
+
+    fn messages(events: &[Event]) -> Vec<&Message> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Message(message) => Some(message.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn source_numbers(sources: &SourceSet) -> Vec<u64> {
+        sources.iter().map(|source| source.number).collect()
+    }
+
+    fn complete<'a>(
+        message: &'a Message,
+        header: &[u8],
+        framing: Body,
+        body_bytes: u64,
+        sources: &[u64],
+    ) -> &'a Head {
+        assert_eq!(message.status, Status::Complete);
+        assert_eq!(message.header_wire.as_ref(), header);
+        assert_eq!(message.framing, Some(framing));
+        assert_eq!(message.body_bytes, body_bytes);
+        assert!(message.error.is_none());
+        assert_eq!(source_numbers(&message.sources), sources);
+        message.head.as_ref().unwrap()
+    }
+
+    #[test]
+    fn pipelined_requests_keep_informational_pairing_chunked_trailers_and_head_framing() {
+        let client_tail = [&POST[20..], b"abc", HEAD].concat();
+        let server_head = [INFORMATIONAL, &CHUNKED[..15]].concat();
+        let server_tail = [
+            &CHUNKED[15..],
+            b"3\r\nxyz\r\n0\r\nX-Trailer: complete\r\n\r\n",
+            HEAD_RESPONSE,
+        ]
+        .concat();
+        let frames = frames(&[&POST[..20], &client_tail], &[&server_head, &server_tail]);
+        for lifecycle in [Lifecycle::Session, Lifecycle::Direct] {
+            let (events, summary, scopes) = collect(&frames, lifecycle, 512).unwrap();
+            let messages = messages(&events);
+            let [post, head, informational, chunked, head_response] = messages.as_slice() else {
+                panic!("expected both requests, an informational response and both final responses")
+            };
+            let post_head = complete(post, POST, Body::Length(3), 3, &[4, 5]);
+            assert!(
+                matches!(&post_head.start, http::StartLine::Request { method, target, version }
+                if method == "POST" && target.as_ref() == b"/first" && version == "HTTP/1.1")
+            );
+            assert_eq!(
+                post_head.values("host").collect::<Vec<_>>(),
+                [b"unit.test".as_slice()]
+            );
+            let head_head = complete(head, HEAD, Body::None, 0, &[5]);
+            assert!(
+                matches!(&head_head.start, http::StartLine::Request { method, target, .. }
+                if method == "HEAD" && target.as_ref() == b"/second")
+            );
+            assert_eq!(
+                complete(informational, INFORMATIONAL, Body::None, 0, &[6]).status(),
+                Some(103)
+            );
+            assert_eq!(informational.request, Some(post.index));
+            assert_eq!(
+                complete(chunked, CHUNKED, Body::Chunked, 3, &[6, 7]).status(),
+                Some(200)
+            );
+            assert_eq!(chunked.request, Some(post.index));
+            let [trailer] = chunked.trailers.as_slice() else {
+                panic!("expected the supplied chunked trailer")
+            };
+            assert!(trailer.name.eq_ignore_ascii_case("X-Trailer"));
+            assert_eq!(trailer.value.as_ref(), b"complete");
+            // A HEAD response has no message body, checked 2026-10-25.
+            // https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.2
+            let response_head = complete(head_response, HEAD_RESPONSE, Body::None, 0, &[7]);
+            assert_eq!(response_head.status(), Some(200));
+            assert_eq!(
+                response_head.values("content-length").collect::<Vec<_>>(),
+                [b"7".as_slice()]
+            );
+            assert_eq!(head_response.request, Some(head.index));
+            assert!(
+                messages
+                    .windows(2)
+                    .all(|pair| pair[0].index < pair[1].index)
+            );
+            for message in &messages {
+                assert!(scopes.iter().any(|scope| scope.id == message.flow.scope));
+            }
+            assert_eq!(
+                (
+                    summary.messages,
+                    summary.complete_messages,
+                    summary.incomplete_messages,
+                    summary.malformed_messages,
+                    summary.responses_without_request,
+                    summary.requests_without_final_response,
+                    summary.upgraded_connections,
+                ),
+                (5, 5, 0, 0, 0, 0, 0)
+            );
+        }
+    }
+
+    #[test]
+    fn completed_headers_release_admission_and_eof_keeps_the_partial_successor() {
+        let header = b"GET /small HTTP/1.1\r\nHost: unit.test\r\n\r\n";
+        let partial = b"GET /later HTTP/1.1\r\nHost: pending";
+        let split = header.len() - 1;
+        let tail = [&header[split..], header.as_slice(), partial.as_slice()].concat();
+        let frames = frames(&[&header[..split], &tail], &[]);
+        for lifecycle in [Lifecycle::Session, Lifecycle::Direct] {
+            let (events, summary, scopes) = collect(&frames, lifecycle, header.len()).unwrap();
+            let messages = messages(&events);
+            let [first, second, unfinished] = messages.as_slice() else {
+                panic!("expected two completed requests and the EOF partial header")
+            };
+            assert_eq!(
+                complete(first, header, Body::None, 0, &[4, 5]).method(),
+                Some("GET")
+            );
+            assert_eq!(
+                complete(second, header, Body::None, 0, &[5]).method(),
+                Some("GET")
+            );
+            assert_eq!(unfinished.status, Status::Incomplete);
+            assert_eq!(unfinished.header_wire.as_ref(), partial);
+            assert!(unfinished.head.is_none());
+            assert_eq!(unfinished.framing, None);
+            assert_eq!(unfinished.body_bytes, 0);
+            assert!(unfinished.error.is_none());
+            assert_eq!(source_numbers(&unfinished.sources), [5]);
+            for message in &messages {
+                assert!(scopes.iter().any(|scope| scope.id == message.flow.scope));
+            }
+            assert_eq!(
+                (
+                    summary.messages,
+                    summary.complete_messages,
+                    summary.incomplete_messages,
+                    summary.malformed_messages,
+                    summary.requests_without_final_response,
+                ),
+                (3, 2, 1, 0, 2)
+            );
+            let error = collect(&frames, lifecycle, header.len() - 1).unwrap_err();
+            assert_eq!(error.classification().code, "policy.application_limit");
+            let expected = format!("max_buffer_bytes={}", header.len() - 1);
+            assert!(error.causes().iter().any(|cause| cause.contains(&expected)));
+        }
+    }
+}

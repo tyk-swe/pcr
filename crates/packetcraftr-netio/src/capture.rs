@@ -274,6 +274,8 @@ impl Provider for SystemProvider {
 #[cfg(test)]
 mod network_improvements {
     use super::*;
+    use packetcraftr_core::{budget::Cancellation, frame::Frame};
+    use std::time::Duration;
     fn request() -> Request {
         Request {
             interface: InterfaceId {
@@ -374,5 +376,174 @@ mod network_improvements {
             Group::<Box<dyn Session>>::new(&group),
             Err(Error::InvalidCaptureFilter { .. })
         ));
+    }
+
+    struct ControlledSession {
+        metadata: [Metadata; 2],
+        queued: Option<Captured>,
+        statistics: Stats,
+        quality: ObservationQuality,
+        failure: Option<Error>,
+    }
+
+    impl ControlledSession {
+        fn check(&self) -> Result<(), Error> {
+            self.failure.clone().map_or(Ok(()), Err)
+        }
+    }
+
+    impl Session for ControlledSession {
+        fn metadata(&self) -> &Metadata {
+            &self.metadata[0]
+        }
+
+        fn source_count(&self) -> usize {
+            self.metadata.len()
+        }
+
+        fn source_metadata(&self, source: usize) -> Option<&Metadata> {
+            self.metadata.get(source)
+        }
+
+        fn wait_ready(&mut self, deadline: &Deadline) -> Result<(), Error> {
+            deadline.check_cancelled()?;
+            self.check()
+        }
+
+        fn next_captured_frame(&mut self, deadline: &Deadline) -> Result<Option<Captured>, Error> {
+            deadline.check_cancelled()?;
+            self.check()?;
+            Ok(self.queued.take())
+        }
+
+        fn request_stop(&mut self) -> Result<(), Error> {
+            self.check()
+        }
+
+        fn shutdown_until(&mut self, deadline: &Deadline) -> Result<(), Error> {
+            deadline.check_cancelled()?;
+            self.check()
+        }
+
+        fn shutdown(&mut self) -> Result<(), Error> {
+            self.check()
+        }
+
+        fn stats(&self) -> Stats {
+            self.statistics
+        }
+
+        fn observation_quality(&self) -> ObservationQuality {
+            self.quality
+        }
+    }
+
+    fn controlled_session(received_at: Instant, failure: Option<Error>) -> ControlledSession {
+        let metadata = [("first", 11, 64), ("second", 12, 128)].map(
+            |(name, index, snap_length): (&str, u32, usize)| Metadata {
+                interface: InterfaceId {
+                    name: name.to_owned(),
+                    index,
+                },
+                link_type: LinkType::RAW,
+                snap_length,
+                native: RealizedSettings::default(),
+            },
+        );
+        let mut captured = Captured::new(
+            Frame::without_timestamp(LinkType::RAW, vec![0xa1, 0xb2, 0xc3]).unwrap(),
+            received_at,
+        );
+        captured.source = 1;
+        ControlledSession {
+            metadata,
+            queued: Some(captured),
+            statistics: Stats {
+                received_frames: 3,
+                received_bytes: 9,
+                dropped_frames: 2,
+                dropped_bytes: 6,
+                overflow_events: 1,
+                receiver_dropped_frames: 1,
+            },
+            quality: ObservationQuality::Incomplete,
+            failure,
+        }
+    }
+
+    fn controlled_deadline(now: Instant, cancellation: Option<Cancellation>) -> Deadline {
+        Deadline::with_time_source(Duration::from_secs(5), move || now)
+            .with_cancellation(cancellation)
+    }
+
+    #[test]
+    fn boxed_capture_preserves_source_and_record_evidence_after_cancelled_waits() {
+        let received_at = Instant::now();
+        let backend = controlled_session(received_at, None);
+        let metadata = backend.metadata.clone();
+        let statistics = backend.statistics;
+        let quality = backend.quality;
+        let expected = backend.queued.as_ref().unwrap().clone();
+        let mut capture: SystemSession = Box::new(backend);
+        assert_eq!(capture.metadata(), &metadata[0]);
+        assert_eq!(capture.source_count(), metadata.len());
+        for (source, expected) in metadata.iter().enumerate() {
+            assert_eq!(capture.source_metadata(source), Some(expected));
+        }
+        assert!(capture.source_metadata(metadata.len()).is_none());
+        assert_eq!(capture.stats(), statistics);
+        assert_eq!(capture.observation_quality(), quality);
+
+        let cancellation = Cancellation::default();
+        cancellation.cancel();
+        let cancelled = controlled_deadline(received_at, Some(cancellation));
+        let live = controlled_deadline(received_at, None);
+        assert!(matches!(
+            capture.wait_ready(&cancelled),
+            Err(Error::Cancelled(_))
+        ));
+        capture.wait_ready(&live).unwrap();
+        assert!(matches!(
+            capture.next_captured_frame(&cancelled),
+            Err(Error::Cancelled(_))
+        ));
+        let received = capture.next_captured_frame(&live).unwrap().unwrap();
+        assert_eq!(received.identity(), expected.identity());
+        assert_eq!(received.source, expected.source);
+        assert_eq!(received.frame, expected.frame);
+        assert_eq!(received.received_at, Some(received_at));
+        assert!(capture.next_captured_frame(&live).unwrap().is_none());
+        capture.request_stop().unwrap();
+        assert!(matches!(
+            capture.shutdown_until(&cancelled),
+            Err(Error::Cancelled(_))
+        ));
+        capture.shutdown_until(&live).unwrap();
+        capture.shutdown().unwrap();
+        assert_eq!(capture.stats(), statistics);
+        assert_eq!(capture.observation_quality(), quality);
+    }
+
+    #[test]
+    fn boxed_capture_preserves_backend_failures_from_readiness_read_stop_and_cleanup() {
+        let now = Instant::now();
+        let failure = Error::Capture {
+            message: "controlled backend failure".to_owned(),
+            source: None,
+        };
+        let mut capture: SystemSession = Box::new(controlled_session(now, Some(failure)));
+        let deadline = controlled_deadline(now, None);
+        let expect_failure = |result: Result<(), Error>| {
+            let Err(Error::Capture { message, source }) = result else {
+                panic!("the boxed capture must preserve the backend's failure")
+            };
+            assert_eq!(message, "controlled backend failure");
+            assert!(source.is_none());
+        };
+        expect_failure(capture.wait_ready(&deadline));
+        expect_failure(capture.next_captured_frame(&deadline).map(drop));
+        expect_failure(capture.request_stop());
+        expect_failure(capture.shutdown_until(&deadline));
+        expect_failure(capture.shutdown());
     }
 }

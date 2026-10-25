@@ -420,12 +420,12 @@ mod audit {
         budget::{Cancellation, Deadline},
         protocol::builtin,
     };
-    use packetcraftr_netio::{tcp, tls};
+    use packetcraftr_netio::{bounded::Outcome, tcp, tls};
     use std::{
         collections::BTreeSet,
         convert::Infallible,
         io::{self, Cursor, Read, Write},
-        net::SocketAddr,
+        net::{SocketAddr, SocketAddrV6},
         sync::{
             Arc, Mutex,
             atomic::{AtomicBool, Ordering},
@@ -461,6 +461,9 @@ mod audit {
         TimeoutBoundary,
         Expire,
         Cancel,
+        WriteTimeoutFailure,
+        CancelWriteTimeout,
+        ExpireWriteTimeout,
     }
 
     enum AuditResponse {
@@ -499,7 +502,11 @@ mod audit {
                 return Ok(count);
             }
             match self.ending {
-                Ending::Eof | Ending::FlushFailure => Ok(0),
+                Ending::Eof
+                | Ending::FlushFailure
+                | Ending::WriteTimeoutFailure
+                | Ending::CancelWriteTimeout
+                | Ending::ExpireWriteTimeout => Ok(0),
                 Ending::ReadFailure => Err(io::Error::new(
                     io::ErrorKind::BrokenPipe,
                     "controlled read failure",
@@ -562,11 +569,26 @@ mod audit {
             Ok(())
         }
         fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
-            Ok(())
+            match self.ending {
+                Ending::WriteTimeoutFailure => Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "controlled timeout setup failure",
+                )),
+                Ending::CancelWriteTimeout => {
+                    self.cancellation.cancel();
+                    Ok(())
+                }
+                Ending::ExpireWriteTimeout => {
+                    self.clock.advance(Duration::from_secs(6));
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
         }
     }
 
     struct AuditTcp {
+        endpoint: SocketAddr,
         stream: Mutex<Option<AuditStream>>,
         forbidden: Arc<AtomicBool>,
     }
@@ -578,7 +600,8 @@ mod audit {
                 !self.forbidden.load(Ordering::SeqCst),
                 "audit must refuse before connecting"
             );
-            assert_eq!(endpoint, endpoint_fixture());
+            assert_eq!(endpoint.ip(), self.endpoint.ip());
+            assert_eq!(endpoint.port(), self.endpoint.port());
             Ok(self
                 .stream
                 .lock()
@@ -615,10 +638,19 @@ mod audit {
         )
     }
     fn response_fixture(policy: Policy, response: AuditResponse, ending: Ending) -> Fixture {
+        response_fixture_at(endpoint_fixture(), policy, response, ending)
+    }
+
+    fn response_fixture_at(
+        endpoint: SocketAddr,
+        policy: Policy,
+        response: AuditResponse,
+        ending: Ending,
+    ) -> Fixture {
         let clock = AuditClock(Arc::new(Mutex::new(Instant::now())));
         let cancellation = Cancellation::default();
         let written = Arc::new(Mutex::new(Vec::new()));
-        let peer = Arc::new(Mutex::new(endpoint_fixture()));
+        let peer = Arc::new(Mutex::new(endpoint));
         let forbidden = Arc::new(AtomicBool::new(false));
         let stream = AuditStream {
             peer: Arc::clone(&peer),
@@ -629,6 +661,7 @@ mod audit {
             ending,
         };
         let provider = AuditTcp {
+            endpoint,
             stream: Mutex::new(Some(stream)),
             forbidden: Arc::clone(&forbidden),
         };
@@ -875,6 +908,124 @@ mod audit {
                 matches!(error, audit::Error::Io(source) if source.kind() == io::ErrorKind::InvalidData)
             );
             assert!(setup.written.lock().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn audit_ipv6_peer_scope_controls_refusal_before_request_bytes() {
+        // IPv6 link-local zones and unique-local scope, checked 2026-10-25.
+        // https://www.rfc-editor.org/rfc/rfc4007.html#section-11.3
+        // https://www.rfc-editor.org/rfc/rfc4193.html#section-3.3
+        let response = b"HTTP/1.1 204 No Content\r\n\r\n";
+        for (address, peer_scope, accepted) in [
+            ("fe80::1", 7, true),
+            ("fe80::1", 8, false),
+            ("fd00::1", 8, true),
+        ] {
+            let address = address.parse().unwrap();
+            let endpoint = SocketAddr::V6(SocketAddrV6::new(address, 8443, 11, 7));
+            let peer = SocketAddr::V6(SocketAddrV6::new(address, 8443, 99, peer_scope));
+            let selected = Policy {
+                allowed_destinations: vec![DestinationConstraint::Exact(endpoint.ip())],
+                ..policy()
+            };
+            let setup = response_fixture_at(
+                endpoint,
+                selected,
+                AuditResponse::Bytes(Cursor::new(response.to_vec())),
+                Ending::Eof,
+            );
+            *setup.peer.lock().unwrap() = peer;
+            let mut request = http_request();
+            request.connection.endpoint = endpoint;
+            request.connection.timeout = Duration::from_secs(5);
+            request.max_response_bytes = response.len();
+            let result = setup.client.audit_http(&request);
+            if !accepted {
+                let Err(audit::Error::Io(source)) = result else {
+                    panic!("a different link-local scope must refuse the connected peer")
+                };
+                assert_eq!(source.kind(), io::ErrorKind::InvalidData);
+                assert!(source.to_string().contains("authorized peer"));
+                assert!(setup.written.lock().unwrap().is_empty());
+                continue;
+            }
+            let report = result.unwrap();
+            let finding = report
+                .findings
+                .iter()
+                .find(|finding| finding.rule_id == "http.csp")
+                .expect("the supplied response omits Content-Security-Policy");
+            assert_eq!(finding.subject, endpoint.to_string());
+            assert_eq!(finding.evidence["response_status"], 204);
+            assert_eq!(report.measurements["status"], 204);
+            assert_eq!(report.measurements["bytes_read"], response.len());
+            assert_eq!(
+                report.measurements["bytes_sent"],
+                expected_request(&request).len()
+            );
+            assert_eq!(*setup.written.lock().unwrap(), expected_request(&request));
+        }
+    }
+
+    #[test]
+    fn tcp_exchange_retains_evidence_when_timeout_setup_fails_or_loses_control() {
+        let request = b"controlled request";
+        let response = b"controlled response";
+        for ending in [
+            Ending::Eof,
+            Ending::WriteTimeoutFailure,
+            Ending::CancelWriteTimeout,
+            Ending::ExpireWriteTimeout,
+        ] {
+            let clock = AuditClock(Arc::new(Mutex::new(Instant::now())));
+            let cancellation = Cancellation::default();
+            let written = Arc::new(Mutex::new(Vec::new()));
+            let mut stream = AuditStream {
+                peer: Arc::new(Mutex::new(endpoint_fixture())),
+                response: AuditResponse::Bytes(Cursor::new(response.to_vec())),
+                written: Arc::clone(&written),
+                clock: clock.clone(),
+                cancellation: cancellation.clone(),
+                ending,
+            };
+            let deadline_clock = clock.clone();
+            let deadline =
+                Deadline::with_time_source(Duration::from_secs(5), move || deadline_clock.now())
+                    .with_cancellation(Some(cancellation));
+            let evidence =
+                tcp::exchange(&mut stream, request, response.len(), &deadline, |bytes| {
+                    bytes == response
+                })
+                .unwrap();
+            match ending {
+                Ending::Eof => assert!(matches!(evidence.outcome, Outcome::Complete)),
+                Ending::WriteTimeoutFailure => assert!(matches!(
+                    &evidence.outcome,
+                    Outcome::Failed(source) if source.kind() == io::ErrorKind::PermissionDenied
+                        && source.to_string() == "controlled timeout setup failure"
+                )),
+                Ending::CancelWriteTimeout => {
+                    assert!(matches!(evidence.outcome, Outcome::Cancelled));
+                }
+                Ending::ExpireWriteTimeout => {
+                    assert!(matches!(evidence.outcome, Outcome::TimedOut));
+                }
+                _ => unreachable!(),
+            }
+            let completed = matches!(ending, Ending::Eof);
+            assert_eq!(
+                evidence.bytes_sent,
+                if completed { request.len() } else { 0 }
+            );
+            assert_eq!(
+                evidence.response.as_ref(),
+                if completed { response.as_slice() } else { b"" }
+            );
+            assert_eq!(
+                written.lock().unwrap().as_slice(),
+                if completed { request.as_slice() } else { b"" }
+            );
         }
     }
 

@@ -30,6 +30,8 @@ CI also retains the portable, default, layer 2, layer 3, minimum Rust version, d
 
 `.config/mutation.toml` pins cargo-mutants and Cosmic Ray and maps every Python production module, including repository tools, to its tests. `requirements-dev.txt` installs Cosmic Ray. Install cargo-mutants with the version in that file's companion TOML configuration.
 
+Python mutation runs execute the suites declared for their module. Ordinary CI still discovers the entire unittest suite. Ownership for the mutation tools is split between score parsing in `test_mutation_results.py`, selection in `test_mutation_scope.py`, orchestration in `test_run_mutation.py` and SDK execution in `test_run_mutation_tools.py`. The orchestration cases also exercise the parser and selector. `test_mutation_test_runner.py` owns the test harness. These files replace the former combined `test_mutation.py` without dropping cases. The four other production modules retain their existing mapped suites.
+
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
@@ -44,6 +46,8 @@ python3 scripts/run_mutation.py check --plan mutation-plan.json --language rust
 For a PR, use `select --base BASE_SHA` instead of `--full`. Selection uses both sides of deleted or renamed files. Rust production edits select whole changed files. A separate or inline test change selects its whole crate. Crate dependency changes select all Rust crates. Python tests select their mapped modules. Shared test support selects every affected language module. Shared fixtures, workflow or mutation configuration, root dependencies and testing policy changes select both language suites. Unknown Python production modules fail selection until ownership is recorded.
 
 The runner takes one snapshot of tracked and untracked, nonignored source before a run, then gives each target a disposable copy. It records the commit and a digest of that source snapshot. Review policy is copied but excluded from the source digest, because it identifies the source it reviews. Artifact directories must be ignored by Git or outside the checkout. Cargo-mutants runs workspace tests against every selected mutant, so dependent crates can detect errors. When a package has a `build.rs`, the disposable manifest exposes it as an additional binary target so cargo-mutants can discover it. The amended manifest is retained with the results. Rust shards are numbered from one at this script's interface and translated to cargo-mutants' zero-based numbering. No mutant is sampled or silently removed.
+
+The Python harness is production tooling and receives its own mutation measurement. Each run first copies the harness into its artifact directory, so mutations to the measured harness cannot change the bootstrap that judges them. Interpreter and bootstrap paths are shell-quoted. The baseline session and its exported report are retained and checked for successful, nonempty unittest execution. The SDK's process exit status alone is insufficient evidence. This validation also applies when discovery finds no mutants.
 
 The existing weekly CI schedule calls the full mutation workflow. PRs call the same workflow with scoped selection. Manual dispatch runs a full audit. Pushes to the default branch retain normal CI without repeating the full mutation audit. Rust runs on the existing Linux, ARM and Intel macOS, and Windows images with each supported feature profile. Eight shards per profile use one mutation worker per job, with at most four Rust jobs at once. These limits do not alter existing CI concurrency. The gate requires every platform, profile and shard, then combines their outcomes per crate. A mutant is killed when any required run catches it. Code disabled in one profile can be tested by another. A timeout never creates a kill, and a mutant is compilation-invalid only if every run that discovered it fails compilation. Python modules are checked separately. A score aggregated across modules or crates cannot make a weak group pass.
 
@@ -171,6 +175,8 @@ The exploratory Python run completed every generated work item. It also measured
 
 # Enforcement case audit
 
+The original combined mutation cases now live in the owning suites listed above. SDK execution cases use controlled tool reports and scratch checkouts. They check public commands, artifacts and admission of complete results. A separate real Cosmic Ray run below validates the interpreter-path regression against the pinned SDK.
+
 | Case | Disposition and protected behavior | Representative defect |
 | --- | --- | --- |
 | `test_outcome_counts_and_evidenced_exclusions_keep_their_own_groups` | Added. Every outcome category is reported, and reviewed equivalents affect only their exact group and revision. | Applying an exclusion to another group or treating a timeout as invalid. |
@@ -210,6 +216,19 @@ The exploratory Python run completed every generated work item. It also measured
 | `test_repository_inventory_is_valid` | Strengthened. Repository metadata validates and exported asset sequences agree with its contents. | Exporting a truncated or wrong inventory. |
 | `test_duplicates_and_source_generated_collisions_are_rejected` | Retained. Duplicate files across either inventory are rejected. | Allowing a generated file to overwrite a source asset. |
 | `test_device_components_and_ancestor_collisions_are_rejected` | Retained. Device names and case-insensitive file/directory collisions cannot enter an archive. | Producing an archive that cannot be extracted safely on a supported platform. |
+| `test_cosmic_baseline_requires_successful_unmutated_test_evidence` | Added. Exactly one completed, unmutated baseline must contain successful nonempty test execution. | Trusting an incompetent SDK baseline or accepting mutated, missing or failing baseline results. |
+| `test_each_selected_target_receives_the_original_source_snapshot` | Added. Two crates run from independent copies of one source snapshot, produce separate scores and preserve the original checkout. | Reusing the first crate's modified source for the second crate or mixing language scopes. |
+| `test_invalid_shards_and_wrong_tool_versions_are_refused_before_execution` | Added. Invalid shard bounds and either unequal tool version fail before source execution. | Running an unintended shard or accepting an unpinned SDK. |
+| `test_runner_mutations_use_an_immutable_bootstrap` | Added. Syntax mutations to the harness remain compilation-invalid and preserve the user's source. | Allowing a mutated harness to invent or omit its own evidence. |
+| `test_rust_tool_reports_cover_build_scripts_features_and_disposable_source` | Added. Every configured profile measures the controlled Rust files and build script, retaining complete scores and unchanged original manifests. | Omitting a feature flag or build script, or modifying the original checkout. |
+| `test_python_tool_handles_an_interpreter_path_with_spaces` | Added regression. The CLI completes and scores a Python measurement when executable and artifact paths contain spaces. | Splitting the interpreter path into separate command arguments. |
+| `test_external_failures_never_publish_a_completed_measurement` | Added. Discovery, baseline, execution and export failures for either SDK leave no accepted report, including a zero-exit incompetent Python baseline. | Publishing success after a worker, command or baseline fails. |
+| `test_scoped_shards_combine_once_and_omissions_fail_the_gate` | Added. The CLI measures the selected files across disjoint shards, then rejects a missing shard. | Ignoring file selection, duplicating work or accepting a partial run. |
+| `test_empty_discovery_runs_a_baseline_and_preserves_the_selection_reason` | Added. Both SDKs validate an empty selection and report not applicable with its reason. | Treating absent discovery as coverage or skipping the baseline. |
+| `test_selected_module_runs_its_owned_tests_without_unrelated_failures` | Added. The harness runs the selected module's suite without importing unrelated failing tests. | Discovering unrelated suites in a scoped measurement. |
+| `test_every_mapped_suite_contributes_to_failure_evidence` | Added. Both declared suites contribute their actual test and failure counts. | Dropping an additional test owner from discovery. |
+| `test_runtime_test_errors_are_distinct_from_syntax_invalid_mutations` | Added. A runtime error is a failed test, while invalid target syntax has separate evidence. | Excluding a behavioral failure as a compiler-invalid mutation. |
+| `test_missing_invalid_and_empty_suites_are_runner_failures` | Added. Missing ownership, malformed configuration and zero executed tests cannot produce successful evidence. | Reporting success when no owned tests execute. |
 
 # Selection regression evidence
 
@@ -250,3 +269,24 @@ Mutation audit failed. mutation artifacts do not match the tested revision, sour
 ```
 
 The mapped CLI regression separately verifies that a matching source fingerprint passes and uncommitted source changes fail. Another regression commits an individually reviewed exclusion, then verifies that scoring succeeds against the unchanged source and publishes the applied evidence.
+
+# Interpreter path regression evidence
+
+A disposable project with a two-mutant Python module was measured using the real pinned Cosmic Ray installation through an interpreter path containing spaces. This is a functionality demonstration, not a mutation score for a project production module. With the unquoted test command, the following command returned exit one.
+
+```sh
+'/tmp/pcr-real-cosmic-space-63u7jpyp/real tools with spaces/bin/python' scripts/run_mutation.py run --plan /tmp/pcr-real-cosmic-space-63u7jpyp/plan.json --language python --output /tmp/pcr-real-cosmic-space-63u7jpyp/checkout/artifacts/unquoted
+```
+
+```text
+Mutation audit failed. scripts/alpha.py failed. Cosmic Ray test execution evidence is missing
+```
+
+With quoting and baseline evidence validation enabled, these actual commands both returned exit zero.
+
+```sh
+'/tmp/pcr-real-cosmic-space-63u7jpyp/real tools with spaces/bin/python' scripts/run_mutation.py run --plan /tmp/pcr-real-cosmic-space-63u7jpyp/plan.json --language python --output /tmp/pcr-real-cosmic-space-63u7jpyp/checkout/artifacts/quoted
+'/tmp/pcr-real-cosmic-space-63u7jpyp/real tools with spaces/bin/python' scripts/run_mutation.py check --plan /tmp/pcr-real-cosmic-space-63u7jpyp/plan.json --language python --output /tmp/pcr-real-cosmic-space-63u7jpyp/checkout/artifacts/quoted
+```
+
+The checker reported `killed` of 2, `eligible` of 2, zero invalid or equivalent exclusions, no survivors or timeouts, tool version `8.7.0` and status `passed`. The saved baseline session independently recorded successful unittest execution.

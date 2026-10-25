@@ -189,27 +189,44 @@ def cosmic_outcome(row: list[object]) -> Outcome:
         raise ValueError('invalid Cosmic Ray work item')
     item, result = record(row[0]), record(row[1])
     identity = cosmic_identity(item)
+    status, evidence = cosmic_test_result(result)
+    return Outcome(identity, status, evidence)
+
+
+def cosmic_baseline(raw: object) -> None:
+    rows = sequence(raw)
+    if len(rows) != 1:
+        raise ValueError('Cosmic Ray baseline must have exactly one result')
+    row = sequence(rows[0])
+    if len(row) != 2 or sequence(record(row[0]).get('mutations')):
+        raise ValueError('Cosmic Ray baseline contains mutations or is incomplete')
+    status, _ = cosmic_test_result(record(row[1]))
+    if status != 'survived':
+        raise ValueError('Cosmic Ray baseline did not execute successful tests')
+
+
+def cosmic_test_result(result: dict[str, object]) -> tuple[Status, str]:
     if result.get('worker_outcome') != 'normal':
         raise ValueError('Cosmic Ray worker did not complete normally')
     output = text(result.get('output'))
     if output == 'timeout':
         if result.get('test_outcome') != 'killed':
             raise ValueError('Cosmic Ray timeout has contradictory test status')
-        return Outcome(identity, 'timeout', output)
+        return 'timeout', output
     markers = tuple(line.removeprefix('MUTATION_RESULT ') for line in output.splitlines()
                     if line.startswith('MUTATION_RESULT '))
     if len(markers) != 1:
         raise ValueError('Cosmic Ray test execution evidence is missing')
     evidence = record(json.loads(markers[0]))
     if evidence.get('kind') == 'syntax_error' and result.get('test_outcome') == 'killed':
-        return Outcome(identity, 'invalid', text(evidence.get('message')))
+        return 'invalid', text(evidence.get('message'))
     if evidence.get('kind') != 'tests' or integer(evidence.get('run')) == 0:
         raise ValueError('Cosmic Ray did not execute tests')
     failures = integer(evidence.get('failures')) + integer(evidence.get('errors'))
     status: Status = 'killed' if failures else 'survived'
     if result.get('test_outcome') != status:
         raise ValueError('Cosmic Ray outcome disagrees with test evidence')
-    return Outcome(identity, status, output)
+    return status, output
 
 
 def parse_report(raw: object) -> Report:

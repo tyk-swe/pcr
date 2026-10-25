@@ -7,7 +7,8 @@ cosmic-ray = "8.7.0"
 "scripts/release_assets.py" = ["scripts/tests/test_release_assets.py"]
 "scripts/script_support.py" = ["scripts/tests/test_script_support.py"]
 "examples/consumers/forwarding.py" = ["scripts/tests/test_forwarding_consumer.py"]
-"scripts/mutation_scope.py" = ["scripts/tests/test_mutation.py"]
-"scripts/mutation_results.py" = ["scripts/tests/test_mutation.py"]
-"scripts/run_mutation.py" = ["scripts/tests/test_mutation.py"]
+"scripts/mutation_scope.py" = ["scripts/tests/test_mutation_scope.py", "scripts/tests/test_run_mutation.py"]
+"scripts/mutation_results.py" = ["scripts/tests/test_mutation_results.py", "scripts/tests/test_run_mutation.py"]
+"scripts/run_mutation.py" = ["scripts/tests/test_run_mutation.py", "scripts/tests/test_run_mutation_tools.py"]
+"scripts/mutation_test_runner.py" = ["scripts/tests/test_mutation_test_runner.py"]
 

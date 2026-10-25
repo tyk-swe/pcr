@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import platform
+import shlex
 import shutil
 import subprocess
 from subprocess import SubprocessError
@@ -13,7 +14,7 @@ import sys
 import tempfile
 from typing import Sequence
 
-from mutation_results import (Exclusion, Outcome, Report, Status, cosmic_identity, cosmic_results,
+from mutation_results import (Exclusion, Outcome, Report, Status, cosmic_baseline, cosmic_identity, cosmic_results,
                               integer, parse_report, record, rust_results, score, sequence, text)
 from mutation_scope import Target, changes_since, configuration, select, serialize
 
@@ -114,7 +115,9 @@ def rust(target: Target, root: Path, output: Path, profile: str, shard: int, sha
 
 def python(target: Target, root: Path, output: Path, version: str) -> Report:
     config = output / 'cosmic.toml'
-    test_command = f'{sys.executable} scripts/tests/mutation_test_runner.py --module {target.group}'
+    runner = output / 'test_runner.py'
+    shutil.copy2(root / 'scripts/mutation_test_runner.py', runner)
+    test_command = shlex.join((sys.executable, str(runner), '--module', target.group))
     config.write_text('[cosmic-ray]\nmodule-path = ' + json.dumps(target.group)
                       + '\ntimeout = 30.0\nexcluded-modules = []\ntest-command = '
                       + json.dumps(test_command) + '\n[cosmic-ray.distributor]\nname = "local"\n',
@@ -128,9 +131,15 @@ def python(target: Target, root: Path, output: Path, version: str) -> Report:
         raise ValueError('Cosmic Ray inventory export failed')
     expected = tuple(cosmic_identity(sequence(json.loads(line))[0])
                      for line in inventory.read_text(encoding='utf-8').splitlines())
-    for label, args in (('baseline', [str(config)]), ('exec', [str(config), str(session)])):
-        if command([*cosmic, label, *args], root, output / f'{label}.log'):
-            raise ValueError(f'Cosmic Ray {label} failed')
+    baseline_session = output / 'baseline.sqlite'
+    if command([*cosmic, 'baseline', str(config), '--session-file', str(baseline_session)], root, output / 'baseline.log'):
+        raise ValueError('Cosmic Ray baseline failed')
+    baseline_dump = output / 'baseline.jsonl'
+    if command([*cosmic, 'dump', str(baseline_session)], root, baseline_dump):
+        raise ValueError('Cosmic Ray baseline export failed')
+    cosmic_baseline([json.loads(line) for line in baseline_dump.read_text(encoding='utf-8').splitlines()])
+    if command([*cosmic, 'exec', str(config), str(session)], root, output / 'exec.log'):
+        raise ValueError('Cosmic Ray exec failed')
     dump = output / 'cosmic.jsonl'
     if command([*cosmic, 'dump', str(session)], root, dump):
         raise ValueError('Cosmic Ray report export failed')

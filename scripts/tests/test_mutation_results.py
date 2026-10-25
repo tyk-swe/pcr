@@ -38,12 +38,22 @@ class MutationScoreTests(unittest.TestCase):
                         (replace(exclusion, identity='invalid'),)):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 score(value, invalid)
+        large = report(400, 300)
+        reviewed_many = tuple(Exclusion(large.group, large.revision, outcome.identity,
+                                       'controlled equivalent expression') for outcome in large.outcomes[400:])
+        measured = score(large, reviewed_many)
+        self.assertEqual((measured.killed, measured.eligible, measured.invalid, measured.equivalent),
+                         (400, 400, 0, 300))
+        self.assertEqual((measured.survivors, measured.timeouts), ((), ()))
 
     def test_missing_duplicate_and_unfinished_results_fail_closed(self) -> None:
         value = report(10)
         for invalid in (replace(value, baseline=False), replace(value, complete=False),
                         replace(value, outcomes=value.outcomes[:-1]),
                         replace(value, outcomes=value.outcomes + value.outcomes[:1]),
+                        replace(value, outcomes=(*value.outcomes, Outcome('extra', 'killed', 'test failed'))),
+                        replace(value, outcomes=(*value.outcomes[:-1],
+                                                replace(value.outcomes[-1], identity='unexpected'))),
                         replace(value, expected=value.expected + value.expected[:1]),
                         replace(value, reason=''), replace(value, tool_version='')):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
@@ -120,7 +130,7 @@ class MutationReportTests(unittest.TestCase):
             output = 'MUTATION_RESULT ' + json.dumps(dict(kind='tests', run=3, failures=failures, errors=errors))
             result = dict(worker_outcome='normal', test_outcome=status, output=output)
             with self.subTest(failures=failures, errors=errors):
-                outcome = cosmic_results([[item, result]])[0]
+                outcome = cosmic_results(json.loads(json.dumps([[item, result]])))[0]
                 self.assertEqual(outcome.status, status)
                 self.assertEqual(outcome.evidence, output)
                 with self.assertRaises(ValueError):
@@ -143,7 +153,8 @@ class MutationReportTests(unittest.TestCase):
             with self.subTest(invalid=invalid_result), self.assertRaises(ValueError):
                 cosmic_results([[item, invalid_result]])
         for kind in ('runner_error', 'compile_error', 'unknown'):
-            invalid_result = syntax | {'output': 'MUTATION_RESULT ' + json.dumps(dict(kind=kind, message='controlled failure'))}
+            invalid_result = syntax | {'output': 'MUTATION_RESULT ' + json.dumps(
+                dict(kind=kind, run=3, failures=1, errors=0, message='controlled failure'))}
             with self.subTest(kind=kind), self.assertRaises(ValueError):
                 cosmic_results([[item, invalid_result]])
 
@@ -202,6 +213,9 @@ class MutationReportTests(unittest.TestCase):
         for outcomes in ([baseline, baseline, outcome], [outcome], [baseline, outcome | {'summary': 'Success'}]):
             with self.subTest(outcomes=outcomes), self.assertRaises(ValueError):
                 rust_results([mutant], raw | {'outcomes': outcomes}, {})
+        for summary in ('Failure', 'Timeout'):
+            with self.subTest(summary=summary), self.assertRaises(ValueError):
+                rust_results([mutant], raw | {'outcomes': [baseline | {'summary': summary}, outcome]}, {})
 
     def test_cosmic_ray_requires_actual_completed_test_results(self) -> None:
         evidence = 'MUTATION_RESULT ' + json.dumps(dict(kind='tests', run=3, failures=1, errors=0))
@@ -211,10 +225,16 @@ class MutationReportTests(unittest.TestCase):
         row: list[object] = [item, dict(worker_outcome='normal', test_outcome='killed', output=evidence)]
         self.assertEqual(cosmic_results([row])[0].status, 'killed')
         for result in (None, dict(worker_outcome='exception'),
+                       dict(worker_outcome='stalled', test_outcome='killed', output=evidence),
                        dict(worker_outcome='normal', test_outcome='killed', output='runner crashed'),
+                       dict(worker_outcome='normal', test_outcome='killed',
+                            output='worker stopped before reporting tests'),
                        dict(worker_outcome='normal', test_outcome='survived', output=evidence)):
             with self.subTest(result=result), self.assertRaises(ValueError):
                 cosmic_results([[item, result]])
+        for invalid in ([], [item], [*row, 'unexpected extra field']):
+            with self.subTest(row=invalid), self.assertRaises(ValueError):
+                cosmic_results([invalid])
         timeout = dict(worker_outcome='normal', test_outcome='killed', output='timeout')
         self.assertEqual(cosmic_results([[item, timeout]])[0].status, 'timeout')
         for status in (None, 'survived', 'incompetent'):
@@ -226,13 +246,19 @@ class MutationReportTests(unittest.TestCase):
                         start_pos=[1, 0], end_pos=[1, 1], operator_args={})
         first = cosmic_identity(dict(job_id='first', mutations=[mutation]))
         self.assertEqual(first, cosmic_identity(dict(job_id='second', mutations=[mutation])))
+        arguments = dict(first=1, second=2)
+        reordered_arguments = dict(reversed(tuple(arguments.items())))
+        ordered = cosmic_identity(dict(mutations=[mutation | {'operator_args': arguments}]))
+        reordered = cosmic_identity(dict(mutations=[mutation | {'operator_args': reordered_arguments}]))
+        self.assertEqual(ordered, reordered)
         for change in (dict(module_path='other.py'), dict(operator_name='remove'),
                        dict(occurrence=1), dict(start_pos=[0, 0]), dict(end_pos=[1, 2]), dict(operator_args={'value': 1})):
             with self.subTest(change=change):
                 self.assertNotEqual(first, cosmic_identity(dict(job_id='first', mutations=[mutation | change])))
         for invalid_change in (dict(module_path=''), dict(operator_name=''), dict(occurrence=-1), dict(occurrence=True),
                        dict(start_pos=[-1, 0]), dict(start_pos=[True, 0]), dict(start_pos=[1]),
-                       dict(end_pos=[1, 0]), dict(end_pos=[0, 1]), dict(end_pos=[1, 1, 0]),
+                       dict(start_pos=[1, 0, 0]), dict(end_pos=[2]), dict(end_pos=[1, 0]),
+                       dict(end_pos=[0, 1]), dict(end_pos=[1, 1, 0]),
                        dict(operator_args='invalid'), dict(operator_args=['invalid'])):
             with self.subTest(change=invalid_change), self.assertRaises(ValueError):
                 cosmic_identity(dict(job_id='first', mutations=[mutation | invalid_change]))
@@ -244,14 +270,22 @@ class MutationReportTests(unittest.TestCase):
         mutant = dict(name='mutation')
         outcome = dict(scenario=dict(Mutant=mutant), summary='CaughtMutant', log_path='log',
                        phase_results=[dict(phase='Test', process_status={'Failure': 101})])
-        raw = dict(end_time='finished', total_mutants=1,
-                   outcomes=[dict(scenario='Baseline', summary='Success',
-                                  phase_results=[dict(phase='Test', process_status='Success')]), outcome])
+        baseline = dict(scenario='Baseline', summary='Success',
+                        phase_results=[dict(phase='Test', process_status='Success')])
+        raw = dict(end_time='finished', total_mutants=1, outcomes=[baseline, outcome])
         self.assertEqual(rust_results([mutant], raw, {})[0].status, 'killed')
+        other = outcome | {'scenario': {'Mutant': {'name': 'unexpected'}}}
         for invalid in ({**raw, 'end_time': None}, {**raw, 'outcomes': [outcome]},
-                        {**raw, 'total_mutants': 0}):
+                        {**raw, 'total_mutants': 0}, {**raw, 'total_mutants': 2},
+                        {**raw, 'outcomes': [baseline]}, {**raw, 'outcomes': [baseline, other]},
+                        {**raw, 'outcomes': [baseline, outcome, other]}):
             with self.assertRaises(ValueError):
                 rust_results([mutant], invalid, {})
+        many = [dict(name=f'mutation-{index}') for index in range(1000)]
+        many_outcomes = [outcome | {'scenario': {'Mutant': selected}} for selected in many]
+        accepted = rust_results(many, raw | {'total_mutants': 1000, 'outcomes': [baseline, *many_outcomes]}, {})
+        self.assertEqual(tuple(result.identity for result in accepted), tuple(selected['name'] for selected in many))
+        self.assertTrue(all(result.status == 'killed' for result in accepted))
         outcome['summary'] = 'Unviable'
         outcome['phase_results'] = [dict(phase='Build', process_status={'Failure': 101})]
         with self.assertRaises(ValueError):

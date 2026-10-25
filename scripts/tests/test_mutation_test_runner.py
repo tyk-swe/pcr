@@ -42,6 +42,20 @@ def evidence(result: subprocess.CompletedProcess[str]) -> dict[str, object]:
 
 
 class MutationTestRunnerTests(unittest.TestCase):
+    def test_importing_the_harness_does_not_start_a_measurement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner_checkout(root)
+            program = ('import runpy, sys\n'
+                       'sys.path.insert(0, "scripts")\n'
+                       'import mutation_test_runner\n'
+                       'runpy.run_path("scripts/mutation_test_runner.py")\n'
+                       'print("loaded")\n')
+            result = subprocess.run([sys.executable, '-c', program], cwd=root, capture_output=True,
+                                    text=True, timeout=5, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, 'loaded\n')
+
     def test_selected_module_runs_its_owned_tests_without_unrelated_failures(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -77,6 +91,24 @@ class MutationTestRunnerTests(unittest.TestCase):
             self.assertEqual(diagnostic['kind'], 'syntax_error')
             self.assertTrue(diagnostic['message'])
 
+    def test_declared_but_unexecuted_suite_is_a_runner_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner_checkout(root)
+            (root / 'scripts/tests/test_alpha.py').write_text(
+                'import unittest\n'
+                'class ValueTests(unittest.TestCase):\n'
+                '    def test_value(self) -> None:\n        self.fail("declared test unexpectedly ran")\n'
+                'class UnexecutedSuite(unittest.TestSuite):\n'
+                '    def run(self, result: unittest.TestResult, debug: bool = False) -> unittest.TestResult:\n'
+                '        return result\n'
+                'def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite,\n'
+                '               pattern: str | None) -> unittest.TestSuite:\n'
+                '    return UnexecutedSuite(tests)\n')
+            result = execute(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(evidence(result)['kind'], 'runner_error')
+
     def test_missing_invalid_and_empty_suites_are_runner_failures(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -88,12 +120,31 @@ class MutationTestRunnerTests(unittest.TestCase):
                             original.replace('["scripts/tests/test_alpha.py"]', '[]'),
                             original.replace('["scripts/tests/test_alpha.py"]', '[1]'),
                             original.replace('["scripts/tests/test_alpha.py"]',
+                                             '{"scripts/tests/test_alpha.py" = true}'),
+                            original.replace('["scripts/tests/test_alpha.py"]',
+                                             '["scripts/tests/test_alpha.py", 1]'),
+                            original.replace('["scripts/tests/test_alpha.py"]',
+                                             '["scripts/tests/test_alpha.py", ""]'),
+                            original.replace('["scripts/tests/test_alpha.py"]',
+                                             '["scripts/tests/test_alpha.py", "  "]'),
+                            original.replace('["scripts/tests/test_alpha.py"]',
                                              '["scripts/tests/test_alpha.py", "scripts/tests/test_absent.py"]'),
                             original.replace('["scripts/tests/test_alpha.py"]',
                                              '["scripts/tests/test_alpha.py", "scripts/tests/empty.py"]')):
                 config.write_text(invalid)
                 result = execute(root)
                 with self.subTest(invalid=invalid):
+                    self.assertEqual(result.returncode, 1)
+                    self.assertEqual(evidence(result)['kind'], 'runner_error')
+            for owner in ('scripts/tests/../../outside/test_escape.py',
+                          'scripts/aaa/test_escape.py', 'scripts/zzz/test_escape.py', 'scripts/tests/helper.py'):
+                path = root / owner
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('import unittest\nclass EscapedTests(unittest.TestCase):\n'
+                                '    def test_escape(self) -> None:\n        self.fail("unowned suite executed")\n')
+                config.write_text(original.replace('["scripts/tests/test_alpha.py"]', json.dumps([owner])))
+                result = execute(root)
+                with self.subTest(owner=owner):
                     self.assertEqual(result.returncode, 1)
                     self.assertEqual(evidence(result)['kind'], 'runner_error')
             (root / 'scripts/tests/test_beta.py').write_text('value = 3\n')

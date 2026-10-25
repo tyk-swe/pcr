@@ -153,7 +153,12 @@ jobs:
           name: mutation-seed
           path: mutation-results/seed
       - if: needs.select.outputs.rust == 'true'
-        run: python3 scripts/run_mutation.py check --plan mutation-plan.json --language rust --output mutation-results/rust --seed mutation-results/seed --shards 64 --platforms ubuntu-24.04 macos-14 macos-15-intel windows-2022 --profiles portable default layer2 layer3 all > mutation-results/scores/rust-scores.jsonl
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: mutation-context-*
+          path: mutation-results/contexts
+      - if: needs.select.outputs.rust == 'true'
+        run: python3 scripts/run_mutation.py check --plan mutation-plan.json --language rust --output mutation-results/rust --seed mutation-results/seed --contexts mutation-results/contexts --shards 64 --platforms ubuntu-24.04 macos-14 macos-15-intel windows-2022 --profiles portable default layer2 layer3 all > mutation-results/scores/rust-scores.jsonl
       - if: always() && needs.select.outputs.python == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:

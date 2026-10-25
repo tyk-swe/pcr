@@ -47,23 +47,29 @@ For a PR, use `select --base BASE_SHA` instead of `--full`. Selection uses both 
 
 The runner takes one snapshot of tracked and untracked, nonignored source before a run, then gives each target a disposable copy. It records the commit and a digest of that source snapshot. Review policy is copied but excluded from the source digest, because it identifies the source it reviews. Artifact directories must be ignored by Git or outside the checkout. Cargo-mutants runs workspace tests against every selected mutant, so dependent crates can detect errors. When a package has a `build.rs`, the disposable manifest exposes it as an additional binary target so cargo-mutants can discover it. The amended manifest is retained with the results. Rust shards are numbered from one at this script's interface and translated to cargo-mutants' zero-based numbering. No mutant is sampled or silently removed.
 
-The Python harness is production tooling and receives its own mutation measurement. Each run first copies the harness into its artifact directory, so mutations to the measured harness cannot change the bootstrap that judges them. Interpreter and bootstrap paths are shell-quoted. The baseline session and its exported report are retained and checked for successful, nonempty unittest execution. The SDK's process exit status alone is insufficient evidence. This validation also applies when discovery finds no mutants.
+The Python harness is production tooling and receives its own mutation measurement. Each run first copies the harness into its artifact directory, so mutations to the measured harness cannot change the bootstrap that judges them. Interpreter and bootstrap paths are shell-quoted. Every owner is validated before execution. A healthy baseline runs all suites, while the first failing test stops a mutant's run and records the actual failure. Later work cannot turn that detected defect into a timeout. The baseline session and its exported report are retained and checked for successful, nonempty unittest execution. The SDK's process exit status alone is insufficient evidence. This validation also applies when discovery finds no mutants.
 
 Rust runs an explicit workspace baseline before mutation. The pinned SDK applies workspace selection to mutants but selects only mutated packages for its own baseline, so its successful baseline alone cannot establish that dependent-crate tests were already healthy. Every artifact also retains its complete normalized target, including language, group, files and selection reason. The gate rejects evidence for a different target, even under the same source revision.
 
-The existing weekly CI schedule calls the full mutation workflow. PRs call the same workflow with scoped selection. Manual dispatch runs a full audit. Pushes to the default branch retain normal CI without repeating the full mutation audit. Rust runs on the existing Linux, ARM and Intel macOS, and Windows images with each supported feature profile. Each platform/profile context runs 64 shards with one mutation worker per job. Context calls are serialized and each context admits at most four shard jobs, preserving the four-job Rust limit. The gate requires every platform, profile and shard, then combines their outcomes per crate. A mutant is killed when any required run catches it. Code disabled in one profile can be tested by another. A timeout never creates a kill, and a mutant is compilation-invalid only if every run that discovered it fails compilation. Each Python module runs in a separate serial job, preserving one active Python worker while giving each module the runner's full time allowance. The gate still requires results for every module in the original selection. A score aggregated across modules or crates cannot make a weak group pass.
+The existing weekly CI schedule calls the full mutation workflow. PRs call the same workflow with scoped selection. Manual dispatch runs a full audit. Pushes to the default branch retain normal CI without repeating the full mutation audit. Rust runs on the existing Linux, ARM and Intel macOS, and Windows images with each supported feature profile. The seed runs 64 shards. Receiver contexts use their complete discovered inventories to choose a smaller count when possible. Each job has one mutation worker. Context calls are serialized and each context admits at most four shard jobs, preserving the four-job Rust limit. The gate requires every platform, profile and planned shard, then combines their outcomes per crate. A mutant is killed when any required run catches it. Code disabled in one profile can be tested by another. A timeout never creates a kill, and a mutant is compilation-invalid only if every run that discovered it fails compilation. Each Python module runs in a separate serial job, preserving one active Python worker while giving each module the runner's full time allowance. The gate still requires results for every module in the original selection. A score aggregated across modules or crates cannot make a weak group pass.
 
 The Linux all-features context runs first and publishes a complete direct seed. Other contexts discover their own inventories and reuse only exact identities that this seed actually killed. Seed survivors, timeouts, compilation-invalid mutants and identities absent from the seed still execute. Each receiver starts a fresh cargo-mutants output directory containing only the verified prior kills. Iteration filtering occurs before sharding. Each context runs its own workspace baseline even when no executable mutants remain.
 
-The seed is bound to the full source fingerprint, Git revision, tool version and requested target. The gate requires its actual completed Linux/all shard cohort and compares every outcome and evidence path. One receiver shard carries its complete inventory, reused identities and exact seed text; all shards carry the same coverage digest. The remaining inventory must be executed exactly once across that context's shards. The score combines actual outcomes only, without inventing receiver kills. Scores publish executed and reused counts by context and the seed provenance. Full weekly throughput remains unverified until a complete production matrix finishes.
+Before receiver jobs start, the `context` action records every selected group's full inventory, exact seed digest and source identity. It selects the smallest count from 1 and the multiples of four through 64 that keeps each group's remaining mutants per shard within its original 64-shard ceiling. Both ceiling calculations round up. Empty receivers still require one baseline job. The pinned SDK applies sharding after iteration filtering, and its slice and round-robin strategies satisfy this count bound, as checked against [cargo-mutants 27.1.0 sharding](https://github.com/sourcefrog/cargo-mutants/blob/v27.1.0/src/shard.rs) on 2026-10-25.
 
-The following example uses one shard for a local two-context run. CI uses the same commands with 64 shards and the full platform and feature matrix.
+The seed is bound to the full source fingerprint, Git revision, tool version and requested target. The gate requires its actual completed Linux/all shard cohort and compares every outcome and evidence path. One receiver shard carries its complete inventory, reused identities and exact seed text; all shards carry the same coverage digest. The gate recomputes each context's required count and binds its full inventory to that coverage. Every planned shard must report, and the remaining inventory must execute exactly once. The score combines actual outcomes only, without inventing receiver kills. Scores publish executed and reused counts, planned shard counts and seed provenance. Measured setup and baseline overhead motivated the variable counts. Full weekly throughput remains unverified until a complete production matrix finishes.
+
+The following example uses a one-shard local seed and discovers the receiver count. CI uses a 64-shard seed and the full platform and feature matrix.
 
 ```sh
 python3 scripts/run_mutation.py run --plan mutation-plan.json --language rust --profile all --platform-label ubuntu-24.04 --output mutation-results/rust/seed-run
 python3 scripts/run_mutation.py seed --plan mutation-plan.json --language rust --output mutation-results/rust/seed-run
-python3 scripts/run_mutation.py run --plan mutation-plan.json --language rust --profile portable --platform-label ubuntu-24.04 --seed mutation-results/rust/seed-run/seed --output mutation-results/rust/portable
-python3 scripts/run_mutation.py check --plan mutation-plan.json --language rust --seed mutation-results/rust/seed-run/seed --platforms ubuntu-24.04 --profiles all portable --output mutation-results/rust
+python3 scripts/run_mutation.py context --plan mutation-plan.json --language rust --profile portable --platform-label ubuntu-24.04 --seed mutation-results/rust/seed-run/seed --output mutation-results/contexts/portable
+RUST_CONTEXT_SHARDS=$(python3 -c 'import json; print(json.load(open("mutation-results/contexts/portable/context.json"))["shards"])')
+for RUST_CONTEXT_SHARD in $(seq 1 "$RUST_CONTEXT_SHARDS"); do
+  python3 scripts/run_mutation.py run --plan mutation-plan.json --language rust --profile portable --platform-label ubuntu-24.04 --seed mutation-results/rust/seed-run/seed --context-plan mutation-results/contexts/portable/context.json --shard "$RUST_CONTEXT_SHARD" --shards "$RUST_CONTEXT_SHARDS" --output "mutation-results/rust/portable/$RUST_CONTEXT_SHARD"
+done
+python3 scripts/run_mutation.py check --plan mutation-plan.json --language rust --seed mutation-results/rust/seed-run/seed --contexts mutation-results/contexts --platforms ubuntu-24.04 --profiles all portable --output mutation-results/rust
 ```
 
 A group's score is killed mutants divided by eligible viable mutants and must be strictly greater than 90 percent. Timeouts remain in the denominator and never count as kills. Only compilation-invalid mutants and individually reviewed equivalent mutants are excluded. The checker requires a successful baseline, complete inventory, consistent shard metadata, actual test execution evidence, and results for every selected mutant. Missing reports, duplicate results, runner failures and unfinished runs fail the gate. Zero eligible mutants are reported as not applicable with the selection reason, including the invalid and equivalent counts.
@@ -96,7 +102,7 @@ The initial inventory contained 282 Rust tests and 50 Python tests. The initial 
 | Protocol message suites | Reviewed all 39 message cases and the remaining core protocol cases. Moved review and improvement cases into reference, framing, reflection and validation suites under the existing owner. Independent decoded fields supplement wire preservation, positive validation cases check complete bytes, and wire expectations cite dated sources. Full mutation scores and the final native CI matrix are still outstanding. |
 | Build scripts | Added disposable binary targets for package-root `build.rs` files. A two-crate integration fixture killed all nine mutants, including deletion of the build script's configuration output. The real build scripts still require full-run survivor review. |
 
-The case audit now records all 293 Rust cases and all 147 Python cases. The overall effort remains incomplete until the final revision passes every required full mutation group and CI profile and all actionable survivors are reviewed and repaired. Passing ordinary tests does not establish that result.
+The case audit now records all 293 Rust cases and all 158 Python cases. The overall effort remains incomplete until the final revision passes every required full mutation group and CI profile and all actionable survivors are reviewed and repaired. Passing ordinary tests does not establish that result.
 
 # Lifecycle case audit
 
@@ -572,6 +578,17 @@ The direct Linux/all seed stage, receiver execution and workflow are connected. 
 | `test_seed_receiver_executes_remaining_and_new_ids_with_direct_coverage` | The CLI executes seed survivors, timeouts and new receiver identities while reusing exact kills. Its score combines actual outcomes and publishes per-context counts. Unrelated previous output cannot exclude a new identity. | Copying old SDK exclusions, filtering by a prefix or synthesizing receiver kills. |
 | `test_receiver_refuses_stale_seeds_and_missing_coverage_or_shards` | Reordered canonical shard files pass. Modified canonical status or evidence, missing canonical or receiver shards, absent or tampered coverage, omitted executable identities and stale seeds fail. | Accepting an embedded seed without its actual submitted execution or trusting a recomputed false partition. |
 | `test_all_reused_receiver_still_requires_its_workspace_baseline` | Empty receiver execution is reported without fabricated outcomes, but a failing own baseline prevents a completed report. | Borrowing seed health when a receiver's feature configuration is broken. |
+| `test_context_shards_choose_every_supported_count_without_increasing_work` | Every permitted count is selected from independent inventory sizes. Empty work uses one job, 64 unresolved IDs require 64, and 65 require 36 under the existing ceiling. | Rounding incorrectly or assigning more mutations to a shard than before. |
+| `test_context_shards_preserve_the_largest_group_requirement` | Mixed groups share the count required by the largest remaining workload. | Choosing a count using only a smaller group. |
+| `test_context_plan_preserves_exact_groups_and_receiver_provenance` | Complete context plans retain their targets, inventories, seed digests and source identity regardless of group order. | Dropping a group or losing provenance. |
+| `test_context_plan_requires_each_selected_group_once` | Missing, extra and duplicate groups are refused. | Letting a partial context schedule pass. |
+| `test_context_plan_rejects_changed_targets_and_seed_evidence` | Every target component and seed digest must match the selected group. | Reusing a plan for a different file scope or donor. |
+| `test_context_plan_rejects_wrong_context_source_or_tool` | Mismatched platforms, profiles, source revisions and tool versions are refused. | Reusing stale or foreign context evidence. |
+| `test_context_plan_recomputes_shards_and_rejects_malformed_records` | A claimed count must equal the independently derived count, with strict raw fields and unique inventories. | Accepting a forged count or malformed planning evidence. |
+| `test_receiver_coverage_cannot_replace_the_context_inventory` | Receiver coverage must retain the context plan's exact full inventory. | Removing a reused identity while leaving executable counts unchanged. |
+| `test_context_matrix_requires_each_planned_cohort_and_complete_inventory` | One- and four-shard receivers coexist with a two-shard fixture seed. Complete actual outcomes pass; missing shards, duplicate/missing plans, changed counts and altered full inventories fail. | Requiring uniform counts or trusting received artifacts to choose their own matrix. |
+| `test_context_plans_run_every_group_with_recomputed_shards` | The CLI discovers, plans, executes and checks all groups at the required count. Empty receivers still run their own baselines. | Skipping a group or admitting a partial receiver context. |
+| `test_context_run_rejects_changed_inventory_and_forged_plan` | Actual discovery is compared with the plan. Wrong counts, identities, source, scope and seed digests fail. A fully unresolved fixture retains the 64-shard ceiling. | Scheduling from stale inventories or accepting a self-consistent forged count. |
 
 # Seed reuse functionality evidence
 
@@ -616,6 +633,42 @@ Mutation audit failed. sample failed. Rust workspace baseline failed
 ```
 
 The retained baseline log shows the dependent test's actual value of 13 against its deliberately incorrect expectation of 99. Both SDK discovery lists are empty, and no mutation execution report is published. Removing either context's receipt from the healthy fixture also makes the final check fail. Restoring both receipts makes it pass.
+
+# Dynamic context functionality evidence
+
+The same small Rust fixture also exercised the new context planner with the real pinned SDK. This is a functionality demonstration, not production mutation coverage. After its four-mutant seed finished, this command selected one receiver shard.
+
+```sh
+cd /tmp/pcr-dynamic-sdk-fixtures-yyw8e4bc/complete
+python3 scripts/run_mutation.py context --plan artifacts/plan.json --language rust --profile portable --platform-label ubuntu-24.04 --seed artifacts/all/seed --output artifacts/contexts/portable
+```
+
+```json
+{"shards": 1}
+```
+
+The receiver reused the three actual seed kills and executed the remaining mutation. The final gate checked the context plan and both completed contexts.
+
+```sh
+python3 scripts/run_mutation.py check --plan artifacts/plan.json --language rust --output artifacts --seed artifacts/all/seed --contexts artifacts/contexts --platforms ubuntu-24.04 --profiles all portable | jq '{killed,eligible,status,receiver:[.execution_contexts[] | select(.profile == "portable") | {executed,reused,shards}]}'
+```
+
+```json
+{
+  "killed": 4,
+  "eligible": 4,
+  "status": "passed",
+  "receiver": [
+    {
+      "executed": 1,
+      "reused": 3,
+      "shards": 1
+    }
+  ]
+}
+```
+
+Removing the context plan made that check fail. A second fixture had no remaining mutations but a failing dependent-crate baseline. Its plan still required one job, and the receiver failed rather than publishing a completed measurement.
 
 # Audit workflow survivor repairs
 
@@ -722,7 +775,7 @@ The original combined mutation cases now live in the owning suites listed above.
 | `test_scoped_shards_combine_once_and_omissions_fail_the_gate` | Added. The CLI measures the selected files across disjoint shards, then rejects a missing shard. | Ignoring file selection, duplicating work or accepting a partial run. |
 | `test_empty_discovery_runs_a_baseline_and_preserves_the_selection_reason` | Added. Both SDKs validate an empty selection and report not applicable with its reason. | Treating absent discovery as coverage or skipping the baseline. |
 | `test_selected_module_runs_its_owned_tests_without_unrelated_failures` | Added. The harness runs the selected module's suite without importing unrelated failing tests. | Discovering unrelated suites in a scoped measurement. |
-| `test_every_mapped_suite_contributes_to_failure_evidence` | Added. Both declared suites contribute their actual test and failure counts. A 300-entry ownership list remains usable and reports every executed test. | Dropping an additional owner or comparing large ownership counts by object identity. |
+| `test_every_mapped_suite_contributes_to_failure_evidence` | Added. Both declared suites contribute actual counts and a 300-entry healthy list remains usable. When the first suite fails, the later suite's file is never written. | Dropping an owner, miscounting large lists or continuing work after a detected defect. |
 | `test_runtime_test_errors_are_distinct_from_syntax_invalid_mutations` | Added. A runtime error is a failed test, while invalid target syntax has separate evidence. | Excluding a behavioral failure as a compiler-invalid mutation. |
 | `test_missing_invalid_and_empty_suites_are_runner_failures` | Added. Missing ownership, malformed or mixed-validity configuration and empty suites cannot produce successful evidence. Existing outside, traversing and wrongly named files are refused before running their tests. | Dropping an invalid owner while retaining a passing one or running an unowned suite. |
 | `test_declared_but_unexecuted_suite_is_a_runner_failure` | Added. A custom unittest suite that declares a test but returns without running it produces runner-failure evidence. | Treating declared test count as proof of actual execution. |

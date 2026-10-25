@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, replace
 import hashlib
 import json
@@ -9,7 +10,8 @@ import unittest
 
 from support import ROOT
 from mutation_results import Outcome, Report, record, score, sequence, text
-from mutation_reuse import Seed, coverage_digest, parse_direct_report, parse_seed, partition_inventory, validate_coverage
+from mutation_reuse import (ContextGroup, ContextPlan, Seed, context_shards, coverage_digest,
+                            parse_context, parse_direct_report, parse_seed, partition_inventory, validate_coverage)
 from mutation_scope import Target
 
 TARGET = Target('packetcraftr-core', 'rust', ('crates/packetcraftr-core/src/lib.rs',), 'changed production files')
@@ -55,7 +57,171 @@ def receiver_runs(data: bytes, inventory: tuple[str, ...]) -> tuple[tuple[dict[s
                  for index, report in enumerate(reports))
 
 
+def context_group(name: str, count: int, remaining: int) -> tuple[ContextGroup, Seed]:
+    target = replace(TARGET, group=name, files=(f'crates/{name}/src/lib.rs',))
+    inventory = tuple(f'{name}-{index}' for index in range(count))
+    report = replace(REPORT, group=name, expected=inventory,
+                     outcomes=tuple(Outcome(identity, 'killed' if index < count - remaining else 'survived',
+                                            'controlled seed result') for index, identity in enumerate(inventory)))
+    seed = parse(encode(receipt(report, target)), target=target)
+    return ContextGroup(target, inventory, seed.donor_digest), seed
+
+
+def context_value(groups: tuple[ContextGroup, ...], shards: int) -> dict[str, object]:
+    return record(json.loads(json.dumps(dict(schema='packetcraftr.mutation-context/v1',
+        platform='windows-2022', profile='portable', revision=REPORT.revision,
+        tool_version=TOOL_VERSION, shards=shards, groups=[asdict(group) for group in groups]))))
+
+
+def parse_plan(data: bytes, targets: tuple[Target, ...], seeds: Mapping[str, Seed], *,
+               platform: str = 'windows-2022', profile: str = 'portable',
+               revision: str = REPORT.revision, tool_version: str = TOOL_VERSION) -> ContextPlan:
+    return parse_context(data, targets=targets, seeds=seeds, platform=platform, profile=profile,
+                         revision=revision, tool_version=tool_version)
+
+
 class MutationReuseTests(unittest.TestCase):
+    def test_context_shards_choose_every_supported_count_without_increasing_work(self) -> None:
+        cases = ((0, 1), (1, 1), (2, 4), (4, 4), (5, 8), (7, 8)) + tuple(
+            (remaining, remaining) for remaining in range(8, 65, 4))
+        for remaining, expected in cases:
+            group, seed = context_group('core', 64, remaining)
+            with self.subTest(remaining=remaining):
+                self.assertEqual(context_shards((group,), {'core': seed}), expected)
+        empty, seed = context_group('empty', 0, 0)
+        self.assertEqual(context_shards((empty,), {'empty': seed}), 1)
+        for count, expected in ((64, 64), (65, 36)):
+            group, seed = context_group('boundary', count, count)
+            with self.subTest(inventory=count):
+                self.assertEqual(context_shards((group,), {'boundary': seed}), expected)
+
+    def test_context_shards_preserve_the_largest_group_requirement(self) -> None:
+        wide, wide_seed = context_group('wide', 512, 8)
+        narrow, narrow_seed = context_group('narrow', 64, 13)
+        empty, empty_seed = context_group('empty', 0, 0)
+        self.assertEqual(context_shards((wide, empty, narrow),
+                         {'wide': wide_seed, 'narrow': narrow_seed, 'empty': empty_seed}), 16)
+        rounded, rounded_seed = context_group('rounded', 129, 12)
+        self.assertEqual(context_shards((rounded,), {'rounded': rounded_seed}), 4)
+        exact, exact_seed = context_group('exact', 128, 12)
+        self.assertEqual(context_shards((exact,), {'exact': exact_seed}), 8)
+
+    def test_context_plan_preserves_exact_groups_and_receiver_provenance(self) -> None:
+        first, first_seed = context_group('first', 64, 4)
+        second, second_seed = context_group('second', 128, 1)
+        groups = (first, second)
+        targets = (first.target, second.target, Target('scripts/other.py', 'python', (), 'other language'))
+        seeds = {'first': first_seed, 'second': second_seed}
+        for ordered in (groups, tuple(reversed(groups))):
+            plan = parse_plan(encode(context_value(ordered, 4)), targets, seeds)
+            self.assertEqual((plan.platform, plan.profile, plan.revision, plan.tool_version, plan.shards),
+                             ('windows-2022', 'portable', REPORT.revision, TOOL_VERSION, 4))
+            self.assertEqual({group.target.group: group for group in plan.groups},
+                             {'first': first, 'second': second})
+
+    def test_context_plan_requires_each_selected_group_once(self) -> None:
+        first, first_seed = context_group('first', 64, 4)
+        second, second_seed = context_group('second', 64, 1)
+        targets = (first.target, second.target)
+        seeds = {'first': first_seed, 'second': second_seed}
+        for groups in ((), (first,), (first, first), (first, second, second)):
+            with self.subTest(groups=groups), self.assertRaises(ValueError):
+                parse_plan(encode(context_value(groups, 4)), targets, seeds)
+        other, _ = context_group('other', 64, 1)
+        with self.assertRaises(ValueError):
+            parse_plan(encode(context_value((first, other), 4)), targets, seeds)
+        with self.assertRaises(ValueError):
+            parse_plan(encode(context_value((first,), 4)), (first.target, first.target), seeds)
+        with self.assertRaises(ValueError):
+            context_shards((first, first), seeds)
+
+    def test_context_plan_rejects_changed_targets_and_seed_evidence(self) -> None:
+        group, seed = context_group('core', 64, 4)
+        value = context_value((group,), 4)
+        raw_group = record(sequence(value['groups'])[0])
+        raw_target = record(raw_group['target'])
+        target_changes: tuple[dict[str, object], ...] = (
+            {'group': 'a'}, {'group': 'z'}, {'language': 'python'}, {'files': []},
+            {'files': ['crates/core/src/other.rs']}, {'reason': 'a'}, {'reason': 'z'}, {'donor': 'unexpected'},
+        )
+        for update in target_changes:
+            changed = value | {'groups': [raw_group | {'target': raw_target | update}]}
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                parse_plan(encode(changed), (group.target,), {'core': seed})
+        for digest in ('0' * 64, 'f' * 64):
+            with self.subTest(digest=digest), self.assertRaises(ValueError):
+                parse_plan(encode(value | {'groups': [raw_group | {'seed_digest': digest}]}),
+                           (group.target,), {'core': seed})
+        with self.assertRaises(ValueError):
+            parse_plan(encode(value), (group.target,), {})
+        for changed_seed in (replace(seed, target=replace(group.target, reason='other')),
+                             replace(seed, report=replace(seed.report, group='other')),
+                             replace(seed, report=replace(seed.report, reason='other')),
+                             replace(seed, report=replace(seed.report, revision='0' * 40 + ' tree ' + SOURCE_DIGEST)),
+                             replace(seed, report=replace(seed.report, revision='c' * 40 + ' tree ' + SOURCE_DIGEST)),
+                             replace(seed, report=replace(seed.report, tool_version='0')),
+                             replace(seed, report=replace(seed.report, tool_version='other'))):
+            with self.subTest(seed=changed_seed), self.assertRaises(ValueError):
+                parse_plan(encode(value), (group.target,), {'core': changed_seed})
+
+    def test_context_plan_rejects_wrong_context_source_or_tool(self) -> None:
+        group, seed = context_group('core', 64, 4)
+        value = context_value((group,), 4)
+        for field, invalid in (('schema', 'packetcraftr.mutation-context/v0'),
+                               ('schema', 'packetcraftr.mutation-context/v2'),
+                               ('platform', 'ubuntu-24.04'), ('platform', 'z'),
+                               ('profile', 'all'), ('profile', 'z'),
+                               ('revision', '0' * 40 + ' tree ' + SOURCE_DIGEST),
+                               ('revision', 'f' * 40 + ' tree ' + SOURCE_DIGEST),
+                               ('revision', REVISION + ' tree ' + 'c' * 64),
+                               ('tool_version', '0'), ('tool_version', 'z')):
+            with self.subTest(field=field, value=invalid), self.assertRaises(ValueError):
+                parse_plan(encode(value | {field: invalid}), (group.target,), {'core': seed})
+        for invalid in ('short', 'a' * 40 + ' tree short'):
+            with self.subTest(revision=invalid), self.assertRaises(ValueError):
+                parse_plan(encode(value | {'revision': invalid}), (group.target,), {'core': seed}, revision=invalid)
+        with self.assertRaises(ValueError):
+            parse_plan(encode(value | {'platform': 'ubuntu-24.04', 'profile': 'all'}),
+                       (group.target,), {'core': seed}, platform='ubuntu-24.04', profile='all')
+
+    def test_context_plan_recomputes_shards_and_rejects_malformed_records(self) -> None:
+        group, seed = context_group('core', 64, 4)
+        value = context_value((group,), 4)
+        for shards in (0, 1, 2, 3, 8, 65, True, 4.0, '4'):
+            with self.subTest(shards=shards), self.assertRaises(ValueError):
+                parse_plan(encode(value | {'shards': shards}), (group.target,), {'core': seed})
+        for missing in value:
+            invalid = {key: item for key, item in value.items() if key != missing}
+            with self.subTest(missing=missing), self.assertRaises(ValueError):
+                parse_plan(encode(invalid), (group.target,), {'core': seed})
+        raw_group = record(sequence(value['groups'])[0])
+        invalid_values = (value | {'extra': True}, value | {'groups': 'core'},
+            value | {'groups': [raw_group | {'extra': True}]},
+            value | {'groups': [raw_group | {'inventory': ['same', 'same']}]},
+            value | {'groups': [raw_group | {'inventory': ['']}]},
+            value | {'groups': [raw_group | {'inventory': 'core'}]},
+            value | {'groups': [{key: item for key, item in raw_group.items() if key != 'seed_digest'}]},
+            value | {'groups': [raw_group | {'target': {'group': 'core'}}]})
+        for invalid in invalid_values:
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                parse_plan(encode(invalid), (group.target,), {'core': seed})
+        duplicated = encode(value)[:-1] + b', "shards": 4}'
+        for data in (b'\xff', b'[]', duplicated):
+            with self.subTest(data=data[:30]), self.assertRaises(ValueError):
+                parse_plan(data, (group.target,), {'core': seed})
+
+    def test_receiver_coverage_cannot_replace_the_context_inventory(self) -> None:
+        data = encode(receipt())
+        inventory = ('killed', 'timeout', 'new')
+        seed = parse(data)
+        runs = receiver_runs(data, inventory)
+        self.assertEqual(validate_coverage(seed, data, runs, expected_inventory=inventory).executable_ids,
+                         ('timeout', 'new'))
+        changed = receiver_runs(data, ('killed', 'replacement'))
+        self.assertEqual(validate_coverage(seed, data, changed).executable_ids, ('replacement',))
+        with self.assertRaises(ValueError):
+            validate_coverage(seed, data, changed, expected_inventory=inventory)
+
     def test_coverage_digest_binds_values_and_ignores_object_key_order(self) -> None:
         coverage: dict[str, object] = dict(seed='caf\u00e9', reused_ids=['first'], inventory=['second', 'first'])
         expected = hashlib.sha256(b'{"inventory":["second","first"],"reused_ids":["first"],"seed":"caf\xc3\xa9"}').hexdigest()

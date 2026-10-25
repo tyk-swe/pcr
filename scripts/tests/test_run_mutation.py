@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import redirect_stdout
 from dataclasses import asdict, replace
+import hashlib
 import io
 import json
 import os
@@ -27,6 +28,83 @@ def measurement(value: Report, target: Target, platform: str = 'Linux',
 
 
 class MutationScoreTests(unittest.TestCase):
+    def test_context_matrix_requires_each_planned_cohort_and_complete_inventory(self) -> None:
+        revision = 'a' * 40 + ' tree ' + 'b' * 64
+        value = replace(report(60, 4), revision=revision)
+        target = Target(value.group, 'rust', (), value.reason)
+        system = 'ubuntu-24.04'
+        profiles = ('all', 'default', 'portable')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seeds, contexts = root / 'seeds', root / 'contexts'
+            seeds.mkdir()
+            contexts.mkdir()
+            seed = json.dumps(dict(schema='packetcraftr.mutation-seed/v1', target=asdict(target),
+                                   platform=system, profile='all', shard=1, shards=1,
+                                   workspace_baseline=True, report=asdict(value)))
+            (seeds / 'core.json').write_text(seed)
+            seed_digest = hashlib.sha256(seed.encode()).hexdigest()
+            paths = tuple(root / f'{profile}-{shard}.json' for profile, count in
+                          (('all', 2), ('default', 1), ('portable', 4)) for shard in range(1, count + 1))
+            for shard in (1, 2):
+                partial = replace(value, outcomes=value.outcomes[shard - 1::2])
+                (root / f'all-{shard}.json').write_text(json.dumps(
+                    measurement(partial, target, platform=system, shard=shard, shards=2)
+                    | {'workspace_baseline': True}))
+            for profile, count, size in (('default', 1, 61), ('portable', 4, 64)):
+                inventory = tuple(str(index) for index in range(size))
+                expected = tuple(str(index) for index in range(60, size))
+                coverage = dict(inventory=inventory, reused_ids=tuple(str(index) for index in range(60)), seed=seed)
+                digest = hashlib.sha256(json.dumps(coverage, sort_keys=True, separators=(',', ':'),
+                                                  ensure_ascii=False).encode()).hexdigest()
+                plan = dict(schema='packetcraftr.mutation-context/v1', platform=system, profile=profile,
+                            revision=revision, tool_version=value.tool_version, shards=count,
+                            groups=[dict(target=asdict(target), inventory=inventory, seed_digest=seed_digest)])
+                (contexts / f'{profile}').mkdir()
+                (contexts / profile / 'context.json').write_text(json.dumps(plan))
+                for shard in range(1, count + 1):
+                    partial = replace(value, expected=expected, outcomes=tuple(
+                        Outcome(identity, 'killed', 'receiver test failure') for identity in expected[shard - 1::count]))
+                    raw = measurement(partial, target, platform=system, shard=shard, shards=count)
+                    (root / f'{profile}-{shard}.json').write_text(json.dumps(raw | dict(
+                        profile=profile, workspace_baseline=True, coverage=coverage if shard == 1 else None,
+                        coverage_digest=digest)))
+            captured = io.StringIO()
+            with redirect_stdout(captured):
+                self.assertTrue(check((target,), paths, 'rust', (system,), profiles, 2, (), revision,
+                                      value.tool_version, seeds, contexts))
+            score_row = json.loads(captured.getvalue())
+            self.assertEqual((score_row['killed'], score_row['eligible']), (64, 64))
+            self.assertEqual({row['profile']: row['shards'] for row in score_row['execution_contexts']
+                              if row['profile'] != 'all'}, {'default': 1, 'portable': 4})
+            with self.assertRaises(ValueError):
+                check((target,), paths[:-1], 'rust', (system,), profiles, 2, (), revision,
+                      value.tool_version, seeds, contexts)
+            context_path = contexts / 'portable/context.json'
+            original = context_path.read_bytes()
+            for change in ('count', 'inventory'):
+                plan = json.loads(original)
+                if change == 'count':
+                    plan['shards'] = 1
+                else:
+                    plan['groups'][0]['inventory'].pop(0)
+                context_path.write_text(json.dumps(plan))
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    check((target,), paths, 'rust', (system,), profiles, 2, (), revision,
+                          value.tool_version, seeds, contexts)
+                context_path.write_bytes(original)
+            duplicate = contexts / 'duplicate/context.json'
+            duplicate.parent.mkdir()
+            duplicate.write_bytes(original)
+            with self.assertRaises(ValueError):
+                check((target,), paths, 'rust', (system,), profiles, 2, (), revision,
+                      value.tool_version, seeds, contexts)
+            duplicate.unlink()
+            context_path.unlink()
+            with self.assertRaises(ValueError):
+                check((target,), paths, 'rust', (system,), profiles, 2, (), revision,
+                      value.tool_version, seeds, contexts)
+
     def test_seed_proofs_require_complete_direct_workspace_execution(self) -> None:
         value = report(1, 3)
         target = Target(value.group, 'rust', (), value.reason)

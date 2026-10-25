@@ -65,6 +65,18 @@ def cargo(argv: list[str], failure: str) -> int:
                  for index, path in enumerate(files) if not args.file or str(path) in args.file]
     if reuse == 'mixed' and not args.all_features and (not args.file or str(files[0]) in args.file):
         inventory.append(dict(name=f'{files[0]}:1:1: shared-kill receiver-only', file=str(files[0])))
+    context = os.environ.get('MUTATION_FIXTURE_CONTEXT', '')
+    context_caught = 60 if args.package == 'sample' else 3
+    if context:
+        count = 65 if args.package == 'sample' else 3
+        if not args.all_features and context != 'unreused':
+            count += 2 if args.package != 'sample' or context == 'changed' else 1
+        if context == 'unreused':
+            count = 64 if args.package == 'sample' else 3
+            context_caught = 0
+        inventory = [dict(name=f'{files[index % len(files)]}:1:1: context {index}',
+                          file=str(files[index % len(files)])) for index in range(count)
+                     if not args.file or str(files[index % len(files)]) in args.file]
     if failure in ('empty', 'empty-baseline'):
         inventory = []
     if args.iterate:
@@ -104,6 +116,7 @@ def cargo(argv: list[str], failure: str) -> int:
                         or reuse == 'mixed' and args.all_features and mutant['name'].endswith(': shared-timeout')
                         else 'MissedMutant' if not caught
                         or reuse == 'mixed' and args.all_features and mutant['name'].endswith(': shared-survivor')
+                        or context and args.all_features and int(mutant['name'].rsplit(' ', 1)[1]) >= context_caught
                         else 'CaughtMutant') for index, mutant in enumerate(inventory))
     test_status: dict[str, object] = {'Timeout': 'Timeout', 'MissedMutant': 'Success', 'CaughtMutant': {'Failure': 101}}
     outcomes = [dict(scenario=dict(Mutant=mutant), summary=summary, log_path=f'log/{index}.log',

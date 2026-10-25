@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from dataclasses import asdict, replace
 import hashlib
 import json
@@ -17,9 +18,10 @@ from typing import Sequence
 from mutation_results import (Exclusion, Outcome, Report, Status, cosmic_baseline, cosmic_identity, cosmic_results,
                               integer, record, rust_results, score, sequence, text)
 from mutation_scope import Target, changes_since, configuration, select, serialize
-from mutation_reuse import (SEED_PLATFORM, SEED_PROFILE, SEED_SCHEMA, Seed, coverage_digest,
-                            parse_direct_report, parse_seed, partition_inventory, validate_coverage)
-from script_support import read_json
+from mutation_reuse import (CONTEXT_SCHEMA, SEED_PLATFORM, SEED_PROFILE, SEED_SCHEMA,
+                            ContextGroup, ContextPlan, Seed, context_shards, coverage_digest,
+                            parse_context, parse_direct_report, parse_seed, partition_inventory, validate_coverage)
+from script_support import read_json, strict_json
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = {
@@ -95,8 +97,7 @@ def snapshot(root: Path, destination: Path) -> str:
     return digest.hexdigest()
 
 
-def rust(target: Target, root: Path, output: Path, profile: str, shard: int, shards: int,
-         seed: tuple[bytes, Seed] | None) -> tuple[Report, dict[str, object] | None]:
+def rust_arguments(target: Target, root: Path, output: Path, profile: str) -> list[str]:
     package = root / 'crates' / target.group
     if (package / 'build.rs').is_file():
         manifest = package / 'Cargo.toml'
@@ -108,7 +109,16 @@ def rust(target: Target, root: Path, output: Path, profile: str, shard: int, sha
             '--cargo-arg=--locked', *PROFILES[profile]]
     for file in target.files:
         args.extend(('--file', file))
+    return args
+
+
+def rust(target: Target, root: Path, output: Path, profile: str, shard: int, shards: int,
+         seed: tuple[bytes, Seed] | None,
+         expected_inventory: tuple[str, ...] | None = None) -> tuple[Report, dict[str, object] | None]:
+    args = rust_arguments(target, root, output, profile)
     inventory = identities(rust_inventory(args, root, output / 'inventory.json'))
+    if expected_inventory is not None and inventory != expected_inventory:
+        raise ValueError('Rust discovery does not match the context plan')
     coverage: dict[str, object] | None = None
     execution = output
     if seed is not None:
@@ -188,16 +198,22 @@ def python(target: Target, root: Path, output: Path, version: str) -> Report:
     return Report(target.group, '', version, target.reason, expected, outcomes, True, True)
 
 
-def run(targets: tuple[Target, ...], output: Path, language: str, profile: str,
-        shard: int, shards: int, platform_label: str, seed_directory: Path | None = None) -> None:
-    if not 1 <= shard <= shards:
-        raise ValueError('invalid shard')
+def tool_version(language: str) -> str:
     config = record(configuration(ROOT).get('tools'))
     version = text(config.get('cargo-mutants' if language == 'rust' else 'cosmic-ray'))
     tool = ['cargo', 'mutants'] if language == 'rust' else [str(Path(sys.executable).with_name('cosmic-ray'))]
     actual = subprocess.check_output([*tool, '--version'], text=True).strip().split()[-1]
     if actual != version:
         raise ValueError(f'expected mutation tool {version}, got {actual}')
+    return version
+
+
+def run(targets: tuple[Target, ...], output: Path, language: str, profile: str,
+        shard: int, shards: int, platform_label: str, seed_directory: Path | None = None,
+        context_path: Path | None = None) -> None:
+    if not 1 <= shard <= shards:
+        raise ValueError('invalid shard')
+    version = tool_version(language)
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -205,26 +221,44 @@ def run(targets: tuple[Target, ...], output: Path, language: str, profile: str,
     with tempfile.TemporaryDirectory(prefix='pcr-mutation-source-') as directory:
         source = Path(directory)
         tree = snapshot(ROOT, source)
+        context = None
+        if context_path is not None:
+            if language != 'rust' or seed_directory is None:
+                raise ValueError('context plans require Rust seed reuse')
+            seeds = {target.group: load_seed(target, seed_directory, revision, tree, version)[1]
+                     for target in targets if target.language == 'rust'}
+            context = parse_context(context_path.read_bytes(), targets=targets, platform=platform_label,
+                                    profile=profile, revision=f'{revision} tree {tree}',
+                                    tool_version=version, seeds=seeds)
+            if shards != context.shards:
+                raise ValueError('requested shard count does not match the context plan')
         failures = tuple(error for target in targets if target.language == language
                          if (error := run_target(target, source, output, profile, shard, shards,
-                                                 platform_label, revision, tree, version, seed_directory)) is not None)
+                                                 platform_label, revision, tree, version, seed_directory,
+                                                 context)) is not None)
     if failures:
         raise ValueError('\n'.join(failures))
 
 
 def run_target(target: Target, source: Path, output: Path, profile: str, shard: int, shards: int,
                platform_label: str, revision: str, tree: str, version: str,
-               seed_directory: Path | None) -> str | None:
+               seed_directory: Path | None, context: ContextPlan | None = None) -> str | None:
     folder = output / target.group.replace('/', '_').replace('.', '_')
     folder.mkdir(parents=True, exist_ok=True)
     metadata = dict(platform=platform_label, profile=profile, shard=shard, shards=shards, target=asdict(target))
     write(folder / 'run.json', {**metadata, 'group': target.group, 'complete': False})
     try:
         seed = load_seed(target, seed_directory, revision, tree, version) if seed_directory is not None else None
+        expected_inventory = None
+        if context is not None:
+            planned = next(group for group in context.groups if group.target == target)
+            if seed is None or seed[1].donor_digest != planned.seed_digest:
+                raise ValueError('seed changed since context planning')
+            expected_inventory = planned.inventory
         with tempfile.TemporaryDirectory(prefix='pcr-mutation-') as directory:
             checkout = Path(directory)
             shutil.copytree(source, checkout, dirs_exist_ok=True)
-            report, coverage = (rust(target, checkout, folder, profile, shard, shards, seed)
+            report, coverage = (rust(target, checkout, folder, profile, shard, shards, seed, expected_inventory)
                                 if target.language == 'rust' else (python(target, checkout, folder, version), None))
         reuse = (dict(coverage=coverage if shard == 1 else None, coverage_digest=coverage_digest(coverage))
                  if coverage is not None else {})
@@ -239,6 +273,40 @@ def run_target(target: Target, source: Path, output: Path, profile: str, shard: 
 def load_seed(target: Target, directory: Path, revision: str, tree: str, version: str) -> tuple[bytes, Seed]:
     data = (directory / f'{target.group.replace("/", "_").replace(".", "_")}.json').read_bytes()
     return data, parse_seed(data, target=target, revision=revision, source_digest=tree, tool_version=version)
+
+
+def discover_context_group(target: Target, source: Path, output: Path, profile: str,
+                           seed: Seed) -> ContextGroup:
+    folder = output / target.group.replace('/', '_').replace('.', '_')
+    folder.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='pcr-context-') as directory:
+        checkout = Path(directory)
+        shutil.copytree(source, checkout, dirs_exist_ok=True)
+        args = rust_arguments(target, checkout, folder, profile)
+        inventory = identities(rust_inventory(args, checkout, folder / 'inventory.json'))
+    return ContextGroup(target, inventory, seed.donor_digest)
+
+
+def plan_context(targets: tuple[Target, ...], output: Path, profile: str,
+                 platform_label: str, seed_directory: Path) -> None:
+    output.mkdir(parents=True, exist_ok=True)
+    destination = output / 'context.json'
+    destination.unlink(missing_ok=True)
+    if (platform_label, profile) == (SEED_PLATFORM, SEED_PROFILE):
+        raise ValueError('canonical seed cannot use a receiver context plan')
+    version = tool_version('rust')
+    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+    with tempfile.TemporaryDirectory(prefix='pcr-context-source-') as directory:
+        source = Path(directory)
+        tree = snapshot(ROOT, source)
+        seeds = {target.group: load_seed(target, seed_directory, revision, tree, version)[1]
+                 for target in targets if target.language == 'rust'}
+        groups = tuple(discover_context_group(target, source, output, profile, seeds[target.group])
+                       for target in targets if target.language == 'rust')
+    context = ContextPlan(platform_label, profile, f'{revision} tree {tree}', version,
+                          context_shards(groups, seeds), groups)
+    write(destination, {'schema': CONTEXT_SCHEMA, **asdict(context)})
+    print(json.dumps({'shards': context.shards}))
 
 
 def cohort(runs: tuple[tuple[dict[str, object], Report], ...], group: str,
@@ -331,9 +399,39 @@ def validate_direct_runs(runs: tuple[tuple[dict[str, object], Report], ...]) -> 
         raise ValueError('seed requires successful workspace baseline evidence')
 
 
+def read_context(path: Path, targets: tuple[Target, ...], revision: str, version: str,
+                 seeds: Mapping[str, Seed], allowed: frozenset[tuple[str, str]]) -> ContextPlan:
+    data = path.read_bytes()
+    raw = record(strict_json(data))
+    system, profile = text(raw.get('platform')), text(raw.get('profile'))
+    if (system, profile) not in allowed:
+        raise ValueError('unexpected receiver context plan')
+    return parse_context(data, targets=targets, platform=system, profile=profile,
+                         revision=revision, tool_version=version, seeds=seeds)
+
+
+def context_plans(directory: Path, targets: tuple[Target, ...], platforms: tuple[str, ...],
+                  profiles: tuple[str, ...], revision: str, version: str,
+                  seed_directory: Path) -> dict[tuple[str, str], ContextPlan]:
+    commit, separator, tree = revision.partition(' tree ')
+    if not separator:
+        raise ValueError('context plans require complete source identity')
+    seeds = {target.group: load_seed(target, seed_directory, commit, tree, version)[1]
+             for target in targets if target.language == 'rust'}
+    allowed = frozenset((system, profile) for system in platforms for profile in profiles
+                        if (system, profile) != (SEED_PLATFORM, SEED_PROFILE))
+    plans = tuple(read_context(path, targets, revision, version, seeds, allowed)
+                  for path in directory.rglob('context.json'))
+    keys = tuple((plan.platform, plan.profile) for plan in plans)
+    if len(set(keys)) != len(keys) or set(keys) != allowed:
+        raise ValueError('receiver context plans are missing or duplicated')
+    return dict(zip(keys, plans))
+
+
 def reuse_contexts(target: Target, runs: tuple[tuple[dict[str, object], Report], ...], directory: Path,
                    platforms: tuple[str, ...], profiles: tuple[str, ...], shards: int,
-                   revision: str, version: str) -> tuple[dict[str, object], ...]:
+                   revision: str, version: str,
+                   plans: Mapping[tuple[str, str], ContextPlan]) -> tuple[dict[str, object], ...]:
     commit, separator, tree = revision.partition(' tree ')
     if not separator or SEED_PLATFORM not in platforms or SEED_PROFILE not in profiles:
         raise ValueError('reuse requires the actual canonical seed context')
@@ -349,34 +447,44 @@ def reuse_contexts(target: Target, runs: tuple[tuple[dict[str, object], Report],
         raise ValueError('supplied seed does not match the completed canonical context')
     return tuple(reuse_context(seed, data, tuple((run, report) for run, report in runs
                                                 if report.group == target.group and run.get('platform') == system
-                                                and run.get('profile') == profile), system, profile)
+                                                and run.get('profile') == profile), system, profile,
+                               plans.get((system, profile)))
                  for system in platforms for profile in profiles)
 
 
 def reuse_context(seed: Seed, data: bytes, runs: tuple[tuple[dict[str, object], Report], ...],
-                  system: str, profile: str) -> dict[str, object]:
+                  system: str, profile: str, context: ContextPlan | None = None) -> dict[str, object]:
     if (system, profile) == (SEED_PLATFORM, SEED_PROFILE):
         return dict(platform=system, profile=profile, executed=len(seed.report.expected), reused=0)
-    plan = validate_coverage(seed, data, runs)
-    return dict(platform=system, profile=profile, executed=len(plan.executable_ids),
-                reused=len(plan.reused_ids), seed_digest=seed.donor_digest,
-                seed_revision=seed.report.revision, seed_tool_version=seed.report.tool_version)
+    inventory = (next(group.inventory for group in context.groups if group.target == seed.target)
+                 if context is not None else None)
+    plan = validate_coverage(seed, data, runs, expected_inventory=inventory)
+    summary: dict[str, object] = dict(platform=system, profile=profile, executed=len(plan.executable_ids),
+                                     reused=len(plan.reused_ids), seed_digest=seed.donor_digest,
+                                     seed_revision=seed.report.revision, seed_tool_version=seed.report.tool_version)
+    return summary | {'shards': context.shards} if context is not None else summary
 
 
 def check(targets: tuple[Target, ...], paths: tuple[Path, ...], language: str,
           platforms: tuple[str, ...], profiles: tuple[str, ...], shards: int,
           exclusions: tuple[Exclusion, ...], revision: str, tool_version: str,
-          seed_directory: Path | None = None) -> bool:
+          seed_directory: Path | None = None, context_directory: Path | None = None) -> bool:
     runs = validated_runs(targets, paths, language, platforms, profiles, shards, revision, tool_version)
     groups = tuple(target.group for target in targets if target.language == language)
     if seed_directory is not None and language != 'rust':
         raise ValueError('seed reuse is only supported for Rust')
     if seed_directory is None and any('coverage' in run or 'coverage_digest' in run for run, _ in runs):
         raise ValueError('receiver coverage requires the supplied seed directory')
+    plans: dict[tuple[str, str], ContextPlan] = {}
+    if context_directory is not None:
+        if seed_directory is None or language != 'rust':
+            raise ValueError('context plans require Rust seed reuse')
+        plans = context_plans(context_directory, targets, platforms, profiles, revision, tool_version, seed_directory)
     contexts = {target.group: reuse_contexts(target, runs, seed_directory, platforms, profiles,
-                                            shards, revision, tool_version)
+                                            shards, revision, tool_version, plans)
                 for target in targets if target.language == language} if seed_directory is not None else {}
-    scores = tuple(score(merge_reports(tuple(cohort(runs, group, system, profile, shards)
+    scores = tuple(score(merge_reports(tuple(cohort(runs, group, system, profile,
+                                                  plans[(system, profile)].shards if (system, profile) in plans else shards)
                                             for system in platforms for profile in profiles)), exclusions)
                    for group in sorted(groups))
     for result in scores:
@@ -392,12 +500,14 @@ def check(targets: tuple[Target, ...], paths: tuple[Path, ...], language: str,
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('select', 'run', 'check', 'seed'))
+    parser.add_argument('action', choices=('select', 'run', 'check', 'seed', 'context'))
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--base')
     parser.add_argument('--full', action='store_true')
     parser.add_argument('--output', type=Path, help='artifact directory, ignored by Git or outside the checkout')
     parser.add_argument('--seed', type=Path, help='directory containing complete canonical Rust seed receipts')
+    parser.add_argument('--context-plan', type=Path, help='receiver plan to bind discovery and shard count')
+    parser.add_argument('--contexts', type=Path, help='directory containing every required receiver context plan')
     parser.add_argument('--language', choices=('rust', 'python'), default='rust')
     parser.add_argument('--profile', choices=tuple(PROFILES), default='all')
     parser.add_argument('--platforms', nargs='+', default=[platform.system()])
@@ -415,8 +525,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(serialize(targets)))
             return 0
         targets = targets_from(args.plan)
-        if args.seed is not None and (args.language != 'rust' or args.action not in ('run', 'check')):
-            raise ValueError('seed reuse is only supported for Rust run and check')
+        if args.seed is not None and (args.language != 'rust' or args.action not in ('run', 'check', 'context')):
+            raise ValueError('seed reuse is only supported for Rust run, check and context')
+        if args.context_plan is not None and (args.action != 'run' or args.seed is None):
+            raise ValueError('--context-plan requires a seeded Rust run')
+        if args.contexts is not None and (args.action != 'check' or args.seed is None):
+            raise ValueError('--contexts requires a seeded Rust check')
         if (args.seed is not None and args.action == 'run'
                 and (args.platform_label, args.profile) == (SEED_PLATFORM, SEED_PROFILE)):
             raise ValueError('canonical seed context must execute directly')
@@ -426,7 +540,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 cwd=ROOT, check=False).returncode != 0):
             raise ValueError('mutation output must be ignored or outside the checkout')
         if args.action == 'run':
-            run(targets, output, args.language, args.profile, args.shard, args.shards, args.platform_label, args.seed)
+            run(targets, output, args.language, args.profile, args.shard, args.shards, args.platform_label,
+                args.seed, args.context_plan)
+            return 0
+        if args.action == 'context':
+            if args.seed is None or args.language != 'rust':
+                raise ValueError('receiver context planning requires a Rust seed')
+            plan_context(targets, output, args.profile, args.platform_label, args.seed)
             return 0
         exclusions = tuple(Exclusion(text(value.get('group')), text(value.get('revision')),
                                      text(value.get('identity')), text(value.get('evidence')))
@@ -450,7 +570,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         return 0 if check(targets, tuple(output.rglob('run.json')), args.language,
                           tuple(args.platforms), tuple(args.profiles), args.shards, exclusions,
-                          revision, version, args.seed) else 1
+                          revision, version, args.seed, args.contexts) else 1
     except (OSError, ValueError, SubprocessError) as error:
         print(f'Mutation audit failed. {error}', file=sys.stderr)
         return 1

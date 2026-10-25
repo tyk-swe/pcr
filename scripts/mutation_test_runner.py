@@ -43,7 +43,7 @@ def main() -> int:
     except (OSError, ValueError) as error:
         print('MUTATION_RESULT ' + json.dumps({'kind': 'runner_error', 'message': str(error)}))
         return 1
-    result = unittest.TextTestRunner(stream=sys.stdout, verbosity=1).run(suite)
+    result = unittest.TextTestRunner(stream=sys.stdout, verbosity=1, failfast=True).run(suite)
     if result.testsRun == 0:
         print('MUTATION_RESULT ' + json.dumps({'kind': 'runner_error', 'message': 'selected tests did not execute'}))
         return 1

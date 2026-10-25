@@ -21,14 +21,74 @@ env:
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
+  plan:
+    runs-on: ${{ inputs.os }}
+    outputs:
+      shards: ${{ steps.matrix.outputs.shards }}
+      count: ${{ steps.matrix.outputs.count }}
+    steps:
+      - if: inputs.reuse-seed
+        run: git config --global core.autocrlf false
+      - if: inputs.reuse-seed
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - if: inputs.reuse-seed
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: mutation-plan
+      - if: inputs.reuse-seed
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: mutation-seed
+          path: mutation-results/seed
+      - if: inputs.reuse-seed && runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - if: inputs.reuse-seed
+        run: rustup toolchain install
+      - if: inputs.reuse-seed
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: mutation-deps-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - if: inputs.reuse-seed
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
+        with:
+          tool: cargo-mutants@27.1.0
+      - if: inputs.reuse-seed
+        run: python scripts/run_mutation.py context --plan mutation-plan.json --language rust --profile ${{ inputs.profile }} --platform-label ${{ inputs.os }} --seed mutation-results/seed --output mutation-results/context
+      - id: matrix
+        shell: bash
+        env:
+          REUSE_SEED: ${{ inputs.reuse-seed }}
+        run: |
+          python - <<'PY'
+          import json, os
+          count = json.load(open('mutation-results/context/context.json'))['shards'] if os.environ['REUSE_SEED'] == 'true' else 64
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('shards=' + json.dumps(list(range(1, count + 1))), file=output)
+              print(f'count={count}', file=output)
+          PY
+      - if: inputs.reuse-seed
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mutation-context-${{ inputs.os }}-${{ inputs.profile }}
+          path: mutation-results/context/context.json
+          if-no-files-found: error
+
   shards:
+    needs: plan
     runs-on: ${{ inputs.os }}
     timeout-minutes: 360
     strategy:
       fail-fast: false
       max-parallel: 4
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64]
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -43,6 +103,11 @@ jobs:
         with:
           name: mutation-seed
           path: mutation-results/seed
+      - if: inputs.reuse-seed
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: mutation-context-${{ inputs.os }}-${{ inputs.profile }}
+          path: mutation-results/context
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup toolchain install
@@ -57,19 +122,19 @@ jobs:
         with:
           tool: cargo-mutants@27.1.0
       - if: ${{ !inputs.reuse-seed }}
-        run: python scripts/run_mutation.py run --plan mutation-plan.json --language rust --profile ${{ inputs.profile }} --shard ${{ matrix.shard }} --shards 64 --platform-label ${{ inputs.os }} --output mutation-results
+        run: python scripts/run_mutation.py run --plan mutation-plan.json --language rust --profile ${{ inputs.profile }} --shard ${{ matrix.shard }} --shards ${{ needs.plan.outputs.count }} --platform-label ${{ inputs.os }} --output mutation-results/run
       - if: inputs.reuse-seed
-        run: python scripts/run_mutation.py run --plan mutation-plan.json --language rust --profile ${{ inputs.profile }} --shard ${{ matrix.shard }} --shards 64 --platform-label ${{ inputs.os }} --output mutation-results --seed mutation-results/seed
+        run: python scripts/run_mutation.py run --plan mutation-plan.json --language rust --profile ${{ inputs.profile }} --shard ${{ matrix.shard }} --shards ${{ needs.plan.outputs.count }} --platform-label ${{ inputs.os }} --output mutation-results/run --seed mutation-results/seed --context-plan mutation-results/context/context.json
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: mutation-rust-${{ inputs.os }}-${{ inputs.profile }}-${{ matrix.shard }}
-          path: mutation-results
+          path: mutation-results/run
           if-no-files-found: error
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: mutation-receipts-rust-${{ inputs.os }}-${{ inputs.profile }}-${{ matrix.shard }}
-          path: mutation-results/**/run.json
+          path: mutation-results/run/**/run.json
           if-no-files-found: error
 

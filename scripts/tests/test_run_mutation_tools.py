@@ -36,8 +36,114 @@ def coverage_digest(value: dict[str, object]) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')).hexdigest()
 
 
+def create_context(root: Path, executable: Path, environment: dict[str, str], plan: Path,
+                   seed: Path, output: Path) -> Path:
+    result = invoke(root, executable, environment, ['context', '--plan', str(plan), '--language', 'rust',
+        '--profile', 'portable', '--platform-label', 'ubuntu-24.04', '--seed', str(seed), '--output', str(output)])
+    result.check_returncode()
+    return output / 'context.json'
+
+
 @unittest.skipUnless(os.name == 'posix', 'SDK doubles use POSIX launchers')
 class MutationToolExecutionTests(unittest.TestCase):
+    def test_context_plans_run_every_group_with_recomputed_shards(self) -> None:
+        for mode, shards, counts in (('scaled', 4, {'sample': (6, 60), 'other': (2, 3)}),
+                                     ('all', 1, {'sample': (0, 3), 'other': (0, 1)})):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory) / 'checkout'
+                mutation_checkout(root)
+                executable, environment = mutation_tools(root, Path(directory) / 'tools/bin')
+                environment = environment | ({'MUTATION_FIXTURE_REUSE': 'all'} if mode == 'all'
+                                             else {'MUTATION_FIXTURE_CONTEXT': mode})
+                plan = Path(directory) / 'plan.json'
+                plan.write_text(json.dumps([asdict(Target(group, 'rust', (), 'controlled contexts'))
+                                            for group in ('sample', 'other')]))
+                output = root / 'artifacts'
+                seed = create_seed(root, executable, environment, plan, output / 'seed-run')
+                contexts = output / 'contexts'
+                context = create_context(root, executable, environment, plan, seed, contexts / 'portable')
+                self.assertEqual(json.loads(context.read_text())['shards'], shards)
+                for shard in range(1, shards + 1):
+                    folder = output / 'receiver' / str(shard) / 'run'
+                    result = invoke(root, executable, environment, ['run', '--plan', str(plan), '--language', 'rust',
+                        '--profile', 'portable', '--platform-label', 'ubuntu-24.04', '--shard', str(shard),
+                        '--shards', str(shards), '--seed', str(seed), '--context-plan', str(context), '--output', str(folder)])
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    for path in folder.rglob('run.json'):
+                        measured = parse_report(json.loads(path.read_text())['report'])
+                        self.assertEqual(len(measured.expected), counts[measured.group][0])
+                        self.assertTrue(all(outcome.status == 'killed' for outcome in measured.outcomes))
+                arguments = ['check', '--plan', str(plan), '--language', 'rust', '--seed', str(seed),
+                    '--contexts', str(contexts), '--output', str(output), '--platforms', 'ubuntu-24.04',
+                    '--profiles', 'all', 'portable', '--shards', '2']
+                checked = invoke(root, executable, environment, arguments)
+                self.assertEqual(checked.returncode, 0, checked.stderr)
+                summaries = [json.loads(line) for line in checked.stdout.splitlines()]
+                self.assertEqual({summary['group'] for summary in summaries}, set(counts))
+                for summary in summaries:
+                    executed, reused = counts[summary['group']]
+                    self.assertEqual((summary['killed'], summary['eligible']), (executed + reused, executed + reused))
+                    self.assertEqual(next((item['executed'], item['reused']) for item in summary['execution_contexts']
+                                          if item['profile'] == 'portable'), (executed, reused))
+                if mode == 'all':
+                    failed = invoke(root, executable, environment | {'MUTATION_FIXTURE_FAILURE': 'workspace-baseline'},
+                        ['run', '--plan', str(plan), '--language', 'rust', '--profile', 'portable',
+                         '--platform-label', 'ubuntu-24.04', '--shards', '1', '--seed', str(seed),
+                         '--context-plan', str(context), '--output', str(output / 'failed')])
+                    self.assertEqual(failed.returncode, 1)
+                    self.assertIn('workspace baseline', failed.stderr)
+                    continue
+                receipt = next((output / 'receiver/4').rglob('run.json'))
+                original = receipt.read_bytes()
+                receipt.unlink()
+                self.assertEqual(invoke(root, executable, environment, arguments).returncode, 1)
+                receipt.write_bytes(original)
+                original_context = context.read_bytes()
+                context.unlink()
+                self.assertEqual(invoke(root, executable, environment, arguments).returncode, 1)
+                context.write_bytes(original_context)
+
+    def test_context_run_rejects_changed_inventory_and_forged_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'checkout'
+            mutation_checkout(root)
+            executable, environment = mutation_tools(root, Path(directory) / 'tools/bin')
+            environment = environment | {'MUTATION_FIXTURE_CONTEXT': 'scaled'}
+            plan = Path(directory) / 'plan.json'
+            plan.write_text(json.dumps([asdict(Target('sample', 'rust', (), 'controlled contexts'))]))
+            output = root / 'artifacts'
+            seed = create_seed(root, executable, environment, plan, output / 'seed-run')
+            context = create_context(root, executable, environment, plan, seed, output / 'contexts/portable')
+            original = context.read_bytes()
+            command = ['run', '--plan', str(plan), '--language', 'rust', '--profile', 'portable',
+                       '--platform-label', 'ubuntu-24.04', '--shards', '4', '--seed', str(seed),
+                       '--context-plan', str(context), '--output', str(output / 'receiver/run')]
+            changed = invoke(root, executable, environment | {'MUTATION_FIXTURE_CONTEXT': 'changed'}, command)
+            self.assertEqual(changed.returncode, 1)
+            for field in ('shards', 'inventory', 'source', 'scope', 'seed'):
+                forged = json.loads(original)
+                arguments = command.copy()
+                if field == 'shards':
+                    forged['shards'] = 1
+                    arguments[arguments.index('--shards') + 1] = '1'
+                elif field == 'inventory':
+                    forged['groups'][0]['inventory'][-1] += ' forged'
+                elif field == 'source':
+                    forged['revision'] = '0' * 40 + ' tree ' + '0' * 64
+                elif field == 'scope':
+                    forged['groups'][0]['target']['files'] = ['crates/sample/src/lib.rs']
+                else:
+                    forged['groups'][0]['seed_digest'] = '0' * 64
+                context.write_text(json.dumps(forged))
+                with self.subTest(field=field):
+                    self.assertEqual(invoke(root, executable, environment, arguments).returncode, 1)
+                context.write_bytes(original)
+            environment = environment | {'MUTATION_FIXTURE_CONTEXT': 'unreused'}
+            other_seed = create_seed(root, executable, environment, plan, output / 'unreused-seed')
+            other_context = create_context(root, executable, environment, plan, other_seed,
+                                           output / 'unreused-contexts/portable')
+            self.assertEqual(json.loads(other_context.read_text())['shards'], 64)
+
     def test_seed_receiver_executes_remaining_and_new_ids_with_direct_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / 'checkout'

@@ -89,6 +89,16 @@ class MutationTestRunnerTests(unittest.TestCase):
             result = execute(root)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(evidence(result), dict(kind='tests', run=len(owners), failures=0, errors=0))
+            (root / 'scripts/tests/test_alpha.py').write_text(
+                'from pathlib import Path\nimport unittest\n'
+                'class LaterTests(unittest.TestCase):\n'
+                '    def test_later(self) -> None:\n        Path("later-ran").write_text("ran")\n')
+            config.write_text(original.replace('["scripts/tests/test_alpha.py"]',
+                '["scripts/tests/test_beta.py", "scripts/tests/test_alpha.py"]'))
+            result = execute(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(evidence(result), dict(kind='tests', run=1, failures=1, errors=0))
+            self.assertFalse((root / 'later-ran').exists())
 
     def test_runtime_test_errors_are_distinct_from_syntax_invalid_mutations(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

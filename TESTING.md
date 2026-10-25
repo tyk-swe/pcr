@@ -30,7 +30,7 @@ CI also retains the portable, default, layer 2, layer 3, minimum Rust version, d
 
 `.config/mutation.toml` pins cargo-mutants and Cosmic Ray and maps every Python production module, including repository tools, to its tests. `requirements-dev.txt` installs Cosmic Ray. Install cargo-mutants with the version in that file's companion TOML configuration.
 
-Python mutation runs execute the suites declared for their module. Ordinary CI still discovers the entire unittest suite. Ownership for the mutation tools is split between score parsing in `test_mutation_results.py`, selection in `test_mutation_scope.py`, orchestration in `test_run_mutation.py` and SDK execution in `test_run_mutation_tools.py`. The orchestration cases also exercise the parser and selector. `test_mutation_test_runner.py` owns the test harness. These files replace the former combined `test_mutation.py` without dropping cases. The four other production modules retain their existing mapped suites.
+Python mutation runs execute the suites declared for their module. Ordinary CI still discovers the entire unittest suite. Ownership for the mutation tools is split between score parsing in `test_mutation_results.py`, selection in `test_mutation_scope.py`, orchestration in `test_run_mutation.py` and SDK execution in `test_run_mutation_tools.py`. The orchestration cases also exercise the parser and selector. `test_mutation_test_runner.py` owns the test harness, and `test_mutation_reuse.py` owns seed validation and receiver coverage. These files replace the former combined `test_mutation.py` without dropping cases. The four other production modules retain their existing mapped suites.
 
 ```sh
 python3 -m venv .venv
@@ -51,7 +51,20 @@ The Python harness is production tooling and receives its own mutation measureme
 
 Rust runs an explicit workspace baseline before mutation. The pinned SDK applies workspace selection to mutants but selects only mutated packages for its own baseline, so its successful baseline alone cannot establish that dependent-crate tests were already healthy. Every artifact also retains its complete normalized target, including language, group, files and selection reason. The gate rejects evidence for a different target, even under the same source revision.
 
-The existing weekly CI schedule calls the full mutation workflow. PRs call the same workflow with scoped selection. Manual dispatch runs a full audit. Pushes to the default branch retain normal CI without repeating the full mutation audit. Rust runs on the existing Linux, ARM and Intel macOS, and Windows images with each supported feature profile. Each platform/profile context runs 64 shards with one mutation worker per job. Context calls are serialized and each context admits at most four shard jobs, preserving the four-job Rust limit. The gate requires every platform, profile and shard, then combines their outcomes per crate. A mutant is killed when any required run catches it. Code disabled in one profile can be tested by another. A timeout never creates a kill, and a mutant is compilation-invalid only if every run that discovered it fails compilation. Python modules are checked separately. A score aggregated across modules or crates cannot make a weak group pass.
+The existing weekly CI schedule calls the full mutation workflow. PRs call the same workflow with scoped selection. Manual dispatch runs a full audit. Pushes to the default branch retain normal CI without repeating the full mutation audit. Rust runs on the existing Linux, ARM and Intel macOS, and Windows images with each supported feature profile. Each platform/profile context runs 64 shards with one mutation worker per job. Context calls are serialized and each context admits at most four shard jobs, preserving the four-job Rust limit. The gate requires every platform, profile and shard, then combines their outcomes per crate. A mutant is killed when any required run catches it. Code disabled in one profile can be tested by another. A timeout never creates a kill, and a mutant is compilation-invalid only if every run that discovered it fails compilation. Each Python module runs in a separate serial job, preserving one active Python worker while giving each module the runner's full time allowance. The gate still requires results for every module in the original selection. A score aggregated across modules or crates cannot make a weak group pass.
+
+The Linux all-features context runs first and publishes a complete direct seed. Other contexts discover their own inventories and reuse only exact identities that this seed actually killed. Seed survivors, timeouts, compilation-invalid mutants and identities absent from the seed still execute. Each receiver starts a fresh cargo-mutants output directory containing only the verified prior kills. Iteration filtering occurs before sharding. Each context runs its own workspace baseline even when no executable mutants remain.
+
+The seed is bound to the full source fingerprint, Git revision, tool version and requested target. The gate requires its actual completed Linux/all shard cohort and compares every outcome and evidence path. One receiver shard carries its complete inventory, reused identities and exact seed text; all shards carry the same coverage digest. The remaining inventory must be executed exactly once across that context's shards. The score combines actual outcomes only, without inventing receiver kills. Scores publish executed and reused counts by context and the seed provenance. Full weekly throughput remains unverified until a complete production matrix finishes.
+
+The following example uses one shard for a local two-context run. CI uses the same commands with 64 shards and the full platform and feature matrix.
+
+```sh
+python3 scripts/run_mutation.py run --plan mutation-plan.json --language rust --profile all --platform-label ubuntu-24.04 --output mutation-results/rust/seed-run
+python3 scripts/run_mutation.py seed --plan mutation-plan.json --language rust --output mutation-results/rust/seed-run
+python3 scripts/run_mutation.py run --plan mutation-plan.json --language rust --profile portable --platform-label ubuntu-24.04 --seed mutation-results/rust/seed-run/seed --output mutation-results/rust/portable
+python3 scripts/run_mutation.py check --plan mutation-plan.json --language rust --seed mutation-results/rust/seed-run/seed --platforms ubuntu-24.04 --profiles all portable --output mutation-results/rust
+```
 
 A group's score is killed mutants divided by eligible viable mutants and must be strictly greater than 90 percent. Timeouts remain in the denominator and never count as kills. Only compilation-invalid mutants and individually reviewed equivalent mutants are excluded. The checker requires a successful baseline, complete inventory, consistent shard metadata, actual test execution evidence, and results for every selected mutant. Missing reports, duplicate results, runner failures and unfinished runs fail the gate. Zero eligible mutants are reported as not applicable with the selection reason, including the invalid and equivalent counts.
 
@@ -83,7 +96,7 @@ The initial inventory contained 282 Rust tests and 50 Python tests. The initial 
 | Protocol message suites | Reviewed all 39 message cases and the remaining core protocol cases. Moved review and improvement cases into reference, framing, reflection and validation suites under the existing owner. Independent decoded fields supplement wire preservation, positive validation cases check complete bytes, and wire expectations cite dated sources. Full mutation scores and the final native CI matrix are still outstanding. |
 | Build scripts | Added disposable binary targets for package-root `build.rs` files. A two-crate integration fixture killed all nine mutants, including deletion of the build script's configuration output. The real build scripts still require full-run survivor review. |
 
-The case audit now records all 285 Rust cases and all 121 Python cases. The overall effort remains incomplete until the final revision passes every required full mutation group and CI profile and all actionable survivors are reviewed and repaired. Passing ordinary tests does not establish that result.
+The case audit now records all 293 Rust cases and all 144 Python cases. The overall effort remains incomplete until the final revision passes every required full mutation group and CI profile and all actionable survivors are reviewed and repaired. Passing ordinary tests does not establish that result.
 
 # Lifecycle case audit
 
@@ -458,7 +471,7 @@ All 23 cases in `scripts/tests/test_script_support.py` are reviewed below. Files
 | `test_all_nonfinite_spellings_are_rejected` | Retained. Nonfinite tokens and numeric overflow fail. | Trusting the decoder's permissive number defaults. |
 | `test_input_must_be_utf8_not_auto_detected_utf16` | Retained. UTF-16 and UTF-32 byte input cannot bypass the UTF-8 contract. | Passing bytes to an auto-detecting decoder. |
 | `test_surrogates_in_additive_fields_and_keys_are_rejected` | Retained. Invalid surrogate strings and keys fail while a valid supplementary character survives. | Validating only fields consumed by a particular tool. |
-| `test_depth_is_bounded_without_uncaught_recursion` | Strengthened. The complete value survives at the nesting boundary, while excess nesting fails safely. | Rejecting the boundary or silently increasing accepted depth. |
+| `test_depth_is_bounded_without_uncaught_recursion` | Strengthened. Complete object and list chains survive at the nesting boundary, while excess nesting fails safely. | Counting object and list depth differently, rejecting the boundary or silently increasing accepted depth. |
 | `test_nested_siblings_are_validated_after_empty_containers` | Added. Expected nested siblings survive, while later invalid numbers or strings are refused after empty containers. | Ending traversal when the first nested iterator finishes. |
 | `test_default_byte_budget_accepts_its_boundary_and_refuses_excess` | Added. A complete value fits the project byte ceiling and excess input is refused. | Changing the published default ceiling or accepting oversized bytes. |
 | `test_size_is_measured_in_utf8_bytes` | Retained. A multibyte string fits its exact byte budget and fails below it. | Counting characters rather than encoded bytes. |
@@ -466,11 +479,11 @@ All 23 cases in `scripts/tests/test_script_support.py` are reviewed below. Files
 | `test_rejected_file_still_respects_the_available_read_budget` | Added. A bounded source yields a normal application size refusal without exhausting its available read credit. | Attempting to read substantially beyond the configured ceiling. |
 | `test_invalid_json_limits_are_rejected_before_io` | Strengthened. Both text and file entry points reject invalid limits and accept the minimum positive limit. | Allowing zero, booleans or fractional limits through one entry point. |
 | `test_prepare_report_removes_stale_success_but_not_input` | Retained. A stale report is removed, while alias refusal preserves the input. | Removing an input before checking aliases. |
-| `test_success_creates_parents_and_utf8_newline` | Retained. A complete UTF-8 JSON value is published under newly created parents with a final portable newline. | Leaving invalid, truncated or platform-dependent report bytes. |
+| `test_success_creates_parents_and_utf8_newline` | Strengthened. A complete UTF-8 JSON value is published through multiple missing parent directories with a final portable newline. | Creating only the immediate parent or leaving invalid, truncated or platform-dependent report bytes. |
 | `test_serialization_failure_preserves_existing_report` | Strengthened. Invalid numbers, keys and strings leave the previous report intact, including invalid nested siblings. | Replacing the previous report before validating all content. |
 | `test_replacement_retains_the_existing_reports_permissions` | Added. A successful replacement preserves deliberately supplied POSIX permissions and publishes the complete new content. | Replacing a report with temporary-file permissions. |
 | `test_replace_failure_cleans_temporary_file` | Retained. A controlled publication failure preserves the previous report and leaves no partial file. | Leaving an abandoned temporary report after failure. |
-| `test_output_cannot_alias_input` | Retained. Same-path and hard-link aliases are refused, while a distinct output is accepted. | Checking path spelling without checking file identity. |
+| `test_output_cannot_alias_input` | Strengthened. Same-path and hard-link aliases are refused, while a distinct output is accepted. Absent input paths and their normalized aliases are also refused. | Checking only existing file identity or comparing unnormalized path spellings. |
 
 # Build metadata case audit
 
@@ -479,7 +492,7 @@ All 13 cases in `scripts/tests/test_build_manifest.py` are reviewed below. Versi
 | Case | Disposition and protected behavior | Representative defect |
 | --- | --- | --- |
 | `test_command_failures_have_a_clean_diagnostic_and_no_success_report` | Retained. Controlled binary or compiler failure produces exit one, a contextual diagnostic and no success artifact. | Publishing metadata after a failed identity command. |
-| `test_write_and_verify_preserve_supplied_identity_and_detect_binary_changes` | Strengthened. Complete supplied identity is published and verified. Independent commit, target, feature, basename, version and binary-content changes fail verification. | Ignoring one provenance field or a changed binary. |
+| `test_write_and_verify_preserve_supplied_identity_and_detect_binary_changes` | Strengthened. Complete supplied identity is published and verified. Independent commit, target, feature, basename and version values on both sides of the expected value fail verification, as does changed binary content. | Replacing equality with an ordering comparison or ignoring a provenance field. |
 | `test_version_and_compiler_payload_cannot_be_blank` | Retained. Prefix-only version and compiler fields are refused. | Treating a product name alone as identity. |
 | `test_complete_provenance_is_required` | Strengthened. Every independently declared identity field is required and rejects blank or incorrectly typed values. | Removing a field from the implementation's required list or accepting a nonstring value. |
 | `test_binary_digest_must_be_sha256` | Retained. A non-digest identity is refused. Detailed width and character cases belong to the shared helper. | Skipping digest validation at the metadata boundary. |
@@ -488,8 +501,8 @@ All 13 cases in `scripts/tests/test_build_manifest.py` are reviewed below. Versi
 | `test_version_is_an_unambiguous_product_line` | Retained. Wrong products, multiple lines and control-bearing version strings fail. | Accepting ambiguous executable identity. |
 | `test_invalid_metadata_has_a_contextual_diagnostic` | Strengthened. Malformed and oversized metadata have contextual diagnostics. A complete identity at the exact byte ceiling loads unchanged. | Rejecting the valid boundary or accepting excess metadata. |
 | `test_mode_is_required_before_binary_access` | Retained. Missing operation mode is refused before accessing the binary. The forbidden I/O interaction is the contract. | Hashing a binary before argument validation. |
-| `test_invalid_release_inputs_do_not_execute_binary` | Retained. Invalid release provenance is refused before an executable runs. | Executing unvalidated release input. |
-| `test_binary_mutation_during_version_query_is_rejected` | Retained. A supplied changed digest after version lookup cannot establish identity. | Combining a version and digest from different binary contents. |
+| `test_invalid_release_inputs_do_not_execute_binary` | Strengthened. Invalid commit, target and feature identifiers are refused before an executable runs. Target and feature fields are also checked directly at the metadata boundary. | Executing unvalidated release input or accepting malformed portable identifiers. |
+| `test_binary_mutation_during_version_query_is_rejected` | Strengthened. Different valid digests below and above the original digest after version lookup cannot establish identity. | Combining a version and digest from different binary contents or replacing equality with ordering. |
 | `test_missing_binary_is_a_clean_failure` | Repaired. A missing file inside a controlled temporary directory produces exit one. | Depending on an unrelated absolute path being absent or returning the wrong exit status. |
 
 # Forwarding consumer case audit
@@ -500,7 +513,7 @@ All 27 original cases and three added cases in `scripts/tests/test_forwarding_co
 | --- | --- | --- |
 | `test_unmatched_and_unkeyed_census_preserves_retained_and_omitted_observations` | Retained. Both capture sides preserve nonempty retained and omitted unmatched/unkeyed observations. Contradictory totals, duplicate frames and malformed entries fail. | Losing a retained observation or accepting an omission count that does not account for the census. |
 | `test_check_outcomes_require_the_declared_evidence_availability` | Retained. Independently specified state combinations determine which checks are evaluable and which outcomes are possible. | Calling unreadable evidence satisfied or refusing an available check as unevaluable. |
-| `test_retained_checks_must_match_declarations` | Strengthened. Missing, additional or different checks produce a diagnostic identifying the affected match and cause. An independent four-kind declaration fixture preserves the ordered complete checks and their census. | Dropping a check kind, changing declaration order or diagnosing an additional check as missing. |
+| `test_retained_checks_must_match_declarations` | Strengthened. Missing, additional or different checks identify the affected match and cause. An independent four-kind fixture preserves the complete checks and census. Matching empty fields in both declaration and retained check are refused. | Dropping a check kind, accepting a shared malformed field or diagnosing an additional check as missing. |
 | `test_rule_budgets_include_every_declaration_and_utf8_literal` | Retained with a precise local type. Every rule category contributes to the configured count and UTF-8 byte budget, including an expectation literal and its separator. | Omitting a rule category or counting Unicode characters instead of bytes. |
 | `test_capture_timestamps_preserve_the_full_signed_range` | Strengthened. Signed second extremes, nanosecond normalization and complete u32 link/interface bounds are preserved or refused correctly on either capture side. | Rejecting a valid large interface value or accepting the first value outside a published range. |
 | `test_decoding_rejects_other_commands_and_preserves_additive_fields` | Strengthened. Additive data survives decoding, while another command, schema version or nonobject envelope is refused. | Accepting a nearby schema name through a lexical comparison. |
@@ -512,7 +525,7 @@ All 27 original cases and three added cases in `scripts/tests/test_forwarding_co
 | `test_default_record_and_stream_budgets_preserve_complete_boundary_output` | Added. A complete aggregate at 16 MiB and a consumer stream at 64 MiB retain the exact report, while one additional byte fails. | Increasing or decreasing the project-owned default ceilings accidentally. |
 | `test_oversized_input_is_refused_within_the_available_read_budget` | Added. Controlled sources provide finite read credit in either format. Oversized data produces the application refusal without exhausting the source's credit. Any number of reads is permitted within the credit. | Attempting to consume substantially more input than the configured refusal needs. |
 | `test_retained_examples_remain_valid` | Strengthened. Every retained example returns the complete expected execution/domain result. Actual subprocess CLI calls check JSON output, stderr and exit status. An execution error with producer exit zero is refused with exit two. | Returning a success CLI exit for an execution error or silently accepting contradictory producer status. |
-| `test_malformed_retained_evidence_is_rejected` | Strengthened. Existing malformed evidence cases remain. New cases independently violate either keyed-rank bound and isolate ingress ordering from egress reorder checks. | Replacing both rank conditions with an OR or weakening strict ingress ordering to inequality. |
+| `test_malformed_retained_evidence_is_rejected` | Strengthened. Malformed evidence includes null identity keys and floating-point or boolean capture and summary counters. Separate cases violate either keyed-rank bound and isolate ingress ordering. | Accepting noninteger counters, incomplete identities or weakened rank and ordering checks. |
 | `test_identity_groups_are_unique_even_with_additive_wrapper_metadata` | Retained. Additional wrapper metadata cannot create another identity group for the same semantic value. | Comparing the entire wrapper instead of the declared typed identity. |
 | `test_semantically_equal_identity_values_share_one_correspondence_group` | Renamed and strengthened from `test_object_identity_is_hashable_and_ignores_member_order`. Distinct object/list/IP identities remain separate, while reordered object members or equivalent IP spellings identify one group. List order remains meaningful. | Keeping duplicate semantic identities because their textual representation or member order differs. |
 | `test_utf8_scalar_and_finite_numbers_apply_to_additive_fields` | Retained. Additive values and keys must still obey UTF-8 and finite-number rules. UTF-16 and UTF-32 bytes are refused. | Validating only metadata the consumer currently uses. |
@@ -528,6 +541,95 @@ All 27 original cases and three added cases in `scripts/tests/test_forwarding_co
 | `test_visible_reordering_with_omitted_pairs` | Strengthened. Visible inversion flags and conservative omitted-pair bounds remain checked. A large bounded-detail report preserves a 300-pair census with unselected input and omitted matches. | Confusing integer identity with numeric equality or requiring retained details to equal the complete census. |
 | `test_violation_evidence_is_not_an_unchecked_side_channel` | Strengthened. All four check kinds have independently constructed valid contradiction evidence. Expectations cover unmatched egress observations with no ingress/key. Undeclared, equal, invalid-frame, invalid-key and invented/missing operand evidence fails. | Accepting a presence violation with equal presence or allowing an expectation violation to invent an ingress operand. |
 | `test_ambiguous_group_and_omission_census` | Strengthened. Complete, partially retained and wholly omitted ambiguous groups preserve their public census. A four-member case exercises retained/omitted addition. An omitted group lacking budget on one side is refused. | Using bitwise combination for member totals or allowing a hidden group with no remaining ingress observation. |
+
+# Verified seed and receiver case audit
+
+The direct Linux/all seed stage, receiver execution and workflow are connected. The following cases validate their observable evidence and refusal behavior. These checks do not establish production mutation scores or weekly throughput.
+
+| Case | Protected behavior | Representative defect |
+| --- | --- | --- |
+| `test_completed_weak_seed_reuses_only_actual_kills` | A complete 25-percent seed remains usable, but only its actual kill is reused. Nonkills remain executable, the partition is disjoint and complete, and donor identity/digest metadata is retained. | Requiring a strong seed score, reusing nonkills or dropping donor provenance. |
+| `test_removed_seed_ids_and_new_receiver_ids_preserve_receiver_order` | IDs absent from the receiver are ignored, new IDs execute, and empty/all-reused receivers remain valid. | Reusing by approximate identity or adding donor-only work to the receiver. |
+| `test_empty_completed_seed_never_invents_a_kill` | A valid empty seed leaves every receiver ID executable. | Inferring reuse from group membership without an actual kill. |
+| `test_original_receipt_bytes_are_bound_by_the_donor_digest` | Semantically equal receipts with different bytes retain their own digests. | Hashing a reconstructed report instead of the supplied artifact. |
+| `test_schema_context_workspace_and_shards_must_be_direct_and_complete` | Wrong schema/context, unsupported shards, false or nonboolean workspace flags and missing fields fail. | Treating a noncanonical or incomplete context as the direct seed. |
+| `test_every_target_component_and_report_binding_must_match` | All Target fields and Report group/reason/source/tool bindings are checked. | Reusing a partial-file seed for a full target or another revision/tool. |
+| `test_expected_source_identity_requires_complete_lowercase_digests` | Short or noncanonical source identities fail. Full SHA-1 and SHA-256 Git revisions remain supported with a SHA-256 source fingerprint. | Accepting an ambiguous revision prefix. |
+| `test_matching_python_seed_is_outside_the_supported_reuse_scope` | Even otherwise matching Python metadata is refused in this Rust-only phase. | Permitting an unsupported language because its fields happen to match. |
+| `test_missing_duplicate_and_unfinished_outcomes_cannot_supply_reuse` | Failed baseline, incomplete run, duplicate inventory/results and missing/extra results fail. | Accepting only the completed subset of a seed. |
+| `test_transitive_or_exclusion_proofs_are_rejected_at_every_level` | Receipt, Report and Outcome additions cannot carry reuse chains or exclusion claims. | Treating an inherited kill as direct execution evidence. |
+| `test_malformed_receipts_fail_instead_of_supplying_a_plan` | Bad JSON, UTF-8, duplicate JSON keys, wrong flags, unknown statuses and missing evidence fail. | Silently accepting an overwritten or malformed proof. |
+| `test_invalid_receiver_inventory_is_not_silently_deduplicated` | Duplicate, blank and scalar-string receiver inventories fail. | Hiding missing receiver work through set coercion. |
+| `test_direct_report_accepts_partial_shards_without_making_them_complete_seeds` | Direct parsing preserves valid partial shard data while complete-seed validation still refuses an unfinished inventory. | Treating a partial actual run as a complete donor. |
+| `test_direct_report_refuses_reuse_or_exclusion_claims_before_normalization` | Unknown reuse, donor and exclusion fields are refused in raw reports and outcomes. | Erasing an inherited-proof claim while normalizing it into a direct outcome. |
+| `test_seed_proofs_require_complete_direct_workspace_execution` | Seed finalization requires every shard, direct raw fields, successful workspace evidence and exact scope/source/tool binding. A complete weak donor is accepted. | Borrowing from incomplete shards or discarding unsupported proof fields before validation. |
+| `test_seed_command_publishes_only_complete_workspace_evidence` | The actual CLI publishes a seed that its strict parser accepts and removes a stale seed when later validation fails. | Leaving an old successful proof behind after a failed generation. |
+| `test_coverage_digest_binds_values_and_ignores_object_key_order` | An independently encoded UTF-8 SHA-256 vector fixes the coverage digest. Object key order is irrelevant, while inventory order, reused identities and seed bytes affect the digest. | Returning a constant digest or hashing a different serialization. |
+| `test_receiver_coverage_binds_actual_partition_and_exact_seed_bytes` | Reordered shard input preserves the exact executable and reused identities and seed digest. A differently encoded seed is refused. | Trusting a receiver partition without matching the supplied seed. |
+| `test_receiver_requires_one_coverage_record_and_own_successful_baselines` | Even an all-reused receiver needs exactly one coverage record, consistent shard digests, successful own workspace baselines and supported raw fields. | Treating empty execution as permission to omit evidence. |
+| `test_recomputed_digest_cannot_turn_non_kills_into_reused_coverage` | A recomputed digest cannot authorize timeout reuse, duplicate inventory, omitted executable identities or unsupported proof fields. | Checking only the hash and accepting a false coverage claim. |
+| `test_seed_receiver_executes_remaining_and_new_ids_with_direct_coverage` | The CLI executes seed survivors, timeouts and new receiver identities while reusing exact kills. Its score combines actual outcomes and publishes per-context counts. Unrelated previous output cannot exclude a new identity. | Copying old SDK exclusions, filtering by a prefix or synthesizing receiver kills. |
+| `test_receiver_refuses_stale_seeds_and_missing_coverage_or_shards` | Reordered canonical shard files pass. Modified canonical status or evidence, missing canonical or receiver shards, absent or tampered coverage, omitted executable identities and stale seeds fail. | Accepting an embedded seed without its actual submitted execution or trusting a recomputed false partition. |
+| `test_all_reused_receiver_still_requires_its_workspace_baseline` | Empty receiver execution is reported without fabricated outcomes, but a failing own baseline prevents a completed report. | Borrowing seed health when a receiver's feature configuration is broken. |
+
+# Seed reuse functionality evidence
+
+A committed, dependency-free two-crate fixture exercised the installed cargo-mutants 27.1.0 binary. The all-features seed killed three of four mutations. The portable receiver reused those exact three kills, executed the remaining survivor and killed it. Its raw SDK report and normalized outcomes contain only the one executed mutation. This is a fixture demonstration, not a production mutation score.
+
+From the retained fixture directory, this command displayed the verified result.
+
+```sh
+cd /tmp/pcr-seed-real-sdk-fixtures-p5nc3x4z/survivor-receiver
+python3 scripts/run_mutation.py check --plan artifacts/plan.json --language rust --shards 1 --output artifacts --platforms ubuntu-24.04 --profiles all portable --seed artifacts/all/seed | jq '{killed,eligible,status,execution_contexts: [.execution_contexts[] | {profile,executed,reused}]}'
+```
+
+```json
+{
+  "killed": 4,
+  "eligible": 4,
+  "status": "passed",
+  "execution_contexts": [
+    {
+      "profile": "all",
+      "executed": 4,
+      "reused": 0
+    },
+    {
+      "profile": "portable",
+      "executed": 1,
+      "reused": 3
+    }
+  ]
+}
+```
+
+A second fixture killed all four mutations in the seed. Its selected crate's portable tests passed, but a dependent crate had a failing portable test. Even with no mutations left to execute, the receiver returned exit one for this command.
+
+```sh
+cd /tmp/pcr-seed-real-sdk-fixtures-p5nc3x4z/empty-receiver-failing-test
+python3 scripts/run_mutation.py run --plan artifacts/plan.json --language rust --shards 1 --profile portable --platform-label ubuntu-24.04 --output artifacts/portable --seed artifacts/all/seed
+```
+
+```text
+Mutation audit failed. sample failed. Rust workspace baseline failed
+```
+
+The retained baseline log shows the dependent test's actual value of 13 against its deliberately incorrect expectation of 99. Both SDK discovery lists are empty, and no mutation execution report is published. Removing either context's receipt from the healthy fixture also makes the final check fail. Restoring both receipts makes it pass.
+
+# Audit workflow survivor repairs
+
+The following cases address behavioral gaps identified in authentic older Rust mutation output for `audit.rs`. The source-to-test mapping targets 40 of 41 observed survivors; this is not a remeasured score. A complete in-memory TLS session now checks the HTTPS application-write gate, and one zero-byte authorization comparison remains a candidate for individual equivalence review.
+
+| Case | Protected behavior and representative defect | Controlled setup and assertions |
+| --- | --- | --- |
+| `audit_validation_refuses_invalid_requests_before_connecting` | Invalid TLS limits, server names, ports and timeout bounds, plus invalid HTTP hosts, paths and response limits, must fail before connection. Deleting validation or an individual disjunct admits one of these requests. | An injected TCP provider panics if used. Invalid cases independently vary one field. Assertions require the intended public error and no transmitted bytes. |
+| `audit_http_writes_one_head_and_uses_the_final_response` | Send exactly the configured HEAD request and report the final response after informational headers. Empty or incorrect request construction, early response selection, missing redaction or extra reading must fail. | Scripted 100, 103 and 200 responses include different cookies. The stream fails on further reads. Assertions independently specify request bytes, final status, host, path, completeness, no security findings, cookie flags, redaction and public byte measurements. HTTP wire syntax is sourced beside the expected request. |
+| `audit_http_accepts_request_and_response_boundaries` | The maximum accepted timeout, host, path and response sizes remain usable. Exact final-response capacity succeeds while one byte less is incomplete. Status 101 is a final response. Off-by-one request guards, truncation acceptance and treating 101 as informational must fail. | Fixed response bytes and a fake clock. Assertions inspect the actual outbound request and specific report or error results. |
+| `audit_policy_and_peer_refusals_precede_request_bytes` | A spent parent deadline, insufficient packet or byte allowance, disallowed destination, or substituted connected peer must prevent request transmission. Removing authorization or peer comparison must fail. | Injected provider refuses calls for pre-connect policy failures. It exposes a controlled peer for the post-connect checks. Both HTTP and TLS paths require rejection with zero transmitted bytes. |
+| `audit_http_retains_distinct_io_and_control_failures` | Preserve read and flush I/O failures, cancellation, expiration and exact-deadline timeout. Reject empty, informational-only, incomplete, malformed and request-shaped responses. Deleting the failed-outcome or timeout-outcome arm must fail. | Scripted errors, a monotonic fake clock and injected cancellation. The timeout-boundary case advances to exactly five seconds, where a zero remaining socket budget is refused even though completed-work enforcement permits equality. No sleeps or scheduler timing determine results. |
+| `audit_tls_does_not_publish_a_report_after_handshake_eof` | A peer closing before the TLS handshake finishes must return an EOF error instead of an audit report. | The real TLS client runs over the injected empty stream. Assertions require `UnexpectedEof` and evidence that TLS handshake bytes were actually transmitted, without pinning their contents or count. |
+| `tls_report_retains_observations_when_certificate_retention_is_truncated` | A completed handshake with intentionally unretained certificate evidence preserves observed protocol, cipher, endpoint and byte measurements, emits incomplete chain/name findings, and reports only the truncation reason. Reversing either finding selection or handshake completeness must fail. | A valid zero-certificate-retention configuration and supplied completed-handshake evidence. Assertions check visible report content. Finding order is normalized. No live certificate or current validity date is consulted. |
+| `audit_https_withholds_request_when_certificate_evidence_is_unavailable` | A real completed TLS session reports unavailable verification and withholds all HTTP application bytes. Reversing the verification gate sends a request and fails the test. | A rustls server and client exchange in-memory records with an ephemeral generated key. Certificate retention is disabled, and the peer captures decrypted application bytes. No stored key, current-time validity assumption, specific cipher or handshake write count is used. |
 
 # Mutation progress
 

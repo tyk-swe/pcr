@@ -15,9 +15,9 @@ import unittest
 from unittest.mock import patch
 
 from support import ROOT, mutation_checkout, report
-from mutation_results import Exclusion, Outcome, Report, score
+from mutation_results import Exclusion, Outcome, Report, parse_report, score
 from mutation_scope import Target
-from run_mutation import check, merge_reports, snapshot
+from run_mutation import check, merge_reports, seed_proofs, snapshot
 
 
 def measurement(value: Report, target: Target, platform: str = 'Linux',
@@ -27,6 +27,49 @@ def measurement(value: Report, target: Target, platform: str = 'Linux',
 
 
 class MutationScoreTests(unittest.TestCase):
+    def test_seed_proofs_require_complete_direct_workspace_execution(self) -> None:
+        value = report(1, 3)
+        target = Target(value.group, 'rust', (), value.reason)
+        with tempfile.TemporaryDirectory() as directory:
+            paths = tuple(Path(directory) / f'{shard}.json' for shard in (1, 2))
+            for index, path in enumerate(paths):
+                partial = replace(value, outcomes=value.outcomes[index::2])
+                path.write_text(json.dumps(measurement(partial, target, platform='ubuntu-24.04',
+                                                      shard=index + 1, shards=2) | {'workspace_baseline': True}))
+            proofs = seed_proofs((target,), paths, 2, value.revision, value.tool_version)
+            measured = parse_report(json.loads(json.dumps(proofs[target.group]))['report'])
+            self.assertEqual({outcome.identity: outcome.status for outcome in measured.outcomes},
+                             {'0': 'killed', '1': 'survived', '2': 'survived', '3': 'survived'})
+            self.assertEqual((score(measured).killed, score(measured).eligible), (1, 4))
+            self.assertEqual(proofs[target.group]['target'], asdict(target))
+            self.assertEqual(proofs[target.group]['schema'], 'packetcraftr.mutation-seed/v1')
+            self.assertFalse(score(value).passed)
+            with self.assertRaises(ValueError):
+                seed_proofs((target,), paths[:1], 2, value.revision, value.tool_version)
+            second = json.loads(paths[1].read_text())
+            for invalid in (None, False, 'true'):
+                paths[1].write_text(json.dumps(second | {'workspace_baseline': invalid}))
+                with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                    seed_proofs((target,), paths, 2, value.revision, value.tool_version)
+            paths[1].write_text(json.dumps(second | {'reused_kills': ['0']}))
+            with self.assertRaisesRegex(ValueError, 'direct execution'):
+                seed_proofs((target,), paths, 2, value.revision, value.tool_version)
+            for nested in (
+                second['report'] | {'reused_kills': ['1']},
+                second['report'] | {'outcomes': [second['report']['outcomes'][0] | {'donor': 'other-context'}]},
+            ):
+                paths[1].write_text(json.dumps(second | {'report': nested}))
+                with self.subTest(nested=nested), self.assertRaises(ValueError):
+                    seed_proofs((target,), paths, 2, value.revision, value.tool_version)
+            paths[1].write_text(json.dumps(second | {'target': second['target'] | {'donor': 'other-context'}}))
+            with self.assertRaises(ValueError):
+                seed_proofs((target,), paths, 2, value.revision, value.tool_version)
+            duplicate = json.dumps(second).replace('"workspace_baseline": true',
+                                                   '"workspace_baseline": false, "workspace_baseline": true')
+            paths[1].write_text(duplicate)
+            with self.assertRaises(ValueError):
+                seed_proofs((target,), paths, 2, value.revision, value.tool_version)
+
     def test_published_scores_preserve_fractional_percentages_and_evidence_counts(self) -> None:
         original = report(20, 2)
         outcomes = (*original.outcomes[:-1], replace(original.outcomes[-1], status='timeout'),

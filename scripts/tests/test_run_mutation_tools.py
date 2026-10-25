@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ import unittest
 from support import PYTHON_TOOL_VERSION, RUST_TOOL_VERSION, mutation_checkout, mutation_tools
 from mutation_results import parse_report, score
 from mutation_scope import Target
+from mutation_reuse import parse_seed
 
 
 def invoke(root: Path, executable: Path, environment: dict[str, str], arguments: list[str]) -> subprocess.CompletedProcess[str]:
@@ -20,8 +22,223 @@ def invoke(root: Path, executable: Path, environment: dict[str, str], arguments:
                           env=environment, capture_output=True, text=True, timeout=10, check=False)
 
 
+def create_seed(root: Path, executable: Path, environment: dict[str, str], plan: Path, output: Path) -> Path:
+    for shard in (1, 2):
+        invoke(root, executable, environment, ['run', '--plan', str(plan), '--language', 'rust',
+            '--profile', 'all', '--platform-label', 'ubuntu-24.04', '--shard', str(shard), '--shards', '2',
+            '--output', str(output / str(shard))]).check_returncode()
+    invoke(root, executable, environment, ['seed', '--plan', str(plan), '--language', 'rust',
+        '--shards', '2', '--output', str(output)]).check_returncode()
+    return output / 'seed'
+
+
+def coverage_digest(value: dict[str, object]) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')).hexdigest()
+
+
 @unittest.skipUnless(os.name == 'posix', 'SDK doubles use POSIX launchers')
 class MutationToolExecutionTests(unittest.TestCase):
+    def test_seed_receiver_executes_remaining_and_new_ids_with_direct_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'checkout'
+            mutation_checkout(root)
+            executable, environment = mutation_tools(root, Path(directory) / 'tools/bin')
+            environment = environment | {'MUTATION_FIXTURE_REUSE': 'mixed'}
+            target = Target('sample', 'rust', (), 'controlled reuse')
+            plan = Path(directory) / 'plan.json'
+            plan.write_text(json.dumps([asdict(target)]))
+            killed = 'crates/sample/src/lib.rs:1:1: shared-kill'
+            survivor = 'crates/sample/src/extra.rs:1:1: shared-survivor'
+            timed_out = 'crates/sample/build.rs:1:1: shared-timeout'
+            new = killed + ' receiver-only'
+            trap = root / 'mutants.out/previously_caught.txt'
+            trap.parent.mkdir()
+            trap.write_text(new + '\n')
+            output = root / 'artifacts'
+            seed = create_seed(root, executable, environment, plan, output / 'seed-run')
+            seed_text = (seed / 'sample.json').read_text()
+            self.assertEqual({item['status'] for item in json.loads(seed_text)['report']['outcomes']},
+                             {'killed', 'survived', 'timeout'})
+            coverage: dict[str, object] = dict(inventory=[killed, survivor, timed_out, new],
+                                               reused_ids=[killed], seed=seed_text)
+            for shard, executed in ((1, (survivor, new)), (2, (timed_out,))):
+                folder = output / 'receiver' / str(shard)
+                result = invoke(root, executable, environment, ['run', '--plan', str(plan), '--language', 'rust',
+                    '--profile', 'portable', '--platform-label', 'ubuntu-24.04', '--shard', str(shard), '--shards', '2',
+                    '--seed', str(seed), '--output', str(folder)])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                metadata = json.loads(next(folder.rglob('run.json')).read_text())
+                actual = parse_report(metadata['report'])
+                self.assertEqual(actual.expected, (survivor, timed_out, new))
+                self.assertEqual(tuple(item.identity for item in actual.outcomes), executed)
+                self.assertEqual({item.status for item in actual.outcomes}, {'killed'})
+                self.assertEqual(metadata['coverage_digest'], coverage_digest(coverage))
+                self.assertEqual(metadata['coverage'], coverage if shard == 1 else None)
+            result = invoke(root, executable, environment, ['check', '--plan', str(plan), '--language', 'rust',
+                '--seed', str(seed), '--output', str(output), '--platforms', 'ubuntu-24.04',
+                '--profiles', 'all', 'portable', '--shards', '2'])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            summary = json.loads(result.stdout)
+            self.assertEqual((summary['killed'], summary['eligible']), (4, 4))
+            self.assertEqual(summary['status'], 'passed')
+            self.assertEqual({item['profile']: (item['executed'], item['reused'])
+                              for item in summary['execution_contexts']}, {'all': (3, 0), 'portable': (3, 1)})
+
+    def test_receiver_refuses_stale_seeds_and_missing_coverage_or_shards(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'checkout'
+            mutation_checkout(root)
+            executable, environment = mutation_tools(root, Path(directory) / 'tools/bin')
+            environment = environment | {'MUTATION_FIXTURE_REUSE': 'mixed'}
+            plan = Path(directory) / 'plan.json'
+            plan.write_text(json.dumps([asdict(Target('sample', 'rust', (), 'controlled reuse'))]))
+            output = root / 'artifacts'
+            seed = create_seed(root, executable, environment, plan, output / 'seed-run')
+            for shard in (1, 2):
+                invoke(root, executable, environment, ['run', '--plan', str(plan), '--language', 'rust',
+                    '--profile', 'portable', '--platform-label', 'ubuntu-24.04', '--shard', str(shard), '--shards', '2',
+                    '--seed', str(seed), '--output', str(output / 'receiver' / str(shard))]).check_returncode()
+            command = ['check', '--plan', str(plan), '--language', 'rust', '--seed', str(seed), '--output', str(output),
+                       '--platforms', 'ubuntu-24.04', '--profiles', 'all', 'portable', '--shards', '2']
+            invoke(root, executable, environment, command).check_returncode()
+            first = next((output / 'receiver/1').rglob('run.json'))
+            second = next((output / 'receiver/2').rglob('run.json'))
+            original, second_original = first.read_bytes(), second.read_bytes()
+            for change in ('missing-coverage', 'all-coverage-absent', 'bad-digest', 'stale-embedded-seed',
+                           'reused-nonkill', 'missing-executable'):
+                metadata = json.loads(original)
+                other = json.loads(second_original)
+                if change == 'missing-coverage':
+                    metadata['coverage'] = None
+                elif change == 'all-coverage-absent':
+                    for receipt in (metadata, other):
+                        receipt.pop('coverage')
+                        receipt.pop('coverage_digest')
+                elif change == 'bad-digest':
+                    metadata['coverage_digest'] = '0' * 64
+                elif change == 'stale-embedded-seed':
+                    stale = json.loads(metadata['coverage']['seed'])
+                    stale['report']['revision'] = '0' * 40 + ' tree ' + '0' * 64
+                    metadata['coverage']['seed'] = json.dumps(stale)
+                elif change == 'reused-nonkill':
+                    metadata['coverage']['reused_ids'].append(metadata['report']['expected'][0])
+                else:
+                    expected = metadata['report']['expected'][1:]
+                    for receipt in (metadata, other):
+                        receipt['report']['expected'] = expected
+                        receipt['report']['outcomes'] = [outcome for outcome in receipt['report']['outcomes']
+                                                         if outcome['identity'] in expected]
+                if change in ('stale-embedded-seed', 'reused-nonkill', 'missing-executable'):
+                    metadata['coverage_digest'] = coverage_digest(metadata['coverage'])
+                    other['coverage_digest'] = metadata['coverage_digest']
+                first.write_text(json.dumps(metadata))
+                second.write_text(json.dumps(other))
+                with self.subTest(change=change):
+                    refused = invoke(root, executable, environment, command)
+                    self.assertEqual(refused.returncode, 1)
+                first.write_bytes(original)
+                second.write_bytes(second_original)
+            second.unlink()
+            self.assertEqual(invoke(root, executable, environment, command).returncode, 1)
+            second.write_bytes(second_original)
+            canonical_first = next((output / 'seed-run/1').rglob('run.json'))
+            canonical_second = next((output / 'seed-run/2').rglob('run.json'))
+            first_seed, second_seed = canonical_first.read_bytes(), canonical_second.read_bytes()
+            canonical_first.write_bytes(second_seed)
+            canonical_second.write_bytes(first_seed)
+            reversed_result = invoke(root, executable, environment, command)
+            self.assertEqual(reversed_result.returncode, 0, reversed_result.stderr)
+            canonical_first.write_bytes(first_seed)
+            canonical_second.write_bytes(second_seed)
+            for field, value in (('status', 'survived'), ('evidence', 'different execution evidence')):
+                changed_seed = json.loads(first_seed)
+                changed_seed['report']['outcomes'][0][field] = value
+                canonical_first.write_text(json.dumps(changed_seed))
+                with self.subTest(canonical=field):
+                    self.assertEqual(invoke(root, executable, environment, command).returncode, 1)
+                canonical_first.write_bytes(first_seed)
+            canonical_first.unlink()
+            canonical_second.unlink()
+            self.assertEqual(invoke(root, executable, environment, command).returncode, 1)
+            canonical_first.write_bytes(first_seed)
+            canonical_second.write_bytes(second_seed)
+            proof = seed / 'sample.json'
+            valid = proof.read_text()
+            for label, invalid in (('malformed', '{}'), ('stale', valid.replace(
+                    json.loads(valid)['report']['revision'], '0' * 40 + ' tree ' + '0' * 64))):
+                proof.write_text(invalid)
+                refused = invoke(root, executable, environment, ['run', '--plan', str(plan), '--language', 'rust',
+                    '--profile', 'portable', '--platform-label', 'ubuntu-24.04', '--seed', str(seed),
+                    '--output', str(Path(directory) / label)])
+                with self.subTest(seed=label):
+                    self.assertEqual(refused.returncode, 1)
+                proof.write_text(valid)
+
+    def test_all_reused_receiver_still_requires_its_workspace_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'checkout'
+            mutation_checkout(root)
+            executable, environment = mutation_tools(root, Path(directory) / 'tools/bin')
+            environment = environment | {'MUTATION_FIXTURE_REUSE': 'all'}
+            plan = Path(directory) / 'plan.json'
+            plan.write_text(json.dumps([asdict(Target('sample', 'rust', (), 'controlled reuse'))]))
+            output = root / 'artifacts'
+            seed = create_seed(root, executable, environment, plan, output / 'seed-run')
+            for shard in (1, 2):
+                folder = output / 'receiver' / str(shard)
+                measured = invoke(root, executable, environment, ['run', '--plan', str(plan), '--language', 'rust',
+                    '--profile', 'portable', '--platform-label', 'ubuntu-24.04', '--shard', str(shard), '--shards', '2',
+                    '--seed', str(seed), '--output', str(folder)])
+                self.assertEqual(measured.returncode, 0, measured.stderr)
+                actual = parse_report(json.loads(next(folder.rglob('run.json')).read_text())['report'])
+                self.assertEqual(actual.expected, ())
+                self.assertEqual(actual.outcomes, ())
+            checked = invoke(root, executable, environment, ['check', '--plan', str(plan), '--language', 'rust',
+                '--seed', str(seed), '--output', str(output), '--platforms', 'ubuntu-24.04',
+                '--profiles', 'all', 'portable', '--shards', '2'])
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            summary = json.loads(checked.stdout)
+            self.assertEqual((summary['killed'], summary['eligible'], summary['invalid']), (3, 3, 0))
+            self.assertEqual(summary['status'], 'passed')
+            self.assertEqual({item['profile']: (item['executed'], item['reused'])
+                              for item in summary['execution_contexts']}, {'all': (3, 0), 'portable': (0, 3)})
+            failed = invoke(root, executable, environment | {'MUTATION_FIXTURE_FAILURE': 'workspace-baseline'},
+                ['run', '--plan', str(plan), '--language', 'rust', '--profile', 'portable',
+                 '--platform-label', 'ubuntu-24.04', '--seed', str(seed), '--output', str(output / 'failed')])
+            self.assertEqual(failed.returncode, 1)
+            self.assertIn('workspace baseline', failed.stderr)
+            for path in (output / 'failed').rglob('run.json'):
+                self.assertNotIn('report', json.loads(path.read_text()))
+
+    def test_seed_command_publishes_only_complete_workspace_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'checkout'
+            mutation_checkout(root)
+            executable, environment = mutation_tools(root, Path(directory) / 'tools/bin')
+            target = Target('sample', 'rust', (), 'controlled seed')
+            plan = Path(directory) / 'plan.json'
+            plan.write_text(json.dumps([asdict(target)]))
+            output = root / 'artifacts'
+            arguments = ['--plan', str(plan), '--language', 'rust', '--output', str(output)]
+            ran = invoke(root, executable, environment, ['run', *arguments, '--platform-label', 'ubuntu-24.04'])
+            self.assertEqual(ran.returncode, 0, ran.stderr)
+            result = invoke(root, executable, environment, ['seed', *arguments])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt_path = next(output.rglob('run.json'))
+            receipt = json.loads(receipt_path.read_text())
+            revision, digest = receipt['report']['revision'].split(' tree ')
+            proof_path = output / 'seed/sample.json'
+            seed = parse_seed(proof_path.read_bytes(), target=target, revision=revision,
+                              source_digest=digest, tool_version=RUST_TOOL_VERSION)
+            self.assertEqual({outcome.status for outcome in seed.report.outcomes}, {'killed'})
+            self.assertEqual(len(seed.report.outcomes), 3)
+            receipt['workspace_baseline'] = False
+            receipt_path.write_text(json.dumps(receipt))
+            result = invoke(root, executable, environment, ['seed', *arguments])
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('workspace baseline', result.stderr)
+            self.assertFalse(proof_path.exists())
+
     def test_cli_selects_owned_targets_and_runs_with_default_output_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / 'checkout'
@@ -35,7 +252,8 @@ class MutationToolExecutionTests(unittest.TestCase):
             self.assertEqual({value['group'] for value in targets if value['language'] == 'rust'}, {'sample', 'other'})
             self.assertEqual({value['group'] for value in targets if value['language'] == 'python'},
                              {'scripts/alpha.py', 'scripts/beta.py', 'scripts/mutation_results.py',
-                              'scripts/mutation_scope.py', 'scripts/run_mutation.py', 'scripts/mutation_test_runner.py'})
+                             'scripts/mutation_scope.py', 'scripts/run_mutation.py', 'scripts/mutation_test_runner.py',
+                             'scripts/mutation_reuse.py', 'scripts/script_support.py'})
             measured = invoke(root, executable, environment, ['run', '--plan', str(plan)])
             self.assertEqual(measured.returncode, 0, measured.stderr)
             checked = invoke(root, executable, environment, ['check', '--plan', str(plan)])

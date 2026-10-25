@@ -20,6 +20,7 @@ jobs:
     outputs:
       rust: ${{ steps.scope.outputs.rust }}
       python: ${{ steps.scope.outputs.python }}
+      python_matrix: ${{ steps.scope.outputs.python_matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -39,29 +40,69 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               for language in ('rust', 'python'):
                   print(f'{language}={str(any(t["language"] == language for t in targets)).lower()}', file=output)
+              modules = [target for target in targets if target['language'] == 'python']
+              matrix = {'include': [dict(id=index, target=target) for index, target in enumerate(modules)]}
+              print('python_matrix=' + json.dumps(matrix), file=output)
           PY
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: mutation-plan
           path: mutation-plan.json
 
-  rust:
+  rust-seed:
     needs: select
     if: needs.select.outputs.rust == 'true'
+    uses: ./.github/workflows/mutation-rust.yml
+    with:
+      os: ubuntu-24.04
+      profile: all
+
+  rust-seed-finalize:
+    needs: [select, rust-seed]
+    if: needs.select.outputs.rust == 'true' && needs.rust-seed.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: mutation-plan
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: mutation-receipts-rust-ubuntu-24.04-all-*
+          path: mutation-results/rust
+      - run: python3 scripts/run_mutation.py seed --plan mutation-plan.json --language rust --shards 64 --output mutation-results/rust
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mutation-seed
+          path: mutation-results/rust/seed/*.json
+          if-no-files-found: error
+
+  rust:
+    needs: [select, rust-seed-finalize]
+    if: needs.select.outputs.rust == 'true' && needs.rust-seed-finalize.result == 'success'
     strategy:
       fail-fast: false
       max-parallel: 1
       matrix:
         os: [ubuntu-24.04, macos-14, macos-15-intel, windows-2022]
         profile: [portable, default, layer2, layer3, all]
+        exclude:
+          - os: ubuntu-24.04
+            profile: all
     uses: ./.github/workflows/mutation-rust.yml
     with:
       os: ${{ matrix.os }}
       profile: ${{ matrix.profile }}
+      reuse-seed: true
 
   python:
     needs: select
     if: needs.select.outputs.python == 'true'
+    name: Python ${{ matrix.target.group }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.select.outputs.python_matrix) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     steps:
@@ -69,20 +110,28 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.13'
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
-        with:
-          name: mutation-plan
       - run: python -m pip install -r requirements-dev.txt
-      - run: python scripts/run_mutation.py run --plan mutation-plan.json --language python --output mutation-results
+      - name: Write selected module plan
+        env:
+          TARGET: ${{ toJSON(matrix.target) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          plan = Path('mutation-results/plan.json')
+          plan.parent.mkdir(exist_ok=True)
+          plan.write_text(json.dumps([json.loads(os.environ['TARGET'])]) + '\n', encoding='utf-8')
+          PY
+      - run: python scripts/run_mutation.py run --plan mutation-results/plan.json --language python --output mutation-results
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: mutation-python
+          name: mutation-python-${{ matrix.id }}
           path: mutation-results
           if-no-files-found: error
 
   policy:
-    needs: [select, rust, python]
+    needs: [select, rust-seed, rust-seed-finalize, rust, python]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -99,11 +148,16 @@ jobs:
           pattern: mutation-receipts-rust-*
           path: mutation-results/rust
       - if: needs.select.outputs.rust == 'true'
-        run: python3 scripts/run_mutation.py check --plan mutation-plan.json --language rust --output mutation-results/rust --shards 64 --platforms ubuntu-24.04 macos-14 macos-15-intel windows-2022 --profiles portable default layer2 layer3 all > mutation-results/scores/rust-scores.jsonl
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: mutation-seed
+          path: mutation-results/seed
+      - if: needs.select.outputs.rust == 'true'
+        run: python3 scripts/run_mutation.py check --plan mutation-plan.json --language rust --output mutation-results/rust --seed mutation-results/seed --shards 64 --platforms ubuntu-24.04 macos-14 macos-15-intel windows-2022 --profiles portable default layer2 layer3 all > mutation-results/scores/rust-scores.jsonl
       - if: always() && needs.select.outputs.python == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
-          name: mutation-python
+          pattern: mutation-python-*
           path: mutation-results/python
       - if: always() && needs.select.outputs.python == 'true'
         run: python3 scripts/run_mutation.py check --plan mutation-plan.json --language python --output mutation-results/python > mutation-results/scores/python-scores.jsonl
@@ -115,9 +169,20 @@ jobs:
       - if: always()
         env:
           SELECT: ${{ needs.select.result }}
+          RUST_SELECTED: ${{ needs.select.outputs.rust }}
+          RUST_SEED: ${{ needs.rust-seed.result }}
+          RUST_SEED_FINALIZE: ${{ needs.rust-seed-finalize.result }}
           RUST: ${{ needs.rust.result }}
           PYTHON: ${{ needs.python.result }}
         run: |
           test "$SELECT" = success
-          test "$RUST" = success -o "$RUST" = skipped
+          if [ "$RUST_SELECTED" = true ]; then
+            test "$RUST_SEED" = success
+            test "$RUST_SEED_FINALIZE" = success
+            test "$RUST" = success
+          else
+            test "$RUST_SEED" = skipped
+            test "$RUST_SEED_FINALIZE" = skipped
+            test "$RUST" = skipped
+          fi
           test "$PYTHON" = success -o "$PYTHON" = skipped

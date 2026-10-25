@@ -58,10 +58,10 @@ def mutation_workspace(root: Path) -> None:
 
 def mutation_checkout(root: Path) -> str:
     mutation_workspace(root)
-    for name in ('mutation_results.py', 'mutation_scope.py', 'run_mutation.py'):
+    for name in ('mutation_results.py', 'mutation_scope.py', 'run_mutation.py', 'mutation_reuse.py', 'script_support.py'):
         (root / 'scripts' / name).write_bytes((ROOT / 'scripts' / name).read_bytes())
     with (root / '.config/mutation.toml').open('a') as config:
-        for name in ('mutation_results.py', 'mutation_scope.py', 'run_mutation.py'):
+        for name in ('mutation_results.py', 'mutation_scope.py', 'run_mutation.py', 'mutation_reuse.py', 'script_support.py'):
             config.write(f'"scripts/{name}" = ["scripts/tests/test_alpha.py"]\n')
         config.write('\n[tools]\ncosmic-ray = "version"\ncargo-mutants = "version"\n')
     (root / '.config/mutation-exclusions.json').write_text('[]\n')

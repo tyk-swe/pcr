@@ -24,6 +24,7 @@ class CargoArguments(argparse.Namespace):
     all_features: bool
     no_default: bool
     features: str
+    iterate: bool
 
 
 def cargo(argv: list[str], failure: str) -> int:
@@ -42,6 +43,7 @@ def cargo(argv: list[str], failure: str) -> int:
     parser.add_argument('--all-features', dest='all_features', action='store_true')
     parser.add_argument('--no-default-features', dest='no_default', action='store_true')
     parser.add_argument('--features', default='')
+    parser.add_argument('--iterate', action='store_true')
     args = CargoArguments()
     parser.parse_known_args(argv[1:], namespace=args)
     if args.version:
@@ -57,10 +59,23 @@ def cargo(argv: list[str], failure: str) -> int:
     manifest = tomllib.loads((package / 'Cargo.toml').read_text())
     if any(target.get('path') == 'build.rs' for target in manifest.get('bin', [])):
         files.append(package / 'build.rs')
-    inventory = [dict(name=f'{path}:1:1: fixture {feature}', file=str(path)) for path in files
-                 if not args.file or str(path) in args.file]
+    reuse = os.environ.get('MUTATION_FIXTURE_REUSE', '')
+    roles = ('shared-kill', 'shared-survivor', 'shared-timeout')
+    inventory = [dict(name=f'{path}:1:1: {roles[index] if reuse else "fixture " + feature}', file=str(path))
+                 for index, path in enumerate(files) if not args.file or str(path) in args.file]
+    if reuse == 'mixed' and not args.all_features and (not args.file or str(files[0]) in args.file):
+        inventory.append(dict(name=f'{files[0]}:1:1: shared-kill receiver-only', file=str(files[0])))
     if failure in ('empty', 'empty-baseline'):
         inventory = []
+    if args.iterate:
+        if args.output is None:
+            return 7
+        caught_file = args.output / 'mutants.out/previously_caught.txt'
+        if not caught_file.is_file():
+            return 7
+        previous = frozenset(caught_file.read_text().splitlines())
+        inventory = [mutant for mutant in inventory if mutant['name'] not in previous]
+        print('INFO controlled iteration reads the supplied output directory', file=sys.stderr)
     if args.shard:
         numerator, denominator = (int(value) for value in args.shard.split('/'))
         inventory = inventory[numerator::denominator]
@@ -84,19 +99,25 @@ def cargo(argv: list[str], failure: str) -> int:
     if failure == 'baseline':
         baseline['summary'] = 'Failure'
     caught = args.workspace == 'true' and failure != 'survivor'
-    outcomes = [dict(scenario=dict(Mutant=mutant),
-                     summary='Timeout' if failure == 'timeout' and index == 0 else 'CaughtMutant' if caught else 'MissedMutant',
-                     log_path=f'log/{index}.log', phase_results=[dict(phase='Build', process_status='Success'),
-                     dict(phase='Test', process_status='Timeout' if failure == 'timeout' and index == 0
-                          else {'Failure': 101} if caught else 'Success')])
-                for index, mutant in enumerate(inventory)]
+    classified = tuple((mutant,
+                        'Timeout' if failure == 'timeout' and index == 0
+                        or reuse == 'mixed' and args.all_features and mutant['name'].endswith(': shared-timeout')
+                        else 'MissedMutant' if not caught
+                        or reuse == 'mixed' and args.all_features and mutant['name'].endswith(': shared-survivor')
+                        else 'CaughtMutant') for index, mutant in enumerate(inventory))
+    test_status: dict[str, object] = {'Timeout': 'Timeout', 'MissedMutant': 'Success', 'CaughtMutant': {'Failure': 101}}
+    outcomes = [dict(scenario=dict(Mutant=mutant), summary=summary, log_path=f'log/{index}.log',
+                     phase_results=[dict(phase='Build', process_status='Success'),
+                                    dict(phase='Test', process_status=test_status[summary])])
+                for index, (mutant, summary) in enumerate(classified)]
     for index in range(len(outcomes)):
         (output / f'log/{index}.log').write_text('controlled test result')
     report = dict(cargo_mutants_version='rust-fixture', end_time=None if failure == 'unfinished' else 'finished',
                   total_mutants=len(inventory) + int(failure == 'inconsistent'), outcomes=[baseline, *outcomes])
     if failure != 'missing-report':
         (output / 'outcomes.json').write_text(json.dumps(report))
-    return 3 if failure == 'timeout' else 0 if caught else 2
+    return 3 if any(summary == 'Timeout' for _, summary in classified) else 2 if any(
+        summary == 'MissedMutant' for _, summary in classified) else 0
 
 
 def cosmic(argv: list[str], failure: str) -> int:

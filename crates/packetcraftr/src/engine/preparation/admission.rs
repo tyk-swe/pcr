@@ -3,8 +3,6 @@
 
 //! Admission tokens, cumulative accounting, and passive route/build authorization.
 
-#[cfg(test)]
-use super::work;
 use super::{
     Clock, Error, Packet, PacketProviders, Policy, PreparedPacket, RebuildError, Stages,
     TransmitProviders, route,
@@ -387,8 +385,6 @@ impl<P: TransmitProviders, K: Clock> Stages<'_, P, K> {
         mut packet: Packet,
         plan: route::Plan,
     ) -> Result<Admitted, Error> {
-        #[cfg(test)]
-        work::prepare();
         let (build_context, preliminary_build) =
             self.materializer()
                 .preliminary(&mut packet, &plan, || self.check())?;

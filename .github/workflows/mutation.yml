@@ -1,0 +1,148 @@
+name: Mutation audit
+
+on:
+  workflow_call:
+    inputs:
+      base:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  select:
+    runs-on: ubuntu-24.04
+    outputs:
+      rust: ${{ steps.scope.outputs.rust }}
+      python: ${{ steps.scope.outputs.python }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - id: scope
+        env:
+          BASE: ${{ inputs.base }}
+        run: |
+          if [ -n "$BASE" ]; then
+            python3 scripts/run_mutation.py select --base "$BASE" --plan mutation-plan.json
+          else
+            python3 scripts/run_mutation.py select --full --plan mutation-plan.json
+          fi
+          python3 - <<'PY'
+          import json, os
+          targets = json.load(open('mutation-plan.json'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              for language in ('rust', 'python'):
+                  print(f'{language}={str(any(t["language"] == language for t in targets)).lower()}', file=output)
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mutation-plan
+          path: mutation-plan.json
+
+  rust:
+    needs: select
+    if: needs.select.outputs.rust == 'true'
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        os: [ubuntu-24.04, macos-14, macos-15-intel, windows-2022]
+        profile: [portable, default, layer2, layer3, all]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: mutation-plan
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - run: rustup toolchain install
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: mutation-deps-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
+        with:
+          tool: cargo-mutants@27.1.0
+      - run: python scripts/run_mutation.py run --plan mutation-plan.json --language rust --profile ${{ matrix.profile }} --shard ${{ matrix.shard }} --shards 8 --platform-label ${{ matrix.os }} --output mutation-results
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mutation-rust-${{ matrix.os }}-${{ matrix.profile }}-${{ matrix.shard }}
+          path: mutation-results
+          if-no-files-found: error
+
+  python:
+    needs: select
+    if: needs.select.outputs.python == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: mutation-plan
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python scripts/run_mutation.py run --plan mutation-plan.json --language python --output mutation-results
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mutation-python
+          path: mutation-results
+          if-no-files-found: error
+
+  policy:
+    needs: [select, rust, python]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: mutation-plan
+      - if: needs.select.outputs.rust == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: mutation-rust-*
+          path: rust-results
+      - if: needs.select.outputs.rust == 'true'
+        run: python3 scripts/run_mutation.py check --plan mutation-plan.json --language rust --output rust-results --shards 8 --platforms ubuntu-24.04 macos-14 macos-15-intel windows-2022 --profiles portable default layer2 layer3 all > rust-scores.jsonl
+      - if: always() && needs.select.outputs.python == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: mutation-python
+          path: python-results
+      - if: always() && needs.select.outputs.python == 'true'
+        run: python3 scripts/run_mutation.py check --plan mutation-plan.json --language python --output python-results > python-scores.jsonl
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mutation-scores
+          path: '*-scores.jsonl'
+      - if: always()
+        env:
+          SELECT: ${{ needs.select.result }}
+          RUST: ${{ needs.rust.result }}
+          PYTHON: ${{ needs.python.result }}
+        run: |
+          test "$SELECT" = success
+          test "$RUST" = success -o "$RUST" = skipped
+          test "$PYTHON" = success -o "$PYTHON" = skipped

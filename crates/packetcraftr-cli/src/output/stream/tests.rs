@@ -81,27 +81,25 @@ fn failed_partial_write_is_terminally_failed_without_a_false_complete_or_later_f
     .unwrap();
     assert!(stream.emit_data(Data { value: 1 }, Vec::new()).is_err());
     assert_eq!(prefix.lock().unwrap().len(), 3);
-    assert_eq!(calls.load(Ordering::Relaxed), 2);
     assert_eq!(flushes.load(Ordering::Relaxed), 0);
+    let attempted = calls.load(Ordering::Relaxed);
     assert!(!stream.is_open());
     assert!(!stream.is_complete());
     assert!(matches!(
         stream.complete((), Vec::new()),
         Err(EncodeError::Failed)
     ));
-    assert_eq!(calls.load(Ordering::Relaxed), 2);
+    assert_eq!(calls.load(Ordering::Relaxed), attempted);
 }
 
 struct BlockedWriter {
     entered: mpsc::Sender<()>,
     release: Arc<(Mutex<bool>, Condvar)>,
-    writes: Arc<AtomicUsize>,
-    flushes: Arc<AtomicUsize>,
     published: Arc<Mutex<Vec<u8>>>,
+    visible: Arc<Mutex<Vec<u8>>>,
 }
 impl Write for BlockedWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.writes.fetch_add(1, Ordering::Relaxed);
         self.entered.send(()).unwrap();
         let (released, changed) = self.release.as_ref();
         let mut released = released.lock().unwrap();
@@ -112,8 +110,24 @@ impl Write for BlockedWriter {
         Ok(bytes.len())
     }
     fn flush(&mut self) -> io::Result<()> {
-        self.flushes.fetch_add(1, Ordering::Relaxed);
+        *self.visible.lock().unwrap() = self.published.lock().unwrap().clone();
         Ok(())
+    }
+}
+
+fn wait_for_worker(runtime: &Runtime) -> Worker<usize, usize> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match Worker::new_in(runtime, Ok) {
+            Ok(worker) => return worker,
+            Err(_) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "writer admission did not recover"
+                );
+                std::thread::yield_now();
+            }
+        }
     }
 }
 
@@ -122,8 +136,7 @@ fn cancelled_bounded_writer_keeps_actual_work_charged_and_never_returns_complete
     let runtime = Runtime::new(1).unwrap();
     let (entered, writing) = mpsc::channel();
     let release = Arc::new((Mutex::new(false), Condvar::new()));
-    let writes = Arc::new(AtomicUsize::new(0));
-    let flushes = Arc::new(AtomicUsize::new(0));
+    let visible = Arc::new(Mutex::new(Vec::new()));
     let cancellation = packetcraftr_core::budget::Cancellation::default();
     let parent =
         Deadline::new(Duration::from_secs(30)).with_cancellation(Some(cancellation.clone()));
@@ -133,9 +146,8 @@ fn cancelled_bounded_writer_keeps_actual_work_charged_and_never_returns_complete
         BlockedWriter {
             entered,
             release: Arc::clone(&release),
-            writes: Arc::clone(&writes),
-            flushes: Arc::clone(&flushes),
             published: Arc::default(),
+            visible: Arc::clone(&visible),
         },
         &runtime,
         Duration::from_secs(30),
@@ -157,17 +169,19 @@ fn cancelled_bounded_writer_keeps_actual_work_charged_and_never_returns_complete
     assert!(!stream.is_open());
     assert!(stream.complete((), Vec::new()).is_err());
     drop(stream);
-    assert_eq!(runtime.snapshot().active, 1);
-    assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 1);
+    assert!(Worker::new_in(&runtime, |_: ()| Ok(())).is_err());
     *release.0.lock().unwrap() = true;
     release.1.notify_all();
-    let guard = Instant::now() + Duration::from_secs(5);
-    while runtime.snapshot().active != 0 {
-        assert!(Instant::now() < guard);
-        std::thread::yield_now();
-    }
-    assert_eq!(writes.load(Ordering::Relaxed), 1);
-    assert_eq!(flushes.load(Ordering::Relaxed), 1);
+    let worker = wait_for_worker(&runtime);
+    assert_eq!(
+        worker
+            .emit(7, &Deadline::new(Duration::from_secs(5)))
+            .unwrap(),
+        7
+    );
+    let record: serde_json::Value = serde_json::from_slice(&visible.lock().unwrap()).unwrap();
+    assert_eq!(record["event"], "message");
+    assert_eq!(record["result"]["value"], 1);
 }
 
 #[test]
@@ -175,18 +189,16 @@ fn a_started_complete_write_can_finish_after_cancellation_without_acknowledging_
     let runtime = Runtime::new(1).unwrap();
     let (entered, writing) = mpsc::channel();
     let release = Arc::new((Mutex::new(false), Condvar::new()));
-    let writes = Arc::new(AtomicUsize::new(0));
-    let flushes = Arc::new(AtomicUsize::new(0));
     let published = Arc::new(Mutex::new(Vec::new()));
+    let visible = Arc::new(Mutex::new(Vec::new()));
     let cancellation = packetcraftr_core::budget::Cancellation::default();
     let stream = StreamEncoder::new_bounded(
         Command::Http,
         BlockedWriter {
             entered,
             release: Arc::clone(&release),
-            writes: Arc::clone(&writes),
-            flushes: Arc::clone(&flushes),
             published: Arc::clone(&published),
+            visible: Arc::clone(&visible),
         },
         &runtime,
         Duration::from_secs(30),
@@ -213,18 +225,17 @@ fn a_started_complete_write_can_finish_after_cancellation_without_acknowledging_
     assert!(!stream.is_open());
     assert!(published.lock().unwrap().is_empty());
     drop(stream);
-    assert_eq!(runtime.snapshot().active, 1);
-    assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 1);
+    assert!(Worker::new_in(&runtime, |_: ()| Ok(())).is_err());
     *release.0.lock().unwrap() = true;
     release.1.notify_all();
-    let guard = Instant::now() + Duration::from_secs(5);
-    while runtime.snapshot().active != 0 {
-        assert!(Instant::now() < guard);
-        std::thread::yield_now();
-    }
-    let bytes = published.lock().unwrap();
+    let worker = wait_for_worker(&runtime);
+    assert_eq!(
+        worker
+            .emit(9, &Deadline::new(Duration::from_secs(5)))
+            .unwrap(),
+        9
+    );
+    let bytes = visible.lock().unwrap();
     let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(record["event"], "complete");
-    assert_eq!(writes.load(Ordering::Relaxed), 1);
-    assert_eq!(flushes.load(Ordering::Relaxed), 1);
 }

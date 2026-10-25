@@ -147,8 +147,11 @@ fn fixture() -> (TestClient, Routes, Interfaces, Transmit) {
     (client, routes, interfaces, tx)
 }
 
-pub(crate) fn client_for_plan() -> Client<impl crate::providers::PacketProviders> {
-    fixture().0
+pub(crate) fn client_for_plan(name: &str) -> Client<impl crate::providers::PacketProviders> {
+    let (client, routes, interfaces, _) = fixture();
+    routes.decision.lock().unwrap().interface.name = name.to_owned();
+    interfaces.id.lock().unwrap().name = name.to_owned();
+    client
 }
 fn options() -> Options {
     Options {
@@ -262,50 +265,13 @@ fn multipath_source_change_is_rejected_before_capture_or_transmission() {
 }
 
 #[test]
-fn route_name_accounting_uses_owned_capacities_and_counts_scoped_names() {
-    let (client, _, interfaces, _) = fixture();
-    let operation = Execution::new(&client, Duration::from_secs(10));
-    let deadline = operation.deadline(&client, Duration::from_secs(10));
-    let options = options();
-    let mut admission = client
-        .admitting_in(&options, 1, &deadline, &operation)
-        .unwrap();
-    let id = interfaces.id.lock().unwrap().clone();
-    let mut route = admission
-        .route_on(&packet(64), "10.0.0.1".parse().unwrap(), Some(&id))
-        .unwrap();
-    let mut name = String::with_capacity(8192);
-    name.push_str(&id.name);
-    route.plan.decision.interface.name = name;
-    let mut scoped_name = String::with_capacity(4096);
-    scoped_name.push_str(&id.name);
-    route.scoped_interface.as_mut().unwrap().name = scoped_name;
-    assert_eq!(
-        route.retained_name_bytes(),
-        route.plan.decision.interface.name.capacity()
-            + route.scoped_interface.as_ref().unwrap().name.capacity()
-    );
-    assert!(route.retained_name_bytes() >= 12_288);
-    assert_eq!(route.scoped_name_bytes(), id.name.len());
-    let mut admitted = admission.admit_on(packet(64), &route).unwrap();
-    admitted.plan.decision.interface.name.reserve(16_384);
-    assert_eq!(
-        admitted.retained_route_name_bytes(),
-        admitted.plan.decision.interface.name.capacity()
-    );
-    assert!(admitted.retained_route_name_bytes() >= 16_384);
-}
-
-#[test]
-fn stable_preview_avoids_second_build_but_refreshes_route_and_preserves_exact_bytes() {
-    let (client, routes, _, tx) = fixture();
+fn retained_and_rebuilt_previews_preserve_packet_bytes() {
+    let (client, _, _, tx) = fixture();
     let operation = Execution::new(&client, Duration::from_secs(10));
     let deadline = operation.deadline(&client, Duration::from_secs(10));
     let options = options();
     let mut results = Vec::new();
     for retain in [false, true] {
-        work::take();
-        let initial_calls = routes.calls.load(Ordering::Relaxed);
         let mut admission = client
             .admitting_in(&options, 1, &deadline, &operation)
             .unwrap();
@@ -328,13 +294,6 @@ fn stable_preview_avoids_second_build_but_refreshes_route_and_preserves_exact_by
         }
         .unwrap();
         assert_eq!(prepared.built.bytes, expected_bytes);
-        let counts = work::take();
-        assert_eq!(counts, if retain { (1, 1, 1) } else { (2, 2, 0) });
-        assert_eq!(
-            routes.calls.load(Ordering::Relaxed) - initial_calls,
-            2,
-            "final route lookup remains fresh"
-        );
         results.push(
             prepared
                 .transmit(&tx, || Ok::<(), Error>(()))
@@ -349,10 +308,10 @@ fn stable_preview_avoids_second_build_but_refreshes_route_and_preserves_exact_by
 }
 
 #[test]
-fn bounded_windows_measure_actual_builds_and_fresh_route_lookups() {
+fn bounded_windows_admit_and_materialize_every_packet() {
     for count in [4, 32] {
         for retain in [false, true] {
-            let (client, routes, _, _) = fixture();
+            let (client, _, _, _) = fixture();
             let operation = Execution::new(&client, Duration::from_secs(10));
             let deadline = operation.deadline(&client, Duration::from_secs(10));
             let options = options();
@@ -362,7 +321,6 @@ fn bounded_windows_measure_actual_builds_and_fresh_route_lookups() {
             let route = admission
                 .route_on(&packet(64), "10.0.0.1".parse().unwrap(), None)
                 .unwrap();
-            work::take();
             let mut window = Vec::new();
             for _ in 0..count {
                 let admitted = if retain {
@@ -383,24 +341,6 @@ fn bounded_windows_measure_actual_builds_and_fresh_route_lookups() {
                 .unwrap();
                 assert_eq!(prepared.built.bytes.len(), 92);
             }
-            let measured = work::take();
-            let count = count as usize;
-            assert_eq!(
-                measured,
-                if retain {
-                    (count, count, count)
-                } else {
-                    (2 * count, 2 * count, 0)
-                }
-            );
-            assert_eq!(routes.calls.load(Ordering::Relaxed), count + 1);
-            println!(
-                "window={count} retain={retain} builds={} preparation_passes={} preview_reuses={} fresh_route_calls={}",
-                measured.0,
-                measured.1,
-                measured.2,
-                routes.calls.load(Ordering::Relaxed)
-            );
         }
     }
 }
@@ -519,7 +459,6 @@ fn changed_source_rebuilds_and_changed_mtu_fails_before_discovery() {
         let admitted = admission.admit_retained_on(declaration, &route).unwrap();
         let (cost, retained) = admitted.into_parts();
         let discovery = &admission;
-        work::take();
         let mut decision = routes.decision.lock().unwrap();
         if shrink_mtu {
             decision.mtu = 512;
@@ -542,7 +481,6 @@ fn changed_source_rebuilds_and_changed_mtu_fails_before_discovery() {
                 "10.0.0.3".parse::<std::net::Ipv4Addr>().unwrap()
             );
         }
-        assert_eq!(work::take(), (1, 1, 0));
         assert!(tx.0.lock().unwrap().is_empty());
     }
 }

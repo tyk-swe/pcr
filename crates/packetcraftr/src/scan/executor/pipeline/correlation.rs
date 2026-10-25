@@ -124,14 +124,7 @@ fn observe(
     sent: &packetcraftr_core::packet::Packet,
     response: &packetcraftr_core::decode::DecodedPacket,
 ) -> Option<Observation> {
-    #[cfg(test)]
-    COMPARISONS.with(|count| count.set(count.get() + 1));
     Observation::observe(registry, probe, sent, response)
-}
-
-#[cfg(test)]
-thread_local! {
-    static COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]

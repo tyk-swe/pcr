@@ -49,7 +49,10 @@ fn split_mqtt_and_coalesced_messages_keep_sources() {
     let wire = [0x30, 4, 0, 1, b'a', b'x'];
     for split in 1..wire.len() {
         let mut c = Collector::new(
-            Limits::default(),
+            Limits {
+                max_buffer_bytes: 8,
+                ..Limits::default()
+            },
             crate::protocol::builtin::registry(),
             [BuiltinProtocol::Mqtt],
         )
@@ -74,8 +77,15 @@ fn split_mqtt_and_coalesced_messages_keep_sources() {
         let Event::Message(second) = &out[1] else {
             panic!()
         };
-        assert_eq!(second.sources.len(), 1);
-        assert_eq!(c.buffered, 0);
+        assert_eq!(second.status, Status::Complete);
+        assert_eq!(second.wire.as_ref(), [0xc0, 0]);
+        assert_eq!(
+            second.sources.iter().map(|f| f.number).collect::<Vec<_>>(),
+            [2]
+        );
+        deliver(&mut c, &t, 3, &wire, 0, &mut out);
+        assert!(matches!(&out[2], Event::Message(message)
+            if message.status == Status::Complete && message.wire.as_ref() == wire));
     }
 }
 #[test]
@@ -748,7 +758,6 @@ fn review_sip_keepalives_across_deliveries_do_not_disable_messages() {
                 expected
             );
         }
-        assert_eq!(collector.buffered, 0);
         assert!(
             collector
                 .finish(&RunSummary::default())

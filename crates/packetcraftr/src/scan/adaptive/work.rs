@@ -4,57 +4,6 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
-#[derive(Default)]
-pub(super) struct Operations {
-    #[cfg(test)]
-    pub(super) discovery: usize,
-    #[cfg(test)]
-    pub(super) ready: usize,
-    #[cfg(test)]
-    pub(super) time: usize,
-}
-
-impl Operations {
-    pub(super) fn starting(ready: usize) -> Self {
-        let _ = ready;
-        #[cfg(test)]
-        {
-            Self {
-                ready,
-                ..Self::default()
-            }
-        }
-        #[cfg(not(test))]
-        {
-            Self::default()
-        }
-    }
-
-    #[inline]
-    pub(super) fn ready(&mut self) {
-        #[cfg(test)]
-        {
-            self.ready += 1;
-        }
-    }
-
-    #[inline]
-    pub(super) fn time(&mut self) {
-        #[cfg(test)]
-        {
-            self.time += 1;
-        }
-    }
-
-    #[inline]
-    pub(super) fn discovery(&mut self) {
-        #[cfg(test)]
-        {
-            self.discovery += 1;
-        }
-    }
-}
-
 pub(in crate::scan) struct Work {
     pub(super) slots: Vec<Slot>,
     pub(super) cursor: usize,
@@ -67,7 +16,6 @@ pub(in crate::scan) struct Work {
     pub(super) first_sequence: u64,
     pub(super) host_count: usize,
     pub(super) canceled_responses: usize,
-    pub(super) operations: Operations,
 }
 
 pub(super) struct Slot {

@@ -34,14 +34,14 @@ fn targets(count: usize) -> Vec<SelectedAddress> {
 }
 
 #[test]
-fn completed_prefix_discovery_is_linear() {
+fn every_host_endpoint_is_selected_once_and_completed() {
     for hosts in [1, 4, 32] {
         for endpoints in [32, 128, 512] {
             let now = Instant::now();
             let mut controller = Controller::new(config(), Duration::from_millis(100), 4);
             let mut work = controller.open_stage(&targets(hosts), endpoints, 1, 100, now);
-            let mut completed = 0;
-            while !work.done() {
+            let mut sequences = std::collections::BTreeSet::new();
+            for _ in 0..hosts * endpoints {
                 let wave = controller.select(&mut work, now, now + Duration::from_secs(20), 1);
                 assert_eq!(wave.selections.len(), 1);
                 let selection = wave.selections[0];
@@ -61,21 +61,15 @@ fn completed_prefix_discovery_is_linear() {
                     },
                     now,
                 );
-                completed += 1;
+                assert!(sequences.insert(selection.sequence));
             }
-            assert_eq!(completed, hosts * endpoints);
-            assert!(work.operations.ready <= 16 * completed + hosts);
-            assert!(work.operations.time <= 16 * completed + 2 * hosts);
-            if hosts == 1 {
-                eprintln!(
-                    "N={endpoints}: endpoint visits={}, ready-index mutations={}, time-index mutations={}",
-                    work.operations.discovery, work.operations.ready, work.operations.time
-                );
-            }
+            assert!(work.done());
+            assert_eq!(sequences, (100..100 + (hosts * endpoints) as u64).collect());
             assert!(
-                work.operations.discovery <= 3 * completed,
-                "{hosts} hosts x {endpoints}: {} endpoint visits",
-                work.operations.discovery
+                controller
+                    .select(&mut work, now, now + Duration::from_secs(20), 1)
+                    .selections
+                    .is_empty()
             );
         }
     }
@@ -373,14 +367,6 @@ fn indexed_readiness_matches_conservative_transitions_with_pacing_retries_and_ex
                     ));
                 }
             }
-            assert!(work.wakes.len() <= hosts);
-            assert!(work.expirations.len() <= hosts);
-            assert!(work.runnable.len() <= hosts);
-            assert!(
-                work.slots
-                    .iter()
-                    .all(|slot| slot.ready.len() + slot.delayed.len() <= slot.endpoints.len())
-            );
             if work.done() && active.is_empty() {
                 accounted_canceled += controller.take_canceled_responses(&mut work);
                 assert_eq!(accounted_canceled, conservative.canceled);

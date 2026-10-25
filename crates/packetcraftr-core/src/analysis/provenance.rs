@@ -140,8 +140,6 @@ impl SourceSet {
                 _ => None,
             };
             if let Some(next) = next {
-                #[cfg(test)]
-                work::copy(1);
                 frames.push(*next);
             }
         }
@@ -182,22 +180,8 @@ pub(crate) struct Accumulator {
     lease: Lease,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct SourceNumber(u64);
-
-impl PartialOrd for SourceNumber {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for SourceNumber {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        #[cfg(test)]
-        work::compare();
-        self.0.cmp(&other.0)
-    }
-}
 
 impl Accumulator {
     pub(crate) fn new(sources: &SourceSet) -> Result<Self, Error> {
@@ -236,8 +220,6 @@ impl Accumulator {
             if let std::collections::btree_map::Entry::Vacant(entry) =
                 self.frames.entry(SourceNumber(frame.number))
             {
-                #[cfg(test)]
-                work::copy(1);
                 entry.insert(*frame);
             }
         }
@@ -262,28 +244,9 @@ impl Accumulator {
         // The old tree stays charged until conversion is complete, including
         // its nodes' capacity during the final flat allocation.
         for frame in self.frames.values() {
-            #[cfg(test)]
-            work::copy(1);
             frames.push(*frame);
         }
         Ok(SourceSet(Arc::new(Data { frames, lease })))
-    }
-}
-
-#[cfg(test)]
-mod work {
-    std::thread_local! {
-        static COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-        static COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    }
-    pub(super) fn compare() {
-        COMPARISONS.set(COMPARISONS.get() + 1);
-    }
-    pub(super) fn copy(count: usize) {
-        COPIES.set(COPIES.get() + count);
-    }
-    pub(super) fn take() -> (usize, usize) {
-        (COMPARISONS.replace(0), COPIES.replace(0))
     }
 }
 

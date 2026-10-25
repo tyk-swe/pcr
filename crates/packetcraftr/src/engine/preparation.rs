@@ -106,34 +106,6 @@ fn changed_preparation(message: &str) -> Error {
 }
 
 #[cfg(test)]
-mod work {
-    std::thread_local! {
-        static COUNTS: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
-    }
-    pub(super) fn build() {
-        COUNTS.with(|counts| {
-            let (builds, preparations, reused) = counts.get();
-            counts.set((builds + 1, preparations, reused));
-        });
-    }
-    pub(super) fn prepare() {
-        COUNTS.with(|counts| {
-            let (builds, preparations, reused) = counts.get();
-            counts.set((builds, preparations + 1, reused));
-        });
-    }
-    pub(super) fn reuse() {
-        COUNTS.with(|counts| {
-            let (builds, preparations, reused) = counts.get();
-            counts.set((builds, preparations, reused + 1));
-        });
-    }
-    pub(super) fn take() -> (usize, usize, usize) {
-        COUNTS.replace((0, 0, 0))
-    }
-}
-
-#[cfg(test)]
 pub(crate) mod tests;
 
 #[derive(Debug)]

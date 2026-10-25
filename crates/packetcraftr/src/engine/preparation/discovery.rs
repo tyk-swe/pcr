@@ -5,8 +5,6 @@
 
 use super::admission::{Admitted, AdmittedCost, AuthorizedRoute, Retained, RetainedAdmission};
 use super::construction::PreparedPacket;
-#[cfg(test)]
-use super::work;
 use super::{
     Clock, Deadline, Error, Packet, PacketProviders, Policy, RebuildError, Stages,
     TransmitProviders, changed_preparation, route,
@@ -154,8 +152,6 @@ impl<P: PacketProviders, K: Clock> Stages<'_, P, K> {
         }
         let fresh = self.fresh_plan(&declared, route)?;
         let admitted = if fresh == admitted.plan {
-            #[cfg(test)]
-            work::reuse();
             self.check()?;
             validate_mtu(&admitted.preliminary_build, fresh.decision.mtu)?;
             self.authorize_built(&admitted.preliminary_build, &fresh)?;

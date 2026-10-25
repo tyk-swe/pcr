@@ -10,3 +10,8 @@
 # Local Python caches
 __pycache__/
 *.py[cod]
+
+/.venv/
+/mutation-results/
+/mutation-plan.json
+/mutants.out*/

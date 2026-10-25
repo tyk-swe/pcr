@@ -34,7 +34,6 @@ impl Controller {
         }
         endpoint.pending = false;
         slot.ready.remove(&selection.endpoint);
-        work.operations.ready();
         if !matches!(outcome, Outcome::Omitted) {
             self.hosts[host_index].completed = self.hosts[host_index].completed.saturating_add(1);
         }
@@ -88,7 +87,6 @@ impl Controller {
                     endpoint.ready_at = now + self.config.retry_delay(selection.attempt + 1);
                     if !was_finished {
                         slot.delayed.insert((endpoint.ready_at, selection.endpoint));
-                        work.operations.time();
                     }
                 }
                 if selection.host_limited {

@@ -160,6 +160,9 @@ mod tests {
             ports: vec![],
             bindings: vec![" udp.port = 0053 :dns".into()],
         };
-        assert!(args.registry().is_ok());
+        assert_eq!(
+            args.registry().unwrap().child_for("udp", Discriminator(53)),
+            Some(Id::new("dns"))
+        );
     }
 }

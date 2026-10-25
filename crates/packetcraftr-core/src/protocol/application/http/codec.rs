@@ -420,6 +420,13 @@ mod start_line_regressions {
         ] {
             assert!(parse_start(&Bytes::copy_from_slice(invalid.as_bytes())).is_err());
         }
-        assert!(parse_start(&Bytes::from_static(b"GET / HTTP/1.1")).is_ok());
+        assert_eq!(
+            parse_start(&Bytes::from_static(b"GET / HTTP/1.1")).unwrap(),
+            StartLine::Request {
+                method: "GET".to_owned(),
+                target: Bytes::from_static(b"/"),
+                version: "HTTP/1.1".to_owned(),
+            }
+        );
     }
 }

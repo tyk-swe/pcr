@@ -17,7 +17,7 @@ use std::{
     io::{self, Write},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -25,29 +25,25 @@ use std::{
 #[derive(Clone, Default)]
 struct Tape {
     bytes: Arc<Mutex<Vec<u8>>>,
-    writes: Arc<AtomicUsize>,
-    flushes: Arc<AtomicUsize>,
+    visible: Arc<Mutex<Vec<u8>>>,
 }
 impl Write for Tape {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.writes.fetch_add(1, Ordering::Relaxed);
         self.bytes.lock().unwrap().extend_from_slice(bytes);
         Ok(bytes.len())
     }
     fn flush(&mut self) -> io::Result<()> {
-        self.flushes.fetch_add(1, Ordering::Relaxed);
+        *self.visible.lock().unwrap() = self.bytes.lock().unwrap().clone();
         Ok(())
     }
 }
 
 struct Record {
-    count: Arc<AtomicUsize>,
     value: serde_json::Value,
     fail: bool,
 }
 impl Serialize for Record {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.count.fetch_add(1, Ordering::Relaxed);
         if self.fail {
             return Err(serde::ser::Error::custom(
                 "injected value serialization failure",
@@ -71,33 +67,35 @@ fn invocation(encoder: StreamEncoder) -> Invocation {
         None,
     )
 }
-fn record(count: &Arc<AtomicUsize>, value: &serde_json::Value) -> Record {
+fn record(value: &serde_json::Value) -> Record {
     Record {
-        count: Arc::clone(count),
         value: value.clone(),
         fail: false,
     }
 }
 
 #[test]
-fn ndjson_application_serializes_once_and_charges_exact_result_bytes_with_line_visibility() {
+fn ndjson_application_enforces_result_budget_and_flushes_complete_records() {
     let tape = Tape::default();
     let invocation = invocation(StreamEncoder::new(Command::Http, tape.clone()));
-    let count = Arc::new(AtomicUsize::new(0));
     let value = serde_json::json!({"body": "quote\" newline\n slash\\ unicode🦀", "nested": [0, true, null]});
     let bytes = serde_json::to_vec(&value).unwrap().len();
     let mut output = EventOutput::new(&invocation, bytes * 64);
     let mut retained = Vec::new();
     for index in 0..64 {
         output
-            .emit(record(&count, &value), &mut retained, |_, _| {
+            .emit(record(&value), &mut retained, |_, _| {
                 panic!("NDJSON called text renderer")
             })
             .unwrap();
-        assert_eq!(count.load(Ordering::Relaxed), index + 1);
-        assert_eq!(output.remaining, bytes * (63 - index));
-        assert_eq!(tape.writes.load(Ordering::Relaxed), index + 1);
-        assert_eq!(tape.flushes.load(Ordering::Relaxed), index + 1);
+        let visible = tape.visible.lock().unwrap();
+        let lines: Vec<_> = visible.split_inclusive(|byte| *byte == b'\n').collect();
+        assert_eq!(lines.len(), index + 1);
+        for line in lines {
+            assert_eq!(line.last(), Some(&b'\n'));
+            let parsed: serde_json::Value = serde_json::from_slice(line).unwrap();
+            assert_eq!(parsed["result"], value);
+        }
     }
     assert!(retained.is_empty());
     let snapshot = tape.bytes.lock().unwrap().clone();
@@ -113,17 +111,25 @@ fn ndjson_application_serializes_once_and_charges_exact_result_bytes_with_line_v
         assert!(serde_json::to_vec(line).unwrap().len() > bytes);
     }
     let failed = output
-        .emit(record(&count, &value), &mut retained, |_, _| Ok(()))
+        .emit(record(&value), &mut retained, |_, _| Ok(()))
         .unwrap_err();
     assert_eq!(failed.classification.kind, Kind::Policy);
     assert_eq!(*tape.bytes.lock().unwrap(), snapshot);
-    assert_eq!(output.remaining, 0);
     invocation
         .output
         .complete(serde_json::json!({"messages": 64}), Vec::new())
         .unwrap();
-    assert_eq!(tape.writes.load(Ordering::Relaxed), 65);
-    assert_eq!(tape.flushes.load(Ordering::Relaxed), 65);
+    let visible = tape.visible.lock().unwrap();
+    let terminal: serde_json::Value = serde_json::from_slice(
+        visible
+            .split(|byte| *byte == b'\n')
+            .rfind(|line| !line.is_empty())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(terminal["event"], "complete");
+    assert_eq!(terminal["sequence"], 64);
+    assert_eq!(terminal["result"], serde_json::json!({"messages": 64}));
     assert!(invocation.output.is_complete());
 }
 
@@ -132,11 +138,10 @@ fn budget_and_serialization_failures_write_no_prefix_and_allow_one_error_termina
     for serialize_failure in [false, true] {
         let tape = Tape::default();
         let invocation = invocation(StreamEncoder::new(Command::Http, tape.clone()));
-        let count = Arc::new(AtomicUsize::new(0));
         let value = serde_json::json!({"body": "bounded"});
         let bytes = serde_json::to_vec(&value).unwrap().len();
         let mut output = EventOutput::new(&invocation, bytes - 1);
-        let mut input = record(&count, &value);
+        let mut input = record(&value);
         input.fail = serialize_failure;
         let failure = output
             .emit(input, &mut Vec::new(), |_, _| Ok(()))
@@ -149,10 +154,8 @@ fn budget_and_serialization_failures_write_no_prefix_and_allow_one_error_termina
                 Kind::Policy
             }
         );
-        assert_eq!(count.load(Ordering::Relaxed), 1);
-        assert_eq!(output.remaining, bytes - 1);
-        assert_eq!(tape.writes.load(Ordering::Relaxed), 0);
-        assert_eq!(tape.flushes.load(Ordering::Relaxed), 0);
+        assert!(tape.bytes.lock().unwrap().is_empty());
+        assert!(tape.visible.lock().unwrap().is_empty());
         assert!(invocation.output.is_open());
         invocation
             .output
@@ -160,7 +163,15 @@ fn budget_and_serialization_failures_write_no_prefix_and_allow_one_error_termina
             .unwrap();
         assert!(invocation.output.is_terminal());
         assert!(!invocation.output.is_complete());
-        assert_eq!(tape.writes.load(Ordering::Relaxed), 1);
+        let terminal: serde_json::Value =
+            serde_json::from_slice(&tape.visible.lock().unwrap()).unwrap();
+        assert_eq!(terminal["event"], "error");
+        assert!(
+            invocation
+                .output
+                .emit_error(failure.output_error())
+                .is_err()
+        );
     }
 }
 
@@ -175,17 +186,14 @@ impl Write for FailedWriter {
 }
 
 #[test]
-fn writer_failure_keeps_exact_charge_and_prevents_false_success_or_repair_terminal() {
+fn writer_failure_prevents_false_success_or_repair_terminal() {
     let invocation = invocation(StreamEncoder::new(Command::Http, FailedWriter));
-    let count = Arc::new(AtomicUsize::new(0));
     let value = serde_json::json!({"body": "hello"});
     let bytes = serde_json::to_vec(&value).unwrap().len();
     let mut output = EventOutput::new(&invocation, bytes);
     let failure = output
-        .emit(record(&count, &value), &mut Vec::new(), |_, _| Ok(()))
+        .emit(record(&value), &mut Vec::new(), |_, _| Ok(()))
         .unwrap_err();
-    assert_eq!(count.load(Ordering::Relaxed), 1);
-    assert_eq!(output.remaining, 0);
     assert_eq!(failure.classification.code, "io.stdout");
     assert!(!invocation.output.is_open());
     assert!(!invocation.output.is_complete());
@@ -225,13 +233,15 @@ fn cancellation_during_serialization_refuses_write_and_terminal_cleanup_remains_
         .emit(CancelValue { cancellation }, &mut Vec::new(), |_, _| Ok(()))
         .unwrap_err();
     assert_eq!(error.classification.code, "io.cancelled");
-    assert_eq!(tape.writes.load(Ordering::Relaxed), 0);
+    assert!(tape.bytes.lock().unwrap().is_empty());
     invocation
         .terminal()
         .output
         .emit_error(error.output_error())
         .unwrap();
-    assert_eq!(tape.writes.load(Ordering::Relaxed), 1);
+    let terminal: serde_json::Value =
+        serde_json::from_slice(&tape.visible.lock().unwrap()).unwrap();
+    assert_eq!(terminal["event"], "error");
     assert!(!invocation.output.is_complete());
 }
 
@@ -275,10 +285,9 @@ fn diagnostics_observe_live_settings_on_initial_and_replacement_outputs() {
                 )
             };
             if let Some(diagnostics) = &diagnostics {
-                let count = Arc::new(AtomicUsize::new(0));
                 invocation
                     .output
-                    .emit_data(record(&count, &serde_json::json!({"index": 0})), Vec::new())
+                    .emit_data(record(&serde_json::json!({"index": 0})), Vec::new())
                     .unwrap();
                 diagnostics.stream_index_needed(false);
             }

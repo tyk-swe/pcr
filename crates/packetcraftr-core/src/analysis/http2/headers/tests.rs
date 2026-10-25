@@ -22,6 +22,8 @@ fn request(method: &[u8]) -> Vec<Header> {
 
 #[test]
 fn regular_names_accept_exactly_the_lowercase_token_bytes() {
+    // RFC 9110 section 5.6.2 and RFC 9113 section 8.2.1, checked 2026-10-25.
+    // https://www.rfc-editor.org/rfc/rfc9113.html#section-8.2.1
     const LOWERCASE_TOKEN: &[u8] = b"!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz";
     for byte in u8::MIN..=u8::MAX {
         assert_eq!(
@@ -78,6 +80,7 @@ fn request_validation_keeps_token_case_rules_for_method_and_protocol() {
     let mut ordered = request(b"GET");
     ordered.push(field(b"via", b"1"));
     ordered.push(field(b":method", b"POST"));
+    // https://www.rfc-editor.org/rfc/rfc9113.html#section-8.3, checked 2026-10-25.
     assert_eq!(
         validate(FieldRole::Request, &ordered).err(),
         Some("pseudo-header field follows a regular field")

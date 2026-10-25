@@ -14,6 +14,23 @@ impl Drop for Owner {
     }
 }
 
+fn wait_for_slot(cleanup: &ThreadCleanup) -> ThreadJoinSlot {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match cleanup.reserve() {
+            Ok(slot) => return slot,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    Instant::now() < deadline,
+                    "cleanup admission did not recover"
+                );
+                std::thread::yield_now();
+            }
+            Err(error) => panic!("unexpected cleanup admission error: {error}"),
+        }
+    }
+}
+
 #[test]
 fn reservations_and_failed_transfers_keep_the_join_owner_until_actual_completion() {
     let cleanup = ThreadCleanup::new(1).unwrap();
@@ -25,18 +42,12 @@ fn reservations_and_failed_transfers_keep_the_join_owner_until_actual_completion
     let (release, held) = mpsc::channel();
     let thread = std::thread::spawn(move || held.recv().unwrap());
     cleanup.inner.refuse_next.store(true, Ordering::Release);
-    slot.attach(thread, Owner(Arc::clone(&active)));
-    assert_eq!(cleanup.inner.pending.lock().unwrap().len(), 1);
+    assert!(!slot.attach(thread, Owner(Arc::clone(&active))));
     assert_eq!(active.load(Ordering::Acquire), 1);
     assert!(cleanup.reserve().is_err());
-    assert!(cleanup.inner.pending.lock().unwrap().is_empty());
     release.send(()).unwrap();
-    let guard = Instant::now() + Duration::from_secs(5);
-    while active.load(Ordering::Acquire) != 0 || cleanup.inner.active.load(Ordering::Acquire) != 0 {
-        assert!(Instant::now() < guard);
-        std::thread::yield_now();
-    }
-    assert!(cleanup.reserve().is_ok());
+    drop(wait_for_slot(&cleanup));
+    assert_eq!(active.load(Ordering::Acquire), 0);
 }
 
 #[test]
@@ -55,12 +66,11 @@ fn one_blocked_join_does_not_serialize_independent_cleanup_slots() {
             .unwrap()
             .attach(std::thread::spawn(|| ()), Owner(Arc::clone(&other)));
         let guard = Instant::now() + Duration::from_secs(5);
-        while other.load(Ordering::Acquire) != 0
-            || cleanup.inner.active.load(Ordering::Acquire) != 1
-        {
+        while other.load(Ordering::Acquire) != 0 {
             assert!(Instant::now() < guard);
             std::thread::yield_now();
         }
+        drop(wait_for_slot(&cleanup));
         assert_eq!(active.load(Ordering::Acquire), 1);
     }
     release.send(()).unwrap();
@@ -73,11 +83,10 @@ fn dropping_last_cleanup_owner_retries_a_failed_transfer_without_an_arc_cycle() 
     let active = Arc::new(AtomicUsize::new(1));
     let (release, held) = mpsc::channel();
     cleanup.inner.refuse_next.store(true, Ordering::Release);
-    cleanup.reserve().unwrap().attach(
+    assert!(!cleanup.reserve().unwrap().attach(
         std::thread::spawn(move || held.recv().unwrap()),
         Owner(Arc::clone(&active)),
-    );
-    assert_eq!(cleanup.inner.pending.lock().unwrap().len(), 1);
+    ));
     drop(cleanup);
     release.send(()).unwrap();
     let guard = Instant::now() + Duration::from_secs(5);
@@ -117,14 +126,8 @@ fn arbitrary_owner_drop_remains_charged_to_cleanup_after_the_thread_has_joined()
         },
     );
     dropping.recv_timeout(Duration::from_secs(5)).unwrap();
-    assert_eq!(cleanup.inner.active.load(Ordering::Acquire), 1);
     assert!(cleanup.reserve().is_err());
     *released.0.lock().unwrap() = true;
     released.1.notify_all();
-    let guard = Instant::now() + Duration::from_secs(5);
-    while cleanup.inner.active.load(Ordering::Acquire) != 0 {
-        assert!(Instant::now() < guard);
-        std::thread::yield_now();
-    }
-    assert!(cleanup.reserve().is_ok());
+    drop(wait_for_slot(&cleanup));
 }

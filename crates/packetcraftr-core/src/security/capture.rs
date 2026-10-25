@@ -740,31 +740,24 @@ mod improvement_tests {
         collector
             .dns_events(vec![dns_event("a.aBcD.Example.test.")])
             .unwrap();
-        assert!(
-            collector
-                .dns_groups
-                .keys()
-                .any(|key| key.3.as_deref() == Some("example.test."))
-        );
-        assert!(
-            collector
-                .dns_groups
-                .values()
-                .any(|group| group.labels.contains(b"abcd".as_slice()))
-        );
-        assert!(
-            !collector
-                .dns_groups
-                .keys()
-                .any(|key| key.3.as_deref() == Some("."))
-        );
+        collector
+            .dns_events(vec![dns_event("z.AbCd.Example.test.")])
+            .unwrap();
         collector.dns_events(vec![dns_event("aBcD.")]).unwrap();
-        assert!(
-            !collector
-                .dns_groups
-                .keys()
-                .any(|key| key.3.as_deref() == Some("."))
-        );
+        let (findings, _) =
+            analysis::Collector::finish(collector, &analysis::Summary::default()).unwrap();
+        let suspicious: Vec<_> = findings
+            .iter()
+            .filter(|finding| finding.rule_id == "dns.high_entropy_labels")
+            .collect();
+        assert_eq!(suspicious.len(), 2);
+        for suffix in ["example.test.", "test."] {
+            let finding = suspicious
+                .iter()
+                .find(|finding| finding.evidence["suffix"] == suffix)
+                .unwrap();
+            assert_eq!(finding.evidence["distinct_labels"], 1);
+        }
         let mut bounded = Collector::new(
             Mode::Dns(options),
             Limits {

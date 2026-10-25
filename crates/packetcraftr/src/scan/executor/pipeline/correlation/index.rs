@@ -29,8 +29,6 @@ pub(in crate::scan::executor::pipeline) struct CandidateIndex {
     scopes: Vec<Scope>,
     entries: BTreeMap<usize, Entry>,
     capacity: usize,
-    #[cfg(test)]
-    discovered: std::cell::Cell<usize>,
 }
 
 impl CandidateIndex {
@@ -39,8 +37,6 @@ impl CandidateIndex {
             scopes: (0..sources).map(|_| Scope::default()).collect(),
             entries: BTreeMap::new(),
             capacity,
-            #[cfg(test)]
-            discovered: std::cell::Cell::new(0),
         }
     }
 
@@ -121,8 +117,6 @@ impl CandidateIndex {
             return Vec::new();
         };
         let Some(keys) = response_identity::response(response) else {
-            #[cfg(test)]
-            self.discovered.set(self.discovered.get() + scope.all.len());
             return scope.all.iter().copied().collect();
         };
         // Missing outer IP paths cannot produce an Observation, even with a
@@ -131,13 +125,8 @@ impl CandidateIndex {
             return Vec::new();
         }
         let mut possible = scope.fallback.clone();
-        #[cfg(test)]
-        self.discovered
-            .set(self.discovered.get() + scope.fallback.len());
         for key in keys {
             if let Some(bucket) = scope.buckets.get(&key) {
-                #[cfg(test)]
-                self.discovered.set(self.discovered.get() + bucket.len());
                 possible.extend(bucket.iter().copied());
             }
         }

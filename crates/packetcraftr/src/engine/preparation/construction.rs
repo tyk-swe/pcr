@@ -7,8 +7,6 @@ use super::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
     require_fixed_width_link_materialization,
 };
-#[cfg(test)]
-use super::work;
 use super::{Error, route};
 use crate::evidence::SentPacket;
 use bytes::Bytes;
@@ -83,8 +81,6 @@ impl Materializer<'_> {
         materialize_link_structure(packet, plan)?;
         check()?;
         let context = build_context(plan);
-        #[cfg(test)]
-        work::build();
         let built = self
             .builder
             .build(packet.clone(), context.clone(), self.options.clone())?;
@@ -102,8 +98,6 @@ impl Materializer<'_> {
         let preliminary_len = preliminary.bytes.len();
         let built = if materialize_link_fields(&mut packet, route)? {
             check()?;
-            #[cfg(test)]
-            work::build();
             self.builder.build(packet, context, self.options.clone())?
         } else {
             preliminary

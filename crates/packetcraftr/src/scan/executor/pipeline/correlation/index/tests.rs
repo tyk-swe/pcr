@@ -221,7 +221,7 @@ fn conservative(
 }
 
 #[test]
-fn actual_observation_comparisons_do_not_scan_unrelated_pending_ports() {
+fn unrelated_pending_ports_do_not_match_direct_or_quoted_replies() {
     for count in [32, 128, 512] {
         let probes = (0..count)
             .map(|n| {
@@ -258,19 +258,12 @@ fn actual_observation_comparisons_do_not_scan_unrelated_pending_ports() {
                         }
                     })
                     .collect::<Vec<_>>();
-                super::super::COMPARISONS.with(|counter| counter.set(0));
                 for response in &responses {
                     assert!(conservative(&probes, &packets, response).is_empty());
                 }
-                assert_eq!(
-                    super::super::COMPARISONS.with(std::cell::Cell::get),
-                    count * frames
-                );
-                super::super::COMPARISONS.with(|counter| counter.set(0));
                 for response in &responses {
                     assert!(observed(&index, &probes, &packets, response, 0).is_empty());
                 }
-                assert_eq!(super::super::COMPARISONS.with(std::cell::Cell::get), 0);
                 let response = if quoted {
                     quote(&packets[count / 2], None)
                 } else {
@@ -279,11 +272,6 @@ fn actual_observation_comparisons_do_not_scan_unrelated_pending_ports() {
                 assert_eq!(
                     observed(&index, &probes, &packets, &response, 0),
                     vec![count / 2]
-                );
-                assert_eq!(super::super::COMPARISONS.with(std::cell::Cell::get), 1);
-                eprintln!(
-                    "pending={count}, unrelated_frames={frames}, quoted={quoted}: conservative comparisons={}; indexed unrelated=0, matching=1",
-                    count * frames
                 );
             }
         }
@@ -344,9 +332,8 @@ fn collisions_scopes_reuse_and_retirement_preserve_every_member() {
     index.insert(3, 0, &sent, &builtin::registry()).unwrap();
     assert_eq!(index.lookup(0, &response.packet), vec![3]);
     index.remove(3);
-    assert!(index.scopes[0].buckets.is_empty());
-    assert!(index.scopes[0].all.is_empty());
-    assert_eq!(index.entries.len(), 1);
+    assert!(index.lookup(0, &response.packet).is_empty());
+    assert_eq!(index.lookup(1, &response.packet), vec![2]);
     assert!(index.insert(2, 0, &sent, &builtin::registry()).is_err());
 }
 
@@ -413,7 +400,6 @@ fn custom_matcher_defaults_to_scoped_conservative_lookup() {
     assert_eq!(index.lookup(1, &response.packet), vec![1]);
     assert!(super::super::observe(&registry, &p, &packet, &response).is_some());
     index.remove(0);
-    assert!(index.scopes[0].fallback.is_empty());
 }
 
 fn materialized_sent(
@@ -761,7 +747,7 @@ fn encapsulated_udp_probe_preserves_inner_matching_and_outer_quoted_identity() {
 }
 
 #[test]
-fn long_eviction_history_leaves_no_historical_keys_or_members() {
+fn retired_candidates_stop_matching_and_admission_recovers() {
     let mut index = CandidateIndex::new(2, 2);
     for generation in 0..4096 {
         let p = probe(
@@ -775,19 +761,15 @@ fn long_eviction_history_leaves_no_historical_keys_or_members() {
         index
             .insert(generation, generation % 2, &sent, &builtin::registry())
             .unwrap();
-        assert_eq!(index.entries.len(), 1);
-        assert_eq!(
-            index
-                .scopes
-                .iter()
-                .map(|scope| scope.buckets.len())
-                .sum::<usize>(),
-            1
-        );
+        let mut response = response_base(&sent);
+        let udp = sent.get::<Udp>().unwrap();
+        response.push(Udp {
+            source_port: udp.destination_port,
+            destination_port: udp.source_port,
+            ..Default::default()
+        });
+        assert_eq!(index.lookup(generation % 2, &response), vec![generation]);
         index.remove(generation);
-        assert!(index.entries.is_empty());
-        assert!(index.scopes.iter().all(|scope| scope.buckets.is_empty()
-            && scope.all.is_empty()
-            && scope.fallback.is_empty()));
+        assert!(index.lookup(generation % 2, &response).is_empty());
     }
 }

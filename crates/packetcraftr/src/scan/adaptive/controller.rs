@@ -12,7 +12,7 @@ use crate::target::{ResolvedZone, SelectedAddress};
 mod settlement;
 
 use super::estimator::Estimator;
-use super::work::{Endpoint, Operations, Selection, Slot, Wave, Work};
+use super::work::{Endpoint, Selection, Slot, Wave, Work};
 use super::{Adaptive, Ceilings, Condition, HostIdentity, Scheduling, SchedulingMode};
 
 pub(super) const CITED_SEQUENCES: usize = 8;
@@ -241,7 +241,6 @@ impl Controller {
             first_sequence,
             host_count,
             canceled_responses: 0,
-            operations: Operations::starting(unfinished),
         };
         for slot in 0..work.slots.len() {
             self.refresh_slot(&mut work, slot, now);
@@ -258,14 +257,11 @@ impl Controller {
     fn refresh_slot(&self, work: &mut Work, index: usize, now: Instant) {
         let slot = &mut work.slots[index];
         work.runnable.remove(&index);
-        work.operations.ready();
         if let Some(wake) = slot.wake.take() {
             work.wakes.remove(&(wake, index));
-            work.operations.time();
         }
         if let Some(expiration) = slot.expiration.take() {
             work.expirations.remove(&(expiration, index));
-            work.operations.time();
         }
         if slot.unfinished == 0 {
             return;
@@ -274,7 +270,6 @@ impl Controller {
         if let Some(started) = host.first_admission {
             let expiration = started + self.config.host_timeout;
             work.expirations.insert((expiration, index));
-            work.operations.time();
             slot.expiration = Some(expiration);
         }
         if host.min_gap > Duration::ZERO && host.uncommitted > 0 {
@@ -284,7 +279,6 @@ impl Controller {
         let ready_time = (!slot.ready.is_empty()).then(|| gap.unwrap_or(now));
         if ready_time.is_some_and(|ready| ready <= now) {
             work.runnable.insert(index);
-            work.operations.ready();
         }
         // Delayed retries must wake even while later first attempts are ready:
         // on promotion the endpoint's original index restores deterministic order.
@@ -299,7 +293,6 @@ impl Controller {
             .min();
         if let Some(wake) = wake {
             work.wakes.insert((wake, index));
-            work.operations.time();
             slot.wake = Some(wake);
         }
     }
@@ -310,7 +303,6 @@ impl Controller {
                 break;
             }
             work.expirations.pop_first();
-            work.operations.time();
             let slot = &mut work.slots[index];
             slot.expiration = None;
             let remaining = slot.unfinished;
@@ -325,8 +317,6 @@ impl Controller {
             slot.unfinished = 0;
             slot.ready.clear();
             slot.delayed.clear();
-            work.operations.ready();
-            work.operations.time();
             work.unfinished = work.unfinished.saturating_sub(remaining);
             work.canceled_responses = work.canceled_responses.saturating_add(canceled);
             if remaining > 0 {
@@ -339,14 +329,11 @@ impl Controller {
                 break;
             }
             work.wakes.pop_first();
-            work.operations.time();
             let slot = &mut work.slots[index];
             slot.wake = None;
             while slot.delayed.first().is_some_and(|(ready, _)| *ready <= now) {
                 let (_, endpoint) = slot.delayed.pop_first().expect("due retry exists");
                 slot.ready.insert(endpoint);
-                work.operations.ready();
-                work.operations.time();
             }
             self.refresh_slot(work, index, now);
         }
@@ -384,15 +371,11 @@ impl Controller {
             let host = slot.host;
             let Some(endpoint_index) = slot.ready.pop_first() else {
                 work.runnable.remove(&slot_index);
-                work.operations.ready();
                 continue;
             };
-            work.operations.discovery();
-            work.operations.ready();
             held.push((slot_index, endpoint_index));
             if slot.ready.is_empty() || self.hosts[host].min_gap > Duration::ZERO {
                 work.runnable.remove(&slot_index);
-                work.operations.ready();
                 suppressed.push(slot_index);
             }
             let host_deadline = self.hosts[host]
@@ -405,7 +388,6 @@ impl Controller {
             if host_remaining.is_zero() {
                 self.mark_incomplete(host);
                 work.runnable.remove(&slot_index);
-                work.operations.ready();
                 suppressed.push(slot_index);
                 continue;
             }
@@ -435,11 +417,9 @@ impl Controller {
         }
         for (slot, endpoint) in held {
             work.slots[slot].ready.insert(endpoint);
-            work.operations.ready();
         }
         for slot in suppressed {
             work.runnable.insert(slot);
-            work.operations.ready();
         }
         let next_ready = work
             .wakes
@@ -459,7 +439,6 @@ impl Controller {
         let slot = &mut work.slots[selection.slot];
         slot.endpoints[selection.endpoint].pending = true;
         slot.ready.remove(&selection.endpoint);
-        work.operations.ready();
         *self.cohort_members.entry(selection.cohort).or_default() += 1;
         self.host_started(selection.host, selection.selected_at);
         self.hosts[selection.host].uncommitted += 1;

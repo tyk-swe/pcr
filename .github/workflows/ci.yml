@@ -20,6 +20,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  mutations:
+    if: github.event_name != 'push'
+    uses: ./.github/workflows/mutation.yml
+    with:
+      base: ${{ github.event.pull_request.base.sha || '' }}
+
   tooling:
     name: Python unit tests
     runs-on: ubuntu-24.04

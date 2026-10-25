@@ -1,0 +1,13 @@
+[tools]
+cargo-mutants = "27.1.0"
+cosmic-ray = "8.7.0"
+
+[python.modules]
+"scripts/build-manifest.py" = ["scripts/tests/test_build_manifest.py"]
+"scripts/release_assets.py" = ["scripts/tests/test_release_assets.py"]
+"scripts/script_support.py" = ["scripts/tests/test_script_support.py"]
+"examples/consumers/forwarding.py" = ["scripts/tests/test_forwarding_consumer.py"]
+"scripts/mutation_scope.py" = ["scripts/tests/test_mutation.py"]
+"scripts/mutation_results.py" = ["scripts/tests/test_mutation.py"]
+"scripts/run_mutation.py" = ["scripts/tests/test_mutation.py"]
+

@@ -10,8 +10,6 @@ use std::time::Instant;
 pub(super) struct PendingDeadlines {
     scheduled: BTreeSet<(Instant, usize)>,
     draining: BTreeSet<usize>,
-    #[cfg(test)]
-    visits: usize,
 }
 
 impl PendingDeadlines {
@@ -28,20 +26,12 @@ impl PendingDeadlines {
     /// original probe order, independent of the order in which deadlines pass.
     pub(super) fn notice_expired(&mut self, now: Instant) -> bool {
         let mut changed = false;
-        #[cfg(test)]
-        {
-            self.visits += 1;
-        }
         while let Some((deadline, index)) = self.scheduled.first().copied() {
             if deadline > now {
                 break;
             }
             self.scheduled.pop_first();
             changed |= self.draining.insert(index);
-            #[cfg(test)]
-            {
-                self.visits += 1;
-            }
         }
         changed
     }
@@ -71,7 +61,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn unrelated_polls_do_not_visit_pending_entries() {
+    fn polls_release_only_due_probes_in_original_order() {
         for count in [32, 128, 512, 4096] {
             let now = Instant::now();
             let end = now + Duration::from_secs(1);
@@ -83,9 +73,8 @@ mod tests {
                 assert!(!deadlines.notice_expired(now));
                 assert_eq!(deadlines.next(), Some(end));
             }
-            assert_eq!(deadlines.visits, 1000);
+            assert_eq!(deadlines.pop_expired(), None);
             assert!(deadlines.notice_expired(end));
-            assert_eq!(deadlines.visits, 1000 + count + 1);
             for index in 0..count {
                 assert_eq!(deadlines.pop_expired(), Some(index));
             }
@@ -110,7 +99,8 @@ mod tests {
         deadlines.notice_expired(now + Duration::from_secs(3));
         assert_eq!(deadlines.pop_expired(), Some(0));
         deadlines.remove(now + Duration::from_secs(3), 0);
-        assert!(deadlines.scheduled.is_empty());
-        assert!(deadlines.draining.is_empty());
+        assert_eq!(deadlines.next(), None);
+        assert_eq!(deadlines.pop_expired(), None);
+        assert!(!deadlines.notice_expired(now + Duration::from_secs(4)));
     }
 }

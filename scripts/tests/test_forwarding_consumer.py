@@ -5,6 +5,7 @@ import copy
 import io
 import json
 import unittest
+from unittest.mock import patch
 
 from support import ROOT, load_script
 
@@ -20,7 +21,135 @@ def consume(value, exit_code=0):
 
 
 class ForwardingConsumerTests(unittest.TestCase):
-    def test_retained_examples_remain_valid(self):
+    def test_retained_checks_must_match_declarations(self) -> None:
+        for mismatch in ('field', 'kind', 'missing', 'extra'):
+            value = envelope()
+            checks = value['result']['matches'][0]['checks']
+            if mismatch == 'field':
+                checks[0]['check']['field'] += '.undeclared'
+            elif mismatch == 'kind':
+                checks[0]['check']['kind'] = 'preserve_presence'
+            elif mismatch == 'missing':
+                checks.clear()
+            else:
+                checks.append(copy.deepcopy(checks[0]))
+            with self.subTest(mismatch=mismatch), self.assertRaises(consumer.ContractError):
+                consume(value)
+
+    def test_rule_budgets_include_every_declaration_and_utf8_literal(self) -> None:
+        for category in ('identity', 'preserve', 'preserve_presence', 'expect', 'expect_absent'):
+            rules = dict(identity=[], preserve=[], preserve_presence=[], expect=[], expect_absent=[])
+            declaration = {'field': 'ip.ttl', 'value': 'é'} if category == 'expect' else 'ip.ttl'
+            with patch.object(consumer, 'MAX_RULE_DECLARATIONS', 2):
+                rules[category] = [declaration, declaration]
+                consumer.validate_rule_budget(rules)
+                rules[category].append(declaration)
+                with self.subTest(category=category), self.assertRaises(consumer.ContractError):
+                    consumer.validate_rule_budget(rules)
+            rules[category] = [declaration]
+            size = len('ip.ttl'.encode()) + (1 + len('é'.encode()) if category == 'expect' else 0)
+            with patch.object(consumer, 'MAX_RULE_DECLARATION_BYTES', size):
+                consumer.validate_rule_budget(rules)
+            with patch.object(consumer, 'MAX_RULE_DECLARATION_BYTES', size - 1):
+                with self.subTest(category=category), self.assertRaises(consumer.ContractError):
+                    consumer.validate_rule_budget(rules)
+
+    def test_capture_timestamps_preserve_the_full_signed_range(self) -> None:
+        for seconds in (-(2**63), -(2**32), 2**32, 2**63 - 1):
+            value = envelope()
+            value['result']['matches'][0]['ingress']['timestamp']['unix_seconds'] = seconds
+            with self.subTest(seconds=seconds):
+                report = consume(value)['report']
+                self.assertEqual(report['matches'][0]['ingress']['timestamp']['unix_seconds'], seconds)
+        for seconds in (-(2**63) - 1, 2**63):
+            value = envelope()
+            value['result']['matches'][0]['ingress']['timestamp']['unix_seconds'] = seconds
+            with self.subTest(seconds=seconds), self.assertRaises(consumer.ContractError):
+                consume(value)
+
+    def test_decoding_rejects_other_commands_and_preserves_additive_fields(self) -> None:
+        value = envelope()
+        value['future'] = {'name': 'é', 'number': 1}
+        self.assertEqual(consumer.decode(json.dumps(value).encode()), value)
+        for command in ('analyze', 'verify-forwarding-other', '', None):
+            value['command'] = command
+            with self.subTest(command=command), self.assertRaises(consumer.ContractError):
+                consumer.decode(json.dumps(value).encode())
+
+    def test_typed_evidence_validates_bounds_and_preserves_values(self) -> None:
+        for kind, value, expected in (
+            ('bool', False, False), ('unsigned', 2**64 - 1, 2**64 - 1),
+            ('signed', -(2**63), -(2**63)), ('signed', 2**63 - 1, 2**63 - 1),
+            ('text', 'é', 'é'), ('bytes', [0, 255], (0, 255)),
+            ('mac', [0, 1, 2, 3, 4, 255], (0, 1, 2, 3, 4, 255)),
+        ):
+            with self.subTest(kind=kind, value=value):
+                self.assertEqual(consumer.field_value({'type': kind, 'value': value}), (kind, expected))
+        for kind, value in (
+            ('bool', 0), ('unsigned', -1), ('unsigned', 2**64), ('unsigned', True),
+            ('signed', -(2**63) - 1), ('signed', 2**63), ('signed', False),
+            ('text', '\ud800'), ('bytes', [-1]), ('bytes', [256]), ('bytes', [True]),
+            ('mac', [0] * 5), ('mac', [0] * 7), ('ipv4', '::1'),
+            ('ipv6', '192.0.2.1'), ('ipv6', 'fe80::1%eth0'), ('unknown', 1),
+        ):
+            with self.subTest(kind=kind, value=value), self.assertRaises(consumer.ContractError):
+                consumer.field_value({'type': kind, 'value': value})
+
+    def test_json_envelopes_reject_ambiguous_and_invalid_input(self) -> None:
+        prefix = json.dumps(envelope()).encode()[:-1]
+        for value in (
+            prefix + b',"schema":"packetcraftr.output/v1"}',
+            prefix + b',"extra":{"duplicate":0,"duplicate":0}}',
+            prefix + b',"extra":NaN}', prefix + b',"extra":1e9999}',
+            prefix + b',"extra":"\\ud800"}', b'\xff',
+        ):
+            with self.subTest(value=value), self.assertRaises(consumer.ContractError):
+                consumer.decode(value)
+
+    def test_presence_and_absence_outcomes_follow_readable_states(self) -> None:
+        for actual in ('observed', 'absent'):
+            for expected in ('observed', 'absent'):
+                check = dict(check={'kind': 'preserve_presence'}, actual_state=actual,
+                             expected_state=expected,
+                             actual={'type': 'unsigned', 'value': 1} if actual == 'observed' else None,
+                             expected={'type': 'unsigned', 'value': 2} if expected == 'observed' else None,
+                             outcome='satisfied' if actual == expected else 'violated')
+                consumer.validate_check(check)
+                check['outcome'] = 'violated' if check['outcome'] == 'satisfied' else 'satisfied'
+                with self.subTest(actual=actual, expected=expected), self.assertRaises(consumer.ContractError):
+                    consumer.validate_check(check)
+            check = dict(check={'kind': 'expect_absent'}, actual_state=actual,
+                         expected_state=None,
+                         actual={'type': 'unsigned', 'value': 1} if actual == 'observed' else None,
+                         outcome='satisfied' if actual == 'absent' else 'violated')
+            consumer.validate_check(check)
+            check['outcome'] = 'violated' if check['outcome'] == 'satisfied' else 'satisfied'
+            with self.assertRaises(consumer.ContractError):
+                consumer.validate_check(check)
+
+    def test_stream_enforces_contiguous_sequence_terminal_and_exit_status(self) -> None:
+        terminal = envelope()
+        encoded = json.dumps(terminal).encode() + b'\n'
+        self.assertEqual(consumer.consume(io.BytesIO(encoded), 'ndjson', 0)['verdict'], 'pass')
+        for invalid in (b'', encoded.rstrip(b'\n'), encoded + encoded):
+            with self.subTest(invalid=invalid), self.assertRaises(consumer.ContractError):
+                consumer.consume(io.BytesIO(invalid), 'ndjson', 0)
+        for exit_code in (-1, 1, True):
+            with self.subTest(exit_code=exit_code), self.assertRaises(consumer.ContractError):
+                consumer.consume(io.BytesIO(encoded), 'ndjson', exit_code)
+        terminal['sequence'] += 1
+        with self.assertRaises(consumer.ContractError):
+            consume(terminal)
+
+    def test_record_and_stream_limits_accept_the_boundary_and_reject_overflow(self) -> None:
+        encoded = json.dumps(envelope()).encode() + b'\n'
+        for limit in ('MAX_RECORD', 'MAX_STREAM'):
+            with patch.object(consumer, limit, len(encoded)):
+                self.assertEqual(consumer.consume(io.BytesIO(encoded), 'ndjson', 0)['verdict'], 'pass')
+            with patch.object(consumer, limit, len(encoded) - 1), self.assertRaises(consumer.ContractError):
+                consumer.consume(io.BytesIO(encoded), 'ndjson', 0)
+
+    def test_retained_examples_remain_valid(self) -> None:
         self.assertEqual(consume(envelope())['verdict'], 'pass')
         for name in ('success', 'complete', 'error'):
             path = ROOT / f'examples/documents/output-verify-forwarding-{name}.json'
@@ -30,7 +159,7 @@ class ForwardingConsumerTests(unittest.TestCase):
             with self.subTest(name=name):
                 consumer.consume(io.BytesIO(json.dumps(value).encode() + b'\n'), mode, code)
 
-    def test_malformed_retained_evidence_is_rejected(self):
+    def test_malformed_retained_evidence_is_rejected(self) -> None:
         mutations = {
             'frame zero': lambda r: r['matches'][0]['ingress'].update(frame=0),
             'frame outside capture': lambda r: r['matches'][0]['egress'].update(frame=3),
@@ -65,7 +194,7 @@ class ForwardingConsumerTests(unittest.TestCase):
                 with self.assertRaises(consumer.ContractError):
                     consume(value)
 
-    def test_identity_groups_are_unique_even_with_additive_wrapper_metadata(self):
+    def test_identity_groups_are_unique_even_with_additive_wrapper_metadata(self) -> None:
         value = envelope()
         first, second = value['result']['matches']
         second['key'] = copy.deepcopy(first['key'])
@@ -73,7 +202,7 @@ class ForwardingConsumerTests(unittest.TestCase):
         with self.assertRaisesRegex(consumer.ContractError, 'identity occurs'):
             consume(value)
 
-    def test_object_identity_is_hashable_and_ignores_member_order(self):
+    def test_object_identity_is_hashable_and_ignores_member_order(self) -> None:
         value = envelope()
         first, second = value['result']['matches']
         a = {'type': 'unsigned', 'value': 1}
@@ -84,7 +213,7 @@ class ForwardingConsumerTests(unittest.TestCase):
         with self.assertRaisesRegex(consumer.ContractError, 'identity occurs'):
             consume(value)
 
-    def test_utf8_scalar_and_finite_numbers_apply_to_additive_fields(self):
+    def test_utf8_scalar_and_finite_numbers_apply_to_additive_fields(self) -> None:
         for extra in ('1e9999', '"\\ud800"', '{"\\ud800": 0}'):
             data = json.dumps(envelope()).encode()[:-1] + b', "future": ' + extra.encode() + b'}'
             with self.subTest(extra=extra), self.assertRaises(consumer.ContractError):
@@ -93,7 +222,7 @@ class ForwardingConsumerTests(unittest.TestCase):
             with self.subTest(encoding=encoding), self.assertRaises(consumer.ContractError):
                 consumer.decode(json.dumps(envelope()).encode(encoding))
 
-    def test_explicit_depth_and_record_limits(self):
+    def test_explicit_depth_and_record_limits(self) -> None:
         value = envelope()
         value['future'] = json.loads('[' * 70 + '0' + ']' * 70)
         with self.assertRaises(consumer.ContractError):
@@ -102,18 +231,18 @@ class ForwardingConsumerTests(unittest.TestCase):
         with patch.object(consumer, 'MAX_RECORD', 10), self.assertRaises(consumer.ContractError):
             consumer.decode(json.dumps(envelope()).encode())
 
-    def test_additive_metadata_and_pre_epoch_timestamp(self):
+    def test_additive_metadata_and_pre_epoch_timestamp(self) -> None:
         value = envelope()
         value['future'] = {'unicode': '\u65e5\u672c', 'finite': 1.5}
         value['result']['matches'][0]['ingress']['timestamp']['unix_seconds'] = -1
         self.assertEqual(consume(value)['verdict'], 'pass')
 
-    def test_invalid_exit_codes(self):
+    def test_invalid_exit_codes(self) -> None:
         for code in (False, True, -1, 0.0):
             with self.subTest(code=code), self.assertRaises(consumer.ContractError):
                 consume(envelope(), code)
 
-    def test_nonterminal_error_cannot_precede_success(self):
+    def test_nonterminal_error_cannot_precede_success(self) -> None:
         value = envelope()
         event = dict(value, event='event', status='error', sequence=0)
         value['sequence'] = 1
@@ -121,21 +250,21 @@ class ForwardingConsumerTests(unittest.TestCase):
         with self.assertRaises(consumer.ContractError):
             consumer.consume(io.BytesIO(stream.encode()), 'ndjson', 0)
 
-    def test_every_check_kind_validates_its_typed_operands(self):
+    def test_every_check_kind_validates_its_typed_operands(self) -> None:
         for kind in ('preserve_presence', 'expect', 'expect_absent'):
             check = dict(check={'kind': kind}, outcome='violated', actual_state='observed',
                          expected_state=None, actual={'type': 'unsigned', 'value': True})
             with self.subTest(kind=kind), self.assertRaises(consumer.ContractError):
                 consumer.validate_check(check)
 
-    def test_observed_and_absent_states_agree_with_values(self):
+    def test_observed_and_absent_states_agree_with_values(self) -> None:
         for state, actual in (('observed', None), ('absent', {'type': 'unsigned', 'value': 1})):
             check = dict(check={'kind': 'expect_absent'}, outcome='unevaluable',
                          actual_state=state, expected_state=None, actual=actual)
             with self.subTest(state=state), self.assertRaises(consumer.ContractError):
                 consumer.validate_check(check)
 
-    def test_evaluable_checks_cannot_be_marked_unevaluable(self):
+    def test_evaluable_checks_cannot_be_marked_unevaluable(self) -> None:
         check = envelope()['result']['matches'][0]['checks'][0]
         check['outcome'] = 'unevaluable'
         with self.assertRaises(consumer.ContractError):
@@ -143,13 +272,13 @@ class ForwardingConsumerTests(unittest.TestCase):
         check['actual_state'] = 'truncated'
         consumer.validate_check(check)  # A partial value may legitimately remain attached.
 
-    def test_expectations_do_not_invent_ingress_states(self):
+    def test_expectations_do_not_invent_ingress_states(self) -> None:
         check = dict(check={'kind': 'expect'}, outcome='satisfied', actual_state='observed',
                      expected_state='observed', actual={'type': 'unsigned', 'value': 1})
         with self.assertRaises(consumer.ContractError):
             consumer.validate_check(check)
 
-    def test_visible_reordering_with_omitted_pairs(self):
+    def test_visible_reordering_with_omitted_pairs(self) -> None:
         value = envelope()
         report = value['result']
         a, b = report['matches']
@@ -162,7 +291,7 @@ class ForwardingConsumerTests(unittest.TestCase):
         with self.assertRaises(consumer.ContractError):
             consume(value)
 
-    def test_violation_evidence_is_not_an_unchecked_side_channel(self):
+    def test_violation_evidence_is_not_an_unchecked_side_channel(self) -> None:
         value = envelope()
         report = value['result']
         pair = report['matches'][0]
@@ -185,7 +314,7 @@ class ForwardingConsumerTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(consumer.ContractError):
                 consume(mutated, 1)
 
-    def test_ambiguous_group_and_omission_census(self):
+    def test_ambiguous_group_and_omission_census(self) -> None:
         value = envelope()
         report = value['result']
         report['verdict'] = 'inconclusive'

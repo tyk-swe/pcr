@@ -119,7 +119,7 @@ impl Accumulator {
         self.retained_record_identities.insert(identity);
     }
 
-    pub(super) fn drain_events(&mut self) -> std::vec::Drain<'_, super::Event> {
+    pub(crate) fn drain_events(&mut self) -> std::vec::Drain<'_, super::Event> {
         self.pending_events.drain(..)
     }
 

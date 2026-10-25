@@ -136,21 +136,27 @@ enum ScanFailure {
 }
 
 #[cfg(test)]
-mod improvement_tests {
+mod tests {
     use super::*;
     #[test]
     fn crossed_delimiters_fail_at_the_crossing_and_quotes_are_preserved() {
-        for (input, offset) in [("([)]", 2), ("{[}]", 2), ("[(])", 2)] {
+        for (input, character) in [("([)]", ')'), ("{[}]", '}'), ("[(])", ']')] {
             assert!(
-                matches!(split_top_level_bounded(0, input, ',', None), Err(Error::Syntax { offset: found, .. }) if found == offset)
+                matches!(split_top_level_bounded(5, input, ',', None), Err(Error::Syntax { offset: 7, message })
+                    if message == format!("unexpected '{character}'"))
             );
         }
         assert_eq!(
-            split_top_level_bounded(0, r#"([{}]),"([)]",x"#, ',', None)
-                .unwrap()
-                .len(),
-            3
+            split_top_level_bounded(5, r#"([{}]),"([)]",x"#, ',', None).unwrap(),
+            [(5, "([{}])"), (12, r#""([)]""#), (19, "x")]
         );
-        assert!(split_top_level_bounded(0, r#""escaped\"([)]""#, ',', None).is_ok());
+        assert_eq!(
+            split_top_level_bounded(5, r#""escaped\"([)]""#, ',', None).unwrap(),
+            [(5, r#""escaped\"([)]""#)]
+        );
+        assert_eq!(
+            split_top_level_bounded(5, r#"("β"),x"#, ',', None).unwrap(),
+            [(5, r#"("β")"#), (12, "x")]
+        );
     }
 }

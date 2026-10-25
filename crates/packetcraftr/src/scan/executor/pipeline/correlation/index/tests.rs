@@ -299,15 +299,21 @@ fn direct_and_quoted_supported_families_match_the_conservative_oracle() {
     for (n, packet) in packets.iter().enumerate() {
         index.insert(n, 0, packet, &builtin::registry()).unwrap();
     }
-    for (probe, packet) in probes.iter().zip(&packets) {
-        for response in [
-            reply(probe, packet),
-            quote(packet, None),
-            quote(packet, Some(if probe.address.is_ipv4() { 28 } else { 48 })),
+    for (position, (probe, packet)) in probes.iter().zip(&packets).enumerate() {
+        for (short, response) in [
+            (false, reply(probe, packet)),
+            (false, quote(packet, None)),
+            (
+                true,
+                quote(packet, Some(if probe.address.is_ipv4() { 28 } else { 48 })),
+            ),
         ] {
-            let expected = conservative(&probes, &packets, &response);
-            // Short SCTP INIT quotes intentionally fail the authoritative
-            // chunk/checksum requirements; both paths must retain that result.
+            let expected = if short && matches!(probe.endpoint, Endpoint::Sctp { .. }) {
+                vec![]
+            } else {
+                vec![position]
+            };
+            assert_eq!(conservative(&probes, &packets, &response), expected);
             assert_eq!(observed(&index, &probes, &packets, &response, 0), expected);
         }
     }
@@ -619,19 +625,23 @@ fn ipv6_extension_ip_replies_and_truncated_or_bad_integrity_packets_use_the_same
         if let Ok(decoded) =
             decode::Dissector::new(builtin::registry()).decode(frame, decode::Options::default())
         {
-            assert_eq!(
+            assert!(
                 observed(
                     &index,
                     std::slice::from_ref(&p),
                     std::slice::from_ref(&sent),
                     &decoded,
                     0
-                ),
+                )
+                .is_empty()
+            );
+            assert!(
                 conservative(
                     std::slice::from_ref(&p),
                     std::slice::from_ref(&sent),
                     &decoded
                 )
+                .is_empty()
             );
         }
     }
@@ -661,7 +671,8 @@ fn unknown_custom_decoded_identity_and_unrecognized_tunnels_use_conservative_fal
     assert_eq!(index.lookup(0, &response.packet), vec![0]);
     assert!(super::super::observe(&registry, &p, &sent, &response).is_some());
 
-    let mut unrecognized = request(&probe(Endpoint::Tcp { port: 1000 }, 2, false));
+    let tunnel_probe = probe(Endpoint::Tcp { port: 1000 }, 2, false);
+    let mut unrecognized = request(&tunnel_probe);
     unrecognized
         .insert(1, packetcraftr_core::protocol::tunnel::Gre::default())
         .unwrap();
@@ -669,10 +680,8 @@ fn unknown_custom_decoded_identity_and_unrecognized_tunnels_use_conservative_fal
     index
         .insert(0, 0, &unrecognized, &builtin::registry())
         .unwrap();
-    assert_eq!(
-        index.scopes[0].fallback.iter().copied().collect::<Vec<_>>(),
-        vec![0]
-    );
+    let response = reply(&tunnel_probe, &unrecognized);
+    assert_eq!(index.lookup(0, &response.packet), vec![0]);
 }
 
 #[test]
@@ -768,8 +777,28 @@ fn retired_candidates_stop_matching_and_admission_recovers() {
             destination_port: udp.source_port,
             ..Default::default()
         });
-        assert_eq!(index.lookup(generation % 2, &response), vec![generation]);
+        let scope = generation % 2;
+        let other = generation + 4096;
+        let replacement = generation + 8192;
+        index
+            .insert(other, 1 - scope, &sent, &builtin::registry())
+            .unwrap();
+        assert!(
+            index
+                .insert(replacement, scope, &sent, &builtin::registry())
+                .is_err()
+        );
+        assert_eq!(index.lookup(scope, &response), vec![generation]);
         index.remove(generation);
-        assert!(index.lookup(generation % 2, &response).is_empty());
+        assert!(index.lookup(scope, &response).is_empty());
+        assert_eq!(index.lookup(1 - scope, &response), vec![other]);
+        index
+            .insert(replacement, scope, &sent, &builtin::registry())
+            .unwrap();
+        assert_eq!(index.lookup(scope, &response), vec![replacement]);
+        index.remove(other);
+        index.remove(replacement);
+        assert!(index.lookup(scope, &response).is_empty());
+        assert!(index.lookup(1 - scope, &response).is_empty());
     }
 }

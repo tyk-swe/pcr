@@ -230,6 +230,40 @@ mod tests {
             assert_eq!(error.classification.kind, Kind::Usage);
             assert!(error.message.contains(&path.display().to_string()));
             assert!(!error.causes.is_empty());
+            if bytes == b"\xff" {
+                let input = std::fs::read(&path).unwrap();
+                let cause = String::from_utf8(input).unwrap_err().to_string();
+                assert!(error.causes.contains(&cause));
+            }
         }
+        let document = serde_json::json!({
+            "schema": "packetcraftr.packet/v1",
+            "layers": [{"protocol": "raw", "fields": {"bytes": {"type": "bytes", "value": [0, 60, 255]}}}]
+        });
+        std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        let packet = resolve_recipe(None, Some(path), &registry, 16).unwrap();
+        assert_eq!(
+            packet
+                .iter()
+                .map(|layer| layer.protocol_id().as_str())
+                .collect::<Vec<_>>(),
+            ["raw"]
+        );
+        assert_eq!(
+            packet.get::<core::layer::Raw>().unwrap().bytes.as_ref(),
+            b"\0<\xff"
+        );
+        let packet = resolve_recipe(Some("raw(text=fixture)".into()), None, &registry, 16).unwrap();
+        assert_eq!(
+            packet
+                .iter()
+                .map(|layer| layer.protocol_id().as_str())
+                .collect::<Vec<_>>(),
+            ["raw"]
+        );
+        assert_eq!(
+            packet.get::<core::layer::Raw>().unwrap().bytes.as_ref(),
+            b"fixture"
+        );
     }
 }

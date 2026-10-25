@@ -288,15 +288,11 @@ mod network_improvements {
     }
     #[test]
     fn invalid_group_never_calls_injected_capture_provider() {
-        struct RefuseCalls(std::sync::atomic::AtomicUsize);
+        struct RefuseCalls;
         impl Provider for RefuseCalls {
             type Capture = Box<dyn Session>;
             fn arm_capture(&self, _: &Request, _: &Deadline) -> Result<Self::Capture, Error> {
-                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Err(Error::Capture {
-                    message: "unexpected provider activation".into(),
-                    source: None,
-                })
+                panic!("invalid capture group activated its provider")
             }
         }
         for identity in [
@@ -309,7 +305,7 @@ mod network_improvements {
                 index: 0,
             },
         ] {
-            let provider = RefuseCalls(std::sync::atomic::AtomicUsize::new(0));
+            let provider = RefuseCalls;
             let request = request();
             let group = GroupRequest {
                 interfaces: vec![identity],
@@ -321,12 +317,21 @@ mod network_improvements {
             let result = Group::new(&group).and_then(|mut group| {
                 group.arm(&provider, &Deadline::new(std::time::Duration::from_secs(1)))
             });
-            assert!(result.is_err());
-            assert_eq!(provider.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+            assert!(matches!(result, Err(Error::InvalidCaptureGroup { .. })));
         }
     }
     #[test]
     fn incomplete_capture_identities_and_nul_are_rejected() {
+        let valid = request();
+        valid.validate().unwrap();
+        Group::<Box<dyn Session>>::new(&GroupRequest {
+            interfaces: vec![valid.interface],
+            limits: valid.limits,
+            filter: None,
+            promiscuous: false,
+            native: valid.native,
+        })
+        .unwrap();
         for id in [
             InterfaceId {
                 name: String::new(),

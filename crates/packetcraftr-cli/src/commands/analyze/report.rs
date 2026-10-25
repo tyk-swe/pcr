@@ -161,8 +161,21 @@ mod tests {
 
     #[test]
     fn redacts_cookies() {
-        let mut v = serde_json::json!({"cookies":[{"value":"secret","http_only":false}],"Set-Cookie":"sid=secret"});
+        let mut v = serde_json::json!({
+            "cookies":[{"name":"sid","value":"secret","http_only":false}],
+            "Set-Cookie":"sid=secret",
+            "nested":{"same_site":"Strict","value":"other-secret","domain":"example.test"},
+            "other":{"value":"visible"},"summary":"keep"
+        });
         super::redact(&mut v);
-        assert!(!v.to_string().contains("secret"));
+        assert_eq!(
+            v,
+            serde_json::json!({
+                "cookies":[{"name":"sid","value":"[redacted]","http_only":false}],
+                "Set-Cookie":"[redacted]",
+                "nested":{"same_site":"Strict","value":"[redacted]","domain":"example.test"},
+                "other":{"value":"visible"},"summary":"keep"
+            })
+        );
     }
 }

@@ -256,6 +256,7 @@ mod tests {
     use bytes::Bytes;
     use packetcraftr_core::protocol::application::dns::{Dns, Limits};
 
+    // https://datatracker.ietf.org/doc/html/rfc1035#section-4.1 checked 2026-10-25.
     const WIRE: &[u8] = &[
         0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x03, b'w', b'w',
         b'w', 0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 0x03, b'c', b'o', b'm', 0x00, 0x00,
@@ -265,18 +266,67 @@ mod tests {
     ];
 
     #[test]
-    fn fields_serialize_identically_to_the_eager_map() {
+    fn fields_publish_the_expected_dns_question_and_compressed_answers() {
         let dns = Dns::from_wire_with_limits(Bytes::from_static(WIRE), Limits::default()).unwrap();
-        let map = Fields(dns.clone()).to_map();
-        assert!(!map.is_empty());
-        assert!(map.contains_key("answers"));
-        assert_eq!(
-            serde_json::to_string_pretty(&Fields(dns.clone())).unwrap(),
-            serde_json::to_string_pretty(&map).unwrap(),
-        );
-        assert_eq!(
-            serde_json::to_string(&Fields(dns)).unwrap(),
-            serde_json::to_string(&map).unwrap(),
-        );
+        let expected = serde_json::json!({
+            "id": {"type": "unsigned", "value": 0x1234},
+            "response": {"type": "bool", "value": true},
+            "opcode": {"type": "unsigned", "value": 0},
+            "authoritative_answer": {"type": "bool", "value": false},
+            "truncated": {"type": "bool", "value": false},
+            "recursion_desired": {"type": "bool", "value": true},
+            "recursion_available": {"type": "bool", "value": true},
+            "reserved": {"type": "bool", "value": false},
+            "authenticated_data": {"type": "bool", "value": false},
+            "checking_disabled": {"type": "bool", "value": false},
+            "rcode": {"type": "unsigned", "value": 0},
+            "question_count": {"type": "unsigned", "value": 1},
+            "answer_count": {"type": "unsigned", "value": 2},
+            "authority_count": {"type": "unsigned", "value": 0},
+            "additional_count": {"type": "unsigned", "value": 0},
+            "qname": {"type": "list", "value": [{"type": "text", "value": "www.example.com."}]},
+            "qtype": {"type": "list", "value": [{"type": "unsigned", "value": 1}]},
+            "qclass": {"type": "list", "value": [{"type": "unsigned", "value": 1}]},
+            "questions": {"type": "list", "value": [{"type": "object", "value": {
+                "name": {"type": "text", "value": "www.example.com."},
+                "type": {"type": "unsigned", "value": 1},
+                "class": {"type": "unsigned", "value": 1}
+            }}]},
+            "answers": {"type": "list", "value": [
+                {"type": "object", "value": {
+                    "owner": {"type": "text", "value": "www.example.com."},
+                    "type": {"type": "unsigned", "value": 5},
+                    "class": {"type": "unsigned", "value": 1},
+                    "ttl": {"type": "unsigned", "value": 300},
+                    "value": {"type": "object", "value": {
+                        "kind": {"type": "text", "value": "cname"},
+                        "name": {"type": "text", "value": "example.com."}
+                    }}
+                }},
+                {"type": "object", "value": {
+                    "owner": {"type": "text", "value": "example.com."},
+                    "type": {"type": "unsigned", "value": 1},
+                    "class": {"type": "unsigned", "value": 1},
+                    "ttl": {"type": "unsigned", "value": 300},
+                    "value": {"type": "object", "value": {
+                        "kind": {"type": "text", "value": "a"},
+                        "address": {"type": "ipv4", "value": "93.184.216.34"}
+                    }}
+                }}
+            ]},
+            "authorities": {"type": "list", "value": []},
+            "additionals": {"type": "list", "value": []}
+        });
+        let fields = Fields(dns);
+        for bytes in [
+            serde_json::to_vec(&fields).unwrap(),
+            serde_json::to_vec_pretty(&fields).unwrap(),
+            serde_json::to_vec(&fields.to_map()).unwrap(),
+        ] {
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+                expected
+            );
+        }
     }
 }

@@ -334,7 +334,15 @@ mod tests {
             (50, 2, 1, 2)
         );
         assert_eq!(diagnostics.len(), 2);
-        assert!(diagnostics.iter().all(|d| d.code.ends_with("_filtered")));
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|d| d.code)
+                .collect::<std::collections::BTreeSet<_>>(),
+            ["stats.protocols_filtered", "stats.conversations_filtered"]
+                .into_iter()
+                .collect()
+        );
     }
 
     #[test]

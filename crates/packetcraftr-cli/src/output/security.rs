@@ -107,6 +107,7 @@ mod tests {
 
     #[test]
     fn published_security_fields_and_nulls_are_frozen() {
+        let digest = "a".repeat(64);
         let mut report = library::Report::new("hunt");
         let mut finding = library::Finding::new(
             "ioc.match",
@@ -120,7 +121,7 @@ mod tests {
         report.findings.push(finding);
         report.sources.push(library::Source {
             path: "indicators.json".into(),
-            sha256: "abc".into(),
+            sha256: digest.clone(),
         });
         report.measurements.insert("frames_read".into(), 3.into());
         report.completeness.note("selected scope");
@@ -132,7 +133,7 @@ mod tests {
                 "evidence":{"value":"example.test"}, "remediation":"Review the evidence.", "complete":true
             }],
             "completeness":{"complete":false,"reasons":["selected scope"]},
-            "measurements":{"frames_read":3}, "sources":[{"path":"indicators.json","sha256":"abc"}]
+            "measurements":{"frames_read":3}, "sources":[{"path":"indicators.json","sha256":digest}]
         });
         assert_eq!(serde_json::to_value(&published).unwrap(), expected);
         assert_eq!(

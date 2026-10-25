@@ -90,4 +90,4 @@ pub use providers::{
 };
 
 #[cfg(test)]
-mod network_improvements;
+mod tests;

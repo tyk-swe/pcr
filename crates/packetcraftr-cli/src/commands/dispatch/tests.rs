@@ -54,23 +54,38 @@ fn generator_cancellation_maps_to_interrupt_status_after_diagnostic_write() {
     let invocation = invocation(Format::Text, Writer::default());
     invocation.cancellation.cancel();
     let error = invocation.cancellation.check().unwrap_err();
+    let reported = RefCell::new(Vec::new());
     let code = generation_exit(&invocation, Err(CliError::classified(error)), |error| {
-        assert_eq!(error.classification.code, "io.cancelled");
+        reported.borrow_mut().push(error.output_error());
         Ok(())
     });
-    assert_eq!(code, ExitCode::from(CANCELLED_EXIT_CODE));
+    assert_eq!(code, ExitCode::from(130));
+    let reports = reported.into_inner();
+    let [report] = reports.as_slice() else {
+        panic!("expected one cancellation diagnostic")
+    };
+    assert_eq!(report.code, "io.cancelled");
 }
 
 #[test]
 fn generator_diagnostic_write_failure_precedes_cancellation_status() {
     let invocation = invocation(Format::Text, Writer::default());
     invocation.cancellation.cancel();
+    let reported = RefCell::new(Vec::new());
     let code = generation_exit(
         &invocation,
         Err(CliError::new(Kind::Io, "cancelled operation")),
-        |_| Err(CliError::new(Kind::Io, "stderr closed")),
+        |error| {
+            reported.borrow_mut().push(error.output_error());
+            Err(CliError::new(Kind::Io, "stderr closed"))
+        },
     );
     assert_eq!(code, ExitCode::from(5));
+    let reports = reported.into_inner();
+    let [report] = reports.as_slice() else {
+        panic!("expected the attempted diagnostic")
+    };
+    assert_eq!(report.message, "cancelled operation");
 }
 
 #[test]
@@ -82,13 +97,14 @@ fn error_handling_json_reporting_failure_keeps_original_diagnostics() {
         vec!["original cause".into()],
     )
     .with_context(Some(Coordinate::SourceFrame(9)));
+    let reported = RefCell::new(Vec::new());
+    let mut primary = None;
     let code = command_failure_with(
         &invocation,
         Command::Build,
         error,
         |_, envelope| {
-            let document = serde_json::to_value(envelope).unwrap();
-            assert_eq!(document["error"]["context"]["source_frame"], 9);
+            primary = Some(serde_json::to_value(envelope).unwrap());
             Err(CliError::wrapping(
                 Kind::Io,
                 "write stdout failed",
@@ -96,15 +112,30 @@ fn error_handling_json_reporting_failure_keeps_original_diagnostics() {
             ))
         },
         |error| {
-            assert!(error.message.contains("original command failure"));
-            assert!(error.message.contains("write stdout failed"));
-            assert!(error.causes.iter().any(|cause| cause == "original cause"));
-            assert!(error.causes.iter().any(|cause| cause == "closed pipe"));
-            assert_eq!(error.context(), Some(Coordinate::SourceFrame(9)));
+            reported.borrow_mut().push(error.output_error());
             Ok(())
         },
     );
     assert_eq!(code, ExitCode::from(5));
+    let primary = primary.unwrap();
+    assert_eq!(primary["error"]["context"]["source_frame"], 9);
+    assert_eq!(primary["error"]["message"], "original command failure");
+    assert_eq!(
+        primary["error"]["causes"],
+        serde_json::json!(["original cause"])
+    );
+    let reports = reported.into_inner();
+    let [report] = reports.as_slice() else {
+        panic!("expected one fallback diagnostic")
+    };
+    assert!(report.message.contains("original command failure"));
+    assert!(report.message.contains("write stdout failed"));
+    assert!(report.causes.iter().any(|cause| cause == "original cause"));
+    assert!(report.causes.iter().any(|cause| cause == "closed pipe"));
+    assert_eq!(
+        serde_json::to_value(report.context).unwrap(),
+        serde_json::json!({"source_frame":9})
+    );
 }
 
 #[test]
@@ -126,19 +157,30 @@ fn error_handling_json_after_publication_uses_stderr_and_prioritizes_output_fail
         } else {
             CliError::new(Kind::Packet, "late failure")
         };
-        let reported = RefCell::new(false);
+        let reported = RefCell::new(Vec::new());
         let code = command_failure_with(
             &invocation,
             Command::Build,
             error,
             |_, _| panic!("must not append another JSON document"),
-            |_| {
-                *reported.borrow_mut() = true;
+            |error| {
+                reported.borrow_mut().push(error.output_error());
                 Ok(())
             },
         );
-        assert!(*reported.borrow());
         assert_eq!(code, ExitCode::from(expected));
+        let reports = reported.into_inner();
+        let [report] = reports.as_slice() else {
+            panic!("expected one stderr diagnostic")
+        };
+        assert_eq!(
+            report.message,
+            if output_failed {
+                "write failed"
+            } else {
+                "late failure"
+            }
+        );
     }
 }
 
@@ -151,30 +193,38 @@ fn error_handling_ndjson_cancellation_reports_one_terminal_record_or_io_failure(
         };
         let invocation = invocation(Format::Ndjson, writer.clone());
         invocation.cancellation.cancel();
+        let reported = RefCell::new(Vec::new());
         let code = command_failure_with(
             &invocation,
             Command::Build,
             CliError::new(Kind::Io, "cancelled operation"),
             |_, _| panic!("NDJSON must not use aggregate JSON"),
             |error| {
-                assert!(fail);
-                assert!(error.message.contains("cancelled operation"));
-                assert!(
-                    error
-                        .causes
-                        .iter()
-                        .any(|cause| cause == "injected pipe failure")
-                );
+                reported.borrow_mut().push(error.output_error());
                 Ok(())
             },
         );
         assert_eq!(code, ExitCode::from(if fail { 5 } else { 130 }));
-        assert!(!invocation.output.is_open());
-        assert!(!invocation.output.is_complete());
         let before = writer.bytes.lock().unwrap().clone();
-        if !fail {
+        let reports = reported.into_inner();
+        if fail {
+            let [report] = reports.as_slice() else {
+                panic!("expected one fallback diagnostic")
+            };
+            assert!(report.message.contains("cancelled operation"));
+            assert!(
+                report
+                    .causes
+                    .iter()
+                    .any(|cause| cause == "injected pipe failure")
+            );
+        } else {
+            assert!(reports.is_empty());
             let document: serde_json::Value = serde_json::from_slice(&before).unwrap();
             assert_eq!(document["event"], "error");
+            assert_eq!(document["status"], "error");
+            assert_eq!(document["command"], "build");
+            assert_eq!(document["error"]["message"], "cancelled operation");
         }
         command_failure_with(
             &invocation,
@@ -208,18 +258,27 @@ fn error_handling_failed_ndjson_preserves_context_and_original_cause() {
     )
     .with_context(Some(Coordinate::ProbeSequence(4)));
     let before = writer.bytes.lock().unwrap().clone();
+    let reported = RefCell::new(Vec::new());
     let code = command_failure_with(
         &invocation,
         Command::Build,
         error,
         |_, _| panic!("failed NDJSON must not use aggregate JSON"),
         |error| {
-            assert_eq!(error.classification.code, "io.stdout");
-            assert_eq!(error.context(), Some(Coordinate::ProbeSequence(4)));
-            assert_eq!(error.causes, ["original failure", "original cause"]);
+            reported.borrow_mut().push(error.output_error());
             Ok(())
         },
     );
     assert_eq!(code, ExitCode::from(5));
     assert_eq!(*writer.bytes.lock().unwrap(), before);
+    let reports = reported.into_inner();
+    let [report] = reports.as_slice() else {
+        panic!("expected one incomplete-stream diagnostic")
+    };
+    assert_eq!(report.code, "io.stdout");
+    assert_eq!(
+        serde_json::to_value(report.context).unwrap(),
+        serde_json::json!({"probe_sequence":4})
+    );
+    assert_eq!(report.causes, ["original failure", "original cause"]);
 }

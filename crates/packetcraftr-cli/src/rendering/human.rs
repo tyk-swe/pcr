@@ -293,6 +293,7 @@ mod tests {
     #[test]
     fn error_handling_reporting_failure_keeps_original_and_stops_after_fallback() {
         let error = CliError::new(Kind::Usage, "invalid argument");
+        let mut reported = String::new();
         let code = report_structured_error(
             error,
             2,
@@ -304,27 +305,33 @@ mod tests {
                 ))
             },
             |combined| {
-                assert!(combined.message.contains("invalid argument"));
-                assert!(combined.message.contains("write stdout failed"));
-                assert!(combined.causes.iter().any(|cause| cause == "closed pipe"));
+                reported = terminal_document(&render_human_error(combined));
                 Err(CliError::new(Kind::Io, "stderr is also closed"))
             },
         );
         assert_eq!(code, ExitCode::from(5));
+        assert!(reported.contains("invalid argument"));
+        assert!(reported.contains("write stdout failed"));
+        assert!(reported.contains("closed pipe"));
     }
 
     #[test]
     fn error_handling_successful_reporting_keeps_requested_exit_status() {
         for code in [2, 3, 4, 5, 6, 70, 130] {
+            let mut emitted = String::new();
             assert_eq!(
                 report_structured_error(
                     CliError::new(Kind::Usage, "original failure"),
                     code,
-                    |_| Ok(()),
+                    |error| {
+                        emitted = terminal_document(&render_human_error(error));
+                        Ok(())
+                    },
                     |_| panic!("successful reporting must not fall back to stderr"),
                 ),
                 ExitCode::from(code)
             );
+            assert!(emitted.contains("original failure"));
         }
     }
 }

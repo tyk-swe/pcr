@@ -157,6 +157,7 @@ fn retain_addresses(
 #[cfg(test)]
 mod network_improvements {
     use super::*;
+    use packetcraftr_core::error::Classified;
     #[test]
     fn native_resolver_retains_unique_addresses_in_first_seen_order() {
         let a = "127.0.0.1".parse().unwrap();
@@ -168,5 +169,14 @@ mod network_improvements {
         assert!(retain_addresses("test.local", [b, b, a], 1).is_err());
         assert!(retain_addresses("test.local", [a], 0).is_err());
         assert!(retain_addresses("test.local", [], 0).unwrap().is_empty());
+        let v6 = "2001:db8::1".parse().unwrap();
+        assert_eq!(
+            retain_addresses("example.test", [b, v6, a, v6, b], 3).unwrap(),
+            [b, v6, a]
+        );
+        let error = retain_addresses("example.test", [b, v6, a], 2).unwrap_err();
+        assert_eq!(error.classification().code, "io.hostname_address_limit");
+        assert_eq!(error.classification().kind, Kind::Io);
+        assert!(error.to_string().contains("example.test"));
     }
 }

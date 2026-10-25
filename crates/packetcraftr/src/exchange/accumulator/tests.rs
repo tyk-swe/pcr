@@ -41,7 +41,7 @@ fn every_matched_reply_refusal_qualifies_missing_observations() {
 
 #[test]
 fn clean_local_retention_does_not_promote_unknown_or_missing_ingress() {
-    let mut captured = Accumulator::new(1);
+    let mut captured = Accumulator::new(0);
     assert_eq!(
         captured.observation_quality(ObservationQuality::Unknown),
         ObservationQuality::Unknown
@@ -50,9 +50,45 @@ fn clean_local_retention_does_not_promote_unknown_or_missing_ingress() {
         captured.observation_quality(ObservationQuality::NoReportedLoss),
         ObservationQuality::NoReportedLoss
     );
-    captured.ingress_unknown = true;
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let dissector = packetcraftr_core::decode::Dissector::new(registry.clone());
+    let bytes = bytes::Bytes::from_static(&[0; 14]);
+    let frame = packetcraftr_core::frame::Frame::without_timestamp(
+        packetcraftr_core::frame::LinkType::ETHERNET,
+        bytes.clone(),
+    )
+    .unwrap();
+    let window = crate::exchange::Window::open(
+        &crate::clock::SystemClock,
+        std::time::Duration::from_secs(30),
+        None,
+    )
+    .unwrap();
+    captured
+        .process(
+            packetcraftr_netio::capture::Captured::with_ingress_time(frame, None),
+            crate::exchange::ProcessContext {
+                registry: &registry,
+                dissector: &dissector,
+                request_count: 0,
+                sent: &[],
+                window: &window,
+                collection: &crate::exchange::Collection::default(),
+            },
+            None,
+        )
+        .unwrap();
     assert_eq!(
         captured.observation_quality(ObservationQuality::NoReportedLoss),
         ObservationQuality::Unknown
     );
+    captured.finalize_unsolicited();
+    let frames = captured
+        .drain_events()
+        .filter_map(|event| match event {
+            crate::exchange::Event::Unsolicited { frame } => Some(frame.frame.bytes().clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(frames, [bytes]);
 }

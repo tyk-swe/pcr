@@ -215,22 +215,19 @@ mod tests {
         let reference = temporary.path().join("ordinary-file");
         std::fs::write(&reference, b"reference").unwrap();
         let expected = std::fs::metadata(&reference).unwrap().permissions().mode() & 0o777;
-        Args {
+        let arguments = Args {
             directory: temporary.path().into(),
-        }
-        .generate(&invocation(), Format::Text)
-        .unwrap();
+        };
+        run_with(&arguments, &invocation(), files, |_, _| Ok(())).unwrap();
 
-        for directory in ["completions", "man"] {
-            for entry in std::fs::read_dir(temporary.path().join(directory)).unwrap() {
-                let path = entry.unwrap().path();
-                assert_eq!(
-                    std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-                    expected,
-                    "{} should have ordinary file creation permissions",
-                    path.display()
-                );
-            }
+        for (path, contents) in files(temporary.path()).unwrap() {
+            assert_eq!(std::fs::read(&path).unwrap(), contents);
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                expected,
+                "{} should have ordinary file creation permissions",
+                path.display()
+            );
         }
     }
 
@@ -242,20 +239,24 @@ mod tests {
         };
         run_with(&arguments, &invocation(), files, |_, _| Ok(())).unwrap();
         let first = temporary.path().join("man/first.1");
+        let second = temporary.path().join("man/second.1");
         std::fs::write(&first, b"old").unwrap();
+        std::fs::write(&second, b"old second").unwrap();
         #[cfg(unix)]
-        {
+        let expected_permissions = {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&first, std::fs::Permissions::from_mode(0o4640)).unwrap();
-        }
+            std::fs::metadata(&first).unwrap().permissions().mode() & 0o7777
+        };
         run_with(&arguments, &invocation(), files, |_, _| Ok(())).unwrap();
         assert_eq!(std::fs::read(&first).unwrap(), b"first");
+        assert_eq!(std::fs::read(&second).unwrap(), b"second");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(
                 std::fs::metadata(&first).unwrap().permissions().mode() & 0o7777,
-                0o4640
+                expected_permissions
             );
         }
     }
@@ -327,13 +328,14 @@ mod tests {
             .unwrap_err();
             assert!(error.message.contains(failed_operation));
             assert!(error.message.contains(second.to_str().unwrap()));
-            assert_eq!(std::fs::read(first).unwrap(), b"old first");
-            assert_eq!(std::fs::read(second).unwrap(), b"old second");
+            assert_eq!(std::fs::read(&first).unwrap(), b"old first");
+            assert_eq!(std::fs::read(&second).unwrap(), b"old second");
             assert_eq!(
                 std::fs::read_dir(temporary.path().join("man"))
                     .unwrap()
-                    .count(),
-                2
+                    .map(|entry| entry.unwrap().path())
+                    .collect::<std::collections::BTreeSet<_>>(),
+                [first, second].into_iter().collect()
             );
         }
     }
@@ -404,16 +406,52 @@ mod tests {
     #[test]
     fn actual_render_includes_completions_and_grouped_manuals() {
         let files = render(Path::new("docs")).unwrap();
-        assert!(files.iter().any(|(path, bytes)| path
-            == Path::new("docs/completions/packetcraftr.bash")
-            && !bytes.is_empty()));
-        assert!(
-            files
-                .iter()
-                .any(|(path, bytes)| path == Path::new("docs/man/packetcraftr.1")
-                    && !bytes.is_empty())
-        );
-        assert!(files.len() > 10);
+        for shell in Shell::value_variants() {
+            let destination = Path::new("docs/completions").join(shell.file_name("packetcraftr"));
+            let (_, bytes) = files.iter().find(|(path, _)| *path == destination).unwrap();
+            let completion = std::str::from_utf8(bytes).unwrap();
+            for command in ["packetcraftr", "dissect", "documentation"] {
+                assert!(
+                    completion.contains(command),
+                    "{} is missing {command}",
+                    destination.display()
+                );
+            }
+        }
+        let mut command = Cli::command();
+        command.build();
+        let manuals = std::iter::once(&command)
+            .chain(
+                crate::commands::registry::GROUPS
+                    .iter()
+                    .map(|(group, _)| command.find_subcommand(group).unwrap()),
+            )
+            .chain(crate::commands::registry::INVENTORY.iter().map(|entry| {
+                command
+                    .find_subcommand(entry.group)
+                    .unwrap()
+                    .find_subcommand(entry.name)
+                    .unwrap()
+            }));
+        for definition in manuals {
+            let destination = Path::new("docs/man")
+                .join(clap_mangen::Man::new(definition.clone()).get_filename());
+            let (_, bytes) = files.iter().find(|(path, _)| *path == destination).unwrap();
+            let manual = std::str::from_utf8(bytes).unwrap();
+            if let Some(about) = definition.get_about() {
+                for word in about
+                    .to_string()
+                    .split_whitespace()
+                    .filter(|word| word.len() >= 4 && word.chars().all(char::is_alphanumeric))
+                {
+                    assert!(
+                        manual.contains(word),
+                        "{} is missing {word}",
+                        destination.display()
+                    );
+                }
+            }
+        }
         let unique: std::collections::BTreeSet<_> = files.iter().map(|(path, _)| path).collect();
         assert_eq!(unique.len(), files.len());
     }
@@ -423,12 +461,17 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let destination = temporary.path().join("destination");
         std::fs::create_dir(&destination).unwrap();
+        let retained = destination.join("retained");
+        std::fs::write(&retained, b"preserved").unwrap();
         assert!(StagedFile::stage_replacement(&invocation(), &destination).is_err());
+        assert_eq!(std::fs::read(&retained).unwrap(), b"preserved");
         #[cfg(unix)]
         {
             let link = temporary.path().join("link");
             std::os::unix::fs::symlink(&destination, &link).unwrap();
             assert!(StagedFile::stage_replacement(&invocation(), &link).is_err());
+            assert_eq!(std::fs::read_link(&link).unwrap(), destination);
+            assert_eq!(std::fs::read(&retained).unwrap(), b"preserved");
             let socket = temporary.path().join("socket");
             let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
             assert!(StagedFile::stage_replacement(&invocation(), &socket).is_err());
@@ -436,5 +479,6 @@ mod tests {
         let regular = temporary.path().join("regular");
         std::fs::write(&regular, b"old").unwrap();
         assert!(StagedFile::stage(&invocation(), &regular).is_err());
+        assert_eq!(std::fs::read(&regular).unwrap(), b"old");
     }
 }

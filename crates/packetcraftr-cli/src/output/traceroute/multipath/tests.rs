@@ -147,6 +147,43 @@ fn aggregate_and_stream_preserve_the_same_multipath_evidence() {
     let terminal = serde_json::to_value(terminal.result).unwrap();
     let aggregate = Published::<Report>::try_from(collector.finish(report).unwrap()).unwrap();
     let aggregate = serde_json::to_value(aggregate.result).unwrap();
+    let expected_flow = json!({
+        "id":1,"source":"10.0.0.2","destination":"10.0.0.9","strategy":"udp",
+        "source_port":49160,"destination_port":33434,"icmp_identifier":null,"ipv6_flow_label":null
+    });
+    let expected_completion =
+        json!({"flow_id":1,"sweep":1,"completion":"destination_reached","last_hop":2});
+    assert_eq!(aggregate["flows"], json!([expected_flow]));
+    assert_eq!(aggregate["completions"], json!([expected_completion]));
+    let expected_rtt = json!({"samples":1,"minimum":{"secs":0,"nanos":2000000},
+                             "median":{"secs":0,"nanos":2000000},"maximum":{"secs":0,"nanos":2000000}});
+    assert_eq!(
+        aggregate["topology"],
+        json!({
+            "nodes":[{"hop_limit":1,"responder":"10.0.1.1","rtt":expected_rtt},
+                     {"hop_limit":2,"responder":"10.0.0.9","rtt":expected_rtt}],
+            "edges":[{"from":{"hop_limit":1,"responder":"10.0.1.1"},
+                      "to":{"hop_limit":2,"responder":"10.0.0.9"},"evidence":[[0,1]]}],
+            "changes":[]
+        })
+    );
+    let expected_summary = json!({
+        "planned_probes":2,"probes_sent":2,"answered_probes":2,"unanswered_probes":0,
+        "replies_seen":2,"ambiguous_probes":0,"cleanup_packets":0,"retained_evidence_bytes":4104,
+        "omitted_frames":0,"incomplete":false,"sweeps_completed":1,"nodes":2,"edges":1,
+        "branch_points":0,"rejoin_points":0,"changes":0
+    });
+    let expected_flows = json!([{"flow_id":1,"probes_sent":2,"answered_probes":2,
+        "unanswered_probes":0,"ambiguous_probes":0,"sweeps_reached":1,"destination_rtt":expected_rtt}]);
+    for result in [&aggregate, &terminal] {
+        assert_eq!(result["mode"], "multipath");
+        assert_eq!(result["target"], "10.0.0.9");
+        assert_eq!(result["resolved_addresses"], json!(["10.0.0.9"]));
+        assert_eq!(result["destination"], "10.0.0.9");
+        assert_eq!(result["strategy"], "udp");
+        assert_eq!(result["summary"], expected_summary);
+        assert_eq!(result["flow_summaries"], expected_flows);
+    }
     for (event, field) in [
         ("flow", "flows"),
         ("probe", "probes"),

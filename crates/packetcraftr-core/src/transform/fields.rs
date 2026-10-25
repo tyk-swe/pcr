@@ -395,7 +395,7 @@ fn write_uint(bytes: &mut [u8], range: ByteRange, value: u64) {
 }
 
 #[cfg(test)]
-mod improvement_tests {
+mod tests {
     use super::*;
     #[test]
     fn assignment_limit_precedes_compilation() {
@@ -414,13 +414,13 @@ mod improvement_tests {
                 limit: MAX_FIELD_ASSIGNMENTS
             })
         ));
-        assert!(!matches!(
+        assert!(matches!(
             FieldEdits::compile(
                 &assignments[..MAX_FIELD_ASSIGNMENTS],
                 ChecksumMode::Repair,
                 &registry
             ),
-            Err(Error::Limit { .. })
+            Err(Error::Invalid(InvalidInput::EditSyntax))
         ));
     }
 }

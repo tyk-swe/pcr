@@ -215,10 +215,17 @@ mod tests {
             short_examples("Examples:\n  one\n  two\n\nDetails").as_deref(),
             Some("one\n  two")
         );
+        assert_eq!(
+            short_examples("Examples:\n  one\n  two\n  three\n  four").as_deref(),
+            Some("one\n  two\n  three")
+        );
+        assert_eq!(short_examples("About only"), None);
+        assert_eq!(short_examples("Examples:\n \t\n"), None);
     }
 
     #[test]
     fn every_is_a_frame_selection_option() {
-        assert_eq!(heading("every"), heading("frames"));
+        assert_eq!(heading("every"), "Selection and decoding");
+        assert_eq!(heading("frames"), "Selection and decoding");
     }
 }

@@ -248,8 +248,8 @@ mod network_improvements {
     use super::*;
     #[test]
     fn scope_precedes_prefix_specificity() {
-        let destination = "8.8.8.8".parse().unwrap();
-        let global = "9.1.1.1".parse().unwrap();
+        let destination = "198.51.100.8".parse().unwrap();
+        let global = "203.0.113.9".parse().unwrap();
         let addresses = [
             interface::Address {
                 address: "10.0.0.1".parse().unwrap(),
@@ -261,5 +261,7 @@ mod network_improvements {
             },
         ];
         assert_eq!(fallback_source(&addresses, destination), Some(global));
+        let reversed: Vec<_> = addresses.into_iter().rev().collect();
+        assert_eq!(fallback_source(&reversed, destination), Some(global));
     }
 }

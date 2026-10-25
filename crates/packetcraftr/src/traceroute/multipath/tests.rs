@@ -4,6 +4,7 @@
 use super::*;
 use crate::{
     Stats,
+    clock::Clock,
     engine::execution::Grant,
     evidence::SentPacket,
     probe::{
@@ -26,7 +27,9 @@ use packetcraftr_core::{
     },
 };
 use std::{
+    convert::Infallible,
     net::IpAddr,
+    sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime},
 };
 
@@ -82,7 +85,7 @@ fn decode(packet: Packet) -> DecodedPacket {
     let built = build(packet);
     Dissector::new(builtin::registry())
         .decode(
-            Frame::new(SystemTime::now(), LinkType::RAW, built.bytes).unwrap(),
+            Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, built.bytes).unwrap(),
             Default::default(),
         )
         .unwrap()
@@ -174,10 +177,10 @@ fn stable_flow_fields_checksums_and_stale_quote_rejection_all_strategies() {
                 ),
             }
             let response = quote(&a, destination(v6), false, usize::MAX - 40);
-            assert!(
-                packet::classify(&builtin::registry(), strategy, &a.packet, &response).is_some(),
-                "{strategy:?} v6={v6}"
-            );
+            let matched =
+                packet::classify(&builtin::registry(), strategy, &a.packet, &response).unwrap();
+            assert_eq!(matched.kind, crate::traceroute::ResponseKind::Intermediate);
+            assert_eq!(matched.responder, destination(v6));
             assert!(
                 packet::classify(&builtin::registry(), strategy, &b.packet, &response).is_none()
             );
@@ -202,10 +205,14 @@ fn udp_short_quotes_are_attributed_only_with_an_exact_identity() {
         );
         let sent = build(probe.packet);
         let reply = quote(&sent, destination(v6), false, 8);
-        assert_eq!(
-            packet::classify(&builtin::registry(), Transport::Udp, &sent.packet, &reply).is_some(),
-            !v6
-        );
+        let matched = packet::classify(&builtin::registry(), Transport::Udp, &sent.packet, &reply);
+        if v6 {
+            assert!(matched.is_none());
+        } else {
+            let matched = matched.unwrap();
+            assert_eq!(matched.kind, crate::traceroute::ResponseKind::Intermediate);
+            assert_eq!(matched.responder, destination(false));
+        }
         let reply = quote(&sent, destination(v6), false, 7);
         assert!(
             packet::classify(&builtin::registry(), Transport::Udp, &sent.packet, &reply).is_none()
@@ -369,6 +376,45 @@ enum CorrelationExpiry {
     UndecodedFrame,
 }
 
+struct NumericOnly;
+
+impl crate::target::Resolver for NumericOnly {
+    fn resolve(
+        &self,
+        _: &crate::target::Hostname,
+        _: usize,
+    ) -> Result<Vec<IpAddr>, crate::target::Error> {
+        panic!("numeric fixtures must not invoke hostname resolution")
+    }
+}
+
+#[derive(Clone)]
+struct TestClock(Arc<Mutex<Instant>>);
+
+impl TestClock {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(Instant::now())))
+    }
+
+    fn deadline(&self) -> Deadline {
+        let clock = self.clone();
+        Deadline::with_time_source(Duration::from_secs(10), move || clock.now())
+    }
+}
+
+impl Clock for TestClock {
+    type Error = Infallible;
+
+    fn now(&self) -> Instant {
+        *self.0.lock().unwrap()
+    }
+
+    fn sleep(&self, delay: Duration, _: &Deadline) -> Result<(), Self::Error> {
+        *self.0.lock().unwrap() += delay;
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 struct Lab {
     batches: Vec<Vec<(u16, u32, u8)>>,
@@ -504,16 +550,18 @@ impl engine::Runner for Lab {
 }
 fn simulate(request: &Request, lab: &mut Lab) -> Aggregate {
     let policy = crate::policy::Policy::default();
-    let resolver = crate::target::SystemResolver;
+    let resolver = NumericOnly;
     let mut admission = crate::client::admission::Admission::new(&policy, &resolver);
     let mut collector = Collector::default();
+    let mut clock = TestClock::new();
+    let mut deadline = clock.deadline();
     let report = engine::run(
         request,
         &mut admission,
         &builtin::registry(),
         lab,
-        &mut crate::clock::SystemClock,
-        &mut Deadline::new(Duration::from_secs(10)),
+        &mut clock,
+        &mut deadline,
         8,
         |event, _| {
             crate::Sink::publish(&mut collector, event)
@@ -533,6 +581,22 @@ fn sweeps_preserve_flow_identity_and_independent_termination_with_branch_and_rej
     assert_eq!(result.report.summary.branch_points, 1);
     assert_eq!(result.report.summary.rejoin_points, 1);
     assert_eq!(result.report.completions.len(), 4);
+    let mut completions = result
+        .report
+        .completions
+        .iter()
+        .map(|item| (item.flow_id, item.sweep, item.last_hop, item.completion))
+        .collect::<Vec<_>>();
+    completions.sort_by_key(|item| (item.0, item.1));
+    assert_eq!(
+        completions,
+        [
+            (1, 1, 3, crate::traceroute::Termination::DestinationReached),
+            (1, 2, 3, crate::traceroute::Termination::DestinationReached),
+            (2, 1, 4, crate::traceroute::Termination::DestinationReached),
+            (2, 2, 4, crate::traceroute::Termination::DestinationReached),
+        ]
+    );
     assert_eq!(lab.batches[3], vec![(2, 1, 4)]);
     assert_eq!(lab.batches[4], vec![(1, 2, 1), (2, 2, 1)]);
     assert!(
@@ -568,6 +632,27 @@ fn all_strategies_and_families_reach_destination_and_account_for_cleanup() {
                     .all(|completion| completion.completion
                         == crate::traceroute::Termination::DestinationReached)
             );
+            let mut summaries = result
+                .report
+                .flow_summaries
+                .iter()
+                .map(|flow| {
+                    (
+                        flow.flow_id,
+                        flow.probes_sent,
+                        flow.sweeps_reached,
+                        flow.destination_rtt.clone(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            summaries.sort_by_key(|item| item.0);
+            let rtt = Some(Rtt {
+                samples: 2,
+                minimum: Duration::from_millis(2),
+                median: Duration::from_millis(2),
+                maximum: Duration::from_millis(2),
+            });
+            assert_eq!(summaries, [(1, 6, 2, rtt.clone()), (2, 8, 2, rtt)]);
             assert!(
                 result
                     .report
@@ -593,6 +678,21 @@ fn gaps_ambiguity_and_retention_never_manufacture_edges() {
         },
     ] {
         let result = simulate(&request(Transport::Udp, false), &mut lab);
+        assert_eq!(
+            result
+                .report
+                .topology
+                .edges
+                .iter()
+                .map(|edge| (
+                    edge.from.hop_limit,
+                    edge.from.responder,
+                    edge.to.hop_limit,
+                    edge.to.responder
+                ))
+                .collect::<Vec<_>>(),
+            [(3, destination(false), 4, destination(false))]
+        );
         assert!(
             result
                 .report
@@ -679,6 +779,7 @@ fn unfinished_correlation_marks_the_batch_incomplete_before_building_topology() 
 #[test]
 fn invalid_flow_ranges_and_excess_probe_counts_are_rejected() {
     let mut request = request(Transport::Udp, false);
+    request.validate().unwrap();
     request.trace.source_port = Some(u16::MAX);
     assert!(request.validate().is_err());
     request.trace.source_port = None;
@@ -705,9 +806,8 @@ fn authoritative_exchange_matching_blocks_a_stale_same_tuple_response() {
     let delayed = quote(&old, destination(false), false, usize::MAX - 40);
     let registry = builtin::registry();
     let dissector = Dissector::new(registry.clone());
-    let window =
-        crate::exchange::Window::open(&crate::clock::SystemClock, Duration::from_secs(10), None)
-            .unwrap();
+    let clock = TestClock::new();
+    let window = crate::exchange::Window::open(&clock, Duration::from_secs(10), None).unwrap();
     let collection = crate::exchange::Collection::default();
     for strict in [false, true] {
         let mut captured = crate::exchange::Accumulator::new(1);
@@ -732,7 +832,17 @@ fn authoritative_exchange_matching_blocks_a_stale_same_tuple_response() {
                 Some(&mut matcher),
             )
             .unwrap();
-        assert_eq!(captured.response_counts[0], usize::from(!strict));
+        captured.finalize_unsolicited();
+        let events = captured.drain_events().collect::<Vec<_>>();
+        if strict {
+            assert!(
+                matches!(events.as_slice(), [crate::exchange::Event::Unsolicited { frame }] if frame.frame.bytes() == delayed.frame.bytes())
+            );
+        } else {
+            assert!(
+                matches!(events.as_slice(), [crate::exchange::Event::Response(response)] if response.request_index == 0 && response.response.frame.bytes() == delayed.frame.bytes())
+            );
+        }
     }
 }
 
@@ -741,17 +851,19 @@ fn cancellation_and_output_failure_stop_before_another_batch() {
     for cancel in [false, true] {
         let mut lab = Lab::default();
         let policy = crate::policy::Policy::default();
-        let resolver = crate::target::SystemResolver;
+        let resolver = NumericOnly;
         let mut admission = crate::client::admission::Admission::new(&policy, &resolver);
         let cancellation = packetcraftr_core::budget::Cancellation::default();
-        let mut deadline =
-            Deadline::new(Duration::from_secs(10)).with_cancellation(Some(cancellation.clone()));
+        let mut clock = TestClock::new();
+        let mut deadline = clock
+            .deadline()
+            .with_cancellation(Some(cancellation.clone()));
         let result = engine::run(
             &request(Transport::Udp, false),
             &mut admission,
             &builtin::registry(),
             &mut lab,
-            &mut crate::clock::SystemClock,
+            &mut clock,
             &mut deadline,
             8,
             |event, _| {
@@ -771,8 +883,20 @@ fn cancellation_and_output_failure_stop_before_another_batch() {
                 Ok(())
             },
         );
-        assert!(result.is_err());
-        assert_eq!(lab.batches.len(), 1);
+        let error = result.unwrap_err();
+        if cancel {
+            assert!(matches!(error, crate::traceroute::Error::Cancelled(_)));
+        } else {
+            let crate::traceroute::Error::Output { source } = error else {
+                panic!("expected the supplied output failure");
+            };
+            assert_eq!(
+                packetcraftr_core::error::Classified::classification(&source).code,
+                "io.test_output"
+            );
+            assert_eq!(source.to_string(), "test output closed");
+        }
+        assert_eq!(lab.batches, [vec![(1, 1, 1), (2, 1, 1)]]);
     }
 }
 
@@ -789,6 +913,17 @@ fn topology_changes_require_two_observed_adjacent_sweeps() {
     topology.observe(&first);
     let update = topology.observe(&second);
     assert_eq!(update.changes.len(), 1);
+    assert_eq!(update.changes[0].flow_id, first.flow_id);
+    assert_eq!(update.changes[0].hop_limit, first.hop_limit);
+    assert_eq!(
+        (update.changes[0].previous_sweep, update.changes[0].sweep),
+        (1, 2)
+    );
+    assert_eq!(update.changes[0].before, first.replies[0].responder);
+    assert_eq!(
+        update.changes[0].after,
+        "10.0.1.9".parse::<IpAddr>().unwrap()
+    );
     assert_eq!(
         update.changes[0].evidence,
         [first.sequence, second.sequence]

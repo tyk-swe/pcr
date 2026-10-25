@@ -197,35 +197,51 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
+    enum WritePhase {
+        Prefix(usize),
+        Refuse,
+        Accept,
+    }
+
     struct FailingWriter {
         bytes: Vec<u8>,
-        writes: usize,
-        flushes: usize,
-        fail_flush: bool,
+        delivered: Vec<u8>,
+        phase: WritePhase,
+        refuse_flush: bool,
     }
 
     impl Write for FailingWriter {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            self.writes += 1;
-            if !self.fail_flush && self.writes > 1 {
-                return Err(io::Error::new(
-                    io::ErrorKind::BrokenPipe,
-                    "injected write failure",
-                ));
-            }
-            let count = if self.fail_flush {
-                bytes.len()
-            } else {
-                bytes.len().min(3)
+            let count = match self.phase {
+                WritePhase::Prefix(remaining) => {
+                    let count = bytes.len().min(remaining);
+                    self.phase = if count == remaining {
+                        WritePhase::Refuse
+                    } else {
+                        WritePhase::Prefix(remaining - count)
+                    };
+                    count
+                }
+                WritePhase::Refuse => {
+                    self.phase = WritePhase::Accept;
+                    return Err(io::Error::new(
+                        io::ErrorKind::BrokenPipe,
+                        "injected write failure",
+                    ));
+                }
+                WritePhase::Accept => bytes.len(),
             };
             self.bytes.extend_from_slice(&bytes[..count]);
             Ok(count)
         }
 
         fn flush(&mut self) -> io::Result<()> {
-            self.flushes += 1;
-            Err(io::Error::other("injected flush failure"))
+            if self.refuse_flush {
+                self.refuse_flush = false;
+                return Err(io::Error::other("injected flush failure"));
+            }
+            self.delivered.clone_from(&self.bytes);
+            Ok(())
         }
     }
 
@@ -237,9 +253,11 @@ mod tests {
             let error = emit_json_to(&invocation, &InvalidValue(length), &mut bytes).unwrap_err();
             assert_eq!(error.classification.kind, Kind::Internal);
             assert_eq!(error.causes, ["injected serialization failure"]);
-            let written = bytes.len();
-            assert_eq!(written > 0, length > 0);
-            assert!(invocation.clone().terminal().json_attempted());
+            let expected =
+                serde_json::to_vec_pretty(&serde_json::json!({"prefix": "a".repeat(length)}))
+                    .unwrap();
+            assert!(expected.starts_with(&bytes));
+            let written = bytes.clone();
             assert!(
                 emit_json_to(
                     &invocation.terminal(),
@@ -248,27 +266,46 @@ mod tests {
                 )
                 .is_err()
             );
-            assert_eq!(bytes.len(), written);
+            assert_eq!(bytes, written);
         }
     }
 
     #[test]
     fn error_handling_json_write_and_flush_failures_do_not_retry_buffered_bytes() {
-        for fail_flush in [false, true] {
+        for fail_write in [true, false] {
             let invocation = invocation();
             let mut writer = FailingWriter {
-                fail_flush,
-                ..Default::default()
+                bytes: Vec::new(),
+                delivered: Vec::new(),
+                phase: if fail_write {
+                    WritePhase::Prefix(3)
+                } else {
+                    WritePhase::Accept
+                },
+                refuse_flush: true,
             };
-            let error = emit_json_to(&invocation, &serde_json::json!({"value": 1}), &mut writer)
-                .unwrap_err();
+            let error = emit_json_to(&invocation, &"fixture", &mut writer).unwrap_err();
             assert_eq!(error.classification.code, "io.stdout");
-            assert!(!error.causes.is_empty());
-            assert_eq!(writer.writes, if fail_flush { 1 } else { 2 });
-            assert_eq!(writer.flushes, usize::from(fail_flush));
-            let writes = writer.writes;
+            let cause = if fail_write {
+                "injected write failure"
+            } else {
+                "injected flush failure"
+            };
+            assert!(
+                error.causes.iter().any(|value| value.contains(cause)),
+                "{:?}",
+                error.causes
+            );
+            let expected = if fail_write {
+                b"\"fi".as_slice()
+            } else {
+                b"\"fixture\"\n"
+            };
+            assert_eq!(writer.bytes, expected);
+            assert!(writer.delivered.is_empty());
             assert!(emit_json_to(&invocation.terminal(), &(), &mut writer).is_err());
-            assert_eq!(writer.writes, writes);
+            assert_eq!(writer.bytes, expected);
+            assert!(writer.delivered.is_empty());
         }
     }
 
@@ -278,7 +315,6 @@ mod tests {
         invocation.cancellation.cancel();
         let mut bytes = Vec::new();
         assert!(emit_json_to(&invocation, &(), &mut bytes).is_err());
-        assert!(!invocation.json_attempted());
         assert!(bytes.is_empty());
         let envelope = output::envelope::Envelope::<()>::error(
             Some(Command::Build),
@@ -288,6 +324,46 @@ mod tests {
         let document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(document["schema"], "packetcraftr.output/v1");
         assert_eq!(document["status"], "error");
+        assert_eq!(document["command"], "build");
+        assert_eq!(document["error"]["message"], "cancelled");
+        assert_eq!(document["error"]["kind"], "io");
         assert_eq!(bytes.last(), Some(&b'\n'));
+    }
+
+    #[test]
+    fn json_budget_accepts_complete_output_and_distinguishes_serialization_failures() {
+        let value = serde_json::json!({"text": "é\n", "values": [1, true, null]});
+        let compact = serde_json::to_vec(&value).unwrap();
+        let mut pretty = Vec::new();
+        emit_json_to(&invocation(), &value, &mut pretty).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&pretty).unwrap(),
+            value
+        );
+        for (measured, length) in [
+            (bounded_json_len(&value, compact.len()), compact.len()),
+            (
+                bounded_pretty_json_len(&value, pretty.len() - 1),
+                pretty.len() - 1,
+            ),
+        ] {
+            assert_eq!(measured.unwrap(), length);
+        }
+        assert!(matches!(
+            bounded_json_len(&value, compact.len() - 1),
+            Err(BoundedJsonError::Limit)
+        ));
+        assert!(matches!(
+            bounded_pretty_json_len(&value, pretty.len() - 2),
+            Err(BoundedJsonError::Limit)
+        ));
+        assert!(matches!(
+            bounded_json_len(&InvalidValue(0), 1024),
+            Err(BoundedJsonError::Serialize(_))
+        ));
+        assert!(matches!(
+            bounded_pretty_json_len(&InvalidValue(1024), 0),
+            Err(BoundedJsonError::Limit)
+        ));
     }
 }

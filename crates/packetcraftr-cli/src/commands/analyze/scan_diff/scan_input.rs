@@ -147,22 +147,35 @@ mod tests {
     }
 
     fn assert_compatible(before: &[u8], after: &[u8], limits: Limits) {
-        let current = (|| {
-            limits.validate()?;
-            let before = parse(before, limits)?;
-            let after = parse(after, limits)?;
-            scan::compare_snapshots(&before, &after, limits)
-        })();
+        let current = compare_cli(before, after, limits);
         assert_eq!(
             result(current),
             result(scan::compare(before, after, limits))
         );
     }
 
+    fn compare_cli(
+        before: &[u8],
+        after: &[u8],
+        limits: Limits,
+    ) -> Result<packetcraftr_core::security::Report, Error> {
+        limits.validate()?;
+        let before = parse(before, limits)?;
+        let after = parse(after, limits)?;
+        scan::compare_snapshots(&before, &after, limits)
+    }
+
     #[test]
     fn cli_adapter_preserves_the_legacy_comparison_contract() {
+        enum Expected {
+            Unchanged,
+            Changed,
+            Unavailable,
+            Coverage,
+            Invalid,
+        }
         let before = document("tcp_connect");
-        let mut cases = vec![before.clone()];
+        let mut cases = vec![(before.clone(), Expected::Unchanged)];
         for state in [
             "closed",
             "filtered",
@@ -172,7 +185,14 @@ mod tests {
         ] {
             let mut value = before.clone();
             value["result"]["endpoints"][0]["inference"]["state"] = state.into();
-            cases.push(value);
+            cases.push((
+                value,
+                if state == "unknown" {
+                    Expected::Unavailable
+                } else {
+                    Expected::Changed
+                },
+            ));
         }
         for field in ["supporting", "state"] {
             let mut value = before.clone();
@@ -180,29 +200,91 @@ mod tests {
                 .as_object_mut()
                 .unwrap()
                 .remove(field);
-            cases.push(value);
+            cases.push((value, Expected::Unavailable));
         }
         let mut value = before.clone();
         value["result"]["endpoints"] = json!([]);
-        cases.push(value);
+        cases.push((value, Expected::Coverage));
         for field in ["schema", "command", "mode", "status"] {
             let mut value = before.clone();
             value[field] = "unsupported".into();
-            cases.push(value);
+            cases.push((value, Expected::Invalid));
         }
         let mut value = before.clone();
         value["result"]["endpoints"][0]["port"] = 65536.into();
-        cases.push(value);
+        cases.push((value, Expected::Invalid));
         let mut value = before.clone();
         let duplicate = value["result"]["endpoints"][0].clone();
         value["result"]["endpoints"]
             .as_array_mut()
             .unwrap()
             .push(duplicate);
-        cases.push(value);
+        cases.push((value, Expected::Invalid));
         let before_bytes = serde_json::to_vec(&before).unwrap();
-        for case in cases {
+        for (case, expected) in cases {
             let bytes = serde_json::to_vec(&case).unwrap();
+            let actual = compare_cli(&before_bytes, &bytes, Limits::default());
+            match expected {
+                Expected::Invalid => {
+                    let error = actual.unwrap_err();
+                    assert_eq!(error.classification().code, "cli.security_input");
+                    assert_eq!(
+                        error.classification().kind,
+                        packetcraftr_core::error::Kind::Usage
+                    );
+                }
+                Expected::Unchanged => {
+                    let report = actual.unwrap();
+                    assert!(report.findings.is_empty());
+                    assert!(report.completeness.complete);
+                    assert_eq!(
+                        serde_json::to_value(report.measurements).unwrap(),
+                        json!({
+                            "method":"tcp_connect", "unchanged_endpoints":1,
+                            "before_endpoints":1, "after_endpoints":1
+                        })
+                    );
+                }
+                Expected::Changed | Expected::Unavailable | Expected::Coverage => {
+                    let report = actual.unwrap();
+                    let (rule, incomplete, count) = match expected {
+                        Expected::Changed => ("scan.state_changed", false, 1),
+                        Expected::Unavailable => ("scan.evidence_unavailable", true, 1),
+                        _ => ("scan.coverage_changed", false, 0),
+                    };
+                    let [finding] = report.findings.as_slice() else {
+                        panic!("expected one comparison finding")
+                    };
+                    assert_eq!(finding.rule_id, rule);
+                    assert_eq!(
+                        finding.severity,
+                        packetcraftr_core::security::Severity::Info
+                    );
+                    assert_eq!(
+                        finding.evidence,
+                        json!({
+                            "before":before["result"]["endpoints"][0],
+                            "after":case["result"]["endpoints"][0],
+                        })
+                    );
+                    assert_eq!(report.completeness.complete, !incomplete);
+                    assert_eq!(
+                        serde_json::to_value(report.measurements).unwrap(),
+                        json!({
+                            "method":"tcp_connect", "unchanged_endpoints":0,
+                            "before_endpoints":1, "after_endpoints":count
+                        })
+                    );
+                    if matches!(expected, Expected::Changed) {
+                        let reverse =
+                            compare_cli(&bytes, &before_bytes, Limits::default()).unwrap();
+                        assert_eq!(
+                            reverse.findings[0].severity,
+                            packetcraftr_core::security::Severity::Medium
+                        );
+                    }
+                }
+            }
             for limits in [
                 Limits::default(),
                 Limits {
@@ -221,6 +303,13 @@ mod tests {
             json!({"zone":"fixture", "interface":{"index":1,"name":"fixture0"}});
         let mut changed = raw.clone();
         changed["result"]["plan"]["tcp_scan"]["mode"] = "ack".into();
+        let mismatch = compare_cli(
+            &serde_json::to_vec(&raw).unwrap(),
+            &serde_json::to_vec(&changed).unwrap(),
+            Limits::default(),
+        )
+        .unwrap_err();
+        assert_eq!(mismatch.classification().code, "cli.security_input");
         assert_compatible(
             &serde_json::to_vec(&raw).unwrap(),
             &serde_json::to_vec(&changed).unwrap(),
@@ -234,6 +323,8 @@ mod tests {
             Limits::default(),
         );
         let oversized = vec![b' '; MAX_INPUT_BYTES + 1];
+        let limit = compare_cli(&oversized, &before_bytes, Limits::default()).unwrap_err();
+        assert_eq!(limit.classification().code, "policy.security_limit");
         assert_compatible(&oversized, &before_bytes, Limits::default());
         assert_compatible(b"invalid JSON", &before_bytes, Limits::default());
         assert_compatible(

@@ -218,7 +218,16 @@ mod tests {
         let scan = output::scan::Failure {
             stats: Default::default(),
             pending: Vec::new(),
-            failed_probe: None,
+            failed_probe: Some(output::scan::FailedProbe {
+                sequence: 7,
+                stage: output::scan::Stage::Scan,
+                destination: "192.0.2.7".parse().unwrap(),
+                scope: None,
+                destination_port: Some(443),
+                ip_protocol: None,
+                transport: packetcraftr::probe::Transport::Tcp,
+                attempt: 2,
+            }),
             capture_sources: Vec::new(),
         };
         let error = CliError::from_classification(

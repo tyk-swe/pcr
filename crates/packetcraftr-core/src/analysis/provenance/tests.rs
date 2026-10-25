@@ -3,12 +3,12 @@
 
 use super::{Accumulator, SourceFrame, SourceSet, Tracker};
 use crate::analysis::{adapter::IpFragments, reassembly::ip, scope::Interner};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
 fn source(number: u64) -> SourceFrame {
     SourceFrame {
         number,
-        timestamp: UNIX_EPOCH,
+        timestamp: UNIX_EPOCH - Duration::from_secs(number),
     }
 }
 
@@ -81,7 +81,17 @@ fn assembly_orders_and_deduplicates_sources_without_changing_published_sets() {
     );
     assert_eq!(snapshot.frames(), [source(3)]);
     let union = first.union(&result).unwrap();
-    assert_eq!(union.frames(), result.frames());
+    assert_eq!(union.frames(), [source(1), source(2), source(3), source(4)]);
+    let additional = tracker.single(source(5)).unwrap();
+    let union = result.union(&additional).unwrap();
+    assert_eq!(
+        union.frames(),
+        [source(1), source(2), source(3), source(4), source(5)]
+    );
+    assert_eq!(
+        result.frames(),
+        [source(1), source(2), source(3), source(4)]
+    );
 }
 
 fn exhaust(tracker: &Tracker) -> Vec<SourceSet> {

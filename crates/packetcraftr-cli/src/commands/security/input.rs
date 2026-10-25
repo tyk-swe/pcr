@@ -79,12 +79,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn single_stdin_validation_precedes_io_and_hashes_consumed_bytes() {
+    fn stdin_source_validation_and_consumed_bytes_preserve_identity() {
         assert!(validate_stdin_sources([Path::new("-"), Path::new("missing.json")]).is_ok());
         assert!(validate_stdin_sources([Path::new("-"), Path::new("-")]).is_err());
         assert!(validate_stdin_sources([Path::new("missing.json")]).is_ok());
         let source = source(Path::new("-"), b"abc");
         assert_eq!(source.path, "-");
+        // https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Standards-and-Guidelines/documents/examples/SHA256.pdf checked 2026-10-25.
         assert_eq!(
             source.sha256,
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"

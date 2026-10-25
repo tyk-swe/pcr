@@ -4,11 +4,7 @@
 use super::record::serialize_line_with_limit;
 use super::*;
 use std::{
-    sync::{
-        Condvar,
-        atomic::{AtomicUsize, Ordering},
-        mpsc,
-    },
+    sync::{Condvar, mpsc},
     time::Instant,
 };
 
@@ -23,7 +19,7 @@ impl StreamRecord for Data {
 }
 
 #[test]
-fn complete_record_limit_includes_newline_and_serialization_failure_never_writes() {
+fn complete_record_limit_includes_newline_and_zero_budget_is_refused() {
     let value = serde_json::json!({"value": "abc"});
     let bytes = serde_json::to_vec(&value).unwrap();
     let exact = serialize_line_with_limit(&value, 0, bytes.len() + 1).unwrap();
@@ -40,16 +36,23 @@ fn complete_record_limit_includes_newline_and_serialization_failure_never_writes
 }
 
 struct PartialWriter {
-    calls: Arc<AtomicUsize>,
-    flushes: Arc<AtomicUsize>,
+    remaining: usize,
+    refused: bool,
     prefix: Arc<Mutex<Vec<u8>>>,
+    visible: Arc<Mutex<Vec<u8>>>,
 }
 impl Write for PartialWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if self.calls.fetch_add(1, Ordering::Relaxed) != 0 {
+        if self.remaining == 0 && !self.refused {
+            self.refused = true;
             return Err(io::Error::other("injected partial failure"));
         }
-        let count = bytes.len().min(3);
+        let count = if self.refused {
+            bytes.len()
+        } else {
+            bytes.len().min(self.remaining)
+        };
+        self.remaining = self.remaining.saturating_sub(count);
         self.prefix
             .lock()
             .unwrap()
@@ -57,7 +60,7 @@ impl Write for PartialWriter {
         Ok(count)
     }
     fn flush(&mut self) -> io::Result<()> {
-        self.flushes.fetch_add(1, Ordering::Relaxed);
+        *self.visible.lock().unwrap() = self.prefix.lock().unwrap().clone();
         Ok(())
     }
 }
@@ -65,31 +68,47 @@ impl Write for PartialWriter {
 #[test]
 fn failed_partial_write_is_terminally_failed_without_a_false_complete_or_later_flush() {
     let runtime = Runtime::new(1).unwrap();
-    let calls = Arc::new(AtomicUsize::new(0));
-    let flushes = Arc::new(AtomicUsize::new(0));
     let prefix = Arc::new(Mutex::new(Vec::new()));
+    let visible = Arc::new(Mutex::new(Vec::new()));
     let stream = StreamEncoder::new_bounded(
         Command::Http,
         PartialWriter {
-            calls: Arc::clone(&calls),
-            flushes: Arc::clone(&flushes),
+            remaining: 3,
+            refused: false,
             prefix: Arc::clone(&prefix),
+            visible: Arc::clone(&visible),
         },
         &runtime,
         Duration::from_secs(5),
     )
     .unwrap();
     assert!(stream.emit_data(Data { value: 1 }, Vec::new()).is_err());
-    assert_eq!(prefix.lock().unwrap().len(), 3);
-    assert_eq!(flushes.load(Ordering::Relaxed), 0);
-    let attempted = calls.load(Ordering::Relaxed);
+    let expected = serde_json::to_vec(&crate::output::envelope::Envelope::record(
+        Command::Http,
+        0,
+        "message",
+        Data { value: 1 },
+        Vec::new(),
+    ))
+    .unwrap();
+    assert_eq!(prefix.lock().unwrap().as_slice(), &expected[..3]);
+    assert!(visible.lock().unwrap().is_empty());
     assert!(!stream.is_open());
     assert!(!stream.is_complete());
     assert!(matches!(
         stream.complete((), Vec::new()),
         Err(EncodeError::Failed)
     ));
-    assert_eq!(calls.load(Ordering::Relaxed), attempted);
+    drop(stream);
+    let worker = wait_for_worker(&runtime);
+    assert_eq!(
+        worker
+            .emit(7, &Deadline::new(Duration::from_secs(5)))
+            .unwrap(),
+        7
+    );
+    assert_eq!(prefix.lock().unwrap().as_slice(), &expected[..3]);
+    assert!(visible.lock().unwrap().is_empty());
 }
 
 struct BlockedWriter {

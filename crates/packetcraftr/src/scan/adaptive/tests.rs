@@ -5,7 +5,6 @@ use std::time::Instant;
 
 use crate::target::SelectedAddress;
 
-use super::work::Endpoint;
 use super::*;
 
 fn config() -> Adaptive {
@@ -33,6 +32,40 @@ fn targets(count: usize) -> Vec<SelectedAddress> {
         .collect()
 }
 
+fn identities(selections: &[Selection]) -> Vec<(usize, usize, u32, u64)> {
+    selections
+        .iter()
+        .map(|selection| {
+            (
+                selection.slot,
+                selection.endpoint,
+                selection.attempt,
+                selection.sequence,
+            )
+        })
+        .collect()
+}
+
+fn reply(responder: IpAddr) -> Outcome {
+    Outcome::Reply {
+        latency: Duration::from_millis(1),
+        responder,
+        control: false,
+    }
+}
+
+fn send_and_settle(
+    controller: &mut Controller,
+    work: &mut Work,
+    selection: Selection,
+    outcome: Outcome,
+    now: Instant,
+) {
+    controller.admitted(work, selection);
+    controller.confirm_send(work, selection, now);
+    controller.settle(work, selection, outcome, now);
+}
+
 #[test]
 fn every_host_endpoint_is_selected_once_and_completed() {
     for hosts in [1, 4, 32] {
@@ -54,11 +87,7 @@ fn every_host_endpoint_is_selected_once_and_completed() {
                 controller.settle(
                     &mut work,
                     selection,
-                    Outcome::Reply {
-                        latency: Duration::from_millis(1),
-                        responder: targets(hosts)[selection.slot].address,
-                        control: false,
-                    },
+                    reply(targets(hosts)[selection.slot].address),
                     now,
                 );
                 assert!(sequences.insert(selection.sequence));
@@ -165,323 +194,413 @@ fn expiry_counts_unsent_attempts_once_and_pending_settlement_remains_valid() {
     );
     assert!(work.done());
     assert_eq!(controller.take_canceled_responses(&mut work), 0);
-    assert_eq!(controller.finish(Ceilings::default()).incomplete.len(), 1);
-}
-
-struct ConservativeWork {
-    endpoints: Vec<Vec<Endpoint>>,
-    cursor: usize,
-    canceled: usize,
-}
-
-impl ConservativeWork {
-    fn select(
-        &mut self,
-        controller: &Controller,
-        work: &Work,
-        now: Instant,
-        end: Instant,
-        capacity: usize,
-    ) -> Vec<(usize, usize, u32)> {
-        for (index, slot) in work.slots.iter().enumerate() {
-            if controller.host_expired(slot.host, now) {
-                for endpoint in &mut self.endpoints[index] {
-                    if !endpoint.finished {
-                        self.canceled += work.max_attempts.saturating_sub(endpoint.sent) as usize;
-                        endpoint.finished = true;
-                    }
-                }
-            }
-        }
-        let mut picked = std::collections::HashSet::new();
-        let mut gapped = std::collections::HashSet::new();
-        let mut selected = Vec::new();
-        let mut misses = 0;
-        while selected.len() < capacity && misses < work.slots.len() {
-            let index = self.cursor;
-            self.cursor = (self.cursor + 1) % work.slots.len();
-            let host = work.slots[index].host;
-            if controller.host_expired(host, now)
-                || controller.hosts[host].min_gap > Duration::ZERO && gapped.contains(&index)
-                || !controller.host_gap_ready(host, now)
-            {
-                misses += 1;
-                continue;
-            }
-            let endpoint =
-                self.endpoints[index]
-                    .iter()
-                    .enumerate()
-                    .find_map(|(endpoint, state)| {
-                        (!state.finished
-                            && !state.pending
-                            && state.sent < work.max_attempts
-                            && state.ready_at <= now
-                            && !picked.contains(&(index, endpoint)))
-                        .then_some(endpoint)
-                    });
-            let Some(endpoint) = endpoint else {
-                misses += 1;
-                continue;
-            };
-            picked.insert((index, endpoint));
-            gapped.insert(index);
-            let deadline = controller.hosts[host]
-                .first_admission
-                .map_or(now + controller.config.host_timeout, |started| {
-                    started + controller.config.host_timeout
-                })
-                .min(end);
-            if now >= deadline {
-                misses += 1;
-                continue;
-            }
-            selected.push((index, endpoint, self.endpoints[index][endpoint].sent + 1));
-            misses = 0;
-        }
-        selected
-    }
-
-    fn admitted(&mut self, selection: Selection) {
-        let endpoint = &mut self.endpoints[selection.slot][selection.endpoint];
-        endpoint.pending = true;
-        endpoint.sent = selection.attempt;
-    }
-
-    fn settle(
-        &mut self,
-        selection: Selection,
-        outcome: Outcome,
-        controller: &Controller,
-        max_attempts: u32,
-        now: Instant,
-    ) {
-        let endpoint = &mut self.endpoints[selection.slot][selection.endpoint];
-        endpoint.pending = false;
-        match outcome {
-            Outcome::Silent | Outcome::UnqualifiedSilence if selection.attempt < max_attempts => {
-                endpoint.ready_at = now + controller.config.retry_delay(selection.attempt + 1);
-            }
-            Outcome::Reply { .. } | Outcome::Silent | Outcome::UnqualifiedSilence => {
-                endpoint.finished = true;
-            }
-            Outcome::Aborted | Outcome::Omitted => {
-                if !endpoint.finished {
-                    self.canceled += max_attempts.saturating_sub(endpoint.sent) as usize;
-                }
-                endpoint.finished = true;
-            }
-        }
-    }
+    let report = controller.finish(Ceilings::default());
+    assert_eq!(
+        report
+            .incomplete
+            .iter()
+            .map(|host| (host.address, host.scope.clone()))
+            .collect::<Vec<_>>(),
+        [(targets(1)[0].address, None)]
+    );
 }
 
 #[test]
-fn indexed_readiness_matches_conservative_transitions_with_pacing_retries_and_expiry() {
-    for hosts in [1, 3, 8] {
-        let start = Instant::now();
-        let mut settings = config();
-        settings.host_timeout = Duration::from_millis(300);
-        let mut controller = Controller::new(settings, Duration::from_millis(100), 8);
-        let targets = targets(hosts);
-        for (index, target) in targets.iter().enumerate() {
-            let host = controller.host_index(target);
-            if index % 2 == 0 {
-                controller.hosts[host].min_gap = Duration::from_millis(15);
-            }
-        }
-        let mut work = controller.open_stage(&targets, 32, 3, 0, start);
-        let mut conservative = ConservativeWork {
-            endpoints: work
-                .slots
-                .iter()
-                .map(|slot| slot.endpoints.clone())
-                .collect(),
-            cursor: 0,
-            canceled: 0,
-        };
-        let mut active = Vec::<(Instant, Selection)>::new();
-        let mut accounted_canceled = 0;
-        for tick in 0..1000 {
-            let now = start + Duration::from_millis(tick * 5);
-            let mut index = 0;
-            while index < active.len() {
-                if active[index].0 > now {
-                    index += 1;
-                    continue;
-                }
-                let (_, selection) = active.remove(index);
-                let outcome = match selection.sequence % 5 {
-                    0 => Outcome::Silent,
-                    1 => Outcome::Aborted,
-                    _ => Outcome::Reply {
-                        latency: Duration::from_millis(5),
-                        responder: targets[selection.slot].address,
-                        control: false,
-                    },
-                };
-                conservative.settle(selection, outcome, &controller, work.max_attempts, now);
-                controller.settle(&mut work, selection, outcome, now);
-            }
-            let capacity = 8usize.saturating_sub(active.len());
-            let expected = conservative.select(
-                &controller,
-                &work,
-                now,
-                start + Duration::from_secs(2),
-                capacity,
-            );
-            let wave = controller.select(&mut work, now, start + Duration::from_secs(2), capacity);
-            assert_eq!(
-                wave.selections
-                    .iter()
-                    .map(|s| (s.slot, s.endpoint, s.attempt))
-                    .collect::<Vec<_>>(),
-                expected,
-                "hosts={hosts}, tick={tick}"
-            );
-            accounted_canceled += controller.take_canceled_responses(&mut work);
-            assert_eq!(accounted_canceled, conservative.canceled);
-            // Exercise a discarded suffix after pacing or admission refusal.
-            let prefix = if tick % 3 == 0 {
-                1
-            } else {
-                wave.selections.len()
-            };
-            for selection in wave.selections.into_iter().take(prefix) {
-                if selection.sequence % 11 == 0 {
-                    conservative.settle(
-                        selection,
-                        Outcome::Omitted,
-                        &controller,
-                        work.max_attempts,
-                        now,
-                    );
-                    controller.settle(&mut work, selection, Outcome::Omitted, now);
-                } else {
-                    conservative.admitted(selection);
-                    controller.admitted(&mut work, selection);
-                    controller.confirm_send(&mut work, selection, now);
-                    active.push((
-                        now + Duration::from_millis(5 + selection.sequence % 7 * 5),
-                        selection,
-                    ));
-                }
-            }
-            if work.done() && active.is_empty() {
-                accounted_canceled += controller.take_canceled_responses(&mut work);
-                assert_eq!(accounted_canceled, conservative.canceled);
-                break;
-            }
-            assert!(tick < 999, "scheduler must finish");
-        }
+fn selection_timeline_preserves_pacing_retries_discarded_offers_and_expiry() {
+    let start = Instant::now();
+    let mut settings = config();
+    settings.host_timeout = Duration::from_millis(300);
+    let mut controller = Controller::new(settings, Duration::from_millis(100), 8);
+    let targets = targets(3);
+    let mut work = controller.open_stage(&targets, 3, 2, 100, start);
+    let paced = controller.host_index(&targets[0]);
+    controller.hosts[paced].min_gap = Duration::from_millis(10);
+    let end = start + Duration::from_secs(2);
+    let at = |millis| start + Duration::from_millis(millis);
+
+    let initial = controller.select(&mut work, start, end, 4);
+    assert_eq!(
+        identities(&initial.selections),
+        [
+            (0, 0, 1, 100),
+            (1, 0, 1, 101),
+            (2, 0, 1, 102),
+            (1, 1, 1, 104)
+        ]
+    );
+    for selection in initial.selections.iter().take(3) {
+        controller.admitted(&mut work, *selection);
+        controller.confirm_send(&mut work, *selection, start);
     }
+    controller.settle(&mut work, initial.selections[0], Outcome::Silent, start);
+    controller.settle(
+        &mut work,
+        initial.selections[1],
+        Outcome::Reply {
+            latency: Duration::from_millis(5),
+            responder: targets[1].address,
+            control: false,
+        },
+        at(5),
+    );
+    controller.settle(&mut work, initial.selections[2], Outcome::Aborted, at(5));
+
+    let next = controller.select(&mut work, at(5), end, 3);
+    assert_eq!(
+        identities(&next.selections),
+        [(2, 1, 1, 105), (1, 1, 1, 104), (2, 2, 1, 108)]
+    );
+    send_and_settle(
+        &mut controller,
+        &mut work,
+        next.selections[0],
+        reply(targets[2].address),
+        at(5),
+    );
+    send_and_settle(
+        &mut controller,
+        &mut work,
+        next.selections[1],
+        Outcome::Silent,
+        at(5),
+    );
+    controller.settle(&mut work, next.selections[2], Outcome::Omitted, at(5));
+
+    let refill = controller.select(&mut work, at(9), end, 4);
+    assert_eq!(identities(&refill.selections), [(1, 2, 1, 107)]);
+    for selection in refill.selections {
+        send_and_settle(
+            &mut controller,
+            &mut work,
+            selection,
+            reply(targets[selection.slot].address),
+            at(9),
+        );
+    }
+
+    let retry = controller.select(&mut work, at(10), end, 4);
+    assert_eq!(identities(&retry.selections), [(0, 0, 2, 109)]);
+    send_and_settle(
+        &mut controller,
+        &mut work,
+        retry.selections[0],
+        reply(targets[0].address),
+        at(10),
+    );
+    let waiting = controller.select(&mut work, at(14), end, 4);
+    assert!(waiting.selections.is_empty());
+    assert_eq!(waiting.next_ready, Some(at(15)));
+    let retry = controller.select(&mut work, at(15), end, 4);
+    assert_eq!(identities(&retry.selections), [(1, 1, 2, 113)]);
+    send_and_settle(
+        &mut controller,
+        &mut work,
+        retry.selections[0],
+        reply(targets[1].address),
+        at(15),
+    );
+
+    let waiting = controller.select(&mut work, at(19), end, 4);
+    assert!(waiting.selections.is_empty());
+    assert_eq!(waiting.next_ready, Some(at(20)));
+    let pending = controller.select(&mut work, at(20), end, 4);
+    assert_eq!(identities(&pending.selections), [(0, 1, 1, 103)]);
+    controller.admitted(&mut work, pending.selections[0]);
+    controller.confirm_send(&mut work, pending.selections[0], at(20));
+    let discarded = controller.select(&mut work, at(30), end, 4);
+    assert_eq!(identities(&discarded.selections), [(0, 2, 1, 106)]);
+    let last_chance = controller.select(&mut work, at(299), end, 4);
+    assert_eq!(identities(&last_chance.selections), [(0, 2, 1, 106)]);
+    assert_eq!(last_chance.selections[0].timeout, Duration::from_millis(1));
+    assert_eq!(last_chance.selections[0].host_deadline, at(300));
+    assert!(last_chance.selections[0].host_limited);
+
+    let expired = controller.select(&mut work, at(300), end, 4);
+    assert!(expired.done);
+    assert!(expired.selections.is_empty());
+    assert_eq!(controller.take_canceled_responses(&mut work), 6);
+    controller.settle(
+        &mut work,
+        pending.selections[0],
+        Outcome::Reply {
+            latency: Duration::from_millis(290),
+            responder: targets[0].address,
+            control: false,
+        },
+        at(310),
+    );
+    assert!(work.done());
+    assert_eq!(controller.take_canceled_responses(&mut work), 0);
+    let report = controller.finish(Ceilings::default());
+    assert_eq!(report.retries_started, 2);
+    assert_eq!(
+        report
+            .incomplete
+            .iter()
+            .map(|host| (&host.address, &host.scope))
+            .collect::<Vec<_>>(),
+        [(&targets[0].address, &targets[0].scope)]
+    );
 }
 
 #[test]
 fn paced_host_cannot_queue_again_before_its_admission_commits_or_is_omitted() {
     for omit in [false, true] {
         let now = Instant::now();
+        let end = now + Duration::from_secs(5);
+        let gap = Duration::from_millis(10);
         let mut controller = Controller::new(config(), Duration::from_millis(100), 4);
         let targets = targets(1);
-        let host = controller.host_index(&targets[0]);
-        controller.hosts[host].min_gap = Duration::from_millis(10);
         let mut work = controller.open_stage(&targets, 3, 1, 0, now);
-        let first = controller
-            .select(&mut work, now, now + Duration::from_secs(5), 4)
-            .selections[0];
+        let host = controller.host_index(&targets[0]);
+        controller.hosts[host].min_gap = gap;
+        let initial = controller.select(&mut work, now, end, 4);
+        assert_eq!(identities(&initial.selections), [(0, 0, 1, 0)]);
+        let first = initial.selections[0];
         controller.admitted(&mut work, first);
         assert!(
             controller
-                .select(&mut work, now, now + Duration::from_secs(5), 4)
+                .select(&mut work, now, end, 4)
                 .selections
                 .is_empty()
         );
-        if omit {
+        let second_at = if omit {
             controller.settle(&mut work, first, Outcome::Omitted, now);
-            assert_eq!(
-                controller
-                    .select(&mut work, now, now + Duration::from_secs(5), 4)
-                    .selections
-                    .len(),
-                1
-            );
+            now
         } else {
             controller.confirm_send(&mut work, first, now);
             assert!(
                 controller
-                    .select(&mut work, now, now + Duration::from_secs(5), 4)
+                    .select(&mut work, now, end, 4)
                     .selections
                     .is_empty()
             );
-            assert_eq!(
-                controller
-                    .select(
-                        &mut work,
-                        now + Duration::from_millis(10),
-                        now + Duration::from_secs(5),
-                        4
-                    )
-                    .selections
-                    .len(),
-                1
-            );
-        }
-        assert_eq!(controller.hosts[host].uncommitted, 0);
+            controller.settle(&mut work, first, reply(targets[0].address), now);
+            now + gap
+        };
+        let second = controller.select(&mut work, second_at, end, 4);
+        assert_eq!(identities(&second.selections), [(0, 1, 1, 1)]);
+        send_and_settle(
+            &mut controller,
+            &mut work,
+            second.selections[0],
+            reply(targets[0].address),
+            second_at,
+        );
+        let third_at = second_at + gap;
+        let waiting = controller.select(&mut work, third_at - Duration::from_nanos(1), end, 4);
+        assert!(waiting.selections.is_empty());
+        assert_eq!(waiting.next_ready, Some(third_at));
+        let third = controller.select(&mut work, third_at, end, 4);
+        assert_eq!(identities(&third.selections), [(0, 2, 1, 2)]);
+        send_and_settle(
+            &mut controller,
+            &mut work,
+            third.selections[0],
+            reply(targets[0].address),
+            third_at,
+        );
+        assert!(work.done());
+        assert!(
+            controller
+                .select(&mut work, third_at, end, 4)
+                .selections
+                .is_empty()
+        );
+        assert_eq!(
+            controller.take_canceled_responses(&mut work),
+            usize::from(omit)
+        );
     }
 }
 
 #[test]
+fn paced_hosts_keep_independent_admission_and_ready_times() {
+    let now = Instant::now();
+    let end = now + Duration::from_secs(5);
+    let mut controller = Controller::new(config(), Duration::from_millis(100), 4);
+    let targets = targets(2);
+    let mut work = controller.open_stage(&targets, 2, 1, 0, now);
+    for (target, milliseconds) in targets.iter().zip([10, 20]) {
+        let host = controller.host_index(target);
+        controller.hosts[host].min_gap = Duration::from_millis(milliseconds);
+    }
+    let initial = controller.select(&mut work, now, end, 4);
+    assert_eq!(
+        identities(&initial.selections),
+        [(0, 0, 1, 0), (1, 0, 1, 1)]
+    );
+    for selection in initial.selections {
+        send_and_settle(
+            &mut controller,
+            &mut work,
+            selection,
+            reply(targets[selection.slot].address),
+            now,
+        );
+    }
+    for (slot, milliseconds, sequence) in [(0, 10, 2), (1, 20, 3)] {
+        let ready = now + Duration::from_millis(milliseconds);
+        let waiting = controller.select(&mut work, ready - Duration::from_nanos(1), end, 4);
+        assert!(waiting.selections.is_empty());
+        assert_eq!(waiting.next_ready, Some(ready));
+        let selected = controller.select(&mut work, ready, end, 4);
+        assert_eq!(identities(&selected.selections), [(slot, 1, 1, sequence)]);
+        send_and_settle(
+            &mut controller,
+            &mut work,
+            selected.selections[0],
+            reply(targets[slot].address),
+            ready,
+        );
+    }
+    assert!(work.done());
+}
+
+#[test]
 fn provisional_silence_retries_neutrally_and_only_final_clean_quality_promotes_losses() {
-    for coverage in [
-        crate::scan::Coverage::NoReportedLoss,
-        crate::scan::Coverage::Incomplete,
-        crate::scan::Coverage::Unknown,
+    for (coverage, expected_window, incomplete) in [
+        (crate::scan::Coverage::NoReportedLoss, 2, false),
+        (crate::scan::Coverage::Incomplete, 4, true),
+        (crate::scan::Coverage::Unknown, 4, true),
     ] {
         let now = Instant::now();
+        let retry_at = now + config().retry_backoff;
         let mut controller = Controller::new(config(), Duration::from_millis(100), 4);
         controller.begin_observation_stage();
-        let mut work = controller.open_stage(&targets(1), 1, 2, 0, now);
-        let first = controller
-            .select(&mut work, now, now + Duration::from_secs(5), 4)
-            .selections[0];
-        controller.admitted(&mut work, first);
-        controller.confirm_send(&mut work, first, now);
-        controller.settle(&mut work, first, Outcome::UnqualifiedSilence, now);
-        assert_eq!(controller.window(), 4);
-        assert_eq!(controller.hosts[0].losses, 0);
-        let retry = controller
-            .select(
-                &mut work,
-                now + config().retry_backoff,
-                now + Duration::from_secs(5),
-                4,
-            )
-            .selections[0];
-        controller.admitted(&mut work, retry);
-        controller.confirm_send(&mut work, retry, now + config().retry_backoff);
-        controller.settle(
+        let target = targets(1);
+        let mut work = controller.open_stage(&target, 2, 2, 0, now);
+        let first = controller.select(
             &mut work,
-            retry,
-            Outcome::UnqualifiedSilence,
-            now + config().retry_backoff,
-        );
-        assert!(work.done());
-        assert_eq!(controller.window(), 4);
-        assert_eq!(controller.hosts[0].pending_losses, 2);
-        controller.qualify_pending(coverage);
-        assert_eq!(
-            controller.hosts[0].losses,
-            if coverage.permits_silence() { 2 } else { 0 }
-        );
-        assert_eq!(controller.is_incomplete(0), !coverage.permits_silence());
-        assert_eq!(
+            now,
+            now + Duration::from_secs(5),
             controller.window(),
-            if coverage.permits_silence() { 2 } else { 4 }
         );
-        assert_eq!(controller.hosts[0].pending_losses, 0);
-        assert!(controller.hosts[0].pending_loss_sequences.is_empty());
-        assert!(controller.cohort_members.is_empty());
-        assert!(controller.halved.is_empty());
+        assert_eq!(identities(&first.selections), [(0, 0, 1, 0), (0, 1, 1, 1)]);
+        for selection in first.selections {
+            send_and_settle(
+                &mut controller,
+                &mut work,
+                selection,
+                Outcome::UnqualifiedSilence,
+                now,
+            );
+        }
+        let waiting = controller.select(
+            &mut work,
+            retry_at - Duration::from_nanos(1),
+            now + Duration::from_secs(5),
+            controller.window(),
+        );
+        assert!(waiting.selections.is_empty());
+        assert_eq!(waiting.next_ready, Some(retry_at));
+        let retry = controller.select(
+            &mut work,
+            retry_at,
+            now + Duration::from_secs(5),
+            controller.window(),
+        );
+        assert_eq!(identities(&retry.selections), [(0, 0, 2, 2), (0, 1, 2, 3)]);
+        for selection in retry.selections {
+            send_and_settle(
+                &mut controller,
+                &mut work,
+                selection,
+                Outcome::UnqualifiedSilence,
+                retry_at,
+            );
+        }
+        assert!(work.done());
+
+        let responder: IpAddr = "198.51.100.7".parse().unwrap();
+        let mut controls = controller.open_stage(&target, 4, 1, 10, retry_at);
+        let replies = controller.select(
+            &mut controls,
+            retry_at,
+            now + Duration::from_secs(5),
+            controller.window(),
+        );
+        assert_eq!(
+            identities(&replies.selections),
+            [(0, 0, 1, 10), (0, 1, 1, 11), (0, 2, 1, 12), (0, 3, 1, 13)]
+        );
+        for selection in &replies.selections {
+            controller.admitted(&mut controls, *selection);
+            controller.confirm_send(&mut controls, *selection, retry_at);
+        }
+        for selection in replies.selections {
+            controller.settle(
+                &mut controls,
+                selection,
+                Outcome::Reply {
+                    latency: Duration::from_millis(1),
+                    responder,
+                    control: true,
+                },
+                retry_at,
+            );
+        }
+        assert!(controls.done());
+
+        controller.qualify_pending(coverage);
+        let following = SelectedAddress::new("192.0.2.2".parse().unwrap());
+        let mut followup = controller.open_stage(&[following], 4, 1, 100, retry_at);
+        let offered = controller.select(
+            &mut followup,
+            retry_at,
+            now + Duration::from_secs(5),
+            controller.window(),
+        );
+        let expected = [
+            (0, 0, 1, 101),
+            (0, 1, 1, 103),
+            (0, 2, 1, 105),
+            (0, 3, 1, 107),
+        ];
+        assert_eq!(identities(&offered.selections), expected[..expected_window]);
+        controller.qualify_pending(crate::scan::Coverage::NoReportedLoss);
+        let repeated = controller.select(
+            &mut followup,
+            retry_at,
+            now + Duration::from_secs(5),
+            controller.window(),
+        );
+        assert_eq!(
+            identities(&repeated.selections),
+            expected[..expected_window]
+        );
+
+        let report = controller.finish(Ceilings::default());
+        assert_eq!(report.retries_started, 2);
+        let expected_incomplete = if incomplete {
+            vec![(target[0].address, target[0].scope.clone())]
+        } else {
+            vec![]
+        };
+        assert_eq!(
+            report
+                .incomplete
+                .iter()
+                .map(|host| (host.address, host.scope.clone()))
+                .collect::<Vec<_>>(),
+            expected_incomplete
+        );
+        if incomplete {
+            assert!(report.conditions.is_empty());
+            continue;
+        }
+        assert_eq!(report.conditions.len(), 1);
+        let condition = &report.conditions[0];
+        assert_eq!(condition.kind, ConditionKind::SuspectedResponseRateLimit);
+        assert_eq!(condition.host.address, target[0].address);
+        assert_eq!(condition.host.scope, target[0].scope);
+        assert_eq!(condition.control_responder, responder);
+        assert_eq!(
+            (condition.completed, condition.replies, condition.losses),
+            (8, 4, 4)
+        );
+        assert_eq!(condition.control_sequences, [10, 11, 12, 13]);
+        assert_eq!(condition.loss_sequences, [0, 1, 2, 3]);
     }
 }
 
@@ -490,9 +609,9 @@ fn deferred_interface_admission_preserves_host_pacing_across_refill_polls() {
     let now = Instant::now();
     let mut controller = Controller::new(config(), Duration::from_millis(100), 3);
     let targets = targets(2);
+    let mut work = controller.open_stage(&targets, 3, 1, 0, now);
     let deferred = controller.host_index(&targets[1]);
     controller.hosts[deferred].min_gap = Duration::from_millis(10);
-    let mut work = controller.open_stage(&targets, 3, 1, 0, now);
     let initial = controller.select(&mut work, now, now + Duration::from_secs(5), 3);
     assert_eq!(
         initial
@@ -511,16 +630,7 @@ fn deferred_interface_admission_preserves_host_pacing_across_refill_polls() {
             controller.confirm_send(&mut work, *selection, now);
         }
     }
-    controller.settle(
-        &mut work,
-        quick,
-        Outcome::Reply {
-            latency: Duration::from_millis(1),
-            responder: targets[0].address,
-            control: false,
-        },
-        now,
-    );
+    controller.settle(&mut work, quick, reply(targets[0].address), now);
     // The first host's armed source can refill while the second host's offered
     // attempt waits for a drained capture epoch. A second offer for that paced
     // host must not sneak into the queue on this independent select call.
@@ -574,4 +684,24 @@ fn deferred_interface_admission_preserves_host_pacing_across_refill_polls() {
             .selections
             .is_empty()
     );
+    let committed = rotated + Duration::from_millis(10);
+    controller.confirm_send(&mut work, next.selections[0], committed);
+    controller.settle(
+        &mut work,
+        next.selections[0],
+        reply(targets[1].address),
+        committed,
+    );
+    controller.settle(&mut work, unarmed, reply(targets[1].address), committed);
+    let ready = committed + Duration::from_millis(10);
+    let last = controller.select(&mut work, ready, ready + Duration::from_secs(5), 3);
+    assert_eq!(identities(&last.selections), [(1, 2, 1, 5)]);
+    send_and_settle(
+        &mut controller,
+        &mut work,
+        last.selections[0],
+        reply(targets[1].address),
+        ready,
+    );
+    assert!(work.done());
 }

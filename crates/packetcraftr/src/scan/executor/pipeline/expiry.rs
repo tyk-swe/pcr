@@ -64,18 +64,23 @@ mod tests {
     fn polls_release_only_due_probes_in_original_order() {
         for count in [32, 128, 512, 4096] {
             let now = Instant::now();
-            let end = now + Duration::from_secs(1);
+            let first = now + Duration::from_millis(10);
+            let end = now + Duration::from_millis(20);
             let mut deadlines = PendingDeadlines::default();
             for index in 0..count {
-                deadlines.insert(end, index);
+                deadlines.insert(if index % 2 == 0 { end } else { first }, index);
             }
-            for _ in 0..1000 {
-                assert!(!deadlines.notice_expired(now));
-                assert_eq!(deadlines.next(), Some(end));
+            for sample in [now, first - Duration::from_nanos(1)] {
+                assert!(!deadlines.notice_expired(sample));
+                assert_eq!(deadlines.next(), Some(first));
             }
             assert_eq!(deadlines.pop_expired(), None);
+            assert!(deadlines.notice_expired(first));
+            assert_eq!(deadlines.next(), Some(end));
+            assert_eq!(deadlines.pop_expired(), Some(1));
+            assert!(!deadlines.notice_expired(end - Duration::from_nanos(1)));
             assert!(deadlines.notice_expired(end));
-            for index in 0..count {
+            for index in (0..count).filter(|index| *index != 1) {
                 assert_eq!(deadlines.pop_expired(), Some(index));
             }
             assert_eq!(deadlines.pop_expired(), None);

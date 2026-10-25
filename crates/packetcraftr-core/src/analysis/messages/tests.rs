@@ -6,7 +6,64 @@ use crate::analysis::{
     reassembly::tcp::FlowKey,
     scope::Interner,
 };
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
+
+fn decoded_message(event: &Event) -> &Message {
+    let Event::Message(message) = event else {
+        panic!("expected a message, got {event:?}");
+    };
+    message
+}
+
+fn complete_message<'a>(
+    event: &'a Event,
+    protocol: BuiltinProtocol,
+    wire: &[u8],
+    sources: &[u64],
+) -> &'a Message {
+    let message = decoded_message(event);
+    assert_eq!(message.status, Status::Complete);
+    assert_eq!(message.protocol, protocol);
+    assert_eq!(message.wire.as_ref(), wire);
+    assert!(message.error.is_none(), "{:?}", message.error);
+    assert!(
+        message
+            .packet
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|layer| layer.protocol_id().as_str() == protocol.as_str())
+    );
+    assert_eq!(
+        message
+            .sources
+            .iter()
+            .map(|source| source.number)
+            .collect::<Vec<_>>(),
+        sources
+    );
+    message
+}
+
+fn assert_packet_fields(message: &Message, expected: &crate::document::Layer) {
+    let layer = message
+        .packet
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|layer| layer.protocol_id().as_str() == expected.protocol)
+        .unwrap();
+    for (field, value) in &expected.fields {
+        assert_eq!(
+            layer.field(field).as_ref(),
+            Some(value),
+            "{}.{}",
+            expected.protocol,
+            field
+        );
+    }
+}
+
 fn flow() -> ScopedFlowKey {
     ScopedFlowKey {
         scope: Interner::new().intern(None, vec![]).unwrap(),
@@ -36,7 +93,7 @@ fn deliver(
                 sources: tracker
                     .single(SourceFrame {
                         number,
-                        timestamp: UNIX_EPOCH,
+                        timestamp: UNIX_EPOCH + Duration::from_secs(number),
                     })
                     .unwrap(),
             },
@@ -46,6 +103,7 @@ fn deliver(
 }
 #[test]
 fn split_mqtt_and_coalesced_messages_keep_sources() {
+    // https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html section 3.3 checked 2026-10-25.
     let wire = [0x30, 4, 0, 1, b'a', b'x'];
     for split in 1..wire.len() {
         let mut c = Collector::new(
@@ -65,27 +123,33 @@ fn split_mqtt_and_coalesced_messages_keep_sources() {
         tail.extend([0xc0, 0]);
         deliver(&mut c, &t, 2, &tail, 0, &mut out);
         assert_eq!(out.len(), 2);
-        let Event::Message(first) = &out[0] else {
-            panic!()
-        };
-        assert_eq!(first.status, Status::Complete);
-        assert_eq!(first.wire.as_ref(), wire);
+        let first = complete_message(&out[0], BuiltinProtocol::Mqtt, &wire, &[1, 2]);
         assert_eq!(
-            first.sources.iter().map(|f| f.number).collect::<Vec<_>>(),
-            vec![1, 2]
+            first.sources.frames(),
+            [
+                SourceFrame {
+                    number: 1,
+                    timestamp: UNIX_EPOCH + Duration::from_secs(1)
+                },
+                SourceFrame {
+                    number: 2,
+                    timestamp: UNIX_EPOCH + Duration::from_secs(2)
+                },
+            ]
         );
-        let Event::Message(second) = &out[1] else {
-            panic!()
-        };
-        assert_eq!(second.status, Status::Complete);
-        assert_eq!(second.wire.as_ref(), [0xc0, 0]);
-        assert_eq!(
-            second.sources.iter().map(|f| f.number).collect::<Vec<_>>(),
-            [2]
-        );
+        let mqtt = first
+            .packet
+            .as_ref()
+            .unwrap()
+            .get::<crate::protocol::application::mqtt::Mqtt>()
+            .unwrap();
+        assert_eq!(mqtt.packet_type, 3);
+        assert_eq!(mqtt.topic.as_ref(), b"a");
+        assert_eq!(mqtt.payload.as_ref(), b"x");
+        complete_message(&out[1], BuiltinProtocol::Mqtt, &[0xc0, 0], &[2]);
         deliver(&mut c, &t, 3, &wire, 0, &mut out);
-        assert!(matches!(&out[2], Event::Message(message)
-            if message.status == Status::Complete && message.wire.as_ref() == wire));
+        assert_eq!(out.len(), 3);
+        complete_message(&out[2], BuiltinProtocol::Mqtt, &wire, &[3]);
     }
 }
 #[test]
@@ -109,11 +173,27 @@ fn gap_stops_direction_until_new_generation() {
         &mut out,
     )
     .unwrap();
-    assert!(matches!(&out[1],Event::Message(m)if m.status==Status::Gap));
+    let [Event::Issue(issue), Event::Message(message)] = out.as_slice() else {
+        panic!("expected a gap and its retained message: {out:?}");
+    };
+    assert_eq!(issue.status, Status::Gap);
+    assert_eq!(issue.number, 2);
+    assert_eq!(message.status, Status::Gap);
+    assert_eq!(message.wire.as_ref(), b"\x30\x04");
+    assert_eq!(
+        message
+            .sources
+            .iter()
+            .map(|source| source.number)
+            .collect::<Vec<_>>(),
+        [1]
+    );
+    assert!(message.packet.is_none());
     deliver(&mut c, &t, 3, &[0xc0, 0], 0, &mut out);
     assert_eq!(out.len(), 2);
     deliver(&mut c, &t, 4, &[0xc0, 0], 1, &mut out);
-    assert!(matches!(&out[2],Event::Message(m)if m.status==Status::Complete&&m.generation==1));
+    let resumed = complete_message(&out[2], BuiltinProtocol::Mqtt, b"\xc0\0", &[4]);
+    assert_eq!(resumed.generation, 1);
 }
 
 #[test]
@@ -122,13 +202,42 @@ fn every_tcp_protocol_accepts_split_and_coalesced_frames() {
         "../../../../../examples/captures/protocols.manifest.json"
     ))
     .unwrap();
-    for row in manifest["protocols"].as_array().unwrap() {
-        let name = row["protocol"].as_str().unwrap();
+    let capabilities: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../examples/documents/output-protocols-success.json"
+    ))
+    .unwrap();
+    for advertised in capabilities["result"]["protocols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["stream_decode"] == true)
+    {
+        let name = advertised["protocol"].as_str().unwrap();
+        let row = manifest["protocols"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["protocol"] == name)
+            .unwrap();
         let protocol = BuiltinProtocol::from_name(name).unwrap();
-        if !protocol.stream_decode() {
-            continue;
-        }
         let bytes = crate::layer::parse_hex(row["wire_hex"].as_str().unwrap()).unwrap();
+        let document_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(row["packet_document"].as_str().unwrap());
+        let json = std::fs::read_to_string(document_path).unwrap();
+        let mut expected =
+            crate::document::Packet::parse(&json, crate::document::Format::Json, json.len())
+                .unwrap();
+        let expected = expected
+            .layers
+            .iter_mut()
+            .find(|layer| layer.protocol == name)
+            .unwrap();
+        if protocol == BuiltinProtocol::ModbusTcp {
+            expected.fields.insert("form".into(), "request".into());
+            expected.fields.insert("quantity".into(), 2_u16.into());
+            expected.fields.insert("data".into(), Bytes::new().into());
+        }
         let port = protocol.message_protocol().unwrap().tcp_ports[0];
         let mut collector = Collector::new(
             Limits::default(),
@@ -163,11 +272,10 @@ fn every_tcp_protocol_accepts_split_and_coalesced_frames() {
             )
             .unwrap();
         assert_eq!(out.len(), 2, "coalesced {name}");
-        assert!(
-            out.iter()
-                .all(|event| matches!(event,Event::Message(m) if m.status==Status::Complete)),
-            "coalesced {name}"
-        );
+        for event in &out {
+            let message = complete_message(event, protocol, &bytes, &[1]);
+            assert_packet_fields(message, expected);
+        }
 
         for split in 1..bytes.len() {
             let mut c = Collector::new(
@@ -197,12 +305,13 @@ fn every_tcp_protocol_accepts_split_and_coalesced_frames() {
                     &mut out,
                 )
                 .unwrap();
+                if number == 1 {
+                    assert!(out.is_empty(), "{name}, split {split}: {out:?}");
+                }
             }
             assert_eq!(out.len(), 1, "{name}, split {split}");
-            assert!(
-                matches!(&out[0],Event::Message(m) if m.status==Status::Complete),
-                "{name}, split {split}: {out:?}"
-            );
+            let message = complete_message(&out[0], protocol, &bytes, &[1, 2]);
+            assert_packet_fields(message, expected);
         }
     }
 }
@@ -210,9 +319,15 @@ fn every_tcp_protocol_accepts_split_and_coalesced_frames() {
 #[test]
 fn declared_length_is_rejected_before_large_allocation() {
     let mut framer = Framer::new("opcua_tcp");
-    assert!(framer.progress(b"MSGF\xff\xff\xff\x7f", 1024).is_err());
+    assert!(matches!(
+        framer.progress(b"MSGF\xff\xff\xff\x7f", 1024),
+        Err(crate::protocol::framing::Error::BufferLimit { limit: 1024 })
+    ));
     let mut framer = Framer::new("resp");
-    assert!(framer.progress(b"$2147483647\r\n", 1024).is_err());
+    assert!(matches!(
+        framer.progress(b"$2147483647\r\n", 1024),
+        Err(crate::protocol::framing::Error::BufferLimit { limit: 1024 })
+    ));
 }
 
 #[test]
@@ -248,7 +363,9 @@ fn port_overrides_drive_stream_selection() {
             &mut events,
         )
         .unwrap();
-    assert!(matches!(&events[0],Event::Message(m) if m.protocol==BuiltinProtocol::Mqtt));
+    assert_eq!(events.len(), 1);
+    let message = complete_message(&events[0], BuiltinProtocol::Mqtt, b"\xc0\0", &[1]);
+    assert_eq!(message.flow.flow.destination_port, 1884);
 }
 
 #[test]
@@ -270,32 +387,14 @@ fn capture_pipeline_reassembles_and_attributes_messages() {
         )
         .unwrap();
     assert_eq!(outcome.summary.complete_messages, 2);
-    let messages: Vec<_> = events
-        .iter()
-        .filter_map(|event| {
-            if let Event::Message(m) = event {
-                Some(m)
-            } else {
-                None
-            }
-        })
-        .collect();
-    assert_eq!(
-        messages[0]
-            .sources
-            .iter()
-            .map(|s| s.number)
-            .collect::<Vec<_>>(),
-        vec![2, 3]
+    assert_eq!(events.len(), 2);
+    complete_message(
+        &events[0],
+        BuiltinProtocol::Mqtt,
+        b"\x30\x04\0\x01ax",
+        &[2, 3],
     );
-    assert_eq!(
-        messages[1]
-            .sources
-            .iter()
-            .map(|s| s.number)
-            .collect::<Vec<_>>(),
-        vec![3]
-    );
+    complete_message(&events[1], BuiltinProtocol::Mqtt, b"\xc0\0", &[3]);
 }
 
 fn deliver_on(
@@ -317,7 +416,7 @@ fn deliver_on(
                 sources: tracker
                     .single(SourceFrame {
                         number,
-                        timestamp: UNIX_EPOCH,
+                        timestamp: UNIX_EPOCH + Duration::from_secs(number),
                     })
                     .unwrap(),
             },
@@ -328,6 +427,7 @@ fn deliver_on(
 
 #[test]
 fn review_selected_source_port_is_not_hidden_by_an_unselected_destination() {
+    // https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html section 3.13 checked 2026-10-25.
     let mut collector = Collector::new(
         Limits::default(),
         crate::protocol::builtin::registry(),
@@ -347,12 +447,25 @@ fn review_selected_source_port_is_not_hidden_by_an_unselected_destination() {
         0,
         &mut events,
     );
-    assert!(matches!(events.as_slice(), [Event::Message(message)]
-        if message.protocol == BuiltinProtocol::Mqtt && message.status == Status::Complete));
+    assert_eq!(events.len(), 1);
+    let message = complete_message(&events[0], BuiltinProtocol::Mqtt, b"\xd0\0", &[1]);
+    assert_eq!(message.flow.flow.source_port, 1883);
+    assert_eq!(message.flow.flow.destination_port, 44818);
+    assert_eq!(
+        message
+            .packet
+            .as_ref()
+            .unwrap()
+            .get::<crate::protocol::application::mqtt::Mqtt>()
+            .unwrap()
+            .packet_type,
+        13
+    );
 }
 
 #[test]
 fn review_mqtt5_stays_opaque_in_both_directions_until_a_new_generation() {
+    // https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html sections 3.1 and 3.15 checked 2026-10-25.
     let connect5 = b"\x10\x0d\0\x04MQTT\x05\x02\0\x3c\0\0\0";
     let publish5 = b"\x30\x05\0\x01a\0x";
     for split in 1..connect5.len() {
@@ -396,50 +509,85 @@ fn review_mqtt5_stays_opaque_in_both_directions_until_a_new_generation() {
             &mut events,
         );
         assert_eq!(events.len(), 5);
-        assert!(
-            events
-                .iter()
-                .all(|event| matches!(event, Event::Message(message)
-            if message.status == Status::Unsupported && message.packet.is_none()))
-        );
-        assert!(matches!(&events[1], Event::Message(message) if message.wire.as_ref() == publish5));
+        let expected: &[(&[u8], &[u64], bool)] = &[
+            (connect5, &[1, 2], false),
+            (publish5, &[2], false),
+            (b"\x20\x03\0\0\0", &[3], true),
+            (b"\xf0\x02\0\0", &[3], true),
+            (publish5, &[3], true),
+        ];
+        for (event, (wire, sources, reverse)) in events.iter().zip(expected) {
+            let message = decoded_message(event);
+            assert_eq!(message.status, Status::Unsupported);
+            assert_eq!(message.protocol, BuiltinProtocol::Mqtt);
+            assert!(message.packet.is_none());
+            assert!(
+                message
+                    .error
+                    .as_ref()
+                    .is_some_and(|error| error.contains("protocol level 5"))
+            );
+            assert_eq!(message.wire.as_ref(), *wire);
+            assert_eq!(
+                message
+                    .sources
+                    .iter()
+                    .map(|source| source.number)
+                    .collect::<Vec<_>>(),
+                *sources
+            );
+            assert_eq!(
+                message.flow,
+                if *reverse { flow().reverse() } else { flow() }
+            );
+        }
         let mut next = b"\x10\x0c\0\x04MQTT\x04\x02\0\x3c\0\0".to_vec();
         next.extend_from_slice(b"\x30\x04\0\x01ax");
         deliver(&mut collector, &tracker, 4, &next, 1, &mut events);
         assert_eq!(events.len(), 7);
-        assert!(
-            events[5..]
-                .iter()
-                .all(|event| matches!(event, Event::Message(message)
-            if message.status == Status::Complete && message.generation == 1))
-        );
+        for (event, wire) in events[5..].iter().zip([&next[..14], &next[14..]]) {
+            let message = complete_message(event, BuiltinProtocol::Mqtt, wire, &[4]);
+            assert_eq!(message.generation, 1);
+        }
     }
 }
 
 #[test]
 fn review_events_before_the_first_delivery_disable_the_generation() {
-    for event in [
-        application::Event::Gap {
-            flow: flow(),
-            stream: 0,
-            generation: 0,
-        },
-        application::Event::Conflict {
-            flow: flow(),
-            stream: 0,
-            generation: 0,
-        },
-        application::Event::Evicted {
-            flow: flow(),
-            stream: 0,
-            generation: 0,
-        },
-        application::Event::Closed {
-            flow: flow(),
-            stream: 0,
-            generation: 0,
-            reset: true,
-        },
+    for (event, expected_status) in [
+        (
+            application::Event::Gap {
+                flow: flow(),
+                stream: 0,
+                generation: 0,
+            },
+            Status::Gap,
+        ),
+        (
+            application::Event::Conflict {
+                flow: flow(),
+                stream: 0,
+                generation: 0,
+            },
+            Status::Conflict,
+        ),
+        (
+            application::Event::Evicted {
+                flow: flow(),
+                stream: 0,
+                generation: 0,
+            },
+            Status::Evicted,
+        ),
+        (
+            application::Event::Closed {
+                flow: flow(),
+                stream: 0,
+                generation: 0,
+                reset: true,
+            },
+            Status::Reset,
+        ),
     ] {
         let mut collector = Collector::new(
             Limits::default(),
@@ -450,12 +598,13 @@ fn review_events_before_the_first_delivery_disable_the_generation() {
         let tracker = Tracker::new(1 << 20, 32).unwrap();
         let mut events = Vec::new();
         collector.event(event, 1, &mut events).unwrap();
+        let [Event::Issue(issue)] = events.as_slice() else {
+            panic!("expected one issue before any delivery: {events:?}");
+        };
+        assert_eq!(issue.status, expected_status);
+        assert_eq!(issue.number, 1);
         deliver(&mut collector, &tracker, 2, &[0xc0, 0], 0, &mut events);
-        assert!(
-            events
-                .iter()
-                .all(|event| !matches!(event, Event::Message(_)))
-        );
+        assert_eq!(events.len(), 1);
         deliver_on(
             &mut collector,
             &tracker,
@@ -465,24 +614,25 @@ fn review_events_before_the_first_delivery_disable_the_generation() {
             0,
             &mut events,
         );
-        // A reset disables both directions, while other events affect just one.
-        let reset = matches!(&events[0], Event::Issue(issue) if issue.status == Status::Reset);
-        assert_eq!(
-            events
-                .iter()
-                .filter(|event| matches!(event, Event::Message(_)))
-                .count(),
-            usize::from(!reset)
-        );
+        let reset = expected_status == Status::Reset;
+        assert_eq!(events.len(), if reset { 1 } else { 2 });
+        if !reset {
+            complete_message(&events[1], BuiltinProtocol::Mqtt, b"\xd0\0", &[3]);
+        }
         deliver(&mut collector, &tracker, 4, &[0xc0, 0], 1, &mut events);
-        assert!(
-            matches!(events.last(), Some(Event::Message(message)) if message.status == Status::Complete && message.generation == 1)
+        let resumed = complete_message(
+            events.last().unwrap(),
+            BuiltinProtocol::Mqtt,
+            b"\xc0\0",
+            &[4],
         );
+        assert_eq!(resumed.generation, 1);
     }
 }
 
 #[test]
 fn review_amqp_unsupported_version_keeps_both_directions_opaque() {
+    // https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#section-protocol-header checked 2026-10-25.
     let mut collector = Collector::new(
         Limits::default(),
         crate::protocol::builtin::registry(),
@@ -512,13 +662,39 @@ fn review_amqp_unsupported_version_keeps_both_directions_opaque() {
         0,
         &mut events,
     );
-    assert!(events.iter().all(
-        |event| matches!(event, Event::Message(message) if message.status == Status::Unsupported)
-    ));
+    assert_eq!(events.len(), 1);
+    let preface = decoded_message(&events[0]);
+    assert_eq!(preface.status, Status::Unsupported);
+    assert_eq!(preface.wire.as_ref(), &wire[..8]);
+    assert!(preface.packet.is_none());
+    assert_eq!(
+        preface
+            .sources
+            .iter()
+            .map(|source| source.number)
+            .collect::<Vec<_>>(),
+        [1]
+    );
     let (tail, summary) = collector.finish(&RunSummary::default()).unwrap();
-    assert!(tail.iter().all(
-        |event| matches!(event, Event::Message(message) if message.status == Status::Unsupported)
-    ));
+    assert_eq!(tail.len(), 2);
+    for (source_port, source) in [(40000, 1), (5672, 2)] {
+        let message = tail
+            .iter()
+            .map(decoded_message)
+            .find(|message| message.flow.flow.source_port == source_port)
+            .unwrap();
+        assert_eq!(message.status, Status::Unsupported);
+        assert_eq!(message.wire.as_ref(), &wire[8..]);
+        assert!(message.packet.is_none());
+        assert_eq!(
+            message
+                .sources
+                .iter()
+                .map(|frame| frame.number)
+                .collect::<Vec<_>>(),
+            [source]
+        );
+    }
     assert_eq!(summary.unsupported_messages, 3);
     assert_eq!(summary.malformed_messages, 0);
 }
@@ -546,12 +722,14 @@ fn review_capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
                 (3, 101, Tcp::ACK, b"\x30\x04" as &[u8]),
             ]);
         } else {
-            segments.push((122, 107, Tcp::ACK, b"\xc0\0"));
+            segments.push((5, 107, Tcp::ACK, b"\xc0\0"));
         }
+        let restart = if conflict { 4 } else { 6 };
         segments.extend([
-            (123, 200, Tcp::SYN, b"" as &[u8]),
-            (124, 201, Tcp::ACK, b"\xc0\0" as &[u8]),
+            (restart, 200, Tcp::SYN, b"" as &[u8]),
+            (restart + 1, 201, Tcp::ACK, b"\xc0\0" as &[u8]),
         ]);
+        let last_frame = segments.len() as u64;
         for (seconds, sequence, flags, payload) in segments {
             let mut packet = Packet::new();
             packet.push(Ethernet::default());
@@ -586,7 +764,17 @@ fn review_capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
         let collector =
             Collector::new(Limits::default(), registry.clone(), [BuiltinProtocol::Mqtt]).unwrap();
         let mut events = Vec::new();
-        let outcome = crate::analysis::Session::new(registry, Default::default(), collector)
+        let options = crate::analysis::Options {
+            limits: crate::analysis::Limits {
+                tcp: crate::analysis::reassembly::tcp::Limits {
+                    idle_expiry: Duration::from_secs(3),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let outcome = crate::analysis::Session::new(registry, options, collector)
             .run(
                 &mut reader,
                 |_| Ok(()),
@@ -603,8 +791,16 @@ fn review_capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
             if issue.status == if conflict { Status::Conflict } else { Status::Gap }))
         );
         assert_eq!(outcome.summary.complete_messages, 1, "{events:?}");
-        assert!(events.iter().any(|event| matches!(event, Event::Message(message)
-            if message.status == Status::Complete && message.generation == 1 && message.wire.as_ref() == b"\xc0\0")));
+        let completed: Vec<_> = events.iter().filter(|event|
+            matches!(event, Event::Message(message) if message.status == Status::Complete)).collect();
+        assert_eq!(completed.len(), 1);
+        let message = complete_message(
+            completed[0],
+            BuiltinProtocol::Mqtt,
+            b"\xc0\0",
+            &[last_frame],
+        );
+        assert_eq!(message.generation, 1);
     }
 }
 
@@ -648,8 +844,13 @@ fn review_server_first_payload_uses_the_handshake_server_port() {
         if payload {
             packet.push(Bgp {
                 message_type: 1,
-                my_as: 64512,
-                identifier: "192.0.2.1".parse().unwrap(),
+                version: 4,
+                my_as: if server { 64513 } else { 64512 },
+                hold_time: 90,
+                identifier: if server { "192.0.2.2" } else { "192.0.2.1" }
+                    .parse()
+                    .unwrap(),
+                parameters: crate::protocol::Records::default(),
                 ..Default::default()
             });
         }
@@ -689,12 +890,39 @@ fn review_server_first_payload_uses_the_handshake_server_port() {
                 )
                 .unwrap();
         assert_eq!(outcome.summary.complete_messages, 2, "{events:?}");
-        assert!(
-            events
-                .iter()
-                .all(|event| matches!(event, Event::Message(message)
-            if message.status == Status::Complete && message.protocol == BuiltinProtocol::Bgp))
-        );
+        assert_eq!(events.len(), 2);
+        for (index, (event, server)) in events.iter().zip([true, false]).enumerate() {
+            // https://datatracker.ietf.org/doc/html/rfc4271#section-4.2 checked 2026-10-25.
+            let mut wire = vec![0xff; 16];
+            wire.extend_from_slice(&[
+                0,
+                29,
+                1,
+                4,
+                252,
+                u8::from(server),
+                0,
+                90,
+                192,
+                0,
+                2,
+                if server { 2 } else { 1 },
+                0,
+            ]);
+            let source = 4 + index as u64 - u64::from(skip_syn);
+            let message = complete_message(event, BuiltinProtocol::Bgp, &wire, &[source]);
+            assert_eq!(
+                message.flow.flow.source_port,
+                if server { 179 } else { 44818 }
+            );
+            let bgp = message.packet.as_ref().unwrap().get::<Bgp>().unwrap();
+            assert_eq!(bgp.my_as, if server { 64513 } else { 64512 });
+            assert_eq!(bgp.hold_time, 90);
+            assert_eq!(
+                bgp.identifier.to_string(),
+                if server { "192.0.2.2" } else { "192.0.2.1" }
+            );
+        }
     }
 }
 
@@ -737,11 +965,6 @@ fn review_sip_keepalives_across_deliveries_do_not_disable_messages() {
         );
         assert_eq!(events.len(), 2, "split {split}: {events:?}");
         for (event, start) in events.iter().zip([2, 6 + message.len()]) {
-            let Event::Message(decoded) = event else {
-                panic!("unexpected issue");
-            };
-            assert_eq!(decoded.status, Status::Complete);
-            assert_eq!(decoded.wire.as_ref(), message);
             let expected: Vec<_> = [
                 (split > start).then_some(1),
                 (split < start + message.len()).then_some(2),
@@ -749,14 +972,15 @@ fn review_sip_keepalives_across_deliveries_do_not_disable_messages() {
             .into_iter()
             .flatten()
             .collect();
-            assert_eq!(
-                decoded
-                    .sources
-                    .iter()
-                    .map(|source| source.number)
-                    .collect::<Vec<_>>(),
-                expected
-            );
+            let decoded = complete_message(event, BuiltinProtocol::Sip, message, &expected);
+            let sip = decoded
+                .packet
+                .as_ref()
+                .unwrap()
+                .get::<crate::protocol::application::sip::Sip>()
+                .unwrap();
+            assert_eq!(sip.start_line.as_ref(), b"OPTIONS sip:service SIP/2.0");
+            assert!(sip.body.is_empty());
         }
         assert!(
             collector
@@ -770,6 +994,7 @@ fn review_sip_keepalives_across_deliveries_do_not_disable_messages() {
 
 #[test]
 fn review_modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
+    // https://www.modbus.org/file/secure/modbusprotocolspecification.pdf section 6.3 checked 2026-10-25.
     use crate::{
         codec::Addresses,
         frame::{Frame, LinkType},
@@ -819,12 +1044,23 @@ fn review_modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
             if payload {
                 packet.push(if server {
                     ModbusTcp {
+                        transaction_id: 0x1234,
+                        unit_id: 7,
+                        function: 3,
                         form: "response".into(),
                         data: Bytes::from_static(b"\0\x2a"),
                         ..Default::default()
                     }
                 } else {
-                    ModbusTcp::default()
+                    ModbusTcp {
+                        transaction_id: 0x1234,
+                        unit_id: 7,
+                        function: 3,
+                        form: "request".into(),
+                        address: 9,
+                        quantity: 1,
+                        ..Default::default()
+                    }
                 });
             }
             let built = builder
@@ -855,30 +1091,38 @@ fn review_modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
                 )
                 .unwrap();
         assert_eq!(outcome.summary.complete_messages, 2, "{events:?}");
-        let forms: Vec<_> = events
+        assert_eq!(events.len(), 2);
+        for (index, (event, wire)) in events
             .iter()
-            .map(|event| {
-                let Event::Message(message) = event else {
-                    panic!("unexpected event");
-                };
-                message
-                    .packet
-                    .as_ref()
-                    .unwrap()
-                    .get::<ModbusTcp>()
-                    .unwrap()
-                    .form
-                    .as_str()
-            })
-            .collect();
-        assert_eq!(
-            forms,
-            if handshake {
-                ["request", "response"]
+            .zip([
+                b"\x12\x34\0\0\0\x06\x07\x03\0\x09\0\x01".as_slice(),
+                b"\x12\x34\0\0\0\x05\x07\x03\x02\0\x2a",
+            ])
+            .enumerate()
+        {
+            let message = complete_message(
+                event,
+                BuiltinProtocol::ModbusTcp,
+                wire,
+                &[index as u64 + 1 + u64::from(handshake)],
+            );
+            let pdu = message.packet.as_ref().unwrap().get::<ModbusTcp>().unwrap();
+            assert_eq!(
+                (pdu.transaction_id, pdu.unit_id, pdu.function),
+                (0x1234, 7, 3)
+            );
+            if !handshake {
+                assert_eq!(pdu.form, "raw");
+                assert_eq!(pdu.data.as_ref(), &wire[8..]);
+            } else if index == 0 {
+                assert_eq!(pdu.form, "request");
+                assert_eq!((pdu.address, pdu.quantity), (9, 1));
+                assert!(pdu.data.is_empty());
             } else {
-                ["raw", "raw"]
+                assert_eq!(pdu.form, "response");
+                assert_eq!(pdu.data.as_ref(), b"\0\x2a");
             }
-        );
+        }
     }
 }
 
@@ -918,8 +1162,25 @@ fn review_many_coalesced_messages_preserve_the_layer_budget_and_stream() {
                 },
             )
             .unwrap();
-        assert_eq!(decoded.packet.len(), max_layers);
-        assert!(decoded.packet.get::<Raw>().is_some());
+        assert!(decoded.packet.len() <= max_layers);
+        assert_eq!(decoded.packet.get::<Tcp>().unwrap().destination_port, 1883);
+        let raw = decoded.packet.get::<Raw>().unwrap();
+        let messages: Vec<_> = decoded
+            .packet
+            .iter()
+            .filter_map(|layer| layer.downcast_ref::<crate::protocol::application::mqtt::Mqtt>())
+            .collect();
+        if max_layers > 4 {
+            assert!(!messages.is_empty());
+        }
+        // https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html section 3.12 checked 2026-10-25.
+        assert!(messages.iter().all(|message| message.packet_type == 12));
+        let reconstructed = messages
+            .iter()
+            .flat_map(|_| [0xc0, 0])
+            .chain(raw.bytes.iter().copied())
+            .collect::<Vec<_>>();
+        assert_eq!(reconstructed, b"\xc0\0".repeat(100));
         assert_eq!(
             builder
                 .build(decoded.packet, Addresses::default(), Default::default())
@@ -947,9 +1208,10 @@ fn review_many_coalesced_messages_preserve_the_layer_budget_and_stream() {
         .unwrap();
     assert_eq!(outcome.summary.complete_messages, 100);
     assert_eq!(events.len(), 100);
-    assert!(events.iter().all(
-        |event| matches!(event, Event::Message(message) if message.status == Status::Complete)
-    ));
+    for (index, event) in events.iter().enumerate() {
+        let message = complete_message(event, BuiltinProtocol::Mqtt, b"\xc0\0", &[1]);
+        assert_eq!(message.index, index as u64 + 1);
+    }
 }
 
 #[test]
@@ -1013,9 +1275,17 @@ fn review_declared_buffer_limits_are_policy_errors_for_every_segmentation() {
                     assert!(events.is_empty());
                 } else {
                     result.unwrap();
-                    assert!(
-                        matches!(events.as_slice(), [Event::Message(message)] if message.status == Status::Complete)
-                    );
+                    assert_eq!(events.len(), 1);
+                    let sources: &[u64] = if split == wire.len() { &[1] } else { &[1, 2] };
+                    complete_message(&events[0], protocol, &wire, sources);
+                    let following = if protocol == BuiltinProtocol::Mqtt {
+                        b"\xc0\0".as_slice()
+                    } else {
+                        b"+OK\r\n"
+                    };
+                    deliver_on(&mut collector, &tracker, 3, f, following, 0, &mut events);
+                    assert_eq!(events.len(), 2);
+                    complete_message(&events[1], protocol, following, &[3]);
                 }
             }
         }

@@ -227,7 +227,11 @@ mod tests {
         let mut limits = args.limits.clone().into_limits();
         limits.max_frames = 1;
         // Three sweeps require capacity for one concurrent flow, not three attempts.
-        assert!(prepare_request(&args, limits).is_ok());
+        let prepared = prepare_request(&args, limits).unwrap();
+        assert_eq!(args.flow_count(), 1);
+        assert_eq!(prepared.probes_per_hop, 3);
+        assert_eq!(prepared.limits.evidence.max_frames, 1);
+        assert_eq!(prepared.limits.evidence.max_undecoded, 1);
         args.source_port = Some(u16::MAX);
         args.flows = Some(2);
         assert!(prepare_request(&args, args.limits.clone().into_limits()).is_err());

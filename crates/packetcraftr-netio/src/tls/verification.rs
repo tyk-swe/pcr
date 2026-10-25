@@ -88,6 +88,15 @@ impl Verification {
 /// Evaluates the retained chain at the current time; no revocation fetching or network I/O.
 /// Callers must gate all application writes on `valid()` when authenticating TLS.
 pub fn verify(evidence: &Evidence, name: &ServerName, roots: &TrustStore) -> Verification {
+    verify_at(evidence, name, roots, UnixTime::now())
+}
+
+fn verify_at(
+    evidence: &Evidence,
+    name: &ServerName,
+    roots: &TrustStore,
+    at: UnixTime,
+) -> Verification {
     let unavailable = |reason| Verification {
         chain: Check::unavailable(reason),
         name: Check::unavailable(reason),
@@ -119,7 +128,7 @@ pub fn verify(evidence: &Evidence, name: &ServerName, roots: &TrustStore) -> Ver
         &cert,
         &roots.0,
         &intermediates,
-        UnixTime::now(),
+        at,
         provider.signature_verification_algorithms.all,
     ));
     let name = match name.clone().into_rustls() {
@@ -137,8 +146,42 @@ mod network_improvements {
     use super::*;
     #[test]
     fn ca_bundles_reject_every_other_pem_section() {
-        let certificate = include_bytes!("test-ca.pem");
-        assert!(TrustStore::from_pem(certificate).is_ok());
+        let certificate = include_bytes!("test-server-ca.pem");
+        let roots = TrustStore::from_pem(certificate).unwrap();
+        let leaf = CertificateDer::from_pem_slice(include_bytes!("test-server.pem")).unwrap();
+        let evidence = Evidence {
+            handshake_complete: true,
+            certificates: vec![bytes::Bytes::copy_from_slice(leaf.as_ref())],
+            ..Default::default()
+        };
+        let name = ServerName::Declared("example.test".into());
+        let at = UnixTime::since_unix_epoch(std::time::Duration::from_secs(1_793_009_638));
+        let accepted = verify_at(&evidence, &name, &roots, at);
+        assert!(accepted.valid());
+        assert_eq!(accepted.chain.valid, Some(true));
+        assert_eq!(accepted.name.valid, Some(true));
+        let unrelated = TrustStore::from_pem(include_bytes!("test-ca.pem")).unwrap();
+        let refused = verify_at(&evidence, &name, &unrelated, at);
+        assert!(!refused.valid());
+        assert_eq!(refused.chain.valid, Some(false));
+        assert_eq!(refused.name.valid, Some(true));
+        let refused = verify_at(
+            &evidence,
+            &ServerName::Declared("other.example.test".into()),
+            &roots,
+            at,
+        );
+        assert!(!refused.valid());
+        assert_eq!(refused.chain.valid, Some(true));
+        assert_eq!(refused.name.valid, Some(false));
+        let premature = verify_at(
+            &evidence,
+            &name,
+            &roots,
+            UnixTime::since_unix_epoch(std::time::Duration::ZERO),
+        );
+        assert!(!premature.valid());
+        assert_eq!(premature.chain.valid, Some(false));
         for label in ["PRIVATE KEY", "PUBLIC KEY", "UNKNOWN"] {
             let section = format!("-----BEGIN {label}-----\nAQ==\n-----END {label}-----\n");
             assert!(TrustStore::from_pem(section.as_bytes()).is_err());

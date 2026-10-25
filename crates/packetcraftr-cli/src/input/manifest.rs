@@ -254,7 +254,8 @@ mod tests {
     fn error_handling_manifest_utf8_keeps_physical_line_and_decode_cause() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("targets.txt");
-        std::fs::write(&path, b"# comment\n\n\xff").unwrap();
+        let bytes = b"# comment\n\n\xff";
+        std::fs::write(&path, bytes).unwrap();
         let error = read_with_budget(
             &[ManifestSource::File(path.clone())],
             &mut ManifestBounds::default().budget(),
@@ -262,7 +263,71 @@ mod tests {
         .unwrap_err();
         assert!(error.message.starts_with(&format!("{}:3:", path.display())));
         assert_eq!(error.classification.kind, Kind::Usage);
-        assert_eq!(error.causes.len(), 1);
-        assert!(error.causes[0].contains("utf-8"));
+        let input = std::fs::read(&path).unwrap();
+        let cause = std::str::from_utf8(&input).unwrap_err().to_string();
+        assert!(error.causes.contains(&cause));
+    }
+
+    #[test]
+    fn declarations_keep_physical_origins_and_share_manifest_budgets() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.txt");
+        let second = directory.path().join("second.txt");
+        let first_text = b"# comment\n\n192.0.2.1\n";
+        let second_text = b"2001:db8::1\r\nexample.test";
+        std::fs::write(&first, first_text).unwrap();
+        std::fs::write(&second, second_text).unwrap();
+        let sources = [
+            ManifestSource::File(first.clone()),
+            ManifestSource::File(second.clone()),
+        ];
+        let bytes = first_text.len() + second_text.len();
+        let declarations = read_with_budget(
+            &sources,
+            &mut ManifestBounds::new(bytes, 5).unwrap().budget(),
+        )
+        .unwrap();
+        assert_eq!(
+            declarations,
+            [
+                Declaration {
+                    token: "192.0.2.1".into(),
+                    source: DeclarationSource::File { path: first },
+                    line: Some(3)
+                },
+                Declaration {
+                    token: "2001:db8::1".into(),
+                    source: DeclarationSource::File {
+                        path: second.clone()
+                    },
+                    line: Some(1)
+                },
+                Declaration {
+                    token: "example.test".into(),
+                    source: DeclarationSource::File {
+                        path: second.clone()
+                    },
+                    line: Some(2)
+                },
+            ]
+        );
+        for (max_bytes, max_lines, limit) in [(bytes - 1, 5, "byte"), (bytes, 4, "line")] {
+            let error = read_with_budget(
+                &sources,
+                &mut ManifestBounds::new(max_bytes, max_lines).unwrap().budget(),
+            )
+            .unwrap_err();
+            assert_eq!(error.classification.kind, Kind::Usage);
+            assert!(
+                error
+                    .message
+                    .starts_with(&format!("{}:2:", second.display()))
+            );
+            assert!(
+                error
+                    .message
+                    .contains(&format!("combined manifest {limit} limit"))
+            );
+        }
     }
 }

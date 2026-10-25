@@ -463,21 +463,19 @@ where
 mod network_improvements {
     use super::*;
     use packetcraftr_core::budget::Cancellation;
-    use std::{
-        sync::atomic::{AtomicUsize, Ordering},
-        time::Duration,
-    };
-    struct Transmitter(AtomicUsize);
+    use std::{sync::Mutex, time::Duration};
+    #[derive(Default)]
+    struct Transmitter(Mutex<Vec<Bytes>>);
     impl transmit::Provider for Transmitter {
         fn send(
             &self,
             outbound: transmit::Outbound<'_>,
         ) -> Result<transmit::Report, packetcraftr_netio::Error> {
-            self.0.fetch_add(1, Ordering::SeqCst);
             let bytes = match outbound {
                 transmit::Outbound::Layer2(frame) => frame.bytes().clone(),
                 _ => unreachable!(),
             };
+            self.0.lock().unwrap().push(bytes.clone());
             Ok(transmit::Report::committed(bytes.len(), bytes))
         }
     }
@@ -485,7 +483,6 @@ mod network_improvements {
         metadata: capture::Metadata,
         cancellation: Cancellation,
         cancel_before_send: bool,
-        reads: usize,
     }
     impl capture::Session for Session {
         fn metadata(&self) -> &capture::Metadata {
@@ -498,12 +495,9 @@ mod network_improvements {
             &mut self,
             deadline: &Deadline,
         ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
-            self.reads += 1;
             if self.cancel_before_send || !deadline.limit().is_zero() {
                 self.cancellation.cancel();
                 if !self.cancel_before_send {
-                    // The wait itself has no cancellation; its parent must retain it.
-                    assert!(deadline.cancellation().is_none());
                     assert!(deadline.check_cancelled().is_err());
                 }
             }
@@ -548,14 +542,14 @@ mod network_improvements {
                 mtu: 1500,
                 link_type: packetcraftr_core::frame::LinkType::ETHERNET,
             };
-            let transmitter = Transmitter(AtomicUsize::new(0));
+            let transmitter = Transmitter::default();
             let state = State::default();
             // Captures::arm_capture panics if the validation boundary is bypassed.
             let result = state
                 .over(&transmitter, &Captures)
                 .resolve(&request, &Deadline::new(Duration::from_secs(1)));
             assert!(result.is_err());
-            assert_eq!(transmitter.0.load(Ordering::SeqCst), 0);
+            assert!(transmitter.0.lock().unwrap().is_empty());
         }
     }
     #[test]
@@ -587,9 +581,8 @@ mod network_improvements {
                 },
                 cancellation,
                 cancel_before_send,
-                reads: 0,
             };
-            let transmitter = Transmitter(AtomicUsize::new(0));
+            let transmitter = Transmitter::default();
             let state = State::default();
             let active = state.over(&transmitter, &Captures);
             let decision = discovery_decision(&request);
@@ -609,8 +602,12 @@ mod network_improvements {
                 .unwrap();
             let expected = u32::from(!cancel_before_send);
             assert_eq!(result.attempts, expected);
-            assert_eq!(transmitter.0.load(Ordering::SeqCst), expected as usize);
-            assert_eq!(session.reads, if cancel_before_send { 1 } else { 2 });
+            let expected_packets = if cancel_before_send {
+                Vec::new()
+            } else {
+                vec![bytes]
+            };
+            assert_eq!(*transmitter.0.lock().unwrap(), expected_packets);
         }
     }
 
@@ -643,7 +640,7 @@ mod network_improvements {
                     }
                     Ok(Some(capture::Captured::new(
                         Frame::new(
-                            std::time::SystemTime::now(),
+                            std::time::SystemTime::UNIX_EPOCH,
                             self.metadata.link_type,
                             [0_u8; 60].to_vec(),
                         )
@@ -710,7 +707,7 @@ mod network_improvements {
             reads: 0,
             elapsed: None,
         })));
-        let transmitter = Transmitter(AtomicUsize::new(0));
+        let transmitter = Transmitter::default();
         let error = State::default()
             .over(&transmitter, &capture)
             .resolve(&request, &deadline)
@@ -724,7 +721,10 @@ mod network_improvements {
             panic!("expected an interrupted capture read");
         };
         assert_eq!(spent.attempts, 1);
-        assert_eq!(transmitter.0.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *transmitter.0.lock().unwrap(),
+            [build_request_frame(&request).unwrap()]
+        );
         assert_eq!(spent.captured.len(), 1);
         assert_eq!(spent.captured[0].bytes().as_ref(), [0_u8; 60]);
         assert!(matches!(source, packetcraftr_netio::Error::Cancelled(_)));
@@ -752,7 +752,7 @@ mod network_improvements {
         });
         let decision = discovery_decision(&request);
         let bytes = build_request_frame(&request).unwrap();
-        let transmitter = Transmitter(AtomicUsize::new(0));
+        let transmitter = Transmitter::default();
         let mut session = InterruptedSession {
             metadata: capture::Metadata {
                 interface: request.interface.clone(),

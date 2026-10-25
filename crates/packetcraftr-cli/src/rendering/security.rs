@@ -165,37 +165,94 @@ pub(crate) fn html(report: &Report<'_>) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn searchable_assessment_escapes_untrusted_content_and_keeps_findings_visible() {
+    fn assessment_escapes_untrusted_findings_and_preserves_report_content() {
         use packetcraftr_core::security::{Finding, Report, Severity, Source};
         let mut report = Report::new("report");
-        report.findings.push(Finding::new(
+        let mut finding = Finding::new(
             "<rule>",
             Severity::High,
             "<subject>",
             "<img src=x onerror=alert(1)>",
             serde_json::json!({"value":"</script><script>alert(1)</script>"}),
             "<remediation>",
-        ));
-        report.sources.push(Source {
-            path: "<source>".into(),
-            sha256: "a".repeat(64),
-        });
+        );
+        finding.indicator_id = Some("<indicator>".into());
+        finding.frames = vec![2, 3];
+        finding.complete = false;
+        report.findings = vec![
+            finding,
+            Finding::new(
+                "second.rule",
+                Severity::Low,
+                "second-subject",
+                "second-summary",
+                serde_json::json!({"value":"second-evidence"}),
+                "second-remediation",
+            ),
+        ];
+        report.completeness.note("<incomplete>");
+        report.sources = vec![
+            Source {
+                path: "<source>".into(),
+                sha256: "a".repeat(64),
+            },
+            Source {
+                path: "second-source".into(),
+                sha256: "b".repeat(64),
+            },
+        ];
         let page = super::html(&crate::output::security::Report::from(&report));
-        assert!(page.contains("&lt;img src=x onerror=alert(1)&gt;"));
-        assert!(page.contains("&lt;/script&gt;&lt;script&gt;"));
-        assert!(page.contains("&lt;source&gt;"));
-        assert!(!page.contains("<img"));
-        assert!(!page.contains("<script>alert(1)"));
-        assert!(page.contains("<article class=\"high\" data-severity=\"high\">"));
-        assert!(page.contains("aria-live=\"polite\">Showing 1 of 1 findings."));
-        assert!(page.contains("<label for=\"finding-search\">"));
+        // https://html.spec.whatwg.org/multipage/syntax.html#character-references checked 2026-10-25.
+        for (raw, escaped) in [
+            ("<rule>", "&lt;rule&gt;"),
+            ("<subject>", "&lt;subject&gt;"),
+            (
+                "<img src=x onerror=alert(1)>",
+                "&lt;img src=x onerror=alert(1)&gt;",
+            ),
+            (
+                "</script><script>alert(1)</script>",
+                "&lt;/script&gt;&lt;script&gt;alert(1)&lt;/script&gt;",
+            ),
+            ("<remediation>", "&lt;remediation&gt;"),
+            ("<indicator>", "&lt;indicator&gt;"),
+            ("<source>", "&lt;source&gt;"),
+            ("<incomplete>", "&lt;incomplete&gt;"),
+        ] {
+            assert!(page.contains(escaped), "missing escaped {raw}");
+            assert!(!page.contains(raw), "untrusted markup remained literal");
+        }
+        for value in [
+            "second.rule",
+            "second-subject",
+            "second-summary",
+            "second-evidence",
+            "second-remediation",
+            "second-source",
+        ] {
+            assert!(page.contains(value), "missing {value}");
+        }
+        for source in &report.sources {
+            assert!(page.contains(&source.sha256));
+        }
+        assert!(page.contains("high · &lt;rule&gt;"));
+        assert!(page.contains("low · second.rule"));
+        assert!(page.contains(&format!("Source frames: {:?}", [2, 3])));
+        assert!(page.contains("Evidence complete: false"));
+        assert!(page.contains(&format!(
+            "Showing {} of {} findings.",
+            report.findings.len(),
+            report.findings.len()
+        )));
     }
 
     #[test]
     fn escape_untrusted_markup() {
+        // https://html.spec.whatwg.org/multipage/named-characters.html checked 2026-10-25.
         assert_eq!(
             super::escape("<script>\"&'"),
             "&lt;script&gt;&quot;&amp;&#39;"
         );
+        assert_eq!(super::escape("café &lt;"), "café &amp;lt;");
     }
 }

@@ -254,12 +254,12 @@ mod tests {
             [0, 0xab, 0xcd]
         );
         let error = hex_frame_bytes(b"00:ab:cd:ef", 3).unwrap_err();
-        let expected = CliError::classified(core::decode::Error::PacketSizeLimit {
-            actual: 4,
-            limit: 3,
-        });
-        assert_eq!(error.classification, expected.classification);
-        assert_eq!(error.message, expected.message);
+        assert_eq!(error.classification.code, "policy.decode_resource_limit");
+        assert_eq!(error.classification.kind, Kind::Policy);
+        assert_eq!(
+            error.message,
+            "captured packet size 4 exceeds configured limit 3"
+        );
         for value in [b"00f".as_slice(), b"zz", &[0xff]] {
             assert_eq!(
                 hex_frame_bytes(value, 8).unwrap_err().classification.kind,
@@ -276,7 +276,12 @@ mod tests {
 
     #[test]
     fn bounded_hex_rejects_oversized_text_and_extra_nibbles() {
-        assert!(hex_frame_bytes(&vec![b' '; hex_text_limit(1) + 1], 1).is_err());
+        let mut oversized = b"00".to_vec();
+        oversized.resize(hex_text_limit(1) + 1, b' ');
+        let error = hex_frame_bytes(&oversized, 1).unwrap_err();
+        assert_eq!(error.classification.code, "policy.decode_resource_limit");
+        assert_eq!(error.classification.kind, Kind::Policy);
+        assert!(error.message.starts_with("frame hex text input exceeds"));
         let error = hex_frame_bytes(b"aabbc", 2).unwrap_err();
         assert_eq!(error.classification.kind, Kind::Policy);
     }

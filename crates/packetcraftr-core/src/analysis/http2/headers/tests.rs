@@ -76,7 +76,24 @@ fn request_validation_keeps_token_case_rules_for_method_and_protocol() {
         field(b":authority", b"example.test"),
         field(b":protocol", b"WebSocket"),
     ];
-    assert!(validate(FieldRole::Request, &connect).unwrap().protocol);
+    // https://www.rfc-editor.org/rfc/rfc8441.html#section-4 checked 2026-10-25.
+    let meta = validate(FieldRole::Request, &connect).unwrap();
+    assert!(meta.protocol);
+    assert_eq!(meta.method.as_deref(), Some(b"CONNECT".as_slice()));
+    assert_eq!(meta.authority.as_deref(), Some(b"example.test".as_slice()));
+    for protocol in [
+        b"".as_slice(),
+        b"web socket",
+        b"web/socket",
+        b"web\x80socket",
+    ] {
+        let mut invalid = connect.clone();
+        invalid[4] = field(b":protocol", protocol);
+        assert_eq!(
+            validate(FieldRole::Request, &invalid).err(),
+            Some(":protocol is not a protocol token")
+        );
+    }
     let mut ordered = request(b"GET");
     ordered.push(field(b"via", b"1"));
     ordered.push(field(b":method", b"POST"));

@@ -20,7 +20,8 @@ use std::{
     net::IpAddr,
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
+        mpsc,
     },
     time::Duration,
 };
@@ -55,7 +56,7 @@ fn info(id: interface::Id) -> interface::Info {
     }
 }
 struct Routes {
-    calls: AtomicUsize,
+    unavailable: AtomicBool,
     cancel: Option<Cancellation>,
     invalid: bool,
 }
@@ -68,7 +69,10 @@ impl packetcraftr_netio::route::Provider for Routes {
         _: Option<IpAddr>,
         _: &Deadline,
     ) -> Result<Decision, Self::Error> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
+        assert!(
+            !self.unavailable.load(Ordering::SeqCst),
+            "disabled provider must not be queried"
+        );
         if let Some(cancel) = &self.cancel {
             cancel.cancel();
         }
@@ -92,7 +96,7 @@ impl interface::Provider for Interfaces {
     }
 }
 #[test]
-fn network_improvements_absolute_hostname_and_resolver_spelling() {
+fn absolute_hostname_and_resolver_spelling() {
     struct Recording;
     impl Resolver for Recording {
         fn resolve(&self, host: &Hostname, _: usize) -> Result<Vec<IpAddr>, TargetError> {
@@ -111,26 +115,40 @@ fn network_improvements_absolute_hostname_and_resolver_spelling() {
         allow_hostname_resolution: true,
         ..Default::default()
     };
-    assert!(
-        policy
-            .resolve_target(
-                &Target::Hostname(absolute),
-                &Recording,
-                &Deadline::new(Duration::from_secs(1))
-            )
-            .is_ok()
+    let resolved = policy
+        .resolve_target(
+            &Target::Hostname(absolute),
+            &Recording,
+            &Deadline::new(Duration::from_secs(1)),
+        )
+        .unwrap();
+    assert_eq!(
+        resolved.addresses(),
+        ["127.0.0.1".parse::<IpAddr>().unwrap()]
+    );
+    assert_eq!(
+        resolved.declared(),
+        &Target::Hostname("example.test.".parse().unwrap())
     );
 }
 #[test]
-fn network_improvements_clock_stops_at_spent_deadline() {
-    let start = std::time::Instant::now();
-    SystemClock
-        .sleep(Duration::from_secs(10), &Deadline::immediate(None))
+fn clock_stops_at_spent_deadline() {
+    let (started, beginning) = mpsc::sync_channel(1);
+    let (finished, completion) = mpsc::sync_channel(1);
+    let worker = std::thread::spawn(move || {
+        started.send(()).unwrap();
+        let result = SystemClock.sleep(Duration::from_secs(10), &Deadline::immediate(None));
+        finished.send(result).unwrap();
+    });
+    beginning.recv_timeout(Duration::from_secs(5)).unwrap();
+    completion
+        .recv_timeout(Duration::from_secs(5))
+        .expect("spent control must interrupt sleep")
         .unwrap();
-    assert!(start.elapsed() < Duration::from_secs(1));
+    worker.join().unwrap();
 }
 #[test]
-fn network_improvements_interface_ambiguity_and_late_enumeration() {
+fn interface_ambiguity_and_late_enumeration() {
     let selector = route::Interface::Name("test0".into());
     let first = decision().interface;
     let second = interface::Id {
@@ -181,26 +199,33 @@ fn network_improvements_interface_ambiguity_and_late_enumeration() {
     ));
 }
 #[test]
-fn network_improvements_route_deadline_cache_and_identity() {
+fn route_deadline_cache_and_identity() {
     use packetcraftr_netio::route::Provider;
     let provider = Routes {
-        calls: AtomicUsize::new(0),
+        unavailable: AtomicBool::new(false),
         cancel: None,
         invalid: false,
     };
     let cached = route::CachedProvider::new(&provider);
     let address = "127.0.0.2".parse().unwrap();
-    cached
+    let first = cached
         .lookup_with_preferences(address, None, None, &Deadline::new(Duration::from_secs(1)))
         .unwrap();
+    assert_eq!(first.interface, decision().interface);
+    assert_eq!(first.selected_source, decision().selected_source);
+    provider.unavailable.store(true, Ordering::SeqCst);
+    let reused = cached
+        .lookup_with_preferences(address, None, None, &Deadline::new(Duration::from_secs(1)))
+        .unwrap();
+    assert_eq!(reused.interface, first.interface);
+    assert_eq!(reused.selected_source, first.selected_source);
     assert!(matches!(
         cached.lookup_with_preferences(address, None, None, &Deadline::immediate(None)),
         Err(route::Error::Interrupted(_))
     ));
-    assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
     let cancel = Cancellation::default();
     let late = Routes {
-        calls: AtomicUsize::new(0),
+        unavailable: AtomicBool::new(false),
         cancel: Some(cancel.clone()),
         invalid: false,
     };
@@ -219,7 +244,7 @@ fn network_improvements_route_deadline_cache_and_identity() {
         Err(route::Error::Interrupted(_))
     ));
     let invalid = Routes {
-        calls: AtomicUsize::new(0),
+        unavailable: AtomicBool::new(false),
         cancel: None,
         invalid: true,
     };
@@ -243,10 +268,9 @@ fn network_improvements_route_deadline_cache_and_identity() {
         ),
         Err(route::Error::Interrupted(_))
     ));
-    assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
 }
 #[test]
-fn network_improvements_numeric_and_custom_resolution_boundaries() {
+fn numeric_and_custom_resolution_boundaries() {
     struct Late(Cancellation);
     impl Resolver for Late {
         fn resolve(&self, _: &Hostname, _: usize) -> Result<Vec<IpAddr>, TargetError> {
@@ -268,6 +292,17 @@ fn network_improvements_numeric_and_custom_resolution_boundaries() {
     };
     let cancel = Cancellation::default();
     let resolver = Late(cancel.clone());
+    let numeric = policy
+        .resolve_target(
+            &"127.0.0.1".parse().unwrap(),
+            &resolver,
+            &Deadline::new(Duration::from_secs(1)),
+        )
+        .unwrap();
+    assert_eq!(
+        numeric.addresses(),
+        ["127.0.0.1".parse::<IpAddr>().unwrap()]
+    );
     assert!(matches!(
         policy.resolve_target(
             &"127.0.0.1".parse().unwrap(),
@@ -288,7 +323,7 @@ fn network_improvements_numeric_and_custom_resolution_boundaries() {
     ));
 }
 #[test]
-fn network_improvements_distinct_resolver_order_and_limit() {
+fn distinct_resolver_order_and_limit() {
     let hostname = "test.local".parse().unwrap();
     let a = "127.0.0.1".parse().unwrap();
     let b = "127.0.0.2".parse().unwrap();

@@ -192,6 +192,7 @@ mod network_improvements {
             index: 1,
         };
         assert!(validate(&interface, "tcp[tcpflags] & (tcp-ece|tcp-cwr) != 0").is_ok());
-        assert!(validate(&interface, "host example.test").is_err());
+        assert!(matches!(validate(&interface, "host example.test"),
+            Err(Error::InvalidCaptureFilter { interface, .. }) if interface == "test0"));
     }
 }

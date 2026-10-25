@@ -407,11 +407,12 @@ impl Codec for HttpCodec {
 }
 
 #[cfg(test)]
-mod start_line_regressions {
+mod tests {
     use super::*;
 
     #[test]
     fn request_start_requires_exactly_three_components() {
+        // https://www.rfc-editor.org/rfc/rfc9112.html#section-3 checked 2026-10-25.
         for invalid in [
             "GET /",
             "GET  / HTTP/1.1",

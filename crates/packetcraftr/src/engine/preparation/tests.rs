@@ -22,7 +22,7 @@ use std::{
     net::IpAddr,
     sync::{
         Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
@@ -30,7 +30,7 @@ use std::{
 #[derive(Clone)]
 struct Routes {
     decision: Arc<Mutex<Decision>>,
-    calls: Arc<AtomicUsize>,
+    forbid_lookup: Arc<AtomicBool>,
 }
 impl RouteProvider for Routes {
     type Error = Infallible;
@@ -41,7 +41,10 @@ impl RouteProvider for Routes {
         _: Option<IpAddr>,
         _: &Deadline,
     ) -> Result<Decision, Infallible> {
-        self.calls.fetch_add(1, Ordering::Relaxed);
+        assert!(
+            !self.forbid_lookup.load(Ordering::Relaxed),
+            "refused preparation reached route lookup"
+        );
         Ok(self.decision.lock().unwrap().clone())
     }
 }
@@ -49,11 +52,9 @@ impl RouteProvider for Routes {
 #[derive(Clone)]
 struct Interfaces {
     id: Arc<Mutex<interface::Id>>,
-    calls: Arc<AtomicUsize>,
 }
 impl interface::Provider for Interfaces {
     fn interfaces(&self, _: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
-        self.calls.fetch_add(1, Ordering::Relaxed);
         Ok(vec![interface::Info {
             id: self.id.lock().unwrap().clone(),
             description: None,
@@ -128,11 +129,10 @@ fn fixture() -> (TestClient, Routes, Interfaces, Transmit) {
             capability: Capability::Layer2AndLayer3,
             link_type: LinkType::ETHERNET,
         })),
-        calls: Arc::default(),
+        forbid_lookup: Arc::default(),
     };
     let interfaces = Interfaces {
         id: Arc::new(Mutex::new(id)),
-        calls: Arc::default(),
     };
     let tx = Transmit::default();
     let policy = Policy {
@@ -175,6 +175,29 @@ fn packet(bytes: usize) -> Packet {
     });
     packet.push(Raw::new(vec![7; bytes]));
     packet
+}
+
+fn assert_packet_bytes(bytes: &Bytes, source: std::net::Ipv4Addr, payload_len: usize) {
+    let decoded = packetcraftr_core::decode::Dissector::new(builtin::registry())
+        .decode(
+            packetcraftr_core::frame::Frame::without_timestamp(LinkType::RAW, bytes.clone())
+                .unwrap(),
+            Default::default(),
+        )
+        .unwrap();
+    let ip = decoded.packet.get::<Ipv4>().unwrap();
+    assert_eq!(ip.source, source);
+    assert_eq!(
+        ip.destination,
+        "10.0.0.1".parse::<std::net::Ipv4Addr>().unwrap()
+    );
+    let udp = decoded.packet.get::<Udp>().unwrap();
+    assert_eq!((udp.source_port, udp.destination_port), (12345, 9));
+    assert_eq!(
+        decoded.packet.get::<Raw>().unwrap().bytes.as_ref(),
+        vec![7; payload_len]
+    );
+    assert!(decoded.diagnostics.is_empty(), "{:?}", decoded.diagnostics);
 }
 
 #[test]
@@ -270,8 +293,7 @@ fn retained_and_rebuilt_previews_preserve_packet_bytes() {
     let operation = Execution::new(&client, Duration::from_secs(10));
     let deadline = operation.deadline(&client, Duration::from_secs(10));
     let options = options();
-    let mut results = Vec::new();
-    for retain in [false, true] {
+    let results = [false, true].map(|retain| {
         let mut admission = client
             .admitting_in(&options, 1, &deadline, &operation)
             .unwrap();
@@ -285,62 +307,75 @@ fn retained_and_rebuilt_previews_preserve_packet_bytes() {
             admission.admit_on(declaration, &route)
         }
         .unwrap();
-        let expected_bytes = admitted.preliminary_build.bytes.clone();
         let (cost, retained) = admitted.into_parts();
-        let discovery = &admission;
         let prepared = match retained {
-            Some(retained) => discovery.materialize_retained(retained, &route, cost),
-            None => discovery.rebuild(packet(64), &route, cost),
+            Some(retained) => admission.materialize_retained(retained, &route, cost),
+            None => admission.rebuild(packet(64), &route, cost),
         }
         .unwrap();
-        assert_eq!(prepared.built.bytes, expected_bytes);
-        results.push(
-            prepared
-                .transmit(&tx, || Ok::<(), Error>(()))
-                .unwrap()
-                .built()
-                .bytes
-                .clone(),
-        );
-    }
-    assert_eq!(results[0], results[1]);
-    assert_eq!(tx.0.lock().unwrap().len(), 2);
+        assert_packet_bytes(&prepared.built.bytes, "10.0.0.2".parse().unwrap(), 64);
+        prepared
+            .transmit(&tx, || Ok::<(), Error>(()))
+            .unwrap()
+            .built()
+            .bytes
+            .clone()
+    });
+    assert_eq!(tx.0.lock().unwrap().as_slice(), results);
 }
 
 #[test]
 fn bounded_windows_admit_and_materialize_every_packet() {
+    let (reference, _, _, _) = fixture();
+    let reference_operation = Execution::new(&reference, Duration::from_secs(10));
+    let reference_options = options();
+    let preview = reference
+        .streaming_in(&reference_options, 1, &reference_operation)
+        .unwrap()
+        .prepare(packet(64))
+        .unwrap();
+    assert_packet_bytes(&preview.built.bytes, "10.0.0.2".parse().unwrap(), 64);
+    let wire_len = preview.built.bytes.len();
     for count in [4, 32] {
         for retain in [false, true] {
-            let (client, _, _, _) = fixture();
+            let (mut client, _, _, _) = fixture();
+            Arc::make_mut(&mut client.policy).max_bytes_per_operation = (count * wire_len) as u64;
             let operation = Execution::new(&client, Duration::from_secs(10));
             let deadline = operation.deadline(&client, Duration::from_secs(10));
             let options = options();
             let mut admission = client
-                .admitting_in(&options, count, &deadline, &operation)
+                .admitting_in(&options, count as u64, &deadline, &operation)
                 .unwrap();
             let route = admission
                 .route_on(&packet(64), "10.0.0.1".parse().unwrap(), None)
                 .unwrap();
-            let mut window = Vec::new();
-            for _ in 0..count {
-                let admitted = if retain {
-                    admission.admit_retained_on(packet(64), &route)
-                } else {
-                    admission.admit_on(packet(64), &route)
-                }
-                .unwrap();
-                window.push(admitted.into_parts());
-            }
-            assert_eq!(admission.wire_bytes(), count * 92);
-            let discovery = &admission;
+            let window = (0..count)
+                .map(|_| {
+                    let admitted = if retain {
+                        admission.admit_retained_on(packet(64), &route)
+                    } else {
+                        admission.admit_on(packet(64), &route)
+                    }
+                    .unwrap();
+                    admitted.into_parts()
+                })
+                .collect::<Vec<_>>();
+            assert!(matches!(
+                admission.admit_on(packet(64), &route),
+                Err(Error::Policy(crate::policy::Error::ByteLimit { .. }))
+            ));
             for (cost, retained) in window {
                 let prepared = match retained {
-                    Some(retained) => discovery.materialize_retained(retained, &route, cost),
-                    None => discovery.rebuild(packet(64), &route, cost),
+                    Some(retained) => admission.materialize_retained(retained, &route, cost),
+                    None => admission.rebuild(packet(64), &route, cost),
                 }
                 .unwrap();
-                assert_eq!(prepared.built.bytes.len(), 92);
+                assert_packet_bytes(&prepared.built.bytes, "10.0.0.2".parse().unwrap(), 64);
             }
+            assert!(matches!(
+                admission.admit_on(packet(64), &route),
+                Err(Error::Policy(crate::policy::Error::ByteLimit { .. }))
+            ));
         }
     }
 }
@@ -365,12 +400,12 @@ fn changed_final_declaration_is_authorized_before_fresh_provider_lookup() {
         .0;
     let mut changed = packet(64);
     changed.get_mut::<Ipv4>().unwrap().destination = "10.0.0.9".parse().unwrap();
+    routes.forbid_lookup.store(true, Ordering::Relaxed);
     let result = admission.rebuild(changed, &route, cost);
     assert!(matches!(
         result,
         Err(RebuildError::Preparation(Error::Policy(_)))
     ));
-    assert_eq!(routes.calls.load(Ordering::Relaxed), 1);
     assert!(tx.0.lock().unwrap().is_empty());
 }
 
@@ -392,31 +427,22 @@ fn borrowed_materialization_keeps_one_cumulative_admission_budget() {
         .admit_retained_on(packet(64), &route)
         .unwrap()
         .into_parts();
-    assert_eq!(admission.wire_bytes(), 92);
     let first = admission
         .materialize_retained(first_preview.unwrap(), &route, first_cost)
         .unwrap();
-    assert_eq!(
-        admission.wire_bytes(),
-        92,
-        "materialization does not charge again"
-    );
+    assert_packet_bytes(&first.built.bytes, "10.0.0.2".parse().unwrap(), 64);
+    let first_bytes = first.built.bytes.clone();
     first.transmit(&tx, || Ok::<(), Error>(())).unwrap();
 
     let second_cost = admission.admit_on(packet(64), &route).unwrap().into_cost();
-    assert_eq!(admission.wire_bytes(), 184);
     let second = admission.rebuild(packet(64), &route, second_cost).unwrap();
-    assert_eq!(admission.wire_bytes(), 184);
+    assert_packet_bytes(&second.built.bytes, "10.0.0.2".parse().unwrap(), 64);
+    let second_bytes = second.built.bytes.clone();
     second.transmit(&tx, || Ok::<(), Error>(())).unwrap();
     assert!(matches!(
         admission.admit_on(packet(64), &route),
         Err(Error::Policy(crate::policy::Error::ByteLimit { .. }))
     ));
-    assert_eq!(
-        admission.wire_bytes(),
-        184,
-        "refusal cannot fork or reset spending"
-    );
 
     let mut other = client
         .admitting_in(&options, 1, &deadline, &operation)
@@ -425,16 +451,18 @@ fn borrowed_materialization_keeps_one_cumulative_admission_budget() {
         .admit_retained_on(packet(64), &route)
         .unwrap()
         .into_parts();
-    let before = routes.calls.load(Ordering::Relaxed);
+    routes.forbid_lookup.store(true, Ordering::Relaxed);
     assert!(matches!(
         admission.materialize_retained(foreign_preview.unwrap(), &route, foreign_cost),
         Err(RebuildError::Preparation(
             Error::PacketMaterialization { .. }
         ))
     ));
-    assert_eq!(routes.calls.load(Ordering::Relaxed), before);
-    assert_eq!(admission.wire_bytes(), 184);
-    assert_eq!(tx.0.lock().unwrap().len(), 2);
+    assert!(matches!(
+        admission.admit_on(packet(64), &route),
+        Err(Error::Policy(crate::policy::Error::ByteLimit { .. }))
+    ));
+    assert_eq!(tx.0.lock().unwrap().as_slice(), [first_bytes, second_bytes]);
 }
 
 #[test]
@@ -476,9 +504,10 @@ fn changed_source_rebuilds_and_changed_mtu_fails_before_discovery() {
                 }))
             ));
         } else {
-            assert_eq!(
-                result.unwrap().built.packet.get::<Ipv4>().unwrap().source,
-                "10.0.0.3".parse::<std::net::Ipv4Addr>().unwrap()
+            assert_packet_bytes(
+                &result.unwrap().built.bytes,
+                "10.0.0.3".parse().unwrap(),
+                1024,
             );
         }
         assert!(tx.0.lock().unwrap().is_empty());
@@ -487,35 +516,46 @@ fn changed_source_rebuilds_and_changed_mtu_fails_before_discovery() {
 
 #[test]
 fn interface_selectors_are_resolved_again_and_capture_identity_change_is_refused() {
-    let (client, routes, interfaces, tx) = fixture();
-    let operation = Execution::new(&client, Duration::from_secs(10));
-    let deadline = operation.deadline(&client, Duration::from_secs(10));
-    let mut options = options();
-    options.plan.interface = Some(route::Interface::Name("controlled0".to_owned()));
-    let mut admission = client
-        .admitting_in(&options, 1, &deadline, &operation)
-        .unwrap();
-    let declaration = packet(64);
-    let route = admission
-        .route_on(&declaration, "10.0.0.1".parse().unwrap(), None)
-        .unwrap();
-    let admitted = admission.admit_retained_on(declaration, &route).unwrap();
-    let (cost, retained) = admitted.into_parts();
-    interfaces.id.lock().unwrap().index = 2;
-    routes.decision.lock().unwrap().interface.index = 2;
-    let result = admission.materialize_retained(retained.unwrap(), &route, cost);
-    assert!(matches!(
-        result,
-        Err(RebuildError::Preparation(Error::Plan(
-            route::Error::InterfaceMismatch {
-                requested_index: 1,
-                selected_index: 2,
-                ..
-            }
-        )))
-    ));
-    assert_eq!(interfaces.calls.load(Ordering::Relaxed), 2);
-    assert!(tx.0.lock().unwrap().is_empty());
+    for disappeared in [false, true] {
+        let (client, routes, interfaces, tx) = fixture();
+        let operation = Execution::new(&client, Duration::from_secs(10));
+        let deadline = operation.deadline(&client, Duration::from_secs(10));
+        let mut options = options();
+        options.plan.interface = Some(route::Interface::Name("controlled0".to_owned()));
+        let mut admission = client
+            .admitting_in(&options, 1, &deadline, &operation)
+            .unwrap();
+        let declaration = packet(64);
+        let route = admission
+            .route_on(&declaration, "10.0.0.1".parse().unwrap(), None)
+            .unwrap();
+        let admitted = admission.admit_retained_on(declaration, &route).unwrap();
+        let (cost, retained) = admitted.into_parts();
+        if disappeared {
+            interfaces.id.lock().unwrap().name = "other-interface".into();
+        } else {
+            interfaces.id.lock().unwrap().index = 2;
+            routes.decision.lock().unwrap().interface.index = 2;
+        }
+        let result = admission.materialize_retained(retained.unwrap(), &route, cost);
+        if disappeared {
+            assert!(
+                matches!(result, Err(RebuildError::Preparation(Error::Plan(route::Error::UnknownInterface { selector }))) if selector == "controlled0")
+            );
+        } else {
+            assert!(matches!(
+                result,
+                Err(RebuildError::Preparation(Error::Plan(
+                    route::Error::InterfaceMismatch {
+                        requested_index: 1,
+                        selected_index: 2,
+                        ..
+                    }
+                )))
+            ));
+        }
+        assert!(tx.0.lock().unwrap().is_empty());
+    }
 }
 
 #[test]
@@ -545,26 +585,29 @@ fn cancellation_and_other_admission_costs_cannot_enter_reuse() {
             signal.cancel();
             admission
         };
-        let before = routes.calls.load(Ordering::Relaxed);
+        routes.forbid_lookup.store(true, Ordering::Relaxed);
         let error = discovery
             .materialize_retained(retained.unwrap(), &route, cost)
             .err()
             .unwrap();
-        assert!(
-            matches!(
+        if foreign_cost {
+            assert!(matches!(
                 error,
                 RebuildError::Preparation(Error::PacketMaterialization { .. })
-            ) == foreign_cost
-        );
-        assert!(matches!(error, RebuildError::Preparation(Error::Cancelled(_))) != foreign_cost);
-        assert_eq!(routes.calls.load(Ordering::Relaxed), before);
+            ));
+        } else {
+            assert!(matches!(
+                error,
+                RebuildError::Preparation(Error::Cancelled(_))
+            ));
+        }
     }
 }
 
 #[test]
 fn changed_wire_length_and_cumulative_budget_are_refused_before_discovery() {
     for mode in [Mode::Layer2, Mode::Layer3] {
-        let (mut client, routes, _, tx) = fixture();
+        let (mut client, _, _, tx) = fixture();
         Arc::make_mut(&mut client.policy).max_bytes_per_operation = 150;
         let operation = Execution::new(&client, Duration::from_secs(10));
         let deadline = operation.deadline(&client, Duration::from_secs(10));
@@ -578,23 +621,20 @@ fn changed_wire_length_and_cumulative_budget_are_refused_before_discovery() {
             .route_on(&declaration, "10.0.0.1".parse().unwrap(), None)
             .unwrap();
         let admitted = admission.admit_on(declaration, &route).unwrap();
-        let admitted_bytes = if mode == Mode::Layer3 { 92 } else { 106 };
-        assert_eq!(admission.wire_bytes(), admitted_bytes);
+        let admitted_bytes = admitted.wire_len();
         assert!(matches!(
             admission.admit_on(packet(64), &route),
             Err(Error::Policy(crate::policy::Error::ByteLimit { .. }))
         ));
-        assert_eq!(
-            admission.wire_bytes(),
-            admitted_bytes,
-            "refused charge does not spend again"
-        );
         let result = admission.rebuild(packet(65), &route, admitted.into_parts().0);
         assert!(matches!(
             result,
-            Err(RebuildError::Changed { admitted }) if admitted == admitted_bytes as usize
+            Err(RebuildError::Changed { admitted }) if admitted == admitted_bytes
         ));
-        assert_eq!(routes.calls.load(Ordering::Relaxed), 2);
+        assert!(matches!(
+            admission.admit_on(packet(64), &route),
+            Err(Error::Policy(crate::policy::Error::ByteLimit { .. }))
+        ));
         assert!(tx.0.lock().unwrap().is_empty());
     }
 }

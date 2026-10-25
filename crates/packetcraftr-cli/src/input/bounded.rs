@@ -324,21 +324,26 @@ mod tests {
         assert!(error.message.contains(&path.display().to_string()));
         assert!(!error.causes.is_empty());
 
+        std::fs::write(&path, b"a").unwrap();
+        assert_eq!(read_bounded_file(&path, 1, InputKind::Frame).unwrap(), b"a");
         std::fs::write(&path, b"ab").unwrap();
-        let error = read_bounded_file(&path, 1, InputKind::Frame).unwrap_err();
         assert_eq!(
-            error.classification,
-            core::decode::Error::PacketSizeLimit {
-                actual: 2,
-                limit: 1
-            }
-            .classification()
+            read_bounded_file(&path, 2, InputKind::Frame).unwrap(),
+            b"ab"
         );
+        let error = read_bounded_file(&path, 1, InputKind::Frame).unwrap_err();
+        assert_eq!(error.classification.code, "policy.decode_resource_limit");
+        assert_eq!(error.classification.kind, Kind::Policy);
         assert!(error.message.contains(&path.display().to_string()));
 
         std::fs::write(&path, b"").unwrap();
         let error = read_bounded_file(&path, 1, InputKind::Frame).unwrap_err();
         assert_eq!(error.classification.code, "cli.input_source");
         assert!(error.message.contains(&path.display().to_string()));
+        assert!(
+            read_bounded_file_allow_empty(&path, 1, InputKind::Frame)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

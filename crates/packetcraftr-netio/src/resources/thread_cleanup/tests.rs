@@ -3,15 +3,46 @@
 
 use super::*;
 use std::{
+    cell::RefCell,
     sync::mpsc,
     time::{Duration, Instant},
 };
 
-struct Owner(Arc<AtomicUsize>);
+struct Owner {
+    completed: mpsc::Sender<usize>,
+    value: usize,
+}
 impl Drop for Owner {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
+        let _ = self.completed.send(self.value);
     }
+}
+
+fn owner(value: usize) -> (Owner, mpsc::Receiver<usize>) {
+    let (completed, result) = mpsc::channel();
+    (Owner { completed, value }, result)
+}
+
+fn complete_replacements(cleanup: &ThreadCleanup, expected: &[usize]) -> Vec<usize> {
+    let slots: Vec<_> = expected.iter().map(|_| wait_for_slot(cleanup)).collect();
+    assert!(cleanup.reserve().is_err());
+    let completed: Vec<_> = slots
+        .into_iter()
+        .zip(expected)
+        .map(|(slot, value)| {
+            let (owner, completed) = owner(*value);
+            assert!(slot.attach(std::thread::spawn(|| ()), owner));
+            completed
+        })
+        .collect();
+    completed
+        .into_iter()
+        .map(|result| result.recv_timeout(Duration::from_secs(5)).unwrap())
+        .collect()
+}
+
+thread_local! {
+    static CLEANUP_EXIT: RefCell<Option<Owner>> = const { RefCell::new(None) };
 }
 
 fn wait_for_slot(cleanup: &ThreadCleanup) -> ThreadJoinSlot {
@@ -38,78 +69,89 @@ fn reservations_and_failed_transfers_keep_the_join_owner_until_actual_completion
     assert!(cleanup.reserve().is_err());
     drop(slot);
     let slot = cleanup.reserve().unwrap();
-    let active = Arc::new(AtomicUsize::new(1));
+    let (owner, completed) = owner(7);
     let (release, held) = mpsc::channel();
     let thread = std::thread::spawn(move || held.recv().unwrap());
     cleanup.inner.refuse_next.store(true, Ordering::Release);
-    assert!(!slot.attach(thread, Owner(Arc::clone(&active))));
-    assert_eq!(active.load(Ordering::Acquire), 1);
+    assert!(!slot.attach(thread, owner));
+    assert!(matches!(
+        completed.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     assert!(cleanup.reserve().is_err());
     release.send(()).unwrap();
-    drop(wait_for_slot(&cleanup));
-    assert_eq!(active.load(Ordering::Acquire), 0);
+    assert_eq!(completed.recv_timeout(Duration::from_secs(5)).unwrap(), 7);
+    assert_eq!(complete_replacements(&cleanup, &[11]), [11]);
 }
 
 #[test]
 fn one_blocked_join_does_not_serialize_independent_cleanup_slots() {
     let cleanup = ThreadCleanup::new(2).unwrap();
-    let active = Arc::new(AtomicUsize::new(1));
+    let (owner, completed) = owner(7);
     let (release, held) = mpsc::channel();
-    cleanup.reserve().unwrap().attach(
-        std::thread::spawn(move || held.recv().unwrap()),
-        Owner(Arc::clone(&active)),
-    );
-    for _ in 0..8 {
-        let other = Arc::new(AtomicUsize::new(1));
-        cleanup
-            .reserve()
-            .unwrap()
-            .attach(std::thread::spawn(|| ()), Owner(Arc::clone(&other)));
-        let guard = Instant::now() + Duration::from_secs(5);
-        while other.load(Ordering::Acquire) != 0 {
-            assert!(Instant::now() < guard);
-            std::thread::yield_now();
-        }
-        drop(wait_for_slot(&cleanup));
-        assert_eq!(active.load(Ordering::Acquire), 1);
+    cleanup
+        .reserve()
+        .unwrap()
+        .attach(std::thread::spawn(move || held.recv().unwrap()), owner);
+    for value in 0..8 {
+        let (owner, other) = self::owner(value);
+        assert!(wait_for_slot(&cleanup).attach(std::thread::spawn(|| ()), owner));
+        assert_eq!(other.recv_timeout(Duration::from_secs(5)).unwrap(), value);
+        assert!(matches!(
+            completed.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
     }
     release.send(()).unwrap();
+    assert_eq!(completed.recv_timeout(Duration::from_secs(5)).unwrap(), 7);
+    assert_eq!(complete_replacements(&cleanup, &[11, 13]), [11, 13]);
 }
 
 #[test]
-fn dropping_last_cleanup_owner_retries_a_failed_transfer_without_an_arc_cycle() {
+fn dropping_last_cleanup_owner_retries_and_releases_worker_resources() {
     let cleanup = ThreadCleanup::new(1).unwrap();
-    let weak = Arc::downgrade(&cleanup.inner);
-    let active = Arc::new(AtomicUsize::new(1));
+    let (thread_exit, exited) = owner(13);
+    let (installed, ready) = mpsc::channel();
+    assert!(
+        cleanup
+            .inner
+            .service
+            .client()
+            .try_transfer(Box::new(move || {
+                CLEANUP_EXIT.with(|slot| *slot.borrow_mut() = Some(thread_exit));
+                installed.send(()).unwrap();
+            }))
+            .is_ok()
+    );
+    ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    let (owner, completed) = owner(7);
     let (release, held) = mpsc::channel();
     cleanup.inner.refuse_next.store(true, Ordering::Release);
-    assert!(!cleanup.reserve().unwrap().attach(
-        std::thread::spawn(move || held.recv().unwrap()),
-        Owner(Arc::clone(&active)),
+    assert!(
+        !cleanup
+            .reserve()
+            .unwrap()
+            .attach(std::thread::spawn(move || held.recv().unwrap()), owner,)
+    );
+    assert!(matches!(
+        completed.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
     ));
+    assert!(matches!(exited.try_recv(), Err(mpsc::TryRecvError::Empty)));
     drop(cleanup);
     release.send(()).unwrap();
-    let guard = Instant::now() + Duration::from_secs(5);
-    while active.load(Ordering::Acquire) != 0 || weak.upgrade().is_some() {
-        assert!(
-            Instant::now() < guard,
-            "failed transfer retained a self-cycle after last cleanup owner dropped"
-        );
-        std::thread::yield_now();
-    }
+    assert_eq!(completed.recv_timeout(Duration::from_secs(5)).unwrap(), 7);
+    assert_eq!(exited.recv_timeout(Duration::from_secs(5)).unwrap(), 13);
 }
 
 struct BlockingOwner {
     entered: mpsc::Sender<()>,
-    released: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    released: mpsc::Receiver<()>,
 }
 impl Drop for BlockingOwner {
     fn drop(&mut self) {
         self.entered.send(()).unwrap();
-        let mut released = self.released.0.lock().unwrap();
-        while !*released {
-            released = self.released.1.wait(released).unwrap();
-        }
+        self.released.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 }
 
@@ -117,17 +159,13 @@ impl Drop for BlockingOwner {
 fn arbitrary_owner_drop_remains_charged_to_cleanup_after_the_thread_has_joined() {
     let cleanup = ThreadCleanup::new(1).unwrap();
     let (entered, dropping) = mpsc::channel();
-    let released = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let (release, released) = mpsc::channel();
     cleanup.reserve().unwrap().attach(
         std::thread::spawn(|| ()),
-        BlockingOwner {
-            entered,
-            released: Arc::clone(&released),
-        },
+        BlockingOwner { entered, released },
     );
     dropping.recv_timeout(Duration::from_secs(5)).unwrap();
     assert!(cleanup.reserve().is_err());
-    *released.0.lock().unwrap() = true;
-    released.1.notify_all();
-    drop(wait_for_slot(&cleanup));
+    release.send(()).unwrap();
+    assert_eq!(complete_replacements(&cleanup, &[17]), [17]);
 }

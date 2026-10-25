@@ -5,13 +5,22 @@ use super::{DocumentLimits, Error, Format, Limit, Packet};
 use crate::document::PACKET_DOCUMENT_SCHEMA_V1;
 use crate::error::{Classified, Kind};
 
-const YAML: &str = "schema: packetcraftr.packet/v1\nlayers:\n  - protocol: raw\n    fields: {}\n";
+const YAML: &str = "schema: packetcraftr.packet/v1\nlayers:\n  - protocol: raw\n    fields:\n      bytes:\n        type: bytes\n        value: [104, 105]\n";
 
 #[test]
 fn yaml_accepts_one_document_with_comments_and_terminators() {
-    let expected = Packet::parse(YAML, Format::Yaml, YAML.len()).unwrap();
-    assert_eq!(expected.schema, PACKET_DOCUMENT_SCHEMA_V1);
-    assert_eq!(expected.layers.len(), 1);
+    // https://yaml.org/spec/1.2.2/#912-document-markers checked 2026-10-25.
+    let expected = Packet {
+        schema: PACKET_DOCUMENT_SCHEMA_V1.to_owned(),
+        layers: vec![crate::document::Layer {
+            protocol: "raw".to_owned(),
+            fields: [(
+                "bytes".to_owned(),
+                crate::field::Value::Bytes(bytes::Bytes::from_static(b"hi")),
+            )]
+            .into(),
+        }],
+    };
     for prefix in ["", "---\n"] {
         for suffix in [
             "",
@@ -70,6 +79,20 @@ fn yaml_rejects_malformed_trailing_content() {
 
 #[test]
 fn yaml_preserves_resource_limit_classification() {
+    let admitted = Packet::parse_with_limits(
+        YAML,
+        Format::Yaml,
+        &DocumentLimits {
+            max_input_bytes: YAML.len(),
+            max_layers: 1,
+            ..DocumentLimits::DEFAULT
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        admitted.layers[0].fields["bytes"],
+        crate::field::Value::Bytes(bytes::Bytes::from_static(b"hi"))
+    );
     for (limit, limits) in [
         (
             Limit::InputBytes,

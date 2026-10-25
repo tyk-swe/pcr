@@ -167,6 +167,8 @@ mod network_improvements {
     #[test]
     fn retained_udp_response_limit_is_exact() {
         for length in [0, 3, 4, 5, 64] {
+            let expected: Vec<u8> = (0..length).map(|value| value as u8).collect();
+            let response = expected.clone();
             let server = UdpSocket::bind("127.0.0.1:0").unwrap();
             server
                 .set_read_timeout(Some(Duration::from_secs(2)))
@@ -174,8 +176,10 @@ mod network_improvements {
             let endpoint = server.local_addr().unwrap();
             let worker = std::thread::spawn(move || {
                 let mut request = [0; 16];
-                let (_, peer) = server.recv_from(&mut request).unwrap();
-                server.send_to(&vec![7; length], peer).unwrap();
+                let (received, peer) = server.recv_from(&mut request).unwrap();
+                assert_eq!(&request[..received], b"query");
+                server.send_to(&response, peer).unwrap();
+                peer
             });
             let reply = SystemProvider
                 .exchange(
@@ -185,8 +189,11 @@ mod network_improvements {
                     &Deadline::new(Duration::from_secs(2)),
                 )
                 .unwrap();
-            worker.join().unwrap();
-            assert_eq!(reply.exchange.response.len(), length.min(4));
+            let peer = worker.join().unwrap();
+            assert_eq!(reply.peer, endpoint);
+            assert_eq!(reply.local, peer);
+            assert_eq!(reply.exchange.bytes_sent, b"query".len());
+            assert_eq!(reply.exchange.response.as_ref(), &expected[..length.min(4)]);
             match reply.exchange.outcome {
                 Outcome::Complete => assert!(length <= 4),
                 Outcome::Truncated => assert!(length > 4),

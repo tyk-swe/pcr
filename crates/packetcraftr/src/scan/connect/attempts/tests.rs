@@ -15,7 +15,7 @@ fn local_deadline_is_unavailable_for_both_control_and_port_inference() {
         attempted: true,
         connect_succeeded: None,
         outcome: Outcome::DeadlineExpired,
-        scheduled_at: SystemTime::now(),
+        scheduled_at: SystemTime::UNIX_EPOCH,
         finished_at: None,
         elapsed: Duration::from_secs(1),
         local: None,
@@ -34,10 +34,41 @@ fn local_deadline_is_unavailable_for_both_control_and_port_inference() {
     }
     probe.outcome = Outcome::TimedOut;
     assert!(matches!(connect_outcome(&probe), adaptive::Outcome::Silent));
-    assert_eq!(
-        inference::connect([(7, probe.outcome)]).rule,
-        inference::Rule::ConnectTimedOut
-    );
+    let silent = inference::connect([(7, probe.outcome)]);
+    assert_eq!(silent.rule, inference::Rule::ConnectTimedOut);
+    assert_eq!(silent.state, Some(inference::State::Filtered));
+    assert_eq!(silent.supporting, [7]);
+    assert!(silent.failed.is_empty());
+    for (outcome, state, rule) in [
+        (
+            Outcome::Connected,
+            inference::State::Open,
+            inference::Rule::ConnectConnected,
+        ),
+        (
+            Outcome::Refused,
+            inference::State::Closed,
+            inference::Rule::ConnectRefused,
+        ),
+    ] {
+        probe.outcome = outcome;
+        let adaptive::Outcome::Reply {
+            latency,
+            responder,
+            control,
+        } = connect_outcome(&probe)
+        else {
+            panic!("a completed connection response remains reply evidence");
+        };
+        assert_eq!(latency, probe.elapsed);
+        assert_eq!(responder, probe.endpoint.ip());
+        assert!(!control);
+        let evidence = inference::connect([(7, outcome)]);
+        assert_eq!(evidence.rule, rule);
+        assert_eq!(evidence.state, Some(state));
+        assert_eq!(evidence.supporting, [7]);
+        assert!(evidence.failed.is_empty());
+    }
     probe.attempted = false;
     assert!(matches!(
         connect_outcome(&probe),

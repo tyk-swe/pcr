@@ -55,6 +55,12 @@ fn info(id: interface::Id) -> interface::Info {
         link_type: LinkType::RAW,
     }
 }
+
+fn fixed_deadline() -> Deadline {
+    let now = Instant::now();
+    Deadline::with_time_source(Duration::from_secs(1), move || now)
+}
+
 struct Routes {
     unavailable: AtomicBool,
     cancel: Option<Cancellation>,
@@ -116,11 +122,7 @@ fn absolute_hostname_and_resolver_spelling() {
         ..Default::default()
     };
     let resolved = policy
-        .resolve_target(
-            &Target::Hostname(absolute),
-            &Recording,
-            &Deadline::new(Duration::from_secs(1)),
-        )
+        .resolve_target(&Target::Hostname(absolute), &Recording, &fixed_deadline())
         .unwrap();
     assert_eq!(
         resolved.addresses(),
@@ -238,7 +240,7 @@ fn interface_ambiguity_and_late_enumeration() {
                 values: vec![first.clone(), second],
                 cancel: None
             },
-            &Deadline::new(Duration::from_secs(1))
+            &fixed_deadline()
         ),
         Err(route::Error::AmbiguousInterface { .. })
     ));
@@ -256,7 +258,7 @@ fn interface_ambiguity_and_late_enumeration() {
                 ],
                 cancel: None
             },
-            &Deadline::new(Duration::from_secs(1))
+            &fixed_deadline()
         ),
         Err(route::Error::AmbiguousInterface { .. })
     ));
@@ -268,7 +270,7 @@ fn interface_ambiguity_and_late_enumeration() {
                 values: vec![first],
                 cancel: Some(cancel.clone())
             },
-            &Deadline::new(Duration::from_secs(1)).with_cancellation(Some(cancel))
+            &fixed_deadline().with_cancellation(Some(cancel))
         ),
         Err(route::Error::Interrupted(_))
     ));
@@ -284,13 +286,13 @@ fn route_deadline_cache_and_identity() {
     let cached = route::CachedProvider::new(&provider);
     let address = "127.0.0.2".parse().unwrap();
     let first = cached
-        .lookup_with_preferences(address, None, None, &Deadline::new(Duration::from_secs(1)))
+        .lookup_with_preferences(address, None, None, &fixed_deadline())
         .unwrap();
     assert_eq!(first.interface, decision().interface);
     assert_eq!(first.selected_source, decision().selected_source);
     provider.unavailable.store(true, Ordering::SeqCst);
     let reused = cached
-        .lookup_with_preferences(address, None, None, &Deadline::new(Duration::from_secs(1)))
+        .lookup_with_preferences(address, None, None, &fixed_deadline())
         .unwrap();
     assert_eq!(reused.interface, first.interface);
     assert_eq!(reused.selected_source, first.selected_source);
@@ -314,7 +316,7 @@ fn route_deadline_cache_and_identity() {
             Some(address),
             &options,
             &late,
-            &Deadline::new(Duration::from_secs(1)).with_cancellation(Some(cancel))
+            &fixed_deadline().with_cancellation(Some(cancel))
         ),
         Err(route::Error::Interrupted(_))
     ));
@@ -329,7 +331,7 @@ fn route_deadline_cache_and_identity() {
             Some(address),
             &options,
             &invalid,
-            &Deadline::new(Duration::from_secs(1))
+            &fixed_deadline()
         ),
         Err(route::Error::InvalidRouteIdentity { .. })
     ));
@@ -368,11 +370,7 @@ fn numeric_and_custom_resolution_boundaries() {
     let cancel = Cancellation::default();
     let resolver = Late(cancel.clone());
     let numeric = policy
-        .resolve_target(
-            &"127.0.0.1".parse().unwrap(),
-            &resolver,
-            &Deadline::new(Duration::from_secs(1)),
-        )
+        .resolve_target(&"127.0.0.1".parse().unwrap(), &resolver, &fixed_deadline())
         .unwrap();
     assert_eq!(
         numeric.addresses(),
@@ -388,8 +386,8 @@ fn numeric_and_custom_resolution_boundaries() {
             TargetError::Control(_)
         ))
     ));
-    let parent = Deadline::new(Duration::from_secs(1)).with_cancellation(Some(cancel));
-    let deadline = Deadline::new(Duration::from_secs(1)).with_parent(Some(Arc::new(parent)));
+    let parent = fixed_deadline().with_cancellation(Some(cancel));
+    let deadline = fixed_deadline().with_parent(Some(Arc::new(parent)));
     assert!(matches!(
         policy.resolve_target(&"example.test".parse().unwrap(), &resolver, &deadline),
         Err(crate::policy::ResolutionError::Target(
@@ -1075,6 +1073,7 @@ mod capture {
     #[derive(Clone, Copy)]
     enum Mode {
         Frames,
+        Loss,
         Late,
         Forbidden,
         Failure,
@@ -1142,7 +1141,7 @@ mod capture {
                         source: None,
                     });
                 }
-                Mode::Frames | Mode::Late => {}
+                Mode::Frames | Mode::Loss | Mode::Late => {}
             }
             let Some(frame) = self.frames.pop_front() else {
                 self.clock.advance(Duration::from_secs(2));
@@ -1159,7 +1158,10 @@ mod capture {
         fn shutdown(&mut self) -> Result<(), packetcraftr_netio::Error> {
             if matches!(self.mode, Mode::Failure) {
                 return Err(packetcraftr_netio::Error::Capture {
-                    message: "fixture shutdown failure".into(),
+                    message: format!(
+                        "fixture shutdown failure on {}",
+                        self.metadata.interface.name
+                    ),
                     source: None,
                 });
             }
@@ -1167,6 +1169,13 @@ mod capture {
         }
 
         fn stats(&self) -> native::Stats {
+            if matches!(self.mode, Mode::Loss) {
+                return native::Stats {
+                    dropped_frames: 1,
+                    dropped_bytes: 2,
+                    ..self.statistics
+                };
+            }
             self.statistics
         }
     }
@@ -1174,11 +1183,20 @@ mod capture {
     type CaptureClient = Client<ProviderSet<(), Interfaces, Provider>, CaptureClock>;
 
     fn fixture(mode: Mode) -> (CaptureClient, crate::capture::Request) {
+        fixture_sources(
+            mode,
+            vec![interface::Id {
+                name: "capture0".into(),
+                index: 7,
+            }],
+        )
+    }
+
+    fn fixture_sources(
+        mode: Mode,
+        interfaces: Vec<interface::Id>,
+    ) -> (CaptureClient, crate::capture::Request) {
         let clock = CaptureClock(Arc::new(Mutex::new(Instant::now())));
-        let id = interface::Id {
-            name: "capture0".into(),
-            index: 7,
-        };
         let client = Client::new(
             builtin::registry(),
             Policy {
@@ -1188,7 +1206,7 @@ mod capture {
             },
             ProviderSet::capture(
                 Interfaces {
-                    values: vec![id.clone()],
+                    values: interfaces.clone(),
                     cancel: None,
                 },
                 Provider {
@@ -1200,7 +1218,7 @@ mod capture {
         .with_clock(clock);
         let request = crate::capture::Request::new(
             native::GroupRequest {
-                interfaces: vec![id],
+                interfaces,
                 limits: native::Limits {
                     max_frames: 8,
                     max_bytes: 512,
@@ -1327,5 +1345,139 @@ mod capture {
         );
         assert!(!error.report.capture_statistics_complete);
         assert_eq!(error.report.stop, StopReason::Failure);
+    }
+
+    #[test]
+    fn capture_window_accepts_zero_and_ceiling_without_extending_it() {
+        let maximum = packetcraftr_netio::deadline::MAX_WAIT;
+        for window in [Duration::ZERO, maximum] {
+            let (client, mut request) = fixture(Mode::Forbidden);
+            request.window = window;
+            let report = client
+                .capture(request, |event| {
+                    let Event::Started { .. } = event else {
+                        panic!("capture stop must precede frame reads");
+                    };
+                    Ok(Control::StopBefore)
+                })
+                .unwrap();
+            assert_eq!(report.sources[0].ready, !window.is_zero());
+            assert_eq!(report.stop, StopReason::Sink);
+            assert_eq!(report.stop.to_string(), "sink");
+            assert_eq!(report.frames_delivered, 0);
+        }
+        let (client, mut request) = fixture(Mode::Forbidden);
+        request.window = maximum + Duration::from_nanos(1);
+        let error = client
+            .capture(request, |_: Event| Ok(Control::StopBefore))
+            .unwrap_err();
+        assert_eq!(error.classification().code, "cli.capture_options");
+        assert!(error.report.sources.is_empty());
+    }
+
+    #[test]
+    fn capture_loss_is_an_error_or_visible_warning_under_selected_policy() {
+        for policy in [
+            native::OverflowPolicy::Fail,
+            native::OverflowPolicy::DropNewest,
+        ] {
+            let (client, mut request) = fixture(Mode::Loss);
+            request.group.limits.overflow_policy = policy;
+            let result = client.capture(request, |event| {
+                Ok(match event {
+                    Event::Started { .. } => Control::Continue,
+                    Event::Frame { .. } => Control::StopAfter,
+                })
+            });
+            if policy == native::OverflowPolicy::Fail {
+                let error = result.unwrap_err();
+                assert_eq!(error.classification().code, "io.capture_evidence_loss");
+                assert_eq!(error.report.stats.packets_completed, 1);
+                assert_eq!(error.report.stats.capture.dropped_frames, 1);
+            } else {
+                let report = result.unwrap();
+                assert_eq!(report.stop, StopReason::Sink);
+                assert_eq!(report.stats.packets_completed, 1);
+                assert_eq!(report.stats.capture.dropped_frames, 1);
+                assert!(
+                    report
+                        .diagnostics
+                        .iter()
+                        .any(|diagnostic| diagnostic.code == "capture.evidence_incomplete")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn capture_consumer_failure_keeps_frame_context_and_supplied_causes() {
+        let (client, request) = fixture(Mode::Frames);
+        let error = client
+            .capture(request, |event| {
+                if matches!(
+                    event,
+                    Event::Frame {
+                        source_frame: 2,
+                        ..
+                    }
+                ) {
+                    return Err(packetcraftr_core::error::BoundaryError::new(
+                        "consumer refused the frame",
+                        packetcraftr_core::error::Classification::new(
+                            "fixture.consumer",
+                            packetcraftr_core::error::Kind::Io,
+                            None,
+                        ),
+                        vec!["supplied capture detail".into()],
+                    ));
+                }
+                Ok(Control::Continue)
+            })
+            .unwrap_err();
+        assert_eq!(error.classification().code, "fixture.consumer");
+        assert_eq!(
+            error.context(),
+            Some(packetcraftr_core::error::Coordinate::SourceFrame(2))
+        );
+        assert!(
+            error
+                .causes()
+                .iter()
+                .any(|cause| cause == "supplied capture detail")
+        );
+        assert_eq!(error.report.stats.packets_completed, 1);
+    }
+
+    #[test]
+    fn capture_cleanup_preserves_each_source_failure() {
+        let (client, request) = fixture_sources(
+            Mode::Failure,
+            vec![
+                interface::Id {
+                    name: "capture0".into(),
+                    index: 7,
+                },
+                interface::Id {
+                    name: "capture1".into(),
+                    index: 8,
+                },
+            ],
+        );
+        let error = client
+            .capture(request, |event| {
+                assert!(matches!(event, Event::Started { .. }));
+                Ok(Control::StopBefore)
+            })
+            .unwrap_err();
+        let causes = error.causes();
+        for source in ["capture0", "capture1"] {
+            let expected = format!("fixture shutdown failure on {source}");
+            assert!(
+                causes.iter().any(|cause| cause.contains(&expected)),
+                "missing {expected:?} from {causes:?}"
+            );
+        }
+        assert_eq!(error.report.frames_delivered, 0);
+        assert!(!error.report.capture_statistics_complete);
     }
 }

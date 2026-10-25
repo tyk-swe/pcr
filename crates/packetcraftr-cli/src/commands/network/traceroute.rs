@@ -236,4 +236,100 @@ mod tests {
         args.flows = Some(2);
         assert!(prepare_request(&args, args.limits.clone().into_limits()).is_err());
     }
+
+    #[test]
+    fn explicit_family_and_capture_limits_reach_workflow_and_diagnostics() {
+        for (address, family, expected_family, policy, expected_policy) in [
+            (
+                "10.0.0.9",
+                "ipv4",
+                packetcraftr::target::Family::Ipv4,
+                "drop-newest",
+                net::capture::OverflowPolicy::DropNewest,
+            ),
+            (
+                "fd00::9",
+                "ipv6",
+                packetcraftr::target::Family::Ipv6,
+                "drop-oldest",
+                net::capture::OverflowPolicy::DropOldest,
+            ),
+            (
+                "10.0.0.9",
+                "any",
+                packetcraftr::target::Family::Any,
+                "fail",
+                net::capture::OverflowPolicy::Fail,
+            ),
+        ] {
+            let definition = crate::app::cli::Cli::command();
+            let matches = definition
+                .clone()
+                .try_get_matches_from([
+                    "packetcraftr",
+                    "network",
+                    "traceroute",
+                    address,
+                    "--family",
+                    family,
+                    "--max-queue-frames",
+                    "7",
+                    "--max-undecoded",
+                    "3",
+                    "--max-captured-bytes",
+                    "8192",
+                    "--snap-length",
+                    "1024",
+                    "--overflow-policy",
+                    policy,
+                ])
+                .unwrap();
+            let args = Args::from_arg_matches(
+                matches
+                    .subcommand_matches("network")
+                    .unwrap()
+                    .subcommand_matches("traceroute")
+                    .unwrap(),
+            )
+            .unwrap();
+            let limits = args.limits.clone().into_limits();
+            assert_eq!(limits.max_frames, 7);
+            assert_eq!(limits.max_bytes, 8192);
+            assert_eq!(limits.snap_length, 1024);
+            assert_eq!(limits.overflow_policy, expected_policy);
+            let prepared = prepare_request(&args, limits).unwrap();
+            assert_eq!(prepared.address_family, expected_family);
+            assert_eq!(prepared.limits.evidence.max_frames, 7);
+            assert_eq!(prepared.limits.evidence.max_bytes, 8192);
+            assert_eq!(prepared.limits.evidence.max_undecoded, 3);
+            let settings = crate::resources::collect_settings(
+                &definition,
+                &matches,
+                false,
+                None,
+                None,
+                Format::Json,
+                |settings| crate::commands::Spec::resources(&args, settings),
+            );
+            let report =
+                serde_json::to_value(crate::resources::Diagnostics::new(settings).snapshot())
+                    .unwrap();
+            for (name, expected) in [
+                ("--max-queue-frames", serde_json::json!(7)),
+                ("--max-captured-bytes", serde_json::json!(8192)),
+                ("--snap-length", serde_json::json!(1024)),
+                ("--overflow-policy", serde_json::json!(policy)),
+            ] {
+                let setting = report["settings"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|setting| setting["name"] == name)
+                    .unwrap();
+                assert_eq!(setting["value"], expected);
+                assert_eq!(setting["source"], "override");
+                assert_eq!(setting["enabled"], true);
+            }
+        }
+    }
 }

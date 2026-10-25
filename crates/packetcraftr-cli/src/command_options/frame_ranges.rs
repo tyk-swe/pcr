@@ -204,6 +204,22 @@ mod tests {
             assert_eq!(failure.classification.code, "cli.frame_selection");
             assert_eq!(failure.exit_code(), 2);
         }
+        let boundary = format!("{}1", "0".repeat(4095));
+        let selection = FrameSelectionArgs {
+            frames: Some(boundary.clone()),
+            every: None,
+        }
+        .resolve()
+        .unwrap();
+        assert!(selection.keeps(1));
+        assert!(!selection.keeps(2));
+        let failure = FrameSelectionArgs {
+            frames: Some(format!("0{boundary}")),
+            every: None,
+        }
+        .resolve()
+        .unwrap_err();
+        assert_eq!(failure.classification.code, "cli.frame_selection");
         assert!(
             FrameSelectionArgs {
                 frames: None,

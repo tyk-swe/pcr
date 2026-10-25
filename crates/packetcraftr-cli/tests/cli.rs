@@ -194,6 +194,53 @@ fn version_reports_the_package_and_compiled_features() {
     }
 }
 
+#[test]
+fn capture_reader_applies_independent_epoch_bounds() {
+    use packetcraftr_core::{
+        capture_file,
+        frame::{Frame, LinkType},
+    };
+    use std::{
+        fs::File,
+        time::{Duration, UNIX_EPOCH},
+    };
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("epochs.pcap");
+    let mut writer =
+        capture_file::Writer::pcap(File::create(&path).unwrap(), LinkType::RAW).unwrap();
+    for (seconds, byte) in [(10, 0x11), (20, 0x22), (30, 0x33)] {
+        writer
+            .write_frame(
+                &Frame::new(
+                    UNIX_EPOCH + Duration::from_secs(seconds),
+                    LinkType::RAW,
+                    vec![byte],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
+    drop(writer);
+    for (bounds, expected) in [
+        (&["--start-epoch", "20"][..], &b"22\n33\n"[..]),
+        (&["--stop-epoch", "20"][..], &b"11\n22\n"[..]),
+        (
+            &["--start-epoch", "20", "--stop-epoch", "20"][..],
+            &b"22\n"[..],
+        ),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+            .args(["--output", "hex", "files", "read"])
+            .arg(&path)
+            .args(bounds)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
+        assert_eq!(output.stdout, expected);
+    }
+}
+
 #[cfg(unix)]
 mod interrupts {
     use nix::{

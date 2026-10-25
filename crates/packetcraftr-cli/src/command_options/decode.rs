@@ -165,4 +165,64 @@ mod tests {
             Some(Id::new("dns"))
         );
     }
+
+    #[test]
+    fn custom_bindings_preserve_transport_and_allow_identical_declarations() {
+        let args = DecodeArgs {
+            ports: vec![4433, 4433],
+            bindings: vec!["tcp.port=4433:tls".into(), "udp.port=15353:dns".into()],
+        };
+        let registry = args.registry().unwrap();
+        assert_eq!(
+            registry.child_for("tcp", Discriminator(4433)),
+            Some(Id::new("tls"))
+        );
+        assert_eq!(
+            registry.child_for("udp", Discriminator(15353)),
+            Some(Id::new("dns"))
+        );
+        let conflict = DecodeArgs {
+            bindings: vec!["tcp.port=4433:http".into(), "tcp.port=4433:tls".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            conflict.registry().unwrap_err().classification.code,
+            "cli.decode_as"
+        );
+    }
+
+    #[test]
+    fn declaration_count_and_input_bytes_have_independent_limits() {
+        for (count, accepted) in [(256, true), (257, false)] {
+            let args = DecodeArgs {
+                ports: vec![4433; 128],
+                bindings: vec!["tcp.port=4433:tls".into(); count - 128],
+            };
+            let result = args.registry();
+            if accepted {
+                assert_eq!(
+                    result.unwrap().child_for("tcp", Discriminator(4433)),
+                    Some(Id::new("tls"))
+                );
+            } else {
+                assert_eq!(result.unwrap_err().classification.code, "cli.decode_as");
+            }
+        }
+        for (bytes, accepted) in [(65_536, true), (65_537, false)] {
+            let padding = " ".repeat(bytes - "udp.port=15353:dns".len());
+            let args = DecodeArgs {
+                ports: Vec::new(),
+                bindings: vec![format!("udp.port{padding}=15353:dns")],
+            };
+            let result = args.registry();
+            if accepted {
+                assert_eq!(
+                    result.unwrap().child_for("udp", Discriminator(15353)),
+                    Some(Id::new("dns"))
+                );
+            } else {
+                assert_eq!(result.unwrap_err().classification.code, "cli.decode_as");
+            }
+        }
+    }
 }

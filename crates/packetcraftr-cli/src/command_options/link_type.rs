@@ -50,5 +50,20 @@ mod tests {
         }
         assert_eq!(parse(" 4294967295 ").unwrap(), LinkType(u32::MAX));
         assert_eq!(parse("ETHERNET").unwrap(), LinkType::ETHERNET);
+        for (names, expected) in [
+            (&["null", "bsd-null"][..], LinkType::NULL),
+            (&["ethernet"][..], LinkType::ETHERNET),
+            (&["bsd-raw"][..], LinkType::BSD_RAW),
+            (&["raw"][..], LinkType::RAW),
+            (&["loop", "bsd-loop"][..], LinkType::LOOP),
+            (&["linux-sll", "sll"][..], LinkType::LINUX_SLL),
+            (&["ipv4", "ip"][..], LinkType::IPV4),
+            (&["ipv6"][..], LinkType::IPV6),
+            (&["linux-sll2", "sll2"][..], LinkType::LINUX_SLL2),
+        ] {
+            for name in names {
+                assert_eq!(parse(name).unwrap(), expected);
+            }
+        }
     }
 }

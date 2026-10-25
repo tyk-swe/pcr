@@ -1,163 +1,163 @@
 [
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Add\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Sub\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Mul\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Div\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_FloorDiv\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Mod\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_Pow\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_RShift\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_LShift\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_BitAnd\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 0, [77, 26], [77, 27], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of strict_json use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceBinaryOperator_BitOr_BitXor\", 1, [174, 22], [174, 23], {}]",
     "evidence": "Postponed annotation only. The module enables future annotations. Callers of digest use the function body and no repository code evaluates or inspects its annotations. Runtime input/output behavior is unchanged."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceComparisonOperator_IsNot_NotEq\", 0, [79, 23], [79, 29], {}]",
     "evidence": "All production max_bytes callers supply built-in integer budgets. For built-in JSON/config value types, type equality with int and type identity with int agree, including rejection of bool and float."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceComparisonOperator_IsNot_NotEq\", 1, [102, 23], [102, 29], {}]",
     "evidence": "All production max_bytes callers supply built-in integer budgets. For built-in JSON/config value types, type equality with int and type identity with int agree, including rejection of bool and float."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/ReplaceFalseWithTrue\", 1, [123, 75], [123, 80], {}]",
     "evidence": "Before json.dumps, _validate_tree rejects every nonfinite float and nonstring object key recursively. Current callers supply JSON-compatible values, so enabling allow_nan cannot change an accepted output or rejection."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/NumberReplacer\", 32, [180, 46], [180, 51], {}]",
     "evidence": "The replacement block size remains positive. The loop feeds the same ordered file bytes to SHA-256 through EOF. Digest callers impose no read-block-size contract. Only chunking changes."
   },
   {
     "group": "scripts/script_support.py",
-    "revision": "8fd6fa6f4c778c747dd5d5637d4065f5514fca7b36f3e919087d0a00b4dfd807",
+    "revision": "fcf96e1dd68be33c559bc8ee8553069d39ec59b5c4a4d8598f55cbf4e88f81e6",
     "identity": "[\"scripts/script_support.py\", \"core/NumberReplacer\", 33, [180, 46], [180, 51], {}]",
     "evidence": "The replacement block size remains positive. The loop feeds the same ordered file bytes to SHA-256 through EOF. Digest callers impose no read-block-size contract. Only chunking changes."
   }

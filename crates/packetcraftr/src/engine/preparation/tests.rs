@@ -148,7 +148,7 @@ impl transmit::Provider for Transmit {
     }
 }
 
-type TestClient = Client<ProviderSet<Routes, Interfaces, NoCapture, Transmit>>;
+type TestClient = Client<ProviderSet<Routes, Interfaces, NoCapture, Transmit>, ControlledClock>;
 fn fixture() -> (TestClient, Routes, Interfaces, Transmit) {
     let id = interface::Id {
         index: 1,
@@ -181,11 +181,14 @@ fn fixture() -> (TestClient, Routes, Interfaces, Transmit) {
         builtin::registry(),
         policy,
         ProviderSet::packet(routes.clone(), interfaces.clone(), NoCapture, tx.clone()),
-    );
+    )
+    .with_clock(ControlledClock(Arc::new(Mutex::new(Instant::now()))));
     (client, routes, interfaces, tx)
 }
 
-pub(crate) fn client_for_plan(name: &str) -> Client<impl crate::providers::PacketProviders> {
+pub(crate) fn client_for_plan(
+    name: &str,
+) -> Client<impl crate::providers::PacketProviders, impl Clock> {
     let (client, routes, interfaces, _) = fixture();
     routes.decision.lock().unwrap().interface.name = name.to_owned();
     interfaces.id.lock().unwrap().name = name.to_owned();
@@ -452,10 +455,34 @@ fn dns_request_refuses_invalid_evidence_bounds() {
     }
 }
 
-#[test]
-fn dns_neighbor_allowance_matches_requests_and_skips_multicast_and_broadcast() {
+fn maximum_neighbor_request_frame(source: IpAddr, destination: IpAddr) -> Bytes {
     use packetcraftr_core::packet::{VlanKind, VlanTag};
 
+    let request = crate::neighbor::Request {
+        interface: interface::Id {
+            name: "controlled0".into(),
+            index: 1,
+        },
+        interface_source: source,
+        interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
+        target: destination,
+        vlan_tags: vec![
+            VlanTag {
+                kind: VlanKind::Ieee8021Q,
+                priority: 0,
+                drop_eligible: false,
+                vlan_id: 7,
+            };
+            crate::neighbor::MAX_VLAN_TAGS
+        ],
+        mtu: 1500,
+        link_type: LinkType::ETHERNET,
+    };
+    crate::neighbor::request_frame(&request).unwrap()
+}
+
+#[test]
+fn dns_neighbor_allowance_matches_requests_and_skips_multicast_and_broadcast() {
     let (_, routes, interfaces, tx) = fixture();
     let client = Client::new(
         builtin::registry(),
@@ -476,27 +503,7 @@ fn dns_neighbor_allowance_matches_requests_and_skips_multicast_and_broadcast() {
         query.address_family = crate::target::Family::Any;
         query.route.link_mode = Mode::Layer3;
         let direct = client.dns_limits([&query]).unwrap();
-        let neighbor = crate::neighbor::Request {
-            interface: interface::Id {
-                name: "controlled0".into(),
-                index: 1,
-            },
-            interface_source: source.parse().unwrap(),
-            interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
-            target: destination,
-            vlan_tags: vec![
-                VlanTag {
-                    kind: VlanKind::Ieee8021Q,
-                    priority: 0,
-                    drop_eligible: false,
-                    vlan_id: 7,
-                };
-                crate::neighbor::MAX_VLAN_TAGS
-            ],
-            mtu: 1500,
-            link_type: LinkType::ETHERNET,
-        };
-        let request_bytes = crate::neighbor::request_frame(&neighbor).unwrap();
+        let request_bytes = maximum_neighbor_request_frame(source.parse().unwrap(), destination);
         query.route.link_mode = Mode::Layer2;
         let indirect = client.dns_limits([&query]).unwrap();
         let neighbor_requests = 2 * u64::from(query.attempts);
@@ -521,6 +528,160 @@ fn dns_neighbor_allowance_matches_requests_and_skips_multicast_and_broadcast() {
         let mapped = client.dns_limits([&query]).unwrap();
         assert_eq!(mapped.udp().packets(), direct.udp().packets());
         assert_eq!(mapped.udp().wire_bytes(), direct.udp().wire_bytes());
+    }
+}
+
+struct AdmittedRoute;
+
+impl RouteProvider for AdmittedRoute {
+    type Error = packetcraftr_core::error::BoundaryError;
+
+    fn lookup_with_preferences(
+        &self,
+        _: IpAddr,
+        _: Option<&interface::Id>,
+        _: Option<IpAddr>,
+        _: &Deadline,
+    ) -> Result<Decision, Self::Error> {
+        Err(packetcraftr_core::error::BoundaryError::new(
+            "probe reached the admitted route provider",
+            packetcraftr_core::error::Classification::new(
+                "fixture.route",
+                packetcraftr_core::error::Kind::Io,
+                None,
+            ),
+            vec!["supplied route refusal".into()],
+        ))
+    }
+}
+
+fn probe_budget_client(
+    max_bytes: u64,
+) -> Client<
+    impl crate::providers::PacketProviders + crate::providers::TargetProviders,
+    ControlledClock,
+> {
+    let (_, _, interfaces, tx) = fixture();
+    Client::new(
+        builtin::registry(),
+        Policy {
+            allowed_destinations: vec![DestinationConstraint::Exact("fd00::1".parse().unwrap())],
+            max_bytes_per_operation: max_bytes,
+            ..Default::default()
+        },
+        ProviderSet::packet(AdmittedRoute, interfaces, NoCapture, tx).with_resolver(NoResolver),
+    )
+    .with_clock(ControlledClock(Arc::new(Mutex::new(Instant::now()))))
+}
+
+fn syn_probe_bytes() -> Bytes {
+    use packetcraftr_core::protocol::{link::Ethernet, network::Ipv6, transport::Tcp};
+
+    let mut packet = Packet::new();
+    packet.push(Ethernet::default());
+    packet.push(Ipv6 {
+        source: "fd00::2".parse().unwrap(),
+        destination: "fd00::1".parse().unwrap(),
+        ..Default::default()
+    });
+    packet.push(Tcp {
+        source_port: 50_000,
+        destination_port: 80,
+        flags: Tcp::SYN,
+        ..Default::default()
+    });
+    packetcraftr_core::build::Builder::new(builtin::registry())
+        .build(packet, Default::default(), Default::default())
+        .unwrap()
+        .bytes
+}
+
+#[test]
+fn scan_admits_the_complete_ipv6_probe_before_route_lookup() {
+    use packetcraftr_core::error::Classified;
+
+    let neighbor =
+        maximum_neighbor_request_frame("fd00::2".parse().unwrap(), "fd00::1".parse().unwrap());
+    let bytes = (syn_probe_bytes().len() + neighbor.len()) as u64;
+    for (limit, expected) in [(bytes - 1, "policy.byte_limit"), (bytes, "fixture.route")] {
+        let request = crate::scan::Request {
+            max_in_flight: 1,
+            targets: crate::target::Selection::from(
+                "fd00::1".parse::<crate::target::Target>().unwrap(),
+            ),
+            target_sources: Vec::new(),
+            endpoints: vec![crate::probe::Endpoint::Tcp { port: 80 }],
+            tcp_scan: crate::scan::TcpScan::Syn,
+            sctp_scan: Default::default(),
+            discovery: Default::default(),
+            udp_payload: Default::default(),
+            udp_profiles: Default::default(),
+            address_family: crate::target::Family::Ipv6,
+            attempts: 1,
+            adaptive: None,
+            timeout: Duration::from_millis(100),
+            probes_per_second: None,
+            limits: Default::default(),
+            route: route::Options {
+                link_mode: Mode::Layer2,
+                ..options().plan
+            },
+            collection: Default::default(),
+        };
+        let error = probe_budget_client(limit)
+            .scan(request, |_: crate::scan::Event| Ok(()))
+            .unwrap_err();
+        assert_eq!(error.classification().code, expected);
+        if expected == "fixture.route" {
+            assert!(
+                error
+                    .causes()
+                    .iter()
+                    .any(|cause| cause.contains("probe reached the admitted route provider"))
+            );
+        }
+    }
+}
+
+#[test]
+fn traceroute_admits_the_complete_ipv6_probe_before_route_lookup() {
+    use packetcraftr_core::error::Classified;
+
+    let bytes = syn_probe_bytes().len() as u64;
+    for (limit, expected) in [(bytes - 1, "policy.byte_limit"), (bytes, "fixture.route")] {
+        let request = crate::traceroute::Request {
+            target: "fd00::1".parse().unwrap(),
+            strategy: crate::probe::Transport::Tcp,
+            address_family: crate::target::Family::Ipv6,
+            destination_port: Some(80),
+            source_port: None,
+            payload_size: 0,
+            dont_fragment: false,
+            dscp: 0,
+            first_hop: 1,
+            max_hops: 1,
+            probes_per_hop: 1,
+            timeout: Duration::from_millis(100),
+            probes_per_second: None,
+            limits: Default::default(),
+            route: route::Options {
+                link_mode: Mode::Layer2,
+                ..options().plan
+            },
+            collection: Default::default(),
+        };
+        let error = probe_budget_client(limit)
+            .traceroute(request, |_: crate::traceroute::Event| Ok(()))
+            .unwrap_err();
+        assert_eq!(error.classification().code, expected);
+        if expected == "fixture.route" {
+            assert!(
+                error
+                    .causes()
+                    .iter()
+                    .any(|cause| cause.contains("probe reached the admitted route provider"))
+            );
+        }
     }
 }
 

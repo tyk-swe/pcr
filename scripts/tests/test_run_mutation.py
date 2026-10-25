@@ -305,6 +305,12 @@ class MutationScoreTests(unittest.TestCase):
                 self.assertTrue(check((target,), paths, 'rust', platforms, profiles, 2, (), 'revision', 'version'))
             summary = json.loads(output.getvalue())
             self.assertEqual((summary['killed'], summary['eligible']), (4, 4))
+            for repeated_platforms, repeated_profiles in (
+                ((*platforms, platforms[0]), profiles),
+                (platforms, (*profiles, profiles[0])),
+            ):
+                with self.subTest(platforms=repeated_platforms, profiles=repeated_profiles), self.assertRaises(ValueError):
+                    check((target,), paths, 'rust', repeated_platforms, repeated_profiles, 2, (), 'revision', 'version')
             foreign = root / 'foreign.json'
             for changed in ({'platform': 'FreeBSD'}, {'profile': 'unknown'}):
                 foreign.write_text(json.dumps(measurement(value, target) | changed))

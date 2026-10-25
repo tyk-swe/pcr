@@ -10,16 +10,16 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::registry::Registry;
 
-use crate::engine::execution::evidence::{EvidenceDiagnosticDescriptor, EvidenceState};
 use crate::engine::execution::validation::{
     validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
     validate_sent_byte_accounting,
 };
+use crate::evidence::retention::{EvidenceDiagnosticDescriptor, EvidenceState};
 
 use super::error::{Error, case_error, duration_limit};
 use super::executor::CaseEvidence;
 use super::{Evidence, Outcome};
-use crate::engine::execution::limits::EvidenceLimits;
+use crate::evidence::Limits as EvidenceLimits;
 
 /// Fuzz keeps undecodable frames as case evidence under the frame budget
 /// alone, so its undecoded-limit code is never raised.
@@ -127,12 +127,7 @@ pub(super) fn validate_execution(
     timeout: Duration,
     max_packet_bytes: usize,
 ) -> Result<(), Error> {
-    let invalid = |source| {
-        (case_error)(
-            case.index,
-            crate::engine::execution::Failure::InvalidEvidence(source),
-        )
-    };
+    let invalid = |source| (case_error)(case.index, crate::error::Failure::InvalidEvidence(source));
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
         return Err(invalid(crate::evidence::Error::IncompleteStatistics));
     }

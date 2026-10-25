@@ -505,7 +505,7 @@ impl engine::Runner for Lab {
 fn simulate(request: &Request, lab: &mut Lab) -> Aggregate {
     let policy = crate::policy::Policy::default();
     let resolver = crate::target::SystemResolver;
-    let mut admission = crate::engine::admission::Admission::new(&policy, &resolver);
+    let mut admission = crate::client::admission::Admission::new(&policy, &resolver);
     let mut collector = Collector::default();
     let report = engine::run(
         request,
@@ -742,7 +742,7 @@ fn cancellation_and_output_failure_stop_before_another_batch() {
         let mut lab = Lab::default();
         let policy = crate::policy::Policy::default();
         let resolver = crate::target::SystemResolver;
-        let mut admission = crate::engine::admission::Admission::new(&policy, &resolver);
+        let mut admission = crate::client::admission::Admission::new(&policy, &resolver);
         let cancellation = packetcraftr_core::budget::Cancellation::default();
         let mut deadline =
             Deadline::new(Duration::from_secs(10)).with_cancellation(Some(cancellation.clone()));

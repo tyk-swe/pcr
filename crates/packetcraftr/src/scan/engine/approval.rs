@@ -7,7 +7,7 @@ use std::time::Duration;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::link::Mode;
 
-use crate::engine::admission::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
+use crate::client::admission::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
 use crate::engine::execution::rate_delay;
 use crate::policy::Authorizer;
 use crate::probe::{check_collection_evidence, check_probe_count, check_probe_duration};

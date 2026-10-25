@@ -51,7 +51,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::engine::execution::Operation::new(self, request.limits.max_duration);
+        let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
         self.scan_in(request, sink, &operation)
     }
 
@@ -59,14 +59,14 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         &self,
         request: Request,
         sink: S,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
     {
         let policy = operation.policy(&self.policy);
         let mut admission =
-            crate::engine::admission::Admission::new(&policy, self.providers.resolver());
+            crate::client::admission::Admission::new(&policy, self.providers.resolver());
         let publish = publisher(
             &operation.runtime,
             sink,

@@ -8,11 +8,13 @@ use super::{
 use crate::traceroute::{Error, MAX_PROBE_BYTES, ResponseKind, Termination, error::probe_error};
 use crate::{
     Client, Sink, Stats,
+    client::admission::{Admission, FamilyGate, admit_operation, wire_limits},
     clock::Clock,
     engine::{
-        admission::{Admission, FamilyGate, admit_operation, wire_limits},
-        execution::{Context, Failure, Grant, Operation, publisher, rate_delay},
+        execution::{Context, Grant, publisher, rate_delay},
+        operation::Operation,
     },
+    error::Failure,
     evidence::{Limits, RetentionBudget},
     policy::Authorizer,
     probe::{

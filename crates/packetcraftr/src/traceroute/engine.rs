@@ -7,8 +7,8 @@ use std::sync::Arc;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
 
+use crate::client::admission::{FamilyGate, admit_operation, wire_limits};
 use crate::clock::Clock;
-use crate::engine::admission::{FamilyGate, admit_operation, wire_limits};
 use crate::engine::execution::{Executor, publisher};
 use crate::exchange::WorkflowExecutor;
 use crate::policy::Authorizer;
@@ -35,7 +35,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::engine::execution::Operation::new(self, request.limits.max_duration);
+        let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
         self.traceroute_in(request, sink, &operation)
     }
 
@@ -43,23 +43,18 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         &self,
         request: Request,
         sink: S,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
     {
         let policy = operation.policy(&self.policy);
         let mut admission =
-            crate::engine::admission::Admission::new(&policy, self.providers.resolver());
+            crate::client::admission::Admission::new(&policy, self.providers.resolver());
         let publish = publisher(
             &operation.runtime,
             sink,
-            |error| {
-                (probe_error)(
-                    0_u64,
-                    crate::engine::execution::Failure::DurationLimit(error),
-                )
-            },
+            |error| (probe_error)(0_u64, crate::error::Failure::DurationLimit(error)),
             |source| Error::Output { source },
         )?;
         let send = crate::send::Options {

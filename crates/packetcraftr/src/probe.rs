@@ -6,8 +6,7 @@ mod model;
 mod reply;
 pub(crate) mod runner;
 
-pub use crate::engine::correlation::Transport;
-pub use model::{Endpoint, Stage, Status};
+pub use model::{Endpoint, Stage, Status, Transport};
 pub use reply::Reply;
 pub(crate) use runner::{Batch, Evidence};
 
@@ -18,7 +17,7 @@ use std::collections::hash_map::Entry;
 
 use packetcraftr_core::budget::Deadline;
 
-use crate::engine::execution::evidence::EvidenceDiagnosticDescriptor;
+use crate::evidence::retention::EvidenceDiagnosticDescriptor;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Workflow {
@@ -73,15 +72,12 @@ impl Workflow {
 }
 
 pub(crate) fn enforce_deadline<E>(
-    errors: fn(u64, crate::engine::execution::Failure) -> E,
+    errors: fn(u64, crate::error::Failure) -> E,
     deadline: &Deadline,
 ) -> Result<(), E> {
-    deadline.enforce().map_err(|interrupted| {
-        (errors)(
-            0_u64,
-            crate::engine::execution::Failure::Interrupted(interrupted),
-        )
-    })
+    deadline
+        .enforce()
+        .map_err(|interrupted| (errors)(0_u64, crate::error::Failure::Interrupted(interrupted)))
 }
 
 pub(crate) fn index_or_push<'a, K, V>(

@@ -14,8 +14,8 @@ use packetcraftr_core::error::{BoundaryError, Classification, Classified, Coordi
 
 use super::{Family, SelectedAddress, Selection, SelectionError, Specification, Target};
 use crate::Client;
+use crate::client::admission::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
 use crate::clock::Clock;
-use crate::engine::admission::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
 use crate::providers::TargetProviders;
 
 #[derive(Clone, Debug, Serialize)]
@@ -111,9 +111,9 @@ impl Classified for Error {
     }
 }
 
-fn selection_error(step: u64, failure: crate::engine::execution::Failure) -> Error {
+fn selection_error(step: u64, failure: crate::error::Failure) -> Error {
     match failure {
-        crate::engine::execution::Failure::InvalidLimit {
+        crate::error::Failure::InvalidLimit {
             field,
             value,
             reason,
@@ -122,18 +122,18 @@ fn selection_error(step: u64, failure: crate::engine::execution::Failure) -> Err
             value,
             reason,
         },
-        crate::engine::execution::Failure::Authorization(source) => Error::Authorization(source),
-        crate::engine::execution::Failure::DurationLimit(source) => {
+        crate::error::Failure::Authorization(source) => Error::Authorization(source),
+        crate::error::Failure::DurationLimit(source) => {
             let _step = step;
 
             source.into()
         }
-        crate::engine::execution::Failure::Interrupted(source) => {
+        crate::error::Failure::Interrupted(source) => {
             let _step = step;
 
             source.into()
         }
-        crate::engine::execution::Failure::Clock(_source) => {
+        crate::error::Failure::Clock(_source) => {
             let _step = step;
 
             BoundaryError::internal_execution(
@@ -143,12 +143,12 @@ fn selection_error(step: u64, failure: crate::engine::execution::Failure) -> Err
             )
             .into()
         }
-        crate::engine::execution::Failure::Execution(source) => {
+        crate::error::Failure::Execution(source) => {
             let _step = step;
 
             Error::Authorization(source)
         }
-        crate::engine::execution::Failure::InvalidEvidence(_source) => {
+        crate::error::Failure::InvalidEvidence(_source) => {
             let _step = step;
 
             BoundaryError::internal_execution(
@@ -158,7 +158,7 @@ fn selection_error(step: u64, failure: crate::engine::execution::Failure) -> Err
             )
             .into()
         }
-        crate::engine::execution::Failure::StatsOverflow(_source) => {
+        crate::error::Failure::StatsOverflow(_source) => {
             let _step = step;
 
             BoundaryError::internal_execution(

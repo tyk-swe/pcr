@@ -6,29 +6,12 @@ use std::net::IpAddr;
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::packet::Packet;
-use packetcraftr_netio::Error as LiveIoError;
 
 use crate::Client;
 use crate::Error;
 use crate::clock::Clock;
 use crate::providers::TransmitProviders;
 use crate::route::{Error as RouteError, Interface, Options, Plan, plan as plan_route};
-
-/// The boundary itself is expired: no time remains once nothing is left.
-#[must_use]
-pub(crate) fn expired(deadline: &Deadline) -> bool {
-    !matches!(deadline.remaining(), Ok(remaining) if !remaining.is_zero())
-}
-
-pub(crate) fn ensure_preparation_deadline(deadline: &Deadline) -> Result<(), Error> {
-    if expired(deadline) {
-        return Err(LiveIoError::DeadlineExceeded {
-            operation: "preparing the exchange",
-        }
-        .into());
-    }
-    Ok(())
-}
 
 /// Where a passive route lookup looks, and the deadline it runs under.
 pub(crate) struct RouteLookup<'a, R> {

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::engine::execution::evidence::Passed;
+use crate::evidence::response::Passed;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -16,9 +16,10 @@ use super::plan::packet::sent_probe_matches;
 use super::profile;
 use super::report::RttAccumulator;
 use super::{Classification, Event, Probe, ProbeEvidence, Reply, SctpScan, Stage, TcpScan};
-use crate::engine::correlation::{Correlation, Transport};
+use crate::engine::correlation::Correlation;
 use crate::evidence::SentPacket;
 use crate::probe;
+use crate::probe::Transport;
 use crate::probe::runner::{Classifier, NO_RESPONSE_REASON, Outcome};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

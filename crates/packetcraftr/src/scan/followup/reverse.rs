@@ -164,7 +164,7 @@ impl Lookup {
     pub(super) fn run<P, K>(
         &self,
         client: &Client<P, K>,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
         hosts: &[Host],
         started: Instant,
         last_sent: Option<Instant>,
@@ -243,7 +243,7 @@ impl Lookup {
     pub(super) fn authorize<P, K>(
         &self,
         client: &Client<P, K>,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
         hosts: &[Host],
     ) -> Result<(), String>
     where
@@ -274,7 +274,7 @@ impl Lookup {
     pub(super) fn lookup<P, K>(
         &self,
         client: &Client<P, K>,
-        operation: &mut crate::engine::execution::Operation,
+        operation: &mut crate::engine::operation::Operation,
         addresses: &[IpAddr],
         remaining: Duration,
     ) -> Result<(Vec<ReverseLookup>, Stats, Option<Instant>), dns::Error>
@@ -526,7 +526,7 @@ pub(super) fn retain_names(lookup: &mut ReverseLookup, budget: &mut usize) {
 pub(super) fn names<P, K>(
     lookup: Option<&Lookup>,
     client: &Client<P, K>,
-    operation: &crate::engine::execution::Operation,
+    operation: &crate::engine::operation::Operation,
     hosts: &[Host],
     started: Instant,
     last_sent: Option<Instant>,

@@ -9,7 +9,12 @@ use std::time::Duration;
 
 use packetcraftr_core::decode::DecodedPacket;
 
-use super::Response;
+/// The fields generic selection reads from a workflow's matched response.
+pub(crate) trait MatchedResponse {
+    fn request_index(&self) -> usize;
+    fn decoded(&self) -> &DecodedPacket;
+    fn latency(&self) -> Duration;
+}
 
 fn response_within_deadline(latency: Duration, timeout: Duration) -> bool {
     latency <= timeout
@@ -98,13 +103,13 @@ pub(crate) struct Selected<'a, O> {
 }
 
 /// Sorting is stable so equal request indices preserve executor evidence order.
-pub(crate) struct ResponseSelector<'a> {
-    matched: Peekable<Iter<'a, Response>>,
+pub(crate) struct ResponseSelector<'a, R> {
+    matched: Peekable<Iter<'a, R>>,
 }
 
-impl<'a> ResponseSelector<'a> {
-    pub(crate) fn new(matched: &'a mut [Response]) -> Self {
-        matched.sort_by_key(|response| response.request_index);
+impl<'a, R: MatchedResponse> ResponseSelector<'a, R> {
+    pub(crate) fn new(matched: &'a mut [R]) -> Self {
+        matched.sort_by_key(MatchedResponse::request_index);
         Self {
             matched: matched.iter().peekable(),
         }
@@ -125,20 +130,20 @@ impl<'a> ResponseSelector<'a> {
         while self
             .matched
             .peek()
-            .is_some_and(|response| response.request_index == request_index)
+            .is_some_and(|response| response.request_index() == request_index)
         {
             check_deadline()?;
             let response = self
                 .matched
                 .next()
                 .expect("peeked matched response must remain available");
-            if let Some(observation) = classify(&response.response)
+            if let Some(observation) = classify(response.decoded())
                 && let Some(lost) = update_best_candidate(
                     &mut best,
                     ResponseCandidate {
                         observation,
-                        decoded: &response.response,
-                        latency: response.latency,
+                        decoded: response.decoded(),
+                        latency: response.latency(),
                     },
                     timeout,
                     &rank,

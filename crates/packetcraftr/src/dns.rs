@@ -3,7 +3,7 @@
 
 //! Bounded DNS query construction, response validation, and retry execution.
 
-use crate::engine::execution::evidence::EvidenceDiagnosticDescriptor;
+use crate::evidence::retention::EvidenceDiagnosticDescriptor;
 
 pub const HEADER_BYTES: usize = 12;
 pub const DEFAULT_SERVER_PORT: u16 = 53;
@@ -44,6 +44,7 @@ mod engine;
 mod error;
 mod evidence;
 mod executor;
+mod identity;
 mod plan;
 mod report;
 mod request;
@@ -61,7 +62,7 @@ pub use report::{
 };
 pub use request::{EdnsRequest, Limits, MessageLimits, QueryType, Request, TransportMode};
 
-pub use crate::engine::correlation::{unpredictable_source_port, unpredictable_transaction_id};
+pub use identity::{unpredictable_source_port, unpredictable_transaction_id};
 pub use plan::Probe;
 pub use reverse::{ptr_names, reverse_name};
 

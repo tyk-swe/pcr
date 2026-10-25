@@ -4,6 +4,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+pub(crate) mod admission;
+pub(crate) mod planning;
+
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::registry::Registry;
 

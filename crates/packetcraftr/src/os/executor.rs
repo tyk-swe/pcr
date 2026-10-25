@@ -40,7 +40,7 @@ pub(super) trait OsExecutor: Executor<Batch<PlannedProbe>> {
 
 pub(super) struct Native<'a, P, K> {
     pub client: &'a Client<P, K>,
-    pub operation: &'a mut crate::engine::execution::Operation,
+    pub operation: &'a mut crate::engine::operation::Operation,
     pub preparation_timeout: Duration,
     pub send: crate::send::Options,
     pub collection: crate::exchange::Collection,

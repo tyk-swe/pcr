@@ -18,7 +18,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::engine::execution::Operation::new(self, std::time::Duration::MAX);
+        let operation = crate::engine::operation::Operation::new(self, std::time::Duration::MAX);
         self.send_in(request, sink, &operation)
     }
 
@@ -26,7 +26,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         &self,
         request: Request,
         sink: S,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
@@ -52,7 +52,7 @@ impl<P: TransmitProviders, K: Clock> Client<P, K> {
             ));
         }
         request.send.plan.link_mode = packetcraftr_netio::link::Mode::Layer3;
-        let operation = crate::engine::execution::Operation::new(self, std::time::Duration::MAX);
+        let operation = crate::engine::operation::Operation::new(self, std::time::Duration::MAX);
         self.send_prepared_in(request, sink, &operation, |stream, packet| {
             stream.prepare_layer3(packet)
         })
@@ -62,7 +62,7 @@ impl<P: TransmitProviders, K: Clock> Client<P, K> {
         &self,
         request: Request,
         sink: S,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
         mut prepare: impl FnMut(
             &mut crate::engine::preparation::Streaming<'_, P, K>,
             packetcraftr_core::packet::Packet,

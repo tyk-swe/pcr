@@ -8,11 +8,11 @@ use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
 
+use crate::client::admission::approve_operation;
 use crate::clock::Clock;
-use crate::engine::admission::approve_operation;
 use crate::engine::execution::Context;
-use crate::engine::execution::evidence::EvidenceState;
 use crate::engine::execution::{Executor, publisher};
+use crate::evidence::retention::EvidenceState;
 use crate::exchange::WorkflowExecutor;
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation, WireLimits};
@@ -39,7 +39,7 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::engine::execution::Operation::new(self, request.limits.max_duration);
+        let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
         self.dns_in(request, sink, &operation)
     }
 
@@ -47,14 +47,14 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
         &self,
         request: Request,
         sink: S,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
     {
         let policy = operation.policy(&self.policy);
         let mut admission =
-            crate::engine::admission::Admission::new(&policy, self.providers.resolver());
+            crate::client::admission::Admission::new(&policy, self.providers.resolver());
         let mut deadline = operation.deadline(self, request.limits.max_duration);
         let publish = publisher(&operation.runtime, sink, Error::from, |source| {
             Error::Output { source }
@@ -94,7 +94,7 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     pub(crate) fn dns_limits_in<Q: std::borrow::Borrow<Request>>(
         &self,
         questions: impl IntoIterator<Item = Q>,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
     ) -> Result<DnsOperation, Error> {
         batch::limits(questions, u64::from(operation.neighbors.max_attempts()))
     }
@@ -105,7 +105,7 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
     where
         S: Sink<batch::Event, Ack = ()>,
     {
-        let operation = crate::engine::execution::Operation::new(self, request.max_duration()?);
+        let operation = crate::engine::operation::Operation::new(self, request.max_duration()?);
         self.dns_batch_in(request, sink, &operation)
     }
 
@@ -113,14 +113,14 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
         &self,
         request: batch::Request,
         sink: S,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
     ) -> Result<batch::Report, Error>
     where
         S: Sink<batch::Event, Ack = ()>,
     {
         let policy = operation.policy(&self.policy);
         let mut admission =
-            crate::engine::admission::Admission::new(&policy, self.providers.resolver());
+            crate::client::admission::Admission::new(&policy, self.providers.resolver());
         let mut deadline = operation.deadline(self, request.max_duration()?);
         let publish = publisher(&operation.runtime, sink, Error::from, |source| {
             Error::Output { source }

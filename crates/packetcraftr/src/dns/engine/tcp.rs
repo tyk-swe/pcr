@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 use packetcraftr_core::budget::Deadline;
 
 use crate::Stats;
+use crate::client::admission::resolve_selected;
 use crate::clock::Clock;
 use crate::dns::tcp::{Category as TcpCategory, Error as TcpError};
-use crate::engine::admission::resolve_selected;
 use crate::engine::execution::Executor;
 use crate::engine::execution::Receipt;
 use crate::evidence::ExecutionPermit;

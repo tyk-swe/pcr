@@ -10,7 +10,7 @@ use packetcraftr_netio::interface::Id as InterfaceId;
 
 use packetcraftr_core::budget::Deadline;
 
-use crate::engine::execution::Failure;
+use crate::error::Failure;
 use crate::policy::{Authorizer, Operation, WireLimits};
 use crate::target::{Family, ResolveTarget, SelectedAddress, Target};
 

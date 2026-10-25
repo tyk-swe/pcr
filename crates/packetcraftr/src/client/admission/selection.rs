@@ -11,7 +11,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::interface::Id as InterfaceId;
 
 use super::approval::{SelectedTargets, approve_operation, resolve_selected};
-use crate::engine::execution::Failure;
+use crate::error::Failure;
 use crate::policy::{Authorizer, Operation};
 use crate::target::{
     Family, MAX_CANDIDATES, ResolveTarget, SelectedAddress, Selection, SelectionError,

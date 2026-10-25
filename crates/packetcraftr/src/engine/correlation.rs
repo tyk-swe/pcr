@@ -1,14 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Wire correlation and probe identity shared by DNS, scan, and traceroute.
-
-mod identity;
-
-pub use identity::{unpredictable_source_port, unpredictable_transaction_id};
+//! Wire correlation shared by DNS, scan, traceroute, and OS fingerprinting.
 
 use std::net::IpAddr;
 
+use crate::probe::Transport;
 use bytes::Bytes;
 use packetcraftr_core::field::{self, WireValue};
 use packetcraftr_core::protocol::{
@@ -22,37 +19,6 @@ use packetcraftr_core::{
     decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet, protocol::BuiltinProtocol,
     protocol::semantics, registry::Registry,
 };
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Transport {
-    Tcp,
-    #[default]
-    Udp,
-    Sctp,
-    Icmp,
-    Ip,
-}
-
-impl Transport {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Tcp => "tcp",
-            Self::Udp => "udp",
-            Self::Sctp => "sctp",
-            Self::Icmp => "icmp",
-            Self::Ip => "ip",
-        }
-    }
-}
-
-impl std::fmt::Display for Transport {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
 
 /// An IPv4 identification native raw-socket adapters can preserve exactly; zero is excluded.
 pub(crate) const fn nonzero_ipv4_identification(sequence: u64) -> u16 {

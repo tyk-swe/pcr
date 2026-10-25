@@ -16,8 +16,8 @@ use super::super::measurement::Measurement;
 use super::super::{Error, Request, Stage};
 use super::planning::StagePlan;
 use super::{Outcome, ProbeEvidence, execution};
+use crate::client::admission::approve_operation;
 use crate::clock::Clock;
-use crate::engine::admission::approve_operation;
 use crate::policy::{Authorizer, Operation, SocketOperation};
 use crate::target::ResolveTarget;
 

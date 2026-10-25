@@ -27,7 +27,6 @@ pub(crate) use streaming::Streaming;
 use admission::Budget;
 use construction::Materializer;
 
-use std::net::IpAddr;
 use std::sync::Arc;
 
 use packetcraftr_core::budget::Deadline;
@@ -35,22 +34,13 @@ use packetcraftr_core::build::Builder;
 use packetcraftr_core::packet::Packet;
 
 use crate::clock::Clock;
-use crate::engine::execution::Operation as Execution;
-use crate::engine::planning::ensure_preparation_deadline;
+use crate::deadline::ensure_preparation_deadline;
+use crate::engine::operation::Operation as Execution;
 use crate::policy::Policy;
 use crate::providers::{PacketProviders, TransmitProviders};
-use crate::route;
+pub(crate) use crate::route;
+use crate::send::Options;
 use crate::{Client, Error};
-
-/// How every packet of one send is routed, built, and authorized on its way to the wire.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Options {
-    pub destination: Option<IpAddr>,
-    pub plan: route::Options,
-    pub build: packetcraftr_core::build::Options,
-    /// Second explicit opt-in required in addition to policy approval.
-    pub allow_permissive_live: bool,
-}
 
 struct Stages<'c, P, K> {
     client: &'c Client<P, K>,

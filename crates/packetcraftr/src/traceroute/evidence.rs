@@ -13,9 +13,10 @@ use packetcraftr_core::protocol::semantics;
 
 use super::plan::packet::sent_probe_matches;
 use super::{Event, Probe, ProbeEvidence, ResponseKind, Termination, UndecodedEvidence};
-use crate::engine::correlation::{self, Correlation, Transport};
+use crate::engine::correlation::{self, Correlation};
 use crate::evidence::SentPacket;
 use crate::probe;
+use crate::probe::Transport;
 use crate::probe::runner::{Classifier, NO_RESPONSE_REASON, Outcome};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

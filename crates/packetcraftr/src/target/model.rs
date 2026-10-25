@@ -381,8 +381,6 @@ pub enum Error {
     ZoneCapability { zone: Zone },
     #[error(transparent)]
     Control(#[from] packetcraftr_core::error::BoundaryError),
-    #[error(transparent)]
-    Policy(#[from] crate::policy::Error),
 }
 
 impl Classified for Error {
@@ -452,15 +450,7 @@ impl Classified for Error {
                 Kind::Capability,
                 Some("use a resolver that can enumerate interfaces for scoped targets"),
             ),
-            Self::Policy(error) => error.classification(),
             Self::Control(error) => error.classification(),
-        }
-    }
-
-    fn causes(&self) -> Vec<String> {
-        match self {
-            Self::Policy(error) => error.causes(),
-            error => packetcraftr_core::error::source_chain(error),
         }
     }
 }

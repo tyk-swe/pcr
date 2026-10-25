@@ -17,12 +17,11 @@ mod shutdown;
 mod window;
 mod workflow;
 
-pub use crate::engine::execution::evidence::Response;
 pub(crate) use accumulator::{
     Accumulator, ProcessContext, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate,
 };
 pub use error::Error;
-pub use evidence::Event;
+pub use evidence::{Event, Response};
 pub(crate) use evidence::{Observed, WorkflowEvidence, into_sent_packet};
 pub(crate) use plan::Prepared;
 pub use report::{Aggregate, Collector, Report};

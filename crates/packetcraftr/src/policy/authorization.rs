@@ -8,11 +8,106 @@ use packetcraftr_core::{
     packet::MacAddress, packet::Packet, protocol::link::Ethernet, protocol::semantics,
 };
 
+use super::ResolutionError;
 use super::address::is_public;
 use super::model::{Error, MAX_DESTINATION_CONSTRAINTS, MAX_RESOLVED_ADDRESSES, Policy};
-use crate::target::{
-    Authorized, Error as TargetError, Hostname, Resolver, Target, distinct_addresses,
-};
+use crate::target::{Authorized, Hostname, Resolver, Target, distinct_addresses};
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+    use std::net::IpAddr;
+    use std::time::Duration;
+
+    use packetcraftr_core::budget::Deadline;
+    use packetcraftr_core::error::Classified;
+
+    use super::Policy;
+    use crate::policy::{Error as PolicyError, ResolutionError};
+    use crate::target::{Error as TargetError, Hostname, Resolver, Target};
+
+    #[test]
+    fn resolution_policy_denial_preserves_classification_and_causes() {
+        let policy = Policy::default();
+        let target: Target = "example.test".parse().unwrap();
+        let error = policy
+            .resolve_target(
+                &target,
+                &crate::target::SystemResolver,
+                &Deadline::new(Duration::from_secs(1)),
+            )
+            .expect_err("hostname resolution is denied");
+        let ResolutionError::Policy(PolicyError::HostnameResolution { hostname }) = &error else {
+            panic!("expected policy hostname denial, got {error:?}");
+        };
+        assert_eq!(hostname, "example.test");
+        let expected = PolicyError::HostnameResolution {
+            hostname: hostname.clone(),
+        };
+        assert_eq!(error.classification(), expected.classification());
+        assert_eq!(error.causes(), expected.causes());
+        assert!(error.source().is_none());
+    }
+
+    #[test]
+    fn resolution_target_failure_preserves_classification_and_causes() {
+        struct FailingResolver;
+        impl Resolver for FailingResolver {
+            fn resolve(&self, hostname: &Hostname, _: usize) -> Result<Vec<IpAddr>, TargetError> {
+                Err(TargetError::Resolver {
+                    hostname: hostname.to_string(),
+                    source: std::io::Error::other("resolver unavailable").into(),
+                })
+            }
+        }
+
+        let policy = Policy {
+            allow_hostname_resolution: true,
+            ..Policy::default()
+        };
+        let target: Target = "example.test".parse().unwrap();
+        let error = policy
+            .resolve_target(
+                &target,
+                &FailingResolver,
+                &Deadline::new(Duration::from_secs(1)),
+            )
+            .expect_err("resolver fails");
+        let ResolutionError::Target(TargetError::Resolver { source, .. }) = &error else {
+            panic!("expected target resolver failure, got {error:?}");
+        };
+        assert_eq!(source.to_string(), "resolver unavailable");
+        assert_eq!(error.classification().code, "io.hostname_resolution");
+        assert_eq!(
+            error.classification().kind,
+            packetcraftr_core::error::Kind::Io
+        );
+        assert_eq!(error.causes(), ["resolver unavailable"]);
+        assert_eq!(
+            error.source().map(ToString::to_string).as_deref(),
+            Some("resolver unavailable")
+        );
+    }
+
+    #[test]
+    fn resolution_deadline_interruption_preserves_target_control() {
+        let policy = Policy::default();
+        let target: Target = "127.0.0.1".parse().unwrap();
+        let error = policy
+            .resolve_target(
+                &target,
+                &crate::target::SystemResolver,
+                &Deadline::immediate(None),
+            )
+            .expect_err("immediate deadline interrupts resolution");
+        let ResolutionError::Target(TargetError::Control(source)) = &error else {
+            panic!("expected target deadline control, got {error:?}");
+        };
+        assert_eq!(error.classification(), source.classification());
+        assert_eq!(error.causes(), source.causes());
+        assert!(error.source().is_some());
+    }
+}
 
 impl Policy {
     pub fn validate(&self) -> Result<(), Error> {
@@ -162,10 +257,11 @@ impl Policy {
         target: &Target,
         resolver: &R,
         deadline: &packetcraftr_core::budget::Deadline,
-    ) -> Result<Authorized, TargetError> {
+    ) -> Result<Authorized, ResolutionError> {
         deadline
             .live_remaining()
-            .map_err(packetcraftr_core::error::BoundaryError::from_error)?;
+            .map_err(packetcraftr_core::error::BoundaryError::from_error)
+            .map_err(crate::target::Error::from)?;
         self.validate()?;
         let result = (|| {
             let selected = match target {
@@ -206,7 +302,8 @@ impl Policy {
         })();
         deadline
             .live_remaining()
-            .map_err(packetcraftr_core::error::BoundaryError::from_error)?;
+            .map_err(packetcraftr_core::error::BoundaryError::from_error)
+            .map_err(crate::target::Error::from)?;
         result
     }
 
@@ -214,13 +311,14 @@ impl Policy {
         &self,
         target: &Target,
         selected: Vec<crate::target::SelectedAddress>,
-    ) -> Result<Authorized, TargetError> {
+    ) -> Result<Authorized, ResolutionError> {
         for record in &selected {
             self.authorize_destination(record.address)?;
             if crate::target::requires_scope(record.address) && record.scope.is_none() {
-                return Err(TargetError::MissingScope {
+                return Err(crate::target::Error::MissingScope {
                     address: record.address,
-                });
+                }
+                .into());
             }
         }
         Ok(Authorized {

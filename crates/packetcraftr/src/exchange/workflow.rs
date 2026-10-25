@@ -10,7 +10,7 @@ use super::{
     WorkflowStopPredicate,
 };
 use crate::clock::{Clock, SystemClock};
-use crate::engine::execution::Operation;
+use crate::engine::operation::Operation;
 use crate::route::Interface;
 use crate::{Client, PacketProviders, send};
 

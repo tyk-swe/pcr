@@ -23,7 +23,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         send: &crate::send::Options,
         timeout: std::time::Duration,
         collection: super::Collection,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
         matcher: &mut WorkflowResponseMatcher<'_>,
         pinned: &mut Option<crate::route::Plan>,
     ) -> Result<super::WorkflowEvidence, Error> {
@@ -65,7 +65,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::engine::execution::Operation::new(self, std::time::Duration::MAX);
+        let operation = crate::engine::operation::Operation::new(self, std::time::Duration::MAX);
         let stop = request.stop;
         let collection = self.deadline(request.timeout);
         // Post-window events get one more finite allowance; they cannot fall inside the window.
@@ -106,7 +106,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub(crate) fn exchange_hooked(
         &self,
         request: Request,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
         workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
         stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
     ) -> Result<super::WorkflowEvidence, Error> {

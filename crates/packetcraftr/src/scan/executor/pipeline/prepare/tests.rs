@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::{
-    engine::execution::Operation,
+    engine::operation::Operation,
     scan::{Probe, Stage},
     target::ResolvedZone,
 };

@@ -3,27 +3,30 @@
 
 //! Policy-gated live workflows, budgets, and evidence.
 //!
-//! # Layers
+//! # Boundaries
 //!
 //! Modules depend only on their own layer or a lower one:
 //!
 //! | Layer | Modules |
 //! | --- | --- |
 //! | 1. Foundation | `clock`, `deadline`, `engine::stats`, `engine::correlation` |
-//! | 2. Environment | `error`, `policy`, `target` (model and selection), `route`, `neighbor`, `providers`, `runtime`, `client` |
-//! | 3. Engine | `engine::{admission, planning, preparation, execution}`, `evidence` |
+//! | 2. Environment | `error`, `policy`, `target` (model and selection), `route`, `neighbor`, `providers`, `runtime`, `client::{admission, planning}` |
+//! | 3. Engine | `engine::{operation, preparation, execution}`, `evidence` |
 //! | 4. Primitives | `send`, `exchange`, `capture`, `probe` |
 //! | 5. Workflows | `dns`, `traceroute`, `os`, `identify`, `replay`, `fuzz`, `audit`, `target::plan` |
 //! | 6. Composite | `scan`, which follows up with traces and reverse DNS |
 //!
-//! `engine` is private plumbing every live workflow shares. A type a lower
-//! layer defines may be re-exported under the workflow that names it, such as
-//! `send::Options`, `exchange::Response`, and `scan::{Reply, Stage}`.
-//! Hand-offs from scan results to later workflows live with `scan`, for
-//! example `scan::Aggregate::trace_observations`.
+//! `client` owns target admission and route planning. `engine` retains private
+//! operation state, packet preparation, and execution plumbing. Public
+//! workflow evidence and identity types live with their workflows, including
+//! `send::Options`, `exchange::Response`, `probe::Transport`, and the DNS
+//! identity functions. Hand-offs from scan results to later workflows live
+//! with `scan`, for example `scan::Aggregate::trace_observations`.
 //!
-//! The one deliberate cycle is `policy` and `target`: policy resolves and
-//! authorizes targets, and a target error can carry the policy refusal behind it.
+//! `policy` owns target resolution and authorization, returning a
+//! `policy::ResolutionError` that keeps target and policy failures distinct.
+//! `target` owns target parsing and resolution errors and no longer carries
+//! policy failures.
 //!
 //! Each `impl Client` block lives with the module that owns its operation.
 //!

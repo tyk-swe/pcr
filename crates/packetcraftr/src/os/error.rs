@@ -66,17 +66,17 @@ impl Classified for Error {
     }
 }
 
-pub(crate) fn probe_error(step: u64, failure: crate::engine::execution::Failure) -> Error {
+pub(crate) fn probe_error(step: u64, failure: crate::error::Failure) -> Error {
     match failure {
-        crate::engine::execution::Failure::InvalidLimit {
+        crate::error::Failure::InvalidLimit {
             field,
             value,
             reason,
         } => Error::Invalid(format!("{field}={value}: {reason}")),
-        crate::engine::execution::Failure::Authorization(source) => Error::Authorization(source),
-        crate::engine::execution::Failure::DurationLimit(source) => source.into(),
-        crate::engine::execution::Failure::Interrupted(source) => source.into(),
-        crate::engine::execution::Failure::Clock(source) => {
+        crate::error::Failure::Authorization(source) => Error::Authorization(source),
+        crate::error::Failure::DurationLimit(source) => source.into(),
+        crate::error::Failure::Interrupted(source) => source.into(),
+        crate::error::Failure::Clock(source) => {
             let sequence = step;
 
             Error::Execution {
@@ -89,12 +89,12 @@ pub(crate) fn probe_error(step: u64, failure: crate::engine::execution::Failure)
                 ),
             }
         }
-        crate::engine::execution::Failure::Execution(source) => {
+        crate::error::Failure::Execution(source) => {
             let sequence = step;
 
             Error::Execution { sequence, source }
         }
-        crate::engine::execution::Failure::InvalidEvidence(source) => {
+        crate::error::Failure::InvalidEvidence(source) => {
             let sequence = step;
 
             Error::Evidence {
@@ -102,7 +102,7 @@ pub(crate) fn probe_error(step: u64, failure: crate::engine::execution::Failure)
                 message: crate::probe::Workflow::Os.describe_evidence(&source),
             }
         }
-        crate::engine::execution::Failure::StatsOverflow(_) => {
+        crate::error::Failure::StatsOverflow(_) => {
             let sequence = step;
 
             Error::Evidence {

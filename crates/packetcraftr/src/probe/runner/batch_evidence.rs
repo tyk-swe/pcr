@@ -12,15 +12,14 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::packet::Packet;
 
 use super::{Batch, Evidence, Sequenced, UnsolicitedCapture};
-use crate::engine::execution::evidence::{
-    EvidenceSink, EvidenceState, Passed, ResponseSelector, Selected,
-};
-use crate::engine::execution::limits::EvidenceLimits;
 use crate::engine::execution::validation::{
     validate_aggregate_evidence_limits, validate_capture_statistics_evidence,
     validate_response_frames_and_deadlines, validate_sent_byte_accounting,
 };
+use crate::evidence::Limits as EvidenceLimits;
 use crate::evidence::SentPacket;
+use crate::evidence::response::{Passed, ResponseSelector, Selected};
+use crate::evidence::retention::{EvidenceSink, EvidenceState};
 use crate::probe::{Workflow, enforce_deadline};
 
 pub(crate) const NO_RESPONSE_REASON: &str =
@@ -96,7 +95,7 @@ pub(crate) struct Reply<O> {
 }
 
 pub(crate) struct BatchEvidence<K, F, E> {
-    errors: fn(u64, crate::engine::execution::Failure) -> E,
+    errors: fn(u64, crate::error::Failure) -> E,
     validation_limits: EvidenceLimits,
     state: EvidenceState,
     classifier: K,
@@ -106,7 +105,7 @@ pub(crate) struct BatchEvidence<K, F, E> {
 impl<K, F, E> BatchEvidence<K, F, E> {
     pub(crate) fn new(
         workflow: Workflow,
-        errors: fn(u64, crate::engine::execution::Failure) -> E,
+        errors: fn(u64, crate::error::Failure) -> E,
         limits: EvidenceLimits,
         classifier: K,
         emit: F,
@@ -118,7 +117,7 @@ impl<K, F, E> BatchEvidence<K, F, E> {
     /// preparation has consumed part (or all) of the operation retention budget.
     pub(crate) fn new_with_retention_limits(
         workflow: Workflow,
-        errors: fn(u64, crate::engine::execution::Failure) -> E,
+        errors: fn(u64, crate::error::Failure) -> E,
         validation_limits: EvidenceLimits,
         retention_limits: EvidenceLimits,
         classifier: K,
@@ -133,7 +132,7 @@ impl<K, F, E> BatchEvidence<K, F, E> {
         }
     }
 
-    pub(crate) const fn errors(&self) -> fn(u64, crate::engine::execution::Failure) -> E {
+    pub(crate) const fn errors(&self) -> fn(u64, crate::error::Failure) -> E {
         self.errors
     }
 
@@ -199,9 +198,7 @@ where
         if permit != batch.permit {
             return Err((self.errors)(
                 batch.sequence,
-                crate::engine::execution::Failure::InvalidEvidence(
-                    crate::evidence::Error::PermitMismatch,
-                ),
+                crate::error::Failure::InvalidEvidence(crate::evidence::Error::PermitMismatch),
             ));
         }
         self.classifier.observation_quality(observation_quality);
@@ -368,7 +365,7 @@ where
 }
 
 struct Events<'e, K: Classifier, F, E> {
-    errors: fn(u64, crate::engine::execution::Failure) -> E,
+    errors: fn(u64, crate::error::Failure) -> E,
     classifier: &'e K,
     emit: &'e mut F,
     probes: &'e [K::Probe],
@@ -450,7 +447,7 @@ where
 }
 
 pub(crate) fn validate_batch_evidence<P: Sequenced, E>(
-    errors: fn(u64, crate::engine::execution::Failure) -> E,
+    errors: fn(u64, crate::error::Failure) -> E,
     probes: &[P],
     timeout: Duration,
     execution: &Evidence,
@@ -471,9 +468,6 @@ pub(crate) fn validate_batch_evidence<P: Sequenced, E>(
             .and_then(|index| probes.get(index))
             .or_else(|| probes.first())
             .map_or(0, Sequenced::sequence);
-        (errors)(
-            sequence,
-            crate::engine::execution::Failure::InvalidEvidence(error),
-        )
+        (errors)(sequence, crate::error::Failure::InvalidEvidence(error))
     })
 }

@@ -1,10 +1,34 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{Aggregate, Error, Report, Response};
+use super::{Aggregate, Error, Report};
 use crate::evidence::SentPacket;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, frame::Frame};
 use std::sync::Arc;
+use std::time::Duration;
+
+/// A decoded frame correlated with the request at `request_index`, received
+/// `latency` after that request was sent.
+#[derive(Clone, Debug)]
+pub struct Response {
+    pub request_index: usize,
+    pub response: DecodedPacket,
+    pub latency: Duration,
+}
+
+impl crate::evidence::response::MatchedResponse for Response {
+    fn request_index(&self) -> usize {
+        self.request_index
+    }
+
+    fn decoded(&self) -> &DecodedPacket {
+        &self.response
+    }
+
+    fn latency(&self) -> Duration {
+        self.latency
+    }
+}
 
 pub(crate) struct WorkflowEvidence {
     pub(crate) observation_quality: packetcraftr_netio::capture::ObservationQuality,

@@ -11,7 +11,7 @@ use super::{
     Clock, Deadline, Error, Packet, PacketProviders, Policy, RebuildError, Stages,
     TransmitProviders, changed_preparation, route,
 };
-use crate::{engine::execution::NeighborMode, engine::mtu::validate_mtu};
+use crate::{engine::mtu::validate_mtu, engine::operation::NeighborMode};
 use std::sync::Arc;
 
 impl<P: TransmitProviders, K: Clock> Stages<'_, P, K> {

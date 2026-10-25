@@ -13,7 +13,7 @@ use super::super::error::probe_error;
 use super::super::plan::{adaptive_worst_case_duration, probe_count, worst_case_duration};
 use super::super::{Error, Request, Stage};
 use super::{execution, invalid};
-use crate::engine::admission::{DeclaredTargets, FamilyGate, admit_selection};
+use crate::client::admission::{DeclaredTargets, FamilyGate, admit_selection};
 use crate::engine::execution::rate_delay;
 use crate::policy::{Authorizer, Operation, SocketLimits, SocketOperation};
 use crate::probe;

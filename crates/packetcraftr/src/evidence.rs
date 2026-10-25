@@ -1,6 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(crate) mod limits;
+pub(crate) mod response;
+pub(crate) mod retention;
+
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -40,7 +44,7 @@ impl Limits {
         &self,
         invalid: impl Fn(&'static str, u64, String) -> E,
     ) -> Result<(), E> {
-        crate::engine::execution::limits::check_limits(
+        limits::check_limits(
             &[
                 (
                     "max_evidence_frames",
@@ -112,6 +116,7 @@ macro_rules! limits_serde {
     };
 }
 pub(crate) use limits_serde;
+pub(crate) use retention::{RetentionBudget, RetentionError};
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -227,80 +232,6 @@ pub(crate) fn total_bytes_sent<'a>(sent: impl IntoIterator<Item = &'a SentPacket
     sent.into_iter().try_fold(0_u64, |total, sent| {
         total.checked_add(u64::try_from(sent.bytes_sent()).unwrap_or(u64::MAX))
     })
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RetentionError {
-    FrameCountOverflow,
-    FrameLimit,
-    ByteCountOverflow,
-    ByteLimit,
-}
-
-#[derive(Clone, Copy, Default)]
-pub(crate) struct RetentionBudget {
-    retained_frames: usize,
-    retained_bytes: usize,
-}
-
-impl RetentionBudget {
-    pub(crate) fn reserve(
-        &mut self,
-        additional_bytes: usize,
-        max_frames: usize,
-        max_bytes: usize,
-    ) -> Result<(), RetentionError> {
-        let next_frames = self
-            .retained_frames
-            .checked_add(1)
-            .ok_or(RetentionError::FrameCountOverflow)?;
-        if next_frames > max_frames {
-            return Err(RetentionError::FrameLimit);
-        }
-        let next_bytes = self
-            .retained_bytes
-            .checked_add(additional_bytes)
-            .ok_or(RetentionError::ByteCountOverflow)?;
-        if next_bytes > max_bytes {
-            return Err(RetentionError::ByteLimit);
-        }
-        self.retained_frames = next_frames;
-        self.retained_bytes = next_bytes;
-        Ok(())
-    }
-
-    pub(crate) fn replace(
-        &mut self,
-        previous_bytes: Option<usize>,
-        additional_bytes: usize,
-        max_frames: usize,
-        max_bytes: usize,
-    ) -> Result<(), RetentionError> {
-        let mut next = *self;
-        if let Some(bytes) = previous_bytes {
-            next.release(bytes);
-        }
-        next.reserve(additional_bytes, max_frames, max_bytes)?;
-        *self = next;
-        Ok(())
-    }
-
-    pub(crate) fn bytes(&self) -> usize {
-        self.retained_bytes
-    }
-
-    pub(crate) fn release(&mut self, bytes: usize) {
-        let frames = self
-            .retained_frames
-            .checked_sub(1)
-            .expect("released frame was retained");
-        let bytes = self
-            .retained_bytes
-            .checked_sub(bytes)
-            .expect("released bytes were retained");
-        self.retained_frames = frames;
-        self.retained_bytes = bytes;
-    }
 }
 
 /// Opaque evidence tying a build and route to the exact bytes one provider call accepted.

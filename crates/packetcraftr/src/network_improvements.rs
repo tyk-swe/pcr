@@ -274,13 +274,17 @@ fn network_improvements_numeric_and_custom_resolution_boundaries() {
             &resolver,
             &Deadline::immediate(None)
         ),
-        Err(TargetError::Control(_))
+        Err(crate::policy::ResolutionError::Target(
+            TargetError::Control(_)
+        ))
     ));
     let parent = Deadline::new(Duration::from_secs(1)).with_cancellation(Some(cancel));
     let deadline = Deadline::new(Duration::from_secs(1)).with_parent(Some(Arc::new(parent)));
     assert!(matches!(
         policy.resolve_target(&"example.test".parse().unwrap(), &resolver, &deadline),
-        Err(TargetError::Control(_))
+        Err(crate::policy::ResolutionError::Target(
+            TargetError::Control(_)
+        ))
     ));
 }
 #[test]

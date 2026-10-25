@@ -14,8 +14,8 @@ use super::{
 };
 use crate::{
     Client, Sink,
+    client::admission::{FamilyGate, admit_operation, wire_limits},
     clock::Clock,
-    engine::admission::{FamilyGate, admit_operation, wire_limits},
     policy::Authorizer,
     probe::{
         Workflow,
@@ -33,7 +33,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     ) -> Result<Report, Error> {
         request.validate()?;
         let mut operation =
-            crate::engine::execution::Operation::new(self, request.limits.max_duration);
+            crate::engine::operation::Operation::new(self, request.limits.max_duration);
         let mut deadline = operation.deadline(self, request.limits.max_duration);
         let publish = crate::engine::execution::publisher(
             &self.runtime,
@@ -44,7 +44,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         let mut clock = self.clock.clone();
         let mut authorizer = self.admission();
         operation.neighbors = self.neighbors.for_operation(1);
-        operation.neighbor_mode = crate::engine::execution::NeighborMode::Cached;
+        operation.neighbor_mode = crate::engine::operation::NeighborMode::Cached;
         operation.packet_limit = request.limits.max_probes as u64;
         operation.byte_limit = request.limits.max_probes as u64 * super::MAX_WIRE_BYTES;
         let mut executor = Native {
@@ -260,12 +260,9 @@ where
     )?;
     let retained_evidence_bytes = evidence.retained_evidence_bytes() + preparation_bytes;
     drop(evidence);
-    stats.checked_add_assign(&prep_stats).map_err(|source| {
-        (probe_error)(
-            sequence,
-            crate::engine::execution::Failure::StatsOverflow(source),
-        )
-    })?;
+    stats
+        .checked_add_assign(&prep_stats)
+        .map_err(|source| (probe_error)(sequence, crate::error::Failure::StatsOverflow(source)))?;
     let observations = state.observations();
     let complete = !state.incomplete();
     let identification = if complete {

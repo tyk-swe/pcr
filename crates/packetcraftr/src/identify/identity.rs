@@ -12,7 +12,7 @@ pub(super) struct DnsIdentities {
 
 impl DnsIdentities {
     pub(super) fn new() -> Result<Self, Error> {
-        Self::with_seed(crate::engine::correlation::unpredictable_transaction_id)
+        Self::with_seed(crate::dns::unpredictable_transaction_id)
     }
 
     fn with_seed(seed: impl FnOnce() -> Result<u16, BoundaryError>) -> Result<Self, Error> {

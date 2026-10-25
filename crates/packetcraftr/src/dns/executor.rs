@@ -10,10 +10,11 @@ use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
 use crate::Stats;
 use crate::clock::Clock;
-use crate::engine::correlation::{self, Transport as ProbeTransport};
+use crate::engine::correlation;
 use crate::engine::execution::{Executor, ExecutorFault};
 use crate::evidence::ExecutionPermit;
 use crate::exchange::{WorkflowExecutor, WorkflowOverrides};
+use crate::probe::Transport as ProbeTransport;
 use crate::providers::{PacketProviders, TcpProviders};
 use packetcraftr_core::error::BoundaryError;
 

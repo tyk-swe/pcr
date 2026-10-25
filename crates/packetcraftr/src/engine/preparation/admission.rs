@@ -10,8 +10,8 @@ use super::{
     TransmitProviders, route,
 };
 use crate::{
+    client::planning::RouteLookup,
     engine::mtu::validate_mtu,
-    engine::planning::RouteLookup,
     policy::{Operation, WireLimits},
 };
 use packetcraftr_core::{build::BuiltPacket, codec};

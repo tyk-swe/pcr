@@ -1,9 +1,37 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::engine::correlation::Transport;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Transport {
+    Tcp,
+    #[default]
+    Udp,
+    Sctp,
+    Icmp,
+    Ip,
+}
+
+impl Transport {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Tcp => "tcp",
+            Self::Udp => "udp",
+            Self::Sctp => "sctp",
+            Self::Icmp => "icmp",
+            Self::Ip => "ip",
+        }
+    }
+}
+
+impl std::fmt::Display for Transport {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Endpoint {

@@ -27,7 +27,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         S: Sink<Event, Ack = ()>,
     {
         let operation =
-            crate::engine::execution::Operation::new(self, request.campaign.limits.max_duration);
+            crate::engine::operation::Operation::new(self, request.campaign.limits.max_duration);
         let mut deadline = operation.deadline(self, request.campaign.limits.max_duration);
         let publish = publisher(&self.runtime, sink, duration_limit, |source| {
             Error::Output { source }

@@ -14,7 +14,10 @@ pub fn unpredictable_transaction_id() -> Result<u16, BoundaryError> {
 /// Retries rotate deterministically from this random base, not with independent entropy.
 pub fn unpredictable_source_port() -> Result<u16, BoundaryError> {
     random_u16(getrandom::fill).map(|value| {
-        super::ephemeral_source_port(super::EPHEMERAL_SOURCE_PORT_BASE, u64::from(value))
+        crate::engine::correlation::ephemeral_source_port(
+            crate::engine::correlation::EPHEMERAL_SOURCE_PORT_BASE,
+            u64::from(value),
+        )
     })
 }
 

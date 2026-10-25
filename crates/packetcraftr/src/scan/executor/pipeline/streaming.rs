@@ -67,7 +67,7 @@ pub(in crate::scan::executor) fn run_stream<P: PacketProviders, K: Clock>(
             .map_err(|source| {
                 BoundaryError::from_error(probe_error(
                     0,
-                    crate::engine::execution::Failure::Clock(Box::new(source)),
+                    crate::error::Failure::Clock(Box::new(source)),
                 ))
             })?;
     };

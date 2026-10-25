@@ -3,10 +3,14 @@
 
 use thiserror::Error as ThisError;
 
+mod failure;
+
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_netio::Error as LiveIoError;
 
 use crate::{policy, target};
+
+pub(crate) use failure::Failure;
 
 #[derive(Debug, ThisError)]
 #[non_exhaustive]

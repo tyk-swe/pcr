@@ -228,9 +228,9 @@ impl fmt::Display for EvidenceFault {
     }
 }
 
-pub(crate) fn attempt_error(step: u64, failure: crate::engine::execution::Failure) -> Error {
+pub(crate) fn attempt_error(step: u64, failure: crate::error::Failure) -> Error {
     match failure {
-        crate::engine::execution::Failure::InvalidLimit {
+        crate::error::Failure::InvalidLimit {
             field,
             value,
             reason,
@@ -239,20 +239,20 @@ pub(crate) fn attempt_error(step: u64, failure: crate::engine::execution::Failur
             value,
             reason,
         },
-        crate::engine::execution::Failure::Authorization(source) => Error::Authorization(source),
-        crate::engine::execution::Failure::DurationLimit(source) => Error::from(source),
-        crate::engine::execution::Failure::Interrupted(source) => Error::from(source),
-        crate::engine::execution::Failure::Clock(source) => {
+        crate::error::Failure::Authorization(source) => Error::Authorization(source),
+        crate::error::Failure::DurationLimit(source) => Error::from(source),
+        crate::error::Failure::Interrupted(source) => Error::from(source),
+        crate::error::Failure::Clock(source) => {
             let attempt = step as u32;
 
             Error::Clock { attempt, source }
         }
-        crate::engine::execution::Failure::Execution(source) => {
+        crate::error::Failure::Execution(source) => {
             let attempt = step as u32;
 
             Error::Execution { attempt, source }
         }
-        crate::engine::execution::Failure::InvalidEvidence(source) => {
+        crate::error::Failure::InvalidEvidence(source) => {
             let attempt = step as u32;
 
             Error::InvalidEvidence {
@@ -260,7 +260,7 @@ pub(crate) fn attempt_error(step: u64, failure: crate::engine::execution::Failur
                 fault: EvidenceFault::Exchange(source),
             }
         }
-        crate::engine::execution::Failure::StatsOverflow(_) => {
+        crate::error::Failure::StatsOverflow(_) => {
             let attempt = step as u32;
 
             Error::StatisticsOverflow { attempt }

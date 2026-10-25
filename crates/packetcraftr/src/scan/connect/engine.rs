@@ -16,8 +16,8 @@ use super::accounting::{Progress, record};
 use super::attempts::{Active, Connector, connect_outcome, settle_active};
 use super::planning::{StagePlan, planned};
 use super::{Event, ProbeEvidence, Report, Stats, execution, invalid};
+use crate::client::admission::approve_operation;
 use crate::clock::Clock;
-use crate::engine::admission::approve_operation;
 use crate::policy::{Authorizer, Operation, SocketOperation};
 use crate::probe::enforce_deadline;
 use crate::providers::{TargetProviders, TcpOf, TcpProviders};
@@ -32,7 +32,7 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::engine::execution::Operation::new(self, request.limits.max_duration);
+        let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
         self.scan_connect_in(request, sink, &operation)
     }
 
@@ -40,14 +40,14 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
         &self,
         request: Request,
         sink: S,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
     {
         let policy = operation.policy(&self.policy);
         let mut admission =
-            crate::engine::admission::Admission::new(&policy, self.providers.resolver());
+            crate::client::admission::Admission::new(&policy, self.providers.resolver());
         let started = self.now();
         let mut deadline = operation.deadline(self, request.limits.max_duration);
         let mut publish =

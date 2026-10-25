@@ -4,9 +4,9 @@
 //! Live targets: addresses, scoped addresses, and hostnames, and the declared
 //! selections that expand to them.
 //!
-//! The model and selection types sit below the engine, which admits them for
-//! an operation. [`plan`] is a workflow of its own: it previews what a
-//! selection admits without sending traffic.
+//! The model and selection types sit below client admission. [`plan`] is a
+//! workflow of its own: it previews what a selection admits without sending
+//! traffic.
 
 mod model;
 pub mod plan;

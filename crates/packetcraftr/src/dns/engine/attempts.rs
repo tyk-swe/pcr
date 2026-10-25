@@ -15,13 +15,12 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
 
 use crate::Stats;
+use crate::client::admission::{FamilyGate, resolve_selected};
 use crate::clock::Clock;
-use crate::engine::admission::{FamilyGate, resolve_selected};
 use crate::engine::execution::Context;
 use crate::engine::execution::Executor;
-use crate::engine::execution::evidence::{
-    EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector,
-};
+use crate::evidence::response::{ResponseCandidate, ResponseSelector};
+use crate::evidence::retention::{EvidenceSink, EvidenceState};
 use crate::policy::Authorizer;
 use crate::target::ResolveTarget;
 

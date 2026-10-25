@@ -10,7 +10,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub(super) fn prepare_exchange(
         &self,
         request: Request,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
     ) -> Result<Prepared, Error> {
         self.check_cancelled()?;
         request.validate()?;
@@ -48,7 +48,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         send: &crate::send::Options,
         timeout: std::time::Duration,
         collection: Collection,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
         mut pinned: Option<&mut Option<crate::route::Plan>>,
     ) -> Result<Prepared, Error>
     where

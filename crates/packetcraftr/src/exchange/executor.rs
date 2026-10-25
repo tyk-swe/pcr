@@ -21,7 +21,7 @@ use super::{
 };
 
 use super::Prepared;
-use crate::engine::planning::ensure_preparation_deadline;
+use crate::deadline::ensure_preparation_deadline;
 use crate::engine::preparation::PreparedPacket;
 use crate::{
     Client, Stats,
@@ -36,7 +36,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub(super) fn arm_capture(
         &self,
         prepared: Prepared,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
     ) -> Result<Transaction<CaptureSession<P>>, Error> {
         let Some(first_packet) = prepared.packets.first() else {
             return Err(crate::Error::Template {

@@ -49,8 +49,8 @@ pub(crate) struct ClientExecutor<'c, P, K> {
     reply_history: reply_history::ReplyHistory,
     client: &'c Client<P, K>,
     bindings: Vec<(u16, packetcraftr_core::layer::Id)>,
-    operation: crate::engine::execution::Operation,
-    configured: Option<crate::engine::execution::Operation>,
+    operation: crate::engine::operation::Operation,
+    configured: Option<crate::engine::operation::Operation>,
     send: crate::send::Options,
     collection: crate::exchange::Collection,
     neighbors: NeighborBounds,
@@ -117,10 +117,10 @@ impl NeighborBounds {
     /// paces its neighbor requests at the scan's probe rate.
     pub(crate) fn authorize(
         request: &Request,
-        operation: &mut crate::engine::execution::Operation,
+        operation: &mut crate::engine::operation::Operation,
     ) -> Result<(), crate::neighbor::Error> {
         operation.neighbors = Self::of(request).narrow(&operation.neighbors)?;
-        operation.neighbor_mode = crate::engine::execution::NeighborMode::Authorized;
+        operation.neighbor_mode = crate::engine::operation::NeighborMode::Authorized;
         operation.neighbor_pause = request
             .probes_per_second
             .and_then(|rate| Duration::from_secs(1).checked_div(rate))
@@ -133,7 +133,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
     pub(crate) fn new(
         client: &'c Client<P, K>,
         request: &Request,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
     ) -> Self {
         Self {
             reply_history: reply_history::ReplyHistory::new(request.has_ip_probes()),
@@ -185,7 +185,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
 
     /// The client every exchange and neighbor resolution of the operation
     /// shares.
-    fn configured(&mut self) -> Result<&crate::engine::execution::Operation, BoundaryError> {
+    fn configured(&mut self) -> Result<&crate::engine::operation::Operation, BoundaryError> {
         Ok(match &mut self.configured {
             Some(client) => client,
             configured => {
@@ -198,7 +198,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
                 // A stage resolves each probe's link-layer neighbor before
                 // its exchanges, through the resolver they all share, so a
                 // probe whose route now needs another sends it no request.
-                client.neighbor_mode = crate::engine::execution::NeighborMode::Cached;
+                client.neighbor_mode = crate::engine::operation::NeighborMode::Cached;
                 client.neighbors = self
                     .neighbors
                     .narrow(&client.neighbors)

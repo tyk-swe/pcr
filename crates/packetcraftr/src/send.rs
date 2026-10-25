@@ -11,8 +11,7 @@ mod plan;
 mod report;
 mod request;
 
-pub use crate::engine::preparation::Options;
 pub use error::Error;
 pub use evidence::{Event, SentFrame};
 pub use report::{Aggregate, Collector, Report};
-pub use request::Request;
+pub use request::{Options, Request};

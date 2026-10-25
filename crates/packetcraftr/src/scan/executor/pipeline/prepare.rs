@@ -102,7 +102,7 @@ pub(super) fn plan_with_limit<'c, P: PacketProviders, K: Clock>(
         .map_err(|error| {
             BoundaryError::from_error(crate::scan::error::probe_error(
                 0,
-                crate::engine::execution::Failure::StatsOverflow(error),
+                crate::error::Failure::StatsOverflow(error),
             ))
         })?;
     let mut admission = client

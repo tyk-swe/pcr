@@ -13,8 +13,8 @@ use super::planner::{HostsClassifier, Planner, Slot};
 use super::report::{Event, Report};
 use super::request::{Request, overflow};
 use super::selection::{Choice, choose};
+use crate::client::admission::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
 use crate::clock::Clock;
-use crate::engine::admission::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
 use crate::engine::execution::{Executor, publisher, rate_delay};
 use crate::exchange::WorkflowExecutor;
 use crate::policy::Authorizer;
@@ -35,7 +35,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let operation = crate::engine::execution::Operation::new(self, request.limits.max_duration);
+        let operation = crate::engine::operation::Operation::new(self, request.limits.max_duration);
         self.trace_hosts_in(request, sink, &operation)
     }
 
@@ -43,7 +43,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         &self,
         request: Request,
         sink: S,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
     ) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
@@ -51,16 +51,11 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         let mut operation = operation.clone();
         let policy = operation.policy(&self.policy);
         let mut admission =
-            crate::engine::admission::Admission::new(&policy, self.providers.resolver());
+            crate::client::admission::Admission::new(&policy, self.providers.resolver());
         let publish = publisher(
             &operation.runtime,
             sink,
-            |error| {
-                (probe_error)(
-                    0_u64,
-                    crate::engine::execution::Failure::DurationLimit(error),
-                )
-            },
+            |error| (probe_error)(0_u64, crate::error::Failure::DurationLimit(error)),
             |source| Error::Output { source },
         )?;
         let send = crate::send::Options {
@@ -72,7 +67,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         // The trace resolves its own neighbors, so its executor authorizes
         // each neighbor request like a probe whether or not the caller did.
         request.validate()?;
-        operation.neighbor_mode = crate::engine::execution::NeighborMode::Authorized;
+        operation.neighbor_mode = crate::engine::operation::NeighborMode::Authorized;
         if request.route.link_mode != packetcraftr_netio::link::Mode::Layer3
             && (request.strategy.is_some() || !request.observed.is_empty())
         {
@@ -117,12 +112,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         report
             .stats
             .checked_add_assign(&report.neighbor_stats.clone())
-            .map_err(|source| {
-                (probe_error)(
-                    0_u64,
-                    crate::engine::execution::Failure::StatsOverflow(source),
-                )
-            })?;
+            .map_err(|source| (probe_error)(0_u64, crate::error::Failure::StatsOverflow(source)))?;
         Ok(report)
     }
 }

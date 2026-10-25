@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use super::evidence::Response;
+use crate::evidence::response::MatchedResponse;
 use crate::evidence::{self, SentPacket};
 use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::frame::Frame;
@@ -16,8 +16,8 @@ fn validate_capture_statistics(statistics: Stats) -> Result<(), String> {
         .map_err(|error| format!("capture statistics are invalid: {error}"))
 }
 
-pub(crate) fn validate_aggregate_evidence_limits<'a>(
-    matched_responses: &[Response],
+pub(crate) fn validate_aggregate_evidence_limits<'a, R: MatchedResponse>(
+    matched_responses: &[R],
     unsolicited: impl ExactSizeIterator<Item = &'a DecodedPacket>,
     undecoded: &[Frame],
     max_captured_frames: usize,
@@ -35,7 +35,7 @@ pub(crate) fn validate_aggregate_evidence_limits<'a>(
     let captured_bytes = checked_frame_bytes(
         matched_responses
             .iter()
-            .map(|response| &response.response.frame)
+            .map(|response| &response.decoded().frame)
             .chain(unsolicited.map(|response| &response.frame))
             .chain(undecoded),
     )
@@ -61,16 +61,16 @@ pub(crate) fn validate_sent_byte_accounting(
     Ok(())
 }
 
-pub(crate) fn validate_response_frames_and_deadlines<'a>(
-    matched_responses: &[Response],
+pub(crate) fn validate_response_frames_and_deadlines<'a, R: MatchedResponse>(
+    matched_responses: &[R],
     unsolicited: impl IntoIterator<Item = &'a DecodedPacket>,
     timeout: Duration,
 ) -> Result<(), evidence::Error> {
     for response in matched_responses {
-        validate_frame_timestamp(&response.response.frame, "matched response")?;
-        if response.latency > timeout {
+        validate_frame_timestamp(&response.decoded().frame, "matched response")?;
+        if response.latency() > timeout {
             return Err(evidence::Error::ResponseAfterTimeout {
-                latency: response.latency,
+                latency: response.latency(),
                 timeout,
             });
         }

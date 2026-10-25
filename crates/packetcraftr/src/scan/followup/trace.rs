@@ -238,7 +238,7 @@ impl Stage {
     pub(super) fn stream<P, K>(
         &self,
         client: &Client<P, K>,
-        operation: &crate::engine::execution::Operation,
+        operation: &crate::engine::operation::Operation,
         handoff: Handoff<'_>,
         emit: impl Sink<hosts::Event, Ack = ()>,
     ) -> Result<Streamed, Error>

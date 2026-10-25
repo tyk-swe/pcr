@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{engine::Runner, packet, packet::Probe};
-use crate::engine::execution::{Grant, Operation};
+use crate::engine::{execution::Grant, operation::Operation};
 use crate::exchange::Collection;
 use crate::probe::{Transport, runner::Evidence};
 use crate::providers::PacketProviders;

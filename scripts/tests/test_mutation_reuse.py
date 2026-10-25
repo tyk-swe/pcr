@@ -8,7 +8,7 @@ import json
 import unittest
 
 from support import ROOT
-from mutation_results import Outcome, Report, record, score, sequence
+from mutation_results import Outcome, Report, record, score, sequence, text
 from mutation_reuse import Seed, coverage_digest, parse_direct_report, parse_seed, partition_inventory, validate_coverage
 from mutation_scope import Target
 
@@ -86,6 +86,7 @@ class MutationReuseTests(unittest.TestCase):
         for index in range(2):
             for update in ({'workspace_baseline': False}, {'workspace_baseline': 1},
                            {'coverage_digest': 'wrong'}, {'unexpected_proof': True},
+                           {'coverage_digest': text(runs[0][0]['coverage_digest'])[:-1]},
                            {'target': asdict(TARGET) | {'donor': 'other'}}):
                 changed = tuple((run | update if item == index else run, report)
                                 for item, (run, report) in enumerate(runs))
@@ -101,18 +102,23 @@ class MutationReuseTests(unittest.TestCase):
         data = encode(receipt())
         runs = receiver_runs(data, ('killed', 'timeout', 'new'))
         original = record(runs[0][0]['coverage'])
-        for update in ({'reused_ids': ['killed', 'timeout']}, {'inventory': ['killed', 'timeout', 'timeout']},
-                       {'inventory': ['killed', 'unreported']}, {'donor': 'other'}, {'seed': ' '},
-                       {'inventory': 'killed'}, {'reused_ids': 'killed'}):
+        updates: tuple[dict[str, object], ...] = (
+            {'reused_ids': ['killed', 'timeout']}, {'reused_ids': []},
+            {'inventory': ['killed', 'timeout', 'timeout']},
+            {'inventory': ['killed', 'unreported']}, {'donor': 'other'}, {'seed': ' '},
+            {'seed': data.decode('utf-8') + '\n'}, {'inventory': 'killed'}, {'reused_ids': 'killed'},
+        )
+        for update in updates:
             coverage = original | update
             changed = tuple((run | {'coverage': coverage if index == 0 else None,
                                     'coverage_digest': coverage_digest(coverage)}, report)
                             for index, (run, report) in enumerate(runs))
             with self.subTest(update=update), self.assertRaises(ValueError):
                 validate_coverage(parse(data), data, changed)
-        changed = tuple((run, replace(report, expected=('timeout',))) for run, report in runs)
-        with self.assertRaises(ValueError):
-            validate_coverage(parse(data), data, changed)
+        for expected in (('timeout',), ('timeout', 'new', 'unreported')):
+            changed = tuple((run, replace(report, expected=expected)) for run, report in runs)
+            with self.subTest(expected=expected), self.assertRaises(ValueError):
+                validate_coverage(parse(data), data, changed)
 
     def test_direct_report_accepts_partial_shards_without_making_them_complete_seeds(self) -> None:
         for complete in (False, True):
@@ -139,7 +145,13 @@ class MutationReuseTests(unittest.TestCase):
     def test_completed_weak_seed_reuses_only_actual_kills(self) -> None:
         self.assertFalse(score(REPORT).passed)
         data = encode(receipt())
-        seed = parse(data)
+        language = text(record(json.loads(json.dumps(asdict(TARGET))))['language'])
+        match language:
+            case 'rust':
+                target = replace(TARGET, language=language)
+            case _:
+                self.fail('controlled target must select Rust')
+        seed = parse(data, target=target)
         inventory = ('new', 'timeout', 'killed', 'invalid', 'equivalent', 'survivor')
         selected = partition_inventory(seed, inventory)
         self.assertEqual(selected.reused_ids, ('killed',))
@@ -158,6 +170,8 @@ class MutationReuseTests(unittest.TestCase):
         self.assertEqual(selected.reused_ids, ())
         self.assertEqual(partition_inventory(seed, ()).executable_ids, ())
         self.assertEqual(partition_inventory(seed, ('killed',)).executable_ids, ())
+        many = tuple(f'new-{index}' for index in range(1000))
+        self.assertEqual(partition_inventory(seed, many).executable_ids, many)
 
     def test_empty_completed_seed_never_invents_a_kill(self) -> None:
         seed = parse(encode(receipt(replace(REPORT, expected=(), outcomes=()))))
@@ -173,9 +187,10 @@ class MutationReuseTests(unittest.TestCase):
 
     def test_schema_context_workspace_and_shards_must_be_direct_and_complete(self) -> None:
         for field, invalid in (
-            ('schema', 'packetcraftr.mutation-seed/v2'), ('platform', 'Linux'), ('platform', 'windows-2022'),
-            ('profile', 'portable'), ('shard', 0), ('shard', 2), ('shard', True),
-            ('shards', 2), ('shards', True), ('workspace_baseline', False), ('workspace_baseline', 1),
+            ('schema', 'packetcraftr.mutation-seed/v0'), ('schema', 'packetcraftr.mutation-seed/v2'),
+            ('platform', 'Linux'), ('platform', 'windows-2022'), ('profile', '0'), ('profile', 'portable'),
+            ('shard', 0), ('shard', 2), ('shard', True), ('shards', 0), ('shards', 2), ('shards', True),
+            ('workspace_baseline', False), ('workspace_baseline', 1),
         ):
             with self.subTest(field=field, value=invalid), self.assertRaises(ValueError):
                 parse(encode(receipt() | {field: invalid}))
@@ -191,17 +206,19 @@ class MutationReuseTests(unittest.TestCase):
                        replace(TARGET, reason='full audit')):
             with self.subTest(target=target), self.assertRaises(ValueError):
                 parse(encode(receipt(target=target)))
-        for report in (replace(REPORT, group='other'), replace(REPORT, reason='full audit'),
+        for report in (replace(REPORT, group='other'), replace(REPORT, group='z-other'),
+                       replace(REPORT, reason='a reason'), replace(REPORT, reason='full audit'),
+                       replace(REPORT, revision=f'{"0" * 40} tree {SOURCE_DIGEST}'),
                        replace(REPORT, revision=f'{"c" * 40} tree {SOURCE_DIGEST}'),
                        replace(REPORT, revision=f'{REVISION} tree {"c" * 64}'),
-                       replace(REPORT, tool_version='other')):
+                       replace(REPORT, tool_version='0'), replace(REPORT, tool_version='other')):
             with self.subTest(report=report), self.assertRaises(ValueError):
                 parse(encode(receipt(report)))
 
     def test_expected_source_identity_requires_complete_lowercase_digests(self) -> None:
-        data = encode(receipt())
         for revision, source in (('short', SOURCE_DIGEST), ('A' * 40, SOURCE_DIGEST),
                                  (REVISION, 'short'), (REVISION, 'B' * 64)):
+            data = encode(receipt(replace(REPORT, revision=f'{revision} tree {source}')))
             with self.subTest(revision=revision, source=source), self.assertRaises(ValueError):
                 parse(data, revision=revision, source_digest=source)
         revision = 'c' * 64

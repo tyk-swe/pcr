@@ -63,7 +63,9 @@ def snapshot(root: Path, destination: Path) -> str:
         target = destination / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-        digest.update(name.encode() + b'\0' + target.read_bytes())
+        # Review policy cannot contain its own source fingerprint.
+        if name != '.config/mutation-exclusions.json':
+            digest.update(name.encode() + b'\0' + target.read_bytes())
     return digest.hexdigest()
 
 
@@ -233,9 +235,9 @@ def check(targets: tuple[Target, ...], paths: tuple[Path, ...], language: str,
         raise ValueError('invalid required mutation matrix')
     runs = tuple(record(read(path)) for path in paths)
     reports = tuple(parse_report(run.get('report')) for run in runs)
-    if any(report.revision.split(' tree ')[0] != revision or report.tool_version != tool_version
+    if any(report.revision != revision or report.tool_version != tool_version
            for report in reports):
-        raise ValueError('mutation artifacts do not match the tested revision or pinned tool version')
+        raise ValueError('mutation artifacts do not match the tested revision, source snapshot or pinned tool version')
     allowed = {target.group for target in targets if target.language == language}
     if any(report.group not in allowed for report in reports):
         raise ValueError('unexpected mutation group')
@@ -260,7 +262,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--base')
     parser.add_argument('--full', action='store_true')
-    parser.add_argument('--output', type=Path)
+    parser.add_argument('--output', type=Path, help='artifact directory, ignored by Git or outside the checkout')
     parser.add_argument('--language', choices=('rust', 'python'), default='rust')
     parser.add_argument('--profile', choices=tuple(PROFILES), default='all')
     parser.add_argument('--platforms', nargs='+', default=[platform.system()])
@@ -278,7 +280,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(serialize(targets)))
             return 0
         targets = targets_from(args.plan)
-        output = args.output or Path('mutation-results') / args.language
+        output = (args.output or Path('mutation-results') / args.language).resolve()
+        if output.is_relative_to(ROOT) and (output == ROOT or subprocess.run(
+                ['git', 'check-ignore', '--quiet', '--', output.relative_to(ROOT).as_posix() + '/'],
+                cwd=ROOT, check=False).returncode != 0):
+            raise ValueError('mutation output must be ignored or outside the checkout')
         if args.action == 'run':
             run(targets, output, args.language, args.profile, args.shard, args.shards, args.platform_label)
             return 0
@@ -287,6 +293,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                            for item in sequence(read(ROOT / '.config/mutation-exclusions.json'))
                            for value in (record(item),))
         revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+        with tempfile.TemporaryDirectory(prefix='pcr-mutation-check-') as directory:
+            tree = snapshot(ROOT, Path(directory))
+        revision = f'{revision} tree {tree}'
         version = text(record(configuration(ROOT).get('tools')).get(
             'cargo-mutants' if args.language == 'rust' else 'cosmic-ray'))
         return 0 if check(targets, tuple(output.rglob('run.json')), args.language,

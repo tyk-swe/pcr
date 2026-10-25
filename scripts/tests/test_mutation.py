@@ -47,6 +47,22 @@ def mutation_workspace(root: Path) -> None:
         path.write_text(content)
 
 
+def mutation_checkout(root: Path) -> str:
+    mutation_workspace(root)
+    for name in ('mutation_results.py', 'mutation_scope.py', 'run_mutation.py'):
+        (root / 'scripts' / name).write_bytes((ROOT / 'scripts' / name).read_bytes())
+    with (root / '.config/mutation.toml').open('a') as config:
+        config.write('\n[tools]\ncosmic-ray = "version"\ncargo-mutants = "version"\n')
+    (root / '.config/mutation-exclusions.json').write_text('[]\n')
+    (root / '.gitignore').write_text('/artifacts/\n__pycache__/\n*.py[cod]\n')
+    environment = os.environ | {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+    commands = (('init', '-q'), ('add', '.'),
+                ('-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-qm', 'initial'))
+    for command in commands:
+        subprocess.run(['git', *command], cwd=root, env=environment, check=True, capture_output=True)
+    return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, env=environment, text=True).strip()
+
+
 class MutationScoreTests(unittest.TestCase):
     def test_outcome_counts_and_evidenced_exclusions_keep_their_own_groups(self) -> None:
         outcomes = (Outcome('caught', 'killed', 'test failed'),
@@ -204,6 +220,70 @@ class MutationScoreTests(unittest.TestCase):
 
 
 class MutationReportTests(unittest.TestCase):
+    def test_reviewed_exclusions_can_be_committed_without_referring_to_their_own_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'checkout'
+            mutation_checkout(root)
+            with tempfile.TemporaryDirectory() as snapshot_directory:
+                tree = snapshot(root, Path(snapshot_directory))
+            group = 'scripts/alpha.py'
+            exclusion = Exclusion(group, tree, '9', 'same result for every allowed input')
+            policy = root / '.config/mutation-exclusions.json'
+            policy.write_text(json.dumps([asdict(exclusion)]))
+            environment = os.environ | {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+            subprocess.run(['git', 'add', str(policy)], cwd=root, env=environment, check=True, capture_output=True)
+            subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.test',
+                            'commit', '-qm', 'review equivalent'], cwd=root, env=environment, check=True, capture_output=True)
+            revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, env=environment, text=True).strip()
+            with tempfile.TemporaryDirectory() as snapshot_directory:
+                current_tree = snapshot(root, Path(snapshot_directory))
+            value = replace(report(9, 1, group), revision=f'{revision} tree {current_tree}')
+            artifacts = root / 'artifacts'
+            artifacts.mkdir()
+            (artifacts / 'run.json').write_text(json.dumps(dict(platform=sys.platform, profile='all', shard=1,
+                                                              shards=1, report=asdict(value))))
+            plan = Path(directory) / 'plan.json'
+            plan.write_text(json.dumps([asdict(Target(group, 'python', (group,), 'changed production'))]))
+            result = subprocess.run([sys.executable, str(root / 'scripts/run_mutation.py'), 'check',
+                                     '--plan', str(plan), '--language', 'python', '--platforms', sys.platform,
+                                     '--output', str(artifacts)], cwd=root, capture_output=True, text=True, timeout=5, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            summary = json.loads(result.stdout)
+            self.assertEqual((summary['killed'], summary['eligible'], summary['equivalent']), (9, 9, 1))
+            self.assertEqual(summary['source_revision'], tree)
+            self.assertEqual(summary['exclusions'], [asdict(exclusion)])
+
+    def test_cli_rejects_cached_results_after_uncommitted_source_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'checkout'
+            revision = mutation_checkout(root)
+            plan = Path(directory) / 'plan.json'
+            target = Target('scripts/alpha.py', 'python', ('scripts/alpha.py',), 'changed production')
+            plan.write_text(json.dumps([asdict(target)]))
+            with tempfile.TemporaryDirectory() as snapshot_directory:
+                tree = snapshot(root, Path(snapshot_directory))
+            value = replace(report(2, 0, target.group), revision=f'{revision} tree {tree}')
+            artifacts = root / 'artifacts'
+            artifacts.mkdir()
+            (artifacts / 'run.json').write_text(json.dumps(dict(platform=sys.platform, profile='all', shard=1,
+                                                              shards=1, report=asdict(value))))
+            command = [sys.executable, str(root / 'scripts/run_mutation.py'), 'check', '--plan', str(plan),
+                       '--language', 'python', '--platforms', sys.platform, '--output', str(artifacts)]
+            result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=5, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)['status'], 'passed')
+            for invalid in (root, root / 'unignored-reports'):
+                result = subprocess.run(command[:-1] + [str(invalid)], cwd=root, capture_output=True,
+                                        text=True, timeout=5, check=False)
+                with self.subTest(invalid=invalid):
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn('ignored or outside', result.stderr)
+            (root / 'scripts/alpha.py').write_text('value = 2\n')
+            result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=5, check=False)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, '')
+            self.assertIn('source snapshot', result.stderr)
+
     def test_cosmic_ray_classifies_failures_errors_and_invalid_syntax_independently(self) -> None:
         item = dict(job_id='job', mutations=[dict(module_path='module.py', operator_name='replace',
                                                 occurrence=0, start_pos=[1, 0], end_pos=[1, 1],
@@ -229,8 +309,15 @@ class MutationReportTests(unittest.TestCase):
         self.assertEqual(cosmic_results([[item, syntax]])[0].status, 'invalid')
         for invalid in (syntax | {'test_outcome': 'survived'}, syntax | {'worker_outcome': 'exception'},
                         syntax | {'output': syntax['output'] + '\n' + syntax['output']},
-                        syntax | {'output': 'MUTATION_RESULT ' + json.dumps(dict(kind='tests', run=0, failures=0, errors=0))}):
+                        syntax | {'output': 'MUTATION_RESULT ' + json.dumps(dict(kind='tests', run=0, failures=0, errors=0))},
+                        syntax | {'test_outcome': 'survived', 'output': 'MUTATION_RESULT ' +
+                                  json.dumps(dict(kind='tests', run=0, failures=0, errors=0))},
+                        syntax | {'test_outcome': 'incompetent'}):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                cosmic_results([[item, invalid]])
+        for kind in ('runner_error', 'compile_error', 'unknown'):
+            invalid = syntax | {'output': 'MUTATION_RESULT ' + json.dumps(dict(kind=kind, message='controlled failure'))}
+            with self.subTest(kind=kind), self.assertRaises(ValueError):
                 cosmic_results([[item, invalid]])
 
     def test_rust_survival_timeout_and_compilation_failure_are_distinct(self) -> None:
@@ -313,6 +400,9 @@ class MutationReportTests(unittest.TestCase):
                 cosmic_results([[item, result]])
         timeout = dict(worker_outcome='normal', test_outcome='killed', output='timeout')
         self.assertEqual(cosmic_results([[item, timeout]])[0].status, 'timeout')
+        for status in (None, 'survived', 'incompetent'):
+            with self.subTest(status=status), self.assertRaises(ValueError):
+                cosmic_results([[item, timeout | {'test_outcome': status}]])
 
     def test_python_mutant_identity_survives_a_new_session(self) -> None:
         mutation = dict(module_path='module.py', operator_name='replace', occurrence=0,
@@ -395,12 +485,26 @@ class MutationSelectionTests(unittest.TestCase):
                 ('crates/sample/Cargo.toml', rust), ('crates/sample/src/fixture.pcap', {'sample'}),
                 ('crates/sample/src/tests.rs', {'sample'}),
             )
-            self.assertEqual({target.group for target in select(root, (), full=True)}, rust | python)
+            helper_paths = ('crates/sample/src/test_helpers.rs', 'crates/sample/src/tests/support.rs')
+            for path in helper_paths:
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text('pub fn fixture_value() -> u8 { 1 }\n')
+            cases += tuple((path, {'sample'}) for path in helper_paths)
+            full = select(root, (), full=True)
+            full_reasons = {target.group: target.reason for target in full}
+            self.assertEqual({target.group for target in full}, rust | python)
             for path, expected in cases:
                 targets = select(root, (Change(path),))
                 with self.subTest(path=path):
                     self.assertEqual({target.group for target in targets}, expected)
                     self.assertTrue(all(not target.files for target in targets if target.language == 'rust'))
+                    for target in targets:
+                        if target.language != 'python':
+                            continue
+                        if path == 'scripts/tests/test_alpha.py':
+                            self.assertNotEqual(target.reason, full_reasons[target.group])
+                        else:
+                            self.assertEqual(target.reason, full_reasons[target.group])
 
     def test_malformed_ownership_cannot_silently_remove_production_modules(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -411,6 +515,7 @@ class MutationSelectionTests(unittest.TestCase):
             for invalid in ('', '[python]\nmodules = []\n',
                             original.replace('["scripts/tests/test_alpha.py"]', '[]'),
                             original.replace('["scripts/tests/test_alpha.py"]', '[1]'),
+                            original.replace('["scripts/tests/test_alpha.py"]', '"scripts/tests/test_alpha.py"'),
                             original.replace('["scripts/tests/test_alpha.py"]', '[""]'),
                             original.replace('["scripts/tests/test_alpha.py"]', '[" "]'),
                             original.replace('scripts/alpha.py', 'scripts/absent.py')):
@@ -418,11 +523,18 @@ class MutationSelectionTests(unittest.TestCase):
                 with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                     select(root, (), full=True)
             path.write_text(original)
+            path.write_text(original.replace('scripts/alpha.py', 'scripts/absent.py'))
+            with self.assertRaises(ValueError) as mismatch:
+                select(root, (), full=True)
+            self.assertIn('scripts/alpha.py', str(mismatch.exception))
+            self.assertIn('scripts/absent.py', str(mismatch.exception))
+            self.assertNotIn('scripts/beta.py', str(mismatch.exception))
+            path.write_text(original)
             (root / 'scripts/unowned.py').write_text('value = 3\n')
             with self.assertRaises(ValueError):
                 select(root, (), full=True)
 
-    def test_committed_test_deletions_schedule_their_owners(self) -> None:
+    def test_committed_additions_and_test_deletions_schedule_their_owners(self) -> None:
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
                 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}):
             root = Path(directory)
@@ -434,9 +546,14 @@ class MutationSelectionTests(unittest.TestCase):
             base = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
             (root / 'crates/sample/src/tests.rs').unlink()
             (root / 'scripts/tests/test_alpha.py').unlink()
+            added = 'crates/sample/src/new_source.rs'
+            (root / added).write_text('pub fn value() -> u8 { 2 }\n')
+            subprocess.run(['git', 'add', added], cwd=root, check=True)
             subprocess.run(['git', 'add', '-u'], cwd=root, check=True)
             subprocess.run([*commit, 'delete tests'], cwd=root, check=True)
-            selected = select(root, changes_since(root, base))
+            changes = changes_since(root, base)
+            self.assertEqual(next(change for change in changes if change.path == added).previous, '')
+            selected = select(root, changes)
             self.assertEqual({target.group for target in selected}, {'sample', 'scripts/alpha.py'})
             self.assertEqual(next(target for target in selected if target.language == 'rust').files, ())
 

@@ -70,6 +70,8 @@ class Score:
     survivors: tuple[str, ...]
     timeouts: tuple[str, ...]
     reason: str
+    source_revision: str
+    exclusions: tuple[Exclusion, ...]
 
     @property
     def passed(self) -> bool:
@@ -85,8 +87,9 @@ def score(report: Report, exclusions: tuple[Exclusion, ...] = ()) -> Score:
     if (len(set(report.expected)) != len(report.expected)
             or len(set(identities)) != len(identities) or set(identities) != set(report.expected)):
         raise ValueError(f'{report.group} has missing, duplicate or unexpected results')
+    source_revision = text(report.revision.rsplit(' tree ', 1)[-1])
     relevant = tuple(exclusion for exclusion in exclusions
-                     if exclusion.group == report.group and exclusion.revision == report.revision)
+                     if exclusion.group == report.group and exclusion.revision == source_revision)
     excluded = {exclusion.identity for exclusion in relevant}
     if len(excluded) != len(relevant) or not excluded <= set(identities):
         raise ValueError('duplicate or unknown equivalent mutant')
@@ -106,6 +109,7 @@ def score(report: Report, exclusions: tuple[Exclusion, ...] = ()) -> Score:
         sum(outcome.status == 'invalid' for outcome in report.outcomes), len(excluded),
         tuple(outcome.identity for outcome in eligible if outcome.status == 'survived'),
         tuple(outcome.identity for outcome in eligible if outcome.status == 'timeout'), report.reason,
+        source_revision, relevant,
     )
 
 
@@ -189,6 +193,8 @@ def cosmic_outcome(row: list[object]) -> Outcome:
         raise ValueError('Cosmic Ray worker did not complete normally')
     output = text(result.get('output'))
     if output == 'timeout':
+        if result.get('test_outcome') != 'killed':
+            raise ValueError('Cosmic Ray timeout has contradictory test status')
         return Outcome(identity, 'timeout', output)
     markers = tuple(line.removeprefix('MUTATION_RESULT ') for line in output.splitlines()
                     if line.startswith('MUTATION_RESULT '))

@@ -1027,3 +1027,305 @@ mod audit {
         }
     }
 }
+
+mod capture {
+    use super::Interfaces;
+    use crate::{
+        Client, ProviderSet,
+        capture::{Control, Event, StopReason},
+        clock::Clock,
+        policy::Policy,
+    };
+    use packetcraftr_core::{
+        budget::Deadline,
+        error::Classified,
+        frame::{Frame, LinkType},
+        protocol::builtin,
+    };
+    use packetcraftr_netio::{capture as native, interface};
+    use std::{
+        collections::VecDeque,
+        convert::Infallible,
+        sync::{Arc, Mutex},
+        time::{Duration, Instant},
+    };
+
+    #[derive(Clone)]
+    struct CaptureClock(Arc<Mutex<Instant>>);
+
+    impl CaptureClock {
+        fn advance(&self, elapsed: Duration) {
+            *self.0.lock().unwrap() += elapsed;
+        }
+    }
+
+    impl Clock for CaptureClock {
+        type Error = Infallible;
+
+        fn now(&self) -> Instant {
+            *self.0.lock().unwrap()
+        }
+
+        fn sleep(&self, elapsed: Duration, _: &Deadline) -> Result<(), Self::Error> {
+            self.advance(elapsed);
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum Mode {
+        Frames,
+        Late,
+        Forbidden,
+        Failure,
+    }
+
+    struct Provider {
+        clock: CaptureClock,
+        mode: Mode,
+    }
+
+    struct Session {
+        metadata: native::Metadata,
+        clock: CaptureClock,
+        mode: Mode,
+        frames: VecDeque<Frame>,
+        statistics: native::Stats,
+    }
+
+    impl native::Provider for Provider {
+        type Capture = Session;
+
+        fn arm_capture(
+            &self,
+            request: &native::Request,
+            _: &Deadline,
+        ) -> Result<Session, packetcraftr_netio::Error> {
+            Ok(Session {
+                metadata: native::Metadata {
+                    interface: request.interface.clone(),
+                    link_type: LinkType::RAW,
+                    snap_length: request.limits.snap_length,
+                    native: Default::default(),
+                },
+                clock: self.clock.clone(),
+                mode: self.mode,
+                frames: (1_u8..=3)
+                    .map(|value| {
+                        Frame::without_timestamp(LinkType::RAW, vec![value; usize::from(value) + 1])
+                            .unwrap()
+                    })
+                    .collect(),
+                statistics: native::Stats::default(),
+            })
+        }
+    }
+
+    impl native::Session for Session {
+        fn metadata(&self) -> &native::Metadata {
+            &self.metadata
+        }
+
+        fn wait_ready(&mut self, _: &Deadline) -> Result<(), packetcraftr_netio::Error> {
+            Ok(())
+        }
+
+        fn next_captured_frame(
+            &mut self,
+            _: &Deadline,
+        ) -> Result<Option<native::Captured>, packetcraftr_netio::Error> {
+            match self.mode {
+                Mode::Forbidden => panic!("a started-event stop must precede capture reads"),
+                Mode::Failure => {
+                    return Err(packetcraftr_netio::Error::Capture {
+                        message: "fixture receive failure".into(),
+                        source: None,
+                    });
+                }
+                Mode::Frames | Mode::Late => {}
+            }
+            let Some(frame) = self.frames.pop_front() else {
+                self.clock.advance(Duration::from_secs(2));
+                return Ok(None);
+            };
+            if matches!(self.mode, Mode::Late) {
+                self.clock.advance(Duration::from_secs(2));
+            }
+            self.statistics.received_frames += 1;
+            self.statistics.received_bytes += u64::from(frame.captured_length());
+            Ok(Some(native::Captured::new(frame, self.clock.now())))
+        }
+
+        fn shutdown(&mut self) -> Result<(), packetcraftr_netio::Error> {
+            if matches!(self.mode, Mode::Failure) {
+                return Err(packetcraftr_netio::Error::Capture {
+                    message: "fixture shutdown failure".into(),
+                    source: None,
+                });
+            }
+            Ok(())
+        }
+
+        fn stats(&self) -> native::Stats {
+            self.statistics
+        }
+    }
+
+    type CaptureClient = Client<ProviderSet<(), Interfaces, Provider>, CaptureClock>;
+
+    fn fixture(mode: Mode) -> (CaptureClient, crate::capture::Request) {
+        let clock = CaptureClock(Arc::new(Mutex::new(Instant::now())));
+        let id = interface::Id {
+            name: "capture0".into(),
+            index: 7,
+        };
+        let client = Client::new(
+            builtin::registry(),
+            Policy {
+                max_packets_per_operation: 16,
+                max_bytes_per_operation: 1024,
+                ..Default::default()
+            },
+            ProviderSet::capture(
+                Interfaces {
+                    values: vec![id.clone()],
+                    cancel: None,
+                },
+                Provider {
+                    clock: clock.clone(),
+                    mode,
+                },
+            ),
+        )
+        .with_clock(clock);
+        let request = crate::capture::Request::new(
+            native::GroupRequest {
+                interfaces: vec![id],
+                limits: native::Limits {
+                    max_frames: 8,
+                    max_bytes: 512,
+                    snap_length: 64,
+                    overflow_policy: native::OverflowPolicy::Fail,
+                },
+                filter: None,
+                promiscuous: false,
+                native: Default::default(),
+            },
+            Duration::from_secs(1),
+        );
+        (client, request)
+    }
+
+    #[test]
+    fn selected_capture_frames_obey_stop_before_and_stop_after() {
+        for stop in [Control::StopBefore, Control::StopAfter] {
+            let (client, request) = fixture(Mode::Frames);
+            let emitted = Arc::new(Mutex::new(Vec::new()));
+            let output = Arc::clone(&emitted);
+            let report = client
+                .capture(
+                    request.with_selector(|number, _| Ok(number != 1)),
+                    move |event| {
+                        let Event::Frame {
+                            source_frame,
+                            frame,
+                            ..
+                        } = event
+                        else {
+                            return Ok(Control::Continue);
+                        };
+                        assert_eq!(frame.interface, Some(0));
+                        if source_frame == 3 && stop == Control::StopBefore {
+                            return Ok(stop);
+                        }
+                        output
+                            .lock()
+                            .unwrap()
+                            .push((source_frame, frame.bytes().to_vec()));
+                        Ok(if source_frame == 3 {
+                            stop
+                        } else {
+                            Control::Continue
+                        })
+                    },
+                )
+                .unwrap();
+            let expected = if stop == Control::StopBefore {
+                vec![(2, vec![2; 3])]
+            } else {
+                vec![(2, vec![2; 3]), (3, vec![3; 4])]
+            };
+            assert_eq!(*emitted.lock().unwrap(), expected);
+            assert_eq!(report.stop, StopReason::Sink);
+            assert_eq!(report.frames_delivered, 3);
+            assert_eq!(report.stats.packets_attempted, 3);
+            assert_eq!(report.stats.packets_completed, expected.len() as u64);
+            assert_eq!(report.stats.bytes, 9);
+            let source = &report.sources[0];
+            assert_eq!(
+                (
+                    source.delivered_frames,
+                    source.admitted_frames,
+                    source.matched_frames,
+                    source.emitted_frames,
+                    source.late_frames
+                ),
+                (3, 3, 2, expected.len() as u64, 0)
+            );
+            assert!(report.capture_statistics_complete);
+        }
+    }
+
+    #[test]
+    fn started_capture_stop_prevents_reads() {
+        let (client, request) = fixture(Mode::Forbidden);
+        let report = client
+            .capture(request, |event| {
+                assert!(matches!(event, Event::Started { .. }));
+                Ok(Control::StopBefore)
+            })
+            .unwrap();
+        assert_eq!(report.stop, StopReason::Sink);
+        assert_eq!(report.frames_delivered, 0);
+        assert_eq!(report.stats.bytes, 0);
+    }
+
+    #[test]
+    fn late_capture_frame_is_reported_without_admission_or_publication() {
+        let (client, request) = fixture(Mode::Late);
+        let report = client
+            .capture(request, |event| {
+                assert!(matches!(event, Event::Started { .. }));
+                Ok(Control::Continue)
+            })
+            .unwrap();
+        assert_eq!(report.stop, StopReason::Window);
+        assert_eq!(report.frames_delivered, 1);
+        assert_eq!(report.sources[0].late_frames, 1);
+        assert_eq!(report.sources[0].admitted_frames, 0);
+        assert_eq!(report.stats.packets_completed, 0);
+        assert_eq!(report.stats.bytes, 0);
+    }
+
+    #[test]
+    fn capture_read_failure_survives_incomplete_cleanup_statistics() {
+        let (client, request) = fixture(Mode::Failure);
+        let error = client
+            .capture(request, |_: Event| Ok(Control::Continue))
+            .unwrap_err();
+        assert_eq!(error.classification().code, "io.capture");
+        let causes = error.causes();
+        assert!(
+            causes
+                .iter()
+                .any(|cause| cause.contains("fixture receive failure"))
+        );
+        assert!(
+            causes
+                .iter()
+                .any(|cause| cause.contains("fixture shutdown failure"))
+        );
+        assert!(!error.report.capture_statistics_complete);
+        assert_eq!(error.report.stop, StopReason::Failure);
+    }
+}

@@ -508,6 +508,56 @@ fn invalid_sent_packet_reports_its_own_probe_sequence() {
 }
 
 #[test]
+fn response_outside_batch_reports_the_workflow_context() {
+    use packetcraftr_core::error::{Classified, Coordinate};
+
+    let probe = probe(Endpoint::Udp { port: 1000 }, 41, false);
+    let packet = request(&probe);
+    let response = reply(&probe, &packet);
+    let sent = materialized_sent(
+        packet,
+        packetcraftr_netio::interface::Id {
+            name: "candidate0".into(),
+            index: 1,
+        },
+    );
+    let evidence = crate::probe::Evidence {
+        observation_quality: None,
+        permit: crate::evidence::ExecutionPermit::new(),
+        sent: vec![sent.as_ref().clone()],
+        responses: vec![crate::exchange::Response {
+            request_index: 1,
+            response,
+            latency: Duration::ZERO,
+        }],
+        unsolicited: Vec::new(),
+        undecoded: Vec::new(),
+        diagnostics: Vec::new(),
+        stats: crate::Stats {
+            packets_attempted: 1,
+            packets_completed: 1,
+            bytes: sent.bytes_sent() as u64,
+            ..Default::default()
+        },
+    };
+    let error = crate::probe::runner::validate_batch_evidence(
+        crate::scan::error::probe_error,
+        &[probe],
+        Duration::from_secs(1),
+        &evidence,
+        crate::evidence::Limits::default(),
+        |_, _| true,
+    )
+    .unwrap_err();
+    assert_eq!(error.context(), Some(Coordinate::ProbeSequence(41)));
+    assert!(matches!(
+        error,
+        crate::scan::Error::InvalidEvidence { sequence: 41, message }
+            if message.contains("matched response references a request outside the batch")
+    ));
+}
+
+#[test]
 fn indexed_correlation_preserves_generation_freshness_deadlines_interfaces_and_late_replies() {
     let native = packetcraftr_netio::interface::Id {
         index: 1,

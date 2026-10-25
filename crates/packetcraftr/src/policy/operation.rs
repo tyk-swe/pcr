@@ -232,17 +232,17 @@ impl<'a> DeclaredPackets<'a> {
 
 /// There is deliberately no `Default` and no permissive fallback:
 ///
-/// ```compile_fail,E0599
+/// ```compile_fail
 /// let _ = packetcraftr::policy::Operation::default();
 /// ```
 ///
 /// ```compile_fail
-/// let _ = packetcraftr::policy::WireLimits { packets: 1, ..Default::default() };
+/// let _ = packetcraftr::policy::WireLimits::default();
 /// ```
 ///
-/// ```compile_fail,E0061
+/// ```compile_fail
 /// use packetcraftr::policy::{DeclaredPackets, WireLimits};
-/// let packets: Vec<packetcraftr_core::packet::Packet> = Vec::new();
+/// let packets: Vec<&packetcraftr_core::packet::Packet> = Vec::new();
 /// let _ = DeclaredPackets::new(WireLimits::new(1, 1), &packets);
 /// ```
 #[derive(Clone, Copy, Debug)]

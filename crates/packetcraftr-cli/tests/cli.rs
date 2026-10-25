@@ -40,6 +40,20 @@ fn packet_commands_run_through_the_executable() {
             .as_str()
             .is_some_and(|message| message.contains("unregistered_protocol"))
     );
+    let output = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+        .args(["--output", "json", "packet", "build", "--packet"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["status"], "error");
+    assert_eq!(value["command"], "build");
+    assert_eq!(value["error"]["kind"], "usage");
+    assert!(
+        value["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("--packet"))
+    );
 }
 
 #[test]
@@ -100,6 +114,84 @@ fn packet_stream_reports_each_built_packet() {
             .as_u64()
             .is_some_and(|capacity| capacity > 0)
     );
+}
+
+#[test]
+fn help_and_formats_topic_define_each_supported_output() {
+    for arguments in [
+        &[
+            "--color",
+            "never",
+            "--output",
+            "text",
+            "reference",
+            "topics",
+            "formats",
+        ][..],
+        &["--color", "never", "--help"][..],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let text = std::str::from_utf8(&output.stdout).unwrap();
+        for format in [
+            "text", "json", "csv", "ndjson", "hex", "raw", "pcap", "pcapng",
+        ] {
+            let (_, definition) = text
+                .lines()
+                .filter_map(|line| line.trim().split_once(char::is_whitespace))
+                .find(|(name, _)| *name == format)
+                .unwrap_or_else(|| panic!("missing {format} output definition"));
+            assert!(!definition.trim().is_empty(), "empty {format} definition");
+        }
+    }
+}
+
+#[test]
+fn version_reports_the_package_and_compiled_features() {
+    let short = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+        .args(["--color", "never", "-V"])
+        .output()
+        .unwrap();
+    assert!(short.status.success(), "{:?}", short.stderr);
+    let expected_version = format!("packetcraftr {}", env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        std::str::from_utf8(&short.stdout).unwrap().trim_end(),
+        expected_version
+    );
+
+    let long = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+        .args(["--color", "never", "--version"])
+        .output()
+        .unwrap();
+    assert!(long.status.success(), "{:?}", long.stderr);
+    let text = std::str::from_utf8(&long.stdout).unwrap();
+    let mut lines = text.lines();
+    assert_eq!(lines.next(), Some(expected_version.as_str()));
+    let features = lines
+        .find_map(|line| line.strip_prefix("native features: "))
+        .expect("long version must identify its native features");
+    let expected = [
+        ("native-route", cfg!(feature = "native-route")),
+        ("native-layer2", cfg!(feature = "native-layer2")),
+        ("native-layer3", cfg!(feature = "native-layer3")),
+    ]
+    .into_iter()
+    .filter_map(|(name, enabled)| enabled.then_some(name))
+    .collect::<std::collections::BTreeSet<_>>();
+    if expected.is_empty() {
+        assert_eq!(features, "none");
+    } else {
+        assert_eq!(
+            features
+                .split(',')
+                .map(str::trim)
+                .collect::<std::collections::BTreeSet<_>>(),
+            expected
+        );
+    }
 }
 
 #[cfg(unix)]

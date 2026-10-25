@@ -19,12 +19,12 @@ The normal Python runner remains unittest.
 ```sh
 python3 -m unittest discover -s scripts/tests -v
 python3 -O -m unittest discover -s scripts/tests -v
-cargo test --locked --workspace --tests --all-features
+cargo test --locked --workspace --all-features
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 ```
 
-CI also retains the portable, default, layer 2, layer 3, minimum Rust version, documentation, macOS and Windows checks. Use the narrow affected tests during repairs and the complete CI matrix before requesting review.
+Cargo's default test selection includes library, integration and documentation tests. CI also retains the portable, default, layer 2, layer 3, minimum Rust version, documentation, macOS and Windows checks. Use the narrow affected tests during repairs and the complete CI matrix before requesting review.
 
 # Mutation checks
 
@@ -43,7 +43,7 @@ python3 scripts/run_mutation.py run --plan mutation-plan.json --language rust --
 python3 scripts/run_mutation.py check --plan mutation-plan.json --language rust
 ```
 
-For a PR, use `select --base BASE_SHA` instead of `--full`. Selection uses both sides of deleted or renamed files. Rust production edits select whole changed files. A separate or inline test change selects its whole crate. Crate dependency changes select all Rust crates. Python tests select their mapped modules. Shared test support selects every affected language module. Shared fixtures, workflow or mutation configuration, root dependencies and testing policy changes select both language suites. Unknown Python production modules fail selection until ownership is recorded.
+For a PR, use `select --base BASE_SHA` instead of `--full`. Selection uses both sides of deleted or renamed files. Rust production edits select whole changed files. A separate or inline test change selects its whole crate. Rustdoc fences, indented examples and documentation attributes also select the complete owning crate, including removed examples. Block documentation is treated conservatively because it can contain indented examples. Crate dependency changes select all Rust crates. Python tests select their mapped modules. Shared test support selects every affected language module. Shared fixtures, workflow or mutation configuration, root dependencies and testing policy changes select both language suites. Unknown Python production modules fail selection until ownership is recorded.
 
 The runner takes one snapshot of tracked and untracked, nonignored source before a run, then gives each target a disposable copy. It records the commit and a digest of that source snapshot. Review policy is copied but excluded from the source digest, because it identifies the source it reviews. Artifact directories must be ignored by Git or outside the checkout. Cargo-mutants runs workspace tests against every selected mutant, so dependent crates can detect errors. When a package has a `build.rs`, the disposable manifest exposes it as an additional binary target so cargo-mutants can discover it. The amended manifest is retained with the results. Rust shards are numbered from one at this script's interface and translated to cargo-mutants' zero-based numbering. No mutant is sampled or silently removed.
 
@@ -57,7 +57,7 @@ The Linux all-features context runs first and publishes a complete direct seed. 
 
 Before receiver jobs start, the `context` action records every selected group's full inventory, exact seed digest and source identity. It selects the smallest count from 1 and the multiples of four through 64 that keeps each group's remaining mutants per shard within its original 64-shard ceiling. Both ceiling calculations round up. Empty receivers still require one baseline job. The pinned SDK applies sharding after iteration filtering, and its slice and round-robin strategies satisfy this count bound, as checked against [cargo-mutants 27.1.0 sharding](https://github.com/sourcefrog/cargo-mutants/blob/v27.1.0/src/shard.rs) on 2026-10-25.
 
-The seed is bound to the full source fingerprint, Git revision, tool version and requested target. The gate requires its actual completed Linux/all shard cohort and compares every outcome and evidence path. One receiver shard carries its complete inventory, reused identities and exact seed text; all shards carry the same coverage digest. The gate recomputes each context's required count and binds its full inventory to that coverage. Every planned shard must report, and the remaining inventory must execute exactly once. The score combines actual outcomes only, without inventing receiver kills. Scores publish executed and reused counts, planned shard counts and seed provenance. Measured setup and baseline overhead motivated the variable counts. Full weekly throughput remains unverified until a complete production matrix finishes.
+The seed is bound to the full source fingerprint, Git revision, tool version and requested target. The gate requires its actual completed Linux/all shard cohort and compares every outcome and evidence path. One receiver shard carries its complete inventory, reused identities and exact seed text. All shards carry the same coverage digest. The gate recomputes each context's required count and binds its full inventory to that coverage. Every planned shard must report, and the remaining inventory must execute exactly once. The score combines actual outcomes only, without inventing receiver kills. Scores publish executed and reused counts, planned shard counts and seed provenance. Measured setup and baseline overhead motivated the variable counts. Full weekly throughput remains unverified until a complete production matrix finishes.
 
 The following example uses a one-shard local seed and discovers the receiver count. CI uses a 64-shard seed and the full platform and feature matrix.
 
@@ -80,7 +80,7 @@ Artifacts retain the selection plan, source revisions and digests, tool versions
 
 # Audit record
 
-The initial inventory contained 282 Rust tests and 50 Python tests. The initial all-features Rust baseline and Python baseline passed. The Rust mutation inventory contained 26,453 candidates before repairs. These counts describe this audit's starting point and are not assertions in the test suite.
+The initial inventory contained 282 Rust function tests and 50 Python tests. The initial all-features Rust library baseline and Python baseline passed. The Rust mutation inventory contained 26,453 candidates before repairs. These counts describe this audit's starting point and are not assertions in the test suite.
 
 | Subsystem | Disposition and protected behavior |
 | --- | --- |
@@ -102,7 +102,37 @@ The initial inventory contained 282 Rust tests and 50 Python tests. The initial 
 | Protocol message suites | Reviewed all 39 message cases and the remaining core protocol cases. Moved review and improvement cases into reference, framing, reflection and validation suites under the existing owner. Independent decoded fields supplement wire preservation, positive validation cases check complete bytes, and wire expectations cite dated sources. Full mutation scores and the final native CI matrix are still outstanding. |
 | Build scripts | Added disposable binary targets for package-root `build.rs` files. A two-crate integration fixture killed all nine mutants, including deletion of the build script's configuration output. The real build scripts still require full-run survivor review. |
 
-The case audit now records all 312 Rust cases, including three executable integration cases, and all 159 Python cases. The overall effort remains incomplete until the final revision passes every required full mutation group and CI profile and all actionable survivors are reviewed and repaired. Passing ordinary tests does not establish that result.
+The case audit now records all 321 Rust function tests, including five executable integration cases, and all 159 Python cases. Nineteen documentation tests are audited separately below. The overall effort remains incomplete until the final revision passes every required full mutation group and CI profile and all actionable survivors are reviewed and repaired. Passing ordinary tests does not establish that result.
+
+# Rust documentation case audit
+
+Rustdoc contributes 19 cases beyond the function-test inventory. The core crate has 15 executable examples. The facade has three compile-fail contracts and one compile-only no-run example. Two text fences are documentation without test claims. Executable examples use controlled in-memory inputs. The live-network usage example remains no-run.
+
+Compile-fail inputs isolate the intended public API restriction. Protocol and capture examples use independent expected bytes or public limit behavior, with dated sources beside external wire facts. Normal CI now uses Cargo's default target selection so these cases run alongside library and integration tests.
+
+| Location | Kind | Disposition and protected behavior | Representative defect |
+| --- | --- | --- | --- |
+| `crates/packetcraftr/src/lib.rs:35` | no_run | Retained compile-only API example. Client, explicit policy, packet recipe and collector composition type-check without contacting a live network. | Removing or incompatibly changing a public construction/send/collector API. |
+| `crates/packetcraftr/src/policy/operation.rs:235` | compile_fail | Retained negative API contract. Operation has no default declaration that can silently choose authorization semantics. | Adding an implicit default operation makes this forbidden use compile. |
+| `crates/packetcraftr/src/policy/operation.rs:239` | compile_fail | Repaired masked failure. WireLimits cannot be obtained through Default. The example no longer also fails on private field access. | Adding Default now makes this exact snippet compile. |
+| `crates/packetcraftr/src/policy/operation.rs:243` | compile_fail | Repaired masked failure. A well-typed packet-reference list still requires explicit destination and permissive-live declaration arguments. | A two-argument fallback constructor now makes this snippet compile rather than still failing on packet types. |
+| `crates/packetcraftr-core/src/analysis/tls/selector.rs:39` | executable | Retained. Case-insensitive leading wildcard matching accepts the requested name, rejects the wrong suffix, and refuses an interior wildcard. | Case sensitivity, substring matching or accepting unsupported wildcard placement. |
+| `crates/packetcraftr-core/src/analysis/tls.rs:6` | text-only | Not a test. Text-only TLS state diagram is documentation. It is excluded from executable/doctest counts. | No runtime assertion is claimed. |
+| `crates/packetcraftr-core/src/capture_file/format.rs:15` | executable | Strengthened. Explicit big-endian microsecond PCAP output contains the independent magic and supplied snapshot length. | Ignoring endianness/snap length or emitting an incorrect header. |
+| `crates/packetcraftr-core/src/capture_file/format.rs:63` | executable | Strengthened. Eight configured interfaces receive sequential IDs and a ninth is refused. | Ignoring the configured interface budget or returning incorrect interface IDs. |
+| `crates/packetcraftr-core/src/capture_file/limits.rs:64` | executable | Retained. A successful 60-byte charge is reflected by public usage totals, and a refused extra frame leaves them unchanged. | Charging failed work or losing accepted frame/byte usage. |
+| `crates/packetcraftr-core/src/capture_file/limits.rs:159` | executable | Strengthened. Independent PCAP bytes yield the exact five-byte payload at the bound and fail with a four-byte maximum. | Ignoring reader size limits or returning corrupted payload bytes. |
+| `crates/packetcraftr-core/src/error.rs:115` | executable | Retained. A controlled nested error emits the exact inner-to-root source chain. | Dropping or reversing a source cause. |
+| `crates/packetcraftr-core/src/error.rs:143` | executable | Retained. A controlled outer/inner error renders both user-supplied messages in order. | Dropping the outer message, source message or separator. |
+| `crates/packetcraftr-core/src/filter.rs:6` | text-only | Not a test. Text-only filter syntax catalog is documentation. It is excluded from executable/doctest counts. | No runtime assertion is claimed. |
+| `crates/packetcraftr-core/src/layer/reflection.rs:15` | executable | Retained. The public macro preserves alias assignment, rejects an out-of-range u16 value, and emits the declared public byte range. | Dropping an alias, accepting overflow or ignoring declared layout metadata. |
+| `crates/packetcraftr-core/src/protocol/application/dns/codec/decode.rs:14` | executable | Retained with dated source. A fixed compressed DNS name yields the expected label and resume offset, and a self pointer is refused. | Returning the pointer destination as resume position or accepting a nonterminating pointer. |
+| `crates/packetcraftr-core/src/protocol/builtin/assembly.rs:94` | executable | Retained. Caller-supplied registry binding selects TLS at the supplied TCP port. | Discarding the caller binding before freezing the registry. |
+| `crates/packetcraftr-core/src/protocol/builtin/assembly.rs:121` | executable | Retained. The TLS-port convenience constructor selects TLS at the supplied port. | Ignoring the supplied port list. |
+| `crates/packetcraftr-core/src/protocol/headers.rs:10` | executable | Retained with dated sources. Independent VLAN/IPv6 extension bytes expose the expected network offset, one extension and ICMPv6 location. | Ignoring the VLAN tag or walking the extension chain incorrectly. |
+| `crates/packetcraftr-core/src/protocol/network/igmpv3.rs:9` | executable | Strengthened with dated source. IGMPv3 encoding preserves the independently expected report type, record/source count, group and source bytes. | A shared encoder/decoder layout defect that could survive only a round trip. |
+| `crates/packetcraftr-core/src/protocol/network/mld.rs:10` | executable | Strengthened with dated source. MLDv2 encoding preserves the independently expected type and complete record/group/source byte vector. | A shared encoder/decoder count, byte-order or address-layout defect. |
+| `crates/packetcraftr-core/src/protocol/network/ndp.rs:5` | executable | Strengthened with dated source. Neighbor solicitation encoding preserves the independently expected type, target and link-layer option bytes. | A shared encoder/decoder target or option-layout defect. |
 
 # Lifecycle case audit
 
@@ -150,6 +180,7 @@ These cases use per-test budgets and injected providers. Real threads exercise t
 | Native registry | `native_operation_wait_checks_parent_cancellation` | Retained. An injected pending operation reports its cancelled parent and aborts the controlled connection task. | Waiting only for the local timeout after cancellation. |
 | Native registry | `native_operation_wait_retains_inherited_elapsed_control_as_well_as_wall_timeout` | Retained. The operation advances an injected parent clock while pending, and the wait reports the expected elapsed classification. | Resetting the inherited allowance at an async boundary. |
 | Native registry | `ready_native_operation_cannot_report_success_after_it_interrupts_its_parent` | Retained. A ready result that cancels or expires its parent returns the corresponding refusal. | Publishing success without checking control after the operation completes. |
+| Callback failures | `callback_failure_keeps_diagnostics_and_refuses_following_events` | Added. A callback failure retains its supplied message, classification, probe context and cause. The worker refuses the next event. | Losing callback diagnostics or continuing after a terminal callback failure. |
 
 Registry fixtures use the pinned development-only tempfile library rather than process-named directories that can survive failed runs. Keeping all anonymous files alive prevents inode reuse from weakening the historical-identity case. The controlled workers retire through the registry during the bounded test rather than relying on the production idle timer. Every reply and recovery wait is bounded.
 
@@ -189,7 +220,7 @@ These cases check emitted documents, externally observed writes and rendered err
 
 # CLI documentation and input case audit
 
-The original sixteen cases remain in their mapped files. One cross-manifest budget case and one Unix directory replacement case were added. Expected file contents, input payloads and error origins replace incidental artifact counts and negative-only success checks. Static HTML checks cover escaped report content and the initial finding count. They do not claim browser layout, filtering or accessibility interaction coverage.
+The original sixteen cases remain in their mapped files. One cross-manifest budget case and two Unix publication cases were added. Expected file contents, input payloads and error origins replace incidental artifact counts and negative-only success checks. Static HTML checks cover escaped report content and the initial finding count. They do not claim browser layout, filtering or accessibility interaction coverage.
 
 | Suite | Case | Disposition and protected behavior | Representative defect |
 | --- | --- | --- | --- |
@@ -200,8 +231,9 @@ The original sixteen cases remain in their mapped files. One cross-manifest budg
 | Documentation | `publication_failure_reports_the_published_prefix_and_destination` | Retained. Publication refusal reports the destination and already-published prefix, with the first file complete and the caller's blocking directory intact. | Hiding partial publication or replacing the blocked destination. |
 | Documentation | `cancellation_at_publication_reports_destination_and_published_prefix` | Retained. Controlled cancellation stops publication at the second destination and reports the complete first file as the published prefix. | Publishing after cancellation or losing the partial-output context. |
 | Documentation | `actual_render_includes_completions_and_grouped_manuals` | Strengthened. Every supported shell produces completion content for the program and representative commands. Root, group and registered command manuals contain their owned descriptions. Destinations remain unique. Paths derive from the generator API, and no arbitrary artifact count is pinned. | Omitting a registered manual, rendering the wrong command's description or producing empty completion content. |
-| Documentation | `replacement_rejects_directory_and_symlink_destinations` | Strengthened. Unsafe destinations are refused while existing directory contents, symlink targets and regular-file contents remain intact. Socket destinations are also refused on Unix. Invalid NUL-containing paths are refused before staging for either publication mode. | Clobbering an existing object or treating an inspection failure as an absent destination. |
+| Documentation | `replacement_rejects_directory_and_symlink_destinations` | Strengthened. Unsafe destinations are refused while existing directory contents, symlink targets and regular-file contents remain intact. Socket destinations are also refused on Unix. Invalid NUL-containing paths and trailing directory syntax are refused before staging for either publication mode. A one-character filename receives its supplied bytes. | Clobbering an existing object, treating an inspection failure as an absent destination or rejecting a valid short filename. |
 | Documentation | `publication_rejects_a_replaced_parent_and_preserves_both_directories` | Added on Unix. After staging, the parent directory is renamed and replaced. Ordinary publication and replacement publication both refuse the changed parent and preserve the original and replacement directories' contents. | Publishing through a stale directory identity or overwriting files after the requested parent changes. |
+| Documentation | `ordinary_publication_stays_private_with_a_permissive_umask` | Added on Unix. An isolated child publishes the supplied bytes under a controlled permissive umask. The final file permits owner reads and writes and grants no group or other access. | Applying documentation creation permissions to private output. |
 | Help | `inline_and_block_examples_survive_short_help` | Strengthened. Inline and block examples retain their text, blank sections are absent, and the short-help limit keeps the first three examples. | Losing an inline example, including trailing detail or ignoring the short-help bound. |
 | Help | `every_is_a_frame_selection_option` | Repaired. Both frame-selection options independently map to the user-facing selection section. | Two incorrectly classified options agreeing with each other. |
 | Bounded input | `error_handling_reads_retain_file_or_stdin_and_causes` | Retained. Injected read failure retains the file or stdin context and the supplied cause. | Losing input identity or replacing the underlying read diagnostic. |
@@ -252,7 +284,7 @@ All 31 cases remain in their mapped files. These tests use controlled capture by
 
 # Remaining CLI case audit
 
-All 61 remaining CLI cases have been reviewed. Inputs are controlled reports, packets and settings. Retained-example consistency is distinct from producer execution. Callback tests assert delivered diagnostics after the callback returns, and output tests protect consumer-visible bytes without depending on write-call counts.
+All 63 remaining CLI cases have been reviewed. Inputs are controlled reports, packets and settings. Retained-example consistency is distinct from producer execution. Callback tests assert delivered diagnostics after the callback returns, and output tests protect consumer-visible bytes without depending on write-call counts.
 
 | Suite | Case | Disposition and protected behavior | Representative defect |
 | --- | --- | --- | --- |
@@ -309,18 +341,20 @@ All 61 remaining CLI cases have been reviewed. Inputs are controlled reports, pa
 | Scan preparation | `list_rejects_discovery` | Retained. Listing with active discovery has the expected usage exit and diagnostic. | Allowing a listing command to trigger discovery. |
 | Scan preparation | `list_rejects_reverse_dns` | Retained. Listing with reverse DNS has the expected usage exit and diagnostic. | Allowing a listing command to start reverse resolution. |
 | Scan preparation | `list_rejects_traceroute` | Retained. Listing with traceroute has the expected usage exit and diagnostic. | Allowing a listing command to send traceroute probes. |
-| Filtering | `filter_capabilities_preserve_header_and_conversation_matches` | Added. Both capability modes evaluate header filters correctly; only stream-capable input accepts and evaluates a stream field. | Rejecting valid header filters or silently admitting unsupported stream fields. |
+| Filtering | `filter_capabilities_preserve_header_and_conversation_matches` | Added. Both capability modes evaluate header filters correctly. Only stream-capable input accepts and evaluates a stream field. | Rejecting valid header filters or silently admitting unsupported stream fields. |
 | Filtering | `optional_selector_applies_the_supplied_filter_to_frames` | Added. An explicit selector keeps the matching frame and refuses a different one, while absent input remains unrestricted. | Dropping a supplied filter or ignoring its result. |
 | Cancellation | `shared_signal_cancels_independent_invocations` | Added. An isolated child observes cancellation through an independently constructed invocation using the shared signal token. Its completion marker proves the scenario ran. | Returning disconnected default tokens or passing after an empty child test selection. |
 | Cancellation | `forced_cleanup_removes_only_active_registrations` | Added. Isolated forced cleanup removes the active temporary file and preserves the released file's bytes. | Removing the wrong registration or retaining a dropped registration. |
-| Process entry | `packet_commands_run_through_the_executable` | Added in the first process integration suite. Actual executable invocations return two different requested raw payloads and structured diagnostics for an invalid protocol. | Skipping the public entrypoint, returning constant output or dropping failure status. |
+| Process entry | `packet_commands_run_through_the_executable` | Added in the first process integration suite. Actual executable invocations return two different requested raw payloads and structured diagnostics for an invalid protocol. A missing packet argument returns the usage exit status and identifies the supplied option. | Skipping the public entrypoint, returning constant output, dropping failure status or misclassifying argument failures. |
+| Reference topic | `help_and_formats_topic_define_each_supported_output` | Added. Root help and the formats topic provide a nonempty definition for each independently listed project-owned output format. | Dropping a format definition or returning empty help. |
+| Version output | `version_reports_the_package_and_compiled_features` | Added. Compact output matches the owned Cargo package version. Long output retains that version and the compiled native feature set, including the portable build. | Publishing a stale version, omitting the package identity or describing features absent from the binary. |
 | Process stream | `packet_stream_reports_each_built_packet` | Added. Two supplied TTL values produce independently expected NDJSON packet fields, payloads, indices and sequence numbers. The terminal record preserves packet and byte totals and reports a supported output-writer runtime with positive capacity. | Returning constant packet counters, omitting a packet or losing output-worker diagnostics. |
 | Process interruption | `http_wait_reports_process_cancellation` | Added on Unix. A controlled local HTTP request establishes handler readiness before SIGINT. The child returns exit 130 and `io.cancelled`, with bounded cleanup on every failure path. | Omitting handler registration, losing cancellation or returning an unrelated network failure. |
 | Resource diagnostics | `report_preserves_the_registered_runtime_name_and_capacity` | Added. A uniquely named runtime appears in the published report with its supplied capacity and supported status. Unrelated workers are permitted. | Dropping a runtime registration or reporting a different capacity. |
 
 # Remaining facade case audit
 
-All 58 cases remain in their owning suites, including ten later survivor regressions. Six cross-provider cases moved from the legacy improvement file to root `tests.rs`. Returned candidates, decoded/transmitted bytes, provider refusals and published events replace shared oracles and private bookkeeping. The sole visibility change exposes the existing internal event drain to these crate tests.
+All 63 cases remain in their owning suites, including fifteen later survivor regressions. Six cross-provider cases moved from the legacy improvement file to root `tests.rs`. Returned candidates, decoded/transmitted bytes, provider refusals and published events replace shared oracles and private bookkeeping. The sole visibility change exposes the existing internal event drain to these crate tests.
 
 | Suite | Case | Disposition and protected behavior | Representative defect |
 | --- | --- | --- | --- |
@@ -328,7 +362,7 @@ All 58 cases remain in their owning suites, including ten later survivor regress
 | Network | `clock_stops_at_spent_deadline` | Repaired. A real monotonic wait reaches its requested lower bound, and a coordinated worker stops a long sleep under spent control. No upper elapsed-time assertion is used. | Skipping a live wait or sleeping for the full delay after the deadline expires. |
 | Network | `interface_ambiguity_and_late_enumeration` | Retained. Ambiguous names and indices are refused, and cancellation during enumeration outranks its result. | Arbitrarily selecting one interface or returning a late result after cancellation. |
 | Network | `route_deadline_cache_and_identity` | Repaired. Cached route contents remain available after the provider is disabled, expired operations do not query it, and late or invalid route identities are refused. | Requerying a cached route, ignoring control or accepting an invalid interface identity. |
-| Network | `numeric_and_custom_resolution_boundaries` | Strengthened. A live numeric target returns its address without hostname lookup; spent or inherited control refuses numeric and custom resolution. | Invoking hostname resolution for a numeric target or accepting a late custom result. |
+| Network | `numeric_and_custom_resolution_boundaries` | Strengthened. A live numeric target returns its address without hostname lookup. Spent or inherited control refuses numeric and custom resolution. | Invoking hostname resolution for a numeric target or accepting a late custom result. |
 | Network | `distinct_resolver_order_and_limit` | Retained. Duplicate addresses retain first-seen order and only distinct values count toward the supplied limit. | Reordering results or counting duplicates as distinct addresses. |
 | Neighbor | `incomplete_capture_identity_never_reaches_injected_provider` | Strengthened. Incomplete names or indices are refused before capture and leave no transmitted packet. | Passing an unusable capture identity to a live provider. |
 | Neighbor | `parent_cancellation_reaches_reads_and_prevents_unsent_attempts` | Repaired. Cancellation reaches the read's inherited control and yields either no transmission or the exact already-started request. No capture-read count is assumed. | Losing inherited cancellation or sending after cancellation before admission. |
@@ -343,7 +377,7 @@ All 58 cases remain in their owning suites, including ten later survivor regress
 | Preparation | `bounded_windows_admit_and_materialize_every_packet` | Repaired. Complete windows fit a budget based on actual encoded bytes, materialize every expected packet and continue refusing extra admission. | Charging materialization twice or resetting cumulative admission. |
 | Preparation | `changed_final_declaration_is_authorized_before_fresh_provider_lookup` | Repaired. A changed unauthorized destination is refused before the disabled route provider can run, with no transmission. | Querying or sending an unauthorized final declaration. |
 | Preparation | `borrowed_materialization_keeps_one_cumulative_admission_budget` | Repaired. Two complete packets fit the supplied cumulative budget, a third is refused, and a foreign cost cannot trigger lookup or restore admission. | Forking spend accounting during borrowed materialization. |
-| Preparation | `changed_source_rebuilds_and_changed_mtu_fails_before_discovery` | Strengthened. Changed source appears in decoded wire bytes; reduced MTU fails before capture or send in either link mode. | Updating only packet metadata or reusing a packet that no longer fits. |
+| Preparation | `changed_source_rebuilds_and_changed_mtu_fails_before_discovery` | Strengthened. Changed source appears in decoded wire bytes. Reduced MTU fails before capture or send in either link mode. | Updating only packet metadata or reusing a packet that no longer fits. |
 | Preparation | `interface_selectors_are_resolved_again_and_capture_identity_change_is_refused` | Repaired. A disappeared interface produces a named refusal, and a recreated interface produces the expected identity mismatch without sending. | Reusing the cached selector or silently changing capture identity. |
 | Preparation | `cancellation_and_other_admission_costs_cannot_enter_reuse` | Repaired. Canceled and foreign-cost reuse retain their distinct errors and cannot reach the disabled route provider. | Looking up a route before checking control or admission ownership. |
 | Preparation | `changed_wire_length_and_cumulative_budget_are_refused_before_discovery` | Repaired. Overspending is refused, changed wire length reports the admitted length, and a failed rebuild does not restore the spent budget or send a packet. | Reusing a cost for a different packet length or resetting spend on failure. |
@@ -358,13 +392,13 @@ All 58 cases remain in their owning suites, including ten later survivor regress
 | Multipath | `invalid_flow_ranges_and_excess_probe_counts_are_rejected` | Strengthened. A valid request is accepted before invalid source-port ranges, flow counts and probe budgets are refused. | An always-refusing validator or an unchecked overflowing range. |
 | Multipath | `authoritative_exchange_matching_blocks_a_stale_same_tuple_response` | Repaired. Generic matching emits a Response for the controlled stale tuple, while authoritative matching emits the exact frame as Unsolicited. | Recording stale evidence as an authoritative response. |
 | Multipath | `cancellation_and_output_failure_stop_before_another_batch` | Strengthened. Cancellation or output failure ends with the expected error and only the actual initial pair of probes dispatched. | Starting another batch after the consumer stops. |
-| Multipath | `topology_changes_require_two_observed_adjacent_sweeps` | Strengthened. A change reports the expected flow, hop, before/after responder, adjacent sweeps and evidence; a missing intermediate sweep prevents comparison. | Attributing a topology change across an observation gap. |
+| Multipath | `topology_changes_require_two_observed_adjacent_sweeps` | Strengthened. A change reports the expected flow, hop, before/after responder, adjacent sweeps and evidence. A missing intermediate sweep prevents comparison. | Attributing a topology change across an observation gap. |
 | Multipath | `non_echoing_udp_reply_is_not_attributed` | Retained. A reply with the right tuple but wrong echoed identity is refused in both families. | Accepting UDP tuple equality as complete identity. |
 | Exchange | `every_matched_reply_refusal_qualifies_missing_observations` | Retained. Local refusal excludes ordinary unanswered inference and keeps quality incomplete even after a later positive reply settles the request. | Promoting a refused reply to evidence of silence. |
 | Exchange | `clean_local_retention_does_not_promote_unknown_or_missing_ingress` | Repaired. Processing an actual frame without an ingress marker retains it as an unsolicited event and leaves observation quality unknown. | Assigning clean ingress merely because local retention succeeded. |
 | Scan preparation | `scoped_and_unscoped_previews_obey_budget_and_materialize_every_probe` | Retained. Both preview paths obey small and metadata-sensitive budgets and materialize every expected destination, port and payload for scoped and unscoped targets. | Admitting oversized metadata or materializing the wrong target's packet. |
 | Scan correlation | `unrelated_pending_ports_do_not_match_direct_or_quoted_replies` | Retained. Unrelated direct and quoted replies match nothing, while a known pending probe matches its independently expected index. | Treating a shared network tuple as the right port identity. |
-| Scan correlation | `direct_and_quoted_supported_families_match_the_conservative_oracle` | Strengthened. Direct and full quoted families match the independently expected probe position; insufficient SCTP quotes match nothing. Differential checks remain supplementary. | Both match paths agreeing on an omitted or wrong candidate. |
+| Scan correlation | `direct_and_quoted_supported_families_match_the_conservative_oracle` | Strengthened. Direct and full quoted families match the independently expected probe position. Insufficient SCTP quotes match nothing. Differential checks remain supplementary. | Both match paths agreeing on an omitted or wrong candidate. |
 | Scan correlation | `collisions_scopes_reuse_and_retirement_preserve_every_member` | Retained. Collisions keep each scoped member, retired identities disappear, reused identities remain reachable and duplicate insertion fails. | Collapsing collision members or crossing interface scopes. |
 | Scan correlation | `custom_matcher_defaults_to_scoped_conservative_lookup` | Retained. A custom matcher retains the entire selected scope even when built-in tuple fields differ. | Applying built-in identity pruning to a custom matcher. |
 | Scan correlation | `indexed_correlation_preserves_generation_freshness_deadlines_interfaces_and_late_replies` | Retained. Independent expected generation identity survives indexed lookup, while old ingress, wrong interface and expired pending state are refused. Retained late evidence remains reachable until eviction. | Selecting a stale generation or removing recent evidence too early. |
@@ -382,10 +416,15 @@ All 58 cases remain in their owning suites, including ten later survivor regress
 | Exchange | `refused_capture_frames_publish_one_visible_limit_diagnostic` | Added. Repeated refused frames publish one warning naming the active frame limit. | Dropping the diagnostic or publishing the same refusal repeatedly. |
 | Identification | `identification_hard_byte_ceiling_accepts_the_boundary_and_refuses_excess` | Added. The public request accepts its hard read-byte ceiling and refuses the next byte under a permissive policy. | Changing or bypassing the workflow's hard resource bound. |
 | OS assessment | `os_hard_evidence_ceiling_accepts_the_boundary_and_refuses_excess` | Added. The public request accepts its hard evidence-byte ceiling and refuses the next byte. | Changing or bypassing the evidence bound. |
+| Capture | `selected_capture_frames_obey_stop_before_and_stop_after` | Added. An injected provider supplies three distinct frames. Selection and sink control preserve the expected published bytes and frame identities, and public admission, delivery and byte counts agree. | Ignoring a selector, publishing a stop-before frame or corrupting capture accounting. |
+| Capture | `started_capture_stop_prevents_reads` | Added. A sink that stops at the started event causes no provider read and reports a sink stop without captured bytes. | Reading after the sink has stopped capture. |
+| Capture | `late_capture_frame_is_reported_without_admission_or_publication` | Added. A controlled clock makes the supplied frame arrive after the capture window. It is reported as late and is neither admitted nor published. | Publishing a late frame or counting it as admitted work. |
+| Capture | `capture_read_failure_survives_incomplete_cleanup_statistics` | Added. A supplied read failure remains primary when shutdown also fails. The shutdown cause and incomplete statistics remain visible. | Replacing the original read failure with a cleanup error or reporting complete statistics. |
+| Scan correlation | `response_outside_batch_reports_the_workflow_context` | Added. An out-of-batch response retains the relevant scan or traceroute workflow in its published error. | Dropping or substituting the workflow context. |
 
 # Remaining native I/O case audit
 
-All 11 cases retain their owning suites. Thread cleanup uses destruction notifications and actual replacement work. TLS verification receives a fixed time through a private helper, preserving the public API. Only public CA and leaf certificates are checked in; the fixtures contain no private keys.
+All 11 cases retain their owning suites. Thread cleanup uses destruction notifications and actual replacement work. TLS verification receives a fixed time through a private helper, preserving the public API. Only public CA and leaf certificates are checked in. The fixtures contain no private keys.
 
 | Suite | Case | Disposition and protected behavior | Representative defect |
 | --- | --- | --- | --- |
@@ -517,7 +556,7 @@ All 13 cases in `scripts/tests/test_build_manifest.py` are reviewed below. Versi
 | Case | Disposition and protected behavior | Representative defect |
 | --- | --- | --- |
 | `test_command_failures_have_a_clean_diagnostic_and_no_success_report` | Retained. Controlled binary or compiler failure produces exit one, a contextual diagnostic and no success artifact. | Publishing metadata after a failed identity command. |
-| `test_write_and_verify_preserve_supplied_identity_and_detect_binary_changes` | Strengthened. Complete supplied identity is published and verified. Commit, target, feature, basename, digest and version values on both sides of the expected value fail verification, as does changed binary content. | Replacing equality with an ordering comparison or ignoring a provenance field. |
+| `test_write_and_verify_preserve_supplied_identity_and_detect_binary_changes` | Strengthened. A controlled executable distinguishes compact version output from the long feature summary. Complete supplied identity is published and verified. Commit, target, feature, basename, digest and version values on both sides of the expected value fail verification, as does changed binary content. | Reading the long feature summary as one version line, replacing equality with an ordering comparison or ignoring a provenance field. |
 | `test_version_and_compiler_payload_cannot_be_blank` | Retained. Prefix-only version and compiler fields are refused. | Treating a product name alone as identity. |
 | `test_complete_provenance_is_required` | Strengthened. Every independently declared identity field is required and rejects blank or incorrectly typed values. | Removing a field from the implementation's required list or accepting a nonstring value. |
 | `test_binary_digest_must_be_sha256` | Retained. A non-digest identity is refused. Detailed width and character cases belong to the shared helper. | Skipping digest validation at the metadata boundary. |
@@ -594,7 +633,7 @@ The direct Linux/all seed stage, receiver execution and workflow are connected. 
 | `test_receiver_coverage_binds_actual_partition_and_exact_seed_bytes` | Reordered shard input preserves the exact executable and reused identities and seed digest. A differently encoded seed is refused. | Trusting a receiver partition without matching the supplied seed. |
 | `test_receiver_requires_one_coverage_record_and_own_successful_baselines` | Even an all-reused receiver needs exactly one coverage record, consistent shard digests, successful own workspace baselines and supported raw fields. Both lower and higher mismatched digests fail. | Treating empty execution as permission to omit evidence or allowing one direction of a digest mismatch. |
 | `test_recomputed_digest_cannot_turn_non_kills_into_reused_coverage` | A recomputed digest cannot authorize missing or false reuse, duplicate inventory, extra or omitted executable identities, changed seed bytes or unsupported proof fields. | Checking only the hash and accepting a false coverage claim. |
-| `test_seed_receiver_executes_remaining_and_new_ids_with_direct_coverage` | The CLI executes seed survivors, timeouts and new receiver identities while reusing exact kills. Its score combines actual outcomes and publishes per-context counts. Unrelated previous output cannot exclude a new identity. | Copying old SDK exclusions, filtering by a prefix or synthesizing receiver kills. |
+| `test_seed_receiver_executes_remaining_and_new_ids_with_direct_coverage` | The CLI executes seed survivors, timeouts and new receiver identities while reusing exact kills. Its score combines actual outcomes and publishes per-context counts. Unrelated previous output cannot exclude a new identity. Canonical seed reuse is refused without changing accepted direct evidence, and every receiver evidence path resolves to its matching retained log. | Copying old SDK exclusions, synthesizing receiver kills, overwriting direct evidence or publishing broken log references. |
 | `test_receiver_refuses_stale_seeds_and_missing_coverage_or_shards` | Reordered canonical shard files pass. Modified canonical status or evidence, missing canonical or receiver shards, absent or tampered coverage, omitted executable identities and stale seeds fail. | Accepting an embedded seed without its actual submitted execution or trusting a recomputed false partition. |
 | `test_all_reused_receiver_still_requires_its_workspace_baseline` | Empty receiver execution is reported without fabricated outcomes, but a failing own baseline prevents a completed report. | Borrowing seed health when a receiver's feature configuration is broken. |
 | `test_context_shards_choose_every_supported_count_without_increasing_work` | Every permitted count is selected from independent inventory sizes. Empty work uses one job, 64 unresolved IDs require 64, and 65 require 36 under the existing ceiling. | Rounding incorrectly or assigning more mutations to a shard than before. |
@@ -605,8 +644,8 @@ The direct Linux/all seed stage, receiver execution and workflow are connected. 
 | `test_context_plan_rejects_wrong_context_source_or_tool` | Mismatched platforms, profiles, source revisions and tool versions are refused. | Reusing stale or foreign context evidence. |
 | `test_context_plan_recomputes_shards_and_rejects_malformed_records` | A claimed count must equal the independently derived count, with strict raw fields and unique inventories. | Accepting a forged count or malformed planning evidence. |
 | `test_receiver_coverage_cannot_replace_the_context_inventory` | Receiver coverage must retain the context plan's exact full inventory, including both directions of an identity mismatch. | Comparing inventories by ordering or removing a reused identity without changing executable counts. |
-| `test_context_matrix_requires_each_planned_cohort_and_complete_inventory` | One- and four-shard receivers coexist with a two-shard fixture seed. Complete actual outcomes pass; missing shards, duplicate/missing plans, changed counts and altered full inventories fail. | Requiring uniform counts or trusting received artifacts to choose their own matrix. |
-| `test_context_plans_run_every_group_with_recomputed_shards` | The CLI discovers, plans, executes and checks all groups at the required count. Empty receivers still run their own baselines. Context flags are refused on unsupported actions even when the supplied seed is valid. | Skipping a group, admitting a partial receiver context or silently ignoring a supplied context option. |
+| `test_context_matrix_requires_each_planned_cohort_and_complete_inventory` | One- and four-shard receivers coexist with a two-shard fixture seed. Complete actual outcomes pass. Missing shards, duplicate/missing plans, changed counts and altered full inventories fail. | Requiring uniform counts or trusting received artifacts to choose their own matrix. |
+| `test_context_plans_run_every_group_with_recomputed_shards` | The CLI discovers, plans, executes and checks all groups at the required count. Empty receivers still run their own baselines. Context flags are refused on unsupported actions even when the supplied seed is valid. A missing-seed usage error preserves an existing accepted context plan. | Skipping a group, admitting a partial receiver context, silently ignoring a supplied context option or deleting accepted evidence on invalid input. |
 | `test_context_run_rejects_changed_inventory_and_forged_plan` | Actual discovery is compared with the plan. Wrong counts, identities, source, scope and seed digests fail. A fully unresolved fixture retains the 64-shard ceiling. | Scheduling from stale inventories or accepting a self-consistent forged count. |
 
 # Seed reuse functionality evidence
@@ -785,7 +824,7 @@ The original combined mutation cases now live in the owning suites listed above.
 | `test_rust_survival_timeout_and_compilation_failure_are_distinct` | Added. Executed tests, timeouts and compiler diagnostics map to distinct outcomes. Even otherwise accepted Build/Test phase shapes fail when they contradict the reported outcome class. | Counting compilation failure or timeout as a kill, or accepting test failure as compilation-invalid. |
 | `test_rust_baseline_requires_successful_test_execution` | Added. A baseline needs both a successful summary and a successful final test phase, with no failed earlier phases. A successful build followed by a failing test is refused. | Inspecting the first phase instead of the final test or ignoring a failed summary. |
 | `test_production_changes_select_their_files_without_unrelated_groups` | Added. Independent production changes select only their files and modules. | Mutating the wrong crate or losing a changed production file. |
-| `test_adding_inline_tests_expands_selection_to_their_complete_crate` | Added regression. Adding or removing inline tests selects their entire crate, with or without a test-only module. | Selecting only the edited file for a newly added inline test. |
+| `test_adding_inline_tests_expands_selection_to_their_complete_crate` | Added regression. Adding or removing inline tests selects their entire crate, with or without a test-only module. Both Rustdoc fences, indented examples, block docs and documentation attributes receive the same ownership. Ordinary line-doc prose preserves narrow selection. | Selecting only the edited file for an added or deleted documentation test. |
 | `test_shared_changes_select_complete_owned_language_groups` | Added. Fixtures, dependencies and shared support select the independently expected groups, while owned tests select their modules. | Skipping a language or unrelatedly narrowing a shared change. |
 | `test_malformed_ownership_cannot_silently_remove_production_modules` | Added regression. Malformed or blank mappings and unowned source files fail selection. | Accepting an empty test destination as ownership. |
 | `test_inventory_shape_is_explicit` | Strengthened. Complete manifests with unsupported schemas, empty lists and invalid entry types are rejected. | Accepting a different schema when other fields are valid. |
@@ -821,7 +860,7 @@ The original combined mutation cases now live in the owning suites listed above.
 | `test_invalid_shards_and_wrong_tool_versions_are_refused_before_execution` | Added. Invalid shard bounds and either unequal tool version fail before source execution. | Running an unintended shard or accepting an unpinned SDK. |
 | `test_runner_mutations_use_an_immutable_bootstrap` | Added. Syntax mutations to the harness remain compilation-invalid and preserve the user's source. | Allowing a mutated harness to invent or omit its own evidence. |
 | `test_rust_tool_reports_cover_build_scripts_features_and_disposable_source` | Added. Every configured profile measures the controlled Rust files and build script, retaining complete scores and unchanged original manifests. | Omitting a feature flag or build script, or modifying the original checkout. |
-| `test_python_tool_handles_an_interpreter_path_with_spaces` | Added regression. The CLI completes and scores a Python measurement when executable and artifact paths contain spaces. | Splitting the interpreter path into separate command arguments. |
+| `test_python_tool_handles_an_interpreter_path_with_spaces` | Added regression. The CLI completes and scores a Python measurement when executable and artifact paths contain spaces. An unsupported seed option is refused without changing the accepted result file. | Splitting the interpreter path into separate command arguments or overwriting accepted evidence before refusing invalid options. |
 | `test_external_failures_never_publish_a_completed_measurement` | Added. Discovery, baseline, execution and export failures for either SDK leave no accepted report, including duplicated full Rust inventory with unique shard results and a zero-exit incompetent Python baseline. | Publishing success after invalid discovery, a worker, a command or a baseline fails. |
 | `test_scoped_shards_combine_once_and_omissions_fail_the_gate` | Added. The CLI measures the selected files across disjoint shards, then rejects a missing shard. | Ignoring file selection, duplicating work or accepting a partial run. |
 | `test_empty_discovery_runs_a_baseline_and_preserves_the_selection_reason` | Added. Both SDKs validate an empty selection and report not applicable with its reason. | Treating absent discovery as coverage or skipping the baseline. |
@@ -856,6 +895,16 @@ With an empty Python test destination in the same checkout, the following comman
 
 ```sh
 /usr/bin/python3 scripts/run_mutation.py select --full --plan invalid.json
+```
+
+Documentation-test deletion was also exercised through the actual selector in a controlled repository. The old selector selected only `crates/sample/src/lib.rs`. After the correction, the same deletion selects the complete owning crate.
+
+```sh
+/usr/bin/python3 scripts/run_mutation.py select --base 95966281476ed3a13b4df7bd663d5e7e1153adda --plan /tmp/pcr-doctest-selection-after-plan.json
+```
+
+```json
+[{"group": "sample", "language": "rust", "files": [], "reason": "full crate, tests or shared inputs changed"}]
 ```
 
 # Source provenance regression evidence
@@ -1023,9 +1072,22 @@ The process exits with 130 and produces this error envelope.
 
 The Unix integration fixture uses a safe signal API from the same locked `nix` version already used by `ctrlc`. The dependency update adds one test dependency edge without changing package versions or checksums. Library cancellation cases use isolated child tests and completion files so a missing child selection cannot pass silently and global cancellation cannot affect another test.
 
+# Build metadata regression evidence
+
+The real executable's `--version` output includes its native feature summary, while `-V` returns the compact package line. Reading the long form caused metadata creation to fail with `build metadata failed: manifest version must be one PacketcraftR version line`. Metadata collection now requests the compact form and keeps the existing validation and binary digest check.
+
+These commands ran successfully against the actual all-feature binary. Both produced no output and exited zero.
+
+```sh
+python3 scripts/build-manifest.py --binary target/debug/packetcraftr --commit 9f9c429362c137c6ea88b0062ed6112655012b57 --target x86_64-unknown-linux-gnu --variant all --output /tmp/pcr-root-build-metadata.json
+python3 scripts/build-manifest.py --binary target/debug/packetcraftr --commit 9f9c429362c137c6ea88b0062ed6112655012b57 --target x86_64-unknown-linux-gnu --variant all --verify /tmp/pcr-root-build-metadata.json
+```
+
+The generated version was `packetcraftr 0.5.0-beta.3`. The mapped regression uses supplied version strings rather than pinning this observation in a test.
+
 # Dependency policy validation
 
-The dependency check found the existing Tokio 1.54.0 advisory and a duplicate Windows binding required by pcap 2.5.0. Tokio is updated to the patched 1.54.1 release. The user approved one exact duplicate-version exception for `windows-sys =0.36.1`; all other duplicate, advisory, license and source rules remain unchanged. The pinned cargo-deny 0.20.2 archive was checksum-verified before this command completed successfully.
+The dependency check found the existing Tokio 1.54.0 advisory and a duplicate Windows binding required by pcap 2.5.0. Tokio is updated to the patched 1.54.1 release. The user approved one exact duplicate-version exception for `windows-sys =0.36.1`. All other duplicate, advisory, license and source rules remain unchanged. The pinned cargo-deny 0.20.2 archive was checksum-verified before this command completed successfully.
 
 ```sh
 /tmp/pcr-cargo-deny/cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny --locked check

@@ -38,6 +38,39 @@ impl Drop for TlsDrop {
 thread_local! { static TLS: std::cell::RefCell<Option<TlsDrop>> = const { std::cell::RefCell::new(None) }; }
 
 #[test]
+fn callback_failure_keeps_diagnostics_and_refuses_following_events() {
+    let runtime = Runtime::new(1).unwrap();
+    let worker = Worker::new_in(&runtime, |event: u8| {
+        if event == 1 {
+            return Err(BoundaryError::new(
+                "callback rejected the event",
+                Classification::new("fixture.callback", Kind::Io, None),
+                vec!["supplied callback detail".into()],
+            )
+            .with_context(Some(packetcraftr_core::error::Coordinate::ProbeSequence(
+                17,
+            ))));
+        }
+        Ok(event + 10)
+    })
+    .unwrap();
+    let error = worker
+        .emit(1, &Deadline::new(Duration::from_secs(5)))
+        .unwrap_err();
+    assert!(error.to_string().contains("callback rejected the event"));
+    assert_eq!(error.classification().code, "fixture.callback");
+    assert_eq!(
+        error.context(),
+        Some(packetcraftr_core::error::Coordinate::ProbeSequence(17))
+    );
+    assert_eq!(error.causes(), ["supplied callback detail"]);
+    let stopped = worker
+        .emit(2, &Deadline::new(Duration::from_secs(5)))
+        .unwrap_err();
+    assert_eq!(stopped.classification().code, "internal.progressive_output");
+}
+
+#[test]
 fn callback_tls_remains_charged_until_actual_exit_and_other_slots_recover() {
     let runtime = Runtime::new(2).unwrap();
     let (entered, dropping) = mpsc::channel();

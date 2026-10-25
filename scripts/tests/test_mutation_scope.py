@@ -20,6 +20,7 @@ class MutationSelectionTests(unittest.TestCase):
             mutation_workspace(root)
             rust = 'crates/sample/src/lib.rs'
             python = 'scripts/beta.py'
+            (root / rust).write_text('/// Returns the fixture value.\n' + (root / rust).read_text())
             targets = select(root, (Change(rust), Change(python)))
             self.assertEqual({(target.group, target.language, target.files) for target in targets},
                              {('sample', 'rust', (rust,)), (python, 'python', (python,))})
@@ -31,7 +32,24 @@ class MutationSelectionTests(unittest.TestCase):
             path = 'crates/sample/src/lib.rs'
             original = (root / path).read_text()
             for test in ('#[test]\nfn checks_value() { assert_eq!(value(), 1); }\n',
-                         '#[cfg(test)]\nmod tests { #[test] fn checks_value() {} }\n'):
+                         '#[cfg(test)]\nmod tests { #[test] fn checks_value() {} }\n',
+                         '# [test]\nfn checks_value() { assert_eq!(value(), 1); }\n',
+                         '#[cfg_attr(test, test)]\nfn checks_value() { assert_eq!(value(), 1); }\n',
+                         '/// ```rust\n/// assert_eq!(sample::documented_value(), 1);\n/// ```\n'
+                         'pub fn documented_value() -> u8 { value() }\n',
+                         '/// ~~~\n/// assert_eq!(sample::documented_value(), 1);\n/// ~~~\n'
+                         'pub fn documented_value() -> u8 { value() }\n',
+                         '///     assert_eq!(sample::documented_value(), 1);\n'
+                         'pub fn documented_value() -> u8 { value() }\n',
+                         '///\tassert_eq!(sample::documented_value(), 1);\n'
+                         'pub fn documented_value() -> u8 { value() }\n',
+                         '//!     assert_eq!(sample::value(), 1);\n',
+                         '/**\n    assert_eq!(sample::documented_value(), 1);\n*/\n'
+                         'pub fn documented_value() -> u8 { value() }\n',
+                         '# [ doc = "    assert_eq!(sample::documented_value(), 1);" ]\n'
+                         'pub fn documented_value() -> u8 { value() }\n',
+                         '#[cfg_attr(all(), doc = "    assert_eq!(sample::documented_value(), 1);")]\n'
+                         'pub fn documented_value() -> u8 { value() }\n'):
                 (root / path).write_text(original + test)
                 targets = select(root, (Change(path, original),))
                 with self.subTest(test=test):

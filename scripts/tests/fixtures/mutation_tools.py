@@ -124,8 +124,8 @@ def cargo(argv: list[str], failure: str) -> int:
                      phase_results=[dict(phase='Build', process_status='Success'),
                                     dict(phase='Test', process_status=test_status[summary])])
                 for index, (mutant, summary) in enumerate(classified)]
-    for index in range(len(outcomes)):
-        (output / f'log/{index}.log').write_text('controlled test result')
+    for index, (mutant, _) in enumerate(classified):
+        (output / f'log/{index}.log').write_text('controlled test result for ' + mutant['name'])
     report = dict(cargo_mutants_version='rust-fixture', end_time=None if failure == 'unfinished' else 'finished',
                   total_mutants=len(inventory) + int(failure == 'inconsistent'), outcomes=[baseline, *outcomes])
     if failure != 'missing-report':

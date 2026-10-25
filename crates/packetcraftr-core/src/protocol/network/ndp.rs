@@ -14,7 +14,12 @@
 //!     options: vec![MessageOption::source_link_layer(MacAddress([2, 0, 0, 0, 0, 1]))],
 //! };
 //! let icmp = solicitation.to_icmpv6()?;
+//! // https://www.rfc-editor.org/rfc/rfc4861#section-4.3, checked 2026-10-25.
 //! assert_eq!(icmp.icmp_type, 135);
+//! assert_eq!(icmp.body.as_ref(), &[
+//!     0, 0, 0, 0, 0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+//!     1, 1, 2, 0, 0, 0, 0, 1,
+//! ]);
 //! assert_eq!(NeighborSolicitation::decode(&icmp.body)?, solicitation);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

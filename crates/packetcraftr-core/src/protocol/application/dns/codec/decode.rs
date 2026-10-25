@@ -16,6 +16,7 @@ mod records;
 /// use packetcraftr_core::protocol::application::dns::{Limits, Error, decode_name};
 ///
 /// // "a" then a pointer back to the root label at offset 0.
+/// // https://www.rfc-editor.org/rfc/rfc1035#section-4.1.4, checked 2026-10-25.
 /// let message = Bytes::from_static(&[0x00, 0x01, b'a', 0xc0, 0x00]);
 /// let (name, resume) = decode_name(&message, 1, Limits::default()).expect("bounded name");
 /// assert_eq!(name.labels(), [Bytes::from_static(b"a")]);

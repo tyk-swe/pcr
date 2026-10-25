@@ -68,7 +68,7 @@ pub(crate) fn install() -> Result<(), CliError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{StagedRegistration, remove_staged, signal};
     use crate::invocation::{Invocation, StreamEncoder};
     use crate::output::contract::{Command, Format};
@@ -79,7 +79,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    fn isolated(name: &str, scenario: impl FnOnce()) {
+    pub(crate) fn isolated(name: &str, scenario: impl FnOnce()) {
         if std::env::var("PACKETCRAFTR_CANCELLATION_CASE").is_ok_and(|value| value == name) {
             scenario();
             let marker = std::env::var_os("PACKETCRAFTR_CANCELLATION_COMPLETED").unwrap();
@@ -101,7 +101,7 @@ mod tests {
             if Instant::now() >= deadline {
                 let _ = child.kill();
                 let _ = child.wait();
-                panic!("isolated cancellation scenario did not finish");
+                panic!("isolated test scenario did not finish");
             }
             std::thread::sleep(Duration::from_millis(5));
         }

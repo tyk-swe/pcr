@@ -20,7 +20,9 @@
 //!     }],
 //! };
 //! let igmp = report.to_igmp()?;
+//! // https://www.rfc-editor.org/rfc/rfc3376#section-4.2, checked 2026-10-25.
 //! assert_eq!(igmp.igmp_type, 0x22);
+//! assert_eq!(igmp.body.as_ref(), &[0, 0, 0, 1, 1, 0, 0, 1, 232, 1, 1, 1, 192, 0, 2, 10]);
 //! assert_eq!(Report::from_igmp(&igmp)?, report);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

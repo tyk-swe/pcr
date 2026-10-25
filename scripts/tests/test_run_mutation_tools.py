@@ -63,6 +63,12 @@ class MutationToolExecutionTests(unittest.TestCase):
                 contexts = output / 'contexts'
                 context = create_context(root, executable, environment, plan, seed, contexts / 'portable')
                 self.assertEqual(json.loads(context.read_text())['shards'], shards)
+                accepted = context.read_bytes()
+                refused = invoke(root, executable, environment, ['context', '--plan', str(plan), '--language', 'rust',
+                    '--profile', 'portable', '--platform-label', 'ubuntu-24.04', '--output', str(context.parent)])
+                self.assertEqual(refused.returncode, 1)
+                self.assertTrue(context.is_file())
+                self.assertEqual(context.read_bytes(), accepted)
                 for shard in range(1, shards + 1):
                     folder = output / 'receiver' / str(shard) / 'run'
                     result = invoke(root, executable, environment, ['run', '--plan', str(plan), '--language', 'rust',
@@ -170,6 +176,13 @@ class MutationToolExecutionTests(unittest.TestCase):
             trap.write_text(new + '\n')
             output = root / 'artifacts'
             seed = create_seed(root, executable, environment, plan, output / 'seed-run')
+            canonical = next((output / 'seed-run/1').rglob('run.json'))
+            original = canonical.read_bytes()
+            refused = invoke(root, executable, environment, ['run', '--plan', str(plan), '--language', 'rust',
+                '--profile', 'all', '--platform-label', 'ubuntu-24.04', '--shard', '1', '--shards', '2',
+                '--seed', str(seed), '--output', str(output / 'seed-run/1')])
+            self.assertEqual(refused.returncode, 1)
+            self.assertEqual(canonical.read_bytes(), original)
             seed_text = (seed / 'sample.json').read_text()
             self.assertEqual({item['status'] for item in json.loads(seed_text)['report']['outcomes']},
                              {'killed', 'survived', 'timeout'})
@@ -181,13 +194,18 @@ class MutationToolExecutionTests(unittest.TestCase):
                     '--profile', 'portable', '--platform-label', 'ubuntu-24.04', '--shard', str(shard), '--shards', '2',
                     '--seed', str(seed), '--output', str(folder)])
                 self.assertEqual(result.returncode, 0, result.stderr)
-                metadata = json.loads(next(folder.rglob('run.json')).read_text())
+                metadata_path = next(folder.rglob('run.json'))
+                metadata = json.loads(metadata_path.read_text())
                 actual = parse_report(metadata['report'])
                 self.assertEqual(actual.expected, (survivor, timed_out, new))
                 self.assertEqual(tuple(item.identity for item in actual.outcomes), executed)
                 self.assertEqual({item.status for item in actual.outcomes}, {'killed'})
                 self.assertEqual(metadata['coverage_digest'], coverage_digest(coverage))
                 self.assertEqual(metadata['coverage'], coverage if shard == 1 else None)
+                for outcome in actual.outcomes:
+                    log = metadata_path.parent / outcome.evidence
+                    self.assertTrue(log.is_file())
+                    self.assertEqual(log.read_text(), 'controlled test result for ' + outcome.identity)
             result = invoke(root, executable, environment, ['check', '--plan', str(plan), '--language', 'rust',
                 '--seed', str(seed), '--output', str(output), '--platforms', 'ubuntu-24.04',
                 '--profiles', 'all', 'portable', '--shards', '2'])
@@ -568,6 +586,12 @@ class MutationToolExecutionTests(unittest.TestCase):
             checked = invoke(root, executable, environment, ['check', *arguments])
             self.assertEqual(checked.returncode, 0, checked.stderr)
             self.assertEqual(json.loads(checked.stdout)['status'], 'passed')
+            receipt = runs[0].read_bytes()
+            seed = Path(directory) / 'seed'
+            seed.mkdir()
+            refused = invoke(root, executable, environment, ['run', *arguments, '--seed', str(seed)])
+            self.assertEqual(refused.returncode, 1)
+            self.assertEqual(runs[0].read_bytes(), receipt)
             self.assertEqual((root / 'marker.txt').read_text(), 'original')
 
     def test_external_failures_never_publish_a_completed_measurement(self) -> None:

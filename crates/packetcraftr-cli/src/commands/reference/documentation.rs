@@ -480,9 +480,17 @@ mod tests {
         std::fs::write(&regular, b"old").unwrap();
         assert!(StagedFile::stage(&invocation(), &regular).is_err());
         assert_eq!(std::fs::read(&regular).unwrap(), b"old");
-        let invalid = temporary.path().join("invalid\0destination");
-        assert!(StagedFile::stage(&invocation(), &invalid).is_err());
-        assert!(StagedFile::stage_replacement(&invocation(), &invalid).is_err());
+        for name in ["invalid\0destination", "missing/", "missing/."] {
+            let invalid = temporary.path().join(name);
+            assert!(StagedFile::stage(&invocation(), &invalid).is_err());
+            assert!(StagedFile::stage_replacement(&invocation(), &invalid).is_err());
+        }
+        let short = temporary.path().join("x");
+        let mut staged = StagedFile::stage(&invocation(), &short).unwrap();
+        staged.as_file_mut().write_all(b"short file name").unwrap();
+        staged.sync().unwrap();
+        staged.persist().unwrap();
+        assert_eq!(std::fs::read(short).unwrap(), b"short file name");
     }
 
     #[cfg(unix)]
@@ -525,5 +533,31 @@ mod tests {
                 assert!(!original.exists());
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ordinary_publication_stays_private_with_a_permissive_umask() {
+        crate::cancellation::tests::isolated(
+            "commands::reference::documentation::tests::ordinary_publication_stays_private_with_a_permissive_umask",
+            || {
+                use nix::sys::stat::{Mode, umask};
+                use std::os::unix::fs::PermissionsExt;
+
+                umask(Mode::empty());
+                let temporary = tempfile::tempdir().unwrap();
+                let destination = temporary.path().join("report");
+                let mut staged = StagedFile::stage(&invocation(), &destination).unwrap();
+                staged.as_file_mut().write_all(b"private report").unwrap();
+                staged.sync().unwrap();
+                staged.persist().unwrap();
+                assert_eq!(std::fs::read(&destination).unwrap(), b"private report");
+                let permissions = Mode::from_bits_truncate(
+                    std::fs::metadata(destination).unwrap().permissions().mode(),
+                );
+                assert!(permissions.contains(Mode::S_IRUSR | Mode::S_IWUSR));
+                assert!(!permissions.intersects(Mode::S_IRWXG | Mode::S_IRWXO));
+            },
+        );
     }
 }

@@ -14,6 +14,8 @@
 //! };
 //!
 //! let mut frame = vec![0; 12];
+//! // EtherTypes: https://www.iana.org/assignments/ieee-802-numbers/ieee-802-numbers.xhtml, checked 2026-10-25.
+//! // IPv6 extension layout: https://www.rfc-editor.org/rfc/rfc8200#section-4, checked 2026-10-25.
 //! frame.extend_from_slice(&[0x81, 0x00, 0x20, 0x07, 0x86, 0xdd]); // VLAN 7, IPv6
 //! frame.extend_from_slice(&[0x60, 0, 0, 0, 0, 8, 0, 64]); // payload 8, Hop-by-Hop
 //! frame.extend_from_slice(&[0; 32]); // addresses

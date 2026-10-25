@@ -13,16 +13,21 @@ use super::wire::WRITER_TIMESTAMP_RESOLUTION;
 /// Classic PCAP file configuration.
 ///
 /// ```rust
-/// use packetcraftr_core::capture_file::{Endianness, PcapOptions, Writer};
+/// use packetcraftr_core::capture_file::{Endianness, PcapOptions, TimestampResolution, Writer};
 /// use packetcraftr_core::frame::LinkType;
 ///
 /// let options = PcapOptions {
 ///     endianness: Endianness::Big,
+///     timestamp_resolution: TimestampResolution::Decimal(6),
 ///     snap_len: 65_535,
 ///     max_size: 65_535,
 ///     ..PcapOptions::default()
 /// };
-/// let _writer = Writer::pcap_with_options(Vec::new(), LinkType::ETHERNET, options)?;
+/// let writer = Writer::pcap_with_options(Vec::new(), LinkType::ETHERNET, options)?;
+/// let bytes = writer.into_inner();
+/// // https://www.ietf.org/archive/id/draft-ietf-opsawg-pcap-09.html#name-file-header, checked 2026-10-25.
+/// assert_eq!(&bytes[..4], &[0xa1, 0xb2, 0xc3, 0xd4]);
+/// assert_eq!(&bytes[16..20], &65_535_u32.to_be_bytes());
 /// # Ok::<(), packetcraftr_core::capture_file::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,7 +61,7 @@ impl Default for PcapOptions {
 /// PCAPNG section configuration.
 ///
 /// ```rust
-/// use packetcraftr_core::capture_file::{PcapNgOptions, Writer};
+/// use packetcraftr_core::capture_file::{Error, PcapNgOptions, Writer};
 /// use packetcraftr_core::frame::LinkType;
 ///
 /// let options = PcapNgOptions {
@@ -64,7 +69,10 @@ impl Default for PcapOptions {
 ///     ..PcapNgOptions::default()
 /// };
 /// let mut writer = Writer::pcapng_with_options(Vec::new(), options)?;
-/// writer.add_interface(LinkType::ETHERNET)?;
+/// for index in 0..8 {
+///     assert_eq!(writer.add_interface(LinkType::ETHERNET)?, index);
+/// }
+/// assert!(matches!(writer.add_interface(LinkType::ETHERNET), Err(Error::InterfaceLimit { limit: 8 })));
 /// # Ok::<(), packetcraftr_core::capture_file::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

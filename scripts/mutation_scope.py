@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
+import re
 import subprocess
 import tomllib
 from typing import Literal
@@ -92,7 +93,13 @@ def select(root: Path, changes: tuple[Change, ...], *, full: bool = False) -> tu
 
 
 def has_rust_tests(source: str) -> bool:
-    return any(marker in source for marker in ('#[cfg(test)]', '#[test]'))
+    if any(marker in source for marker in ('#[cfg(test)]', '#[test]', '```', '~~~', '/**', '/*!')):
+        return True
+    if re.search(r'#\s*!?\s*\[[^]]*\b(?:doc|test)\b', source) is not None:
+        return True
+    return any(line.startswith(('///    ', '//!    '))
+               or line.startswith(('///', '//!')) and '\t' in line
+               for line in map(str.lstrip, source.splitlines()))
 
 
 def rust_target(root: Path, crate: str, changes: tuple[Change, ...], full: bool) -> Target | None:

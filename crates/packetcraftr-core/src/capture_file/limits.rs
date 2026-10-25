@@ -158,15 +158,23 @@ impl Budget {
 ///
 /// ```rust
 /// use std::io::Cursor;
-/// use packetcraftr_core::capture_file::{Reader, ReaderLimits, Writer};
-/// use packetcraftr_core::frame::LinkType;
+/// use packetcraftr_core::capture_file::{Error, Reader, ReaderLimits};
 ///
-/// let bytes = Writer::pcap(Vec::new(), LinkType::ETHERNET)?.into_inner();
+/// // https://www.ietf.org/archive/id/draft-ietf-opsawg-pcap-09.html#name-packet-record, checked 2026-10-25.
+/// let bytes = [
+///     0xd4, 0xc3, 0xb2, 0xa1, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+///     8, 0, 0, 0, 1, 0, 0, 0,
+///     0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 5, 0, 0, 0, 1, 2, 3, 4, 5,
+/// ];
 /// let options = ReaderLimits {
-///     max_size: 64 * 1024,
+///     max_size: 5,
 ///     ..ReaderLimits::default()
 /// };
-/// let _reader = Reader::with_limits(Cursor::new(bytes), options)?;
+/// let mut reader = Reader::with_limits(Cursor::new(bytes), options)?;
+/// assert_eq!(reader.next_frame()?.unwrap().bytes().as_ref(), &[1, 2, 3, 4, 5]);
+/// assert!(reader.next_frame()?.is_none());
+/// let mut smaller = Reader::with_limits(Cursor::new(bytes), ReaderLimits { max_size: 4, ..options })?;
+/// assert!(matches!(smaller.next_frame(), Err(Error::SizeLimitExceeded { declared: 5, limit: 4, .. })));
 /// # Ok::<(), packetcraftr_core::capture_file::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

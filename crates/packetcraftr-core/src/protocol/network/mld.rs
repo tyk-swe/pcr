@@ -20,7 +20,13 @@
 //!     }],
 //! };
 //! let icmp = report.to_icmpv6()?;
+//! // https://www.rfc-editor.org/rfc/rfc3810#section-5.2, checked 2026-10-25.
 //! assert_eq!(icmp.icmp_type, 143);
+//! assert_eq!(icmp.body.as_ref(), &[
+//!     0, 0, 0, 1, 2, 0, 0, 1,
+//!     0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0, 0, 1,
+//!     0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+//! ]);
 //! assert_eq!(Message::from_icmpv6(&icmp)?, Message::Mldv2Report(report));
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

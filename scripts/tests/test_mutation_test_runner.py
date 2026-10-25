@@ -69,11 +69,17 @@ class MutationTestRunnerTests(unittest.TestCase):
             root = Path(directory)
             runner_checkout(root)
             config = root / '.config/mutation.toml'
-            config.write_text(config.read_text().replace('["scripts/tests/test_alpha.py"]',
+            original = config.read_text()
+            config.write_text(original.replace('["scripts/tests/test_alpha.py"]',
                 '["scripts/tests/test_alpha.py", "scripts/tests/test_beta.py"]'))
             result = execute(root)
             self.assertEqual(result.returncode, 1)
             self.assertEqual(evidence(result), dict(kind='tests', run=2, failures=1, errors=0))
+            owners = ('scripts/tests/test_alpha.py',) * 300
+            config.write_text(original.replace('["scripts/tests/test_alpha.py"]', json.dumps(owners)))
+            result = execute(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(evidence(result), dict(kind='tests', run=len(owners), failures=0, errors=0))
 
     def test_runtime_test_errors_are_distinct_from_syntax_invalid_mutations(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

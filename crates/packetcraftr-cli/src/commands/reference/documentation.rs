@@ -552,11 +552,12 @@ mod tests {
                 staged.sync().unwrap();
                 staged.persist().unwrap();
                 assert_eq!(std::fs::read(&destination).unwrap(), b"private report");
-                let permissions = Mode::from_bits_truncate(
-                    std::fs::metadata(destination).unwrap().permissions().mode(),
-                );
-                assert!(permissions.contains(Mode::S_IRUSR | Mode::S_IWUSR));
-                assert!(!permissions.intersects(Mode::S_IRWXG | Mode::S_IRWXO));
+                let permissions =
+                    u64::from(std::fs::metadata(destination).unwrap().permissions().mode());
+                let owner = u64::from((Mode::S_IRUSR | Mode::S_IWUSR).bits());
+                let others = u64::from((Mode::S_IRWXG | Mode::S_IRWXO).bits());
+                assert_eq!(permissions & owner, owner);
+                assert_eq!(permissions & others, 0);
             },
         );
     }

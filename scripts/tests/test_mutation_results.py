@@ -107,7 +107,8 @@ class MutationReportTests(unittest.TestCase):
         output = 'MUTATION_RESULT ' + json.dumps(dict(kind='tests', run=3, failures=0, errors=0))
         result = dict(worker_outcome='normal', test_outcome='survived', output=output)
         cosmic_baseline([[item, result]])
-        rows: tuple[list[object], ...] = ([], [[item, result], [item, result]], [[item, None]],
+        rows: tuple[list[object], ...] = ([], [[item, result], [item, result]], [[]], [[item]],
+                [[item, result, 'unexpected extra field']], [[item, None]],
                 [[item | {'mutations': [dict(module_path='module.py')]}, result]],
                 [[item, result | {'test_outcome': 'incompetent'}]],
                 [[item, result | {'worker_outcome': 'exception'}]],
@@ -177,7 +178,12 @@ class MutationReportTests(unittest.TestCase):
             with self.subTest(summary=summary):
                 result = rust_results([mutant], raw, logs)[0]
                 self.assertEqual((result.identity, result.status, result.evidence), ('mutation', expected, 'mutant.log'))
-                invalid_phases = ((phase, 'Success'),) if summary == 'Timeout' else (('Check', process),)
+                invalid_phases: tuple[tuple[str, str | dict[str, int]], ...] = (
+                    ((phase, 'Success'),) if summary == 'Timeout' else (('Check', process),))
+                if summary in ('CaughtMutant', 'MissedMutant'):
+                    invalid_phases = (*invalid_phases, ('Build', process))
+                if summary == 'Unviable':
+                    invalid_phases = (*invalid_phases, ('Test', process))
                 for bad_phase, bad_process in (*invalid_phases, (phase, {'Failure': 13})):
                     invalid = dict(outcome, phase_results=[dict(phase=bad_phase, process_status=bad_process)])
                     with self.assertRaises(ValueError):
@@ -206,7 +212,8 @@ class MutationReportTests(unittest.TestCase):
         self.assertEqual(rust_results([mutant], raw, {})[0].status, 'survived')
         for phases in ([], [dict(phase='Build', process_status='Success')],
                        [dict(phase='Test', process_status={'Failure': 101})],
-                       [dict(phase='Build', process_status={'Failure': 101}), dict(phase='Test', process_status='Success')]):
+                       [dict(phase='Build', process_status={'Failure': 101}), dict(phase='Test', process_status='Success')],
+                       [dict(phase='Build', process_status='Success'), dict(phase='Test', process_status={'Failure': 101})]):
             invalid = baseline | {'phase_results': phases}
             with self.subTest(phases=phases), self.assertRaises(ValueError):
                 rust_results([mutant], raw | {'outcomes': [invalid, outcome]}, {})

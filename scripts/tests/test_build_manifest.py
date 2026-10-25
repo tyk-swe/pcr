@@ -79,6 +79,7 @@ class BuildManifestTests(unittest.TestCase):
                     ('target', ('aaa-target', 'zzz-target'), 'packaged target'),
                     ('feature_variant', ('aaa-mode', 'zzz-mode'), 'packaged feature_variant'),
                     ('binary', ('aaa-binary', 'zzz-binary'), 'packaged binary'),
+                    ('binary_sha256', ('0' * 64, 'f' * 64), 'packaged binary'),
                 ):
                     for value in values:
                         output.write_text(json.dumps(document | {field: value}))
@@ -128,15 +129,19 @@ class BuildManifestTests(unittest.TestCase):
 
     def test_compiler_identity_preserves_multiline_but_rejects_controls(self) -> None:
         document = identity()
-        document['rustc'] = 'rustc fixture-version\r\nbinary:\trustc\nhost: test'
+        document['rustc'] = 'rustc fixture-version~\r\nbinary:\trustc\nhost: test\u00a0λ'
         manifest.validate_identity(document)
-        for control in ('\x00', '\x1b', '\x7f', '\x85'):
+        for control in ('\x00', '\x1b', '\x1f', '\x7f', '\x85', '\x9f'):
             document['rustc'] = 'rustc fixture-version' + control
             with self.subTest(control=control), self.assertRaisesRegex(ValueError, 'control'):
                 manifest.validate_identity(document)
 
     def test_version_is_an_unambiguous_product_line(self) -> None:
-        for version in ['other 1', 'packetcraftr 1\npacketcraftr 2', 'packetcraftr \x1b[0m']:
+        for version in ('packetcraftr fixture~', 'packetcraftr fixture-λ'):
+            manifest.validate_identity(identity() | {'version': version})
+        controls = tuple('packetcraftr fixture' + chr(value) for value in (*range(32), 127))
+        for version in ('other 1', 'packetcraftr 1\npacketcraftr 2',
+                        'packetcraftr 1\u2028packetcraftr 2', *controls):
             document = identity()
             document['version'] = version
             with self.subTest(version=version), self.assertRaises(ValueError):
@@ -158,10 +163,17 @@ class BuildManifestTests(unittest.TestCase):
                 manifest.load_manifest(path)
 
     def test_mode_is_required_before_binary_access(self) -> None:
-        with patch.object(manifest, 'digest') as digest:
-            with self.assertRaises(SystemExit):
-                manifest.main(['--binary', 'missing'])
-            digest.assert_not_called()
+        for arguments in ([], ['--binary', 'missing'], ['--verify', 'metadata.json']):
+            with self.subTest(arguments=arguments), \
+                    patch.object(Path, 'is_file', side_effect=AssertionError('unexpected binary access')), \
+                    self.assertRaises(SystemExit) as rejected:
+                manifest.main(arguments)
+            self.assertNotEqual(rejected.exception.code, 0)
+        result = subprocess.run([sys.executable, '-c',
+                                 'import runpy\nrunpy.run_path("build-manifest.py")\nprint("loaded")\n'],
+                                cwd=ROOT / 'scripts', capture_output=True, text=True, timeout=5, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, 'loaded\n')
 
     def test_invalid_release_inputs_do_not_execute_binary(self) -> None:
         with patch.object(manifest.subprocess, 'check_output') as command:

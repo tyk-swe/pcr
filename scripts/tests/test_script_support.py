@@ -143,6 +143,7 @@ class StrictJsonTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             strict_json('"é"', max_bytes=3)
         self.assertEqual(strict_json('"é"', max_bytes=4), 'é')
+        self.assertEqual(strict_json('"é"'.encode('utf-8'), max_bytes=5), 'é')
 
     def test_read_has_a_finite_limit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -178,8 +179,11 @@ class StrictJsonTests(unittest.TestCase):
                     read_json(path, max_bytes=limit)
 
     def test_invalid_json_limits_are_rejected_before_io(self) -> None:
-        for limit in [0, -1, True, 1.5]:
-            with self.subTest(limit=limit), self.assertRaises(ValueError):
+        for limit in [0, -1, -2, True, 1.5]:
+            with self.subTest(limit=limit), \
+                    patch.object(Path, 'is_file', side_effect=AssertionError('unexpected file metadata access')), \
+                    patch.object(Path, 'open', side_effect=AssertionError('unexpected file read')), \
+                    self.assertRaises(ValueError):
                 read_json(Path('missing'), max_bytes=cast(int, limit))
             with self.subTest(limit=limit), self.assertRaises(ValueError):
                 strict_json('0', max_bytes=cast(int, limit))
@@ -192,6 +196,8 @@ class AtomicReportTests(unittest.TestCase):
             report, source = Path(directory) / 'report.json', Path(directory) / 'input'
             source.write_bytes(b'input')
             report.write_text('{"status":"passed"}')
+            script_support.prepare_report(report, source)
+            self.assertFalse(report.exists())
             script_support.prepare_report(report, source)
             self.assertFalse(report.exists())
             with self.assertRaises(ValueError):
@@ -249,7 +255,9 @@ class AtomicReportTests(unittest.TestCase):
             alias.hardlink_to(source)
             with self.assertRaises(ValueError):
                 distinct_paths(alias, source)
-            distinct_paths(source.with_name('report.json'), source)
+            for name in ('a-report.json', 'report.json'):
+                with self.subTest(output=name):
+                    distinct_paths(source.with_name(name), source)
             missing = Path(directory) / 'absent-input'
             for output in (missing, Path(directory) / 'nested/../absent-input'):
                 with self.subTest(output=output), self.assertRaises(ValueError):

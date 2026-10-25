@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -42,7 +43,7 @@ def evidence(result: subprocess.CompletedProcess[str]) -> dict[str, object]:
 
 
 class MutationTestRunnerTests(unittest.TestCase):
-    def test_importing_the_harness_does_not_start_a_measurement(self) -> None:
+    def test_module_loading_respects_the_requested_entrypoint(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             runner_checkout(root)
@@ -55,6 +56,14 @@ class MutationTestRunnerTests(unittest.TestCase):
                                     text=True, timeout=5, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, 'loaded\n')
+            program = ('import os, runpy, sys\n'
+                       'sys.argv = ["scripts/mutation_test_runner.py", "--module", "scripts/alpha.py"]\n'
+                       'runpy.run_path(sys.argv[0], run_name=os.environ["MUTATION_TEST_ENTRYPOINT"])\n')
+            result = subprocess.run([sys.executable, '-c', program], cwd=root, capture_output=True,
+                                    env=os.environ | {'MUTATION_TEST_ENTRYPOINT': '__main__'},
+                                    text=True, timeout=5, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(evidence(result), dict(kind='tests', run=1, failures=0, errors=0))
 
     def test_selected_module_runs_its_owned_tests_without_unrelated_failures(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

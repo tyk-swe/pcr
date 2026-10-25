@@ -109,15 +109,23 @@ class MutationReuseTests(unittest.TestCase):
     def test_context_plan_preserves_exact_groups_and_receiver_provenance(self) -> None:
         first, first_seed = context_group('first', 64, 4)
         second, second_seed = context_group('second', 128, 1)
+        language = text(record(json.loads(json.dumps(asdict(first.target))))['language'])
+        match language:
+            case 'rust':
+                first = replace(first, target=replace(first.target, language=language))
+            case _:
+                self.fail('controlled target must select Rust')
         groups = (first, second)
         targets = (first.target, second.target, Target('scripts/other.py', 'python', (), 'other language'))
         seeds = {'first': first_seed, 'second': second_seed}
-        for ordered in (groups, tuple(reversed(groups))):
-            plan = parse_plan(encode(context_value(ordered, 4)), targets, seeds)
-            self.assertEqual((plan.platform, plan.profile, plan.revision, plan.tool_version, plan.shards),
-                             ('windows-2022', 'portable', REPORT.revision, TOOL_VERSION, 4))
-            self.assertEqual({group.target.group: group for group in plan.groups},
-                             {'first': first, 'second': second})
+        for platform in ('macos-14', 'windows-2022'):
+            for ordered in (groups, tuple(reversed(groups))):
+                value = context_value(ordered, 4) | {'platform': platform}
+                plan = parse_plan(encode(value), targets, seeds, platform=platform)
+                self.assertEqual((plan.platform, plan.profile, plan.revision, plan.tool_version, plan.shards),
+                                 (platform, 'portable', REPORT.revision, TOOL_VERSION, 4))
+                self.assertEqual({group.target.group: group for group in plan.groups},
+                                 {'first': first, 'second': second})
 
     def test_context_plan_requires_each_selected_group_once(self) -> None:
         first, first_seed = context_group('first', 64, 4)
@@ -134,6 +142,14 @@ class MutationReuseTests(unittest.TestCase):
             parse_plan(encode(context_value((first,), 4)), (first.target, first.target), seeds)
         with self.assertRaises(ValueError):
             context_shards((first, first), seeds)
+        many = tuple(context_group(f'group{index}', 0, 0) for index in range(300))
+        many_groups = tuple(group for group, _ in many)
+        many_seeds = {group.target.group: seed for group, seed in many}
+        plan = parse_plan(encode(context_value(many_groups, 1)),
+                          tuple(group.target for group in many_groups), many_seeds)
+        self.assertEqual(plan.shards, 1)
+        self.assertEqual({group.target.group for group in plan.groups},
+                         {f'group{index}' for index in range(300)})
 
     def test_context_plan_rejects_changed_targets_and_seed_evidence(self) -> None:
         group, seed = context_group('core', 64, 4)
@@ -217,10 +233,11 @@ class MutationReuseTests(unittest.TestCase):
         runs = receiver_runs(data, inventory)
         self.assertEqual(validate_coverage(seed, data, runs, expected_inventory=inventory).executable_ids,
                          ('timeout', 'new'))
-        changed = receiver_runs(data, ('killed', 'replacement'))
-        self.assertEqual(validate_coverage(seed, data, changed).executable_ids, ('replacement',))
-        with self.assertRaises(ValueError):
-            validate_coverage(seed, data, changed, expected_inventory=inventory)
+        for replacement in ('replacement', 'zz-replacement'):
+            changed = receiver_runs(data, ('killed', replacement))
+            self.assertEqual(validate_coverage(seed, data, changed).executable_ids, (replacement,))
+            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
+                validate_coverage(seed, data, changed, expected_inventory=inventory)
 
     def test_coverage_digest_binds_values_and_ignores_object_key_order(self) -> None:
         coverage: dict[str, object] = dict(seed='caf\u00e9', reused_ids=['first'], inventory=['second', 'first'])

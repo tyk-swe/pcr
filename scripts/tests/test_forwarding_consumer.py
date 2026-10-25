@@ -331,9 +331,9 @@ class ForwardingConsumerTests(unittest.TestCase):
                 with self.subTest(format=mode, mode=invalid_mode), self.assertRaises(consumer.ContractError):
                     consumer.consume(io.BytesIO(json.dumps(supplied).encode() + b'\n'), mode, 0)
         aggregate = dict(envelope(), mode='aggregate')
-        for unknown in ('a', 'jsonz', 'other'):
+        for unknown, data in (('a', json.dumps(aggregate).encode()), ('jsonz', encoded), ('other', encoded)):
             with self.subTest(format=unknown), self.assertRaises(consumer.ContractError):
-                consumer.consume(io.BytesIO(json.dumps(aggregate).encode()), unknown, 0)
+                consumer.consume(io.BytesIO(data), unknown, 0)
         events = [dict(schema=terminal['schema'], command=terminal['command'], mode='stream',
                        sequence=index, event='event', status='success') for index in range(300)]
         ending = dict(envelope(), sequence=300)
@@ -477,7 +477,7 @@ class ForwardingConsumerTests(unittest.TestCase):
                 value = envelope()
                 mutate(value['result'])
                 with self.assertRaises(consumer.ContractError):
-                    consume(value)
+                    consume(value, 1 if label == 'false verdict' else 0)
         value = envelope()
         value['result']['matches'][0]['key'] = [None]
         with self.assertRaises(consumer.ContractError):

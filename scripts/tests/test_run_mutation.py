@@ -15,10 +15,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from support import ROOT, mutation_checkout, report
+from support import PYTHON_TOOL_VERSION, ROOT, mutation_checkout, mutation_tools, report
 from mutation_results import Exclusion, Outcome, Report, parse_report, score
 from mutation_scope import Target
-from run_mutation import check, merge_reports, seed_proofs, snapshot
+from run_mutation import check, merge_reports, python as run_python, seed_proofs, snapshot
 
 
 def measurement(value: Report, target: Target, platform: str = 'Linux',
@@ -28,6 +28,45 @@ def measurement(value: Report, target: Target, platform: str = 'Linux',
 
 
 class MutationScoreTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'posix', 'SDK doubles use POSIX launchers')
+    def test_python_timeout_tracks_only_a_successful_baseline(self) -> None:
+        for elapsed, timeout in ((0.5, 30.0), (12.5, 37.5), (100.0, 300.0)):
+            with self.subTest(elapsed=elapsed), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory) / 'checkout'
+                mutation_checkout(root)
+                executable, environment = mutation_tools(root, Path(directory) / 'tools/bin')
+                output = root / 'artifacts/python'
+                output.mkdir(parents=True)
+                def clock() -> float:
+                    return elapsed if (output / 'baseline.sqlite').is_file() else 0.0
+
+                target = Target('scripts/alpha.py', 'python', ('scripts/alpha.py',), 'controlled calibration')
+                with patch.dict(os.environ, environment, clear=True), patch('run_mutation.sys.executable', str(executable)):
+                    measured = run_python(target, root, output, PYTHON_TOOL_VERSION, clock=clock)
+                self.assertEqual(len(measured.expected), 2)
+                self.assertEqual(tuple(outcome.status for outcome in measured.outcomes), ('killed', 'killed'))
+                self.assertEqual(float((output / 'baseline.timeout').read_text()), 300.0)
+                self.assertEqual(float((output / 'session.timeout').read_text()), timeout)
+                self.assertEqual(json.loads((output / 'timing.json').read_text()),
+                                 dict(baseline_seconds=elapsed, baseline_timeout_seconds=300.0,
+                                      mutant_timeout_seconds=timeout))
+        for failure in ('empty-baseline', 'baseline-incompetent', 'baseline-zero-tests'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory) / 'checkout'
+                mutation_checkout(root)
+                executable, environment = mutation_tools(root, Path(directory) / 'tools/bin')
+                output = root / 'artifacts/python'
+                output.mkdir(parents=True)
+                def failed_clock() -> float:
+                    return 20.0 if (output / 'baseline.sqlite').is_file() else 0.0
+
+                target = Target('scripts/alpha.py', 'python', ('scripts/alpha.py',), 'controlled calibration')
+                with patch.dict(os.environ, environment | {'MUTATION_FIXTURE_FAILURE': failure}, clear=True), \
+                        patch('run_mutation.sys.executable', str(executable)), self.assertRaises(ValueError):
+                    run_python(target, root, output, PYTHON_TOOL_VERSION, clock=failed_clock)
+                self.assertFalse((output / 'session.timeout').exists())
+                self.assertFalse((output / 'timing.json').exists())
+
     def test_context_matrix_requires_each_planned_cohort_and_complete_inventory(self) -> None:
         revision = 'a' * 40 + ' tree ' + 'b' * 64
         value = replace(report(60, 4), revision=revision)

@@ -167,6 +167,8 @@ def cosmic(argv: list[str], failure: str) -> int:
                 output = 'MUTATION_RESULT ' + json.dumps(dict(kind='tests', run=1, failures=int(status == 'killed'), errors=0))
                 if failure == 'runner-syntax':
                     output = Path(argv[1]).with_suffix('.output').read_text()
+                if failure == 'timeout':
+                    status, output = 'killed', 'timeout'
                 result = dict(worker_outcome='exception' if failure == 'worker-error' else 'normal',
                               test_outcome=status, output=output, diff='controlled SDK mutation')
             print(json.dumps([item, result]))
@@ -177,10 +179,15 @@ def cosmic(argv: list[str], failure: str) -> int:
     if not isinstance(command, str) or not isinstance(module, str) or not Path(module).is_file():
         return 7
     if action == 'baseline':
+        Path(argv[argv.index('--session-file') + 1]).with_suffix('.timeout').write_text(str(settings['timeout']))
         if failure == 'empty-baseline':
             return 7
         baseline_path = Path(argv[argv.index('--session-file') + 1])
-        if failure == 'baseline-incompetent':
+        if failure == 'baseline-zero-tests':
+            baseline_result = dict(worker_outcome='normal', test_outcome='survived',
+                                   output='MUTATION_RESULT {"kind":"tests","run":0,"failures":0,"errors":0}')
+            baseline_exit = 0
+        elif failure == 'baseline-incompetent':
             baseline_result = dict(worker_outcome='normal', test_outcome='incompetent', output='launcher unavailable')
             baseline_exit = 0
         else:
@@ -192,6 +199,7 @@ def cosmic(argv: list[str], failure: str) -> int:
         baseline_path.with_suffix('.result').write_text(json.dumps(baseline_result))
         return baseline_exit
     if action == 'exec':
+        Path(argv[2]).with_suffix('.timeout').write_text(str(settings['timeout']))
         if Path('marker.txt').read_text() != 'original':
             return 7
         Path('marker.txt').write_text('changed by SDK')

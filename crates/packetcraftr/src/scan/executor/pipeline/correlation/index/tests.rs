@@ -451,6 +451,63 @@ fn materialized_sent(
 }
 
 #[test]
+fn invalid_sent_packet_reports_its_own_probe_sequence() {
+    use packetcraftr_core::error::{Classified, Coordinate};
+
+    let probes = [
+        probe(Endpoint::Udp { port: 1000 }, 11, false),
+        probe(Endpoint::Udp { port: 2000 }, 22, false),
+        probe(Endpoint::Udp { port: 3000 }, 33, false),
+    ];
+    let sent = [0, 1, 0]
+        .map(|index| {
+            materialized_sent(
+                request(&probes[index]),
+                packetcraftr_netio::interface::Id {
+                    name: "candidate0".into(),
+                    index: 1,
+                },
+            )
+            .as_ref()
+            .clone()
+        })
+        .to_vec();
+    let bytes = sent.iter().map(|packet| packet.bytes_sent() as u64).sum();
+    let evidence = crate::probe::Evidence {
+        observation_quality: None,
+        permit: crate::evidence::ExecutionPermit::new(),
+        sent,
+        responses: Vec::new(),
+        unsolicited: Vec::new(),
+        undecoded: Vec::new(),
+        diagnostics: Vec::new(),
+        stats: crate::Stats {
+            packets_attempted: 3,
+            packets_completed: 3,
+            bytes,
+            ..Default::default()
+        },
+    };
+    let error = crate::probe::runner::validate_batch_evidence(
+        crate::scan::error::probe_error,
+        &probes,
+        Duration::from_secs(1),
+        &evidence,
+        crate::evidence::Limits::default(),
+        |probe, packet| {
+            packet.get::<Udp>().map(|udp| udp.destination_port) == probe.endpoint.port()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.context(), Some(Coordinate::ProbeSequence(33)));
+    assert!(matches!(
+        error,
+        crate::scan::Error::InvalidEvidence { sequence: 33, message }
+            if message.contains("sent packet does not preserve the scan destination and probe identity")
+    ));
+}
+
+#[test]
 fn indexed_correlation_preserves_generation_freshness_deadlines_interfaces_and_late_replies() {
     let native = packetcraftr_netio::interface::Id {
         index: 1,

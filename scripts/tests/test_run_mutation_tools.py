@@ -403,6 +403,7 @@ class MutationToolExecutionTests(unittest.TestCase):
                 (Target('sample', 'rust', (), 'complete survivors'), 'survivor', 0, 3, 3, 0),
                 (Target('scripts/alpha.py', 'python', ('scripts/alpha.py',), 'complete survivors'), 'survivor', 0, 2, 2, 0),
                 (Target('sample', 'rust', (), 'complete timeout'), 'timeout', 2, 3, 0, 1),
+                (Target('scripts/alpha.py', 'python', ('scripts/alpha.py',), 'complete timeout'), 'timeout', 0, 2, 0, 2),
             ):
                 plan = Path(directory) / f'{target.language}-{failure}.json'
                 plan.write_text(json.dumps([asdict(target)]))

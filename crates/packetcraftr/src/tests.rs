@@ -23,7 +23,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 fn decision() -> Decision {
@@ -133,6 +133,14 @@ fn absolute_hostname_and_resolver_spelling() {
 }
 #[test]
 fn clock_stops_at_spent_deadline() {
+    let not_before = Instant::now() + Duration::from_millis(10);
+    SystemClock
+        .sleep(
+            not_before.saturating_duration_since(Instant::now()),
+            &Deadline::new(Duration::from_secs(1)),
+        )
+        .unwrap();
+    assert!(Instant::now() >= not_before);
     let (started, beginning) = mpsc::sync_channel(1);
     let (finished, completion) = mpsc::sync_channel(1);
     let worker = std::thread::spawn(move || {
@@ -146,6 +154,32 @@ fn clock_stops_at_spent_deadline() {
         .expect("spent control must interrupt sleep")
         .unwrap();
     worker.join().unwrap();
+}
+
+#[test]
+fn client_accessors_preserve_supplied_registry_policy_and_runtime() {
+    let allowed = "127.0.0.2".parse().unwrap();
+    let policy = crate::policy::Policy {
+        allowed_destinations: vec![crate::policy::DestinationConstraint::Exact(allowed)],
+        ..Default::default()
+    };
+    let client = crate::Client::new(packetcraftr_core::protocol::builtin::registry(), policy, ())
+        .with_runtime(crate::runtime::Runtime::new(0).unwrap());
+    assert_eq!(
+        client
+            .registry()
+            .protocol_named("IPv6")
+            .map(packetcraftr_core::layer::Id::as_str),
+        Some("ipv6")
+    );
+    client.policy().authorize_destination(allowed).unwrap();
+    assert!(matches!(
+        client
+            .policy()
+            .authorize_destination("127.0.0.1".parse().unwrap()),
+        Err(crate::policy::Error::DestinationNotAllowed { .. })
+    ));
+    assert_eq!(client.runtime().capacity(), 0);
 }
 #[test]
 fn interface_ambiguity_and_late_enumeration() {

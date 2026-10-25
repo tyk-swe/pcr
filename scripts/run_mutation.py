@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, replace
 import hashlib
 import json
@@ -13,6 +13,7 @@ import subprocess
 from subprocess import SubprocessError
 import sys
 import tempfile
+from time import monotonic
 from typing import Sequence
 
 from mutation_results import (Exclusion, Outcome, Report, Status, cosmic_baseline, cosmic_identity, cosmic_results,
@@ -161,15 +162,20 @@ def rust(target: Target, root: Path, output: Path, profile: str, shard: int, sha
                   inventory, outcomes, True, True), coverage
 
 
-def python(target: Target, root: Path, output: Path, version: str) -> Report:
+def python(target: Target, root: Path, output: Path, version: str,
+           clock: Callable[[], float] = monotonic) -> Report:
     config = output / 'cosmic.toml'
     runner = output / 'test_runner.py'
     shutil.copy2(root / 'scripts/mutation_test_runner.py', runner)
     test_command = shlex.join((sys.executable, str(runner), '--module', target.group))
-    config.write_text('[cosmic-ray]\nmodule-path = ' + json.dumps(target.group)
-                      + '\ntimeout = 30.0\nexcluded-modules = []\ntest-command = '
-                      + json.dumps(test_command) + '\n[cosmic-ray.distributor]\nname = "local"\n',
-                      encoding='utf-8')
+
+    def configure(timeout: float) -> None:
+        config.write_text('[cosmic-ray]\nmodule-path = ' + json.dumps(target.group)
+                          + '\ntimeout = ' + str(timeout) + '\nexcluded-modules = []\ntest-command = '
+                          + json.dumps(test_command) + '\n[cosmic-ray.distributor]\nname = "local"\n',
+                          encoding='utf-8')
+
+    configure(300.0)
     session = output / 'session.sqlite'
     cosmic = [str(Path(sys.executable).with_name('cosmic-ray'))]
     if command([*cosmic, 'init', str(config), str(session)], root, output / 'init.log'):
@@ -180,12 +186,18 @@ def python(target: Target, root: Path, output: Path, version: str) -> Report:
     expected = tuple(cosmic_identity(sequence(json.loads(line))[0])
                      for line in inventory.read_text(encoding='utf-8').splitlines())
     baseline_session = output / 'baseline.sqlite'
+    started = clock()
     if command([*cosmic, 'baseline', str(config), '--session-file', str(baseline_session)], root, output / 'baseline.log'):
         raise ValueError('Cosmic Ray baseline failed')
+    elapsed = clock() - started
     baseline_dump = output / 'baseline.jsonl'
     if command([*cosmic, 'dump', str(baseline_session)], root, baseline_dump):
         raise ValueError('Cosmic Ray baseline export failed')
     cosmic_baseline([json.loads(line) for line in baseline_dump.read_text(encoding='utf-8').splitlines()])
+    timeout = max(30.0, 3 * elapsed)
+    configure(timeout)
+    write(output / 'timing.json', dict(baseline_seconds=elapsed, baseline_timeout_seconds=300.0,
+                                     mutant_timeout_seconds=timeout))
     if command([*cosmic, 'exec', str(config), str(session)], root, output / 'exec.log'):
         raise ValueError('Cosmic Ray exec failed')
     dump = output / 'cosmic.jsonl'

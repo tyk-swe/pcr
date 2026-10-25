@@ -24,8 +24,46 @@ use std::{
         Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
+
+#[derive(Clone)]
+struct ControlledClock(Arc<Mutex<Instant>>);
+
+impl ControlledClock {
+    fn advance(&self, elapsed: Duration) {
+        *self.0.lock().unwrap() += elapsed;
+    }
+}
+
+impl Clock for ControlledClock {
+    type Error = Infallible;
+
+    fn now(&self) -> Instant {
+        *self.0.lock().unwrap()
+    }
+
+    fn sleep(&self, delay: Duration, _: &Deadline) -> Result<(), Self::Error> {
+        self.advance(delay);
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct TimedTransmit {
+    clock: ControlledClock,
+    sent: Arc<Mutex<Vec<(Instant, Bytes)>>>,
+}
+
+impl transmit::Provider for TimedTransmit {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
+        self.sent
+            .lock()
+            .unwrap()
+            .push((self.clock.now(), frame.bytes().clone()));
+        Ok(transmit::Submission::start().complete(frame.bytes().len(), frame.bytes().clone()))
+    }
+}
 
 #[derive(Clone)]
 struct Routes {
@@ -201,62 +239,294 @@ fn assert_packet_bytes(bytes: &Bytes, source: std::net::Ipv4Addr, payload_len: u
 }
 
 #[test]
-fn interrupted_neighbor_io_preserves_sent_request_statistics() {
-    let (client, routes, _, _) = fixture();
-    let operation = Execution::new(&client, Duration::from_secs(10));
-    let deadline = operation.deadline(&client, Duration::from_secs(10));
-    let options = Options {
-        plan: route::Options {
-            link_mode: Mode::Layer2,
+fn send_paces_actual_packets_at_the_requested_rate() {
+    let (original, routes, interfaces, _) = fixture();
+    let clock = ControlledClock(Arc::new(Mutex::new(Instant::now())));
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let transmit = TimedTransmit {
+        clock: clock.clone(),
+        sent: Arc::clone(&sent),
+    };
+    let client = Client::new(
+        Arc::clone(original.registry()),
+        original.policy().clone(),
+        ProviderSet::packet(routes, interfaces, NoCapture, transmit),
+    )
+    .with_clock(clock);
+    let mut request = crate::send::Request::packet(packet(3), options());
+    request.repeat = 3;
+    request.rate = Some(3);
+    let report = client
+        .send_layer3(request, |_: crate::send::Event| Ok(()))
+        .unwrap();
+    let observed = sent.lock().unwrap();
+    assert_eq!(observed.len(), 3);
+    for (_, bytes) in observed.iter() {
+        assert_packet_bytes(bytes, "10.0.0.2".parse().unwrap(), 3);
+    }
+    let interval = Duration::from_nanos(333_333_334);
+    assert_eq!(observed[1].0.duration_since(observed[0].0), interval);
+    assert_eq!(observed[2].0.duration_since(observed[1].0), interval);
+    assert_eq!(report.stats.elapsed, interval * 2);
+}
+
+#[test]
+fn expired_preparation_refuses_provider_work_at_the_deadline_boundary() {
+    let (client, routes, _, tx) = fixture();
+    let clock = ControlledClock(Arc::new(Mutex::new(Instant::now())));
+    let source = clock.clone();
+    let deadline = Deadline::with_time_source(Duration::from_secs(1), move || source.now());
+    clock.advance(Duration::from_secs(1));
+    let client = client.with_clock(clock).with_deadline(deadline);
+    routes.forbid_lookup.store(true, Ordering::Relaxed);
+    let error = client
+        .send_layer3(
+            crate::send::Request::packet(packet(3), options()),
+            |_: crate::send::Event| Ok(()),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        crate::send::Error::Preparation(Error::Io(LiveIoError::DeadlineExceeded {
+            operation: "preparing the exchange"
+        }))
+    ));
+    assert!(tx.0.lock().unwrap().is_empty());
+}
+
+struct NoTcp;
+impl packetcraftr_netio::tcp::Provider for NoTcp {
+    type Stream = packetcraftr_netio::tcp::SystemStream;
+
+    fn connect(
+        &self,
+        _: std::net::SocketAddr,
+        _: &Deadline,
+    ) -> Result<Self::Stream, packetcraftr_netio::tcp::Error> {
+        panic!("DNS admission must not connect")
+    }
+}
+
+struct NoResolver;
+impl crate::target::Resolver for NoResolver {
+    fn resolve(
+        &self,
+        _: &crate::target::Hostname,
+        _: usize,
+    ) -> Result<Vec<IpAddr>, crate::target::Error> {
+        panic!("DNS admission must not resolve")
+    }
+}
+
+fn dns_request() -> crate::dns::Request {
+    crate::dns::Request {
+        server: "fd00::1".parse().unwrap(),
+        address_family: crate::target::Family::Ipv6,
+        server_port: 53,
+        source_port: 49_152,
+        query_name: "example.test".into(),
+        query_type: crate::dns::QueryType::A,
+        transaction_id: 0x1234,
+        recursion_desired: true,
+        edns: None,
+        transport: crate::dns::TransportMode::Udp,
+        attempts: 2,
+        timeout: Duration::from_millis(100),
+        queries_per_second: None,
+        limits: Default::default(),
+        route: options().plan,
+        collection: Default::default(),
+    }
+}
+
+#[test]
+fn dns_admission_counts_complete_query_frames_before_provider_work() {
+    use packetcraftr_core::error::Classified;
+    use packetcraftr_core::protocol::{application::dns::Dns, link::Ethernet, network::Ipv6};
+
+    let (_, routes, interfaces, tx) = fixture();
+    routes.forbid_lookup.store(true, Ordering::Relaxed);
+    let request = dns_request();
+    let query = crate::dns::wire::encode_query(
+        &request.query_name,
+        request.query_type,
+        request.transaction_id,
+        request.recursion_desired,
+        None,
+    )
+    .unwrap();
+    let mut packet = Packet::new();
+    packet.push(Ethernet::default());
+    packet.push(Ipv6 {
+        source: "fd00::2".parse().unwrap(),
+        destination: "fd00::1".parse().unwrap(),
+        ..Default::default()
+    });
+    packet.push(Udp {
+        source_port: request.source_port,
+        destination_port: request.server_port,
+        ..Default::default()
+    });
+    packet.push(Dns::try_from(query).unwrap());
+    let frame = packetcraftr_core::build::Builder::new(builtin::registry())
+        .build(packet, Default::default(), Default::default())
+        .unwrap();
+    let expected_bytes = frame.bytes.len() as u64 * u64::from(request.attempts);
+    let client = Client::new(
+        builtin::registry(),
+        Policy {
+            allowed_destinations: vec![DestinationConstraint::Exact("fd00::1".parse().unwrap())],
+            max_bytes_per_operation: expected_bytes - 1,
             ..Default::default()
         },
-        ..Default::default()
-    };
-    let mut admission = client
-        .admitting_in(&options, 1, &deadline, &operation)
-        .unwrap();
-    let packet = packet(1);
-    let route = admission
-        .route_on(&packet, "10.0.0.1".parse().unwrap(), None)
-        .unwrap();
-    let admitted = admission.admit_on(packet, &route).unwrap();
-    let request = route::neighbor_request(&route.plan).unwrap();
-    routes.decision.lock().unwrap().source_mac = None;
-    let cancellation = Cancellation::default();
-    cancellation.cancel();
-    let result = admission
-        .discover()
-        .stages
-        .materialize_using(admitted, |_, _| {
-            Err(crate::neighbor::Error::Io {
-                interface: request.interface.name.clone().into_boxed_str(),
-                target: request.target,
-                operation: "receiving discovery response",
-                spent: Some(Box::new(crate::neighbor::FailureEvidence {
-                    attempts: 1,
-                    captured: Box::default(),
-                    evidence_truncated: false,
-                })),
-                source: LiveIoError::Cancelled(packetcraftr_core::budget::Cancelled),
-            }
-            .into())
-        });
-    let Err(error) = result else {
-        panic!("interrupted neighbor discovery unexpectedly succeeded");
-    };
-    let Error::NeighborSpent(spent) = error else {
-        panic!("expected sent-request evidence on the preparation failure");
-    };
-    assert_eq!(spent.stats.packets_attempted, 1);
-    assert_eq!(spent.stats.packets_completed, 1);
-    assert_eq!(
-        spent.stats.bytes,
-        crate::neighbor::request_frame(&request).unwrap().len() as u64
+        ProviderSet::packet(routes, interfaces, NoCapture, tx.clone())
+            .with_tcp(NoTcp)
+            .with_resolver(NoResolver),
     );
-    assert!(matches!(
-        spent.error,
-        Error::Plan(route::Error::Neighbor(_))
-    ));
+    let limits = client.dns_limits([&request]).unwrap();
+    assert_eq!(limits.udp().packets(), 2);
+    assert_eq!(limits.udp().wire_bytes(), expected_bytes);
+    let error = client
+        .dns(request.clone(), |_: crate::dns::Event| Ok(()))
+        .unwrap_err();
+    assert!(matches!(&error, crate::dns::Error::Authorization(_)));
+    assert_eq!(error.classification().code, "policy.traffic_byte_limit");
+    assert!(tx.0.lock().unwrap().is_empty());
+}
+
+#[test]
+fn dns_request_refuses_invalid_evidence_bounds() {
+    let request = dns_request();
+    let valid = request.limits.evidence;
+    for (evidence, field) in [
+        (
+            crate::evidence::Limits {
+                max_frames: 0,
+                ..valid
+            },
+            "max_evidence_frames",
+        ),
+        (
+            crate::evidence::Limits {
+                max_frames: capture::MAX_CAPTURE_QUEUE_FRAMES + 1,
+                ..valid
+            },
+            "max_evidence_frames",
+        ),
+        (
+            crate::evidence::Limits {
+                max_bytes: 0,
+                ..valid
+            },
+            "max_evidence_bytes",
+        ),
+        (
+            crate::evidence::Limits {
+                max_bytes: capture::MAX_CAPTURE_QUEUE_BYTES + 1,
+                ..valid
+            },
+            "max_evidence_bytes",
+        ),
+        (
+            crate::evidence::Limits {
+                max_frames: 1,
+                max_undecoded: 2,
+                ..valid
+            },
+            "max_undecoded",
+        ),
+    ] {
+        let request = crate::dns::Request {
+            limits: crate::dns::Limits {
+                evidence,
+                ..request.limits
+            },
+            ..request.clone()
+        };
+        assert!(matches!(
+            request.validate(),
+            Err(crate::dns::Error::InvalidLimit { field: actual, .. }) if actual == field
+        ));
+    }
+}
+
+#[test]
+fn failed_neighbor_io_preserves_sent_statistics_and_error_causes() {
+    use packetcraftr_core::error::Classified;
+    use std::error::Error as _;
+
+    for with_source in [false, true] {
+        let (client, routes, _, _) = fixture();
+        let operation = Execution::new(&client, Duration::from_secs(10));
+        let deadline = operation.deadline(&client, Duration::from_secs(10));
+        let options = Options {
+            plan: route::Options {
+                link_mode: Mode::Layer2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut admission = client
+            .admitting_in(&options, 1, &deadline, &operation)
+            .unwrap();
+        let packet = packet(1);
+        let route = admission
+            .route_on(&packet, "10.0.0.1".parse().unwrap(), None)
+            .unwrap();
+        let admitted = admission.admit_on(packet, &route).unwrap();
+        let request = route::neighbor_request(&route.plan).unwrap();
+        routes.decision.lock().unwrap().source_mac = None;
+        let result = admission
+            .discover()
+            .stages
+            .materialize_using(admitted, |_, _| {
+                Err(crate::neighbor::Error::Io {
+                    interface: request.interface.name.clone().into_boxed_str(),
+                    target: request.target,
+                    operation: "receiving discovery response",
+                    spent: Some(Box::new(crate::neighbor::FailureEvidence {
+                        attempts: 1,
+                        captured: Box::default(),
+                        evidence_truncated: false,
+                    })),
+                    source: if with_source {
+                        LiveIoError::Capture {
+                            message: "controlled capture failure".into(),
+                            source: Some(std::io::Error::other("controlled kernel failure").into()),
+                        }
+                    } else {
+                        LiveIoError::Cancelled(packetcraftr_core::budget::Cancelled)
+                    },
+                }
+                .into())
+            });
+        let Err(error) = result else {
+            panic!("interrupted neighbor discovery unexpectedly succeeded");
+        };
+        assert!(error.to_string().contains("receiving discovery response"));
+        if with_source {
+            assert!(error.source().is_some());
+            assert!(
+                error
+                    .causes()
+                    .iter()
+                    .any(|cause| cause == "controlled kernel failure")
+            );
+        }
+        let Error::NeighborSpent(spent) = error else {
+            panic!("expected sent-request evidence on the preparation failure");
+        };
+        assert_eq!(spent.stats.packets_attempted, 1);
+        assert_eq!(spent.stats.packets_completed, 1);
+        assert_eq!(
+            spent.stats.bytes,
+            crate::neighbor::request_frame(&request).unwrap().len() as u64
+        );
+        assert!(matches!(
+            spent.error,
+            Error::Plan(route::Error::Neighbor(_))
+        ));
+    }
 }
 
 #[test]

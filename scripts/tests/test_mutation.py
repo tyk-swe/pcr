@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+from contextlib import redirect_stdout
+import io
+from itertools import product
 import json
 import os
 from pathlib import Path
@@ -8,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from support import ROOT
 from mutation_results import (Exclusion, Outcome, Report, cosmic_identity, cosmic_results, parse_report,
@@ -23,7 +27,53 @@ def report(killed: int = 9, survived: int = 1, group: str = 'core') -> Report:
                   tuple(outcome.identity for outcome in outcomes), outcomes, True, True)
 
 
+def mutation_workspace(root: Path) -> None:
+    files = {
+        'crates/sample/Cargo.toml': '[package]\nname="sample"\n',
+        'crates/sample/src/lib.rs': 'pub fn value() -> u8 { 1 }\n',
+        'crates/sample/src/tests.rs': '#[test]\nfn protects_value() { assert_eq!(crate::value(), 1); }\n',
+        'crates/other/Cargo.toml': '[package]\nname="other"\n',
+        'crates/other/src/lib.rs': 'pub fn value() -> u8 { 2 }\n',
+        'scripts/alpha.py': 'value = 1\n',
+        'scripts/beta.py': 'value = 2\n',
+        'scripts/tests/test_alpha.py': 'from alpha import value\ndef test_value(): assert value == 1\n',
+        'scripts/tests/test_beta.py': 'from beta import value\ndef test_value(): assert value == 2\n',
+        '.config/mutation.toml': '[python.modules]\n"scripts/alpha.py" = ["scripts/tests/test_alpha.py"]\n'
+                                 '"scripts/beta.py" = ["scripts/tests/test_beta.py"]\n',
+    }
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+
 class MutationScoreTests(unittest.TestCase):
+    def test_outcome_counts_and_evidenced_exclusions_keep_their_own_groups(self) -> None:
+        outcomes = (Outcome('caught', 'killed', 'test failed'),
+                    Outcome('missed', 'survived', 'test passed'),
+                    Outcome('equivalent', 'survived', 'test passed'),
+                    Outcome('timed', 'timeout', 'timeout'),
+                    Outcome('invalid', 'invalid', 'compiler diagnostic'))
+        value = replace(report(), expected=tuple(outcome.identity for outcome in outcomes), outcomes=outcomes)
+        result = score(value)
+        self.assertEqual((result.killed, result.eligible, result.invalid, result.equivalent), (1, 4, 1, 0))
+        self.assertEqual(result.survivors, ('missed', 'equivalent'))
+        self.assertEqual(result.timeouts, ('timed',))
+        self.assertFalse(result.passed)
+        exclusion = Exclusion(value.group, value.revision, 'equivalent', 'same observable result for every input')
+        reviewed = score(value, (exclusion,))
+        self.assertEqual((reviewed.killed, reviewed.eligible, reviewed.invalid, reviewed.equivalent), (1, 3, 1, 1))
+        self.assertEqual(reviewed.survivors, ('missed',))
+        self.assertEqual(reviewed.timeouts, ('timed',))
+        for unrelated in (replace(exclusion, group='a'), replace(exclusion, group='z'),
+                          replace(exclusion, revision='a'), replace(exclusion, revision='z')):
+            with self.subTest(unrelated=unrelated):
+                self.assertEqual(score(value, (unrelated,)), result)
+        for invalid in ((exclusion, exclusion), (replace(exclusion, identity='timed'),),
+                        (replace(exclusion, identity='invalid'),)):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                score(value, invalid)
+
     def test_threshold_is_strict_and_applies_to_every_group(self) -> None:
         self.assertFalse(score(report()).passed)
         self.assertTrue(score(report(10)).passed)
@@ -70,6 +120,46 @@ class MutationScoreTests(unittest.TestCase):
         result = score(report(0, 0))
         self.assertEqual(result.eligible, 0)
         self.assertEqual(result.reason, 'changed production')
+        self.assertTrue(result.passed)
+        invalid = replace(report(0, 1), outcomes=(Outcome('0', 'invalid', 'compiler diagnostic'),))
+        result = score(invalid)
+        self.assertEqual((result.killed, result.eligible, result.invalid), (0, 0, 1))
+        self.assertTrue(result.passed)
+        self.assertFalse(score(report(0, 1)).passed)
+        value = report(0, 0)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'run.json'
+            path.write_text(json.dumps(dict(platform='Linux', profile='all', shard=1, shards=1,
+                                           report=asdict(value))))
+            output = io.StringIO()
+            with redirect_stdout(output):
+                passed = check((Target('core', 'rust', (), value.reason),), (path,), 'rust',
+                               ('Linux',), ('all',), 1, (), value.revision, value.tool_version)
+            summary = json.loads(output.getvalue())
+            self.assertTrue(passed)
+            self.assertEqual(summary['status'], 'not_applicable')
+            self.assertIsNone(summary['percentage'])
+            self.assertEqual(summary['reason'], value.reason)
+
+    def test_artifact_parser_preserves_false_completion_and_rejects_invalid_values(self) -> None:
+        raw = json.loads(json.dumps(asdict(report(2, 0))))
+        parsed = parse_report(raw)
+        self.assertEqual((score(parsed).killed, score(parsed).eligible), (2, 2))
+        for flag in ('baseline', 'complete'):
+            unfinished = parse_report(raw | {flag: False})
+            with self.subTest(flag=flag), self.assertRaises(ValueError):
+                score(unfinished)
+        missing = tuple({key: value for key, value in raw.items() if key != name} for name in raw)
+        invalid_flags = tuple(raw | {name: invalid} for name, invalid in product(
+            ('baseline', 'complete'), (None, 0, 1, 'true')))
+        invalid_text = tuple(raw | {name: invalid} for name, invalid in product(
+            ('group', 'revision', 'tool_version', 'reason'), (None, '', ' ', 1)))
+        invalid_results = tuple(raw | {'outcomes': [raw['outcomes'][0] | {name: invalid}]} for name, invalid in (
+            ('identity', ''), ('status', 'unknown'), ('evidence', ''), ('evidence', None)))
+        for invalid in (None, [], 1, raw | {'expected': [None]}, raw | {'outcomes': [None]},
+                        *missing, *invalid_flags, *invalid_text, *invalid_results):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                parse_report(invalid)
 
     def test_all_shards_must_agree_and_complete_the_inventory(self) -> None:
         value = report(10, 0)
@@ -114,6 +204,81 @@ class MutationScoreTests(unittest.TestCase):
 
 
 class MutationReportTests(unittest.TestCase):
+    def test_cosmic_ray_classifies_failures_errors_and_invalid_syntax_independently(self) -> None:
+        item = dict(job_id='job', mutations=[dict(module_path='module.py', operator_name='replace',
+                                                occurrence=0, start_pos=[1, 0], end_pos=[1, 1],
+                                                operator_args={})])
+        for failures, errors, status in ((0, 0, 'survived'), (1, 0, 'killed'), (0, 1, 'killed'),
+                                        (1, 1, 'killed'), (2, 1, 'killed'), (1, 2, 'killed')):
+            output = 'MUTATION_RESULT ' + json.dumps(dict(kind='tests', run=3, failures=failures, errors=errors))
+            result = dict(worker_outcome='normal', test_outcome=status, output=output)
+            with self.subTest(failures=failures, errors=errors):
+                outcome = cosmic_results([[item, result]])[0]
+                self.assertEqual(outcome.status, status)
+                self.assertEqual(outcome.evidence, output)
+                with self.assertRaises(ValueError):
+                    cosmic_results([[item, result | {'test_outcome': 'killed' if status == 'survived' else 'survived'}]])
+        for name, invalid in product(('run', 'failures', 'errors'), (None, True, -1, 1.5, '1')):
+            evidence = dict(kind='tests', run=3, failures=1, errors=0) | {name: invalid}
+            result = dict(worker_outcome='normal', test_outcome='killed',
+                          output='MUTATION_RESULT ' + json.dumps(evidence))
+            with self.subTest(name=name, invalid=invalid), self.assertRaises(ValueError):
+                cosmic_results([[item, result]])
+        syntax = dict(worker_outcome='normal', test_outcome='killed', output='MUTATION_RESULT ' +
+                      json.dumps(dict(kind='syntax_error', message='controlled invalid syntax')))
+        self.assertEqual(cosmic_results([[item, syntax]])[0].status, 'invalid')
+        for invalid in (syntax | {'test_outcome': 'survived'}, syntax | {'worker_outcome': 'exception'},
+                        syntax | {'output': syntax['output'] + '\n' + syntax['output']},
+                        syntax | {'output': 'MUTATION_RESULT ' + json.dumps(dict(kind='tests', run=0, failures=0, errors=0))}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                cosmic_results([[item, invalid]])
+
+    def test_rust_survival_timeout_and_compilation_failure_are_distinct(self) -> None:
+        # https://github.com/sourcefrog/cargo-mutants/blob/v27.1.0/src/outcome.rs, checked 2026-10-25.
+        mutant = dict(name='mutation')
+        baseline = dict(scenario='Baseline', summary='Success', phase_results=[
+            dict(phase='Build', process_status='Success'), dict(phase='Test', process_status='Success')])
+        cases = (('CaughtMutant', 'Test', {'Failure': 101}, 'killed'),
+                 ('MissedMutant', 'Test', 'Success', 'survived'),
+                 ('Timeout', 'Test', 'Timeout', 'timeout'),
+                 ('Unviable', 'Build', {'Failure': 101}, 'invalid'))
+        for summary, phase, process, expected in cases:
+            outcome = dict(scenario=dict(Mutant=mutant), summary=summary, log_path='mutant.log',
+                           phase_results=[dict(phase='Build', process_status='Success'),
+                                          dict(phase=phase, process_status=process)])
+            raw = dict(end_time='finished', total_mutants=1, outcomes=[baseline, outcome])
+            logs = {'mutant.log': 'error[E0308]: mismatched types\nerror: could not compile sample'}
+            with self.subTest(summary=summary):
+                result = rust_results([mutant], raw, logs)[0]
+                self.assertEqual((result.identity, result.status, result.evidence), ('mutation', expected, 'mutant.log'))
+                invalid_phases = ((phase, 'Success'),) if summary == 'Timeout' else (('Check', process),)
+                for bad_phase, bad_process in (*invalid_phases, (phase, {'Failure': 13})):
+                    invalid = dict(outcome, phase_results=[dict(phase=bad_phase, process_status=bad_process)])
+                    with self.assertRaises(ValueError):
+                        rust_results([mutant], raw | {'outcomes': [baseline, invalid]}, logs)
+        for log in ('error[E0308]: mismatched types', 'could not compile sample', 'network failed'):
+            with self.subTest(log=log), self.assertRaises(ValueError):
+                rust_results([mutant], raw, {'mutant.log': log})
+        self.assertEqual(rust_results([mutant], raw, {'mutant.log': 'error: expected expression\ncould not compile sample'})[0].status,
+                         'invalid')
+
+    def test_rust_baseline_requires_successful_test_execution(self) -> None:
+        mutant = dict(name='mutation')
+        outcome = dict(scenario=dict(Mutant=mutant), summary='MissedMutant', log_path='mutant.log',
+                       phase_results=[dict(phase='Test', process_status='Success')])
+        baseline = dict(scenario='Baseline', summary='Success', phase_results=[dict(phase='Test', process_status='Success')])
+        raw = dict(end_time='finished', total_mutants=1, outcomes=[baseline, outcome])
+        self.assertEqual(rust_results([mutant], raw, {})[0].status, 'survived')
+        for phases in ([], [dict(phase='Build', process_status='Success')],
+                       [dict(phase='Test', process_status={'Failure': 101})],
+                       [dict(phase='Build', process_status={'Failure': 101}), dict(phase='Test', process_status='Success')]):
+            invalid = baseline | {'phase_results': phases}
+            with self.subTest(phases=phases), self.assertRaises(ValueError):
+                rust_results([mutant], raw | {'outcomes': [invalid, outcome]}, {})
+        for outcomes in ([baseline, baseline, outcome], [outcome], [baseline, outcome | {'summary': 'Success'}]):
+            with self.subTest(outcomes=outcomes), self.assertRaises(ValueError):
+                rust_results([mutant], raw | {'outcomes': outcomes}, {})
+
     @unittest.skipUnless(os.name == 'posix', 'fixture executables use POSIX shebangs')
     def test_cli_reports_external_command_failure_without_a_success_plan(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -155,9 +320,17 @@ class MutationReportTests(unittest.TestCase):
         first = cosmic_identity(dict(job_id='first', mutations=[mutation]))
         self.assertEqual(first, cosmic_identity(dict(job_id='second', mutations=[mutation])))
         for change in (dict(module_path='other.py'), dict(operator_name='remove'),
-                       dict(occurrence=1), dict(start_pos=[0, 0]), dict(operator_args={'value': 1})):
+                       dict(occurrence=1), dict(start_pos=[0, 0]), dict(end_pos=[1, 2]), dict(operator_args={'value': 1})):
             with self.subTest(change=change):
                 self.assertNotEqual(first, cosmic_identity(dict(job_id='first', mutations=[mutation | change])))
+        for change in (dict(module_path=''), dict(operator_name=''), dict(occurrence=-1), dict(occurrence=True),
+                       dict(start_pos=[-1, 0]), dict(start_pos=[True, 0]), dict(start_pos=[1]),
+                       dict(end_pos=[1, 0]), dict(end_pos=[0, 1]), dict(end_pos=[1, 1, 0]), dict(operator_args=[])):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                cosmic_identity(dict(job_id='first', mutations=[mutation | change]))
+        for mutations in ([], [mutation, mutation]):
+            with self.subTest(mutations=mutations), self.assertRaises(ValueError):
+                cosmic_identity(dict(job_id='first', mutations=mutations))
 
     def test_rust_inventory_and_baseline_are_required(self) -> None:
         mutant = dict(name='mutation')
@@ -180,18 +353,80 @@ class MutationReportTests(unittest.TestCase):
 
 
 class MutationSelectionTests(unittest.TestCase):
-    def test_committed_test_deletions_schedule_their_owners(self) -> None:
+    def test_production_changes_select_their_files_without_unrelated_groups(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for folder in ('crates/sample/src', '.config', 'scripts/tests'):
-                (root / folder).mkdir(parents=True)
-            (root / 'crates/sample/Cargo.toml').write_text('[package]\nname="sample"\n')
-            (root / 'crates/sample/src/lib.rs').write_text('pub fn value() -> u8 { 1 }\n')
-            (root / 'crates/sample/src/tests.rs').write_text('#[test]\nfn protects_value() { assert_eq!(crate::value(), 1); }\n')
-            (root / 'scripts/alpha.py').write_text('value = 1\n')
-            (root / 'scripts/tests/test_alpha.py').write_text('from alpha import value\ndef test_value(): assert value == 1\n')
-            (root / '.config/mutation.toml').write_text(
-                '[python.modules]\n"scripts/alpha.py" = ["scripts/tests/test_alpha.py"]\n')
+            mutation_workspace(root)
+            rust = 'crates/sample/src/lib.rs'
+            python = 'scripts/beta.py'
+            targets = select(root, (Change(rust), Change(python)))
+            self.assertEqual({(target.group, target.language, target.files) for target in targets},
+                             {('sample', 'rust', (rust,)), (python, 'python', (python,))})
+
+    def test_adding_inline_tests_expands_selection_to_their_complete_crate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            mutation_workspace(root)
+            path = 'crates/sample/src/lib.rs'
+            original = (root / path).read_text()
+            for test in ('#[test]\nfn checks_value() { assert_eq!(value(), 1); }\n',
+                         '#[cfg(test)]\nmod tests { #[test] fn checks_value() {} }\n'):
+                (root / path).write_text(original + test)
+                targets = select(root, (Change(path, original),))
+                with self.subTest(test=test):
+                    self.assertEqual({(target.group, target.files) for target in targets}, {('sample', ())})
+                (root / path).write_text(original)
+                removed = select(root, (Change(path, original + test),))
+                self.assertEqual({(target.group, target.files) for target in removed}, {('sample', ())})
+
+    def test_shared_changes_select_complete_owned_language_groups(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            mutation_workspace(root)
+            rust = {'sample', 'other'}
+            python = {'scripts/alpha.py', 'scripts/beta.py'}
+            shared = ('.config/mutation.toml', '.github/workflows/ci.yml', 'Cargo.toml', 'Cargo.lock',
+                      'rust-toolchain.toml', 'requirements-dev.txt', 'AGENTS.md', 'TESTING.md',
+                      'schemas/contract.json', 'examples/captures/fixture.pcap',
+                      'examples/documents/fixture.json', 'examples/consumers/fixtures/fixture.json')
+            cases = tuple((path, rust | python) for path in shared) + (
+                ('scripts/tests/support.py', python), ('scripts/tests/fixture.json', python),
+                ('scripts/fixtures/input.json', python), ('scripts/tests/test_alpha.py', {'scripts/alpha.py'}),
+                ('crates/sample/Cargo.toml', rust), ('crates/sample/src/fixture.pcap', {'sample'}),
+                ('crates/sample/src/tests.rs', {'sample'}),
+            )
+            self.assertEqual({target.group for target in select(root, (), full=True)}, rust | python)
+            for path, expected in cases:
+                targets = select(root, (Change(path),))
+                with self.subTest(path=path):
+                    self.assertEqual({target.group for target in targets}, expected)
+                    self.assertTrue(all(not target.files for target in targets if target.language == 'rust'))
+
+    def test_malformed_ownership_cannot_silently_remove_production_modules(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            mutation_workspace(root)
+            path = root / '.config/mutation.toml'
+            original = path.read_text()
+            for invalid in ('', '[python]\nmodules = []\n',
+                            original.replace('["scripts/tests/test_alpha.py"]', '[]'),
+                            original.replace('["scripts/tests/test_alpha.py"]', '[1]'),
+                            original.replace('["scripts/tests/test_alpha.py"]', '[""]'),
+                            original.replace('["scripts/tests/test_alpha.py"]', '[" "]'),
+                            original.replace('scripts/alpha.py', 'scripts/absent.py')):
+                path.write_text(invalid)
+                with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                    select(root, (), full=True)
+            path.write_text(original)
+            (root / 'scripts/unowned.py').write_text('value = 3\n')
+            with self.assertRaises(ValueError):
+                select(root, (), full=True)
+
+    def test_committed_test_deletions_schedule_their_owners(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+                'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}):
+            root = Path(directory)
+            mutation_workspace(root)
             subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
             subprocess.run(['git', 'add', '.'], cwd=root, check=True)
             commit = ['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-qm']
@@ -231,7 +466,8 @@ class MutationSelectionTests(unittest.TestCase):
         self.assertEqual(select(ROOT, (Change('README.md'),)), ())
 
     def test_disposable_snapshot_includes_working_changes(self) -> None:
-        with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+                'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}):
             root, destination = Path(source), Path(directory)
             (root / 'module.py').write_text('original')
             subprocess.run(['git', 'init', '-q'], cwd=root, check=True)

@@ -33,7 +33,7 @@ def python_modules(root: Path) -> dict[str, tuple[str, ...]]:
         raise ValueError('missing Python mutation ownership')
     modules = section['modules']
     if any(not isinstance(path, str) or not isinstance(tests, list)
-           or not tests or any(not isinstance(test, str) for test in tests)
+           or not tests or any(not isinstance(test, str) or not test.strip() for test in tests)
            for path, tests in modules.items()):
         raise ValueError('invalid Python mutation ownership')
     discovered = {path.relative_to(root).as_posix()
@@ -87,6 +87,10 @@ def select(root: Path, changes: tuple[Change, ...], *, full: bool = False) -> tu
     return rust + python
 
 
+def has_rust_tests(source: str) -> bool:
+    return any(marker in source for marker in ('#[cfg(test)]', '#[test]'))
+
+
 def rust_target(root: Path, crate: str, changes: tuple[Change, ...], full: bool) -> Target | None:
     prefix = f'crates/{crate}/'
     affected = tuple(change for change in changes if change.path.startswith(prefix))
@@ -96,10 +100,9 @@ def rust_target(root: Path, crate: str, changes: tuple[Change, ...], full: bool)
         not change.path.endswith('.rs')
         or 'test' in Path(change.path).stem
         or 'tests' in Path(change.path).parts
-        or '#[cfg(test)]' in change.previous
-        or '#[test]' in change.previous
+        or has_rust_tests(change.previous)
         or ((root / change.path).is_file()
-            and '#[cfg(test)]' in (root / change.path).read_text())
+            and has_rust_tests((root / change.path).read_text()))
         for change in affected
     )
     if full or test_change:

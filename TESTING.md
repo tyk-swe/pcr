@@ -164,3 +164,71 @@ The first completed exploratory forwarding run measured the source snapshot at c
 Survivors exposed missing cases for nonempty unmatched and unkeyed capture counts, omitted matches and evidence availability. Added cases now check retained and omitted observations on both sides, conservative reorder bounds, and valid or contradictory outcomes across evidence states. Targeted Cosmic Ray reruns killed four previously surviving arithmetic mutants in rule budgeting, omission accounting and capture totals. A complete rerun is still required before claiming any new module score.
 
 The exploratory build-manifest run attempted all 176 mutations but produced a worker exception when Cosmic Ray tried to replace a qualified exception name inside a tuple. No score was accepted for that run. Importing the exception by name makes the mutation executable in both affected tools. Targeted reruns completed normally and killed both handler mutations. CLI regression cases also verify that failed binary, compiler and version-control commands return a failure diagnostic without publishing a success report or plan. No mutation was excluded to address the runner error.
+
+The exploratory Python run completed every generated work item. It also measured 313 kills out of 458 eligible mutants for the result checker, 77 out of 156 for selection, 114 out of 126 for release assets, and 171 out of 258 for shared script support. The release-assets score exceeds the threshold, but its twelve survivors still exposed missing schema, canonical-path and byte-budget cases. Those cases have been added. Checker cases now cover all outcome classes, malformed artifacts, baseline execution, scoped exclusions and both failure counters. Complete module reruns are required to measure these repairs.
+
+# Enforcement case audit
+
+| Case | Disposition and protected behavior | Representative defect |
+| --- | --- | --- |
+| `test_outcome_counts_and_evidenced_exclusions_keep_their_own_groups` | Added. Every outcome category is reported, and reviewed equivalents affect only their exact group and revision. | Applying an exclusion to another group or treating a timeout as invalid. |
+| `test_artifact_parser_preserves_false_completion_and_rejects_invalid_values` | Added. Valid JSON artifacts are scored, explicit incomplete flags remain incomplete, and malformed fields fail validation. | Converting false or nonboolean completion into success. |
+| `test_cosmic_ray_classifies_failures_errors_and_invalid_syntax_independently` | Added. Either failure counter can establish a kill. Syntax-invalid mutations are separate, and contradictory or malformed evidence fails. | Cancelling equal failure and error counts or trusting an unsupported outcome. |
+| `test_rust_survival_timeout_and_compilation_failure_are_distinct` | Added. Executed tests, timeout evidence and compiler diagnostics map to distinct outcomes. Mismatched phases and exits fail. | Counting compilation failure or timeout as a kill. |
+| `test_rust_baseline_requires_successful_test_execution` | Added. A baseline needs a successful test phase and cannot contain failed earlier phases. | Accepting a successful build without running tests. |
+| `test_production_changes_select_their_files_without_unrelated_groups` | Added. Independent production changes select only their files and modules. | Mutating the wrong crate or losing a changed production file. |
+| `test_adding_inline_tests_expands_selection_to_their_complete_crate` | Added regression. Adding or removing inline tests selects their entire crate, with or without a test-only module. | Selecting only the edited file for a newly added inline test. |
+| `test_shared_changes_select_complete_owned_language_groups` | Added. Fixtures, dependencies and shared support select the independently expected groups, while owned tests select their modules. | Skipping a language or unrelatedly narrowing a shared change. |
+| `test_malformed_ownership_cannot_silently_remove_production_modules` | Added regression. Malformed or blank mappings and unowned source files fail selection. | Accepting an empty test destination as ownership. |
+| `test_inventory_shape_is_explicit` | Strengthened. Complete manifests with unsupported schemas, empty lists and invalid entry types are rejected. | Accepting a different schema when other fields are valid. |
+| `test_paths_are_safe_portable_and_canonical` | Strengthened. Trailing separators join the existing unsafe and noncanonical path cases. | Accepting a directory-like path after canonicalization. |
+| `test_all_protocol_fixture_references_exist_and_are_packaged` | Repaired. Controlled files and package entries must both contain every referenced fixture. | Checking only disk existence or only the package list. |
+| `test_protocol_fixture_manifest_enforces_its_byte_budget` | Added. A fixture manifest fits at the project byte ceiling and is refused one byte above it. | Raising, lowering or bypassing the read ceiling. |
+| `test_loaded_release_inventory_is_bounded_and_exports_supplied_assets` | Added. A fresh module import exports the supplied inventory at the byte boundary and fails above it. | Applying the ceiling only to protocol fixtures. |
+| `test_threshold_is_strict_and_applies_to_every_group` | Retained. Exactly 90 percent fails, a score above it passes, and a weak group cannot borrow another group's kills. | Applying an aggregate score or an inclusive threshold. |
+| `test_missing_duplicate_and_unfinished_results_fail_closed` | Retained. Missing, duplicate and unfinished results or absent provenance cannot produce a score. | Accepting a partial inventory. |
+| `test_timeouts_stay_in_the_denominator` | Retained. Timeout identities remain eligible and never increase the kill count. | Counting a timed-out run as a detected defect. |
+| `test_only_evidenced_equivalents_and_invalid_compilations_are_excluded` | Retained. Exact evidenced equivalents and compiler-invalid mutations are the only supported exclusions. | Excluding an unknown, already-killed or unexplained mutant. |
+| `test_empty_selection_is_reported_with_its_reason` | Strengthened. Zero eligible mutations produce a not-applicable artifact with the selection reason and no numeric percentage. | Treating an empty group as measured coverage. |
+| `test_all_shards_must_agree_and_complete_the_inventory` | Retained. Complete disjoint shards combine, while absent or repeated shards fail. | Passing an unfinished shard collection. |
+| `test_reports_from_another_revision_or_tool_cannot_pass` | Retained. Old commits and mismatched tool versions cannot satisfy the gate. | Using stale evidence after a change. |
+| `test_required_feature_runs_can_detect_different_mutants` | Strengthened. Complete runs can detect complementary defects, while incomplete or inconsistent source runs cannot combine. | Filling missing work with results from another profile. |
+| `test_cli_reports_external_command_failure_without_a_success_plan` | Retained. A controlled failing version-control command produces a failure diagnostic and no plan. | Publishing a plan after command failure. |
+| `test_cosmic_ray_requires_actual_completed_test_results` | Retained. Worker completion, consistent test evidence and timeout classification are required. | Trusting a tool's kill label after a worker crash. |
+| `test_python_mutant_identity_survives_a_new_session` | Strengthened. Identities are stable across sessions and distinguish source spans, operators and arguments. Malformed spans are rejected. | Applying an exclusion to the wrong mutation after a rerun. |
+| `test_rust_inventory_and_baseline_are_required` | Retained. Completed inventory and baseline evidence accompany actual test execution. Infrastructure failures are not compiler exclusions. | Accepting a tool crash as an invalid mutant. |
+| `test_committed_test_deletions_schedule_their_owners` | Retained. A real local commit deleting tests selects their original production owners. Git configuration is isolated from the host. | Ignoring deletions in the PR diff. |
+| `test_deleted_tests_select_their_production_owners` | Retained. Deleted separate and inline tests select the expected crate or Python module. | Filtering only production-file additions. |
+| `test_shared_inputs_schedule_every_affected_language` | Retained. Actual repository configuration and shared fixtures select every affected group. | Omitting a group from shared-input scheduling. |
+| `test_unmapped_python_files_cannot_bypass_mutation_checks` | Retained. A new Python source without ownership is rejected. | Silently ignoring a new source location. |
+| `test_documentation_only_change_has_no_mutants` | Retained. A general documentation edit does not schedule unrelated mutations. | Treating every repository edit as production scope. |
+| `test_disposable_snapshot_includes_working_changes` | Retained. Tracked edits and new source files reach the disposable snapshot and alter its digest. Git configuration is isolated. | Measuring committed content while testing a changed worktree. |
+| `test_repository_inventory_is_valid` | Strengthened. Repository metadata validates and exported asset sequences agree with its contents. | Exporting a truncated or wrong inventory. |
+| `test_duplicates_and_source_generated_collisions_are_rejected` | Retained. Duplicate files across either inventory are rejected. | Allowing a generated file to overwrite a source asset. |
+| `test_device_components_and_ancestor_collisions_are_rejected` | Retained. Device names and case-insensitive file/directory collisions cannot enter an archive. | Producing an archive that cannot be extracted safely on a supported platform. |
+
+# Selection regression evidence
+
+In a disposable checkout containing one commit that adds an inline test to `crates/packetcraftr-core/src/budget.rs`, the actual selection command was run with the original and repaired selector.
+
+```sh
+/usr/bin/python3 scripts/run_mutation.py select --base 'HEAD^' --plan selected.json
+```
+
+The original command exited zero and selected only the edited file.
+
+```json
+[{"group": "packetcraftr-core", "language": "rust", "files": ["crates/packetcraftr-core/src/budget.rs"], "reason": "changed production files"}]
+```
+
+The repaired command exited zero and selected the owning crate.
+
+```json
+[{"group": "packetcraftr-core", "language": "rust", "files": [], "reason": "full crate, tests or shared inputs changed"}]
+```
+
+With an empty Python test destination in the same checkout, the following command exited one and printed `Mutation audit failed. invalid Python mutation ownership`.
+
+```sh
+/usr/bin/python3 scripts/run_mutation.py select --full --plan invalid.json
+```

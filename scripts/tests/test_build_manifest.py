@@ -74,15 +74,16 @@ class BuildManifestTests(unittest.TestCase):
                 })
                 manifest.main([*supplied, '--verify', str(output)])
                 document = json.loads(output.read_text())
-                for field, value, diagnostic in (
-                    ('commit', 'c' * 40, 'packaged commit'),
-                    ('target', 'other-target', 'packaged target'),
-                    ('feature_variant', 'other-mode', 'packaged feature_variant'),
-                    ('binary', 'renamed-binary', 'packaged binary'),
+                for field, values, diagnostic in (
+                    ('commit', ('0' * 40, 'f' * 40), 'packaged commit'),
+                    ('target', ('aaa-target', 'zzz-target'), 'packaged target'),
+                    ('feature_variant', ('aaa-mode', 'zzz-mode'), 'packaged feature_variant'),
+                    ('binary', ('aaa-binary', 'zzz-binary'), 'packaged binary'),
                 ):
-                    output.write_text(json.dumps(document | {field: value}))
-                    with self.subTest(field=field), self.assertRaisesRegex(SystemExit, diagnostic):
-                        manifest.main([*supplied, '--verify', str(output)])
+                    for value in values:
+                        output.write_text(json.dumps(document | {field: value}))
+                        with self.subTest(field=field, value=value), self.assertRaisesRegex(SystemExit, diagnostic):
+                            manifest.main([*supplied, '--verify', str(output)])
                 for version in ('packetcraftr earlier', 'packetcraftr later'):
                     output.write_text(json.dumps(document | {'version': version}))
                     with self.subTest(version=version), self.assertRaisesRegex(SystemExit, 'packaged version'):
@@ -167,12 +168,29 @@ class BuildManifestTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 manifest.main(['--binary', 'missing', '--verify', 'metadata', '--commit', 'short'])
             command.assert_not_called()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / 'binary'
+            binary.write_bytes(b'controlled input')
+            for option, field in (('target', 'target'), ('variant', 'feature_variant')):
+                for invalid in ('bad/name', 'with space', '-leading', 'trailing\n', 'é'):
+                    document = identity() | {field: invalid}
+                    with self.subTest(field=field, value=invalid):
+                        with self.assertRaisesRegex(ValueError, field):
+                            manifest.validate_identity(document)
+                        with patch.object(manifest.subprocess, 'check_output') as command:
+                            with self.assertRaises(SystemExit) as refused:
+                                manifest.main(['--binary', str(binary), '--verify', str(root / 'metadata.json'),
+                                               '--commit', 'a' * 40, f'--{option}={invalid}'])
+                            self.assertEqual(refused.exception.code, 2)
+                            command.assert_not_called()
 
     def test_binary_mutation_during_version_query_is_rejected(self) -> None:
         with patch.object(manifest.subprocess, 'check_output', return_value='packetcraftr 1\n'):
-            with patch.object(manifest, 'digest', return_value='changed'):
-                with self.assertRaisesRegex(ValueError, 'changed'):
-                    manifest.binary_version(Path('/binary'), 'original')
+            for changed in ('0' * 64, 'f' * 64):
+                with self.subTest(changed=changed), patch.object(manifest, 'digest', return_value=changed):
+                    with self.assertRaisesRegex(ValueError, 'changed'):
+                        manifest.binary_version(Path('/binary'), '8' * 64)
 
     def test_missing_binary_is_a_clean_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -336,3 +336,619 @@ fn distinct_resolver_order_and_limit() {
         Err(TargetError::AddressLimit { .. })
     ));
 }
+
+mod audit {
+    use crate::{
+        Client, ProviderSet, audit,
+        clock::Clock,
+        policy::{DestinationConstraint, Policy},
+    };
+    use packetcraftr_core::{
+        budget::{Cancellation, Deadline},
+        protocol::builtin,
+    };
+    use packetcraftr_netio::{tcp, tls};
+    use std::{
+        collections::BTreeSet,
+        convert::Infallible,
+        io::{self, Cursor, Read, Write},
+        net::SocketAddr,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::{Duration, Instant},
+    };
+
+    #[derive(Clone)]
+    struct AuditClock(Arc<Mutex<Instant>>);
+
+    impl AuditClock {
+        fn advance(&self, duration: Duration) {
+            *self.0.lock().unwrap() += duration;
+        }
+    }
+
+    impl Clock for AuditClock {
+        type Error = Infallible;
+        fn now(&self) -> Instant {
+            *self.0.lock().unwrap()
+        }
+        fn sleep(&self, delay: Duration, _: &Deadline) -> Result<(), Self::Error> {
+            self.advance(delay);
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum Ending {
+        Eof,
+        ReadFailure,
+        FlushFailure,
+        TimeoutBoundary,
+        Expire,
+        Cancel,
+    }
+
+    enum AuditResponse {
+        Bytes(Cursor<Vec<u8>>),
+        Tls {
+            session: Box<rustls::ServerConnection>,
+            application: Arc<Mutex<Vec<u8>>>,
+        },
+    }
+
+    struct AuditStream {
+        peer: Arc<Mutex<SocketAddr>>,
+        response: AuditResponse,
+        written: Arc<Mutex<Vec<u8>>>,
+        clock: AuditClock,
+        cancellation: Cancellation,
+        ending: Ending,
+    }
+
+    impl Read for AuditStream {
+        fn read(&mut self, mut bytes: &mut [u8]) -> io::Result<usize> {
+            let count = match &mut self.response {
+                AuditResponse::Bytes(response) => response.read(bytes)?,
+                AuditResponse::Tls { session, .. } => session.write_tls(&mut bytes)?,
+            };
+            if matches!(self.ending, Ending::TimeoutBoundary) {
+                self.clock.advance(Duration::from_secs(5));
+            }
+            if matches!(self.ending, Ending::Expire) {
+                self.clock.advance(Duration::from_secs(3601));
+            }
+            if matches!(self.ending, Ending::Cancel) {
+                self.cancellation.cancel();
+            }
+            if count > 0 {
+                return Ok(count);
+            }
+            match self.ending {
+                Ending::Eof | Ending::FlushFailure => Ok(0),
+                Ending::ReadFailure => Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "controlled read failure",
+                )),
+                Ending::TimeoutBoundary | Ending::Expire => Err(io::ErrorKind::TimedOut.into()),
+                Ending::Cancel => Err(io::ErrorKind::Interrupted.into()),
+            }
+        }
+    }
+
+    impl Write for AuditStream {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            let count = match &mut self.response {
+                AuditResponse::Bytes(_) => bytes.len(),
+                AuditResponse::Tls {
+                    session,
+                    application,
+                } => {
+                    let count = session.read_tls(&mut Cursor::new(bytes))?;
+                    let available = session
+                        .process_new_packets()
+                        .map_err(io::Error::other)?
+                        .plaintext_bytes_to_read();
+                    if available > 0 {
+                        let mut received = vec![0; available];
+                        session.reader().read_exact(&mut received)?;
+                        application.lock().unwrap().extend(received);
+                        session
+                            .writer()
+                            .write_all(b"HTTP/1.1 204 No Content\r\n\r\n")?;
+                    }
+                    count
+                }
+            };
+            self.written
+                .lock()
+                .unwrap()
+                .extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            if matches!(self.ending, Ending::FlushFailure) {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "controlled flush failure",
+                ));
+            }
+            Ok(())
+        }
+    }
+
+    impl tcp::Stream for AuditStream {
+        fn peer_addr(&self) -> io::Result<SocketAddr> {
+            Ok(*self.peer.lock().unwrap())
+        }
+        fn local_addr(&self) -> io::Result<SocketAddr> {
+            Ok("127.0.0.1:50000".parse().unwrap())
+        }
+        fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+            Ok(())
+        }
+        fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct AuditTcp {
+        stream: Mutex<Option<AuditStream>>,
+        forbidden: Arc<AtomicBool>,
+    }
+
+    impl tcp::Provider for AuditTcp {
+        type Stream = AuditStream;
+        fn connect(&self, endpoint: SocketAddr, _: &Deadline) -> Result<Self::Stream, tcp::Error> {
+            assert!(
+                !self.forbidden.load(Ordering::SeqCst),
+                "audit must refuse before connecting"
+            );
+            assert_eq!(endpoint, endpoint_fixture());
+            Ok(self
+                .stream
+                .lock()
+                .unwrap()
+                .take()
+                .expect("one connection per audit"))
+        }
+    }
+
+    type AuditClient = Client<ProviderSet<(), (), (), (), AuditTcp, ()>, AuditClock>;
+    struct Fixture {
+        client: AuditClient,
+        written: Arc<Mutex<Vec<u8>>>,
+        peer: Arc<Mutex<SocketAddr>>,
+        forbidden: Arc<AtomicBool>,
+    }
+
+    fn endpoint_fixture() -> SocketAddr {
+        "127.0.0.1:8443".parse().unwrap()
+    }
+    fn policy() -> Policy {
+        Policy {
+            allowed_destinations: vec![DestinationConstraint::Exact(endpoint_fixture().ip())],
+            max_packets_per_operation: 2,
+            max_bytes_per_operation: 1_048_576,
+            ..Policy::default()
+        }
+    }
+    fn fixture(policy: Policy, response: &[u8], ending: Ending) -> Fixture {
+        response_fixture(
+            policy,
+            AuditResponse::Bytes(Cursor::new(response.to_vec())),
+            ending,
+        )
+    }
+    fn response_fixture(policy: Policy, response: AuditResponse, ending: Ending) -> Fixture {
+        let clock = AuditClock(Arc::new(Mutex::new(Instant::now())));
+        let cancellation = Cancellation::default();
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let peer = Arc::new(Mutex::new(endpoint_fixture()));
+        let forbidden = Arc::new(AtomicBool::new(false));
+        let stream = AuditStream {
+            peer: Arc::clone(&peer),
+            response,
+            written: Arc::clone(&written),
+            clock: clock.clone(),
+            cancellation: cancellation.clone(),
+            ending,
+        };
+        let provider = AuditTcp {
+            stream: Mutex::new(Some(stream)),
+            forbidden: Arc::clone(&forbidden),
+        };
+        let client = Client::new(builtin::registry(), policy, ProviderSet::tcp(provider, ()))
+            .with_clock(clock)
+            .with_cancellation(cancellation);
+        Fixture {
+            client,
+            written,
+            peer,
+            forbidden,
+        }
+    }
+
+    fn http_request() -> audit::HttpRequest {
+        let mut request = audit::HttpRequest::new(endpoint_fixture());
+        request.host = "example.test".into();
+        request.path = "/audit?kind=headers".into();
+        request
+    }
+
+    fn expected_request(request: &audit::HttpRequest) -> Vec<u8> {
+        // https://www.rfc-editor.org/rfc/rfc9112.html#section-3 checked 2026-10-25.
+        format!("HEAD {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: PacketcraftR-audit\r\n\r\n", request.path, request.host).into_bytes()
+    }
+
+    #[test]
+    fn audit_validation_refuses_invalid_requests_before_connecting() {
+        let setup = fixture(policy(), b"", Ending::Eof);
+        setup.forbidden.store(true, Ordering::SeqCst);
+        let base = audit::TlsRequest::new(endpoint_fixture());
+        for request in [
+            audit::TlsRequest {
+                endpoint: "127.0.0.1:0".parse().unwrap(),
+                ..base.clone()
+            },
+            audit::TlsRequest {
+                timeout: Duration::ZERO,
+                ..base.clone()
+            },
+            audit::TlsRequest {
+                timeout: Duration::from_secs(3601),
+                ..base.clone()
+            },
+        ] {
+            assert!(matches!(
+                setup.client.audit_tls(&request),
+                Err(audit::Error::Invalid(_))
+            ));
+        }
+        let invalid_name = audit::TlsRequest {
+            server_name: Some("bad name".into()),
+            ..base.clone()
+        };
+        assert!(matches!(
+            setup.client.audit_tls(&invalid_name),
+            Err(audit::Error::Tls(tls::Error::InvalidServerName))
+        ));
+        let invalid_limits = audit::TlsRequest {
+            limits: tls::Limits {
+                max_steps: 0,
+                ..base.limits
+            },
+            ..base
+        };
+        assert!(matches!(
+            setup.client.audit_tls(&invalid_limits),
+            Err(audit::Error::Tls(tls::Error::InvalidLimits))
+        ));
+        for host in [
+            String::new(),
+            "example test".into(),
+            "éxample.test".into(),
+            "example\r\nInjected: yes".into(),
+            "a".repeat(1025),
+            "example/test".into(),
+            "example\\test".into(),
+            "example@test".into(),
+            "example#test".into(),
+            "example?test".into(),
+        ] {
+            let request = audit::HttpRequest {
+                host,
+                ..http_request()
+            };
+            assert!(matches!(
+                setup.client.audit_http(&request),
+                Err(audit::Error::Invalid(_))
+            ));
+        }
+        for path in [
+            "relative".into(),
+            "/line\r\nInjected: yes".into(),
+            "/nul\0".into(),
+            "/é".into(),
+            format!("/{}", "a".repeat(8192)),
+        ] {
+            let request = audit::HttpRequest {
+                path,
+                ..http_request()
+            };
+            assert!(matches!(
+                setup.client.audit_http(&request),
+                Err(audit::Error::Invalid(_))
+            ));
+        }
+        for max_response_bytes in [0, 65_536] {
+            let request = audit::HttpRequest {
+                max_response_bytes,
+                ..http_request()
+            };
+            assert!(matches!(
+                setup.client.audit_http(&request),
+                Err(audit::Error::Invalid(_))
+            ));
+        }
+        assert!(setup.written.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn audit_http_writes_one_head_and_uses_the_final_response() {
+        let response = b"HTTP/1.1 100 Continue\r\nSet-Cookie: interim=discard-me\r\n\r\nHTTP/1.1 103 Early Hints\r\n\r\nHTTP/1.1 200 OK\r\nContent-Security-Policy: frame-ancestors 'none'\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nSet-Cookie: sid=redacted-secret; Secure; HttpOnly; SameSite=Strict\r\n\r\n";
+        let setup = fixture(policy(), response, Ending::ReadFailure);
+        let request = http_request();
+        let report = setup.client.audit_http(&request).unwrap();
+        assert_eq!(*setup.written.lock().unwrap(), expected_request(&request));
+        assert_eq!(report.kind, "audit-http");
+        assert!(report.completeness.complete);
+        assert!(report.findings.is_empty());
+        assert_eq!(report.measurements["status"], 200);
+        assert_eq!(report.measurements["https"], false);
+        assert_eq!(report.measurements["host"], request.host);
+        assert_eq!(report.measurements["path"], request.path);
+        assert_eq!(
+            report.measurements["bytes_sent"],
+            expected_request(&request).len()
+        );
+        assert_eq!(report.measurements["bytes_read"], response.len());
+        assert_eq!(
+            report.measurements["cookies"],
+            serde_json::json!([{"index":0,"name":"sid","value":"[redacted]","secure":true,"http_only":true,"same_site":"strict"}])
+        );
+        assert!(
+            !serde_json::to_string(&report)
+                .unwrap()
+                .contains("redacted-secret")
+        );
+    }
+
+    #[test]
+    fn audit_http_accepts_request_and_response_boundaries() {
+        let response = b"HTTP/1.1 204 No Content\r\n\r\n";
+        let mut request = http_request();
+        request.connection.timeout = Duration::from_secs(3600);
+        request.host = "a".repeat(1024);
+        request.path = format!("/{}", "b".repeat(8191));
+        request.max_response_bytes = 65_535;
+        let setup = fixture(policy(), response, Ending::ReadFailure);
+        let report = setup.client.audit_http(&request).unwrap();
+        assert_eq!(*setup.written.lock().unwrap(), expected_request(&request));
+        assert_eq!(report.measurements["status"], 204);
+        let request = audit::HttpRequest {
+            max_response_bytes: response.len(),
+            ..http_request()
+        };
+        let report = fixture(policy(), response, Ending::ReadFailure)
+            .client
+            .audit_http(&request)
+            .unwrap();
+        assert_eq!(report.measurements["bytes_read"], response.len());
+        let request = audit::HttpRequest {
+            max_response_bytes: response.len() - 1,
+            ..request
+        };
+        assert!(matches!(
+            fixture(policy(), response, Ending::Eof)
+                .client
+                .audit_http(&request),
+            Err(audit::Error::IncompleteResponse)
+        ));
+        let response = b"HTTP/1.1 101 Switching Protocols\r\n\r\n";
+        let report = fixture(policy(), response, Ending::ReadFailure)
+            .client
+            .audit_http(&http_request())
+            .unwrap();
+        assert_eq!(report.measurements["status"], 101);
+    }
+
+    #[test]
+    fn audit_policy_and_peer_refusals_precede_request_bytes() {
+        let request = http_request();
+        let setup = fixture(policy(), b"", Ending::Eof);
+        setup.forbidden.store(true, Ordering::SeqCst);
+        let stopped = setup.client.with_deadline(Deadline::immediate(None));
+        assert!(matches!(
+            stopped.audit_http(&request),
+            Err(audit::Error::Interrupted(_))
+        ));
+        for selected in [
+            Policy {
+                max_packets_per_operation: 1,
+                ..policy()
+            },
+            Policy {
+                max_bytes_per_operation: expected_request(&request).len() as u64 - 1,
+                ..policy()
+            },
+            Policy {
+                allowed_destinations: vec![DestinationConstraint::Exact(
+                    "127.0.0.2".parse().unwrap(),
+                )],
+                ..policy()
+            },
+        ] {
+            let setup = fixture(selected, b"", Ending::Eof);
+            setup.forbidden.store(true, Ordering::SeqCst);
+            assert!(matches!(
+                setup.client.audit_http(&request),
+                Err(audit::Error::Policy(_))
+            ));
+            assert!(setup.written.lock().unwrap().is_empty());
+        }
+        let tls_request = audit::TlsRequest::new(endpoint_fixture());
+        let selected = Policy {
+            max_bytes_per_operation: tls_request.limits.max_wire_bytes_sent as u64 - 1,
+            ..policy()
+        };
+        let setup = fixture(selected, b"", Ending::Eof);
+        setup.forbidden.store(true, Ordering::SeqCst);
+        assert!(matches!(
+            setup.client.audit_tls(&tls_request),
+            Err(audit::Error::Policy(_))
+        ));
+        for use_tls in [false, true] {
+            let setup = fixture(policy(), b"", Ending::Eof);
+            *setup.peer.lock().unwrap() = "127.0.0.1:8444".parse().unwrap();
+            let error = if use_tls {
+                setup.client.audit_tls(&tls_request)
+            } else {
+                setup.client.audit_http(&request)
+            }
+            .unwrap_err();
+            assert!(
+                matches!(error, audit::Error::Io(source) if source.kind() == io::ErrorKind::InvalidData)
+            );
+            assert!(setup.written.lock().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn audit_http_retains_distinct_io_and_control_failures() {
+        for ending in [Ending::ReadFailure, Ending::FlushFailure] {
+            let setup = fixture(policy(), b"HTTP/1.1 200 OK\r\nIncomplete:", ending);
+            assert!(
+                matches!(setup.client.audit_http(&http_request()), Err(audit::Error::Io(source)) if source.kind() == io::ErrorKind::BrokenPipe)
+            );
+        }
+        for ending in [Ending::Expire, Ending::Cancel] {
+            for response in [b"".as_slice(), b"HTTP/1.1 200 OK\r\n\r\n"] {
+                let setup = fixture(policy(), response, ending);
+                let error = setup.client.audit_http(&http_request()).unwrap_err();
+                match ending {
+                    Ending::Expire => assert!(matches!(
+                        error,
+                        audit::Error::Interrupted(
+                            packetcraftr_core::budget::Interrupted::Exceeded(_)
+                        )
+                    )),
+                    Ending::Cancel => assert!(matches!(
+                        error,
+                        audit::Error::Interrupted(
+                            packetcraftr_core::budget::Interrupted::Cancelled(_)
+                        )
+                    )),
+                    _ => unreachable!(),
+                }
+            }
+        }
+        let mut request = http_request();
+        request.connection.timeout = Duration::from_secs(5);
+        for response in [b"".as_slice(), b"HTTP/1.1 200 OK\r\n\r\n"] {
+            let setup = fixture(policy(), response, Ending::TimeoutBoundary);
+            assert!(matches!(
+                setup.client.audit_http(&request),
+                Err(audit::Error::Tcp(tcp::Error::DeadlineExceeded))
+            ));
+        }
+        for response in [
+            b"".as_slice(),
+            b"HTTP/1.1 100 Continue\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nIncomplete:",
+        ] {
+            assert!(matches!(
+                fixture(policy(), response, Ending::Eof)
+                    .client
+                    .audit_http(&http_request()),
+                Err(audit::Error::IncompleteResponse)
+            ));
+        }
+        for response in [
+            b"GET / HTTP/1.1\r\n\r\n".as_slice(),
+            b"not an HTTP response\r\n\r\n",
+        ] {
+            assert!(matches!(
+                fixture(policy(), response, Ending::Eof)
+                    .client
+                    .audit_http(&http_request()),
+                Err(audit::Error::Http(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn audit_tls_does_not_publish_a_report_after_handshake_eof() {
+        let setup = fixture(policy(), b"", Ending::Eof);
+        let error = setup
+            .client
+            .audit_tls(&audit::TlsRequest::new(endpoint_fixture()))
+            .unwrap_err();
+        assert!(
+            matches!(error, audit::Error::Tls(tls::Error::Io(source)) if source.kind() == io::ErrorKind::UnexpectedEof)
+        );
+        assert!(!setup.written.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn audit_https_withholds_request_when_certificate_evidence_is_unavailable() {
+        let rcgen::CertifiedKey { cert, signing_key } =
+            rcgen::generate_simple_self_signed(vec!["example.test".into()]).unwrap();
+        let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert.der().clone()], signing_key.into())
+        .unwrap();
+        let session = rustls::ServerConnection::new(Arc::new(config)).unwrap();
+        let application = Arc::new(Mutex::new(Vec::new()));
+        let setup = response_fixture(
+            policy(),
+            AuditResponse::Tls {
+                session: Box::new(session),
+                application: Arc::clone(&application),
+            },
+            Ending::Eof,
+        );
+        let mut request = http_request();
+        request.tls = true;
+        request.connection.server_name = Some(request.host.clone());
+        request.connection.limits.max_certificate_bytes = 0;
+
+        let report = setup.client.audit_http(&request).unwrap();
+
+        assert!(application.lock().unwrap().is_empty());
+        assert_eq!(report.kind, "audit-http");
+        assert!(!report.completeness.complete);
+        assert_eq!(
+            report
+                .completeness
+                .reasons
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "certificate evidence truncated",
+                "HTTP request withheld because TLS certificate verification failed"
+            ])
+        );
+        assert!(report.measurements["protocol"].is_string());
+        assert!(report.measurements["cipher"].is_string());
+        assert_eq!(
+            report.measurements["certificate_sha256"],
+            serde_json::json!([])
+        );
+        assert_eq!(
+            report.measurements["verification"],
+            serde_json::json!({
+                "chain": {"valid": null, "reason": "certificate evidence truncated"},
+                "name": {"valid": null, "reason": "certificate evidence truncated"}
+            })
+        );
+        assert_eq!(
+            report
+                .findings
+                .iter()
+                .map(|finding| finding.rule_id.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["tls.chain_invalid", "tls.name_mismatch"])
+        );
+        for finding in report.findings {
+            assert!(!finding.complete);
+            assert_eq!(finding.subject, request.connection.endpoint.to_string());
+        }
+    }
+}

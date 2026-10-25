@@ -397,3 +397,75 @@ fn final_head(
 fn response_complete(bytes: &[u8]) -> bool {
     !matches!(final_head(bytes), Ok(None))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tls_report_retains_observations_when_certificate_retention_is_truncated() {
+        let request = TlsRequest {
+            server_name: Some("example.test".into()),
+            limits: tls::Limits {
+                max_certificate_bytes: 0,
+                ..Default::default()
+            },
+            ..TlsRequest::new("127.0.0.1:8443".parse().unwrap())
+        };
+        let evidence = tls::Evidence {
+            handshake_complete: true,
+            protocol_version: Some("observed protocol".into()),
+            cipher_suite: Some("observed cipher".into()),
+            certificates_truncated: true,
+            wire_bytes_sent: 311,
+            wire_bytes_read: 1024,
+            ..Default::default()
+        };
+        let report = tls_report(&request, &evidence);
+        assert_eq!(report.kind, "audit-tls");
+        assert_eq!(report.measurements["endpoint"], json!(request.endpoint));
+        assert_eq!(
+            report.measurements["server_name"],
+            json!(request.server_name)
+        );
+        assert_eq!(
+            report.measurements["protocol"],
+            json!(evidence.protocol_version)
+        );
+        assert_eq!(report.measurements["cipher"], json!(evidence.cipher_suite));
+        assert_eq!(
+            report.measurements["wire_bytes_sent"],
+            json!(evidence.wire_bytes_sent)
+        );
+        assert_eq!(
+            report.measurements["wire_bytes_read"],
+            json!(evidence.wire_bytes_read)
+        );
+        assert_eq!(report.measurements["certificate_sha256"], json!([]));
+        assert!(!report.completeness.complete);
+        assert_eq!(
+            report.completeness.reasons,
+            ["certificate evidence truncated"]
+        );
+        let mut findings = report
+            .findings
+            .iter()
+            .map(|finding| (finding.rule_id.as_str(), finding.severity, finding.complete))
+            .collect::<Vec<_>>();
+        findings.sort_by_key(|finding| finding.0);
+        assert_eq!(
+            findings,
+            [
+                ("tls.chain_invalid", Severity::High, false),
+                ("tls.name_mismatch", Severity::High, false)
+            ]
+        );
+        for finding in &report.findings {
+            assert_eq!(finding.subject, request.endpoint.to_string());
+            assert_eq!(
+                finding.evidence,
+                json!({"valid":null,"reason":"certificate evidence truncated"})
+            );
+        }
+    }
+}

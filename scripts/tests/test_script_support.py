@@ -115,6 +115,15 @@ class StrictJsonTests(unittest.TestCase):
         for depth in [65, 2000]:
             with self.subTest(depth=depth), self.assertRaises(ValueError):
                 strict_json('[' * depth + '0' + ']' * depth)
+        raw = '{"child":' * 64 + '7' + '}' * 64
+        value = strict_json(raw)
+        for _ in range(64):
+            self.assertIsInstance(value, dict)
+            self.assertEqual(tuple(value), ('child',))
+            value = value['child']
+        self.assertEqual(value, 7)
+        with self.assertRaises(ValueError):
+            strict_json('{"child":' * 65 + '7' + '}' * 65)
 
     def test_nested_siblings_are_validated_after_empty_containers(self) -> None:
         expected = [[], {'nested': [[], 'retained']}, 7]
@@ -191,7 +200,7 @@ class AtomicReportTests(unittest.TestCase):
 
     def test_success_creates_parents_and_utf8_newline(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'nested/report.json'
+            path = Path(directory) / 'outer/nested/report.json'
             write_json_atomic(path, {'name': 'é'})
             self.assertEqual(json.loads(path.read_bytes()), {'name': 'é'})
             self.assertTrue(path.read_bytes().endswith(b'\n'))
@@ -241,3 +250,7 @@ class AtomicReportTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 distinct_paths(alias, source)
             distinct_paths(source.with_name('report.json'), source)
+            missing = Path(directory) / 'absent-input'
+            for output in (missing, Path(directory) / 'nested/../absent-input'):
+                with self.subTest(output=output), self.assertRaises(ValueError):
+                    distinct_paths(output, missing)

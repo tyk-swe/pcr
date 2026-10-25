@@ -130,6 +130,11 @@ class ForwardingConsumerTests(unittest.TestCase):
                      actual_state='absent', expected_state=None, outcome='satisfied'),
             ]
         self.assertEqual(consume(value)['report'], report)
+        report['rules']['expect'][0]['field'] = ''
+        for pair in report['matches']:
+            pair['checks'][2]['check']['field'] = ''
+        with self.assertRaisesRegex(consumer.ContractError, 'field must be a non-empty string'):
+            consume(value)
 
     def test_rule_budgets_include_every_declaration_and_utf8_literal(self) -> None:
         for category in ('identity', 'preserve', 'preserve_presence', 'expect', 'expect_absent'):
@@ -396,6 +401,23 @@ class ForwardingConsumerTests(unittest.TestCase):
                 mutate(value['result'])
                 with self.assertRaises(consumer.ContractError):
                     consume(value)
+        value = envelope()
+        value['result']['matches'][0]['key'] = [None]
+        with self.assertRaises(consumer.ContractError):
+            consume(value)
+        summary_fields = ('unique_matches', 'reordered_pairs', 'ingress_only', 'egress_only',
+                          'ambiguous_groups', 'ambiguous_observations', 'checks_evaluated',
+                          'checks_satisfied', 'checks_violated', 'checks_unevaluable')
+        capture_fields = ('read', 'selected', 'keyed', 'unkeyed', 'incomplete')
+        for side in ('summary', 'ingress', 'egress'):
+            for field in summary_fields if side == 'summary' else capture_fields:
+                for convert in (float, bool):
+                    value = envelope()
+                    report = value['result']
+                    counters = report['summary'] if side == 'summary' else report['captures'][side]
+                    counters[field] = convert(counters[field])
+                    with self.subTest(side=side, field=field, kind=convert.__name__), self.assertRaises(consumer.ContractError):
+                        consume(value)
         for side, (rank, frame) in product(('ingress', 'egress'), ((1, 1), (2, 3))):
             value = envelope()
             report = value['result']

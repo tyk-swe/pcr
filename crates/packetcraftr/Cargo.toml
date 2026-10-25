@@ -27,3 +27,7 @@ packetcraftr-core.workspace = true
 packetcraftr-netio.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+rustls.workspace = true
+rcgen = { version = "0.14.10", default-features = false, features = ["ring"] }

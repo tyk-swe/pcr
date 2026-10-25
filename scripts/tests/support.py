@@ -12,6 +12,8 @@ import sys
 from types import ModuleType
 
 ROOT = Path(__file__).resolve().parents[2]
+RUST_TOOL_VERSION = 'rust-fixture'
+PYTHON_TOOL_VERSION = 'python-fixture'
 sys.path.insert(0, str(ROOT / 'scripts'))
 
 from mutation_results import Outcome, Report
@@ -59,9 +61,11 @@ def mutation_checkout(root: Path) -> str:
     for name in ('mutation_results.py', 'mutation_scope.py', 'run_mutation.py'):
         (root / 'scripts' / name).write_bytes((ROOT / 'scripts' / name).read_bytes())
     with (root / '.config/mutation.toml').open('a') as config:
+        for name in ('mutation_results.py', 'mutation_scope.py', 'run_mutation.py'):
+            config.write(f'"scripts/{name}" = ["scripts/tests/test_alpha.py"]\n')
         config.write('\n[tools]\ncosmic-ray = "version"\ncargo-mutants = "version"\n')
     (root / '.config/mutation-exclusions.json').write_text('[]\n')
-    (root / '.gitignore').write_text('/artifacts/\n__pycache__/\n*.py[cod]\n')
+    (root / '.gitignore').write_text('/artifacts/\n/mutation-results/\n__pycache__/\n*.py[cod]\n')
     environment = os.environ | {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
     commands = (('init', '-q'), ('add', '.'),
                 ('-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-qm', 'initial'))
@@ -93,6 +97,8 @@ def mutation_tools(root: Path, tools_root: Path) -> tuple[Path, dict[str, str]]:
     (root / 'scripts/mutation_test_runner.py').write_bytes((ROOT / 'scripts/mutation_test_runner.py').read_bytes())
     config = root / '.config/mutation.toml'
     config.write_text(config.read_text().replace('[tools]',
-        '"scripts/mutation_test_runner.py" = ["scripts/tests/test_alpha.py"]\n\n[tools]'))
+        '"scripts/mutation_test_runner.py" = ["scripts/tests/test_alpha.py"]\n\n[tools]')
+        .replace('cosmic-ray = "version"', f'cosmic-ray = "{PYTHON_TOOL_VERSION}"')
+        .replace('cargo-mutants = "version"', f'cargo-mutants = "{RUST_TOOL_VERSION}"'))
     return executable, os.environ | {'PATH': str(tools_root) + os.pathsep + os.environ.get('PATH', ''),
                                     'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}

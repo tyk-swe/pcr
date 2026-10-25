@@ -155,11 +155,12 @@ class MutationReportTests(unittest.TestCase):
         cases = (('CaughtMutant', 'Test', {'Failure': 101}, 'killed'),
                  ('MissedMutant', 'Test', 'Success', 'survived'),
                  ('Timeout', 'Test', 'Timeout', 'timeout'),
+                 ('Timeout', 'Build', 'Timeout', 'timeout'),
                  ('Unviable', 'Build', {'Failure': 101}, 'invalid'))
         for summary, phase, process, expected in cases:
             outcome = dict(scenario=dict(Mutant=mutant), summary=summary, log_path='mutant.log',
-                           phase_results=[dict(phase='Build', process_status='Success'),
-                                          dict(phase=phase, process_status=process)])
+                           phase_results=([dict(phase='Build', process_status='Success')] if phase == 'Test' else [])
+                                         + [dict(phase=phase, process_status=process)])
             raw = dict(end_time='finished', total_mutants=1, outcomes=[baseline, outcome])
             logs = {'mutant.log': 'error[E0308]: mismatched types\nerror: could not compile sample'}
             with self.subTest(summary=summary):
@@ -170,6 +171,15 @@ class MutationReportTests(unittest.TestCase):
                     invalid = dict(outcome, phase_results=[dict(phase=bad_phase, process_status=bad_process)])
                     with self.assertRaises(ValueError):
                         rust_results([mutant], raw | {'outcomes': [baseline, invalid]}, logs)
+                for preceding in ('Timeout', {'Failure': 101}, {'Failure': 13}):
+                    invalid = outcome | {'phase_results': [dict(phase='Build', process_status=preceding),
+                                                           dict(phase=phase, process_status=process)]}
+                    with self.subTest(summary=summary, preceding=preceding), self.assertRaises(ValueError):
+                        rust_results([mutant], raw | {'outcomes': [baseline, invalid]}, logs)
+                for phases in ([dict(phase='Check', process_status='Success'), *outcome['phase_results']],
+                               [dict(phase='Test', process_status='Success'), *outcome['phase_results']]):
+                    with self.subTest(summary=summary, phases=phases), self.assertRaises(ValueError):
+                        rust_results([mutant], raw | {'outcomes': [baseline, outcome | {'phase_results': phases}]}, logs)
         for log in ('error[E0308]: mismatched types', 'could not compile sample', 'network failed'):
             with self.subTest(log=log), self.assertRaises(ValueError):
                 rust_results([mutant], raw, {'mutant.log': log})

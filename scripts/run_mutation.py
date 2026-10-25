@@ -43,13 +43,19 @@ def command(argv: Sequence[str], cwd: Path, log: Path) -> int:
                               check=False).returncode
 
 
-def targets_from(path: Path) -> tuple[Target, ...]:
-    values = tuple(record(value) for value in sequence(read(path)))
-    if any(value.get('language') not in ('rust', 'python') for value in values):
+def parse_target(raw: object) -> Target:
+    value = record(raw)
+    if value.get('language') not in ('rust', 'python'):
         raise ValueError('invalid mutation language')
-    return tuple(Target(text(value.get('group')), 'rust' if value['language'] == 'rust' else 'python',
-                        tuple(text(file) for file in sequence(value.get('files'))),
-                        text(value.get('reason'))) for value in values)
+    return Target(text(value.get('group')), 'rust' if value['language'] == 'rust' else 'python',
+                  tuple(text(file) for file in sequence(value.get('files'))), text(value.get('reason')))
+
+
+def targets_from(path: Path) -> tuple[Target, ...]:
+    targets = tuple(parse_target(value) for value in sequence(read(path)))
+    if len({(target.language, target.group) for target in targets}) != len(targets):
+        raise ValueError('duplicate mutation targets')
+    return targets
 
 
 def snapshot(root: Path, destination: Path) -> str:
@@ -91,10 +97,10 @@ def rust(target: Target, root: Path, output: Path, profile: str, shard: int, sha
     if command([*args, *partition, '--list', '--json'], root, selected_path):
         raise ValueError('Rust shard discovery failed')
     selected = read(selected_path)
+    if command(['cargo', 'test', '--locked', '--workspace', *PROFILES[profile]],
+               root, output / 'baseline.log'):
+        raise ValueError('Rust workspace baseline failed')
     if not sequence(selected):
-        if command(['cargo', 'test', '--locked', '--workspace', *PROFILES[profile]],
-                   root, output / 'baseline.log'):
-            raise ValueError('Rust baseline failed for an empty mutation selection')
         version = subprocess.check_output(['cargo', 'mutants', '--version'], text=True).split()[-1]
         return Report(target.group, '', version, target.reason,
                       tuple(text(record(mutant).get('name')) for mutant in sequence(inventory)),
@@ -178,7 +184,7 @@ def run_target(target: Target, source: Path, output: Path, profile: str, shard: 
                platform_label: str, revision: str, tree: str, version: str) -> str | None:
     folder = output / target.group.replace('/', '_').replace('.', '_')
     folder.mkdir(parents=True, exist_ok=True)
-    metadata = dict(platform=platform_label, profile=profile, shard=shard, shards=shards)
+    metadata = dict(platform=platform_label, profile=profile, shard=shard, shards=shards, target=asdict(target))
     write(folder / 'run.json', {**metadata, 'group': target.group, 'complete': False})
     try:
         with tempfile.TemporaryDirectory(prefix='pcr-mutation-') as directory:
@@ -247,9 +253,14 @@ def check(targets: tuple[Target, ...], paths: tuple[Path, ...], language: str,
     if any(report.revision != revision or report.tool_version != tool_version
            for report in reports):
         raise ValueError('mutation artifacts do not match the tested revision, source snapshot or pinned tool version')
-    allowed = {target.group for target in targets if target.language == language}
+    allowed = {target.group: target for target in targets if target.language == language}
+    if len(allowed) != sum(target.language == language for target in targets):
+        raise ValueError('duplicate required mutation groups')
     if any(report.group not in allowed for report in reports):
         raise ValueError('unexpected mutation group')
+    if any(parse_target(run.get('target')) != allowed[report.group]
+           or report.reason != allowed[report.group].reason for run, report in zip(runs, reports)):
+        raise ValueError('mutation artifacts do not match the requested target scope')
     if any(run.get('platform') not in platforms or run.get('profile') not in profiles for run in runs):
         raise ValueError('unexpected mutation platform or feature profile')
     scores = tuple(score(merge_reports(tuple(cohort(tuple(zip(runs, reports)), group, system, profile, shards)

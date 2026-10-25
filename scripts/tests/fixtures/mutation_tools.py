@@ -29,7 +29,7 @@ class CargoArguments(argparse.Namespace):
 def cargo(argv: list[str], failure: str) -> int:
     if argv[0] == 'test':
         print('controlled workspace baseline')
-        return 7 if failure == 'empty-baseline' else 0
+        return 7 if failure == 'empty-baseline' or failure == 'workspace-baseline' and '--workspace' in argv else 0
     parser = argparse.ArgumentParser()
     parser.add_argument('--version', action='store_true')
     parser.add_argument('--list', dest='listing', action='store_true')
@@ -45,7 +45,7 @@ def cargo(argv: list[str], failure: str) -> int:
     args = CargoArguments()
     parser.parse_known_args(argv[1:], namespace=args)
     if args.version:
-        print('cargo-mutants ' + os.environ.get('MUTATION_FIXTURE_VERSION', 'version'))
+        print('cargo-mutants ' + os.environ.get('MUTATION_FIXTURE_VERSION', 'rust-fixture'))
         return 0
     if args.jobs != 1 or not Path('Cargo.toml').is_file():
         return 7
@@ -53,7 +53,7 @@ def cargo(argv: list[str], failure: str) -> int:
     features = frozenset(('default',) if not args.no_default else ()) | frozenset(
         name for name in ('layer2', 'layer3') if f'native-{name}' in args.features)
     feature = 'default+layer2+layer3' if args.all_features else '+'.join(sorted(features)) or 'portable'
-    files = [package / 'src/lib.rs', package / 'src/extra.rs']
+    files = [path for path in (package / 'src/lib.rs', package / 'src/extra.rs') if path.is_file()]
     manifest = tomllib.loads((package / 'Cargo.toml').read_text())
     if any(target.get('path') == 'build.rs' for target in manifest.get('bin', [])):
         files.append(package / 'build.rs')
@@ -84,23 +84,25 @@ def cargo(argv: list[str], failure: str) -> int:
     if failure == 'baseline':
         baseline['summary'] = 'Failure'
     caught = args.workspace == 'true' and failure != 'survivor'
-    outcomes = [dict(scenario=dict(Mutant=mutant), summary='CaughtMutant' if caught else 'MissedMutant',
+    outcomes = [dict(scenario=dict(Mutant=mutant),
+                     summary='Timeout' if failure == 'timeout' and index == 0 else 'CaughtMutant' if caught else 'MissedMutant',
                      log_path=f'log/{index}.log', phase_results=[dict(phase='Build', process_status='Success'),
-                     dict(phase='Test', process_status={'Failure': 101} if caught else 'Success')])
+                     dict(phase='Test', process_status='Timeout' if failure == 'timeout' and index == 0
+                          else {'Failure': 101} if caught else 'Success')])
                 for index, mutant in enumerate(inventory)]
     for index in range(len(outcomes)):
         (output / f'log/{index}.log').write_text('controlled test result')
-    report = dict(cargo_mutants_version='version', end_time=None if failure == 'unfinished' else 'finished',
+    report = dict(cargo_mutants_version='rust-fixture', end_time=None if failure == 'unfinished' else 'finished',
                   total_mutants=len(inventory) + int(failure == 'inconsistent'), outcomes=[baseline, *outcomes])
     if failure != 'missing-report':
         (output / 'outcomes.json').write_text(json.dumps(report))
-    return 0 if caught else 2
+    return 3 if failure == 'timeout' else 0 if caught else 2
 
 
 def cosmic(argv: list[str], failure: str) -> int:
     action = argv[0]
     if action == '--version':
-        print('cosmic-ray, version ' + os.environ.get('MUTATION_FIXTURE_VERSION', 'version'))
+        print('cosmic-ray, version ' + os.environ.get('MUTATION_FIXTURE_VERSION', 'python-fixture'))
         return 0
     if failure == action:
         return 7

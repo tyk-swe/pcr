@@ -15,21 +15,49 @@ import unittest
 from unittest.mock import patch
 
 from support import ROOT, mutation_checkout, report
-from mutation_results import Exclusion, Outcome, score
+from mutation_results import Exclusion, Outcome, Report, score
 from mutation_scope import Target
 from run_mutation import check, merge_reports, snapshot
 
 
+def measurement(value: Report, target: Target, platform: str = 'Linux',
+                shard: int = 1, shards: int = 1) -> dict[str, object]:
+    return dict(platform=platform, profile='all', shard=shard, shards=shards,
+                report=asdict(value), target=asdict(target))
+
+
 class MutationScoreTests(unittest.TestCase):
+    def test_published_scores_preserve_fractional_percentages_and_evidence_counts(self) -> None:
+        original = report(20, 2)
+        outcomes = (*original.outcomes[:-1], replace(original.outcomes[-1], status='timeout'),
+                    Outcome('invalid-a', 'invalid', 'compiler error'), Outcome('invalid-b', 'invalid', 'compiler error'))
+        value = replace(original, outcomes=outcomes, expected=tuple(outcome.identity for outcome in outcomes))
+        target = Target(value.group, 'rust', (), value.reason)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'run.json'
+            path.write_text(json.dumps(measurement(value, target)))
+            output = io.StringIO()
+            with redirect_stdout(output):
+                passed = check((target,), (path,), 'rust', ('Linux',), ('all',), 1, (), value.revision, value.tool_version)
+            published = json.loads(output.getvalue())
+            self.assertTrue(passed)
+            self.assertAlmostEqual(published['percentage'], 100 * 20 / 22)
+            self.assertEqual((published['killed'], published['eligible'], published['invalid'], published['equivalent']),
+                             (20, 22, 2, 0))
+            self.assertEqual(published['survivors'], ['20'])
+            self.assertEqual(published['timeouts'], ['21'])
+            self.assertEqual(published['tool_versions'], [value.tool_version])
+            self.assertEqual(published['status'], 'passed')
+
     def test_threshold_is_strict_and_applies_to_every_group(self) -> None:
         self.assertFalse(score(report()).passed)
         self.assertTrue(score(report(10)).passed)
         with tempfile.TemporaryDirectory() as directory:
             paths = tuple(Path(directory) / f'{group}.json' for group in ('strong', 'weak'))
-            for path, value in zip(paths, (report(99, 1, 'strong'), report(9, 1, 'weak'))):
-                path.write_text(json.dumps(dict(platform='Linux', profile='all', shard=1, shards=1,
-                                               report=asdict(value))))
-            targets = tuple(Target(group, 'rust', (), 'test') for group in ('strong', 'weak'))
+            values = (report(99, 1, 'strong'), report(9, 1, 'weak'))
+            targets = tuple(Target(value.group, 'rust', (), value.reason) for value in values)
+            for path, value, target in zip(paths, values, targets):
+                path.write_text(json.dumps(measurement(value, target)))
             self.assertFalse(check(targets, paths, 'rust', ('Linux',), ('all',), 1, (), 'revision', 'version'))
 
     def test_empty_selection_is_reported_with_its_reason(self) -> None:
@@ -45,8 +73,7 @@ class MutationScoreTests(unittest.TestCase):
         value = report(0, 0)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'run.json'
-            path.write_text(json.dumps(dict(platform='Linux', profile='all', shard=1, shards=1,
-                                           report=asdict(value))))
+            path.write_text(json.dumps(measurement(value, Target('core', 'rust', (), value.reason))))
             output = io.StringIO()
             with redirect_stdout(output):
                 passed = check((Target('core', 'rust', (), value.reason),), (path,), 'rust',
@@ -59,28 +86,69 @@ class MutationScoreTests(unittest.TestCase):
 
     def test_all_shards_must_agree_and_complete_the_inventory(self) -> None:
         value = report(10, 0)
-        target = (Target('core', 'rust', (), 'test'),)
+        target = (Target('core', 'rust', (), value.reason),)
         with tempfile.TemporaryDirectory() as directory:
             paths = tuple(Path(directory) / f'{i}.json' for i in (1, 2))
             for i, path in enumerate(paths):
                 partial = replace(value, outcomes=value.outcomes[i::2])
-                path.write_text(json.dumps(dict(platform='Linux', profile='all', shard=i + 1,
-                                               shards=2, report=asdict(partial))))
+                path.write_text(json.dumps(measurement(partial, target[0], shard=i + 1, shards=2)))
             self.assertTrue(check(target, paths, 'rust', ('Linux',), ('all',), 2, (), 'revision', 'version'))
             with self.assertRaises(ValueError):
                 check(target, paths[:1], 'rust', ('Linux',), ('all',), 2, (), 'revision', 'version')
             with self.assertRaises(ValueError):
                 check(target, (paths[0], paths[0]), 'rust', ('Linux',), ('all',), 2, (), 'revision', 'version')
+            second = measurement(replace(value, outcomes=value.outcomes[1::2]), target[0], shard=2, shards=2)
+            for field, invalid in (('shard', 0), ('shard', 3), ('shards', 1), ('shards', 3)):
+                paths[1].write_text(json.dumps(second | {field: invalid}))
+                with self.subTest(field=field, value=invalid), self.assertRaises(ValueError):
+                    check(target, paths, 'rust', ('Linux',), ('all',), 2, (), 'revision', 'version')
+            for inconsistent in (
+                replace(value, outcomes=value.outcomes[1::2], expected=(*value.expected, 'unreported-mutant')),
+                replace(value, outcomes=value.outcomes[1::2], baseline=False),
+                replace(value, outcomes=value.outcomes[1::2], complete=False),
+            ):
+                paths[1].write_text(json.dumps(measurement(inconsistent, target[0], shard=2, shards=2)))
+                with self.subTest(report=inconsistent), self.assertRaises(ValueError):
+                    check(target, paths, 'rust', ('Linux',), ('all',), 2, (), 'revision', 'version')
 
     def test_reports_from_another_revision_or_tool_cannot_pass(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'run.json'
-            path.write_text(json.dumps(dict(platform='Linux', profile='all', shard=1, shards=1,
-                                           report=asdict(report(10, 0)))))
+            value = report(10, 0)
+            target = Target('core', 'rust', (), value.reason)
+            path.write_text(json.dumps(measurement(value, target)))
             for revision, version in (('other', 'version'), ('revision', 'other')):
                 with self.subTest(revision=revision, version=version), self.assertRaises(ValueError):
-                    check((Target('core', 'rust', (), 'test'),), (path,), 'rust', ('Linux',), ('all',),
+                    check((target,), (path,), 'rust', ('Linux',), ('all',),
                           1, (), revision, version)
+
+    def test_platform_and_profile_cohorts_combine_only_their_own_shards(self) -> None:
+        value = report(0, 4)
+        target = Target(value.group, 'rust', (), value.reason)
+        platforms, profiles = ('Linux', 'Windows'), ('all', 'portable')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = tuple(root / f'{platform}-{profile}-{shard}.json'
+                          for platform in platforms for profile in profiles for shard in (1, 2))
+            for index, (platform, profile) in enumerate((platform, profile)
+                    for platform in platforms for profile in profiles):
+                outcomes = tuple(replace(outcome, status='killed' if number == index else 'survived')
+                                 for number, outcome in enumerate(value.outcomes))
+                for shard in (1, 2):
+                    partial = replace(value, outcomes=outcomes[shard - 1::2])
+                    (root / f'{platform}-{profile}-{shard}.json').write_text(json.dumps(
+                        measurement(partial, target, platform=platform, shard=shard, shards=2)
+                        | {'profile': profile}))
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertTrue(check((target,), paths, 'rust', platforms, profiles, 2, (), 'revision', 'version'))
+            summary = json.loads(output.getvalue())
+            self.assertEqual((summary['killed'], summary['eligible']), (4, 4))
+            foreign = root / 'foreign.json'
+            for changed in ({'platform': 'FreeBSD'}, {'profile': 'unknown'}):
+                foreign.write_text(json.dumps(measurement(value, target) | changed))
+                with self.subTest(changed=changed), self.assertRaises(ValueError):
+                    check((target,), (*paths, foreign), 'rust', platforms, profiles, 2, (), 'revision', 'version')
 
     def test_required_feature_runs_can_detect_different_mutants(self) -> None:
         first = report()
@@ -97,6 +165,26 @@ class MutationScoreTests(unittest.TestCase):
                            replace(first, complete=False)):
             with self.subTest(incomplete=incomplete), self.assertRaises(ValueError):
                 merge_reports((incomplete, second))
+
+    def test_artifacts_cannot_replace_a_full_or_different_file_selection(self) -> None:
+        first = Target('core', 'rust', ('crates/core/src/first.rs',), 'changed production files')
+        value = replace(report(10, 0), reason=first.reason)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'run.json'
+            path.write_text(json.dumps(measurement(value, first)))
+            self.assertTrue(check((first,), (path,), 'rust', ('Linux',), ('all',), 1, (), 'revision', 'version'))
+            for target in (replace(first, files=()), replace(first, files=('crates/core/src/second.rs',)),
+                           replace(first, reason='full crate, tests or shared inputs changed')):
+                with self.subTest(target=target), self.assertRaises(ValueError):
+                    check((target,), (path,), 'rust', ('Linux',), ('all',), 1, (), 'revision', 'version')
+            with self.assertRaises(ValueError):
+                check((first, replace(first, files=('crates/core/src/second.rs',))), (path,),
+                      'rust', ('Linux',), ('all',), 1, (), 'revision', 'version')
+            raw = measurement(value, first)
+            for invalid_target in (None, asdict(replace(first, language='python'))):
+                path.write_text(json.dumps(raw | {'target': invalid_target}))
+                with self.subTest(target=invalid_target), self.assertRaises(ValueError):
+                    check((first,), (path,), 'rust', ('Linux',), ('all',), 1, (), 'revision', 'version')
 
 
 class MutationReportTests(unittest.TestCase):
@@ -118,12 +206,12 @@ class MutationReportTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as snapshot_directory:
                 current_tree = snapshot(root, Path(snapshot_directory))
             value = replace(report(9, 1, group), revision=f'{revision} tree {current_tree}')
+            target = Target(group, 'python', (group,), value.reason)
             artifacts = root / 'artifacts'
             artifacts.mkdir()
-            (artifacts / 'run.json').write_text(json.dumps(dict(platform=sys.platform, profile='all', shard=1,
-                                                              shards=1, report=asdict(value))))
+            (artifacts / 'run.json').write_text(json.dumps(measurement(value, target, platform=sys.platform)))
             plan = Path(directory) / 'plan.json'
-            plan.write_text(json.dumps([asdict(Target(group, 'python', (group,), 'changed production'))]))
+            plan.write_text(json.dumps([asdict(target)]))
             result = subprocess.run([sys.executable, str(root / 'scripts/run_mutation.py'), 'check',
                                      '--plan', str(plan), '--language', 'python', '--platforms', sys.platform,
                                      '--output', str(artifacts)], cwd=root, capture_output=True, text=True, timeout=5, check=False)
@@ -145,8 +233,7 @@ class MutationReportTests(unittest.TestCase):
             value = replace(report(2, 0, target.group), revision=f'{revision} tree {tree}')
             artifacts = root / 'artifacts'
             artifacts.mkdir()
-            (artifacts / 'run.json').write_text(json.dumps(dict(platform=sys.platform, profile='all', shard=1,
-                                                              shards=1, report=asdict(value))))
+            (artifacts / 'run.json').write_text(json.dumps(measurement(value, target, platform=sys.platform)))
             command = [sys.executable, str(root / 'scripts/run_mutation.py'), 'check', '--plan', str(plan),
                        '--language', 'python', '--platforms', sys.platform, '--output', str(artifacts)]
             result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=5, check=False)
@@ -195,8 +282,20 @@ class MutationSelectionTests(unittest.TestCase):
             subprocess.run(['git', 'add', 'module.py'], cwd=root, check=True)
             (root / 'module.py').write_text('edited')
             (root / 'new.py').write_text('new module')
+            early = root / '.config/aaa.toml'
+            early.parent.mkdir()
+            early.write_text('value=1\n')
+            subprocess.run(['git', 'add', '.config/aaa.toml'], cwd=root, check=True)
             first = snapshot(root, destination)
             self.assertEqual((destination / 'module.py').read_text(), 'edited')
             self.assertEqual((destination / 'new.py').read_text(), 'new module')
-            (root / 'module.py').write_text('second edit')
+            early.write_text('value=2\n')
             self.assertNotEqual(snapshot(root, destination), first)
+            (root / 'module.py').unlink()
+            with tempfile.TemporaryDirectory() as fresh:
+                snapshot(root, Path(fresh))
+                self.assertEqual((Path(fresh) / 'new.py').read_text(), 'new module')
+            (root / 'module.py').write_text('edited')
+            unchanged_module = snapshot(root, destination)
+            (root / 'module.py').write_text('second edit')
+            self.assertNotEqual(snapshot(root, destination), unchanged_module)

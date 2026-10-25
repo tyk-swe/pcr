@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 from pathlib import Path
 import sys
@@ -29,8 +30,16 @@ def main() -> int:
         names = tuple(name for name in selected if isinstance(name, str) and name.strip())
         if len(names) != len(selected):
             raise ValueError('invalid Python test ownership')
-        suite = unittest.TestSuite(unittest.defaultTestLoader.discover(str(Path(name).parent), pattern=Path(name).name)
-                                   for name in names)
+        paths = tuple(Path(name) for name in names)
+        if any(path.is_absolute() or '..' in path.parts or path.parts[:2] != ('scripts', 'tests')
+               or not path.name.startswith('test_') or path.suffix != '.py' or not path.is_file()
+               for path in paths):
+            raise ValueError('selected Python test owner is not a repository test file')
+        suites = tuple(unittest.defaultTestLoader.discover(str(path.parent), pattern=glob.escape(path.name))
+                       for path in paths)
+        if any(suite.countTestCases() == 0 for suite in suites):
+            raise ValueError('selected Python test owner contains no tests')
+        suite = unittest.TestSuite(suites)
     except (OSError, ValueError) as error:
         print('MUTATION_RESULT ' + json.dumps({'kind': 'runner_error', 'message': str(error)}))
         return 1

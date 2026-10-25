@@ -86,12 +86,22 @@ class MutationTestRunnerTests(unittest.TestCase):
             for invalid in ('', '[python]\nmodules=[]\n',
                             original.replace('scripts/alpha.py', 'scripts/absent.py'),
                             original.replace('["scripts/tests/test_alpha.py"]', '[]'),
-                            original.replace('["scripts/tests/test_alpha.py"]', '[1]')):
+                            original.replace('["scripts/tests/test_alpha.py"]', '[1]'),
+                            original.replace('["scripts/tests/test_alpha.py"]',
+                                             '["scripts/tests/test_alpha.py", "scripts/tests/test_absent.py"]'),
+                            original.replace('["scripts/tests/test_alpha.py"]',
+                                             '["scripts/tests/test_alpha.py", "scripts/tests/empty.py"]')):
                 config.write_text(invalid)
                 result = execute(root)
                 with self.subTest(invalid=invalid):
                     self.assertEqual(result.returncode, 1)
                     self.assertEqual(evidence(result)['kind'], 'runner_error')
+            (root / 'scripts/tests/test_beta.py').write_text('value = 3\n')
+            config.write_text(original.replace('["scripts/tests/test_alpha.py"]',
+                '["scripts/tests/test_alpha.py", "scripts/tests/test_beta.py"]'))
+            result = execute(root)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(evidence(result)['kind'], 'runner_error')
             config.write_text(original)
             (root / 'scripts/tests/test_alpha.py').write_text('value = 3\n')
             result = execute(root)

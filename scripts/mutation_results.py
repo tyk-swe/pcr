@@ -113,6 +113,16 @@ def score(report: Report, exclusions: tuple[Exclusion, ...] = ()) -> Score:
     )
 
 
+def rust_phases(raw: object) -> tuple[dict[str, object], ...]:
+    phases = tuple(record(phase) for phase in sequence(raw))
+    names = tuple(phase.get('phase') for phase in phases)
+    if names not in (('Build',), ('Test',), ('Build', 'Test')):
+        raise ValueError('cargo-mutants has inconsistent execution phases')
+    if any(phase.get('process_status') != 'Success' for phase in phases[:-1]):
+        raise ValueError('cargo-mutants continued after an unsuccessful phase')
+    return phases
+
+
 def rust_results(inventory: object, raw: object, logs: Mapping[str, str]) -> tuple[Outcome, ...]:
     expected = tuple(text(record(mutant).get('name')) for mutant in sequence(inventory))
     report = record(raw)
@@ -122,9 +132,9 @@ def rust_results(inventory: object, raw: object, logs: Mapping[str, str]) -> tup
     baselines = tuple(outcome for outcome in outcomes if outcome.get('scenario') == 'Baseline')
     if len(baselines) != 1 or baselines[0].get('summary') != 'Success':
         raise ValueError('cargo-mutants baseline failed or is missing')
-    baseline_phases = tuple(record(phase) for phase in sequence(baselines[0].get('phase_results')))
-    if (not baseline_phases or baseline_phases[-1].get('phase') != 'Test'
-            or any(phase.get('process_status') != 'Success' for phase in baseline_phases)):
+    baseline_phases = rust_phases(baselines[0].get('phase_results'))
+    if (baseline_phases[-1].get('phase') != 'Test'
+            or baseline_phases[-1].get('process_status') != 'Success'):
         raise ValueError('cargo-mutants baseline did not successfully run tests')
     results = tuple(rust_outcome(outcome, logs) for outcome in outcomes if outcome not in baselines)
     if integer(report.get('total_mutants')) != len(expected) or set(expected) != {r.identity for r in results}:
@@ -136,9 +146,7 @@ def rust_outcome(outcome: dict[str, object], logs: Mapping[str, str]) -> Outcome
     mutant = record(record(outcome.get('scenario')).get('Mutant'))
     identity = text(mutant.get('name'))
     log_path = text(outcome.get('log_path'))
-    phases = tuple(record(phase) for phase in sequence(outcome.get('phase_results')))
-    if not phases:
-        raise ValueError('cargo-mutants has no execution evidence')
+    phases = rust_phases(outcome.get('phase_results'))
     last = phases[-1]
     summary = outcome.get('summary')
     match summary:
@@ -148,7 +156,7 @@ def rust_outcome(outcome: dict[str, object], logs: Mapping[str, str]) -> Outcome
             if last.get('phase') != 'Test' or last.get('process_status') != expected_exit:
                 raise ValueError('cargo-mutants test phase failed unexpectedly')
         case 'Timeout':
-            if not any(phase.get('process_status') == 'Timeout' for phase in phases):
+            if last.get('process_status') != 'Timeout':
                 raise ValueError('cargo-mutants timeout has no evidence')
             status = 'timeout'
         case 'Unviable':

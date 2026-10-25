@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import unittest
 
-from support import mutation_checkout, mutation_tools
+from support import PYTHON_TOOL_VERSION, RUST_TOOL_VERSION, mutation_checkout, mutation_tools
 from mutation_results import parse_report, score
 from mutation_scope import Target
 
@@ -22,6 +22,83 @@ def invoke(root: Path, executable: Path, environment: dict[str, str], arguments:
 
 @unittest.skipUnless(os.name == 'posix', 'SDK doubles use POSIX launchers')
 class MutationToolExecutionTests(unittest.TestCase):
+    def test_cli_selects_owned_targets_and_runs_with_default_output_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'checkout'
+            mutation_checkout(root)
+            executable, environment = mutation_tools(root, Path(directory) / 'tools/bin')
+            plan = Path(directory) / 'selection/plan.json'
+            selected = invoke(root, executable, environment, ['select', '--full', '--plan', str(plan)])
+            self.assertEqual(selected.returncode, 0, selected.stderr)
+            targets = json.loads(plan.read_text())
+            self.assertEqual(json.loads(selected.stdout), targets)
+            self.assertEqual({value['group'] for value in targets if value['language'] == 'rust'}, {'sample', 'other'})
+            self.assertEqual({value['group'] for value in targets if value['language'] == 'python'},
+                             {'scripts/alpha.py', 'scripts/beta.py', 'scripts/mutation_results.py',
+                              'scripts/mutation_scope.py', 'scripts/run_mutation.py', 'scripts/mutation_test_runner.py'})
+            measured = invoke(root, executable, environment, ['run', '--plan', str(plan)])
+            self.assertEqual(measured.returncode, 0, measured.stderr)
+            checked = invoke(root, executable, environment, ['check', '--plan', str(plan)])
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            summaries = tuple(json.loads(line) for line in checked.stdout.splitlines())
+            self.assertEqual({(value['group'], value['killed'], value['eligible']) for value in summaries},
+                             {('sample', 3, 3), ('other', 1, 1)})
+            self.assertTrue(all(value['tool_versions'] == [RUST_TOOL_VERSION] for value in summaries))
+            self.assertEqual({json.loads(path.read_text())['report']['group']
+                              for path in (root / 'mutation-results/rust').rglob('run.json')}, {'sample', 'other'})
+            self.assertEqual((root / 'marker.txt').read_text(), 'original')
+            identity = ('-c', 'user.name=Test', '-c', 'user.email=test@example.test')
+            for command in (('add', '.'), (*identity, 'commit', '-qm', 'test: initialize SDK fixtures')):
+                subprocess.run(['git', *command], cwd=root, env=environment, capture_output=True, check=True)
+            (root / 'scripts/alpha.py').write_text('value = 1\n\n')
+            for command in (('add', 'scripts/alpha.py'), (*identity, 'commit', '-qm', 'test: edit selected module')):
+                subprocess.run(['git', *command], cwd=root, env=environment, capture_output=True, check=True)
+            python_plan = Path(directory) / 'python.json'
+            selected = invoke(root, executable, environment,
+                              ['select', '--base', 'HEAD^', '--plan', str(python_plan)])
+            self.assertEqual(selected.returncode, 0, selected.stderr)
+            self.assertEqual(json.loads(selected.stdout), json.loads(python_plan.read_text()))
+            self.assertEqual([(value['group'], value['files']) for value in json.loads(selected.stdout)],
+                             [('scripts/alpha.py', ['scripts/alpha.py'])])
+            arguments = ['--plan', str(python_plan), '--language', 'python']
+            measured = invoke(root, executable, environment, ['run', *arguments])
+            self.assertEqual(measured.returncode, 0, measured.stderr)
+            checked = invoke(root, executable, environment, ['check', *arguments])
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            summary = json.loads(checked.stdout)
+            self.assertEqual((summary['group'], summary['killed'], summary['eligible']), ('scripts/alpha.py', 2, 2))
+            self.assertEqual(summary['tool_versions'], [PYTHON_TOOL_VERSION])
+            self.assertEqual(len(tuple((root / 'mutation-results/python').rglob('run.json'))), 1)
+
+    def test_completed_survivors_and_timeouts_fail_the_cli_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'checkout'
+            mutation_checkout(root)
+            executable, environment = mutation_tools(root, Path(directory) / 'tools/bin')
+            for target, failure, killed, eligible, survivors, timeouts in (
+                (Target('sample', 'rust', (), 'complete survivors'), 'survivor', 0, 3, 3, 0),
+                (Target('scripts/alpha.py', 'python', ('scripts/alpha.py',), 'complete survivors'), 'survivor', 0, 2, 2, 0),
+                (Target('sample', 'rust', (), 'complete timeout'), 'timeout', 2, 3, 0, 1),
+            ):
+                plan = Path(directory) / f'{target.language}-{failure}.json'
+                plan.write_text(json.dumps([asdict(target)]))
+                output = root / 'artifacts' / f'{target.language}-{failure}'
+                arguments = ['--plan', str(plan), '--language', target.language, '--output', str(output)]
+                measured = invoke(root, executable, environment | {'MUTATION_FIXTURE_FAILURE': failure}, ['run', *arguments])
+                with self.subTest(language=target.language, failure=failure):
+                    self.assertEqual(measured.returncode, 0, measured.stderr)
+                    checked = invoke(root, executable, environment, ['check', *arguments])
+                    self.assertEqual(checked.returncode, 1, checked.stderr)
+                    published = json.loads(checked.stdout)
+                    self.assertEqual((published['killed'], published['eligible'], published['invalid']), (killed, eligible, 0))
+                    self.assertEqual(len(published['survivors']), survivors)
+                    self.assertEqual(len(published['timeouts']), timeouts)
+                    self.assertEqual(published['status'], 'failed')
+                    self.assertFalse(published['passed'])
+                    self.assertAlmostEqual(published['percentage'], 100 * killed / eligible)
+                    version = RUST_TOOL_VERSION if target.language == 'rust' else PYTHON_TOOL_VERSION
+                    self.assertEqual(published['tool_versions'], [version])
+
     def test_each_selected_target_receives_the_original_source_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / 'checkout'
@@ -38,6 +115,7 @@ class MutationToolExecutionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             reports = tuple(parse_report(json.loads(path.read_text())['report']) for path in output.rglob('run.json'))
             self.assertEqual({value.group for value in reports}, {'sample', 'other'})
+            self.assertEqual({value.tool_version for value in reports}, {RUST_TOOL_VERSION})
             self.assertEqual(len({value.revision for value in reports}), 1)
             result = invoke(root, executable, environment, ['check', *arguments])
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -62,13 +140,15 @@ class MutationToolExecutionTests(unittest.TestCase):
                     with self.subTest(language=target.language, shard=shard, shards=shards):
                         self.assertEqual(result.returncode, 1)
                         self.assertIn('invalid shard', result.stderr)
-                for version in ('aaa', 'zzz'):
+                other_version = PYTHON_TOOL_VERSION if target.language == 'rust' else RUST_TOOL_VERSION
+                for version in ('aaa', 'zzz', other_version):
                     result = invoke(root, executable, environment | {'MUTATION_FIXTURE_VERSION': version},
                                     ['run', '--plan', str(plan), '--language', target.language,
                                      '--output', str(root / 'artifacts' / f'{target.language}-{version}')])
                     with self.subTest(language=target.language, version=version):
                         self.assertEqual(result.returncode, 1)
-                        self.assertIn(f'expected mutation tool version, got {version}', result.stderr)
+                        expected = RUST_TOOL_VERSION if target.language == 'rust' else PYTHON_TOOL_VERSION
+                        self.assertIn(f'expected mutation tool {expected}, got {version}', result.stderr)
                         self.assertEqual((root / 'marker.txt').read_text(), 'original')
 
     def test_runner_mutations_use_an_immutable_bootstrap(self) -> None:
@@ -110,6 +190,7 @@ class MutationToolExecutionTests(unittest.TestCase):
                     runs = tuple(output.rglob('run.json'))
                     self.assertEqual(len(runs), 1)
                     measured = parse_report(json.loads(runs[0].read_text())['report'])
+                    self.assertEqual(measured.tool_version, RUST_TOOL_VERSION)
                     self.assertEqual(len(measured.expected), 3)
                     self.assertTrue(all(identity.endswith(f'fixture {feature}') for identity in measured.expected))
                     self.assertTrue(any('build.rs' in identity for identity in measured.expected))
@@ -135,6 +216,7 @@ class MutationToolExecutionTests(unittest.TestCase):
             runs = tuple(output.rglob('run.json'))
             self.assertEqual(len(runs), 1)
             measured = parse_report(json.loads(runs[0].read_text())['report'])
+            self.assertEqual(measured.tool_version, PYTHON_TOOL_VERSION)
             self.assertEqual((score(measured).killed, score(measured).eligible), (2, 2))
             checked = invoke(root, executable, environment, ['check', *arguments])
             self.assertEqual(checked.returncode, 0, checked.stderr)
@@ -142,7 +224,7 @@ class MutationToolExecutionTests(unittest.TestCase):
             self.assertEqual((root / 'marker.txt').read_text(), 'original')
 
     def test_external_failures_never_publish_a_completed_measurement(self) -> None:
-        rust_failures = ('discovery', 'shard-discovery', 'runner', 'baseline', 'unfinished',
+        rust_failures = ('discovery', 'shard-discovery', 'runner', 'baseline', 'workspace-baseline', 'unfinished',
                          'missing-report', 'inconsistent', 'empty-baseline')
         python_failures = ('init', 'inventory-export', 'baseline', 'baseline-export', 'baseline-incompetent', 'exec', 'report-export',
                            'worker-error', 'incomplete', 'missing-mutation', 'empty-baseline')

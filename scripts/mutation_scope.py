@@ -61,9 +61,13 @@ def select(root: Path, changes: tuple[Change, ...], *, full: bool = False) -> tu
     crates = tuple(sorted(path.parent.name for path in (root / 'crates').glob('*/Cargo.toml')))
     modules = python_modules(root)
     tests = {test for owned in modules.values() for test in owned}
+    deleted_python = {change.path for change in changes if change.path.endswith('.py')
+                      and not change.path.startswith('scripts/tests/')
+                      and not (root / change.path).is_file()}
     unknown = tuple(change.path for change in changes
                     if change.path.endswith('.py') and change.path not in modules
-                    and change.path not in tests and not change.path.startswith('scripts/tests/'))
+                    and change.path not in tests and not change.path.startswith('scripts/tests/')
+                    and change.path not in deleted_python)
     if unknown:
         raise ValueError(f'Python files have no mutation ownership: {unknown}')
     shared = any(change.path.startswith(('.config/', '.github/', 'examples/captures/',
@@ -71,7 +75,7 @@ def select(root: Path, changes: tuple[Change, ...], *, full: bool = False) -> tu
                  or change.path in ('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml',
                                     'requirements-dev.txt', 'AGENTS.md', 'TESTING.md')
                  for change in changes)
-    shared_python = any(change.path.startswith('scripts/tests/')
+    shared_python = bool(deleted_python) or any(change.path.startswith('scripts/tests/')
                         and change.path not in tests
                         or change.path.startswith('scripts/') and not change.path.endswith('.py')
                         for change in changes)

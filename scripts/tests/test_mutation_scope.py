@@ -105,7 +105,7 @@ class MutationSelectionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 select(root, (), full=True)
 
-    def test_committed_additions_and_test_deletions_schedule_their_owners(self) -> None:
+    def test_committed_additions_deletions_and_renames_schedule_their_owners(self) -> None:
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
                 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}):
             root = Path(directory)
@@ -127,6 +127,21 @@ class MutationSelectionTests(unittest.TestCase):
             selected = select(root, changes)
             self.assertEqual({target.group for target in selected}, {'sample', 'scripts/alpha.py'})
             self.assertEqual(next(target for target in selected if target.language == 'rust').files, ())
+            config = root / '.config/mutation.toml'
+            (root / 'scripts/alpha.py').unlink()
+            config.write_text(config.read_text().replace(
+                '"scripts/alpha.py" = ["scripts/tests/test_alpha.py"]\n', ''))
+            subprocess.run(['git', 'add', '-u'], cwd=root, check=True)
+            subprocess.run([*commit, 'delete module'], cwd=root, check=True)
+            selected = select(root, changes_since(root, base))
+            self.assertEqual({target.group for target in selected}, {'sample', 'other', 'scripts/beta.py'})
+            (root / 'scripts/beta.py').rename(root / 'scripts/renamed.py')
+            (root / 'scripts/tests/test_beta.py').rename(root / 'scripts/tests/test_renamed.py')
+            config.write_text(config.read_text().replace('beta', 'renamed'))
+            subprocess.run(['git', 'add', '.'], cwd=root, check=True)
+            subprocess.run([*commit, 'rename module'], cwd=root, check=True)
+            selected = select(root, changes_since(root, base))
+            self.assertEqual({target.group for target in selected}, {'sample', 'other', 'scripts/renamed.py'})
 
     def test_deleted_tests_select_their_production_owners(self) -> None:
         rust = select(ROOT, (Change('crates/packetcraftr-core/src/analysis/messages/tests.rs'),))
@@ -147,8 +162,14 @@ class MutationSelectionTests(unittest.TestCase):
         self.assertEqual({t.group for t in support}, {t.group for t in all_targets if t.language == 'python'})
 
     def test_unmapped_python_files_cannot_bypass_mutation_checks(self) -> None:
-        with self.assertRaisesRegex(ValueError, 'no mutation ownership'):
-            select(ROOT, (Change('tools/new_helper.py'),))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            mutation_workspace(root)
+            path = root / 'tools/new_helper.py'
+            path.parent.mkdir()
+            path.write_text('value = 3\n')
+            with self.assertRaisesRegex(ValueError, 'no mutation ownership'):
+                select(root, (Change('tools/new_helper.py'),))
 
     def test_documentation_only_change_has_no_mutants(self) -> None:
         self.assertEqual(select(ROOT, (Change('README.md'),)), ())

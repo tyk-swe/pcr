@@ -56,19 +56,50 @@ class MutationToolExecutionTests(unittest.TestCase):
                 environment = environment | ({'MUTATION_FIXTURE_REUSE': 'all'} if mode == 'all'
                                              else {'MUTATION_FIXTURE_CONTEXT': mode})
                 plan = Path(directory) / 'plan.json'
-                plan.write_text(json.dumps([asdict(Target(group, 'rust', (), 'controlled contexts'))
-                                            for group in ('sample', 'other')]))
+                plan.write_text(json.dumps([*(asdict(Target(group, 'rust', (), 'controlled contexts'))
+                                              for group in ('sample', 'other')),
+                                            asdict(Target('scripts/alpha.py', 'python', ('scripts/alpha.py',),
+                                                          'controlled contexts'))]))
                 output = root / 'artifacts'
                 seed = create_seed(root, executable, environment, plan, output / 'seed-run')
                 contexts = output / 'contexts'
                 context = create_context(root, executable, environment, plan, seed, contexts / 'portable')
                 self.assertEqual(json.loads(context.read_text())['shards'], shards)
+                mac_context = Path(directory) / 'mac-context'
+                planned = invoke(root, executable, environment, ['context', '--plan', str(plan), '--language', 'rust',
+                    '--profile', 'all', '--platform-label', 'macos-15', '--seed', str(seed), '--output', str(mac_context)])
+                self.assertEqual(planned.returncode, 0, planned.stderr)
+                mac_plan = json.loads((mac_context / 'context.json').read_text())
+                self.assertEqual((mac_plan['platform'], mac_plan['profile'], mac_plan['shards']),
+                                 ('macos-15', 'all', shards))
+                self.assertEqual({group['target']['group'] for group in mac_plan['groups']}, set(counts))
+                mac_output = Path(directory) / 'mac-receiver'
+                mac_run = invoke(root, executable, environment, ['run', '--plan', str(plan), '--language', 'rust',
+                    '--profile', 'all', '--platform-label', 'macos-15', '--seed', str(seed),
+                    '--context-plan', str(mac_context / 'context.json'), '--shards', str(shards),
+                    '--output', str(mac_output)])
+                self.assertEqual(mac_run.returncode, 0, mac_run.stderr)
+                mac_reports = tuple(parse_report(json.loads(path.read_text())['report'])
+                                    for path in mac_output.rglob('run.json'))
+                self.assertEqual({measured.group for measured in mac_reports}, set(counts))
+                for measured in mac_reports:
+                    self.assertEqual((measured.baseline, measured.complete), (True, True))
+                    expected = 5 if mode == 'scaled' and measured.group == 'sample' else 0
+                    self.assertEqual(len(measured.expected), expected)
+                    if expected:
+                        self.assertTrue(measured.outcomes)
+                        self.assertTrue(all(outcome.status == 'survived' for outcome in measured.outcomes))
                 accepted = context.read_bytes()
                 refused = invoke(root, executable, environment, ['context', '--plan', str(plan), '--language', 'rust',
                     '--profile', 'portable', '--platform-label', 'ubuntu-24.04', '--output', str(context.parent)])
                 self.assertEqual(refused.returncode, 1)
                 self.assertTrue(context.is_file())
                 self.assertEqual(context.read_bytes(), accepted)
+                context = create_context(root, executable, environment, plan, seed, contexts / 'portable')
+                corrected = json.loads(context.read_text())
+                self.assertEqual((corrected['platform'], corrected['profile'], corrected['shards']),
+                                 ('ubuntu-24.04', 'portable', shards))
+                self.assertEqual({group['target']['group'] for group in corrected['groups']}, set(counts))
                 for shard in range(1, shards + 1):
                     folder = output / 'receiver' / str(shard) / 'run'
                     result = invoke(root, executable, environment, ['run', '--plan', str(plan), '--language', 'rust',
@@ -132,6 +163,24 @@ class MutationToolExecutionTests(unittest.TestCase):
             command = ['run', '--plan', str(plan), '--language', 'rust', '--profile', 'portable',
                        '--platform-label', 'ubuntu-24.04', '--shards', '4', '--seed', str(seed),
                        '--context-plan', str(context), '--output', str(output / 'receiver/run')]
+            accepted = invoke(root, executable, environment, command)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            receipt = next((output / 'receiver/run').rglob('run.json'))
+            retained = receipt.read_bytes()
+            completed = parse_report(json.loads(retained)['report'])
+            self.assertEqual((completed.baseline, completed.complete), (True, True))
+            for requested in ('1', '8'):
+                arguments = command.copy()
+                arguments[arguments.index('--shards') + 1] = requested
+                refused = invoke(root, executable, environment, arguments)
+                with self.subTest(requested=requested):
+                    self.assertEqual(refused.returncode, 1)
+                    self.assertTrue(receipt.is_file())
+                    self.assertEqual(receipt.read_bytes(), retained)
+            corrected = invoke(root, executable, environment, command)
+            self.assertEqual(corrected.returncode, 0, corrected.stderr)
+            completed = parse_report(json.loads(receipt.read_text())['report'])
+            self.assertEqual((completed.baseline, completed.complete), (True, True))
             changed = invoke(root, executable, environment | {'MUTATION_FIXTURE_CONTEXT': 'changed'}, command)
             self.assertEqual(changed.returncode, 1)
             for field in ('shards', 'inventory', 'source', 'scope', 'seed'):
@@ -381,7 +430,10 @@ class MutationToolExecutionTests(unittest.TestCase):
             root = Path(directory) / 'checkout'
             mutation_checkout(root)
             executable, environment = mutation_tools(root, Path(directory) / 'tools/bin')
-            plan = Path(directory) / 'selection/plan.json'
+            plan = Path(directory) / 'selection/nested/plan.json'
+            missing = invoke(root, executable, environment, ['select', '--full'])
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn('--plan', missing.stderr)
             selected = invoke(root, executable, environment, ['select', '--full', '--plan', str(plan)])
             self.assertEqual(selected.returncode, 0, selected.stderr)
             targets = json.loads(plan.read_text())
@@ -565,6 +617,23 @@ class MutationToolExecutionTests(unittest.TestCase):
                     self.assertEqual(json.loads(checked.stdout)['status'], 'passed')
                     self.assertEqual((root / 'marker.txt').read_text(), 'original')
                     self.assertEqual((root / 'crates/sample/Cargo.toml').read_bytes(), manifest)
+            output = root / 'artifacts/large'
+            arguments = ['--plan', str(plan), '--language', 'rust', '--output', str(output)]
+            large = invoke(root, executable, environment | {'MUTATION_FIXTURE_CONTEXT': 'large'},
+                           ['run', *arguments, '--profile', 'all'])
+            self.assertEqual(large.returncode, 0, large.stderr)
+            measured = parse_report(json.loads(next(output.rglob('run.json')).read_text())['report'])
+            self.assertEqual((measured.baseline, measured.complete), (True, True))
+            self.assertEqual(frozenset(identity.rsplit(' ', 1)[1] for identity in measured.expected),
+                             frozenset(str(index) for index in range(1000)))
+            self.assertEqual(frozenset(outcome.identity for outcome in measured.outcomes), frozenset(measured.expected))
+            self.assertTrue(all(outcome.status == 'killed' for outcome in measured.outcomes))
+            checked = invoke(root, executable, environment, ['check', *arguments, '--profiles', 'all'])
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            summary = json.loads(checked.stdout)
+            self.assertEqual((summary['killed'], summary['eligible']), (1000, 1000))
+            self.assertEqual((root / 'marker.txt').read_text(), 'original')
+            self.assertEqual((root / 'crates/sample/Cargo.toml').read_bytes(), manifest)
 
     def test_python_tool_handles_an_interpreter_path_with_spaces(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

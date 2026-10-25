@@ -37,8 +37,9 @@ class MutationScoreTests(unittest.TestCase):
                 executable, environment = mutation_tools(root, Path(directory) / 'tools/bin')
                 output = root / 'artifacts/python'
                 output.mkdir(parents=True)
+                epoch = 1000.0
                 def clock() -> float:
-                    return elapsed if (output / 'baseline.sqlite').is_file() else 0.0
+                    return epoch + (elapsed if (output / 'baseline.sqlite').is_file() else 0.0)
 
                 target = Target('scripts/alpha.py', 'python', ('scripts/alpha.py',), 'controlled calibration')
                 with patch.dict(os.environ, environment, clear=True), patch('run_mutation.sys.executable', str(executable)):
@@ -72,7 +73,11 @@ class MutationScoreTests(unittest.TestCase):
         value = replace(report(60, 4), revision=revision)
         target = Target(value.group, 'rust', (), value.reason)
         system = 'ubuntu-24.04'
-        profiles = ('all', 'default', 'portable')
+        platforms, profiles = (system, 'macos-15', 'windows-2022'), ('all', 'default', 'portable')
+        receivers = ((system, 'default', 1, 61), (system, 'portable', 4, 64),
+                     ('macos-15', 'all', 4, 64), ('macos-15', 'default', 1, 61),
+                     ('macos-15', 'portable', 4, 64), ('windows-2022', 'all', 4, 64),
+                     ('windows-2022', 'default', 1, 61), ('windows-2022', 'portable', 4, 64))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             seeds, contexts = root / 'seeds', root / 'contexts'
@@ -83,43 +88,47 @@ class MutationScoreTests(unittest.TestCase):
                                    workspace_baseline=True, report=asdict(value)))
             (seeds / 'core.json').write_text(seed)
             seed_digest = hashlib.sha256(seed.encode()).hexdigest()
-            paths = tuple(root / f'{profile}-{shard}.json' for profile, count in
-                          (('all', 2), ('default', 1), ('portable', 4)) for shard in range(1, count + 1))
-            for shard in (1, 2):
-                partial = replace(value, outcomes=value.outcomes[shard - 1::2])
-                (root / f'all-{shard}.json').write_text(json.dumps(
-                    measurement(partial, target, platform=system, shard=shard, shards=2)
-                    | {'workspace_baseline': True}))
-            for profile, count, size in (('default', 1, 61), ('portable', 4, 64)):
+            canonical = root / 'all-1.json'
+            canonical.write_text(json.dumps(measurement(value, target, platform=system)
+                                             | {'workspace_baseline': True}))
+            paths = (canonical, *(root / f'{platform}-{profile}-{shard}.json'
+                                  for platform, profile, count, _ in receivers
+                                  for shard in range(1, count + 1)))
+            for platform, profile, count, size in receivers:
                 inventory = tuple(str(index) for index in range(size))
                 expected = tuple(str(index) for index in range(60, size))
                 coverage = dict(inventory=inventory, reused_ids=tuple(str(index) for index in range(60)), seed=seed)
                 digest = hashlib.sha256(json.dumps(coverage, sort_keys=True, separators=(',', ':'),
                                                   ensure_ascii=False).encode()).hexdigest()
-                plan = dict(schema='packetcraftr.mutation-context/v1', platform=system, profile=profile,
+                plan = dict(schema='packetcraftr.mutation-context/v1', platform=platform, profile=profile,
                             revision=revision, tool_version=value.tool_version, shards=count,
                             groups=[dict(target=asdict(target), inventory=inventory, seed_digest=seed_digest)])
-                (contexts / f'{profile}').mkdir()
-                (contexts / profile / 'context.json').write_text(json.dumps(plan))
+                (contexts / f'{platform}-{profile}').mkdir()
+                (contexts / f'{platform}-{profile}' / 'context.json').write_text(json.dumps(plan))
                 for shard in range(1, count + 1):
                     partial = replace(value, expected=expected, outcomes=tuple(
                         Outcome(identity, 'killed', 'receiver test failure') for identity in expected[shard - 1::count]))
-                    raw = measurement(partial, target, platform=system, shard=shard, shards=count)
-                    (root / f'{profile}-{shard}.json').write_text(json.dumps(raw | dict(
+                    raw = measurement(partial, target, platform=platform, shard=shard, shards=count)
+                    (root / f'{platform}-{profile}-{shard}.json').write_text(json.dumps(raw | dict(
                         profile=profile, workspace_baseline=True, coverage=coverage if shard == 1 else None,
                         coverage_digest=digest)))
             captured = io.StringIO()
             with redirect_stdout(captured):
-                self.assertTrue(check((target,), paths, 'rust', (system,), profiles, 2, (), revision,
+                self.assertTrue(check((target,), paths, 'rust', platforms, profiles, 1, (), revision,
                                       value.tool_version, seeds, contexts))
             score_row = json.loads(captured.getvalue())
             self.assertEqual((score_row['killed'], score_row['eligible']), (64, 64))
-            self.assertEqual({row['profile']: row['shards'] for row in score_row['execution_contexts']
-                              if row['profile'] != 'all'}, {'default': 1, 'portable': 4})
+            self.assertEqual({(row['platform'], row['profile']): row['shards']
+                              for row in score_row['execution_contexts']
+                              if (row['platform'], row['profile']) != (system, 'all')},
+                             {(system, 'default'): 1, (system, 'portable'): 4, ('macos-15', 'all'): 4,
+                              ('macos-15', 'default'): 1, ('macos-15', 'portable'): 4,
+                              ('windows-2022', 'all'): 4, ('windows-2022', 'default'): 1,
+                              ('windows-2022', 'portable'): 4})
             with self.assertRaises(ValueError):
-                check((target,), paths[:-1], 'rust', (system,), profiles, 2, (), revision,
+                check((target,), paths[:-1], 'rust', platforms, profiles, 1, (), revision,
                       value.tool_version, seeds, contexts)
-            context_path = contexts / 'portable/context.json'
+            context_path = contexts / f'{system}-portable/context.json'
             original = context_path.read_bytes()
             for change in ('count', 'inventory'):
                 plan = json.loads(original)
@@ -129,20 +138,24 @@ class MutationScoreTests(unittest.TestCase):
                     plan['groups'][0]['inventory'].pop(0)
                 context_path.write_text(json.dumps(plan))
                 with self.subTest(change=change), self.assertRaises(ValueError):
-                    check((target,), paths, 'rust', (system,), profiles, 2, (), revision,
+                    check((target,), paths, 'rust', platforms, profiles, 1, (), revision,
                           value.tool_version, seeds, contexts)
                 context_path.write_bytes(original)
             duplicate = contexts / 'duplicate/context.json'
             duplicate.parent.mkdir()
             duplicate.write_bytes(original)
             with self.assertRaises(ValueError):
-                check((target,), paths, 'rust', (system,), profiles, 2, (), revision,
+                check((target,), paths, 'rust', platforms, profiles, 1, (), revision,
                       value.tool_version, seeds, contexts)
             duplicate.unlink()
-            context_path.unlink()
-            with self.assertRaises(ValueError):
-                check((target,), paths, 'rust', (system,), profiles, 2, (), revision,
-                      value.tool_version, seeds, contexts)
+            for missing_profile in ('default', 'portable'):
+                missing = contexts / f'{system}-{missing_profile}/context.json'
+                accepted = missing.read_bytes()
+                missing.unlink()
+                with self.subTest(missing_profile=missing_profile), self.assertRaises(ValueError):
+                    check((target,), paths, 'rust', platforms, profiles, 1, (), revision,
+                          value.tool_version, seeds, contexts)
+                missing.write_bytes(accepted)
 
     def test_seed_proofs_require_complete_direct_workspace_execution(self) -> None:
         value = report(1, 3)
@@ -164,7 +177,7 @@ class MutationScoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 seed_proofs((target,), paths[:1], 2, value.revision, value.tool_version)
             second = json.loads(paths[1].read_text())
-            for invalid in (None, False, 'true'):
+            for invalid in (None, False, 'true', 1):
                 paths[1].write_text(json.dumps(second | {'workspace_baseline': invalid}))
                 with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                     seed_proofs((target,), paths, 2, value.revision, value.tool_version)
@@ -209,6 +222,14 @@ class MutationScoreTests(unittest.TestCase):
             self.assertEqual(published['tool_versions'], [value.tool_version])
             self.assertEqual(published['revisions'], [value.revision])
             self.assertEqual(published['status'], 'passed')
+            for field, evidence in (
+                ('coverage', dict(inventory=[*value.expected, 'unexecuted'],
+                                  reused_ids=['unexecuted'], seed='unprovided proof')),
+                ('coverage_digest', 'unprovided proof digest'),
+            ):
+                path.write_text(json.dumps(measurement(value, target) | {field: evidence}))
+                with self.subTest(field=field), redirect_stdout(io.StringIO()), self.assertRaises(ValueError):
+                    check((target,), (path,), 'rust', ('Linux',), ('all',), 1, (), value.revision, value.tool_version)
 
     def test_threshold_is_strict_and_applies_to_every_group(self) -> None:
         self.assertFalse(score(report()).passed)
@@ -265,6 +286,7 @@ class MutationScoreTests(unittest.TestCase):
                     check(target, paths, 'rust', ('Linux',), ('all',), 2, (), 'revision', 'version')
             for inconsistent in (
                 replace(value, outcomes=value.outcomes[1::2], expected=(*value.expected, 'unreported-mutant')),
+                replace(value, outcomes=value.outcomes[1::2], expected=('!unreported-mutant', *value.expected)),
                 replace(value, outcomes=value.outcomes[1::2], baseline=False),
                 replace(value, outcomes=value.outcomes[1::2], complete=False),
             ):
@@ -278,7 +300,11 @@ class MutationScoreTests(unittest.TestCase):
             value = report(10, 0)
             target = Target('core', 'rust', (), value.reason)
             path.write_text(json.dumps(measurement(value, target)))
-            for revision, version in (('other', 'version'), ('revision', 'other'), ('revision', 'zzz')):
+            with redirect_stdout(io.StringIO()):
+                self.assertTrue(check((target,), (path,), 'rust', ('Linux',), ('all',),
+                                      1, (), value.revision, value.tool_version))
+            for revision, version in (('other', 'version'), ('zzz', 'version'),
+                                      ('revision', 'other'), ('revision', 'zzz')):
                 with self.subTest(revision=revision, version=version), self.assertRaises(ValueError):
                     check((target,), (path,), 'rust', ('Linux',), ('all',),
                           1, (), revision, version)

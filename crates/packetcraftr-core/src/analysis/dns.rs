@@ -511,3 +511,440 @@ impl session::Collector for Collector {
         .map_err(BoundaryError::from_error)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        analysis::{self, Session},
+        budget::Deadline,
+        build::Builder,
+        capture_file::{Format, Reader, Writer},
+        frame::{Frame, LinkType},
+        layer::Raw,
+        packet::Packet,
+        protocol::{application::dns::RecordValue, builtin, network::Ipv4, transport::Tcp},
+        registry::Registry,
+    };
+    use std::{
+        io::Cursor,
+        net::{Ipv4Addr, SocketAddrV4},
+        sync::Arc,
+        time::{Duration, Instant, UNIX_EPOCH},
+    };
+
+    // DNS header, question, resource record and compression fields, checked 2026-10-25.
+    // https://www.rfc-editor.org/rfc/rfc1035.html#section-4.1
+    const QUERY: &[u8] =
+        b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x04test\x00\x00\x01\x00\x01";
+    const ANSWER: &[u8] =
+        b"\x12\x34\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00\x07example\x04test\x00\x00\x01\x00\x01\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04\xc0\x00\x02\x09";
+
+    #[derive(Clone, Copy)]
+    enum Lifecycle {
+        Session,
+        Direct,
+    }
+
+    fn registry() -> Arc<Registry> {
+        Arc::new(
+            builtin::registry_with(|builder| {
+                for (protocol, port) in
+                    [("udp", 40000), ("udp", 5354), ("tcp", 40000), ("tcp", 5354)]
+                {
+                    builder.bind(protocol, port, "raw", i32::MAX)?;
+                }
+                Ok(())
+            })
+            .unwrap(),
+        )
+    }
+
+    fn endpoints(response: bool) -> (SocketAddrV4, SocketAddrV4) {
+        let client = SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 40000);
+        let server = SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 53), 5354);
+        if response {
+            (server, client)
+        } else {
+            (client, server)
+        }
+    }
+
+    fn base_packet(response: bool) -> Packet {
+        let (source, destination) = endpoints(response);
+        let mut packet = Packet::new();
+        packet.push(Ipv4 {
+            source: *source.ip(),
+            destination: *destination.ip(),
+            ..Default::default()
+        });
+        packet
+    }
+
+    fn frame(number: u64, packet: Packet) -> Frame {
+        let built = Builder::new(registry())
+            .build(packet, Default::default(), Default::default())
+            .unwrap();
+        Frame::new(
+            UNIX_EPOCH + Duration::from_secs(100 + number),
+            LinkType::RAW,
+            built.bytes,
+        )
+        .unwrap()
+    }
+
+    fn udp_frame(number: u64, response: bool, wire: &[u8]) -> Frame {
+        let (source, destination) = endpoints(response);
+        let mut packet = base_packet(response);
+        packet.push(Udp {
+            source_port: source.port(),
+            destination_port: destination.port(),
+            ..Default::default()
+        });
+        packet.push(Raw::new(wire.to_vec()));
+        frame(number, packet)
+    }
+
+    fn tcp_frame(number: u64, response: bool, mut header: Tcp, payload: &[u8]) -> Frame {
+        let (source, destination) = endpoints(response);
+        header.source_port = source.port();
+        header.destination_port = destination.port();
+        let mut packet = base_packet(response);
+        packet.push(header);
+        if !payload.is_empty() {
+            packet.push(Raw::new(payload.to_vec()));
+        }
+        frame(number, packet)
+    }
+
+    fn options(lifecycle: Lifecycle) -> analysis::Options<'static> {
+        let now = Instant::now();
+        analysis::Options {
+            deadline: Some(Arc::new(Deadline::with_time_source(
+                Duration::from_secs(30),
+                move || now,
+            ))),
+            tcp_events: matches!(lifecycle, Lifecycle::Direct),
+            track_sources: matches!(lifecycle, Lifecycle::Direct),
+            limits: analysis::Limits {
+                max_frames: 32,
+                max_bytes: 64 * 1024,
+                max_frame_bytes: 1024,
+                max_duration: Duration::MAX,
+                tcp: analysis::reassembly::tcp::Limits {
+                    idle_expiry: Duration::from_secs(60),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn collect(frames: &[Frame], lifecycle: Lifecycle) -> (Vec<Event>, Summary, Vec<Definition>) {
+        let mut writer = Writer::new(Vec::new(), Format::Pcap, LinkType::RAW).unwrap();
+        for frame in frames {
+            writer.write_frame(frame).unwrap();
+        }
+        let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+        let collector = Collector::new(
+            Limits {
+                max_messages: 16,
+                max_streams: 4,
+                max_buffer_bytes: QUERY.len() + 2,
+                max_retained_bytes: 128 * 1024,
+                max_source_spans: 16,
+            },
+            [5354],
+        )
+        .unwrap();
+        let mut events = Vec::new();
+        match lifecycle {
+            Lifecycle::Session => {
+                let outcome = Session::new(registry(), options(lifecycle), collector)
+                    .run(
+                        &mut reader,
+                        |_| Ok(()),
+                        |event| {
+                            events.push(event);
+                            Ok(())
+                        },
+                    )
+                    .unwrap();
+                (events, outcome.summary, outcome.scopes)
+            }
+            Lifecycle::Direct => {
+                let mut collector = collector;
+                let run = analysis::run(&mut reader, registry(), &options(lifecycle), |record| {
+                    events.extend(<Collector as analysis::Collector>::observe(
+                        &mut collector,
+                        &record,
+                    )?);
+                    Ok(())
+                })
+                .unwrap();
+                let scopes = <Collector as analysis::Collector>::scopes(&collector);
+                let (tail, summary) =
+                    <Collector as analysis::Collector>::finish(collector, &run).unwrap();
+                events.extend(tail);
+                (events, summary, scopes)
+            }
+        }
+    }
+
+    fn messages(events: &[Event]) -> Vec<&Message> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Message(message) => Some(message.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn transactions(events: &[Event]) -> Vec<&Transaction> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Transaction(transaction) => Some(transaction),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn sources(set: &SourceSet) -> Vec<u64> {
+        set.iter().map(|source| source.number).collect()
+    }
+
+    fn complete<'a>(
+        message: &'a Message,
+        transport: StreamTransport,
+        wire: &[u8],
+        id: u16,
+        response: bool,
+        frames: &[u64],
+    ) -> &'a Dns {
+        assert_eq!(message.status, Status::Complete);
+        assert_eq!(message.transport, transport);
+        assert_eq!(message.wire.as_ref(), wire);
+        assert_eq!(
+            message.declared_length,
+            Some(u16::try_from(wire.len()).unwrap())
+        );
+        assert!(message.error.is_none());
+        assert_eq!(sources(&message.sources), frames);
+        let dns = message.dns.as_ref().unwrap();
+        assert_eq!(dns.id, id);
+        assert_eq!(dns.response, response);
+        assert_eq!(dns.rcode, 0);
+        let [question] = dns.questions.as_slice() else {
+            panic!("expected the supplied DNS question")
+        };
+        let labels: Vec<&[u8]> = question.name.labels().iter().map(Bytes::as_ref).collect();
+        assert_eq!(labels, [b"example".as_slice(), b"test".as_slice()]);
+        assert_eq!((question.query_type, question.class), (1, 1));
+        dns
+    }
+
+    fn client_flow(flow: &ScopedFlowKey) {
+        let (client, server) = endpoints(false);
+        assert_eq!(flow.flow.source, *client.ip());
+        assert_eq!(flow.flow.destination, *server.ip());
+        assert_eq!(flow.flow.source_port, client.port());
+        assert_eq!(flow.flow.destination_port, server.port());
+    }
+
+    #[test]
+    fn udp_capture_publishes_decoded_messages_matched_and_orphan_transactions() {
+        let mut orphan = ANSWER.to_vec();
+        orphan[..2].copy_from_slice(&[0xbe, 0xef]);
+        *orphan.last_mut().unwrap() = 17;
+        let frames = [
+            udp_frame(1, false, QUERY),
+            udp_frame(2, true, ANSWER),
+            udp_frame(3, true, &orphan),
+        ];
+        for lifecycle in [Lifecycle::Session, Lifecycle::Direct] {
+            let (events, summary, scopes) = collect(&frames, lifecycle);
+            let messages = messages(&events);
+            let [query, answer, orphan_response] = messages.as_slice() else {
+                panic!("expected the query, answer and independent orphan response")
+            };
+            complete(query, StreamTransport::Udp, QUERY, 0x1234, false, &[1]);
+            let answer_dns = complete(answer, StreamTransport::Udp, ANSWER, 0x1234, true, &[2]);
+            let orphan_dns = complete(
+                orphan_response,
+                StreamTransport::Udp,
+                &orphan,
+                0xbeef,
+                true,
+                &[3],
+            );
+            for (dns, address) in [(answer_dns, [192, 0, 2, 9]), (orphan_dns, [192, 0, 2, 17])] {
+                let [record] = dns.answers.as_slice() else {
+                    panic!("expected the supplied A answer")
+                };
+                assert_eq!(record.ttl, 60);
+                assert_eq!(record.value, RecordValue::A(address.into()));
+            }
+            assert!(query.index < answer.index && answer.index < orphan_response.index);
+            for message in &messages {
+                assert!(message.framing_bytes.is_empty());
+                assert!(scopes.iter().any(|scope| scope.id == message.flow.scope));
+            }
+            let transactions = transactions(&events);
+            let [matched, orphan] = transactions.as_slice() else {
+                panic!("expected the matched query and finalized orphan")
+            };
+            assert_eq!(matched.status, TransactionStatus::Matched);
+            assert_eq!(matched.transport, StreamTransport::Udp);
+            assert_eq!(matched.dns_id, 0x1234);
+            assert_eq!(matched.queries, [query.index]);
+            assert_eq!(matched.response, Some(answer.index));
+            assert_eq!(sources(&matched.sources), [1, 2]);
+            assert_eq!(
+                matched.first_query_latency,
+                Some(Latency {
+                    nanoseconds: 1_000_000_000,
+                    negative: false,
+                })
+            );
+            assert_eq!(matched.latest_query_latency, matched.first_query_latency);
+            client_flow(&matched.flow);
+            assert_eq!(orphan.status, TransactionStatus::OrphanResponse);
+            assert_eq!(orphan.dns_id, 0xbeef);
+            assert!(orphan.queries.is_empty());
+            assert_eq!(orphan.response, Some(orphan_response.index));
+            assert_eq!(sources(&orphan.sources), [3]);
+            client_flow(&orphan.flow);
+            assert_eq!(
+                (
+                    summary.messages,
+                    summary.complete_messages,
+                    summary.transactions,
+                    summary.matched_transactions,
+                    summary.unanswered_transactions,
+                    summary.orphan_responses,
+                    summary.duplicate_responses,
+                ),
+                (3, 3, 2, 1, 0, 1, 0)
+            );
+        }
+    }
+
+    #[test]
+    fn tcp_capture_finalizes_split_queries_partial_messages_and_unanswered_sources() {
+        // TCP DNS length framing, checked 2026-10-25.
+        // https://www.rfc-editor.org/rfc/rfc1035.html#section-4.2.2
+        // TCP setup and sequence progression, checked 2026-10-25.
+        // https://www.rfc-editor.org/rfc/rfc9293.html#section-3.5
+        let partial = [0xbe, 0xef, 0x01, 0x00, 0x00];
+        let tail = [&[30][..], QUERY, &[0, 64], &partial].concat();
+        let frames = [
+            tcp_frame(
+                1,
+                false,
+                Tcp {
+                    sequence: 100,
+                    flags: Tcp::SYN,
+                    window: 4096,
+                    ..Default::default()
+                },
+                &[],
+            ),
+            tcp_frame(
+                2,
+                true,
+                Tcp {
+                    sequence: 900,
+                    acknowledgment: 101,
+                    flags: Tcp::SYN | Tcp::ACK,
+                    window: 4096,
+                    ..Default::default()
+                },
+                &[],
+            ),
+            tcp_frame(
+                3,
+                false,
+                Tcp {
+                    sequence: 101,
+                    acknowledgment: 901,
+                    flags: Tcp::ACK,
+                    window: 4096,
+                    ..Default::default()
+                },
+                &[],
+            ),
+            tcp_frame(
+                4,
+                false,
+                Tcp {
+                    sequence: 101,
+                    acknowledgment: 901,
+                    flags: Tcp::ACK,
+                    window: 4096,
+                    ..Default::default()
+                },
+                &[0],
+            ),
+            tcp_frame(
+                5,
+                false,
+                Tcp {
+                    sequence: 102,
+                    acknowledgment: 901,
+                    flags: Tcp::ACK,
+                    window: 4096,
+                    ..Default::default()
+                },
+                &tail,
+            ),
+        ];
+        for lifecycle in [Lifecycle::Session, Lifecycle::Direct] {
+            let (events, summary, scopes) = collect(&frames, lifecycle);
+            let messages = messages(&events);
+            let [query, incomplete] = messages.as_slice() else {
+                panic!("expected a complete split query and its unfinished successor")
+            };
+            complete(query, StreamTransport::Tcp, QUERY, 0x1234, false, &[4, 5]);
+            assert_eq!(query.framing_bytes.as_ref(), &[0, 30]);
+            assert_eq!(incomplete.status, Status::Incomplete);
+            assert_eq!(incomplete.transport, StreamTransport::Tcp);
+            assert_eq!(incomplete.declared_length, Some(64));
+            assert_eq!(incomplete.framing_bytes.as_ref(), &[0, 64]);
+            assert_eq!(incomplete.wire.as_ref(), &partial);
+            assert!(incomplete.dns.is_none());
+            assert!(incomplete.error.is_none());
+            assert_eq!(sources(&incomplete.sources), [5]);
+            for message in &messages {
+                assert!(scopes.iter().any(|scope| scope.id == message.flow.scope));
+            }
+            let transactions = transactions(&events);
+            let [unanswered] = transactions.as_slice() else {
+                panic!("expected the complete query's unanswered transaction")
+            };
+            assert_eq!(unanswered.status, TransactionStatus::Unanswered);
+            assert_eq!(unanswered.transport, StreamTransport::Tcp);
+            assert_eq!(unanswered.dns_id, 0x1234);
+            assert_eq!(unanswered.queries, [query.index]);
+            assert_eq!(unanswered.response, None);
+            assert_eq!(sources(&unanswered.sources), [4, 5]);
+            assert_eq!(unanswered.first_query_latency, None);
+            assert_eq!(unanswered.latest_query_latency, None);
+            client_flow(&unanswered.flow);
+            assert_eq!(
+                (
+                    summary.messages,
+                    summary.complete_messages,
+                    summary.transactions,
+                    summary.matched_transactions,
+                    summary.unanswered_transactions,
+                    summary.orphan_responses,
+                    summary.duplicate_responses,
+                ),
+                (2, 1, 1, 0, 1, 0, 0)
+            );
+        }
+    }
+}

@@ -25,7 +25,7 @@ use crate::probe::Transport as ProbeTransport;
 
 use super::error::{Error, EvidenceFault};
 use super::executor::ExchangeEvidence;
-use super::plan::{Probe, udp_dissects_as_dns};
+use super::plan::Probe;
 use super::wire;
 use super::wire::{decode_response, decode_tcp_frame};
 use super::{AttemptEvidence, Limits, MessageLimits, Outcome, ValidatedResponse};
@@ -150,17 +150,13 @@ fn direct_udp_match(request: &Packet, response: &Packet) -> bool {
 }
 
 pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {
-    let (udp_index, udp) = packet
+    let udp_index = packet
         .iter()
-        .enumerate()
-        .find_map(|(index, layer)| Some((index, layer.downcast_ref::<Udp>()?)))?;
-    let registered_dns = udp_dissects_as_dns(udp.source_port, udp.destination_port);
+        .position(|layer| layer.downcast_ref::<Udp>().is_some())?;
     let payload = packet.layer(udp_index.checked_add(1)?)?;
     match BuiltinProtocol::of(payload) {
-        Some(BuiltinProtocol::Dns) if registered_dns => {
-            payload.downcast_ref::<Dns>().map(|dns| dns.wire().clone())
-        }
-        Some(BuiltinProtocol::Malformed) if registered_dns => payload
+        Some(BuiltinProtocol::Dns) => payload.downcast_ref::<Dns>().map(|dns| dns.wire().clone()),
+        Some(BuiltinProtocol::Malformed) => payload
             .downcast_ref::<packetcraftr_core::layer::Malformed>()
             .filter(|layer| layer.intended_protocol.as_deref() == Some("dns"))
             .map(|layer| layer.bytes.clone()),

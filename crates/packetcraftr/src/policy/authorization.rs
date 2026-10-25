@@ -236,16 +236,21 @@ impl Policy {
 mod tests {
     use std::error::Error as _;
     use std::net::IpAddr;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use packetcraftr_core::budget::Deadline;
-    use packetcraftr_core::error::Classified;
+    use packetcraftr_core::error::{Classified, Kind};
 
     use super::Policy;
-    use crate::policy::{Error as PolicyError, ResolutionError};
+    use crate::policy::{DestinationConstraint, Error as PolicyError, ResolutionError};
     use crate::target::{Error as TargetError, Hostname, Resolver, Target};
 
     struct UnexpectedResolver;
+
+    fn fixed_deadline() -> Deadline {
+        let now = Instant::now();
+        Deadline::with_time_source(Duration::from_secs(1), move || now)
+    }
 
     impl Resolver for UnexpectedResolver {
         fn resolve(&self, _: &Hostname, _: usize) -> Result<Vec<IpAddr>, TargetError> {
@@ -258,21 +263,15 @@ mod tests {
         let policy = Policy::default();
         let target: Target = "example.test".parse().unwrap();
         let error = policy
-            .resolve_target(
-                &target,
-                &UnexpectedResolver,
-                &Deadline::new(Duration::from_secs(1)),
-            )
+            .resolve_target(&target, &UnexpectedResolver, &fixed_deadline())
             .expect_err("hostname resolution is denied");
         let ResolutionError::Policy(PolicyError::HostnameResolution { hostname }) = &error else {
             panic!("expected policy hostname denial, got {error:?}");
         };
         assert_eq!(hostname, "example.test");
-        let expected = PolicyError::HostnameResolution {
-            hostname: hostname.clone(),
-        };
-        assert_eq!(error.classification(), expected.classification());
-        assert_eq!(error.causes(), expected.causes());
+        assert_eq!(error.classification().code, "policy.hostname_resolution");
+        assert_eq!(error.classification().kind, Kind::Policy);
+        assert!(error.causes().is_empty());
         assert!(error.source().is_none());
     }
 
@@ -294,11 +293,7 @@ mod tests {
         };
         let target: Target = "example.test".parse().unwrap();
         let error = policy
-            .resolve_target(
-                &target,
-                &FailingResolver,
-                &Deadline::new(Duration::from_secs(1)),
-            )
+            .resolve_target(&target, &FailingResolver, &fixed_deadline())
             .expect_err("resolver fails");
         let ResolutionError::Target(TargetError::Resolver { source, .. }) = &error else {
             panic!("expected target resolver failure, got {error:?}");
@@ -326,8 +321,102 @@ mod tests {
         let ResolutionError::Target(TargetError::Control(source)) = &error else {
             panic!("expected target deadline control, got {error:?}");
         };
-        assert_eq!(error.classification(), source.classification());
+        assert_eq!(error.classification().code, "policy.duration_limit");
+        assert_eq!(error.classification().kind, Kind::Policy);
         assert_eq!(error.causes(), source.causes());
         assert!(error.source().is_some());
+    }
+
+    #[test]
+    fn destination_scope_permission_and_address_constraints_are_independent() {
+        // Address scope references, checked 2026-10-25.
+        // https://www.iana.org/assignments/iana-ipv4-special-registry/
+        // https://www.iana.org/assignments/iana-ipv6-special-registry/
+        // https://www.rfc-editor.org/rfc/rfc1112#section-4
+        // https://www.rfc-editor.org/rfc/rfc4291#section-2.7
+        for (spelling, requires_public_permission) in [
+            ("10.0.0.1", false),
+            ("172.16.0.1", false),
+            ("172.31.255.254", false),
+            ("192.168.0.1", false),
+            ("127.0.0.1", false),
+            ("169.254.1.1", false),
+            ("0.0.0.0", false),
+            ("192.0.2.1", false),
+            ("198.51.100.1", false),
+            ("203.0.113.1", false),
+            ("::1", false),
+            ("::", false),
+            ("fc00::1", false),
+            ("fdff:ffff::1", false),
+            ("fe80::1", false),
+            ("2001:db8::1", false),
+            ("2001:db8:ffff::1", false),
+            ("3fff::1", false),
+            ("3fff:fff:ffff::1", false),
+            ("::ffff:10.0.0.1", false),
+            ("::ffff:192.0.2.1", false),
+            ("::ffff:127.0.0.1", false),
+            ("172.15.255.254", true),
+            ("172.32.0.1", true),
+            ("192.167.255.254", true),
+            ("192.169.0.1", true),
+            ("2001:db7:ffff::1", true),
+            ("2001:db9::1", true),
+            ("3ffe:ffff::1", true),
+            ("3fff:1000::1", true),
+            ("4000::1", true),
+            ("224.0.0.1", true),
+            ("ff02::1", true),
+            ("::ffff:224.0.0.1", true),
+            ("::ffff:172.32.0.1", true),
+        ] {
+            let address: IpAddr = spelling.parse().unwrap();
+            let equivalent = match address {
+                IpAddr::V4(value) => IpAddr::V6(value.to_ipv6_mapped()),
+                IpAddr::V6(value) => value.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(address),
+            };
+            for public_permission in [false, true] {
+                let policy = Policy {
+                    allow_public_destinations: public_permission,
+                    allowed_destinations: vec![DestinationConstraint::Exact(equivalent)],
+                    ..Policy::default()
+                };
+                let result = policy.authorize_destination(address);
+                if requires_public_permission && !public_permission {
+                    let error = result.unwrap_err();
+                    assert!(
+                        matches!(&error, PolicyError::PublicDestination { destination }
+                        if *destination == address),
+                        "{spelling}"
+                    );
+                    assert_eq!(error.classification().code, "policy.public_destination");
+                    assert_eq!(error.classification().kind, Kind::Policy);
+                } else {
+                    result.unwrap();
+                }
+            }
+            let different = match address.to_canonical() {
+                IpAddr::V4(value) => IpAddr::V4((u32::from(value) ^ 1).into()),
+                IpAddr::V6(value) => IpAddr::V6((u128::from(value) ^ 1).into()),
+            };
+            let error = Policy {
+                allow_public_destinations: true,
+                allowed_destinations: vec![DestinationConstraint::Exact(different)],
+                ..Policy::default()
+            }
+            .authorize_destination(address)
+            .unwrap_err();
+            assert!(
+                matches!(&error, PolicyError::DestinationNotAllowed { destination, constraints }
+                if *destination == address && constraints.contains(&different.to_string())),
+                "{spelling}"
+            );
+            assert_eq!(
+                error.classification().code,
+                "policy.destination_not_allowed"
+            );
+            assert_eq!(error.classification().kind, Kind::Policy);
+        }
     }
 }

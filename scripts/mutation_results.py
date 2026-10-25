@@ -161,9 +161,10 @@ def rust_outcome(outcome: dict[str, object], logs: Mapping[str, str]) -> Outcome
             status = 'timeout'
         case 'Unviable':
             log = logs.get(log_path, '')
+            invalid_source = (re.search(r'error(?:\[E\d{4}\]|: expected)', log) is not None
+                              or 'error: `||` operators are not supported in let chain conditions' in log.splitlines())
             if (last.get('phase') != 'Build' or last.get('process_status') != {'Failure': 101}
-                    or not re.search(r'error(?:\[E\d{4}\]|: expected)', log)
-                    or 'could not compile' not in log):
+                    or not invalid_source or 'could not compile' not in log):
                 raise ValueError('build failure is not a confirmed compilation-invalid mutant')
             status = 'invalid'
         case _:

@@ -344,6 +344,640 @@ fn dns_request() -> crate::dns::Request {
     }
 }
 
+mod dns_udp {
+    use super::*;
+    use crate::dns::{self, Event, Outcome, Transport};
+    use packetcraftr_core::{
+        build::Builder,
+        decode::Dissector,
+        error::{BoundaryError, Classification, Classified, Coordinate, Kind, Source},
+        frame::Frame,
+    };
+    use std::{
+        collections::VecDeque,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    // RFC 1035 sections 4.1.1/4.1.2, checked 2026-10-25.
+    // https://datatracker.ietf.org/doc/html/rfc1035#section-4.1.1
+    const QUERY: &[u8] =
+        b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x04test\x00\x00\x01\x00\x01";
+
+    #[derive(Clone)]
+    enum CaptureMode {
+        Response(u8),
+        Sequence(Vec<Frame>),
+        ReadFailure,
+    }
+
+    struct Route(Routes);
+
+    impl RouteProvider for Route {
+        type Error = Infallible;
+
+        fn lookup_with_preferences(
+            &self,
+            address: IpAddr,
+            interface: Option<&interface::Id>,
+            source: Option<IpAddr>,
+            deadline: &Deadline,
+        ) -> Result<Decision, Infallible> {
+            let mut decision = self
+                .0
+                .lookup_with_preferences(address, interface, source, deadline)?;
+            decision.selected_source = Some(source.unwrap_or_else(|| "10.0.0.3".parse().unwrap()));
+            decision.preferred_source = source;
+            Ok(decision)
+        }
+    }
+
+    struct Sender {
+        transmitted: Transmit,
+        clock: ControlledClock,
+        wall: SystemTime,
+        ingress: Arc<Mutex<Option<Instant>>>,
+    }
+
+    impl transmit::Provider for Sender {
+        fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
+            assert!(
+                matches!(&frame, transmit::Outbound::Layer3(_)),
+                "DNS must honor the requested raw-IP route"
+            );
+            self.transmitted
+                .0
+                .lock()
+                .unwrap()
+                .push(frame.bytes().clone());
+            let report = transmit::Report::committed_at(
+                frame.bytes().len(),
+                frame.bytes().clone(),
+                self.clock.now(),
+                self.wall,
+            );
+            *self.ingress.lock().unwrap() =
+                Some(report.timing().freshness_marker().monotonic() + Duration::from_millis(1));
+            Ok(report)
+        }
+    }
+
+    #[derive(Clone)]
+    struct Capture {
+        clock: ControlledClock,
+        mode: CaptureMode,
+        ingress: Arc<Mutex<Option<Instant>>>,
+    }
+
+    struct Session {
+        metadata: capture::Metadata,
+        capture: Capture,
+        frames: VecDeque<Frame>,
+        statistics: capture::Stats,
+    }
+
+    fn wall_time(code: u8) -> SystemTime {
+        UNIX_EPOCH + Duration::from_secs(123 + u64::from(code))
+    }
+
+    fn response(code: u8) -> Frame {
+        let mut payload = QUERY.to_vec();
+        payload[2] = 0x81;
+        payload[3] = 0x80 | code;
+        udp_frame(
+            &payload,
+            "10.0.0.1:5354".parse().unwrap(),
+            "10.0.0.2:49152".parse().unwrap(),
+            wall_time(code),
+        )
+    }
+
+    fn udp_frame(
+        payload: &[u8],
+        source: std::net::SocketAddrV4,
+        destination: std::net::SocketAddrV4,
+        timestamp: SystemTime,
+    ) -> Frame {
+        let mut packet = Packet::new();
+        packet.push(Ipv4 {
+            source: *source.ip(),
+            destination: *destination.ip(),
+            ..Default::default()
+        });
+        packet.push(Udp {
+            source_port: source.port(),
+            destination_port: destination.port(),
+            ..Default::default()
+        });
+        packet.push(Raw::new(payload.to_vec()));
+        let registry = builtin::registry_with(|builder| {
+            builder.bind("udp", u64::from(source.port()), "raw", i32::MAX)?;
+            builder.bind("udp", u64::from(destination.port()), "raw", i32::MAX)?;
+            Ok(())
+        })
+        .unwrap();
+        let built = Builder::new(Arc::new(registry))
+            .build(packet, Default::default(), Default::default())
+            .unwrap();
+        Frame::new(timestamp, LinkType::RAW, built.bytes).unwrap()
+    }
+
+    impl capture::Provider for Capture {
+        type Capture = Session;
+
+        fn arm_capture(
+            &self,
+            request: &capture::Request,
+            _: &Deadline,
+        ) -> Result<Session, LiveIoError> {
+            *self.ingress.lock().unwrap() = None;
+            let frames = match &self.mode {
+                CaptureMode::Response(code) => VecDeque::from([response(*code)]),
+                CaptureMode::Sequence(frames) => frames.clone().into(),
+                CaptureMode::ReadFailure => VecDeque::new(),
+            };
+            Ok(Session {
+                metadata: capture::Metadata {
+                    interface: request.interface.clone(),
+                    link_type: LinkType::RAW,
+                    snap_length: request.limits.snap_length,
+                    native: Default::default(),
+                },
+                capture: self.clone(),
+                frames,
+                statistics: Default::default(),
+            })
+        }
+    }
+
+    impl capture::Session for Session {
+        fn metadata(&self) -> &capture::Metadata {
+            &self.metadata
+        }
+        fn wait_ready(&mut self, _: &Deadline) -> Result<(), LiveIoError> {
+            Ok(())
+        }
+        fn next_captured_frame(
+            &mut self,
+            deadline: &Deadline,
+        ) -> Result<Option<capture::Captured>, LiveIoError> {
+            let Some(received) = *self.capture.ingress.lock().unwrap() else {
+                return Ok(None);
+            };
+            if matches!(&self.capture.mode, CaptureMode::ReadFailure) {
+                return Err(LiveIoError::Capture {
+                    message: "controlled DNS receive failure".into(),
+                    source: Some(Source::new(std::io::Error::other(
+                        "controlled DNS device cause",
+                    ))),
+                });
+            }
+            let Some(frame) = self.frames.pop_front() else {
+                self.capture
+                    .clock
+                    .advance(deadline.remaining().unwrap_or_default());
+                return Ok(None);
+            };
+            self.capture.clock.advance(Duration::from_millis(1));
+            *self.capture.ingress.lock().unwrap() = Some(received + Duration::from_millis(1));
+            self.statistics.received_frames += 1;
+            self.statistics.received_bytes += u64::from(frame.captured_length());
+            Ok(Some(capture::Captured::new(frame, received)))
+        }
+        fn shutdown(&mut self) -> Result<(), LiveIoError> {
+            Ok(())
+        }
+        fn stats(&self) -> capture::Stats {
+            self.statistics
+        }
+    }
+
+    fn request() -> dns::Request {
+        let mut request = super::dns_request();
+        request.server = "10.0.0.1".parse().unwrap();
+        request.address_family = crate::target::Family::Ipv4;
+        request.server_port = 5354;
+        request.route = route::Options {
+            link_mode: Mode::Layer3,
+            interface: Some(
+                interface::Id {
+                    index: 1,
+                    name: "controlled0".into(),
+                }
+                .into(),
+            ),
+            preferred_source: Some("10.0.0.2".parse().unwrap()),
+        };
+        request.collection = crate::exchange::Collection {
+            capture: capture::Limits {
+                max_frames: 8,
+                max_bytes: 2048,
+                snap_length: 256,
+                overflow_policy: capture::OverflowPolicy::Fail,
+            },
+            max_responses: 8,
+            max_unmatched_frames: 4,
+            ..Default::default()
+        };
+        request.limits.evidence = crate::evidence::Limits {
+            max_frames: 8,
+            max_bytes: 2048,
+            max_undecoded: 4,
+        };
+        request
+    }
+
+    fn client(
+        mode: CaptureMode,
+    ) -> (
+        Client<
+            impl PacketProviders + crate::providers::TargetProviders + crate::providers::TcpProviders,
+            ControlledClock,
+        >,
+        Transmit,
+    ) {
+        let (_, routes, interfaces, transmitted) = super::fixture();
+        let clock = ControlledClock(Arc::new(Mutex::new(
+            Instant::now() - Duration::from_secs(1),
+        )));
+        let wall = match &mode {
+            CaptureMode::Response(code) => wall_time(*code),
+            CaptureMode::ReadFailure | CaptureMode::Sequence(_) => wall_time(0),
+        };
+        let ingress = Arc::new(Mutex::new(None));
+        let client = Client::new(
+            builtin::registry(),
+            Policy {
+                allowed_destinations: vec![DestinationConstraint::Exact(
+                    "10.0.0.1".parse().unwrap(),
+                )],
+                ..Default::default()
+            },
+            ProviderSet::packet(
+                Route(routes),
+                interfaces,
+                Capture {
+                    clock: clock.clone(),
+                    mode,
+                    ingress: Arc::clone(&ingress),
+                },
+                Sender {
+                    transmitted: transmitted.clone(),
+                    clock: clock.clone(),
+                    wall,
+                    ingress,
+                },
+            )
+            .with_tcp(NoTcp)
+            .with_resolver(NoResolver),
+        )
+        .with_clock(clock);
+        (client, transmitted)
+    }
+
+    fn assert_query(transmitted: &Transmit) {
+        let sent = transmitted.0.lock().unwrap();
+        let [bytes] = sent.as_slice() else {
+            panic!("expected the single DNS query's transmitted bytes")
+        };
+        let decoded = Dissector::new(builtin::registry())
+            .decode(
+                Frame::new(UNIX_EPOCH, LinkType::RAW, bytes.clone()).unwrap(),
+                Default::default(),
+            )
+            .unwrap();
+        let ip = decoded.packet.get::<Ipv4>().unwrap();
+        assert_eq!(ip.source, "10.0.0.2".parse::<std::net::Ipv4Addr>().unwrap());
+        assert_eq!(
+            ip.destination,
+            "10.0.0.1".parse::<std::net::Ipv4Addr>().unwrap()
+        );
+        let udp = decoded.packet.get::<Udp>().unwrap();
+        assert_eq!((udp.source_port, udp.destination_port), (49_152, 5354));
+        // RFC 791 section 3.1 and RFC 768, checked 2026-10-25.
+        // https://www.rfc-editor.org/rfc/rfc791#section-3.1 and https://www.rfc-editor.org/rfc/rfc768
+        let ipv4_header_bytes = usize::from(bytes[0] & 0x0f) * 4;
+        assert_eq!(&bytes[ipv4_header_bytes + 8..], QUERY);
+    }
+
+    #[test]
+    fn direct_query_preserves_route_wire_identity_and_response_meanings() {
+        // RCODE meanings, checked 2026-10-25 https://www.iana.org/assignments/dns-parameters#dns-parameters-6
+        for (code, meaning) in [
+            (0, "no_error"),
+            (1, "format_error"),
+            (2, "server_failure"),
+            (3, "name_error"),
+            (4, "not_implemented"),
+            (5, "refused"),
+        ] {
+            let (client, transmitted) = client(CaptureMode::Response(code));
+            let collector = dns::Collector::default();
+            let report = client.dns(request(), collector.clone()).unwrap();
+            assert_query(&transmitted);
+            assert_eq!(report.server, "10.0.0.1");
+            assert_eq!(report.server_port, 5354);
+            assert_eq!(
+                report.resolved_addresses,
+                ["10.0.0.1".parse::<IpAddr>().unwrap()]
+            );
+            assert_eq!(report.query_name, "example.test.");
+            assert_eq!(report.query_type, dns::QueryType::A);
+            assert_eq!(report.transaction_id, 0x1234);
+            assert_eq!(report.completion.outcome(), Outcome::Response);
+            assert_eq!(report.completion.accepted_transport(), Some(Transport::Udp));
+            let metadata = report.completion.response().unwrap();
+            assert_eq!(metadata.response_code, u16::from(code));
+            assert!(metadata.recursion_desired);
+            assert!(metadata.recursion_available);
+            assert!(!metadata.authoritative);
+            assert!(!metadata.truncated);
+            assert_eq!(report.stats.packets_completed, 1);
+            let aggregate = collector.finish(report).unwrap();
+            let [attempt] = aggregate.attempts() else {
+                panic!("accepted response must publish one completed attempt")
+            };
+            assert_eq!(attempt.attempt, 1);
+            assert_eq!(attempt.status, Outcome::Response);
+            assert_eq!(attempt.response_code, Some(u16::from(code)));
+            assert_eq!(attempt.latency, Some(Duration::from_millis(1)));
+            let dns::TransportEvidence::Udp { sent_at, .. } = &attempt.transport_evidence else {
+                panic!("a UDP query must publish UDP transport evidence")
+            };
+            assert_eq!(*sent_at, wall_time(code));
+            assert!(attempt.reason.contains(meaning));
+        }
+    }
+
+    #[test]
+    fn receive_failure_retains_attempt_and_device_cause() {
+        let (client, transmitted) = client(CaptureMode::ReadFailure);
+        let error = client
+            .dns(request(), dns::Collector::default())
+            .unwrap_err();
+        assert_query(&transmitted);
+        assert_eq!(error.classification().code, "io.capture");
+        assert_eq!(error.context(), Some(Coordinate::Attempt(1)));
+        let causes = error.causes();
+        assert!(
+            causes
+                .iter()
+                .any(|cause| cause.contains("controlled DNS receive failure"))
+        );
+        assert!(
+            causes
+                .iter()
+                .any(|cause| cause == "controlled DNS device cause")
+        );
+    }
+
+    #[test]
+    fn output_failure_retains_supplied_coordinate_and_cause() {
+        struct RefusingSink;
+        impl crate::Sink<Event> for RefusingSink {
+            type Ack = ();
+            fn delivery(&self) -> crate::Delivery {
+                crate::Delivery::Cooperative
+            }
+            fn publish(&mut self, _: Event) -> Result<(), BoundaryError> {
+                Err(BoundaryError::new(
+                    "controlled DNS output refusal",
+                    Classification::new("output.fixture", Kind::Io, None),
+                    vec!["controlled DNS writer cause".into()],
+                )
+                .with_context(Some(Coordinate::SourceFrame(9))))
+            }
+        }
+        let (client, transmitted) = client(CaptureMode::Response(0));
+        let error = client.dns(request(), RefusingSink).unwrap_err();
+        assert_query(&transmitted);
+        assert_eq!(error.classification().code, "output.fixture");
+        assert_eq!(error.context(), Some(Coordinate::SourceFrame(9)));
+        let causes = error.causes();
+        assert!(
+            causes
+                .iter()
+                .any(|cause| cause == "controlled DNS output refusal")
+        );
+        assert!(
+            causes
+                .iter()
+                .any(|cause| cause == "controlled DNS writer cause")
+        );
+    }
+
+    fn payload_frame(payload: &[u8]) -> Frame {
+        udp_frame(
+            payload,
+            "10.0.0.1:5354".parse().unwrap(),
+            "10.0.0.2:49152".parse().unwrap(),
+            wall_time(0),
+        )
+    }
+
+    fn run_frames(frames: Vec<Frame>) -> dns::Aggregate {
+        let (client, transmitted) = client(CaptureMode::Sequence(frames));
+        let mut request = request();
+        request.attempts = 1;
+        let collector = dns::Collector::default();
+        let report = client.dns(request, collector.clone()).unwrap();
+        assert_query(&transmitted);
+        collector.finish(report).unwrap()
+    }
+
+    #[test]
+    fn failed_replies_keep_their_kind_and_stronger_later_evidence_wins() {
+        let mut wrong_id = QUERY.to_vec();
+        wrong_id[..4].copy_from_slice(&[0xbe, 0xef, 0x81, 0x80]);
+        let unrelated = payload_frame(&wrong_id);
+        let malformed = payload_frame(&[0x12, 0x34, 0x81]);
+        for (frames, expected, latency) in [
+            (vec![unrelated.clone()], Outcome::Unrelated, 1),
+            (vec![malformed.clone()], Outcome::DecodeFailure, 1),
+            (
+                vec![unrelated.clone(), malformed.clone()],
+                Outcome::DecodeFailure,
+                2,
+            ),
+            (
+                vec![unrelated, malformed, response(0)],
+                Outcome::Response,
+                3,
+            ),
+        ] {
+            let aggregate = run_frames(frames);
+            assert_eq!(aggregate.report().completion.outcome(), expected);
+            let [attempt] = aggregate.attempts() else {
+                panic!("one requested attempt must publish its result")
+            };
+            assert_eq!(attempt.status, expected);
+            assert_eq!(attempt.latency, Some(Duration::from_millis(latency)));
+            assert_eq!(
+                attempt.server_address,
+                "10.0.0.1".parse::<IpAddr>().unwrap()
+            );
+            if expected == Outcome::Response {
+                assert_eq!(aggregate.response().unwrap().metadata.response_code, 0);
+            } else {
+                assert!(aggregate.response().is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn truncated_udp_reply_keeps_its_status_without_tcp_fallback() {
+        let mut truncated = QUERY.to_vec();
+        truncated[2..4].copy_from_slice(&[0x83, 0x80]);
+        let aggregate = run_frames(vec![payload_frame(&truncated)]);
+        let report = aggregate.report();
+        assert_eq!(report.completion.outcome(), Outcome::Truncated);
+        assert_eq!(report.completion.accepted_transport(), Some(Transport::Udp));
+        assert!(!report.completion.fallback_attempted());
+        assert!(aggregate.response().unwrap().metadata.truncated);
+        let [attempt] = aggregate.attempts() else {
+            panic!("truncated query must publish its attempt")
+        };
+        assert_eq!(attempt.status, Outcome::Truncated);
+        assert_eq!(attempt.response_code, Some(0));
+        assert_eq!(attempt.latency, Some(Duration::from_millis(1)));
+    }
+
+    fn probe() -> dns::Probe {
+        dns::Probe {
+            attempt: 1,
+            server_address: "10.0.0.1".parse().unwrap(),
+            server_port: 5354,
+            source_port: 49152,
+            transaction_id: 0x1234,
+            query_name: "example.test.".into(),
+            query_type: dns::QueryType::A,
+            query: Bytes::copy_from_slice(QUERY),
+        }
+    }
+
+    #[test]
+    fn exported_classifier_refuses_each_changed_udp_tuple_field() {
+        let registry = builtin::registry();
+        let sent = Dissector::new(Arc::clone(&registry))
+            .decode(
+                udp_frame(
+                    QUERY,
+                    "10.0.0.2:49152".parse().unwrap(),
+                    "10.0.0.1:5354".parse().unwrap(),
+                    wall_time(0),
+                ),
+                Default::default(),
+            )
+            .unwrap();
+        let valid = Dissector::new(Arc::clone(&registry))
+            .decode(response(0), Default::default())
+            .unwrap();
+        assert!(
+            matches!(dns::classify_response(&registry, &probe(), &sent.packet, &valid, request().limits.message), Some(dns::ResponseClassification::Response(response)) if response.metadata.response_code == 0)
+        );
+        let mut payload = QUERY.to_vec();
+        payload[2..4].copy_from_slice(&[0x81, 0x80]);
+        for (source, destination) in [
+            ("10.0.0.9:5354", "10.0.0.2:49152"),
+            ("10.0.0.1:5355", "10.0.0.2:49152"),
+            ("10.0.0.1:5354", "10.0.0.3:49152"),
+            ("10.0.0.1:5354", "10.0.0.2:49153"),
+        ] {
+            let decoded = Dissector::new(Arc::clone(&registry))
+                .decode(
+                    udp_frame(
+                        &payload,
+                        source.parse().unwrap(),
+                        destination.parse().unwrap(),
+                        wall_time(0),
+                    ),
+                    Default::default(),
+                )
+                .unwrap();
+            assert!(
+                dns::classify_response(
+                    &registry,
+                    &probe(),
+                    &sent.packet,
+                    &decoded,
+                    request().limits.message
+                )
+                .is_none(),
+                "wrong tuple {source} -> {destination} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn custom_dns_binding_preserves_response_classification() {
+        use packetcraftr_core::protocol::application::dns::{Dns, Error as DnsWireError};
+
+        for protocol in ["raw", "dns"] {
+            let registry = Arc::new(
+                builtin::registry_with(|builder| {
+                    builder.bind("udp", 5354, protocol, 200)?;
+                    Ok(())
+                })
+                .unwrap(),
+            );
+            let sent = Dissector::new(Arc::clone(&registry))
+                .decode(
+                    udp_frame(
+                        QUERY,
+                        "10.0.0.2:49152".parse().unwrap(),
+                        "10.0.0.1:5354".parse().unwrap(),
+                        wall_time(0),
+                    ),
+                    Default::default(),
+                )
+                .unwrap();
+            let mut valid = QUERY.to_vec();
+            valid[2..4].copy_from_slice(&[0x81, 0x80]);
+            for (payload, complete) in [(valid.as_slice(), true), (&[0x12, 0x34, 0x81][..], false)]
+            {
+                let decoded = Dissector::new(Arc::clone(&registry))
+                    .decode(payload_frame(payload), Default::default())
+                    .unwrap();
+                if complete {
+                    if protocol == "dns" {
+                        assert_eq!(
+                            decoded.packet.get::<Dns>().unwrap().wire().as_ref(),
+                            payload
+                        );
+                    } else {
+                        assert_eq!(decoded.packet.get::<Raw>().unwrap().bytes.as_ref(), payload);
+                    }
+                }
+                let classified = dns::classify_response(
+                    &registry,
+                    &probe(),
+                    &sent.packet,
+                    &decoded,
+                    request().limits.message,
+                );
+                match classified {
+                    Some(dns::ResponseClassification::Response(response)) if complete => {
+                        assert_eq!(response.metadata.response_code, 0);
+                    }
+                    Some(dns::ResponseClassification::DecodeFailure {
+                        source:
+                            Some(dns::wire::Error::Decode(DnsWireError::MessageTooShort {
+                                actual,
+                                minimum,
+                            })),
+                        ..
+                    }) if !complete => {
+                        assert_eq!(actual, payload.len());
+                        assert_eq!(minimum, dns::HEADER_BYTES);
+                    }
+                    other => {
+                        panic!("explicit {protocol} binding changed wire classification: {other:?}")
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn dns_admission_counts_complete_query_frames_before_provider_work() {
     use packetcraftr_core::error::Classified;
@@ -393,6 +1027,20 @@ fn dns_admission_counts_complete_query_frames_before_provider_work() {
     assert_eq!(limits.udp().wire_bytes(), expected_bytes);
     let error = client
         .dns(request.clone(), |_: crate::dns::Event| Ok(()))
+        .unwrap_err();
+    assert!(matches!(&error, crate::dns::Error::Authorization(_)));
+    assert_eq!(error.classification().code, "policy.traffic_byte_limit");
+    let question = crate::dns::Request {
+        attempts: 1,
+        ..request
+    };
+    let error = client
+        .dns_batch(
+            crate::dns::batch::Request {
+                questions: vec![question.clone(), question],
+            },
+            |_: crate::dns::batch::Event| Ok(()),
+        )
         .unwrap_err();
     assert!(matches!(&error, crate::dns::Error::Authorization(_)));
     assert_eq!(error.classification().code, "policy.traffic_byte_limit");
@@ -453,6 +1101,383 @@ fn dns_request_refuses_invalid_evidence_bounds() {
             Err(crate::dns::Error::InvalidLimit { field: actual, .. }) if actual == field
         ));
     }
+}
+
+#[test]
+fn dns_batch_requires_bounded_questions_with_one_shared_transport_context() {
+    use crate::dns::batch;
+
+    let first = crate::dns::Request {
+        collection: crate::exchange::Collection {
+            max_responses: 2,
+            ..dns_request().collection
+        },
+        ..dns_request()
+    };
+    for count in [1, batch::MAX_QUESTIONS] {
+        batch::Request {
+            questions: vec![first.clone(); count],
+        }
+        .validate()
+        .unwrap();
+    }
+    for count in [0, batch::MAX_QUESTIONS + 1] {
+        let error = batch::Request {
+            questions: vec![first.clone(); count],
+        }
+        .validate()
+        .unwrap_err();
+        assert!(matches!(error, crate::dns::Error::InvalidLimit {
+            field: "questions", value, ..
+        } if value == count as u64));
+    }
+    let mut changed_server = first.clone();
+    changed_server.server = "fd00::3".parse().unwrap();
+    let mut changed_port = first.clone();
+    changed_port.server_port = 5353;
+    let mut changed_route = first.clone();
+    changed_route.route.interface = Some(
+        interface::Id {
+            name: "another0".into(),
+            index: 2,
+        }
+        .into(),
+    );
+    let mut changed_collection = first.clone();
+    changed_collection.collection.max_responses = 3;
+    for changed in [
+        changed_server,
+        changed_port,
+        changed_route,
+        changed_collection,
+    ] {
+        let error = batch::Request {
+            questions: vec![first.clone(), first.clone(), changed],
+        }
+        .validate()
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::dns::Error::InvalidLimit {
+                field: "questions",
+                value: 2,
+                ..
+            }
+        ));
+    }
+}
+
+#[test]
+fn dns_batch_retains_question_failures_and_stops_at_the_shortest_shared_deadline() {
+    use crate::dns::{QueryType, batch};
+    use packetcraftr_core::error::Classified;
+
+    struct RefusingResolver(ControlledClock);
+
+    impl crate::target::Resolver for RefusingResolver {
+        fn resolve(
+            &self,
+            hostname: &crate::target::Hostname,
+            _: usize,
+        ) -> Result<Vec<IpAddr>, crate::target::Error> {
+            self.0.advance(Duration::from_millis(600));
+            Err(crate::target::Error::Resolver {
+                hostname: hostname.to_string(),
+                source: Box::new(std::io::Error::other("controlled DNS failure")),
+            })
+        }
+    }
+
+    struct CancelledTcp;
+
+    impl packetcraftr_netio::tcp::Provider for CancelledTcp {
+        type Stream = packetcraftr_netio::tcp::SystemStream;
+
+        fn connect(
+            &self,
+            _: std::net::SocketAddr,
+            _: &Deadline,
+        ) -> Result<Self::Stream, packetcraftr_netio::tcp::Error> {
+            Err(packetcraftr_core::budget::Cancelled.into())
+        }
+    }
+
+    let (_, routes, interfaces, tx) = fixture();
+    routes.forbid_lookup.store(true, Ordering::Relaxed);
+    let clock = ControlledClock(Arc::new(Mutex::new(Instant::now())));
+    let client = Client::new(
+        builtin::registry(),
+        Policy {
+            allow_hostname_resolution: true,
+            ..Policy::default()
+        },
+        ProviderSet::packet(routes, interfaces, NoCapture, tx.clone())
+            .with_tcp(NoTcp)
+            .with_resolver(RefusingResolver(clock.clone())),
+    )
+    .with_clock(clock);
+    let questions = [
+        ("first.test", QueryType::A, 0x1234, 5),
+        ("second.test", QueryType::AAAA, 0x5678, 1),
+        ("third.test", QueryType::PTR, 0x9abc, 10),
+    ]
+    .map(|(query_name, query_type, transaction_id, seconds)| {
+        let mut question = dns_request();
+        question.server = "resolver.test".parse().unwrap();
+        question.query_name = query_name.into();
+        question.query_type = query_type;
+        question.transaction_id = transaction_id;
+        question.attempts = 1;
+        question.limits.max_duration = Duration::from_secs(seconds);
+        question
+    });
+    let report = client
+        .dns_batch(
+            batch::Request {
+                questions: questions.to_vec(),
+            },
+            |_: batch::Event| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(report.server, "resolver.test");
+    assert_eq!(report.server_port, questions[0].server_port);
+    assert_eq!(report.status_counts(), (0, 2, 1));
+    assert_eq!(report.questions.len(), questions.len());
+    for ((actual, expected), status) in
+        report
+            .questions
+            .iter()
+            .zip(&questions)
+            .zip(["failed", "failed", "unattempted"])
+    {
+        assert_eq!(actual.query_name, expected.query_name);
+        assert_eq!(actual.query_type, expected.query_type);
+        assert_eq!(actual.transaction_id, expected.transaction_id);
+        assert_eq!(actual.status.as_str(), status);
+        assert_eq!(actual.status.to_string(), status);
+        assert!(actual.result.is_none());
+    }
+    let first_error = report.questions[0].error.as_ref().unwrap();
+    assert!(
+        packetcraftr_core::error::source_chain(first_error)
+            .iter()
+            .any(|cause| cause.contains("controlled DNS failure"))
+    );
+    let elapsed = report.questions[1].error.as_ref().unwrap();
+    assert_eq!(elapsed.classification().code, "policy.dns_duration_limit");
+    assert!(
+        matches!(elapsed, crate::dns::Error::DurationLimit { actual, limit }
+        if actual >= limit && *limit == Duration::from_secs(1))
+    );
+    assert!(report.questions[2].error.is_none());
+    assert!(tx.0.lock().unwrap().is_empty());
+
+    let (_, routes, interfaces, tx) = fixture();
+    routes.forbid_lookup.store(true, Ordering::Relaxed);
+    let client = Client::new(
+        builtin::registry(),
+        Policy {
+            allowed_destinations: vec![DestinationConstraint::Exact("10.0.0.1".parse().unwrap())],
+            ..Policy::default()
+        },
+        ProviderSet::packet(routes, interfaces, NoCapture, tx.clone())
+            .with_tcp(CancelledTcp)
+            .with_resolver(NoResolver),
+    )
+    .with_clock(ControlledClock(Arc::new(Mutex::new(Instant::now()))));
+    let question = crate::dns::Request {
+        server: "10.0.0.1".parse().unwrap(),
+        address_family: crate::target::Family::Ipv4,
+        transport: crate::dns::TransportMode::Tcp,
+        attempts: 1,
+        timeout: Duration::from_secs(30),
+        route: route::Options::default(),
+        ..dns_request()
+    };
+    let report = client
+        .dns_batch(
+            batch::Request {
+                questions: vec![question.clone(), question],
+            },
+            |_: batch::Event| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(report.status_counts(), (0, 1, 1));
+    assert!(matches!(
+        report.questions[0].error.as_ref(),
+        Some(crate::dns::Error::Cancelled(_))
+    ));
+    assert_eq!(
+        report.questions[1].status,
+        batch::QuestionStatus::Unattempted
+    );
+    assert!(report.questions[1].result.is_none());
+    assert!(report.questions[1].error.is_none());
+    assert!(tx.0.lock().unwrap().is_empty());
+}
+
+#[test]
+fn dns_batch_publishes_the_supplied_tcp_answer_and_exact_query() {
+    use crate::dns::{Outcome, Transport, batch};
+    use packetcraftr_core::protocol::application::dns::RecordValue;
+    use std::collections::VecDeque;
+    use std::io::{self, Cursor, Read, Write};
+    use std::net::SocketAddr;
+
+    struct Stream {
+        reply: Cursor<Vec<u8>>,
+        sent: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl Read for Stream {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            self.reply.read(buffer)
+        }
+    }
+
+    impl Write for Stream {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.sent.lock().unwrap().extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl packetcraftr_netio::tcp::Stream for Stream {
+        fn peer_addr(&self) -> io::Result<SocketAddr> {
+            Ok("10.0.0.1:53".parse().unwrap())
+        }
+
+        fn local_addr(&self) -> io::Result<SocketAddr> {
+            Ok("10.0.0.2:40000".parse().unwrap())
+        }
+
+        fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct Tcp {
+        replies: Mutex<VecDeque<Vec<u8>>>,
+        sent: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl packetcraftr_netio::tcp::Provider for Tcp {
+        type Stream = Stream;
+
+        fn connect(
+            &self,
+            endpoint: SocketAddr,
+            _: &Deadline,
+        ) -> Result<Stream, packetcraftr_netio::tcp::Error> {
+            assert_eq!(endpoint, "10.0.0.1:53".parse().unwrap());
+            Ok(Stream {
+                reply: Cursor::new(self.replies.lock().unwrap().pop_front().unwrap()),
+                sent: Arc::clone(&self.sent),
+            })
+        }
+    }
+
+    // RFC 1035 sections 3.4.1, 4.1 and 4.2.2, checked 2026-10-25.
+    // https://www.rfc-editor.org/rfc/rfc1035
+    let first_query = [
+        0, 30, 0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 7, b'e', b'x', b'a', b'm', b'p', b'l',
+        b'e', 4, b't', b'e', b's', b't', 0, 0, 1, 0, 1,
+    ];
+    let second_query = [
+        0, 30, 0xab, 0xcd, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 7, b'e', b'x', b'a', b'm', b'p', b'l',
+        b'e', 4, b't', b'e', b's', b't', 0, 0, 1, 0, 1,
+    ];
+    let first_reply = vec![
+        0, 46, 0x12, 0x34, 0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0, 7, b'e', b'x', b'a', b'm', b'p',
+        b'l', b'e', 4, b't', b'e', b's', b't', 0, 0, 1, 0, 1, 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60,
+        0, 4, 192, 0, 2, 9,
+    ];
+    let second_reply = vec![
+        0, 46, 0xab, 0xcd, 0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0, 7, b'e', b'x', b'a', b'm', b'p',
+        b'l', b'e', 4, b't', b'e', b's', b't', 0, 0, 1, 0, 1, 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 120,
+        0, 4, 192, 0, 2, 17,
+    ];
+    let (_, routes, interfaces, tx) = fixture();
+    routes.forbid_lookup.store(true, Ordering::Relaxed);
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let client = Client::new(
+        builtin::registry(),
+        Policy {
+            allowed_destinations: vec![DestinationConstraint::Exact("10.0.0.1".parse().unwrap())],
+            ..Policy::default()
+        },
+        ProviderSet::packet(routes, interfaces, NoCapture, tx)
+            .with_resolver(NoResolver)
+            .with_tcp(Tcp {
+                replies: Mutex::new(VecDeque::from([first_reply, second_reply])),
+                sent: Arc::clone(&sent),
+            }),
+    )
+    .with_clock(ControlledClock(Arc::new(Mutex::new(Instant::now()))));
+    let request = crate::dns::Request {
+        server: "10.0.0.1".parse().unwrap(),
+        address_family: crate::target::Family::Ipv4,
+        transport: crate::dns::TransportMode::Tcp,
+        attempts: 1,
+        timeout: Duration::from_secs(30),
+        route: route::Options::default(),
+        ..dns_request()
+    };
+    let collector = batch::Collector::default();
+    let report = client
+        .dns_batch(
+            batch::Request {
+                questions: vec![
+                    request.clone(),
+                    crate::dns::Request {
+                        transaction_id: 0xabcd,
+                        ..request
+                    },
+                ],
+            },
+            collector.clone(),
+        )
+        .unwrap();
+    assert_eq!(report.status_counts(), (2, 0, 0));
+    let aggregate = collector.finish(report).unwrap();
+    assert_eq!(aggregate.questions.len(), 2);
+    for (question, (id, ttl, address)) in aggregate
+        .questions
+        .iter()
+        .zip([(0x1234, 60, "192.0.2.9"), (0xabcd, 120, "192.0.2.17")])
+    {
+        assert_eq!(question.query_name, "example.test");
+        assert_eq!(question.transaction_id, id);
+        assert_eq!(question.status.as_str(), "completed");
+        assert_eq!(question.status.to_string(), "completed");
+        assert!(question.error.is_none());
+        let result = question.result.as_ref().unwrap();
+        assert_eq!(result.report().completion.outcome(), Outcome::Response);
+        assert_eq!(
+            result.report().completion.accepted_transport(),
+            Some(Transport::Tcp)
+        );
+        let response = result.response().unwrap();
+        let [answer] = response.answers.as_slice() else {
+            panic!("expected the supplied address record");
+        };
+        assert_eq!(answer.owner.to_string(), "example.test.");
+        assert_eq!(answer.class, 1);
+        assert_eq!(answer.ttl, ttl);
+        assert_eq!(answer.value, RecordValue::A(address.parse().unwrap()));
+    }
+    assert_eq!(
+        sent.lock().unwrap().as_slice(),
+        [first_query.as_slice(), second_query.as_slice()].concat()
+    );
 }
 
 fn maximum_neighbor_request_frame(source: IpAddr, destination: IpAddr) -> Bytes {

@@ -210,6 +210,28 @@ class MutationReportTests(unittest.TestCase):
                 rust_results([mutant], raw, {'mutant.log': log})
         self.assertEqual(rust_results([mutant], raw, {'mutant.log': 'error: expected expression\ncould not compile sample'})[0].status,
                          'invalid')
+        # https://doc.rust-lang.org/reference/expressions/if-expr.html#chains-of-conditions, checked 2026-10-25.
+        syntax = 'error: `||` operators are not supported in let chain conditions'
+        unviable = dict(scenario=dict(Mutant=mutant), summary='Unviable', log_path='mutant.log',
+                        phase_results=[dict(phase='Build', process_status={'Failure': 101})])
+        completed = dict(end_time='finished', total_mutants=1, outcomes=[baseline, unviable])
+        syntax_log = syntax + '\n --> module.rs:3:5\nerror: could not compile sample (lib) due to 1 previous error\n'
+        self.assertEqual(rust_results([mutant], completed, {'mutant.log': syntax_log}),
+                         (Outcome('mutation', 'invalid', 'mutant.log'),))
+        for log in (syntax, 'error: could not compile sample',
+                    'error: No space left on device\nerror: could not compile sample',
+                    'error: Disk quota exceeded\nerror: could not compile sample',
+                    'error: runner failed\nerror: could not compile sample',
+                    'warning: `||` operators are not supported in let chain conditions\ncould not compile sample',
+                    syntax + ' while writing cache\ncould not compile sample'):
+            with self.subTest(log=log), self.assertRaises(ValueError):
+                rust_results([mutant], completed, {'mutant.log': log})
+        with self.assertRaises(ValueError):
+            rust_results([mutant], completed | {'end_time': None}, {'mutant.log': syntax_log})
+        for phase, process in (('Build', {'Failure': 13}), ('Build', 'Timeout'), ('Test', {'Failure': 101})):
+            wrong_phase = unviable | {'phase_results': [dict(phase=phase, process_status=process)]}
+            with self.subTest(phase=phase, process=process), self.assertRaises(ValueError):
+                rust_results([mutant], completed | {'outcomes': [baseline, wrong_phase]}, {'mutant.log': syntax_log})
 
     def test_rust_baseline_requires_successful_test_execution(self) -> None:
         mutant = dict(name='mutation')

@@ -1128,3 +1128,81 @@ The dependency check found the existing Tokio 1.54.0 advisory and a duplicate Wi
 ```text
 advisories ok, bans ok, licenses ok, sources ok
 ```
+
+# Follow-up behavioral audit
+
+The following cases extend the owning suites after reviewing surviving mutations. They check supplied protocol data, public diagnostics and effects. Focused replay evidence does not replace the required complete mutation audit.
+
+| Suite | Case | Protected behavior | Representative defect |
+| --- | --- | --- | --- |
+| CLI files | `offline_capture_limits_are_validated_before_input_io` | Invalid limits produce usage errors. Valid relationships reach the supplied path and retain its I/O diagnostic. | Opening input before validating its bounds. |
+| CLI files | `capture_reader_applies_and_reports_supplied_bounds` | Controlled packet sizes, interface counts and encoded/decoded lengths obey independently supplied limits, including exact boundaries. Published diagnostics retain those inputs. | Ignoring a supplied limit or swapping two limits. |
+| CLI follow | `offline_frame_ceiling_preserves_each_followed_payload_chunk` | A two-frame allowance retains both supplied UDP payload chunks and their source positions. | Returning only the first retained chunk. |
+| CLI build | `numeric_template_ranges_emit_inclusive_steps_and_enforce_the_packet_limit` | The supplied inclusive stepped axis emits TTL values 37, 39 and 41. A limit of two refuses the complete three-packet product before preparing either a valid or invalid recipe. | Producing an empty range or losing the documented early limit check. |
+| CLI analysis | `scan_diff_publishes_findings_before_the_requested_failure_exit` | Supplied closed/open observations publish a successful state-change finding. The default exits zero and the explicit failure threshold exits one. | Replacing a command's requested nonzero result with zero. |
+| DNS UDP | `direct_query_preserves_route_wire_identity_and_response_meanings` | Requested route/source settings reach the actual query. Supplied response codes, fields, timestamps and latency reach the report. | Dropping route preferences or changing decoded response meaning. |
+| DNS UDP | `receive_failure_retains_attempt_and_device_cause` | A supplied read failure retains its actual attempt coordinate and device cause. | Replacing a useful failure with a generic error. |
+| DNS UDP | `output_failure_retains_supplied_coordinate_and_cause` | A cooperative sink failure retains the supplied coordinate and cause. | Losing the original publication failure. |
+| DNS UDP | `failed_replies_keep_their_kind_and_stronger_later_evidence_wins` | Wrong identity remains unrelated, a short header remains a decode failure, and later stronger evidence wins independently from arrival latency. | Ranking all failures equally or treating malformed data as unrelated. |
+| DNS UDP | `truncated_udp_reply_keeps_its_status_without_tcp_fallback` | UDP-only truncation retains its header and public status without opening TCP. | Publishing a complete response or overriding the requested transport. |
+| DNS UDP | `exported_classifier_refuses_each_changed_udp_tuple_field` | Each independently changed address or port is refused, while the matching tuple is accepted. | Classifying a valid message from the wrong endpoint. |
+| DNS UDP | `custom_dns_binding_preserves_response_classification` | Explicit Raw and DNS bindings preserve the same accepted reply and specific short-header error. | Discarding typed payloads outside builtin bindings. |
+| DNS batch | `dns_batch_requires_bounded_questions_with_one_shared_transport_context` | Count boundaries and independent server, port, route and collection mismatches obey the public batch contract. | Accepting an empty batch or mixing transport contexts. |
+| DNS batch | `dns_batch_retains_question_failures_and_stops_at_the_shortest_shared_deadline` | Returned questions retain identities and causes. The shortest shared limit and provider cancellation leave later questions unattempted. | Continuing after cancellation or losing duration-error precedence. |
+| DNS batch | `dns_batch_publishes_the_supplied_tcp_answer_and_exact_query` | Two independent TCP vectors retain their distinct IDs, answers and TTLs, and exact outbound queries are observed. | Assigning one question's events or answer to another. |
+| Neighbor | `maximum_vlan_stack_and_priority_endpoints_reach_capture` | Supported VLAN-stack and priority boundaries reach a controlled capture refusal before transmission. | Rejecting a valid boundary during admission. |
+| Neighbor | `matching_reply_is_retained_under_independent_frame_and_byte_limits` | Actual matching reply bytes and address survive independent frame and byte ceilings, with omission reported. | Retaining only unrelated traffic or exceeding a supplied budget. |
+| Neighbor | `capture_snapshot_accepts_its_boundary_and_refuses_one_extra_byte` | Exact snapshot-size input is retained and one extra byte is refused. | Rejecting the boundary or accepting oversized capture evidence. |
+| Neighbor | `contradictory_transmission_reports_cannot_produce_a_neighbor_answer` | Wrong accepted-byte counts and wrong accepted-byte contents retain distinct public refusals. | Accepting a reply after inconsistent transmission evidence. |
+| OS | `complete_probe_set_publishes_wire_fields_observations_and_cleanup` | Both IP families publish the versioned probe stimulus, supplied observations, named corpus match and valid cleanup relationships. A changed predicate produces a complete Unknown result. | Omitting authored fields, observations or cleanup effects. |
+| OS | `missing_or_wrong_base_responses_stop_optional_probe_kinds` | Missing or unsuitable base evidence prevents optional traffic and leaves identification inconclusive. | Sending optional probes after unqualified base evidence. |
+| OS | `nonce_and_echo_reflection_failures_cannot_qualify_observations` | Wrong supplied timestamp or echo reflection cannot qualify observations in either family. | Matching only endpoints while ignoring correlation identity. |
+| OS | `changed_final_tcp_destination_is_refused_as_probe_evidence` | A final transmitted destination differing from the requested probe is refused with its supplied public probe coordinate, including a later closed-port request. | Treating altered wire data as evidence for the requested probe. |
+| OS | `preparation_and_responses_share_frame_and_byte_retention_limits` | Controlled ARP preparation and subsequent responses share independent total frame and byte budgets. Supplied bytes remain visible and omitted evidence makes the report incomplete. | Giving preparation and responses separate retention allowances or reporting incomplete evidence as complete. |
+| Policy | `destination_scope_permission_and_address_constraints_are_independent` | Explicit scope permission and matching or nonmatching canonical-address constraints remain independent for both address families and mapped aliases. | An exact constraint bypassing required permission or an unrelated address entering the allowlist. |
+| Core DNS analysis | `udp_capture_publishes_decoded_messages_matched_and_orphan_transactions` | Supplied query/answer fields, TTL, matched latency, orphan responses, scope and physical provenance reach public messages and transactions through both supported collector entrypoints. | Discarding observed messages or dropping transaction finalization. |
+| Core DNS analysis | `tcp_capture_finalizes_split_queries_partial_messages_and_unanswered_sources` | A split query completes under a one-message-sized buffer, further input is admitted, and EOF retains the partial successor and unanswered-query provenance. | Failing to release completed input or losing partial/finalized output. |
+
+The existing DNS admission case also refuses a combined batch whose questions fit individually but exceed the shared traffic allowance. Workflow time is injected. Exact send timestamps use the provider's supplied monotonic and wall-clock samples through `Report::committed_at`, while `Report::committed` keeps its native clock behavior. Independent wire expectations allow protocol-defined freedom in padding, option alignment and ARP target-hardware contents.
+
+The existing Python harness cases now reject a missing required module and detect resource failures across distinct cause/context branches. Existing mutation-runner cases also cover complete cross-platform receiver cohorts, corrected plan regeneration, nested output creation, nonzero clock epochs, a realistic large inventory and incomplete single-field reuse metadata. Revision mismatches are refused in both lexical directions, every cohort must declare the same inventory, and numeric one cannot stand in for a true workspace-baseline proof. These cases retain valid surrounding reports so a separate count, source or inventory error cannot mask the expected refusal.
+
+# Explicit DNS binding regression evidence
+
+A public SDK client builds matching query/response bytes in memory and installs explicit Raw and DNS bindings for UDP port 5354. The shared classifier previously discarded the typed DNS payload even though the tuple and DNS message matched. It also lost the specific wire error from a short DNS header. The repaired helper accepts the declared payload while preserving tuple matching, checksum checks, application validation and the intended-protocol guard for unrelated malformed data.
+
+The unchanged SDK client and manifest were run with this command before and after the repair.
+
+```sh
+cargo run --quiet --offline --manifest-path /home/ubuntu/pcr-audit/dns-binding-sdk-proof/Cargo.toml
+```
+
+Before the repair, the command exited zero and printed the incorrect classification for the explicit DNS binding.
+
+```text
+raw valid: response code=0
+raw short: decode_failure DNS message is 3 bytes; expected at least 12
+dns valid: decode_failure correlated UDP response has no complete DNS payload
+dns short: decode_failure correlated UDP response has no complete DNS payload
+```
+
+After the repair, the same command exits zero and preserves both kinds of supplied data through either binding.
+
+```text
+raw valid: response code=0
+raw short: decode_failure DNS message is 3 bytes; expected at least 12
+dns valid: response code=0
+dns short: decode_failure DNS message is 3 bytes; expected at least 12
+```
+
+The separate mapped regression fails before the helper repair and passes afterward. These SDK command receipts demonstrate the functionality independently from the test results.
+
+# Compiler diagnostic classification
+
+The result checker recognizes the retained compiler diagnostic for unsupported logical OR in a let chain as a source-compilation failure. It still requires an Unviable outcome, a failed Build phase with status 101 and a compiler failure summary. Resource failures, failed test phases, timeouts and incomplete reports remain blocking evidence. Review of 1,660 retained CI outcomes changed exactly 23 parser rejections to invalid mutants and added no kills. The complete cohort and source-bound score requirements remain in force.
+
+# Reviewed annotation equivalents
+
+The exclusion registry adds 132 exact orchestration identities and 33 exact harness identities. Each was an actual surviving mutant that changed one deferred function annotation. Both modules enable future annotations, the complete non-annotation AST stays identical, and repository callers do not inspect or evaluate those annotations. Independent review checked every source span, SDK diff, completed test outcome and unchanged module hash. The existing 27 helper exclusions were separately reconfirmed, including their 22 annotation identities.
+
+Each entry names its group, exact operator/span identity, final source fingerprint and individual reason. These entries do not exclude a file, function, operator class or timeout. They do not add kills or convert old reports into final-source evidence. Changed production bodies, missing results, incomplete runs and stale source bindings still fail validation, and the required new measurements remain separate from the review of these equivalents.

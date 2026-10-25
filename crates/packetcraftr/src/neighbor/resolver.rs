@@ -462,8 +462,14 @@ where
 #[cfg(test)]
 mod network_improvements {
     use super::*;
-    use packetcraftr_core::budget::Cancellation;
-    use std::{sync::Mutex, time::Duration};
+    use crate::neighbor::MAX_VLAN_TAGS;
+    use packetcraftr_core::{
+        budget::Cancellation,
+        error::Classified,
+        frame::LinkType,
+        packet::{VlanKind, VlanTag},
+    };
+    use std::{collections::VecDeque, sync::Mutex, time::Duration};
     #[derive(Default)]
     struct Transmitter(Mutex<Vec<Bytes>>);
     impl transmit::Provider for Transmitter {
@@ -782,5 +788,297 @@ mod network_improvements {
         assert_eq!(outcome.captured.len(), 1);
         assert_eq!(outcome.captured[0].bytes().as_ref(), [0_u8; 60]);
         assert!(!outcome.evidence_truncated);
+    }
+
+    fn neighbor_request() -> Request {
+        Request {
+            interface: packetcraftr_netio::interface::Id {
+                name: "neighbor0".into(),
+                index: 7,
+            },
+            interface_source: "192.168.1.1".parse().unwrap(),
+            interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
+            target: "192.168.1.2".parse().unwrap(),
+            vlan_tags: Vec::new(),
+            mtu: 1500,
+            link_type: LinkType::ETHERNET,
+        }
+    }
+
+    // RFC 826 packet format and RFC 894 Ethernet padding, checked 2026-10-25.
+    // https://www.rfc-editor.org/rfc/rfc826 and https://www.rfc-editor.org/rfc/rfc894
+    // EtherTypes: https://www.iana.org/assignments/ieee-802-numbers, checked 2026-10-25.
+    // RFC 826 permits any request target-hardware value.
+    fn assert_arp_request(sent: &[Bytes]) {
+        let [bytes] = sent else {
+            panic!("expected one transmitted neighbor request");
+        };
+        let expected_prefix: &[u8] = &[
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 2, 0, 0, 0, 0, 1, 0x08, 0x06, 0, 1, 0x08, 0, 6, 4,
+            0, 1, 2, 0, 0, 0, 0, 1, 192, 168, 1, 1,
+        ];
+        assert!(bytes.len() >= 60);
+        assert_eq!(&bytes[..32], expected_prefix);
+        assert_eq!(&bytes[38..42], &[192, 168, 1, 2]);
+        assert!(bytes[42..].iter().all(|byte| *byte == 0));
+    }
+
+    fn arp_reply(sender: MacAddress, address: [u8; 4], size: usize) -> Frame {
+        let destination = [2, 0, 0, 0, 0, 1];
+        let header = [
+            destination.as_slice(),
+            sender.0.as_slice(),
+            &[0x08, 0x06, 0, 1, 0x08, 0, 6, 4, 0, 2],
+            sender.0.as_slice(),
+            address.as_slice(),
+            destination.as_slice(),
+            &[192, 168, 1, 1],
+        ]
+        .concat();
+        let bytes = [header.as_slice(), vec![0; size - header.len()].as_slice()].concat();
+        Frame::new(std::time::UNIX_EPOCH, LinkType::ETHERNET, bytes).unwrap()
+    }
+
+    type PendingReplies = Arc<Mutex<VecDeque<capture::Captured>>>;
+
+    struct ReplySession {
+        metadata: capture::Metadata,
+        pending: PendingReplies,
+    }
+
+    impl capture::Session for ReplySession {
+        fn metadata(&self) -> &capture::Metadata {
+            &self.metadata
+        }
+        fn wait_ready(&mut self, _: &Deadline) -> Result<(), packetcraftr_netio::Error> {
+            Ok(())
+        }
+        fn next_captured_frame(
+            &mut self,
+            _: &Deadline,
+        ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
+            Ok(self.pending.lock().unwrap().pop_front())
+        }
+        fn shutdown(&mut self) -> Result<(), packetcraftr_netio::Error> {
+            Ok(())
+        }
+        fn stats(&self) -> capture::Stats {
+            Default::default()
+        }
+    }
+
+    struct ReplyCapture(PendingReplies);
+
+    impl capture::Provider for ReplyCapture {
+        type Capture = ReplySession;
+        fn arm_capture(
+            &self,
+            request: &capture::Request,
+            _: &Deadline,
+        ) -> Result<Self::Capture, packetcraftr_netio::Error> {
+            Ok(ReplySession {
+                metadata: capture::Metadata {
+                    interface: request.interface.clone(),
+                    link_type: LinkType::ETHERNET,
+                    snap_length: request.limits.snap_length,
+                    native: Default::default(),
+                },
+                pending: Arc::clone(&self.0),
+            })
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum SendEvidence {
+        Exact,
+        WrongCount,
+        WrongBytes,
+    }
+
+    struct ReplyTransmit {
+        sent: Transmitter,
+        pending: PendingReplies,
+        replies: Vec<Frame>,
+        evidence: SendEvidence,
+    }
+
+    impl transmit::Provider for ReplyTransmit {
+        fn send(
+            &self,
+            outbound: transmit::Outbound<'_>,
+        ) -> Result<transmit::Report, packetcraftr_netio::Error> {
+            let sent = transmit::Provider::send(&self.sent, outbound)?;
+            let count = sent.bytes_sent();
+            let report = match self.evidence {
+                SendEvidence::Exact => sent,
+                SendEvidence::WrongCount => {
+                    transmit::Report::committed(count - 1, sent.wire_bytes().clone())
+                }
+                SendEvidence::WrongBytes => {
+                    transmit::Report::committed(count, Bytes::from(vec![0; count]))
+                }
+            };
+            let received_at = Instant::now();
+            self.pending.lock().unwrap().extend(
+                self.replies
+                    .iter()
+                    .cloned()
+                    .map(|frame| capture::Captured::new(frame, received_at)),
+            );
+            Ok(report)
+        }
+    }
+
+    fn reply_options() -> Options {
+        Options {
+            max_attempts: 1,
+            attempt_timeout: Duration::from_secs(30),
+            max_capture_queue_frames: 4,
+            max_captured_bytes: 1024,
+            snap_length: 256,
+            ..Default::default()
+        }
+    }
+
+    fn resolve_replies(
+        request: &Request,
+        options: Options,
+        replies: Vec<Frame>,
+        evidence: SendEvidence,
+    ) -> (Result<Resolution, Error>, Vec<Bytes>) {
+        let pending = Arc::new(Mutex::new(VecDeque::new()));
+        let transmit = ReplyTransmit {
+            sent: Transmitter::default(),
+            pending: Arc::clone(&pending),
+            replies,
+            evidence,
+        };
+        let capture = ReplyCapture(pending);
+        let state = State::try_new(options).unwrap();
+        let began = Instant::now();
+        let deadline = Deadline::with_time_source(Duration::from_secs(30), move || began);
+        let result = state.over(&transmit, &capture).resolve(request, &deadline);
+        (result, transmit.sent.0.into_inner().unwrap())
+    }
+
+    struct RefusedCapture;
+
+    impl capture::Provider for RefusedCapture {
+        type Capture = ReplySession;
+        fn arm_capture(
+            &self,
+            _: &capture::Request,
+            _: &Deadline,
+        ) -> Result<Self::Capture, packetcraftr_netio::Error> {
+            Err(packetcraftr_netio::Error::Capture {
+                message: "controlled capture refusal".into(),
+                source: None,
+            })
+        }
+    }
+
+    #[test]
+    fn maximum_vlan_stack_and_priority_endpoints_reach_capture() {
+        for (count, priority) in [(0, 0), (MAX_VLAN_TAGS, 0), (MAX_VLAN_TAGS, 7)] {
+            let request = Request {
+                vlan_tags: vec![
+                    VlanTag {
+                        kind: VlanKind::Ieee8021Q,
+                        priority,
+                        drop_eligible: false,
+                        vlan_id: 7,
+                    };
+                    count
+                ],
+                ..neighbor_request()
+            };
+            let transmit = Transmitter::default();
+            let state = State::default();
+            let began = Instant::now();
+            let deadline = Deadline::with_time_source(Duration::from_secs(30), move || began);
+            let error = state
+                .over(&transmit, &RefusedCapture)
+                .resolve(&request, &deadline)
+                .unwrap_err();
+            assert_eq!(error.classification().code, "io.capture");
+            assert!(
+                error
+                    .causes()
+                    .iter()
+                    .any(|cause| cause.contains("controlled capture refusal"))
+            );
+            assert!(transmit.0.lock().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn matching_reply_is_retained_under_independent_frame_and_byte_limits() {
+        let mac = MacAddress([2, 0, 0, 0, 0, 9]);
+        let reply = arp_reply(mac, [192, 168, 1, 2], 256);
+        let unrelated = arp_reply(MacAddress([2, 0, 0, 0, 0, 8]), [192, 168, 1, 3], 256);
+        for (frames, bytes) in [(1, 512), (2, 256)] {
+            let options = Options {
+                max_capture_queue_frames: frames,
+                max_captured_bytes: bytes,
+                ..reply_options()
+            };
+            let (result, sent) = resolve_replies(
+                &neighbor_request(),
+                options,
+                vec![unrelated.clone(), reply.clone()],
+                SendEvidence::Exact,
+            );
+            let resolved = result.unwrap();
+            assert_eq!(resolved.mac_address, mac);
+            assert_eq!(resolved.attempts, 1);
+            assert!(!resolved.cache_hit);
+            assert_eq!(
+                resolved
+                    .captured
+                    .iter()
+                    .map(|frame| frame.bytes().clone())
+                    .collect::<Vec<_>>(),
+                [reply.bytes().clone()]
+            );
+            assert!(resolved.evidence_truncated);
+            assert_arp_request(&sent);
+        }
+    }
+
+    #[test]
+    fn capture_snapshot_accepts_its_boundary_and_refuses_one_extra_byte() {
+        let mac = MacAddress([2, 0, 0, 0, 0, 9]);
+        for size in [256, 257] {
+            let reply = arp_reply(mac, [192, 168, 1, 2], size);
+            let (result, sent) = resolve_replies(
+                &neighbor_request(),
+                reply_options(),
+                vec![reply.clone()],
+                SendEvidence::Exact,
+            );
+            if size == 256 {
+                let resolved = result.unwrap();
+                assert_eq!(resolved.mac_address, mac);
+                assert_eq!(resolved.captured[0].bytes(), reply.bytes());
+                assert!(!resolved.evidence_truncated);
+            } else {
+                assert_eq!(result.unwrap_err().classification().code, "io.neighbor");
+            }
+            assert_arp_request(&sent);
+        }
+    }
+
+    #[test]
+    fn contradictory_transmission_reports_cannot_produce_a_neighbor_answer() {
+        for (evidence, expected) in [
+            (SendEvidence::WrongCount, "io.partial_send"),
+            (SendEvidence::WrongBytes, "internal.live_io_invariant"),
+        ] {
+            let reply = arp_reply(MacAddress([2, 0, 0, 0, 0, 9]), [192, 168, 1, 2], 256);
+            let (result, sent) =
+                resolve_replies(&neighbor_request(), reply_options(), vec![reply], evidence);
+            assert_eq!(result.unwrap_err().classification().code, expected);
+            assert_arp_request(&sent);
+        }
     }
 }

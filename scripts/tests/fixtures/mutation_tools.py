@@ -74,6 +74,8 @@ def cargo(argv: list[str], failure: str) -> int:
         if context == 'unreused':
             count = 64 if args.package == 'sample' else 3
             context_caught = 0
+        if context == 'large':
+            count, context_caught = 1000, 1000
         inventory = [dict(name=f'{files[index % len(files)]}:1:1: context {index}',
                           file=str(files[index % len(files)])) for index in range(count)
                      if not args.file or str(files[index % len(files)]) in args.file]

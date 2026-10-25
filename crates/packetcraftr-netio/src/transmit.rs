@@ -223,6 +223,26 @@ pub struct Report {
 impl Report {
     pub fn committed(bytes_sent: usize, wire_bytes: Bytes) -> Self {
         let committed = TimeMarker::now();
+        Self::committed_at(
+            bytes_sent,
+            wire_bytes,
+            committed.monotonic,
+            committed.wall_clock,
+        )
+    }
+
+    /// Records an exact provider-supplied acceptance time. The monotonic value must
+    /// share the clock domain used for capture ingress and operation deadlines.
+    pub fn committed_at(
+        bytes_sent: usize,
+        wire_bytes: Bytes,
+        monotonic: Instant,
+        wall_clock: SystemTime,
+    ) -> Self {
+        let committed = TimeMarker {
+            monotonic,
+            wall_clock,
+        };
         Self {
             bytes_sent,
             wire_bytes,

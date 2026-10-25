@@ -67,6 +67,10 @@ class MutationTestRunnerTests(unittest.TestCase):
                                     text=True, timeout=5, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(evidence(result), dict(kind='tests', run=1, failures=0, errors=0))
+            result = subprocess.run([sys.executable, 'scripts/mutation_test_runner.py'], cwd=root,
+                                    capture_output=True, text=True, timeout=5, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('--module', result.stderr)
 
     def test_selected_module_runs_its_owned_tests_without_unrelated_failures(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -137,6 +141,17 @@ class MutationTestRunnerTests(unittest.TestCase):
                              + 'except OSError as error:\n    raise AssertionError("project assertion") from error\n')
                 assertion_context = ('try:\n    ' + failure
                                      + 'except OSError:\n    raise AssertionError("project assertion")\n')
+                distinct_cause = (f'cause = OSError({code}, "controlled storage exhaustion")\n'
+                                  'try:\n    raise ValueError("separate context")\n'
+                                  'except ValueError:\n    raise RuntimeError("outer wrapper") from cause\n')
+                distinct_context = ('cause = ValueError("separate cause")\ntry:\n    ' + failure
+                                    + 'except OSError:\n    raise RuntimeError("outer wrapper") from cause\n')
+                shared_branch = ('try:\n    raise ValueError("shared cause")\n'
+                                 'except ValueError as error:\n    try:\n'
+                                 '        raise RuntimeError("inner wrapper") from error\n'
+                                 '    except RuntimeError as nested:\n        cause = nested\n'
+                                 'try:\n    ' + failure
+                                 + 'except OSError:\n    raise RuntimeError("outer wrapper") from cause\n')
                 prefix = 'import unittest\nclass Tests(unittest.TestCase):\n    def test_value(self) -> None:\n'
                 sources = (
                     ('body', prefix + indent(failure, '        ')),
@@ -147,6 +162,9 @@ class MutationTestRunnerTests(unittest.TestCase):
                     ('cause', prefix + indent(cause, '        ')),
                     ('detached_cause', prefix + indent(detached_cause, '        ')),
                     ('context', prefix + indent(context, '        ')),
+                    ('distinct_cause', prefix + indent(distinct_cause, '        ')),
+                    ('distinct_context', prefix + indent(distinct_context, '        ')),
+                    ('shared_branch', prefix + indent(shared_branch, '        ')),
                     ('assertion_cause', prefix + indent(assertion, '        ')),
                     ('subtest_assertion_context', prefix + '        with self.subTest(stage="write"):\n'
                      + indent(assertion_context, '            ')),

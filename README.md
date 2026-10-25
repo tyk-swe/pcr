@@ -70,19 +70,5 @@ published; files are not replaced as a single transaction. Symlink, directory,
 and special-file destinations are rejected. Documentation generation supports
 text output only.
 
-## Compatibility notes for this improvement batch
-
-Absolute hostnames retain their terminal dot through normalization and resolution,
-so `example.test` and `example.test.` remain distinct spellings. Malformed
-expressions, lengths, RESP numbers, MQTT topics, selectors, custom CA bundles,
-and ambiguous interface identities now fail earlier. Fallback route source
-selection prefers an address with matching scope before prefix specificity.
-
-Packet layouts now expose bounded SIP/RTSP bodies, Memcached extras/key/value,
-LDAP message and operation fields, and CoAP token/options/payload byte ranges.
-DNS anomaly analysis examines qualifying labels at every position and groups each
-by its following domain suffix; labels with no following domain are excluded.
-See [the acceptance map](IMPROVEMENTS.md) for all 50 changes and focused validation.
-
 PacketcraftR is licensed under [AGPL-3.0-only](LICENSE). Third-party attribution
 is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

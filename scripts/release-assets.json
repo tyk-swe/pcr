@@ -1,7 +1,6 @@
 {
   "schema": "packetcraftr.release-assets/v1",
   "source_assets": [
-    "IMPROVEMENTS.md",
     "LICENSE",
     "README.md",
     "THIRD_PARTY_NOTICES.md",

@@ -66,3 +66,95 @@ pub(crate) fn install() -> Result<(), CliError> {
         )
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{StagedRegistration, remove_staged, signal};
+    use crate::invocation::{Invocation, StreamEncoder};
+    use crate::output::contract::{Command, Format};
+    use packetcraftr_core::budget::Interrupted;
+    use std::{
+        fs,
+        process::{Command as Process, Stdio},
+        time::{Duration, Instant},
+    };
+
+    fn isolated(name: &str, scenario: impl FnOnce()) {
+        if std::env::var("PACKETCRAFTR_CANCELLATION_CASE").is_ok_and(|value| value == name) {
+            scenario();
+            let marker = std::env::var_os("PACKETCRAFTR_CANCELLATION_COMPLETED").unwrap();
+            fs::write(marker, name).unwrap();
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let marker = directory.path().join("completed");
+        let mut child = Process::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--nocapture"])
+            .env("PACKETCRAFTR_CANCELLATION_CASE", name)
+            .env("PACKETCRAFTR_CANCELLATION_COMPLETED", &marker)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("isolated cancellation scenario did not finish");
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let result = child.wait_with_output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(fs::read(marker).unwrap(), name.as_bytes());
+    }
+
+    #[test]
+    fn shared_signal_cancels_independent_invocations() {
+        isolated(
+            "cancellation::tests::shared_signal_cancels_independent_invocations",
+            || {
+                let handler = signal().clone();
+                let invocation = Invocation::new(
+                    Format::Text,
+                    StreamEncoder::new(Command::Build, std::io::sink()),
+                    None,
+                    signal().clone(),
+                    None,
+                );
+                invocation.check_interrupted().unwrap();
+                handler.cancel();
+                assert!(matches!(
+                    invocation.check_interrupted(),
+                    Err(Interrupted::Cancelled(_))
+                ));
+            },
+        );
+    }
+
+    #[test]
+    fn forced_cleanup_removes_only_active_registrations() {
+        isolated(
+            "cancellation::tests::forced_cleanup_removes_only_active_registrations",
+            || {
+                let directory = tempfile::tempdir().unwrap();
+                let active = directory.path().join("active");
+                let released = directory.path().join("released");
+                fs::write(&active, b"active bytes").unwrap();
+                fs::write(&released, b"released bytes").unwrap();
+                let _active = StagedRegistration::new(&active);
+                let released_registration = StagedRegistration::new(&released);
+                drop(released_registration);
+                remove_staged();
+                assert!(!active.exists());
+                assert_eq!(fs::read(released).unwrap(), b"released bytes");
+            },
+        );
+    }
+}

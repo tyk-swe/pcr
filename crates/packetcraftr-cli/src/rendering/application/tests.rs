@@ -284,12 +284,12 @@ fn diagnostics_observe_live_settings_on_initial_and_replacement_outputs() {
                     diagnostics.clone(),
                 )
             };
-            if let Some(diagnostics) = &diagnostics {
+            if diagnostics.is_some() {
                 invocation
                     .output
                     .emit_data(record(&serde_json::json!({"index": 0})), Vec::new())
                     .unwrap();
-                diagnostics.stream_index_needed(false);
+                invocation.stream_index_needed(false);
             }
             invocation
                 .output

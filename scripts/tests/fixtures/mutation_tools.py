@@ -94,7 +94,8 @@ def cargo(argv: list[str], failure: str) -> int:
     if args.listing:
         if failure == ('shard-discovery' if args.shard else 'discovery'):
             return 7
-        print(json.dumps(inventory))
+        reported = [*inventory, inventory[0]] if failure == 'duplicate-inventory' and not args.shard else inventory
+        print(json.dumps(reported))
         return 0
     if failure == 'runner':
         return 7

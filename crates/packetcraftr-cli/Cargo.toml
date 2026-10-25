@@ -37,6 +37,9 @@ serde_json.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 
+[target.'cfg(unix)'.dev-dependencies]
+nix = { version = "0.31.3", default-features = false, features = ["signal"] }
+
 [[bin]]
 name = "packetcraftr"
 path = "src/main.rs"

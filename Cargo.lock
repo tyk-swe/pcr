@@ -822,6 +822,7 @@ dependencies = [
  "clap_lex",
  "clap_mangen",
  "ctrlc",
+ "nix 0.31.3",
  "packetcraftr",
  "packetcraftr-core",
  "packetcraftr-netio",

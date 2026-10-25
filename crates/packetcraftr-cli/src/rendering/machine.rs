@@ -176,6 +176,10 @@ mod tests {
         output::contract::{Command, Format},
     };
     use serde::{Serializer, ser::SerializeStruct};
+    use std::{
+        sync::{Arc, Mutex},
+        time::{Duration, Instant},
+    };
 
     fn invocation() -> Invocation {
         Invocation::new(
@@ -310,24 +314,38 @@ mod tests {
     }
 
     #[test]
-    fn error_handling_json_prepublication_cancellation_still_allows_terminal_report() {
-        let invocation = invocation();
-        invocation.cancellation.cancel();
-        let mut bytes = Vec::new();
-        assert!(emit_json_to(&invocation, &(), &mut bytes).is_err());
-        assert!(bytes.is_empty());
-        let envelope = output::envelope::Envelope::<()>::error(
-            Some(Command::Build),
-            CliError::new(Kind::Io, "cancelled").output_error(),
-        );
-        emit_json_to(&invocation.terminal(), &envelope, &mut bytes).unwrap();
-        let document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(document["schema"], "packetcraftr.output/v1");
-        assert_eq!(document["status"], "error");
-        assert_eq!(document["command"], "build");
-        assert_eq!(document["error"]["message"], "cancelled");
-        assert_eq!(document["error"]["kind"], "io");
-        assert_eq!(bytes.last(), Some(&b'\n'));
+    fn error_handling_json_prepublication_interruption_still_allows_terminal_report() {
+        for message in ["cancelled", "deadline expired"] {
+            let mut invocation = invocation();
+            if message == "cancelled" {
+                invocation.cancellation.cancel();
+            } else {
+                let started = Instant::now();
+                let now = Arc::new(Mutex::new(started));
+                let source = Arc::clone(&now);
+                let deadline = packetcraftr_core::budget::Deadline::with_time_source(
+                    Duration::from_secs(1),
+                    move || *source.lock().unwrap(),
+                );
+                invocation.deadline = Some(Arc::new(deadline));
+                *now.lock().unwrap() = started + Duration::from_secs(2);
+            }
+            let mut bytes = Vec::new();
+            assert!(emit_json_to(&invocation, &(), &mut bytes).is_err());
+            assert!(bytes.is_empty());
+            let envelope = output::envelope::Envelope::<()>::error(
+                Some(Command::Build),
+                CliError::new(Kind::Io, message).output_error(),
+            );
+            emit_json_to(&invocation.terminal(), &envelope, &mut bytes).unwrap();
+            let document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(document["schema"], "packetcraftr.output/v1");
+            assert_eq!(document["status"], "error");
+            assert_eq!(document["command"], "build");
+            assert_eq!(document["error"]["message"], message);
+            assert_eq!(document["error"]["kind"], "io");
+            assert_eq!(bytes.last(), Some(&b'\n'));
+        }
     }
 
     #[test]

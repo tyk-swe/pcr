@@ -100,3 +100,91 @@ pub(crate) fn frame_error(
 pub(crate) fn matches_decoded(filter: &Filter, context: &Context<'_>) -> Result<bool, CliError> {
     filter.matches(context).map_err(CliError::classified)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use packetcraftr_core::{
+        build::Builder,
+        decode::Dissector,
+        frame::{Frame, LinkType},
+        layer::Raw,
+        packet::Packet,
+        protocol::{builtin, network::Ipv4, transport::Udp},
+    };
+
+    fn frame(ttl: u8) -> Frame {
+        let mut packet = Packet::new();
+        packet.push(Ipv4 {
+            source: "192.0.2.1".parse().unwrap(),
+            destination: "192.0.2.2".parse().unwrap(),
+            ttl,
+            ..Default::default()
+        });
+        packet.push(Udp {
+            source_port: 3333,
+            destination_port: 4444,
+            ..Default::default()
+        });
+        packet.push(Raw::new(bytes::Bytes::from_static(b"filter fixture")));
+        let built = Builder::new(builtin::registry())
+            .build(packet, Default::default(), Default::default())
+            .unwrap();
+        Frame::without_timestamp(LinkType::RAW, built.bytes).unwrap()
+    }
+
+    #[test]
+    fn filter_capabilities_preserve_header_and_conversation_matches() {
+        let registry = builtin::registry();
+        let decoded = Dissector::new(Arc::clone(&registry))
+            .decode(frame(37), Default::default())
+            .unwrap();
+        let context = Context::frame(&decoded, 1);
+        for capabilities in [Capabilities::frames_only(), Capabilities::stream_capable()] {
+            let matching = compile("ipv4.ttl == 37", &registry, capabilities).unwrap();
+            let different = compile("ipv4.ttl == 38", &registry, capabilities).unwrap();
+            assert!(matches_decoded(&matching, &context).unwrap());
+            assert!(!matches_decoded(&different, &context).unwrap());
+        }
+        let stream = compile("udp.stream == 7", &registry, Capabilities::stream_capable()).unwrap();
+        assert!(
+            matches_decoded(
+                &stream,
+                &Context {
+                    udp_stream: Some(7),
+                    ..context
+                }
+            )
+            .unwrap()
+        );
+        assert!(
+            !matches_decoded(
+                &stream,
+                &Context {
+                    udp_stream: Some(8),
+                    ..context
+                }
+            )
+            .unwrap()
+        );
+        let refused =
+            compile("udp.stream == 7", &registry, Capabilities::frames_only()).unwrap_err();
+        assert_eq!(refused.classification.code, "cli.filter_unsupported_field");
+        assert_eq!(refused.classification.kind, Kind::Usage);
+    }
+
+    #[test]
+    fn optional_selector_applies_the_supplied_filter_to_frames() {
+        let registry = builtin::registry();
+        let selected = optional_frame_selector(Some("ipv4.ttl == 37"), &registry, 1024)
+            .unwrap()
+            .expect("an explicitly requested filter must produce a selector");
+        assert!(selected.keep(1, &frame(37)).unwrap());
+        assert!(!selected.keep(2, &frame(38)).unwrap());
+        assert!(
+            optional_frame_selector(None, &registry, 1024)
+                .unwrap()
+                .is_none()
+        );
+    }
+}

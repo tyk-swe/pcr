@@ -85,3 +85,23 @@ impl Diagnostics {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_preserves_the_registered_runtime_name_and_capacity() {
+        let diagnostics = Diagnostics::new(Vec::new());
+        let runtime = Runtime::new(3).unwrap();
+        diagnostics.register_runtime("controlled_runtime", &runtime);
+        let report = diagnostics.snapshot();
+        let registered = report
+            .workers
+            .iter()
+            .find(|worker| worker.name == "controlled_runtime")
+            .expect("the registered runtime must be present in the resource report");
+        assert!(registered.supported);
+        assert_eq!(registered.capacity, 3);
+    }
+}

@@ -480,5 +480,50 @@ mod tests {
         std::fs::write(&regular, b"old").unwrap();
         assert!(StagedFile::stage(&invocation(), &regular).is_err());
         assert_eq!(std::fs::read(&regular).unwrap(), b"old");
+        let invalid = temporary.path().join("invalid\0destination");
+        assert!(StagedFile::stage(&invocation(), &invalid).is_err());
+        assert!(StagedFile::stage_replacement(&invocation(), &invalid).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publication_rejects_a_replaced_parent_and_preserves_both_directories() {
+        for replacement in [false, true] {
+            let temporary = tempfile::tempdir().unwrap();
+            let parent = temporary.path().join("parent");
+            let retired = temporary.path().join("retired");
+            std::fs::create_dir(&parent).unwrap();
+            let destination = parent.join("report");
+            if replacement {
+                std::fs::write(&destination, b"original report").unwrap();
+            }
+            let mut staged = if replacement {
+                StagedFile::stage_replacement(&invocation(), &destination)
+            } else {
+                StagedFile::stage(&invocation(), &destination)
+            }
+            .unwrap();
+            staged.as_file_mut().write_all(b"new report").unwrap();
+            staged.sync().unwrap();
+            std::fs::rename(&parent, &retired).unwrap();
+            std::fs::create_dir(&parent).unwrap();
+            std::fs::write(&destination, b"replacement report").unwrap();
+            let unrelated = parent.join("unrelated");
+            std::fs::write(&unrelated, b"untouched").unwrap();
+
+            let error = staged.persist().unwrap_err();
+            assert_eq!(error.classification.code, "io.output_file");
+            assert_eq!(error.classification.kind, Kind::Io);
+            assert!(error.message.contains("changed since staging"));
+            assert!(error.message.contains(destination.to_str().unwrap()));
+            assert_eq!(std::fs::read(&destination).unwrap(), b"replacement report");
+            assert_eq!(std::fs::read(&unrelated).unwrap(), b"untouched");
+            let original = retired.join("report");
+            if replacement {
+                assert_eq!(std::fs::read(original).unwrap(), b"original report");
+            } else {
+                assert!(!original.exists());
+            }
+        }
     }
 }

@@ -6,7 +6,7 @@ Use controlled input and independently expected output. A round trip or agreemen
 
 Workflow tests use injected providers and clocks. A synchronization test may use real threads when thread lifetime or admission is the behavior being tested. Coordinate entry and release explicitly and bound every wait. Mock calls only when the interaction is the contract, such as rejecting transmission before authorization. Test budget refusal while data is retained, then successful work after release, rather than inspecting bookkeeping fields.
 
-Keep regressions in their existing owning test file. Inline Rust tests belong with their module and separate Rust tests belong in that module's `tests.rs`. Python uses `scripts/tests/test_<module>.py`. A new feature can have a new mapped file. Do not add per-ticket suites. Modified helpers must be typed and follow AGENTS.md, including its comment and suppression rules.
+Keep regressions in their existing owning test file. Inline Rust tests belong with their module and separate Rust tests belong in that module's `tests.rs`. Executable contracts use the CLI package's `tests/cli.rs` suite with Cargo's binary path. Python uses `scripts/tests/test_<module>.py`. A new feature can have a new mapped file. Do not add per-ticket suites. Modified helpers must be typed and follow AGENTS.md, including its comment and suppression rules.
 
 # Review checklist
 
@@ -19,7 +19,7 @@ The normal Python runner remains unittest.
 ```sh
 python3 -m unittest discover -s scripts/tests -v
 python3 -O -m unittest discover -s scripts/tests -v
-cargo test --locked --workspace --lib --all-features
+cargo test --locked --workspace --tests --all-features
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 ```
@@ -102,7 +102,7 @@ The initial inventory contained 282 Rust tests and 50 Python tests. The initial 
 | Protocol message suites | Reviewed all 39 message cases and the remaining core protocol cases. Moved review and improvement cases into reference, framing, reflection and validation suites under the existing owner. Independent decoded fields supplement wire preservation, positive validation cases check complete bytes, and wire expectations cite dated sources. Full mutation scores and the final native CI matrix are still outstanding. |
 | Build scripts | Added disposable binary targets for package-root `build.rs` files. A two-crate integration fixture killed all nine mutants, including deletion of the build script's configuration output. The real build scripts still require full-run survivor review. |
 
-The case audit now records all 299 Rust cases and all 159 Python cases. The overall effort remains incomplete until the final revision passes every required full mutation group and CI profile and all actionable survivors are reviewed and repaired. Passing ordinary tests does not establish that result.
+The case audit now records all 312 Rust cases, including three executable integration cases, and all 159 Python cases. The overall effort remains incomplete until the final revision passes every required full mutation group and CI profile and all actionable survivors are reviewed and repaired. Passing ordinary tests does not establish that result.
 
 # Lifecycle case audit
 
@@ -179,7 +179,7 @@ These cases check emitted documents, externally observed writes and rendered err
 | --- | --- | --- | --- |
 | JSON | `error_handling_json_serialization_failure_never_publishes_a_second_document` | Repaired. Failed serialization retains the expected error classification and only a valid output prefix. A terminal attempt cannot change published bytes. | Retrying a partial document or publishing another document after failure. |
 | JSON | `error_handling_json_write_and_flush_failures_do_not_retry_buffered_bytes` | Repaired. Write and flush refusals preserve the expected bytes and cannot complete later delivery through an implicit retry. | Retrying buffered bytes during writer destruction or a terminal report. |
-| JSON | `error_handling_json_prepublication_cancellation_still_allows_terminal_report` | Strengthened. Cancellation publishes no initial bytes, while the allowed terminal document contains the expected command and error fields. | Consuming publication admission before checking cancellation. |
+| JSON | `error_handling_json_prepublication_interruption_still_allows_terminal_report` | Renamed and strengthened. Both cancellation and a controlled expired invocation deadline publish no initial bytes, while terminal JSON retains the expected command and error fields. | Keeping expired invocation control on terminal error reporting or consuming admission too early. |
 | JSON | `json_budget_accepts_complete_output_and_distinguishes_serialization_failures` | Added. Compact and pretty output fit exact byte budgets and fail below them. Serialization errors remain distinct from size refusals. | Counting characters, miscounting formatting bytes or misclassifying serialization failure. |
 | Human errors | `error_handling_text_renders_coordinates_and_sanitizes_details` | Retained. Every supported coordinate and escaped untrusted detail appears in rendered output. | Dropping coordinates or emitting raw control characters. |
 | Human errors | `error_handling_reporting_failure_keeps_original_and_stops_after_fallback` | Strengthened. Actual fallback text preserves the original failure, reporting failure and cause, while the exit status reflects failed reporting. | Skipping fallback entirely or discarding the original failure. |
@@ -189,7 +189,7 @@ These cases check emitted documents, externally observed writes and rendered err
 
 # CLI documentation and input case audit
 
-The original sixteen cases remain in their mapped files and one cross-manifest budget case was added. Expected file contents, input payloads and error origins replace incidental artifact counts and negative-only success checks. Static HTML checks cover escaped report content and the initial finding count. They do not claim browser layout, filtering or accessibility interaction coverage.
+The original sixteen cases remain in their mapped files. One cross-manifest budget case and one Unix directory replacement case were added. Expected file contents, input payloads and error origins replace incidental artifact counts and negative-only success checks. Static HTML checks cover escaped report content and the initial finding count. They do not claim browser layout, filtering or accessibility interaction coverage.
 
 | Suite | Case | Disposition and protected behavior | Representative defect |
 | --- | --- | --- | --- |
@@ -200,7 +200,8 @@ The original sixteen cases remain in their mapped files and one cross-manifest b
 | Documentation | `publication_failure_reports_the_published_prefix_and_destination` | Retained. Publication refusal reports the destination and already-published prefix, with the first file complete and the caller's blocking directory intact. | Hiding partial publication or replacing the blocked destination. |
 | Documentation | `cancellation_at_publication_reports_destination_and_published_prefix` | Retained. Controlled cancellation stops publication at the second destination and reports the complete first file as the published prefix. | Publishing after cancellation or losing the partial-output context. |
 | Documentation | `actual_render_includes_completions_and_grouped_manuals` | Strengthened. Every supported shell produces completion content for the program and representative commands. Root, group and registered command manuals contain their owned descriptions. Destinations remain unique. Paths derive from the generator API, and no arbitrary artifact count is pinned. | Omitting a registered manual, rendering the wrong command's description or producing empty completion content. |
-| Documentation | `replacement_rejects_directory_and_symlink_destinations` | Strengthened. Unsafe destinations are refused while existing directory contents, symlink targets and regular-file contents remain intact. Socket destinations are also refused on Unix. | Clobbering an existing object while reporting a refusal. |
+| Documentation | `replacement_rejects_directory_and_symlink_destinations` | Strengthened. Unsafe destinations are refused while existing directory contents, symlink targets and regular-file contents remain intact. Socket destinations are also refused on Unix. Invalid NUL-containing paths are refused before staging for either publication mode. | Clobbering an existing object or treating an inspection failure as an absent destination. |
+| Documentation | `publication_rejects_a_replaced_parent_and_preserves_both_directories` | Added on Unix. After staging, the parent directory is renamed and replaced. Ordinary publication and replacement publication both refuse the changed parent and preserve the original and replacement directories' contents. | Publishing through a stale directory identity or overwriting files after the requested parent changes. |
 | Help | `inline_and_block_examples_survive_short_help` | Strengthened. Inline and block examples retain their text, blank sections are absent, and the short-help limit keeps the first three examples. | Losing an inline example, including trailing detail or ignoring the short-help bound. |
 | Help | `every_is_a_frame_selection_option` | Repaired. Both frame-selection options independently map to the user-facing selection section. | Two incorrectly classified options agreeing with each other. |
 | Bounded input | `error_handling_reads_retain_file_or_stdin_and_causes` | Retained. Injected read failure retains the file or stdin context and the supplied cause. | Losing input identity or replacing the underlying read diagnostic. |
@@ -251,7 +252,7 @@ All 31 cases remain in their mapped files. These tests use controlled capture by
 
 # Remaining CLI case audit
 
-All 53 remaining CLI cases have been reviewed. Inputs are controlled reports, packets and settings. Retained-example consistency is distinct from producer execution. Callback tests assert delivered diagnostics after the callback returns, and output tests protect consumer-visible bytes without depending on write-call counts.
+All 61 remaining CLI cases have been reviewed. Inputs are controlled reports, packets and settings. Retained-example consistency is distinct from producer execution. Callback tests assert delivered diagnostics after the callback returns, and output tests protect consumer-visible bytes without depending on write-call counts.
 
 | Suite | Case | Disposition and protected behavior | Representative defect |
 | --- | --- | --- | --- |
@@ -274,7 +275,7 @@ All 53 remaining CLI cases have been reviewed. Inputs are controlled reports, pa
 | Application output | `budget_and_serialization_failures_write_no_prefix_and_allow_one_error_terminal` | Retained. Policy and serialization failures stay distinct, publish no prefix and allow one complete error terminal. | Publishing partial data before refusal or allowing duplicate terminal records. |
 | Application output | `writer_failure_prevents_false_success_or_repair_terminal` | Retained. A writer refusal has the output-error classification and prevents later success or error-repair publication. | Acknowledging completion or reopening an encoder after a failed write. |
 | Application output | `cancellation_during_serialization_refuses_write_and_terminal_cleanup_remains_usable` | Retained. Cancellation from serialization prevents output bytes and leaves terminal error cleanup usable. | Failing to recheck control after serialization. |
-| Application output | `diagnostics_observe_live_settings_on_initial_and_replacement_outputs` | Retained. Published resource settings track a controlled enabled-to-disabled change on both encoder paths and remain absent when diagnostics are disabled. | Retaining a stale settings snapshot after output replacement. |
+| Application output | `diagnostics_observe_live_settings_on_initial_and_replacement_outputs` | Strengthened. Published resource settings track a controlled enabled-to-disabled change through the invocation adapter on both encoder paths and remain absent when diagnostics are disabled. | Dropping the setting change or retaining a stale settings snapshot after output replacement. |
 | Application output | `preexisting_encoder_deadline_survives_initial_and_replacement_configuration` | Retained. An injected expired encoder deadline prevents completion and all bytes despite a longer invocation allowance. | Replacing inherited control with a fresh local allowance. |
 | Traceroute arguments | `multipath_arguments_require_opt_in_and_preserve_legacy_defaults` | Repaired. Invalid opt-in and flow ranges fail. Prepared requests retain the supplied attempt count and evidence limits, and overflowing source-port ranges fail. | Accepting success while discarding requested probe or resource settings. |
 | Assessment sources | `source_provenance_preserves_first_seen_order_and_distinct_hashes` | Retained. Independent source pairs verify first-seen order, duplicate removal and preservation of different content under one path. | Sorting source output or conflating different hashes. |
@@ -308,10 +309,18 @@ All 53 remaining CLI cases have been reviewed. Inputs are controlled reports, pa
 | Scan preparation | `list_rejects_discovery` | Retained. Listing with active discovery has the expected usage exit and diagnostic. | Allowing a listing command to trigger discovery. |
 | Scan preparation | `list_rejects_reverse_dns` | Retained. Listing with reverse DNS has the expected usage exit and diagnostic. | Allowing a listing command to start reverse resolution. |
 | Scan preparation | `list_rejects_traceroute` | Retained. Listing with traceroute has the expected usage exit and diagnostic. | Allowing a listing command to send traceroute probes. |
+| Filtering | `filter_capabilities_preserve_header_and_conversation_matches` | Added. Both capability modes evaluate header filters correctly; only stream-capable input accepts and evaluates a stream field. | Rejecting valid header filters or silently admitting unsupported stream fields. |
+| Filtering | `optional_selector_applies_the_supplied_filter_to_frames` | Added. An explicit selector keeps the matching frame and refuses a different one, while absent input remains unrestricted. | Dropping a supplied filter or ignoring its result. |
+| Cancellation | `shared_signal_cancels_independent_invocations` | Added. An isolated child observes cancellation through an independently constructed invocation using the shared signal token. Its completion marker proves the scenario ran. | Returning disconnected default tokens or passing after an empty child test selection. |
+| Cancellation | `forced_cleanup_removes_only_active_registrations` | Added. Isolated forced cleanup removes the active temporary file and preserves the released file's bytes. | Removing the wrong registration or retaining a dropped registration. |
+| Process entry | `packet_commands_run_through_the_executable` | Added in the first process integration suite. Actual executable invocations return two different requested raw payloads and structured diagnostics for an invalid protocol. | Skipping the public entrypoint, returning constant output or dropping failure status. |
+| Process stream | `packet_stream_reports_each_built_packet` | Added. Two supplied TTL values produce independently expected NDJSON packet fields, payloads, indices and sequence numbers. The terminal record preserves packet and byte totals and reports a supported output-writer runtime with positive capacity. | Returning constant packet counters, omitting a packet or losing output-worker diagnostics. |
+| Process interruption | `http_wait_reports_process_cancellation` | Added on Unix. A controlled local HTTP request establishes handler readiness before SIGINT. The child returns exit 130 and `io.cancelled`, with bounded cleanup on every failure path. | Omitting handler registration, losing cancellation or returning an unrelated network failure. |
+| Resource diagnostics | `report_preserves_the_registered_runtime_name_and_capacity` | Added. A uniquely named runtime appears in the published report with its supplied capacity and supported status. Unrelated workers are permitted. | Dropping a runtime registration or reporting a different capacity. |
 
 # Remaining facade case audit
 
-All 54 cases remain in their owning suites, including six later survivor regressions. Six cross-provider cases moved from the legacy improvement file to root `tests.rs`. Returned candidates, decoded/transmitted bytes, provider refusals and published events replace shared oracles and private bookkeeping. The sole visibility change exposes the existing internal event drain to these crate tests.
+All 58 cases remain in their owning suites, including ten later survivor regressions. Six cross-provider cases moved from the legacy improvement file to root `tests.rs`. Returned candidates, decoded/transmitted bytes, provider refusals and published events replace shared oracles and private bookkeeping. The sole visibility change exposes the existing internal event drain to these crate tests.
 
 | Suite | Case | Disposition and protected behavior | Representative defect |
 | --- | --- | --- | --- |
@@ -364,11 +373,15 @@ All 54 cases remain in their owning suites, including six later survivor regress
 | Scan correlation | `encapsulated_udp_probe_preserves_inner_matching_and_outer_quoted_identity` | Retained. An encapsulated response and outer short quote both identify the independently expected original probe. | Losing inner correlation or using inner fields for an outer quote. |
 | Scan correlation | `retired_candidates_stop_matching_and_admission_recovers` | Strengthened. A full two-entry index refuses another insertion, retirement restores admission without disturbing the other scope, and repeated generations remain independently reachable then disappear. | Leaking admission, losing another scope or matching retired identities. |
 | Network | `client_accessors_preserve_supplied_registry_policy_and_runtime` | Added. The supplied registry resolves a protocol, the configured destination policy permits and refuses the intended inputs, and the supplied runtime retains its public capacity. | Returning a default service instead of the supplied one. |
-| Preparation | `send_paces_actual_packets_at_the_requested_rate` | Added. Three complete transmitted packets have independently checked fields and the requested three-per-second spacing under a controlled clock. | Removing pacing or calculating the wrong fractional delay. |
+| Preparation | `send_paces_actual_packets_at_the_requested_rate` | Added. Three actual transmissions agree with all three published wire-byte records and independently checked packet fields, with requested three-per-second spacing under a controlled clock. | Losing published packet bytes, truncating sent evidence or calculating the wrong delay. |
 | Preparation | `expired_preparation_refuses_provider_work_at_the_deadline_boundary` | Added. Exactly spent parent time produces the public preparation-deadline error before route lookup or transmission. | Admitting provider work at an expired deadline. |
 | DNS | `dns_admission_counts_complete_query_frames_before_provider_work` | Added. Public DNS costs equal complete built frames, and a total budget one byte below that cost refuses provider work. | Omitting link or network overhead from traffic admission. |
 | DNS | `dns_request_refuses_invalid_evidence_bounds` | Added. Invalid frame, byte and undecoded-frame limits produce the expected public limit error. | Skipping evidence-limit validation. |
 | Scan correlation | `invalid_sent_packet_reports_its_own_probe_sequence` | Added. A mismatched third sent packet produces the public scan error with that probe's supplied sequence. | Attributing a later failure to an earlier or missing probe. |
+| Preparation | `dns_neighbor_allowance_matches_requests_and_skips_multicast_and_broadcast` | Added. DNS neighbor allowances equal complete request frames with the public maximum VLAN stack. Multicast and broadcast destinations add no neighbor-resolution traffic. | Miscounting link overhead or trying to resolve deterministically mapped destinations. |
+| Exchange | `refused_capture_frames_publish_one_visible_limit_diagnostic` | Added. Repeated refused frames publish one warning naming the active frame limit. | Dropping the diagnostic or publishing the same refusal repeatedly. |
+| Identification | `identification_hard_byte_ceiling_accepts_the_boundary_and_refuses_excess` | Added. The public request accepts its hard read-byte ceiling and refuses the next byte under a permissive policy. | Changing or bypassing the workflow's hard resource bound. |
+| OS assessment | `os_hard_evidence_ceiling_accepts_the_boundary_and_refuses_excess` | Added. The public request accepts its hard evidence-byte ceiling and refuses the next byte. | Changing or bypassing the evidence bound. |
 
 # Remaining native I/O case audit
 
@@ -576,7 +589,7 @@ The direct Linux/all seed stage, receiver execution and workflow are connected. 
 | `test_direct_report_accepts_partial_shards_without_making_them_complete_seeds` | Direct parsing preserves valid partial shard data while complete-seed validation still refuses an unfinished inventory. | Treating a partial actual run as a complete donor. |
 | `test_direct_report_refuses_reuse_or_exclusion_claims_before_normalization` | Unknown reuse, donor and exclusion fields are refused in raw reports and outcomes. | Erasing an inherited-proof claim while normalizing it into a direct outcome. |
 | `test_seed_proofs_require_complete_direct_workspace_execution` | Seed finalization requires every shard, direct raw fields, successful workspace evidence and exact scope/source/tool binding. A complete weak donor is accepted. | Borrowing from incomplete shards or discarding unsupported proof fields before validation. |
-| `test_seed_command_publishes_only_complete_workspace_evidence` | The actual CLI publishes a seed that its strict parser accepts and removes a stale seed when later validation fails. | Leaving an old successful proof behind after a failed generation. |
+| `test_seed_command_publishes_only_complete_workspace_evidence` | The CLI publishes a valid seed and removes a stale seed after failed validation. An unsupported seed-reuse argument is refused before changing the existing proof. | Retaining stale success or silently accepting an unsupported invocation. |
 | `test_coverage_digest_binds_values_and_ignores_object_key_order` | An independently encoded UTF-8 SHA-256 vector fixes the coverage digest. Object key order is irrelevant, while inventory order, reused identities and seed bytes affect the digest. | Returning a constant digest or hashing a different serialization. |
 | `test_receiver_coverage_binds_actual_partition_and_exact_seed_bytes` | Reordered shard input preserves the exact executable and reused identities and seed digest. A differently encoded seed is refused. | Trusting a receiver partition without matching the supplied seed. |
 | `test_receiver_requires_one_coverage_record_and_own_successful_baselines` | Even an all-reused receiver needs exactly one coverage record, consistent shard digests, successful own workspace baselines and supported raw fields. Both lower and higher mismatched digests fail. | Treating empty execution as permission to omit evidence or allowing one direction of a digest mismatch. |
@@ -593,7 +606,7 @@ The direct Linux/all seed stage, receiver execution and workflow are connected. 
 | `test_context_plan_recomputes_shards_and_rejects_malformed_records` | A claimed count must equal the independently derived count, with strict raw fields and unique inventories. | Accepting a forged count or malformed planning evidence. |
 | `test_receiver_coverage_cannot_replace_the_context_inventory` | Receiver coverage must retain the context plan's exact full inventory, including both directions of an identity mismatch. | Comparing inventories by ordering or removing a reused identity without changing executable counts. |
 | `test_context_matrix_requires_each_planned_cohort_and_complete_inventory` | One- and four-shard receivers coexist with a two-shard fixture seed. Complete actual outcomes pass; missing shards, duplicate/missing plans, changed counts and altered full inventories fail. | Requiring uniform counts or trusting received artifacts to choose their own matrix. |
-| `test_context_plans_run_every_group_with_recomputed_shards` | The CLI discovers, plans, executes and checks all groups at the required count. Empty receivers still run their own baselines. | Skipping a group or admitting a partial receiver context. |
+| `test_context_plans_run_every_group_with_recomputed_shards` | The CLI discovers, plans, executes and checks all groups at the required count. Empty receivers still run their own baselines. Context flags are refused on unsupported actions even when the supplied seed is valid. | Skipping a group, admitting a partial receiver context or silently ignoring a supplied context option. |
 | `test_context_run_rejects_changed_inventory_and_forged_plan` | Actual discovery is compared with the plan. Wrong counts, identities, source, scope and seed digests fail. A fully unresolved fixture retains the 64-shard ceiling. | Scheduling from stale inventories or accepting a self-consistent forged count. |
 
 # Seed reuse functionality evidence
@@ -693,6 +706,21 @@ The following cases address behavioral gaps identified in authentic older Rust m
 
 # Mutation progress
 
+Completed measurements at commit `9996f55b1c67ddc08b9f4c61ac08dffe4fc19563`, source fingerprint `85b9cde38b38273e5137f91830927ab2e3f4e2c6b5a99b38f9edff7de9dc6353`, exceeded 90 percent in eight Python modules. Every survivor was reviewed. These results retain their original source identity and do not establish the score of later commits. The orchestrator and full Rust runs remain in progress.
+
+| Python module | Killed / eligible |
+| --- | --- |
+| `scripts/script_support.py` | 236 / 242 |
+| `scripts/build-manifest.py` | 171 / 187 |
+| `scripts/release_assets.py` | 126 / 126 |
+| `examples/consumers/forwarding.py` | 1,668 / 1,765 |
+| `scripts/mutation_results.py` | 515 / 547 |
+| `scripts/mutation_scope.py` | 165 / 179 |
+| `scripts/mutation_test_runner.py` | 118 / 128 |
+| `scripts/mutation_reuse.py` | 466 / 504 |
+
+Only shared support uses equivalent exclusions, with 27 individually documented identities. The forwarding timeout remains eligible. Other exclusions are compilation-invalid mutations. Subsequent CI measurements on the `546b6fa9` source snapshot also passed the seven completed non-orchestrator, non-support modules. Final-source evidence for every module remains required.
+
 The timeout-calibration audit used the actual Cosmic Ray command below from its isolated checkout. Its unmutated suite completed in 31.896 seconds, above the former 30-second allowance. The completed baseline produced the following timing receipt and execution budget. The full audit was still running when this receipt was recorded.
 
 ```sh
@@ -733,7 +761,7 @@ The following later repairs retain the original scope-binding and baseline cases
 
 | Case | Change and protected behavior | Representative defect |
 | --- | --- | --- |
-| `test_published_scores_preserve_fractional_percentages_and_evidence_counts` | Added. Captures the published JSON score for a controlled 20-kill, one-survivor, one-timeout and two-invalid fixture. It checks the fractional percentage, all category counts, surviving/timed-out identities and measured tool version. | Publishing a truncated percentage, dropping timeout denominator entries or reporting incorrect counts/version evidence. |
+| `test_published_scores_preserve_fractional_percentages_and_evidence_counts` | Added. A controlled score retains its fractional percentage, every category count, survivor/timeout identities, tool version and supplied source revision. | Dropping source attribution, truncating percentages or changing denominator accounting. |
 | `test_all_shards_must_agree_and_complete_the_inventory` | Strengthened. Existing complete, omitted and duplicate shards remain covered. Out-of-range or zero IDs, incorrect shard totals, a changed discovered inventory, false baseline and incomplete flags now fail independently. | Accepting a collection solely because it has the expected number of files, or ignoring one shard's extra discovered mutant. |
 | `test_cli_selects_owned_targets_and_runs_with_default_output_paths` | Added. Actual CLI calls select a complete controlled workspace, publish its plan and measure both Rust targets under the default Rust output path. A committed Python-only change then selects exactly that module and runs/checks under the default Python output path. | Returning an empty successful selection, losing selected files, dispatching the wrong language or using the wrong default output directory. |
 | `test_completed_survivors_and_timeouts_fail_the_cli_gate` | Added. Completed Rust and Python survivor and timeout reports publish valid measurements but fail the policy check. Timeouts remain eligible under both SDK formats and never become kills. | Rejecting a valid timeout report as a runner error, changing its denominator treatment or returning success for a weak score. |
@@ -743,7 +771,7 @@ The following later repairs retain the original scope-binding and baseline cases
 | `test_rust_tool_reports_cover_build_scripts_features_and_disposable_source` | Strengthened. Existing five-profile, build-script, counts and source-preservation assertions remain. Reports retain the controlled Rust version. | Losing language-specific provenance during report creation. |
 | `test_python_tool_handles_an_interpreter_path_with_spaces` | Strengthened. Existing complete execution, policy check and source preservation remain. The report retains the distinct Python version. | Reusing Rust tool metadata for a successful Python run. |
 
-`test_artifacts_cannot_replace_a_full_or_different_file_selection` additionally checks complete target binding. A narrow-file report cannot satisfy a full crate, a different narrow file set, a different selection reason, a wrong-language target or duplicate requested groups. The snapshot case checks a configuration file that sorts before the exclusion policy and an absent tracked file before a retained source, with independent digests for each content change.
+`test_artifacts_cannot_replace_a_full_or_different_file_selection` additionally checks complete target binding. A narrow-file report cannot satisfy a full crate, a different narrow file set, a different selection reason, a wrong-language target or duplicate requested groups. The report's own selection reason must match the requested target in either comparison direction. The snapshot case checks a configuration file that sorts before the exclusion policy and an absent tracked file before a retained source, with independent digests for each content change.
 
 `test_platform_and_profile_cohorts_combine_only_their_own_shards` supplies two platforms, two profiles and two shards, with a different independently detected mutation in each platform/profile pair. The complete matrix combines all four kills. An extra artifact with only a foreign platform or profile is refused. This checks actual matrix selection rather than inferring it from isolated profile runs.
 
@@ -773,7 +801,7 @@ The original combined mutation cases now live in the owning suites listed above.
 | `test_reviewed_exclusions_can_be_committed_without_referring_to_their_own_hash` | Added regression. A reviewed equivalent can be committed and scored against the same source. Applied evidence appears in the score artifact. | Making a review depend on the hash that changes when that review is committed. |
 | `test_empty_selection_is_reported_with_its_reason` | Strengthened. Zero eligible mutations produce a not-applicable artifact with the selection reason and no numeric percentage. | Treating an empty group as measured coverage. |
 | `test_all_shards_must_agree_and_complete_the_inventory` | Retained. Complete disjoint shards combine, while absent or repeated shards fail. | Passing an unfinished shard collection. |
-| `test_reports_from_another_revision_or_tool_cannot_pass` | Retained. Old commits and mismatched tool versions cannot satisfy the gate. | Using stale evidence after a change. |
+| `test_reports_from_another_revision_or_tool_cannot_pass` | Strengthened. Other commits and tool versions on either side of the expected value cannot satisfy the gate. | Accepting mismatched evidence through a one-sided comparison. |
 | `test_required_feature_runs_can_detect_different_mutants` | Strengthened. Complete runs can detect complementary defects, while incomplete or inconsistent source runs cannot combine. | Filling missing work with results from another profile. |
 | `test_cli_reports_external_command_failure_without_a_success_plan` | Retained. A controlled failing version-control command produces a failure diagnostic and no plan. | Publishing a plan after command failure. |
 | `test_cosmic_ray_requires_actual_completed_test_results` | Retained. Worker completion, consistent test evidence and exact timeout classification are required. Unknown complete worker states and wrong-sized work items fail. | Trusting a tool's kill label after a worker crash or interpreting arbitrary output as a timeout. |
@@ -789,12 +817,12 @@ The original combined mutation cases now live in the owning suites listed above.
 | `test_duplicates_and_source_generated_collisions_are_rejected` | Retained. Duplicate files across either inventory are rejected. | Allowing a generated file to overwrite a source asset. |
 | `test_device_components_and_ancestor_collisions_are_rejected` | Retained. Device names and case-insensitive file/directory collisions cannot enter an archive. | Producing an archive that cannot be extracted safely on a supported platform. |
 | `test_cosmic_baseline_requires_successful_unmutated_test_evidence` | Added. Exactly one completed, unmutated baseline must contain successful nonempty execution in a two-field work item. Empty, short and extra-field rows fail. | Trusting an incompetent SDK baseline or accepting mutated, missing, malformed or failing baseline results. |
-| `test_each_selected_target_receives_the_original_source_snapshot` | Added. Two crates run from independent copies of one source snapshot, produce separate scores and preserve the original checkout. | Reusing the first crate's modified source for the second crate or mixing language scopes. |
+| `test_each_selected_target_receives_the_original_source_snapshot` | Added. Two crates run from independent copies of one source snapshot, produce separate scores and preserve the original checkout. The same mixed-language plan separately measures and checks only its Python module. | Reusing the first crate's modified source for the second crate or mixing language scopes. |
 | `test_invalid_shards_and_wrong_tool_versions_are_refused_before_execution` | Added. Invalid shard bounds and either unequal tool version fail before source execution. | Running an unintended shard or accepting an unpinned SDK. |
 | `test_runner_mutations_use_an_immutable_bootstrap` | Added. Syntax mutations to the harness remain compilation-invalid and preserve the user's source. | Allowing a mutated harness to invent or omit its own evidence. |
 | `test_rust_tool_reports_cover_build_scripts_features_and_disposable_source` | Added. Every configured profile measures the controlled Rust files and build script, retaining complete scores and unchanged original manifests. | Omitting a feature flag or build script, or modifying the original checkout. |
 | `test_python_tool_handles_an_interpreter_path_with_spaces` | Added regression. The CLI completes and scores a Python measurement when executable and artifact paths contain spaces. | Splitting the interpreter path into separate command arguments. |
-| `test_external_failures_never_publish_a_completed_measurement` | Added. Discovery, baseline, execution and export failures for either SDK leave no accepted report, including a zero-exit incompetent Python baseline. | Publishing success after a worker, command or baseline fails. |
+| `test_external_failures_never_publish_a_completed_measurement` | Added. Discovery, baseline, execution and export failures for either SDK leave no accepted report, including duplicated full Rust inventory with unique shard results and a zero-exit incompetent Python baseline. | Publishing success after invalid discovery, a worker, a command or a baseline fails. |
 | `test_scoped_shards_combine_once_and_omissions_fail_the_gate` | Added. The CLI measures the selected files across disjoint shards, then rejects a missing shard. | Ignoring file selection, duplicating work or accepting a partial run. |
 | `test_empty_discovery_runs_a_baseline_and_preserves_the_selection_reason` | Added. Both SDKs validate an empty selection and report not applicable with its reason. | Treating absent discovery as coverage or skipping the baseline. |
 | `test_selected_module_runs_its_owned_tests_without_unrelated_failures` | Added. The harness runs the selected module's suite without importing unrelated failing tests. | Discovering unrelated suites in a scoped measurement. |
@@ -955,6 +983,45 @@ Mutation audit failed. mutation artifacts do not match the requested target scop
 ```
 
 All three plan checks used the same source fingerprint. Target binding is independent of source binding because a selected file list can change without changing source.
+
+# Executable and interrupt evidence
+
+The CLI entrypoint fixture runs the actual executable. The observed no-op entrypoint mutation returned exit zero with no bytes for this command. Restoring the implementation produced the requested bytes and exit zero.
+
+```sh
+/tmp/pcr-cli-process-tests/target/debug/packetcraftr --output raw packet build --packet 'raw(text=entrypoint-fixture)'
+```
+
+```text
+entrypoint-fixture
+```
+
+The interrupt fixture starts a controlled local HTTP server that keeps its response pending. After receiving the complete HEAD request, the fixture sends SIGINT to this owned process.
+
+```sh
+/tmp/pcr-cli-process-tests/target/debug/packetcraftr --output json network audit-http 127.0.0.1:55711 --path /interrupt-test --timeout-ms 30000 --allow-destination 127.0.0.1
+```
+
+The process exits with 130 and produces this error envelope.
+
+```json
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "audit-http",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "io.cancelled",
+    "kind": "io",
+    "message": "operation cancelled; previously completed external effects are not undone",
+    "causes": [],
+    "remediation": "account for earlier records and confirmed transmissions; the operation is incomplete"
+  },
+  "diagnostics": []
+}
+```
+
+The Unix integration fixture uses a safe signal API from the same locked `nix` version already used by `ctrlc`. The dependency update adds one test dependency edge without changing package versions or checksums. Library cancellation cases use isolated child tests and completion files so a missing child selection cannot pass silently and global cancellation cannot affect another test.
 
 # Dependency policy validation
 

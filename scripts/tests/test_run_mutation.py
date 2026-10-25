@@ -207,6 +207,7 @@ class MutationScoreTests(unittest.TestCase):
             self.assertEqual(published['survivors'], ['20'])
             self.assertEqual(published['timeouts'], ['21'])
             self.assertEqual(published['tool_versions'], [value.tool_version])
+            self.assertEqual(published['revisions'], [value.revision])
             self.assertEqual(published['status'], 'passed')
 
     def test_threshold_is_strict_and_applies_to_every_group(self) -> None:
@@ -277,7 +278,7 @@ class MutationScoreTests(unittest.TestCase):
             value = report(10, 0)
             target = Target('core', 'rust', (), value.reason)
             path.write_text(json.dumps(measurement(value, target)))
-            for revision, version in (('other', 'version'), ('revision', 'other')):
+            for revision, version in (('other', 'version'), ('revision', 'other'), ('revision', 'zzz')):
                 with self.subTest(revision=revision, version=version), self.assertRaises(ValueError):
                     check((target,), (path,), 'rust', ('Linux',), ('all',),
                           1, (), revision, version)
@@ -344,6 +345,11 @@ class MutationScoreTests(unittest.TestCase):
             for invalid_target in (None, asdict(replace(first, language='python'))):
                 path.write_text(json.dumps(raw | {'target': invalid_target}))
                 with self.subTest(target=invalid_target), self.assertRaises(ValueError):
+                    check((first,), (path,), 'rust', ('Linux',), ('all',), 1, (), 'revision', 'version')
+            for reason in ('aaa', 'zzz'):
+                changed = measurement(replace(value, reason=reason), first)
+                path.write_text(json.dumps(changed))
+                with self.subTest(reason=reason), self.assertRaises(ValueError):
                     check((first,), (path,), 'rust', ('Linux',), ('all',), 1, (), 'revision', 'version')
 
 

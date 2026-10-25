@@ -181,6 +181,47 @@ fn client_accessors_preserve_supplied_registry_policy_and_runtime() {
     ));
     assert_eq!(client.runtime().capacity(), 0);
 }
+
+#[test]
+fn identification_hard_byte_ceiling_accepts_the_boundary_and_refuses_excess() {
+    let mut request = crate::identify::Request::new(
+        vec![crate::identify::Endpoint {
+            address: "127.0.0.1:80".parse().unwrap(),
+            transport: crate::identify::Transport::Tcp,
+        }],
+        crate::identify::builtin_corpus().unwrap(),
+        crate::identify::builtin_exclusions().unwrap(),
+    );
+    let policy = crate::policy::Policy {
+        max_bytes_per_operation: u64::MAX,
+        max_packets_per_operation: u64::MAX,
+        ..Default::default()
+    };
+    request.limits.operation.read_bytes = 64 * 1024 * 1024;
+    request.validate(&policy).unwrap();
+    request.limits.operation.read_bytes += 1;
+    assert!(matches!(
+        request.validate(&policy),
+        Err(crate::identify::Error::Request { .. })
+    ));
+}
+
+#[test]
+fn os_hard_evidence_ceiling_accepts_the_boundary_and_refuses_excess() {
+    let mut request = crate::os::Request::new(
+        "127.0.0.1".parse().unwrap(),
+        80,
+        81,
+        crate::os::builtin_corpus().unwrap(),
+    );
+    request.limits.evidence.max_bytes = 1024 * 1024;
+    request.validate().unwrap();
+    request.limits.evidence.max_bytes += 1;
+    assert!(matches!(
+        request.validate(),
+        Err(crate::os::Error::Invalid(_))
+    ));
+}
 #[test]
 fn interface_ambiguity_and_late_enumeration() {
     let selector = route::Interface::Name("test0".into());

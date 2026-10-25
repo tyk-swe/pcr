@@ -256,18 +256,20 @@ fn send_paces_actual_packets_at_the_requested_rate() {
     let mut request = crate::send::Request::packet(packet(3), options());
     request.repeat = 3;
     request.rate = Some(3);
-    let report = client
-        .send_layer3(request, |_: crate::send::Event| Ok(()))
-        .unwrap();
+    let collector = crate::send::Collector::default();
+    let report = client.send_layer3(request, collector.clone()).unwrap();
+    let aggregate = collector.finish(report).unwrap();
     let observed = sent.lock().unwrap();
     assert_eq!(observed.len(), 3);
-    for (_, bytes) in observed.iter() {
+    assert_eq!(aggregate.sent.len(), observed.len());
+    for ((_, bytes), reported) in observed.iter().zip(&aggregate.sent) {
         assert_packet_bytes(bytes, "10.0.0.2".parse().unwrap(), 3);
+        assert_eq!(reported.packet.wire_bytes(), bytes);
     }
     let interval = Duration::from_nanos(333_333_334);
     assert_eq!(observed[1].0.duration_since(observed[0].0), interval);
     assert_eq!(observed[2].0.duration_since(observed[1].0), interval);
-    assert_eq!(report.stats.elapsed, interval * 2);
+    assert_eq!(aggregate.stats.elapsed, interval * 2);
 }
 
 #[test]
@@ -447,6 +449,78 @@ fn dns_request_refuses_invalid_evidence_bounds() {
             request.validate(),
             Err(crate::dns::Error::InvalidLimit { field: actual, .. }) if actual == field
         ));
+    }
+}
+
+#[test]
+fn dns_neighbor_allowance_matches_requests_and_skips_multicast_and_broadcast() {
+    use packetcraftr_core::packet::{VlanKind, VlanTag};
+
+    let (_, routes, interfaces, tx) = fixture();
+    let client = Client::new(
+        builtin::registry(),
+        Policy::default(),
+        ProviderSet::packet(routes, interfaces, NoCapture, tx)
+            .with_tcp(NoTcp)
+            .with_resolver(NoResolver),
+    )
+    .with_neighbor_options(crate::neighbor::Options {
+        max_attempts: 2,
+        ..Default::default()
+    })
+    .unwrap();
+    for (source, destination) in [("10.0.0.2", "10.0.0.1"), ("fd00::2", "fd00::1")] {
+        let destination: IpAddr = destination.parse().unwrap();
+        let mut query = dns_request();
+        query.server = crate::target::Target::Address(destination);
+        query.address_family = crate::target::Family::Any;
+        query.route.link_mode = Mode::Layer3;
+        let direct = client.dns_limits([&query]).unwrap();
+        let neighbor = crate::neighbor::Request {
+            interface: interface::Id {
+                name: "controlled0".into(),
+                index: 1,
+            },
+            interface_source: source.parse().unwrap(),
+            interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
+            target: destination,
+            vlan_tags: vec![
+                VlanTag {
+                    kind: VlanKind::Ieee8021Q,
+                    priority: 0,
+                    drop_eligible: false,
+                    vlan_id: 7,
+                };
+                crate::neighbor::MAX_VLAN_TAGS
+            ],
+            mtu: 1500,
+            link_type: LinkType::ETHERNET,
+        };
+        let request_bytes = crate::neighbor::request_frame(&neighbor).unwrap();
+        query.route.link_mode = Mode::Layer2;
+        let indirect = client.dns_limits([&query]).unwrap();
+        let neighbor_requests = 2 * u64::from(query.attempts);
+        assert_eq!(
+            indirect.udp().packets(),
+            direct.udp().packets() + neighbor_requests
+        );
+        assert_eq!(
+            indirect.udp().wire_bytes(),
+            direct.udp().wire_bytes() + neighbor_requests * request_bytes.len() as u64
+        );
+    }
+    // IPv6 multicast: https://www.rfc-editor.org/rfc/rfc4291#section-2.7, checked 2026-10-25.
+    // IPv4 multicast/broadcast: RFC 1112 §4 and RFC 919 §7, checked 2026-10-25.
+    for destination in ["224.0.0.1", "255.255.255.255", "ff02::1"] {
+        let mut query = dns_request();
+        query.server = destination.parse().unwrap();
+        query.address_family = crate::target::Family::Any;
+        query.route.link_mode = Mode::Layer3;
+        let direct = client.dns_limits([&query]).unwrap();
+        query.route.link_mode = Mode::Layer2;
+        let mapped = client.dns_limits([&query]).unwrap();
+        assert_eq!(mapped.udp().packets(), direct.udp().packets());
+        assert_eq!(mapped.udp().wire_bytes(), direct.udp().wire_bytes());
     }
 }
 

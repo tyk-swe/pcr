@@ -78,6 +78,14 @@ class MutationToolExecutionTests(unittest.TestCase):
                     '--profiles', 'all', 'portable', '--shards', '2']
                 checked = invoke(root, executable, environment, arguments)
                 self.assertEqual(checked.returncode, 0, checked.stderr)
+                invalid = invoke(root, executable, environment, [*arguments, '--context-plan', str(context)])
+                self.assertEqual(invalid.returncode, 1)
+                self.assertIn('--context-plan', invalid.stderr)
+                invalid = invoke(root, executable, environment, ['run', '--plan', str(plan), '--language', 'rust',
+                    '--profile', 'portable', '--platform-label', 'ubuntu-24.04', '--seed', str(seed),
+                    '--contexts', str(contexts), '--output', str(output / 'invalid-contexts')])
+                self.assertEqual(invalid.returncode, 1)
+                self.assertIn('--contexts', invalid.stderr)
                 summaries = [json.loads(line) for line in checked.stdout.splitlines()]
                 self.assertEqual({summary['group'] for summary in summaries}, set(counts))
                 for summary in summaries:
@@ -338,6 +346,11 @@ class MutationToolExecutionTests(unittest.TestCase):
                               source_digest=digest, tool_version=RUST_TOOL_VERSION)
             self.assertEqual({outcome.status for outcome in seed.report.outcomes}, {'killed'})
             self.assertEqual(len(seed.report.outcomes), 3)
+            proof = proof_path.read_bytes()
+            invalid = invoke(root, executable, environment, ['seed', *arguments, '--seed', str(output / 'seed')])
+            self.assertEqual(invalid.returncode, 1)
+            self.assertIn('seed reuse', invalid.stderr)
+            self.assertEqual(proof_path.read_bytes(), proof)
             receipt['workspace_baseline'] = False
             receipt_path.write_text(json.dumps(receipt))
             result = invoke(root, executable, environment, ['seed', *arguments])
@@ -448,6 +461,15 @@ class MutationToolExecutionTests(unittest.TestCase):
             self.assertEqual({(value['group'], value['killed'], value['eligible']) for value in summaries},
                              {('sample', 3, 3), ('other', 1, 1)})
             self.assertEqual((root / 'marker.txt').read_text(), 'original')
+            python_arguments = ['--plan', str(plan), '--language', 'python',
+                                '--output', str(root / 'artifacts/python')]
+            invoke(root, executable, environment, ['run', *python_arguments]).check_returncode()
+            checked = invoke(root, executable, environment, ['check', *python_arguments])
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            python_summary = json.loads(checked.stdout)
+            self.assertEqual((python_summary['group'], python_summary['killed'], python_summary['eligible']),
+                             ('scripts/alpha.py', 2, 2))
+            self.assertEqual((root / 'marker.txt').read_text(), 'original')
 
     def test_invalid_shards_and_wrong_tool_versions_are_refused_before_execution(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -549,7 +571,7 @@ class MutationToolExecutionTests(unittest.TestCase):
             self.assertEqual((root / 'marker.txt').read_text(), 'original')
 
     def test_external_failures_never_publish_a_completed_measurement(self) -> None:
-        rust_failures = ('discovery', 'shard-discovery', 'runner', 'baseline', 'workspace-baseline', 'unfinished',
+        rust_failures = ('discovery', 'shard-discovery', 'duplicate-inventory', 'runner', 'baseline', 'workspace-baseline', 'unfinished',
                          'missing-report', 'inconsistent', 'empty-baseline')
         python_failures = ('init', 'inventory-export', 'baseline', 'baseline-export', 'baseline-incompetent', 'exec', 'report-export',
                            'worker-error', 'incomplete', 'missing-mutation', 'empty-baseline')

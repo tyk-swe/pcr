@@ -92,3 +92,62 @@ fn clean_local_retention_does_not_promote_unknown_or_missing_ingress() {
         .collect::<Vec<_>>();
     assert_eq!(frames, [bytes]);
 }
+
+#[test]
+fn refused_capture_frames_publish_one_visible_limit_diagnostic() {
+    use packetcraftr_core::{
+        decode::Dissector,
+        frame::{Frame, LinkType},
+        protocol::builtin,
+    };
+    use std::time::{Duration, Instant};
+
+    let mut captured = Accumulator::new(0);
+    let registry = builtin::registry();
+    let dissector = Dissector::new(registry.clone());
+    let window =
+        crate::exchange::Window::open(&crate::clock::SystemClock, Duration::from_secs(30), None)
+            .unwrap();
+    let collection = crate::exchange::Collection {
+        max_unmatched_frames: 0,
+        ..Default::default()
+    };
+    let mut diagnostics = Vec::new();
+    for value in 1..=3 {
+        let frame = Frame::without_timestamp(LinkType::ETHERNET, vec![value; 14]).unwrap();
+        captured
+            .process(
+                packetcraftr_netio::capture::Captured::with_ingress_time(
+                    frame,
+                    Some(Instant::now()),
+                ),
+                crate::exchange::ProcessContext {
+                    registry: &registry,
+                    dissector: &dissector,
+                    request_count: 0,
+                    sent: &[],
+                    window: &window,
+                    collection: &collection,
+                },
+                None,
+            )
+            .unwrap();
+        captured
+            .diagnostics
+            .publish_new(|diagnostic| {
+                diagnostics.push(diagnostic);
+                Ok::<(), std::convert::Infallible>(())
+            })
+            .unwrap();
+    }
+    let visible = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "exchange.unsolicited_limit")
+        .collect::<Vec<_>>();
+    assert_eq!(visible.len(), 1);
+    assert_eq!(
+        visible[0].severity,
+        packetcraftr_core::diagnostic::Severity::Warning
+    );
+    assert!(visible[0].message.contains("frame limit 0 reached"));
+}

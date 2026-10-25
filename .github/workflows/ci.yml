@@ -69,10 +69,10 @@ jobs:
           cargo clippy --locked --workspace --all-targets --no-default-features --features packetcraftr-cli/native-layer2 -- -D warnings
           cargo clippy --locked --workspace --all-targets --no-default-features --features packetcraftr-cli/native-layer3 -- -D warnings
           cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - name: Run library unit tests with default and all features
+      - name: Run tests with default and all features
         run: |
-          cargo test --locked --workspace --lib
-          cargo test --locked --workspace --lib --all-features
+          cargo test --locked --workspace --tests
+          cargo test --locked --workspace --tests --all-features
       - name: Documentation for supported feature profiles
         env:
           RUSTDOCFLAGS: -D warnings
@@ -136,12 +136,12 @@ jobs:
             ~/.cargo/git/db
             target
           key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
-      - name: Run library unit tests without default features
-        run: cargo test --locked --workspace --lib --no-default-features
+      - name: Run tests without default features
+        run: cargo test --locked --workspace --tests --no-default-features
       - name: Compile library examples
         run: cargo check --locked --workspace --examples --no-default-features
-      - name: Run library unit tests with the pcap-free feature profile
-        run: cargo test --locked --lib -p packetcraftr-cli -p packetcraftr-netio --no-default-features --features packetcraftr-cli/native-layer3,packetcraftr-netio/native-layer3
+      - name: Run tests with the pcap-free feature profile
+        run: cargo test --locked --tests -p packetcraftr-cli -p packetcraftr-netio --no-default-features --features packetcraftr-cli/native-layer3,packetcraftr-netio/native-layer3
       - name: Build the pcap-free CLI
         run: cargo build --locked -p packetcraftr-cli --no-default-features --features native-layer3
       - name: Drop workspace artifacts from the Cargo cache
@@ -208,12 +208,12 @@ jobs:
             ~/.cargo/git/db
             target
           key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
-      - name: Run library unit tests with default features
-        run: cargo test --locked --workspace --lib
-      - name: Run library unit tests with all features
-        run: cargo test --locked --workspace --lib --all-features
-      - name: Run library unit tests without default features
-        run: cargo test --locked --workspace --lib --no-default-features
+      - name: Run tests with default features
+        run: cargo test --locked --workspace --tests
+      - name: Run tests with all features
+        run: cargo test --locked --workspace --tests --all-features
+      - name: Run tests without default features
+        run: cargo test --locked --workspace --tests --no-default-features
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |

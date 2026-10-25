@@ -4,30 +4,87 @@
 use super::{Inbox, NetlinkRequest, Refused};
 use packetcraftr_core::budget::Deadline;
 use std::{
-    sync::{Arc, Barrier, mpsc},
+    sync::{
+        Arc, Barrier,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 
 fn request() -> NetlinkRequest {
-    let (respond, _) = mpsc::sync_channel(1);
-    NetlinkRequest {
-        operation: Box::new(|_| {
-            Box::pin(async { Ok(Box::new(()) as Box<dyn std::any::Any + Send>) })
-        }),
-        respond,
-        deadline: Instant::now() + Duration::from_secs(5),
-        control: Arc::new(Deadline::new(Duration::from_secs(5))),
+    request_with_reply().0
+}
+
+fn request_with_reply() -> (NetlinkRequest, mpsc::Receiver<super::OperationResult>) {
+    let (respond, reply) = mpsc::sync_channel(1);
+    (
+        NetlinkRequest {
+            operation: Box::new(|_| {
+                Box::pin(async { Ok(Box::new(()) as Box<dyn std::any::Any + Send>) })
+            }),
+            respond,
+            deadline: Instant::now() + Duration::from_secs(5),
+            control: Arc::new(Deadline::new(Duration::from_secs(5))),
+        },
+        reply,
+    )
+}
+
+fn received_value<T: Send + 'static>(reply: mpsc::Receiver<super::OperationResult>) -> T {
+    *reply
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .unwrap()
+        .downcast::<T>()
+        .unwrap()
+}
+
+fn admit_after_cleanup(pool: &Arc<crate::workers::Pool>) -> crate::workers::Permit {
+    let expires = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Ok(permit) = pool.admit() {
+            return permit;
+        }
+        assert!(
+            Instant::now() < expires,
+            "worker cleanup did not restore admission"
+        );
+        std::thread::yield_now();
     }
+}
+
+fn observed_parent() -> (
+    Deadline,
+    Arc<AtomicU64>,
+    Arc<AtomicBool>,
+    mpsc::Receiver<()>,
+) {
+    let advanced = Arc::new(AtomicU64::new(0));
+    let time = Arc::clone(&advanced);
+    let armed = Arc::new(AtomicBool::new(false));
+    let observe = Arc::clone(&armed);
+    let (sampled, sample) = mpsc::sync_channel(1);
+    let origin = Instant::now();
+    let parent = Deadline::with_time_source(Duration::from_secs(30), move || {
+        let seconds = time.load(Ordering::SeqCst);
+        if observe.swap(false, Ordering::SeqCst) {
+            let _ = sampled.send(());
+        }
+        origin + Duration::from_secs(seconds)
+    });
+    (parent, advanced, armed, sample)
 }
 
 #[test]
 fn queued_and_executing_requests_prevent_idle_retirement() {
     let inbox = Inbox::new();
     let deadline = Deadline::new(Duration::from_secs(5));
+    let (submitted, reply) = request_with_reply();
     assert!(
         inbox
             .submit(
-                request(),
+                submitted,
                 &deadline,
                 Instant::now() + Duration::from_secs(5)
             )
@@ -36,7 +93,8 @@ fn queued_and_executing_requests_prevent_idle_retirement() {
     assert!(!inbox.retire_if_idle());
     let request = inbox.next().unwrap();
     assert!(!inbox.retire_if_idle());
-    drop(request);
+    request.respond.send(Ok(Box::new(7_u64))).unwrap();
+    assert_eq!(received_value::<u64>(reply), 7);
     inbox.complete_request();
     assert!(inbox.retire_if_idle());
     assert!(inbox.next().is_none());
@@ -62,8 +120,9 @@ fn request_arrival_and_retirement_have_no_unreachable_accepted_request() {
             retire.retire_if_idle()
         });
         start.wait();
+        let (request, reply) = request_with_reply();
         let submitted = inbox.submit(
-            request(),
+            request,
             &Deadline::new(Duration::from_secs(5)),
             Instant::now() + Duration::from_secs(5),
         );
@@ -71,11 +130,21 @@ fn request_arrival_and_retirement_have_no_unreachable_accepted_request() {
         match submitted {
             Ok(()) => {
                 assert!(!retired);
-                assert!(inbox.next().is_some());
+                inbox
+                    .next()
+                    .unwrap()
+                    .respond
+                    .send(Ok(Box::new(7_u64)))
+                    .unwrap();
+                assert_eq!(received_value::<u64>(reply), 7);
                 inbox.complete_request();
                 assert!(inbox.retire_if_idle());
             }
-            Err(Refused::Retired(_)) => assert!(retired),
+            Err(Refused::Retired(request)) => {
+                assert!(retired);
+                request.respond.send(Ok(Box::new(7_u64))).unwrap();
+                assert_eq!(received_value::<u64>(reply), 7);
+            }
             Err(Refused::Interrupted(_)) => panic!("controlled submission expired"),
             Err(Refused::Stopped(_)) => panic!("controlled worker unexpectedly failed"),
         }
@@ -86,13 +155,40 @@ fn request_arrival_and_retirement_have_no_unreachable_accepted_request() {
 fn an_empty_inbox_retires_and_an_abandoned_initializer_stops() {
     let idle = Inbox::new();
     assert!(idle.next_with_idle(Duration::ZERO).is_none());
-    assert!(!super::lock(&idle.state).serving);
+    assert!(matches!(
+        idle.submit(
+            request(),
+            &Deadline::new(Duration::from_secs(5)),
+            Instant::now() + Duration::from_secs(5)
+        ),
+        Err(Refused::Retired(_))
+    ));
     let failed = Inbox::new();
+    let (queued, reply) = request_with_reply();
+    assert!(
+        failed
+            .submit(
+                queued,
+                &Deadline::new(Duration::from_secs(5)),
+                Instant::now() + Duration::from_secs(5)
+            )
+            .is_ok()
+    );
     failed.abandon();
-    assert!(failed.next().is_none());
-    // The exit guard also rejects any queued submissions after initialization fails.
     failed.stop();
-    assert!(!super::lock(&failed.state).serving);
+    assert!(matches!(
+        reply.recv_timeout(Duration::from_secs(5)),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    ));
+    assert!(failed.next().is_none());
+    assert!(matches!(
+        failed.submit(
+            request(),
+            &Deadline::new(Duration::from_secs(5)),
+            Instant::now() + Duration::from_secs(5)
+        ),
+        Err(Refused::Retired(_))
+    ));
     let failed = Inbox::new();
     failed.stop();
     assert!(matches!(
@@ -108,6 +204,7 @@ fn an_empty_inbox_retires_and_an_abandoned_initializer_stops() {
 fn fake_worker(
     namespace: &super::Namespace,
     pool: &Arc<crate::workers::Pool>,
+    response: usize,
 ) -> super::WorkerSlot {
     let permit = pool.admit().unwrap();
     let inbox = Arc::new(Inbox::new());
@@ -117,9 +214,11 @@ fn fake_worker(
         .spawn(move || {
             let _namespace = namespace;
             let _stop = super::StopOnExit(&worker_inbox);
-            while let Some(request) = worker_inbox.next() {
-                let _in_flight = super::RequestInFlight(&worker_inbox);
-                let _ = request.respond.send(Ok(Box::new(())));
+            // Registry retirement controls this worker throughout the bounded test.
+            while let Some(request) = worker_inbox.next_with_idle(Duration::from_secs(3600)) {
+                let in_flight = super::RequestInFlight(&worker_inbox);
+                drop(in_flight);
+                let _ = request.respond.send(Ok(Box::new(response)));
             }
         })
         .unwrap();
@@ -132,58 +231,43 @@ fn fake_worker(
 
 #[test]
 fn sequential_historical_identities_recover_resident_capacity_and_root_headroom() {
-    let pool = Arc::new(crate::workers::Pool::new(8));
+    let capacity = super::RESIDENT_CAPACITY + 1;
+    let pool = Arc::new(crate::workers::Pool::new(capacity));
     let mut workers = super::Workers::new();
-    let directory = std::env::temp_dir().join(format!(
-        "packetcraftr-namespace-registry-{}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&directory).unwrap();
-    for number in 0..(super::RESIDENT_CAPACITY * 5) {
-        // Files provide distinct pinned identities to exercise the registry with
-        // controlled workers; this does not establish actual namespace runtime.
-        let path = directory.join(number.to_string());
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .unwrap();
-        let namespace = super::Namespace {
-            id: super::ExecutionContext::of_namespace(&file).unwrap(),
-            file,
-        };
+    // Keep every anonymous file alive so historical identities cannot be recycled.
+    let namespaces = (0..(super::RESIDENT_CAPACITY * 5))
+        .map(|_| {
+            let file = tempfile::tempfile().unwrap();
+            super::Namespace {
+                id: super::ExecutionContext::of_namespace(&file).unwrap(),
+                file,
+            }
+        })
+        .collect::<Vec<_>>();
+    for (number, namespace) in namespaces.iter().enumerate() {
         let deadline = Deadline::new(Duration::from_secs(5));
         let (_, inbox) = super::ensure_worker(
             &mut workers,
-            &namespace,
+            namespace,
             &deadline,
             Instant::now() + Duration::from_secs(5),
             &pool,
-            |namespace, _, _| Ok(fake_worker(namespace, &pool)),
+            |namespace, _, _| Ok(fake_worker(namespace, &pool, number)),
         )
         .unwrap();
-        let (respond, reply) = mpsc::sync_channel(1);
-        let mut request = self::request();
-        request.respond = respond;
+        let (request, reply) = request_with_reply();
         assert!(
             inbox
                 .submit(request, &deadline, Instant::now() + Duration::from_secs(5))
                 .is_ok()
         );
-        assert!(reply.recv_timeout(Duration::from_secs(5)).unwrap().is_ok());
-        // Wait until the completion guard has returned the service to idle.
-        let guard = Instant::now() + Duration::from_secs(5);
-        while super::lock(&inbox.state).active {
-            assert!(Instant::now() < guard);
-            std::thread::yield_now();
-        }
-        assert!(workers.len() <= super::RESIDENT_CAPACITY);
-        assert!(pool.snapshot().active <= super::RESIDENT_CAPACITY);
-        std::fs::remove_file(path).unwrap();
+        assert_eq!(received_value::<usize>(reply), number);
+        let unrelated = admit_after_cleanup(&pool).spawn(move || number).unwrap();
+        assert!(
+            matches!(unrelated.wait(&Deadline::new(Duration::from_secs(5))),
+            crate::workers::Waited::Finished(Ok(value)) if value == number)
+        );
     }
-    let unrelated = pool.admit().unwrap();
-    drop(unrelated);
     for (_, worker) in workers {
         assert!(worker.inbox.retire_if_idle());
         assert!(matches!(
@@ -191,29 +275,33 @@ fn sequential_historical_identities_recover_resident_capacity_and_root_headroom(
             crate::workers::Waited::Finished(Ok(()))
         ));
     }
-    assert_eq!(pool.snapshot().active, 0);
-    std::fs::remove_dir(directory).unwrap();
+    let reclaimed = (0..capacity)
+        .map(|_| admit_after_cleanup(&pool))
+        .collect::<Vec<_>>();
+    assert!(pool.admit().is_err());
+    let tasks = reclaimed
+        .into_iter()
+        .enumerate()
+        .map(|(index, permit)| permit.spawn(move || index).unwrap())
+        .collect::<Vec<_>>();
+    for (index, task) in tasks.into_iter().enumerate() {
+        assert!(matches!(task.wait(&Deadline::new(Duration::from_secs(5))),
+            crate::workers::Waited::Finished(Ok(value)) if value == index));
+    }
 }
 
 #[test]
 fn checked_out_registry_wait_observes_inherited_elapsed_control() {
-    use std::sync::atomic::{AtomicU64, Ordering};
     let held_registry = super::shared_workers(
         &Deadline::new(Duration::from_secs(5)),
         Instant::now() + Duration::from_secs(5),
     )
     .unwrap();
-    let advanced = Arc::new(AtomicU64::new(0));
-    let clock = Arc::clone(&advanced);
-    let origin = Instant::now();
-    let parent = Deadline::with_time_source(Duration::from_secs(30), move || {
-        origin + Duration::from_secs(clock.load(Ordering::SeqCst))
-    });
+    let (parent, advanced, armed, sampled) = observed_parent();
     let caller = Deadline::new(Duration::from_secs(30)).with_parent(Some(Arc::new(parent)));
-    let (started, starting) = mpsc::sync_channel(1);
     let (returned, result) = mpsc::sync_channel(1);
     let waiter = std::thread::spawn(move || {
-        started.send(()).unwrap();
+        armed.store(true, Ordering::SeqCst);
         returned
             .send(
                 super::shared_workers(&caller, Instant::now() + Duration::from_secs(30))
@@ -221,7 +309,7 @@ fn checked_out_registry_wait_observes_inherited_elapsed_control() {
             )
             .unwrap();
     });
-    starting.recv_timeout(Duration::from_secs(5)).unwrap();
+    sampled.recv_timeout(Duration::from_secs(5)).unwrap();
     advanced.store(31, Ordering::SeqCst);
     let returned_under_control = result.recv_timeout(Duration::from_secs(5));
     drop(held_registry);
@@ -236,29 +324,26 @@ fn checked_out_registry_wait_observes_inherited_elapsed_control() {
 
 #[test]
 fn full_inbox_wait_observes_inherited_elapsed_control_without_accepting_an_expired_request() {
-    use std::sync::atomic::{AtomicU64, Ordering};
     let inbox = Arc::new(Inbox::new());
-    for _ in 0..super::NETLINK_QUEUE_DEPTH {
-        inbox
-            .submit(
-                request(),
-                &Deadline::new(Duration::from_secs(5)),
-                Instant::now() + Duration::from_secs(5),
-            )
-            .unwrap_or_else(|_| panic!("a bounded inbox must admit its declared allocation"));
-    }
-    let advanced = Arc::new(AtomicU64::new(0));
-    let clock = Arc::clone(&advanced);
-    let origin = Instant::now();
-    let parent = Deadline::with_time_source(Duration::from_secs(30), move || {
-        origin + Duration::from_secs(clock.load(Ordering::SeqCst))
-    });
+    let replies = (0..super::NETLINK_QUEUE_DEPTH)
+        .map(|_| {
+            let (request, reply) = request_with_reply();
+            inbox
+                .submit(
+                    request,
+                    &Deadline::new(Duration::from_secs(5)),
+                    Instant::now() + Duration::from_secs(5),
+                )
+                .unwrap_or_else(|_| panic!("a bounded inbox must admit its declared allocation"));
+            reply
+        })
+        .collect::<Vec<_>>();
+    let (parent, advanced, armed, sampled) = observed_parent();
     let caller = Deadline::new(Duration::from_secs(30)).with_parent(Some(Arc::new(parent)));
     let submitting = Arc::clone(&inbox);
-    let (started, starting) = mpsc::sync_channel(1);
     let (returned, result) = mpsc::sync_channel(1);
     let waiter = std::thread::spawn(move || {
-        started.send(()).unwrap();
+        armed.store(true, Ordering::SeqCst);
         let observed =
             match submitting.submit(request(), &caller, Instant::now() + Duration::from_secs(30)) {
                 Err(Refused::Interrupted(super::route::Error::DeadlineExceeded { operation })) => {
@@ -268,17 +353,33 @@ fn full_inbox_wait_observes_inherited_elapsed_control_without_accepting_an_expir
             };
         returned.send(observed).unwrap();
     });
-    starting.recv_timeout(Duration::from_secs(5)).unwrap();
+    sampled.recv_timeout(Duration::from_secs(5)).unwrap();
     advanced.store(31, Ordering::SeqCst);
     let returned_under_control = result.recv_timeout(Duration::from_secs(5));
-    let retained = super::lock(&inbox.state).queue.len();
+    let delivered = (0..super::NETLINK_QUEUE_DEPTH)
+        .map(|_| {
+            inbox.next_with_idle(Duration::ZERO).map(|request| {
+                let _in_flight = super::RequestInFlight(&inbox);
+                request.respond.send(Ok(Box::new(7_u64)))
+            })
+        })
+        .collect::<Vec<_>>();
+    let unexpected_request = inbox.next_with_idle(Duration::ZERO).is_some();
     inbox.stop();
     waiter.join().unwrap();
     assert_eq!(
         returned_under_control.expect("full inbox ignored inherited elapsed control"),
         Some("submitting the netlink request")
     );
-    assert_eq!(retained, super::NETLINK_QUEUE_DEPTH);
+    assert!(!unexpected_request);
+    assert!(
+        delivered
+            .into_iter()
+            .all(|result| matches!(result, Some(Ok(()))))
+    );
+    for reply in replies {
+        assert_eq!(received_value::<u64>(reply), 7);
+    }
 }
 
 #[test]

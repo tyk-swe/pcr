@@ -226,6 +226,8 @@ def cosmic_test_result(result: dict[str, object]) -> tuple[Status, str]:
     if len(markers) != 1:
         raise ValueError('Cosmic Ray test execution evidence is missing')
     evidence = record(json.loads(markers[0]))
+    if evidence.get('kind') == 'resource_error':
+        raise ValueError('Cosmic Ray tests exhausted execution resources: ' + text(evidence.get('code')))
     if evidence.get('kind') == 'syntax_error' and result.get('test_outcome') == 'killed':
         return 'invalid', text(evidence.get('message'))
     if evidence.get('kind') != 'tests' or integer(evidence.get('run')) == 0:

@@ -2,12 +2,14 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+import errno
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from textwrap import indent
 import unittest
 
 from support import ROOT, mutation_checkout
@@ -28,7 +30,8 @@ def runner_checkout(root: Path) -> None:
 
 def execute(root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run([sys.executable, str(root / 'scripts/mutation_test_runner.py'), '--module', 'scripts/alpha.py'],
-                          cwd=root, capture_output=True, text=True, timeout=5, check=False)
+                          cwd=root, env=os.environ | {'PYTHONDONTWRITEBYTECODE': '1'},
+                          capture_output=True, text=True, timeout=5, check=False)
 
 
 def evidence(result: subprocess.CompletedProcess[str]) -> dict[str, object]:
@@ -115,6 +118,82 @@ class MutationTestRunnerTests(unittest.TestCase):
             diagnostic = evidence(result)
             self.assertEqual(diagnostic['kind'], 'syntax_error')
             self.assertTrue(diagnostic['message'])
+
+    def test_storage_exhaustion_blocks_test_errors_and_subtests(self) -> None:
+        codes = tuple((code, name) for code, name in errno.errorcode.items() if name in ('ENOSPC', 'EDQUOT'))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner_checkout(root)
+            path = root / 'scripts/tests/test_alpha.py'
+            for code, name in codes:
+                failure = f'raise OSError({code}, "controlled storage exhaustion")\n'
+                cause = ('try:\n    ' + failure
+                         + 'except OSError as error:\n    raise SystemExit("project load failed") from error\n')
+                detached_cause = ('error = SystemExit("project load failed")\n'
+                                  f'error.__cause__ = OSError({code}, "controlled storage exhaustion")\nraise error\n')
+                context = ('try:\n    ' + failure
+                           + 'except OSError:\n    raise RuntimeError("project wrapper")\n')
+                assertion = ('try:\n    ' + failure
+                             + 'except OSError as error:\n    raise AssertionError("project assertion") from error\n')
+                assertion_context = ('try:\n    ' + failure
+                                     + 'except OSError:\n    raise AssertionError("project assertion")\n')
+                prefix = 'import unittest\nclass Tests(unittest.TestCase):\n    def test_value(self) -> None:\n'
+                sources = (
+                    ('body', prefix + indent(failure, '        ')),
+                    ('subtest', prefix + '        with self.subTest(stage="write"):\n' + indent(failure, '            ')),
+                    ('setup', 'import unittest\nclass Tests(unittest.TestCase):\n    @classmethod\n'
+                     '    def setUpClass(cls) -> None:\n' + indent(failure, '        ')
+                     + '    def test_value(self) -> None:\n        self.fail("must not execute")\n'),
+                    ('cause', prefix + indent(cause, '        ')),
+                    ('detached_cause', prefix + indent(detached_cause, '        ')),
+                    ('context', prefix + indent(context, '        ')),
+                    ('assertion_cause', prefix + indent(assertion, '        ')),
+                    ('subtest_assertion_context', prefix + '        with self.subTest(stage="write"):\n'
+                     + indent(assertion_context, '            ')),
+                    ('import', 'import unittest\n' + failure),
+                    ('import_cause', 'import unittest\n' + cause),
+                    ('import_context', 'import unittest\n' + context),
+                    ('load_tests', 'import unittest\ndef load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite,\n'
+                     '               pattern: str | None) -> unittest.TestSuite:\n' + indent(failure, '    ')),
+                )
+                for phase, source in sources:
+                    path.write_text(source)
+                    result = execute(root)
+                    with self.subTest(code=name, phase=phase):
+                        self.assertEqual(result.returncode, 1)
+                        observed = evidence(result)
+                        self.assertEqual(observed['kind'], 'resource_error')
+                        self.assertEqual(observed['code'], name)
+                        self.assertIn('controlled storage exhaustion', str(observed['message']))
+            for statement, failures, errors in (
+                ('raise AssertionError("Disk quota exceeded")', 1, 0),
+                ('with self.subTest(stage="assertion"):\n            self.fail("Disk quota exceeded")', 1, 0),
+                ('raise RuntimeError("No space left on device")', 0, 1),
+                (f'raise OSError({errno.EACCES}, "controlled refusal")', 0, 1),
+                ('print("Disk quota exceeded\\nNo space left on device")\n        raise ValueError("project failure")', 0, 1),
+                ('print("Disk quota exceeded\\nNo space left on device")', 0, 0),
+                (f'try:\n            raise OSError({errno.EACCES}, "project refusal")\n'
+                 '        except OSError as error:\n            raise RuntimeError("project wrapper") from error', 0, 1),
+                ('error = RuntimeError("project cycle")\n        error.__cause__ = error\n        raise error', 0, 1),
+            ):
+                path.write_text('import unittest\nclass Tests(unittest.TestCase):\n'
+                                '    def test_value(self) -> None:\n        ' + statement + '\n')
+                result = execute(root)
+                with self.subTest(statement=statement):
+                    self.assertEqual(result.returncode, int(bool(failures or errors)))
+                    self.assertEqual(evidence(result), dict(kind='tests', run=1, failures=failures, errors=errors))
+            for source in (
+                'raise ImportError("project import failed")\n',
+                f'try:\n    raise OSError({errno.EACCES}, "project refusal")\n'
+                'except OSError as error:\n    raise RuntimeError("project import wrapper") from error\n',
+                'import unittest\ndef load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite,\n'
+                '               pattern: str | None) -> unittest.TestSuite:\n    raise ValueError("project load failure")\n',
+            ):
+                path.write_text(source)
+                result = execute(root)
+                with self.subTest(source=source):
+                    self.assertEqual(result.returncode, 1)
+                    self.assertEqual(evidence(result), dict(kind='tests', run=1, failures=0, errors=1))
 
     def test_declared_but_unexecuted_suite_is_a_runner_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

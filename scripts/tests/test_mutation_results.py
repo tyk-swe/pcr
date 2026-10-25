@@ -158,6 +158,14 @@ class MutationReportTests(unittest.TestCase):
                 dict(kind=kind, run=3, failures=1, errors=0, message='controlled failure'))}
             with self.subTest(kind=kind), self.assertRaises(ValueError):
                 cosmic_results([[item, invalid_result]])
+        for code, status in product(('ENOSPC', 'EDQUOT'), ('killed', 'survived', 'incompetent')):
+            exhausted = syntax | {'test_outcome': status, 'output': 'MUTATION_RESULT ' + json.dumps(
+                dict(kind='resource_error', code=code, message='controlled storage exhaustion'))}
+            with self.subTest(code=code, status=status), self.assertRaisesRegex(ValueError, 'exhausted execution resources'):
+                cosmic_results([[item, exhausted]])
+        ordinary = dict(worker_outcome='normal', test_outcome='killed', output='Disk quota exceeded\n' +
+                        'MUTATION_RESULT ' + json.dumps(dict(kind='tests', run=1, failures=0, errors=1)))
+        self.assertEqual(cosmic_results([[item, ordinary]])[0].status, 'killed')
 
     def test_rust_survival_timeout_and_compilation_failure_are_distinct(self) -> None:
         # https://github.com/sourcefrog/cargo-mutants/blob/v27.1.0/src/outcome.rs, checked 2026-10-25.

@@ -112,12 +112,18 @@ fn truncated_and_unsupported_packets_preserve_bytes() {
             "{name}"
         );
     }
+    let wire = Bytes::from_static(b"get key\r\n");
     let raw = reg
         .codec("memcached")
         .unwrap()
-        .decode(Bytes::from_static(b"get key\r\n"), &context)
+        .decode(wire.clone(), &context)
         .unwrap();
     assert_eq!(raw.layer.protocol_id().as_str(), "raw");
+    assert_eq!(raw.consumed, wire.len());
+    assert_eq!(
+        raw.layer.field("bytes"),
+        Some(crate::field::Value::Bytes(wire))
+    );
 }
 #[test]
 fn mqtt_fields_are_editable() {
@@ -134,6 +140,18 @@ fn mqtt_fields_are_editable() {
         .unwrap()
         .decode(Bytes::from_static(&[0x30, 4, 0, 1, b'a', b'x']), &context)
         .unwrap();
+    assert_eq!(
+        decoded.layer.field("packet_type"),
+        Some(crate::field::Value::Unsigned(3))
+    );
+    assert_eq!(
+        decoded.layer.field("topic"),
+        Some(crate::field::Value::Bytes(Bytes::from_static(b"a")))
+    );
+    assert_eq!(
+        decoded.layer.field("payload"),
+        Some(crate::field::Value::Bytes(Bytes::from_static(b"x")))
+    );
     decoded
         .layer
         .set_field(
@@ -145,6 +163,14 @@ fn mqtt_fields_are_editable() {
         decoded.layer.field("topic"),
         Some(crate::field::Value::Bytes(Bytes::from_static(b"next")))
     );
+    let mut packet = Packet::new();
+    packet.push_boxed(decoded.layer);
+    let built = crate::build::Builder::new(reg)
+        .build(packet, Addresses::default(), Default::default())
+        .unwrap();
+    // MQTT 3.1.1 section 3.3, checked 2026-10-25.
+    // https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html
+    assert_eq!(built.bytes.as_ref(), b"\x30\x07\0\x04nextx");
 }
 
 #[test]

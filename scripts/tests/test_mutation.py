@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -112,6 +114,26 @@ class MutationScoreTests(unittest.TestCase):
 
 
 class MutationReportTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'posix', 'fixture executables use POSIX shebangs')
+    def test_cli_reports_external_command_failure_without_a_success_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable, plan = root / 'git', root / 'plan.json'
+            executable.write_text(f'#!{sys.executable}\nimport sys\nsys.exit(13)\n')
+            executable.chmod(0o755)
+            result = subprocess.run(
+                [sys.executable, str(ROOT / 'scripts/run_mutation.py'), 'select',
+                 '--base', 'HEAD', '--plan', str(plan)],
+                env=os.environ | {'PATH': str(root) + os.pathsep + os.environ.get('PATH', '')},
+                capture_output=True, text=True, timeout=5, check=False,
+            )
+            command = ['git', 'diff', '--name-only', '--no-renames', '-z', 'HEAD...HEAD']
+            cause = subprocess.CalledProcessError(13, command)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, '')
+            self.assertEqual(result.stderr, f'Mutation audit failed. {cause}\n')
+            self.assertFalse(plan.exists())
+
     def test_cosmic_ray_requires_actual_completed_test_results(self) -> None:
         evidence = 'MUTATION_RESULT ' + json.dumps(dict(kind='tests', run=3, failures=1, errors=0))
         item = dict(job_id='job', mutations=[dict(module_path='module.py', operator_name='replace',

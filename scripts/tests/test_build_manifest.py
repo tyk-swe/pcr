@@ -4,12 +4,13 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from support import load_script
+from support import ROOT, load_script
 
 manifest = load_script('build-manifest')
 
@@ -22,6 +23,32 @@ def identity() -> dict[str, str]:
 
 
 class BuildManifestTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'posix', 'fixture executables use POSIX shebangs')
+    def test_command_failures_have_a_clean_diagnostic_and_no_success_report(self) -> None:
+        for failed in ('binary', 'compiler'):
+            with self.subTest(failed=failed), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                binary, compiler, output = root / 'packetcraftr', root / 'rustc', root / 'metadata.json'
+                for path, label, version in ((binary, 'binary', 'packetcraftr fixture'),
+                                             (compiler, 'compiler', 'rustc fixture')):
+                    body = 'import sys\nsys.exit(7)' if failed == label else f'print({version!r})'
+                    path.write_text(f'#!{sys.executable}\n{body}\n')
+                    path.chmod(0o755)
+                result = subprocess.run(
+                    [sys.executable, str(ROOT / 'scripts/build-manifest.py'),
+                     '--binary', str(binary), '--output', str(output), '--commit', 'a' * 40,
+                     '--target', 'fixture-target', '--variant', 'fixture-mode'],
+                    env=os.environ | {'PATH': str(root) + os.pathsep + os.environ.get('PATH', '')},
+                    capture_output=True, text=True, timeout=5, check=False,
+                )
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, '')
+                failed_command = ([str(binary), '--version'] if failed == 'binary'
+                                  else ['rustc', '--version', '--verbose'])
+                cause = subprocess.CalledProcessError(7, failed_command)
+                self.assertEqual(result.stderr, f'build metadata failed: {cause}\n')
+                self.assertFalse(output.exists())
+
     @unittest.skipUnless(os.name == 'posix', 'fixture executables use POSIX shebangs')
     def test_write_and_verify_preserve_supplied_identity_and_detect_binary_changes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

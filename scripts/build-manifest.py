@@ -3,9 +3,11 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Write or verify packaged binary identity using release-supplied metadata."""
 import argparse
+from collections.abc import Sequence
 import pathlib
 import re
 import subprocess
+from subprocess import SubprocessError
 
 from script_support import digest, portable_basename, prepare_report, read_json, valid_digest, write_json_atomic
 
@@ -95,7 +97,7 @@ def arguments():
     return parser
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> None:
     parser = arguments()
     args = parser.parse_args(argv)
     # Preserve the supplied basename, but never search PATH for the hashed file.
@@ -118,7 +120,7 @@ def main(argv=None):
             verify_manifest(args, binary_digest)
         else:
             write_manifest(args, binary_digest)
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, SubprocessError) as error:
         parser.exit(1, f'build metadata failed: {error}\n')
 
 

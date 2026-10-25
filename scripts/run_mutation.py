@@ -8,6 +8,7 @@ from pathlib import Path
 import platform
 import shutil
 import subprocess
+from subprocess import SubprocessError
 import sys
 import tempfile
 from typing import Sequence
@@ -176,7 +177,7 @@ def run_target(target: Target, source: Path, output: Path, profile: str, shard: 
                       else python(target, checkout, folder, version))
         write(folder / 'run.json', {**metadata, 'report': asdict(replace(report, revision=f'{revision} tree {tree}'))})
         return None
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, SubprocessError) as error:
         return f'{target.group} failed. {error}'
 
 
@@ -291,7 +292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0 if check(targets, tuple(output.rglob('run.json')), args.language,
                           tuple(args.platforms), tuple(args.profiles), args.shards, exclusions,
                           revision, version) else 1
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, SubprocessError) as error:
         print(f'Mutation audit failed. {error}', file=sys.stderr)
         return 1
 

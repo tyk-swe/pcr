@@ -3,6 +3,7 @@
 """Reject mutated evidence while retaining forward-compatible additive metadata."""
 import copy
 import io
+from itertools import product
 import json
 import unittest
 from unittest.mock import patch
@@ -21,6 +22,79 @@ def consume(value, exit_code=0):
 
 
 class ForwardingConsumerTests(unittest.TestCase):
+    def test_unmatched_and_unkeyed_census_preserves_retained_and_omitted_observations(self) -> None:
+        for category, side in product(('unmatched', 'unkeyed'), ('ingress', 'egress')):
+            value = envelope()
+            report = value['result']
+            capture = report['captures'][side]
+            capture.update(read=4, selected=4)
+            if category == 'unmatched':
+                capture['keyed'] = 4
+                report['summary'][side + '_only'] = 2
+            else:
+                capture['unkeyed'] = 2
+            evidence = copy.deepcopy(report['matches'][0][side])
+            evidence['frame'] = 3
+            report[category][side] = ([evidence] if category == 'unmatched'
+                                      else [dict(evidence=evidence, key=[None])])
+            report['omitted'][category + '_' + side] = 1
+            report['verdict'] = 'inconclusive'
+            with self.subTest(category=category, side=side):
+                result = consume(value, 1)
+                self.assertEqual(result['verdict'], 'inconclusive')
+                self.assertEqual(result['report'], report)
+            for failure in ('omission', 'duplicate', 'capture_total', 'entries'):
+                broken = copy.deepcopy(value)
+                invalid = broken['result']
+                if failure == 'omission':
+                    invalid['omitted'][category + '_' + side] = 0
+                elif failure == 'duplicate':
+                    retained = invalid[category][side][0]
+                    (retained if category == 'unmatched' else retained['evidence'])['frame'] = 1
+                elif failure == 'capture_total':
+                    invalid['captures'][side]['selected'] += 1
+                else:
+                    invalid[category][side] = None
+                with self.subTest(category=category, side=side, failure=failure):
+                    with self.assertRaises(consumer.ContractError):
+                        consume(broken, 1)
+
+    def test_check_outcomes_require_the_declared_evidence_availability(self) -> None:
+        states = ('observed', 'absent', 'truncated', 'decode_incomplete', 'field_budget')
+        readable_pairs = {('observed', 'observed')}
+        presence_pairs = {('observed', 'observed'), ('observed', 'absent'),
+                          ('absent', 'observed'), ('absent', 'absent')}
+        for (kind, available_pairs), actual, expected, same_value in product(
+                (('preserve', readable_pairs), ('preserve_presence', presence_pairs)),
+                states, states, (False, True)):
+            available = (actual, expected) in available_pairs
+            satisfied = same_value if kind == 'preserve' else actual == expected
+            outcome = ('satisfied' if satisfied else 'violated') if available else 'unevaluable'
+            check = dict(check=dict(kind=kind), actual_state=actual, expected_state=expected,
+                         actual={'type': 'unsigned', 'value': 1} if actual == 'observed' else None,
+                         expected={'type': 'unsigned', 'value': 1 if same_value else 2}
+                         if expected == 'observed' else None, outcome=outcome)
+            with self.subTest(kind=kind, actual=actual, expected=expected, same_value=same_value):
+                consumer.validate_check(check)
+                check['outcome'] = 'unevaluable' if available else 'satisfied'
+                with self.assertRaises(consumer.ContractError):
+                    consumer.validate_check(check)
+                if available:
+                    check['outcome'] = 'violated' if outcome == 'satisfied' else 'satisfied'
+                    with self.assertRaises(consumer.ContractError):
+                        consumer.validate_check(check)
+        for kind, actual in product(('expect', 'expect_absent'), states):
+            available = actual == 'observed' or kind == 'expect_absent' and actual == 'absent'
+            outcome = ('satisfied' if actual == 'absent' else 'violated') if available else 'unevaluable'
+            check = dict(check=dict(kind=kind), actual_state=actual, expected_state=None,
+                         actual={'type': 'unsigned', 'value': 1} if actual == 'observed' else None,
+                         outcome=outcome)
+            with self.subTest(kind=kind, actual=actual):
+                consumer.validate_check(check)
+                check['outcome'] = 'unevaluable' if available else 'satisfied'
+                with self.assertRaises(consumer.ContractError):
+                    consumer.validate_check(check)
+
     def test_retained_checks_must_match_declarations(self) -> None:
         for mismatch in ('field', 'kind', 'missing', 'extra'):
             value = envelope()
@@ -290,6 +364,19 @@ class ForwardingConsumerTests(unittest.TestCase):
         b['reordered'] = False
         with self.assertRaises(consumer.ContractError):
             consume(value)
+        for reordered in (0, 1):
+            incomplete = envelope()
+            retained = incomplete['result']
+            retained['matches'] = retained['matches'][:1]
+            retained['omitted']['matches'] = 1
+            retained['summary']['reordered_pairs'] = reordered
+            with self.subTest(hidden_reorders=reordered):
+                result = consume(incomplete)
+                self.assertEqual(result['report']['matches'], retained['matches'])
+                self.assertEqual(result['report']['summary']['reordered_pairs'], reordered)
+            retained['summary']['reordered_pairs'] = 2
+            with self.assertRaises(consumer.ContractError):
+                consume(incomplete)
 
     def test_violation_evidence_is_not_an_unchecked_side_channel(self) -> None:
         value = envelope()

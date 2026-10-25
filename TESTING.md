@@ -149,3 +149,18 @@ HTTP and indicator cases use controlled strings. Capture cases use injected even
 | CSP | `csp_directive_names_are_ascii_case_insensitive` | Retained with source. Mixed-case directive names retain their meaning. | Case-sensitive name matching. |
 | CSP | `csp_uses_the_first_directive_in_each_policy` | Retained with source. First-directive precedence applies independently to each policy. | Choosing the last duplicate or merging separate policies. |
 | CSP | `csp_does_not_treat_unicode_whitespace_as_a_separator` | Retained with source. Non-ASCII whitespace cannot create a directive boundary. | Using Unicode whitespace rules for protocol parsing. |
+
+# Protocol cases reviewed so far
+
+| Case | Disposition and protected behavior | Representative defect |
+| --- | --- | --- |
+| `truncated_and_unsupported_packets_preserve_bytes` | Strengthened. Invalid packets are rejected and unsupported text retains its complete bytes and consumed length. | Identifying opaque input while discarding its contents. |
+| `mqtt_fields_are_editable` | Strengthened. Independent packet type, topic and payload expectations precede an edit. The rebuilt bytes have the expected new topic, length and unchanged payload. The wire assertion cites MQTT 3.1.1. | Updating a reflected field without updating the encoded packet. |
+
+# Mutation progress
+
+The first completed exploratory forwarding run measured the source snapshot at commit `6c8698caf40c0f9c2503b867bed3b4b6f002cb51` with tree digest `6c70734e2ff5a05b24e9dc94666b84c6809a7d27bea257e04126f5589bd1129f`. It killed 1,172 of 1,765 eligible mutants, a score of 66.4 percent. Twenty compilation-invalid mutants were excluded. There were 592 survivors and one timeout, with no equivalent exclusions. This older snapshot does not establish the score of the current branch.
+
+Survivors exposed missing cases for nonempty unmatched and unkeyed capture counts, omitted matches and evidence availability. Added cases now check retained and omitted observations on both sides, conservative reorder bounds, and valid or contradictory outcomes across evidence states. Targeted Cosmic Ray reruns killed four previously surviving arithmetic mutants in rule budgeting, omission accounting and capture totals. A complete rerun is still required before claiming any new module score.
+
+The exploratory build-manifest run attempted all 176 mutations but produced a worker exception when Cosmic Ray tried to replace a qualified exception name inside a tuple. No score was accepted for that run. Importing the exception by name makes the mutation executable in both affected tools. Targeted reruns completed normally and killed both handler mutations. CLI regression cases also verify that failed binary, compiler and version-control commands return a failure diagnostic without publishing a success report or plan. No mutation was excluded to address the runner error.

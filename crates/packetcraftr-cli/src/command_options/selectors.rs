@@ -121,7 +121,19 @@ mod tests {
         ] {
             assert!(parse_stream(input).is_none(), "{input}");
         }
-        assert_eq!(parse_stream("tcp:0").unwrap().index, 0);
-        assert_eq!(parse_stream("udp:001").unwrap().index, 1);
+        assert_eq!(
+            parse_stream("tcp:0").unwrap(),
+            StreamRef {
+                transport: StreamTransport::Tcp,
+                index: 0
+            }
+        );
+        assert_eq!(
+            parse_stream("udp:001").unwrap(),
+            StreamRef {
+                transport: StreamTransport::Udp,
+                index: 1
+            }
+        );
     }
 }

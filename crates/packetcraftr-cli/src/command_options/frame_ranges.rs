@@ -160,6 +160,61 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_ranges_intersect_sampling_without_losing_boundaries() {
+        let selection = FrameSelectionArgs {
+            frames: Some("2-4,4-6,9-".into()),
+            every: Some(3),
+        }
+        .resolve()
+        .unwrap();
+        assert_eq!(
+            (0..=14)
+                .filter(|position| selection.keeps(*position))
+                .collect::<Vec<_>>(),
+            [4, 10, 13]
+        );
+        let maximum = FrameSelectionArgs {
+            frames: Some(format!("{}-", u64::MAX)),
+            every: None,
+        }
+        .resolve()
+        .unwrap();
+        assert!(maximum.keeps(u64::MAX));
+        assert!(!maximum.keeps(u64::MAX - 1));
+    }
+
+    #[test]
+    fn invalid_ranges_and_zero_sampling_report_usage_errors() {
+        for frames in [
+            "",
+            "0",
+            "3-2",
+            "-2",
+            "1--2",
+            "1,",
+            "+1",
+            "18446744073709551616",
+        ] {
+            let failure = FrameSelectionArgs {
+                frames: Some(frames.into()),
+                every: None,
+            }
+            .resolve()
+            .unwrap_err();
+            assert_eq!(failure.classification.code, "cli.frame_selection");
+            assert_eq!(failure.exit_code(), 2);
+        }
+        assert!(
+            FrameSelectionArgs {
+                frames: None,
+                every: Some(0)
+            }
+            .resolve()
+            .is_err()
+        );
+    }
+
+    #[test]
     fn explicit_noop_selections_keep_verbatim_fast_path() {
         for frames in [None, Some("1-"), Some("1-10,11-")] {
             for every in [None, Some(1)] {

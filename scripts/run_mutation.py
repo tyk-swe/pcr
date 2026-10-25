@@ -67,6 +67,13 @@ def snapshot(root: Path, destination: Path) -> str:
 
 
 def rust(target: Target, root: Path, output: Path, profile: str, shard: int, shards: int) -> Report:
+    package = root / 'crates' / target.group
+    if (package / 'build.rs').is_file():
+        manifest = package / 'Cargo.toml'
+        with manifest.open('a', encoding='utf-8') as destination:
+            destination.write('\n[[bin]]\nname = ' + json.dumps(f'mutation-build-{target.group}')
+                              + '\npath = "build.rs"\ntest = false\n')
+        shutil.copy2(manifest, output / 'mutation-Cargo.toml')
     args = ['cargo', 'mutants', '--package', target.group, '--test-workspace=true',
             '--cargo-arg=--locked', *PROFILES[profile]]
     for file in target.files:

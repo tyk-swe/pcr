@@ -135,6 +135,7 @@ mod tests {
 
     #[test]
     fn hsts_rejects_duplicate_directives_case_insensitively() {
+        // https://www.rfc-editor.org/rfc/rfc6797.html#section-6.1, checked 2026-10-25.
         for value in [
             "max-age=0; max-age=1",
             "max-age=1; MAX-AGE=1",
@@ -146,17 +147,20 @@ mod tests {
 
     #[test]
     fn hsts_accepts_quoted_values_and_quoted_pairs() {
+        // https://www.rfc-editor.org/rfc/rfc6797.html#section-6.1.1, checked 2026-10-25.
         assert!(positive_hsts(br#"max-age="123""#));
         assert!(positive_hsts(br#"max-age="\1\2\3"; extension="a;b""#));
     }
 
     #[test]
     fn hsts_accepts_optional_whitespace_around_equals() {
+        // https://www.rfc-editor.org/rfc/rfc6797.html#section-6.1, checked 2026-10-25.
         assert!(positive_hsts(b" max-age \t=\t 1 ; includeSubDomains "));
     }
 
     #[test]
     fn hsts_delta_seconds_are_digits_not_signed_integers() {
+        // https://www.rfc-editor.org/rfc/rfc6797.html#section-6.1.1, checked 2026-10-25.
         for value in [
             "max-age=+1",
             "max-age=-1",
@@ -170,11 +174,13 @@ mod tests {
 
     #[test]
     fn hsts_positive_lifetime_need_not_fit_u64() {
+        // https://www.rfc-editor.org/rfc/rfc6797.html#section-6.1.1, checked 2026-10-25.
         assert!(positive_hsts(b"max-age=184467440737095516160"));
     }
 
     #[test]
     fn malformed_extensions_invalidate_the_entire_hsts_field() {
+        // https://www.rfc-editor.org/rfc/rfc6797.html#section-6.1, checked 2026-10-25.
         for value in [
             "max-age=1; includeSubDomains=yes",
             "max-age=1; bad@name",
@@ -188,11 +194,13 @@ mod tests {
 
     #[test]
     fn csp_directive_names_are_ascii_case_insensitive() {
+        // https://www.w3.org/TR/2026/WD-CSP3-20260916/#parse-serialized-policy, checked 2026-10-25.
         assert!(framing_csp("FrAmE-AnCeStOrS 'none'"));
     }
 
     #[test]
     fn csp_uses_the_first_directive_in_each_policy() {
+        // https://www.w3.org/TR/2026/WD-CSP3-20260916/#parse-serialized-policy, checked 2026-10-25.
         assert!(!framing_csp("frame-ancestors *; frame-ancestors 'none'"));
         assert!(framing_csp("frame-ancestors 'none'; frame-ancestors *"));
         assert!(framing_csp("frame-ancestors *, frame-ancestors 'none'"));
@@ -200,6 +208,7 @@ mod tests {
 
     #[test]
     fn csp_does_not_treat_unicode_whitespace_as_a_separator() {
+        // https://www.w3.org/TR/2026/WD-CSP3-20260916/#parse-serialized-policy, checked 2026-10-25.
         assert!(!framing_csp("frame-ancestors\u{a0}'none'"));
     }
 }

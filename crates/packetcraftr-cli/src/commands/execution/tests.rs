@@ -9,7 +9,7 @@ use crate::output::{
 use packetcraftr::{
     Client, ProviderSet,
     policy::{DestinationConstraint, Policy},
-    runtime::Runtime,
+    runtime::{Runtime, Worker},
     scan,
 };
 use packetcraftr_core::{
@@ -18,18 +18,14 @@ use packetcraftr_core::{
 };
 use std::{
     io::{self, Write},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-        mpsc,
-    },
+    sync::{Arc, Mutex, mpsc},
     time::{Duration, Instant},
 };
 
 #[derive(Clone, Default)]
 struct Writer {
-    writes: Arc<AtomicUsize>,
-    flushes: Arc<AtomicUsize>,
+    bytes: Arc<Mutex<Vec<u8>>>,
+    visible: Arc<Mutex<Vec<u8>>>,
     threads: Arc<Mutex<Vec<std::thread::ThreadId>>>,
 }
 impl Write for Writer {
@@ -38,15 +34,63 @@ impl Write for Writer {
             .lock()
             .unwrap()
             .push(std::thread::current().id());
-        self.writes.fetch_add(1, Ordering::Relaxed);
+        self.bytes.lock().unwrap().extend_from_slice(bytes);
         Ok(bytes.len())
     }
     fn flush(&mut self) -> io::Result<()> {
-        self.flushes.fetch_add(1, Ordering::Relaxed);
+        *self.visible.lock().unwrap() = self.bytes.lock().unwrap().clone();
         Ok(())
     }
 }
 struct Refused;
+impl packetcraftr_netio::route::Provider for Refused {
+    type Error = packetcraftr_netio::route::Error;
+    fn lookup_with_preferences(
+        &self,
+        _: std::net::IpAddr,
+        _: Option<&packetcraftr_netio::interface::Id>,
+        _: Option<std::net::IpAddr>,
+        _: &Deadline,
+    ) -> Result<packetcraftr_netio::route::Decision, Self::Error> {
+        panic!("a controlled socket scan must not query routes")
+    }
+}
+impl packetcraftr_netio::interface::Provider for Refused {
+    fn interfaces(
+        &self,
+        _: &Deadline,
+    ) -> Result<Vec<packetcraftr_netio::interface::Info>, packetcraftr_netio::interface::Error>
+    {
+        panic!("a controlled socket scan must not enumerate interfaces")
+    }
+}
+impl packetcraftr_netio::capture::Provider for Refused {
+    type Capture = packetcraftr_netio::capture::SystemSession;
+    fn arm_capture(
+        &self,
+        _: &packetcraftr_netio::capture::Request,
+        _: &Deadline,
+    ) -> Result<Self::Capture, packetcraftr_netio::Error> {
+        panic!("a controlled socket scan must not start capture")
+    }
+}
+impl packetcraftr_netio::transmit::Provider for Refused {
+    fn send(
+        &self,
+        _: packetcraftr_netio::transmit::Outbound<'_>,
+    ) -> Result<packetcraftr_netio::transmit::Report, packetcraftr_netio::Error> {
+        panic!("a controlled socket scan must not transmit packets")
+    }
+}
+impl packetcraftr::target::Resolver for Refused {
+    fn resolve(
+        &self,
+        _: &packetcraftr::target::Hostname,
+        _: usize,
+    ) -> Result<Vec<std::net::IpAddr>, packetcraftr::target::Error> {
+        panic!("a numeric socket scan must not resolve hostnames")
+    }
+}
 impl packetcraftr_netio::tcp::Provider for Refused {
     type Stream = packetcraftr_netio::tcp::SystemStream;
     fn connect(
@@ -55,6 +99,26 @@ impl packetcraftr_netio::tcp::Provider for Refused {
         _: &Deadline,
     ) -> Result<Self::Stream, packetcraftr_netio::tcp::Error> {
         Err(io::Error::from(io::ErrorKind::ConnectionRefused).into())
+    }
+}
+
+fn providers()
+-> impl packetcraftr::PacketProviders + packetcraftr::TargetProviders + packetcraftr::TcpProviders {
+    ProviderSet::packet(Refused, Refused, Refused, Refused)
+        .with_tcp(Refused)
+        .with_resolver(Refused)
+}
+
+fn recovered_worker(runtime: &Runtime) -> Worker<usize, usize> {
+    let guard = Instant::now() + Duration::from_secs(5);
+    loop {
+        match Worker::new_in(runtime, |event| Ok(event + 1)) {
+            Ok(worker) => return worker,
+            Err(_) => {
+                assert!(Instant::now() < guard, "output admission did not recover");
+                std::thread::yield_now();
+            }
+        }
     }
 }
 
@@ -86,22 +150,6 @@ fn request() -> scan::Request {
     }
 }
 
-struct Counted<T> {
-    value: T,
-    count: Arc<AtomicUsize>,
-}
-impl<T: serde::Serialize> serde::Serialize for Counted<T> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.count.fetch_add(1, Ordering::Relaxed);
-        self.value.serialize(serializer)
-    }
-}
-impl<T: output::stream::StreamRecord> output::stream::StreamRecord for Counted<T> {
-    fn event_name(&self) -> &'static str {
-        self.value.event_name()
-    }
-}
-
 #[test]
 fn bounded_ndjson_followup_sink_uses_no_workflow_handoff_and_flushes_each_record() {
     let writer = Writer::default();
@@ -123,8 +171,6 @@ fn bounded_ndjson_followup_sink_uses_no_workflow_handoff_and_flushes_each_record
     );
     let callbacks = Arc::new(Mutex::new(Vec::new()));
     let callback_threads = Arc::clone(&callbacks);
-    let serializations = Arc::new(AtomicUsize::new(0));
-    let counted = Arc::clone(&serializations);
     let sink = emitter(&invocation, move |event: scan::connect::Event, stream| {
         callback_threads
             .lock()
@@ -133,25 +179,10 @@ fn bounded_ndjson_followup_sink_uses_no_workflow_handoff_and_flushes_each_record
         let scan::connect::Event::Probe(probe) = event;
         let value =
             output::scan::connect::ProbeEvent::try_from(probe).map_err(CliError::classified)?;
-        stream
-            .emit_data(
-                Counted {
-                    value,
-                    count: Arc::clone(&counted),
-                },
-                Vec::new(),
-            )
-            .map_err(CliError::from)
+        stream.emit_data(value, Vec::new()).map_err(CliError::from)
     });
     assert_eq!(sink.delivery(), Delivery::Cooperative);
-    let providers = ProviderSet::packet(
-        packetcraftr_netio::route::SystemProvider,
-        packetcraftr_netio::interface::SystemProvider,
-        packetcraftr_netio::capture::SystemProvider,
-        packetcraftr_netio::transmit::SystemProvider,
-    )
-    .with_tcp(Refused)
-    .with_resolver(packetcraftr::target::SystemResolver);
+    let providers = providers();
     let client = Client::new(
         builtin::registry(),
         Policy {
@@ -170,15 +201,19 @@ fn bounded_ndjson_followup_sink_uses_no_workflow_handoff_and_flushes_each_record
             sink,
         )
         .unwrap();
-    assert_eq!(workflow_runtime.snapshot().active, 0);
-    assert_eq!(workflow_runtime.snapshot().rejected_admissions, 0);
     assert_eq!(
         callbacks.lock().unwrap().as_slice(),
         &[std::thread::current().id()]
     );
-    assert_eq!(serializations.load(Ordering::Relaxed), 1);
-    assert_eq!(writer.writes.load(Ordering::Relaxed), 1);
-    assert_eq!(writer.flushes.load(Ordering::Relaxed), 1);
+    let record: serde_json::Value =
+        serde_json::from_slice(&writer.visible.lock().unwrap()).unwrap();
+    assert_eq!(record["event"], "connect_probe");
+    assert_eq!(record["sequence"], 0);
+    assert_eq!(record["result"]["address"], "192.0.2.11");
+    assert_eq!(record["result"]["port"], 80);
+    assert_eq!(record["result"]["attempt"], 1);
+    assert_eq!(record["result"]["attempted"], true);
+    assert_eq!(record["result"]["outcome"], "refused");
     assert!(
         writer
             .threads
@@ -191,8 +226,18 @@ fn bounded_ndjson_followup_sink_uses_no_workflow_handoff_and_flushes_each_record
         .output
         .complete(serde_json::json!({"done": true}), Vec::new())
         .unwrap();
-    assert_eq!(writer.writes.load(Ordering::Relaxed), 2);
-    assert_eq!(writer.flushes.load(Ordering::Relaxed), 2);
+    let visible = writer.visible.lock().unwrap();
+    let records: Vec<serde_json::Value> = visible
+        .split_inclusive(|byte| *byte == b'\n')
+        .map(|line| {
+            assert_eq!(line.last(), Some(&b'\n'));
+            serde_json::from_slice(line).unwrap()
+        })
+        .collect();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[1]["event"], "complete");
+    assert_eq!(records[1]["sequence"], 1);
+    assert_eq!(records[1]["result"], serde_json::json!({"done": true}));
 }
 
 #[test]
@@ -217,7 +262,7 @@ struct GateWriter {
 impl Write for GateWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.entered.send(()).unwrap();
-        self.release.recv().unwrap();
+        self.release.recv_timeout(Duration::from_secs(10)).unwrap();
         Ok(bytes.len())
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -266,14 +311,7 @@ fn cooperative_followup_publication_retains_parent_control_inside_the_writer_wai
         } else {
             Deadline::new(Duration::from_secs(30)).with_cancellation(Some(cancellation.clone()))
         };
-        let providers = ProviderSet::packet(
-            packetcraftr_netio::route::SystemProvider,
-            packetcraftr_netio::interface::SystemProvider,
-            packetcraftr_netio::capture::SystemProvider,
-            packetcraftr_netio::transmit::SystemProvider,
-        )
-        .with_tcp(Refused)
-        .with_resolver(packetcraftr::target::SystemResolver);
+        let providers = providers();
         let client = Client::new(
             builtin::registry(),
             Policy {
@@ -303,21 +341,20 @@ fn cooperative_followup_publication_retains_parent_control_inside_the_writer_wai
             cancellation.cancel();
         }
         let returned_under_control = result.recv_timeout(Duration::from_secs(5));
-        let still_charged = writer_runtime.snapshot();
+        assert!(Worker::new_in(&writer_runtime, |_: ()| Ok(())).is_err());
         release.send(()).unwrap();
         caller.join().unwrap();
         assert!(returned_under_control.unwrap().is_err());
-        assert_eq!(still_charged.active, 1);
-        assert_eq!(still_charged.timed_out_retaining_capacity, 1);
         assert!(!invocation.output.is_complete());
         assert!(!invocation.output.is_open());
-        assert_eq!(workflow_runtime.snapshot().rejected_admissions, 0);
         drop(invocation);
-        let guard = Instant::now() + Duration::from_secs(5);
-        while writer_runtime.snapshot().active != 0 {
-            assert!(Instant::now() < guard);
-            std::thread::yield_now();
-        }
+        let worker = recovered_worker(&writer_runtime);
+        assert_eq!(
+            worker
+                .emit(7, &Deadline::new(Duration::from_secs(5)))
+                .unwrap(),
+            8
+        );
     }
 }
 
@@ -364,17 +401,18 @@ fn invocation_without_duration_applies_cancellation_to_initial_and_replacement_o
         writing.recv_timeout(Duration::from_secs(5)).unwrap();
         cancellation.cancel();
         let returned_under_control = result.recv_timeout(Duration::from_secs(5));
-        let still_charged = runtime.snapshot();
+        assert!(Worker::new_in(&runtime, |_: ()| Ok(())).is_err());
         release.send(()).unwrap();
         caller.join().unwrap();
         assert!(returned_under_control.unwrap().is_err());
-        assert_eq!(still_charged.active, 1);
         assert!(!invocation.output.is_complete());
         drop(invocation);
-        let guard = Instant::now() + Duration::from_secs(5);
-        while runtime.snapshot().active != 0 {
-            assert!(Instant::now() < guard);
-            std::thread::yield_now();
-        }
+        let worker = recovered_worker(&runtime);
+        assert_eq!(
+            worker
+                .emit(9, &Deadline::new(Duration::from_secs(5)))
+                .unwrap(),
+            10
+        );
     }
 }

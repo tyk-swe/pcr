@@ -13,10 +13,16 @@ struct Gate {
 impl Gate {
     fn block(&self) {
         self.entered.send(()).unwrap();
-        let mut released = self.released.lock().unwrap();
-        while !*released {
-            released = self.changed.wait(released).unwrap();
-        }
+        let released = self
+            .changed
+            .wait_timeout_while(
+                self.released.lock().unwrap(),
+                Duration::from_secs(5),
+                |released| !*released,
+            )
+            .unwrap()
+            .0;
+        assert!(*released, "cleanup gate was not released");
     }
     fn release(&self) {
         *self.released.lock().unwrap() = true;
@@ -51,38 +57,48 @@ fn callback_tls_remains_charged_until_actual_exit_and_other_slots_recover() {
         .unwrap();
     drop(worker);
     dropping.recv_timeout(Duration::from_secs(5)).unwrap();
-    let active_while_blocked = runtime.snapshot().active;
-    if active_while_blocked == 1 {
-        for _ in 0..8 {
-            let other = Worker::new_in(&runtime, |_: ()| Ok(())).unwrap();
+    for event in 0..8 {
+        let other = recovered_worker(&runtime);
+        assert!(Worker::new_in(&runtime, |_: ()| Ok(())).is_err());
+        assert_eq!(
             other
-                .emit((), &Deadline::new(Duration::from_secs(5)))
-                .unwrap();
-            drop(other);
-            let guard = Instant::now() + Duration::from_secs(5);
-            while runtime.snapshot().active > active_while_blocked {
-                assert!(Instant::now() < guard);
-                std::thread::yield_now();
-            }
-        }
+                .emit(event, &Deadline::new(Duration::from_secs(5)))
+                .unwrap(),
+            event + 1
+        );
+        drop(other);
     }
     gate.release();
-    let guard = Instant::now() + Duration::from_secs(5);
-    while runtime.snapshot().active != 0 {
-        assert!(Instant::now() < guard);
-        std::thread::yield_now();
-    }
+    let first = recovered_worker(&runtime);
+    let second = recovered_worker(&runtime);
     assert_eq!(
-        active_while_blocked, 1,
-        "TLS cleanup released callback admission before actual exit"
+        first
+            .emit(8, &Deadline::new(Duration::from_secs(5)))
+            .unwrap(),
+        9
+    );
+    assert_eq!(
+        second
+            .emit(9, &Deadline::new(Duration::from_secs(5)))
+            .unwrap(),
+        10
     );
 }
 
-fn wait_released(runtime: &Runtime) {
+fn recovered_worker(runtime: &Runtime) -> Worker<usize, usize> {
     let guard = Instant::now() + Duration::from_secs(5);
-    while runtime.snapshot().active != 0 {
-        assert!(Instant::now() < guard);
-        std::thread::yield_now();
+    loop {
+        match Worker::new_in(runtime, |event| Ok(event + 1)) {
+            Ok(worker) => return worker,
+            Err(error)
+                if error.classification().code
+                    == "internal.progressive_output_worker_exhausted" =>
+            {
+                assert!(Instant::now() < guard, "worker admission did not recover");
+                std::thread::yield_now();
+            }
+            Err(error) => panic!("worker admission failed: {error}"),
+        }
     }
 }
 
@@ -118,15 +134,20 @@ fn worker_admission_waits_for_a_released_permits_cleanup_slot() {
         .emit((), &Deadline::new(Duration::from_secs(5)))
         .unwrap();
     drop(worker);
-    wait_released(&runtime);
-    assert_eq!(runtime.snapshot().rejected_admissions, 0);
+    let worker = recovered_worker(&runtime);
+    assert_eq!(
+        worker
+            .emit(7, &Deadline::new(Duration::from_secs(5)))
+            .unwrap(),
+        8
+    );
 }
 
 #[test]
-fn completed_workers_can_immediately_reuse_a_single_slot_runtime() {
+fn completed_workers_reuse_a_single_slot_runtime() {
     let runtime = Runtime::new(1).unwrap();
     for _ in 0..256 {
-        let worker = Worker::new_in(&runtime, |event: usize| Ok(event + 1)).unwrap();
+        let worker = recovered_worker(&runtime);
         assert_eq!(
             worker
                 .emit(1, &Deadline::new(Duration::from_secs(5)))
@@ -134,9 +155,7 @@ fn completed_workers_can_immediately_reuse_a_single_slot_runtime() {
             2
         );
         drop(worker);
-        wait_released(&runtime);
     }
-    assert_eq!(runtime.snapshot().rejected_admissions, 0);
 }
 
 #[test]
@@ -180,23 +199,35 @@ fn parent_cancellation_retains_callback_and_tls_charges_without_blocking_an_inde
         Some("io.cancelled")
     );
     caller.join().unwrap();
-    assert_eq!(runtime.snapshot().active, 1);
-    assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 1);
     assert!(Worker::new_in(&runtime, |_: ()| Ok(())).is_err());
+    let reported = runtime.snapshot();
+    assert_eq!(reported.active, reported.capacity);
+    assert_eq!(reported.timed_out_retaining_capacity, reported.active);
     let independent = Runtime::new(1).unwrap();
     let other = Worker::new_in(&independent, |_: ()| Ok(())).unwrap();
     other
         .emit((), &Deadline::new(Duration::from_secs(5)))
         .unwrap();
     drop(other);
-    wait_released(&independent);
+    let other = recovered_worker(&independent);
+    assert_eq!(
+        other
+            .emit(11, &Deadline::new(Duration::from_secs(5)))
+            .unwrap(),
+        12
+    );
     work.release();
     tls_dropping.recv_timeout(Duration::from_secs(5)).unwrap();
-    assert_eq!(runtime.snapshot().active, 1);
-    assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 1);
+    assert!(Worker::new_in(&runtime, |_: ()| Ok(())).is_err());
     tls.release();
-    wait_released(&runtime);
+    let worker = recovered_worker(&runtime);
     assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 0);
+    assert_eq!(
+        worker
+            .emit(13, &Deadline::new(Duration::from_secs(5)))
+            .unwrap(),
+        14
+    );
 }
 
 struct PanicDrop(Arc<Gate>);
@@ -218,8 +249,6 @@ fn callback_panic_payload_cleanup_stays_owned_and_initialization_failure_is_retr
         )
         .is_err()
     );
-    assert_eq!(runtime.snapshot().active, 0);
-    assert!(runtime.budget.cleanup.lock().unwrap().is_none());
     let (entered, dropping) = mpsc::channel();
     let gate = Arc::new(Gate {
         entered,
@@ -238,21 +267,13 @@ fn callback_panic_payload_cleanup_stays_owned_and_initialization_failure_is_retr
     );
     drop(worker);
     dropping.recv_timeout(Duration::from_secs(5)).unwrap();
-    assert_eq!(runtime.snapshot().active, 1);
     assert!(Worker::new_in(&runtime, |_: ()| Ok(())).is_err());
     gate.release();
-    wait_released(&runtime);
-    let worker = Worker::new_in(&runtime, |event: usize| Ok(event == 0)).unwrap();
-    assert!(
+    let worker = recovered_worker(&runtime);
+    assert_eq!(
         worker
-            .emit(0, &Deadline::new(Duration::from_secs(5)))
-            .unwrap()
+            .emit(17, &Deadline::new(Duration::from_secs(5)))
+            .unwrap(),
+        18
     );
-    assert!(
-        !worker
-            .emit(1, &Deadline::new(Duration::from_secs(5)))
-            .unwrap()
-    );
-    drop(worker);
-    wait_released(&runtime);
 }

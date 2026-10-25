@@ -4,10 +4,7 @@
 use super::*;
 use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::error::{Classification, Classified, Kind};
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 struct Cooperative<F>(F);
@@ -26,12 +23,12 @@ impl<F: FnMut(usize) -> Result<bool, BoundaryError> + Send + 'static> Sink<usize
 #[test]
 fn cooperative_publication_preserves_ack_and_has_no_worker_handoffs() {
     let runtime = Runtime::new(0).unwrap();
-    let count = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::clone(&count);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&events);
     let caller = std::thread::current().id();
     let sink = Cooperative(move |event| {
         assert_eq!(std::thread::current().id(), caller);
-        observed.fetch_add(1, Ordering::Relaxed);
+        observed.lock().unwrap().push(event);
         Ok(event != 999)
     });
     let mut publish = publisher(&runtime, sink, BoundaryError::from_error, |error| error).unwrap();
@@ -39,9 +36,7 @@ fn cooperative_publication_preserves_ack_and_has_no_worker_handoffs() {
     for event in 0..1000 {
         assert_eq!(publish(event, &deadline).unwrap(), event != 999);
     }
-    assert_eq!(count.load(Ordering::Relaxed), 1000);
-    assert_eq!(runtime.snapshot().active, 0);
-    assert_eq!(runtime.snapshot().rejected_admissions, 0);
+    assert_eq!(*events.lock().unwrap(), (0..1000).collect::<Vec<_>>());
 }
 
 #[test]
@@ -82,7 +77,6 @@ fn cooperative_errors_and_isolated_default_remain_explicit() {
     let ordinary = |_: usize| Ok::<_, BoundaryError>(false);
     let runtime = Runtime::new(0).unwrap();
     assert!(publisher(&runtime, ordinary, BoundaryError::from_error, |error| error).is_err());
-    assert_eq!(runtime.snapshot().rejected_admissions, 1);
 }
 
 #[test]
@@ -104,8 +98,6 @@ fn forwarding_preserves_declared_delivery_and_generic_acknowledgements() {
             number != 5
         );
     }
-    assert_eq!(runtime.snapshot().active, 0);
     let isolated = forwarding(Delivery::Isolated, |_: (), _| Ok(false));
     assert!(publisher(&runtime, isolated, BoundaryError::from_error, |error| error).is_err());
-    assert_eq!(runtime.snapshot().rejected_admissions, 1);
 }

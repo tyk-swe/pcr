@@ -20,23 +20,31 @@ struct Gate {
     destroyed: AtomicUsize,
     hold_stats: AtomicBool,
 }
+impl Gate {
+    fn wait_released(&self) {
+        let released = self
+            .changed
+            .wait_timeout_while(
+                self.released.lock().unwrap(),
+                Duration::from_secs(10),
+                |released| !*released,
+            )
+            .unwrap()
+            .0;
+        assert!(*released, "capture source was not released");
+    }
+}
 struct Source(Arc<Gate>);
 impl NativeCaptureSource for Source {
     fn next_event(&mut self) -> Result<NativeCaptureEvent, Error> {
         self.0.entered.fetch_add(1, Ordering::SeqCst);
-        let mut released = self.0.released.lock().unwrap();
-        while !*released {
-            released = self.0.changed.wait(released).unwrap();
-        }
+        self.0.wait_released();
         Ok(NativeCaptureEvent::Closed)
     }
     fn stats(&mut self) -> Result<NativeCaptureStats, Error> {
         if self.0.hold_stats.load(Ordering::SeqCst) {
             self.0.entered.fetch_add(1, Ordering::SeqCst);
-            let mut released = self.0.released.lock().unwrap();
-            while !*released {
-                released = self.0.changed.wait(released).unwrap();
-            }
+            self.0.wait_released();
         }
         Ok(Default::default())
     }
@@ -104,6 +112,28 @@ fn until(mut predicate: impl FnMut() -> bool) {
     }
 }
 
+fn reused_workers(pool: &Arc<Pool>, count: usize) {
+    let guard = Instant::now() + Duration::from_secs(5);
+    let permits: Vec<_> = (0..count)
+        .map(|_| {
+            loop {
+                match pool.admit() {
+                    Ok(permit) => break permit,
+                    Err(_) => {
+                        assert!(Instant::now() < guard, "capture admission did not recover");
+                        std::thread::yield_now();
+                    }
+                }
+            }
+        })
+        .collect();
+    for (index, permit) in permits.into_iter().enumerate() {
+        let task = permit.spawn(move || index + 7).unwrap();
+        assert!(matches!(task.wait(&Deadline::new(Duration::from_secs(5))),
+            crate::workers::Waited::Finished(Ok(value)) if value == index + 7));
+    }
+}
+
 #[test]
 fn unfinished_group_readers_stay_charged_through_drop_until_actual_release() {
     for count in [1, 4, 15] {
@@ -135,24 +165,29 @@ fn unfinished_group_readers_stay_charged_through_drop_until_actual_release() {
             )
             .unwrap();
         until(|| gate.entered.load(Ordering::SeqCst) == count);
+        let headroom = pool.admit().unwrap();
+        assert!(pool.admit().is_err());
         assert!(
             group
                 .shutdown_until(&Deadline::new(Duration::ZERO))
                 .is_err()
         );
         assert_eq!(gate.stopped.load(Ordering::SeqCst), count);
-        assert_eq!(pool.snapshot().active, count);
+        assert_eq!(pool.snapshot().active, count + 1);
         assert_eq!(pool.snapshot().cleanup_retaining_capacity, count);
         drop(group);
         assert_eq!(
             pool.snapshot().active,
-            count,
+            count + 1,
             "drop must retain unfinished cleanup"
         );
         assert_eq!(gate.destroyed.load(Ordering::SeqCst), 0);
+        assert!(pool.admit().is_err());
         *gate.released.lock().unwrap() = true;
         gate.changed.notify_all();
-        until(|| pool.snapshot().active == 0);
+        until(|| gate.destroyed.load(Ordering::SeqCst) == count);
+        reused_workers(&pool, count);
+        drop(headroom);
         assert_eq!(pool.snapshot().cleanup_retaining_capacity, 0);
         assert_eq!(gate.destroyed.load(Ordering::SeqCst), count);
     }
@@ -192,18 +227,18 @@ fn elapsed_capture_wait(readiness: bool) {
     let advanced = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let clock = Arc::clone(&advanced);
     let origin = Instant::now();
-    let samples = AtomicUsize::new(0);
+    let sampling = Arc::new(AtomicBool::new(false));
+    let armed = Arc::clone(&sampling);
     let (sampled, waiting) = mpsc::sync_channel(1);
     let parent = Deadline::with_time_source(Duration::from_secs(30), move || {
         let now = origin + Duration::from_secs(clock.load(Ordering::SeqCst));
-        // Constructor, inherited check, then the inherited remainder used by
-        // wait_end. Return this sampled value even when the test advances time.
-        if samples.fetch_add(1, Ordering::SeqCst) == 2 {
+        if sampling.swap(false, Ordering::SeqCst) {
             sampled.send(()).unwrap();
         }
         now
     });
     let caller = Deadline::new(Duration::from_secs(30)).with_parent(Some(Arc::new(parent)));
+    armed.store(true, Ordering::SeqCst);
     let (returned, result) = mpsc::sync_channel(1);
     let waiter = std::thread::spawn(move || {
         let interrupted = if readiness {
@@ -222,10 +257,13 @@ fn elapsed_capture_wait(readiness: bool) {
     advanced.store(31, Ordering::SeqCst);
     let returned_under_control = result.recv_timeout(Duration::from_secs(5));
     let retained = pool.snapshot();
+    let headroom = pool.admit().unwrap();
+    assert!(pool.admit().is_err());
     *gate.released.lock().unwrap() = true;
     gate.changed.notify_all();
     waiter.join().unwrap();
-    until(|| pool.snapshot().active == 0);
+    reused_workers(&pool, 1);
+    drop(headroom);
     assert!(returned_under_control.expect("native capture ignored inherited elapsed control"));
     assert_eq!(retained.active, 1);
     assert_eq!(retained.cleanup_retaining_capacity, 1);
@@ -289,14 +327,9 @@ fn zero_duration_native_poll_preserves_queued_records_and_cancellation_before_de
     ));
     let immediate = Deadline::new(Duration::ZERO)
         .with_parent(Some(Arc::new(Deadline::new(Duration::from_secs(5)))));
-    assert_eq!(
-        session
-            .next_captured_frame(&immediate)
-            .unwrap()
-            .unwrap()
-            .identity(),
-        identity
-    );
+    let received = session.next_captured_frame(&immediate).unwrap().unwrap();
+    assert_eq!(received.identity(), identity);
+    assert_eq!(received.frame.bytes().as_ref(), &[7]);
     assert!(session.next_captured_frame(&immediate).unwrap().is_none());
     assert!(
         session
@@ -305,9 +338,12 @@ fn zero_duration_native_poll_preserves_queued_records_and_cancellation_before_de
     );
     drop(session);
     let retained = pool.snapshot();
+    let headroom = pool.admit().unwrap();
+    assert!(pool.admit().is_err());
     *gate.released.lock().unwrap() = true;
     gate.changed.notify_all();
-    until(|| pool.snapshot().active == 0);
+    reused_workers(&pool, 1);
+    drop(headroom);
     assert_eq!(retained.active, 1);
     assert_eq!(retained.cleanup_retaining_capacity, 1);
 }

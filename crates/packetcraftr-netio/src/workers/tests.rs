@@ -15,15 +15,40 @@ fn wait<T>(task: super::Task<T>) -> T {
     }
 }
 
+fn run_after_release(pool: &Arc<Pool>, value: usize) -> usize {
+    let guard = std::time::Instant::now() + Duration::from_secs(5);
+    let permit = loop {
+        match pool.admit() {
+            Ok(permit) => break permit,
+            Err(_) => {
+                assert!(
+                    std::time::Instant::now() < guard,
+                    "native admission did not recover"
+                );
+                std::thread::yield_now();
+            }
+        }
+    };
+    wait(permit.spawn(move || value + 1).unwrap())
+}
+
+fn sockets(pool: &Arc<Pool>, count: usize) -> Vec<SocketPermit> {
+    (0..count)
+        .map(|_| {
+            wait(
+                pool.admit_connect()
+                    .unwrap()
+                    .spawn(super::SocketReservation::into_socket)
+                    .unwrap(),
+            )
+        })
+        .collect()
+}
+
 #[test]
 fn established_data_keeps_one_root_charge_without_execution_and_leaves_control_headroom() {
     let pool = Arc::new(Pool::new(4));
-    let mut sockets: Vec<SocketPermit> = Vec::new();
-    for _ in 0..3 {
-        let permit = pool.admit_connect().unwrap();
-        let task = permit.spawn(super::SocketReservation::into_socket).unwrap();
-        sockets.push(wait(task));
-    }
+    let held = sockets(&pool, 3);
     assert_eq!(pool.snapshot().active, 3);
     assert_eq!(pool.tcp_snapshot().active, 3);
     assert_eq!(pool.socket_snapshot().active, 3);
@@ -36,14 +61,18 @@ fn established_data_keeps_one_root_charge_without_execution_and_leaves_control_h
     let task = control.spawn(|| 42).unwrap();
     assert_eq!(wait(task), 42);
     assert_eq!(pool.snapshot().active, 3);
-    drop(sockets);
+    drop(held);
     assert_eq!(pool.snapshot().active, 0);
     assert_eq!(pool.socket_snapshot().active, 0);
+    let held = sockets(&pool, 3);
+    assert!(pool.admit_connect().is_err());
+    assert_eq!(run_after_release(&pool, 41), 42);
+    drop(held);
 }
 
 #[test]
 fn a_socket_transfer_keeps_execution_until_the_work_really_finishes() {
-    let pool = Arc::new(Pool::new(4));
+    let pool = Arc::new(Pool::new(1));
     let permit = pool.admit_connect().unwrap();
     let (published, received) = mpsc::sync_channel(1);
     let (release, held) = mpsc::sync_channel(1);
@@ -51,7 +80,7 @@ fn a_socket_transfer_keeps_execution_until_the_work_really_finishes() {
         .spawn(move |socket| {
             let socket = socket.into_socket();
             published.send(()).unwrap();
-            held.recv().unwrap();
+            held.recv_timeout(Duration::from_secs(5)).unwrap();
             socket
         })
         .unwrap();
@@ -59,12 +88,16 @@ fn a_socket_transfer_keeps_execution_until_the_work_really_finishes() {
     assert_eq!(pool.snapshot().active, 1);
     assert_eq!(pool.execution_snapshot().active, 1);
     assert_eq!(pool.socket_snapshot().active, 1);
+    assert!(pool.admit().is_err());
+    assert!(pool.admit_connect().is_err());
     release.send(()).unwrap();
     let socket = wait(task);
     assert_eq!(pool.execution_snapshot().active, 0);
     assert_eq!(pool.snapshot().active, 1);
+    assert!(pool.admit().is_err());
     drop(socket);
     assert_eq!(pool.snapshot().active, 0);
+    assert_eq!(run_after_release(&pool, 43), 44);
 }
 
 #[test]
@@ -72,7 +105,9 @@ fn cancelled_unfinished_work_stays_charged_until_actual_completion() {
     let pool = Arc::new(Pool::new(1));
     let permit = pool.admit().unwrap();
     let (release, held) = mpsc::sync_channel(1);
-    let task = permit.spawn(move || held.recv().unwrap()).unwrap();
+    let task = permit
+        .spawn(move || held.recv_timeout(Duration::from_secs(5)).unwrap())
+        .unwrap();
     task.retention_marker().mark_retained();
     task.retention_marker().mark_retained();
     assert_eq!(pool.snapshot().active, 1);
@@ -83,6 +118,7 @@ fn cancelled_unfinished_work_stays_charged_until_actual_completion() {
     wait(task);
     assert_eq!(pool.snapshot().active, 0);
     assert_eq!(pool.snapshot().cleanup_retaining_capacity, 0);
+    assert_eq!(run_after_release(&pool, 47), 48);
 }
 
 #[test]
@@ -104,6 +140,7 @@ fn a_root_lease_retains_admission_without_retaining_finished_execution() {
     drop(lease);
     assert_eq!(pool.snapshot().active, 0);
     assert_eq!(pool.snapshot().cleanup_retaining_capacity, 0);
+    assert_eq!(run_after_release(&pool, 49), 50);
 }
 
 #[test]
@@ -119,6 +156,9 @@ fn unpromoted_socket_reservations_release_every_charge() {
     let permit = pool.admit_connect().unwrap();
     wait(permit.spawn(|_reservation| ()).unwrap());
     assert_released();
+    let held = sockets(&pool, 3);
+    assert!(pool.admit_connect().is_err());
+    drop(held);
 
     let permit = pool.admit_connect().unwrap();
     let task = permit
@@ -129,31 +169,29 @@ fn unpromoted_socket_reservations_release_every_charge() {
         Waited::Finished(Err(_))
     ));
     assert_released();
+    let held = sockets(&pool, 3);
+    assert!(pool.admit_connect().is_err());
+    drop(held);
 }
 
 #[test]
 fn rejected_connect_dispatch_drops_captures_outside_lock_before_releasing_admission() {
     struct CaptureDrop {
         pool: Arc<Pool>,
-        snapshot: mpsc::Sender<(usize, usize)>,
+        admission: mpsc::Sender<bool>,
     }
 
     impl Drop for CaptureDrop {
         fn drop(&mut self) {
-            self.snapshot
-                .send((
-                    self.pool.snapshot().active,
-                    self.pool.execution_snapshot().active,
-                ))
-                .unwrap();
+            self.admission.send(self.pool.admit().is_err()).unwrap();
         }
     }
 
-    let pool = Arc::new(Pool::new(4));
-    let (snapshot, observed) = mpsc::channel();
+    let pool = Arc::new(Pool::new(1));
+    let (admission, observed) = mpsc::channel();
     let capture = CaptureDrop {
         pool: Arc::clone(&pool),
-        snapshot,
+        admission,
     };
     let permit = pool.admit_connect().unwrap();
     let caller = std::thread::spawn(move || {
@@ -166,15 +204,13 @@ fn rejected_connect_dispatch_drops_captures_outside_lock_before_releasing_admiss
                 .is_err()
         );
     });
-    assert_eq!(
-        observed.recv_timeout(Duration::from_secs(5)).unwrap(),
-        (1, 1)
-    );
+    assert!(observed.recv_timeout(Duration::from_secs(5)).unwrap());
     caller.join().unwrap();
     assert_eq!(pool.snapshot().active, 0);
     assert_eq!(pool.tcp_snapshot().active, 0);
     assert_eq!(pool.execution_snapshot().active, 0);
     assert_eq!(pool.socket_snapshot().active, 0);
+    assert_eq!(run_after_release(&pool, 53), 54);
 }
 
 struct NeverConnect;
@@ -190,6 +226,19 @@ impl crate::tcp::Provider for NeverConnect {
     }
 }
 
+struct RefusedConnect;
+
+impl crate::tcp::Provider for RefusedConnect {
+    type Stream = crate::tcp::SystemStream;
+    fn connect(
+        &self,
+        _: std::net::SocketAddr,
+        _: &Deadline,
+    ) -> Result<Self::Stream, crate::tcp::Error> {
+        Err(std::io::Error::from(std::io::ErrorKind::ConnectionRefused).into())
+    }
+}
+
 struct PanicPayloadGate {
     entered: mpsc::Sender<()>,
     released: std::sync::Mutex<bool>,
@@ -200,10 +249,17 @@ struct GatedPanicPayload(Arc<PanicPayloadGate>);
 impl Drop for GatedPanicPayload {
     fn drop(&mut self) {
         self.0.entered.send(()).unwrap();
-        let mut released = self.0.released.lock().unwrap();
-        while !*released {
-            released = self.0.changed.wait(released).unwrap();
-        }
+        let released = self
+            .0
+            .changed
+            .wait_timeout_while(
+                self.0.released.lock().unwrap(),
+                Duration::from_secs(5),
+                |released| !*released,
+            )
+            .unwrap()
+            .0;
+        assert!(*released, "panic cleanup gate was not released");
         panic!("injected panic-payload destructor failure");
     }
 }
@@ -250,6 +306,7 @@ fn work_panic_payload_cleanup_stays_charged_after_caller_cancellation() {
     assert_eq!(pool.snapshot().active, 0);
     assert_eq!(pool.execution_snapshot().active, 0);
     assert_eq!(pool.snapshot().cleanup_retaining_capacity, 0);
+    assert_eq!(run_after_release(&pool, 59), 60);
 }
 
 struct PanickingConnect(Arc<PanicPayloadGate>);
@@ -298,13 +355,45 @@ fn tcp_operation_budget_stays_charged_through_opaque_panic_cleanup() {
     drop(pending);
     assert_eq!(budget.active(), 1);
     assert_eq!(pool.snapshot().cleanup_retaining_capacity, 1);
+    assert!(matches!(
+        budget.start_on(
+            &pool,
+            Arc::new(NeverConnect),
+            "127.0.0.1:9".parse().unwrap(),
+            &control
+        ),
+        Err(crate::tcp::Error::Capacity { .. })
+    ));
     *gate.released.lock().unwrap() = true;
     gate.changed.notify_all();
     let guard = std::time::Instant::now() + Duration::from_secs(5);
-    while pool.snapshot().active != 0 || budget.active() != 0 {
-        assert!(std::time::Instant::now() < guard);
-        std::thread::yield_now();
-    }
+    let mut next = loop {
+        match budget.start_on(
+            &pool,
+            Arc::new(RefusedConnect),
+            "127.0.0.1:9".parse().unwrap(),
+            &control,
+        ) {
+            Ok(pending) => break pending,
+            Err(crate::tcp::Error::Capacity { .. }) => {
+                assert!(
+                    std::time::Instant::now() < guard,
+                    "TCP admission did not recover"
+                );
+                std::thread::yield_now();
+            }
+            Err(error) => panic!("TCP admission failed: {error}"),
+        }
+    };
+    let outcome = next
+        .wait(&Deadline::new(Duration::from_secs(5)))
+        .unwrap()
+        .unwrap();
+    assert!(outcome.attempted);
+    assert!(
+        matches!(outcome.result, Err(crate::tcp::Error::Socket(error))
+        if error.kind() == std::io::ErrorKind::ConnectionRefused)
+    );
     assert_eq!(pool.snapshot().cleanup_retaining_capacity, 0);
 }
 
@@ -351,11 +440,22 @@ fn nested_lookup_allocation_stays_charged_through_cancelled_panic_cleanup() {
     assert_eq!(allocation.snapshot().cleanup_retaining_capacity, 1);
     assert_eq!(root.snapshot().cleanup_retaining_capacity, 1);
     assert!(allocation.admit().is_err());
+    let headroom = root.admit().unwrap();
+    assert!(root.admit().is_err());
+    drop(headroom);
     *gate.released.lock().unwrap() = true;
     gate.changed.notify_all();
-    let guard = std::time::Instant::now() + Duration::from_secs(5);
-    while root.snapshot().active != 0 || allocation.snapshot().active != 0 {
-        assert!(std::time::Instant::now() < guard);
-        std::thread::yield_now();
-    }
+    assert_eq!(run_after_release(&allocation, 61), 62);
+    assert_eq!(run_after_release(&root, 63), 64);
+    let address = "192.0.2.7".parse().unwrap();
+    assert_eq!(
+        crate::resolution::blocking_lookup_on(
+            &Deadline::new(Duration::from_secs(5)),
+            move || Ok(vec![address]),
+            &allocation,
+            &root,
+        )
+        .unwrap(),
+        [address]
+    );
 }

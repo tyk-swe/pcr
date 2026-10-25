@@ -209,6 +209,7 @@ mod policy_regressions {
 
     #[test]
     fn only_the_first_hsts_field_is_effective() {
+        // https://www.rfc-editor.org/rfc/rfc6797.html#section-8.1, checked 2026-10-25.
         let report = report(
             "Strict-Transport-Security: max-age=0\r\nStrict-Transport-Security: max-age=1\r\n",
         );
@@ -222,6 +223,7 @@ mod policy_regressions {
 
     #[test]
     fn cookie_attribute_whitespace_does_not_hide_protection() {
+        // https://httpwg.org/http-extensions/draft-ietf-httpbis-rfc6265bis.html#name-the-set-cookie-header-field, checked 2026-10-25.
         let report =
             report("Set-Cookie: sid=private; Secure = yes; HttpOnly = yes; SameSite = Lax\r\n");
         assert!(
@@ -235,6 +237,7 @@ mod policy_regressions {
 
     #[test]
     fn the_last_samesite_attribute_is_not_skipped_when_bare() {
+        // https://httpwg.org/http-extensions/draft-ietf-httpbis-rfc6265bis.html#name-storage-model, checked 2026-10-25.
         let report =
             report("Set-Cookie: sid=private; Secure; HttpOnly; SameSite=Lax; SameSite\r\n");
         assert!(

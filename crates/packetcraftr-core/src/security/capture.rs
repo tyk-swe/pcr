@@ -364,7 +364,12 @@ mod tests {
         analysis::Collector as _,
         budget::{Cancellation, Deadline},
     };
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
+
+    fn deadline() -> Deadline {
+        let now = Instant::now();
+        Deadline::with_time_source(Duration::from_secs(1), move || now)
+    }
 
     #[test]
     fn threshold_validation_reports_each_invalid_field_and_accepts_boundaries() {
@@ -532,11 +537,15 @@ mod tests {
 
     #[test]
     fn controlled_finalization_preserves_events_summary_and_completeness() {
-        let run = analysis::Summary::default();
+        let run = analysis::Summary {
+            frames_read: 3,
+            frames_matched: 0,
+            ..Default::default()
+        };
         let (expected_events, expected_report) = collector().finish(&run).unwrap();
         let mut events = Vec::new();
         let report = collector()
-            .finish_controlled(&run, &Deadline::new(Duration::from_secs(1)), &mut |event| {
+            .finish_controlled(&run, &deadline(), &mut |event| {
                 events.push(event);
                 Ok(())
             })
@@ -546,10 +555,23 @@ mod tests {
             serde_json::to_value(expected_events).unwrap()
         );
         assert_eq!(
-            serde_json::to_value(report).unwrap(),
+            serde_json::to_value(&report).unwrap(),
             serde_json::to_value(expected_report).unwrap()
         );
         assert!(events.iter().all(|event| !event.complete));
+        assert_eq!(
+            events
+                .iter()
+                .map(|finding| finding.subject.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+        assert!(
+            events.iter().all(|finding| finding.rule_id == "test"
+                && finding.evidence == json!({"observed": true}))
+        );
+        assert!(!report.completeness.complete);
+        assert_eq!(report.measurements["frames_read"], run.frames_read);
     }
 
     #[test]
@@ -557,7 +579,7 @@ mod tests {
         let run = analysis::Summary::default();
         let mut delivered = 0;
         let error = collector()
-            .finish_controlled(&run, &Deadline::new(Duration::from_secs(1)), &mut |_| {
+            .finish_controlled(&run, &deadline(), &mut |_| {
                 delivered += 1;
                 Err(BoundaryError::from_error(Error::Invalid(
                     "sink refused".into(),
@@ -574,8 +596,7 @@ mod tests {
                 .is_err()
         );
         let cancellation = Cancellation::default();
-        let deadline =
-            Deadline::new(Duration::from_secs(1)).with_cancellation(Some(cancellation.clone()));
+        let deadline = deadline().with_cancellation(Some(cancellation.clone()));
         let mut delivered = 0;
         assert!(
             collector()
@@ -623,59 +644,96 @@ mod improvement_tests {
                 .is_err()
             );
         }
-        let collector = Collector::new(
+        let mut collector = Collector::new(
             Mode::Hunt(document("dns", "EXAMPLE.TEST.")),
             Limits::default(),
             application::Limits::default(),
         )
         .unwrap();
-        let Mode::Hunt(doc) = collector.mode else {
-            panic!()
-        };
-        assert_eq!(doc.indicators[0].value, "example.test");
+        collector
+            .dns_events(vec![dns_event("ExAmPlE.TeSt.")])
+            .unwrap();
+        let (findings, _) =
+            analysis::Collector::finish(collector, &analysis::Summary::default()).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "ioc.match");
+        assert_eq!(findings[0].indicator_id.as_deref(), Some("dns"));
+        assert_eq!(findings[0].frames, [1]);
     }
 
     #[test]
     fn nanosecond_beacon_intervals_retain_precision_at_modern_epochs() {
+        use crate::{
+            build::Builder,
+            capture_file::{PcapOptions, Reader, TimestampResolution, Writer},
+            codec::Addresses,
+            frame::{Frame, LinkType},
+            packet::Packet,
+            protocol::{builtin, network::Ipv4, transport::Tcp},
+        };
         let options = BeaconOptions {
             min_attempts: 3,
             min_interval_seconds: 1e-10,
             max_cv: 0.0,
         };
-        let mut collector = Collector::new(
+        let collector = Collector::new(
             Mode::Beacons(options),
             Limits::default(),
             application::Limits::default(),
         )
         .unwrap();
-        let epoch = Duration::from_secs(1_800_000_000);
-        collector.beacons.insert(
-            (
-                0,
-                "192.0.2.1".parse().unwrap(),
-                "192.0.2.2".parse().unwrap(),
-                443,
-            ),
-            BeaconGroup {
-                times: vec![
-                    epoch,
-                    epoch + Duration::from_nanos(1),
-                    epoch + Duration::from_nanos(2),
-                ],
-                frames: vec![1, 2, 3],
+        let registry = builtin::registry();
+        let builder = Builder::new(registry.clone());
+        let mut writer = Writer::pcap_with_options(
+            Vec::new(),
+            LinkType::RAW,
+            PcapOptions {
+                timestamp_resolution: TimestampResolution::Decimal(9),
+                ..Default::default()
             },
-        );
-        collector
-            .finish_beacons(
-                options,
-                &analysis::Summary::default(),
-                &crate::budget::Deadline::new(Duration::from_secs(1)),
-            )
+        )
+        .unwrap();
+        let epoch = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        // Windows SystemTime represents 100 ns intervals, checked 2026-10-25.
+        // https://doc.rust-lang.org/std/time/struct.SystemTime.html#platform-specific-behavior
+        let interval = Duration::from_nanos(100);
+        for index in 0..3 {
+            let mut packet = Packet::new();
+            packet.push(Ipv4 {
+                source: "192.0.2.1".parse().unwrap(),
+                destination: "192.0.2.2".parse().unwrap(),
+                ..Default::default()
+            });
+            packet.push(Tcp {
+                source_port: 1000 + index as u16,
+                destination_port: 443,
+                sequence: index,
+                flags: Tcp::SYN,
+                ..Default::default()
+            });
+            let built = builder
+                .build(packet, Addresses::default(), Default::default())
+                .unwrap();
+            writer
+                .write_frame(
+                    &Frame::new(epoch + interval * index, LinkType::RAW, built.bytes).unwrap(),
+                )
+                .unwrap();
+        }
+        let capture = writer.into_inner();
+        let mut reader = Reader::new(&capture[..]).unwrap();
+        let outcome = analysis::Session::new(registry, Default::default(), collector)
+            .run(&mut reader, |_| Ok(()), |_| Ok(()))
             .unwrap();
-        assert_eq!(collector.report.findings.len(), 1);
+        assert_eq!(outcome.run.frames_read, 3);
+        assert_eq!(outcome.summary.findings.len(), 1);
+        let finding = &outcome.summary.findings[0];
+        assert_eq!(finding.rule_id, "traffic.periodic_connections");
+        assert_eq!(finding.frames, [1, 2, 3]);
+        assert_eq!(finding.evidence["attempts"], 3);
         assert_eq!(
-            collector.report.findings[0].evidence["mean_interval_seconds"],
-            json!(1e-9)
+            finding.evidence["mean_interval_seconds"],
+            json!(interval.as_secs_f64())
         );
     }
 

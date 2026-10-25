@@ -197,20 +197,27 @@ mod input_regressions {
 
     #[test]
     fn domains_have_at_most_one_root_terminator() {
-        assert!(document("dns", Kind::Domain, "example.test.").is_ok());
+        let parsed = document("dns", Kind::Domain, "example.test.").unwrap();
+        assert!(parsed.indicators[0].matches_domain("EXAMPLE.TEST."));
+        assert!(!parsed.indicators[0].matches_domain("badexample.test"));
         assert!(document("dns", Kind::Domain, "example.test..").is_err());
     }
 
     #[test]
     fn cidr_prefixes_are_decimal_not_signed() {
         assert!(document("net", Kind::Cidr, "192.0.2.0/+24").is_err());
-        assert!(document("net", Kind::Cidr, "2001:db8::/0").is_ok());
+        let parsed = document("net", Kind::Cidr, "2001:db8::/0").unwrap();
+        assert!(parsed.indicators[0].matches_ip("2001:db9::7".parse().unwrap()));
+        assert!(parsed.indicators[0].matches_ip("::1".parse().unwrap()));
+        assert!(!parsed.indicators[0].matches_ip("192.0.2.1".parse().unwrap()));
     }
 
     #[test]
     fn blank_identifiers_are_not_useful_evidence_names() {
         assert!(document("   ", Kind::Ip, "192.0.2.1").is_err());
-        assert!(document("dns name", Kind::Domain, "example.test").is_ok());
+        let parsed = document("dns name", Kind::Domain, "example.test").unwrap();
+        assert_eq!(parsed.indicators[0].id, "dns name");
+        assert!(parsed.indicators[0].matches_domain("example.test"));
     }
 
     #[test]

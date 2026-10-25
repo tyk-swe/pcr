@@ -55,8 +55,8 @@ def load_manifest(path):
         raise SystemExit(f'cannot load build metadata {path}: {error}') from error
 
 
-def binary_version(binary, binary_digest):
-    version = subprocess.check_output([str(binary), '--version'], text=True,
+def binary_version(binary: pathlib.Path, binary_digest: str) -> str:
+    version = subprocess.check_output([str(binary), '-V'], text=True,
                                       encoding='utf-8', timeout=COMMAND_TIMEOUT).strip()
     if digest(binary) != binary_digest:
         raise ValueError('binary changed while reading its version')

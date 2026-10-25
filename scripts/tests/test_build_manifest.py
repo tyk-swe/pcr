@@ -48,7 +48,7 @@ class BuildManifestTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(result.stdout, '')
-                failed_command = ([str(binary), '--version'] if failed == 'binary'
+                failed_command = ([str(binary), '-V'] if failed == 'binary'
                                   else ['rustc', '--version', '--verbose'])
                 cause = subprocess.CalledProcessError(7, failed_command)
                 self.assertEqual(result.stderr, f'build metadata failed: {cause}\n')
@@ -59,7 +59,11 @@ class BuildManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             binary, compiler, output = root / 'packetcraftr', root / 'rustc', root / 'metadata.json'
-            executable(binary, 'print("packetcraftr fixture")')
+            executable(binary,
+                       'import sys\n'
+                       'versions = {"-V": "packetcraftr fixture", '
+                       '"--version": "packetcraftr fixture\\nnative features: supplied-native"}\n'
+                       'print(versions[sys.argv[1]])')
             executable(compiler, 'print("rustc fixture\\nhost: fixture")')
             supplied = ['--binary', str(binary), '--commit', 'a' * 40,
                         '--target', 'fixture-target', '--variant', 'fixture-mode']

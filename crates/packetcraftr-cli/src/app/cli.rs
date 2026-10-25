@@ -70,8 +70,6 @@ fn root_after_help() -> String {
     help
 }
 
-/// `scripts/build-manifest.py --verify` compares this text against
-/// `BUILD-METADATA.json`, so this format is part of release packaging.
 fn long_version() -> &'static str {
     static LONG_VERSION: OnceLock<String> = OnceLock::new();
     LONG_VERSION.get_or_init(|| {

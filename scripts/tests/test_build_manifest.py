@@ -4,6 +4,7 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -17,9 +18,14 @@ manifest = load_script('build-manifest')
 
 def identity() -> dict[str, str]:
     return dict(binary='packetcraftr', binary_sha256='a' * 64,
-                version='packetcraftr 0.5.0-beta.3', commit='b' * 40,
+                version='packetcraftr fixture-version', commit='b' * 40,
                 target='x86_64-unknown-linux-gnu', feature_variant='all-features',
-                rustc='rustc 1.98.1\nbinary: rustc')
+                rustc='rustc fixture-version\nbinary: rustc')
+
+
+def executable(path: Path, source: str) -> None:
+    path.write_text('#!/bin/sh\nexec ' + shlex.join((sys.executable, '-c', source)) + ' "$@"\n')
+    path.chmod(0o755)
 
 
 class BuildManifestTests(unittest.TestCase):
@@ -32,8 +38,7 @@ class BuildManifestTests(unittest.TestCase):
                 for path, label, version in ((binary, 'binary', 'packetcraftr fixture'),
                                              (compiler, 'compiler', 'rustc fixture')):
                     body = 'import sys\nsys.exit(7)' if failed == label else f'print({version!r})'
-                    path.write_text(f'#!{sys.executable}\n{body}\n')
-                    path.chmod(0o755)
+                    executable(path, body)
                 result = subprocess.run(
                     [sys.executable, str(ROOT / 'scripts/build-manifest.py'),
                      '--binary', str(binary), '--output', str(output), '--commit', 'a' * 40,
@@ -54,10 +59,8 @@ class BuildManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             binary, compiler, output = root / 'packetcraftr', root / 'rustc', root / 'metadata.json'
-            binary.write_text(f'#!{sys.executable}\nprint("packetcraftr fixture")\n')
-            compiler.write_text(f'#!{sys.executable}\nprint("rustc fixture\\nhost: fixture")\n')
-            binary.chmod(0o755)
-            compiler.chmod(0o755)
+            executable(binary, 'print("packetcraftr fixture")')
+            executable(compiler, 'print("rustc fixture\\nhost: fixture")')
             supplied = ['--binary', str(binary), '--commit', 'a' * 40,
                         '--target', 'fixture-target', '--variant', 'fixture-mode']
             with patch.dict(os.environ, {'PATH': str(root) + os.pathsep + os.environ.get('PATH', '')}):
@@ -71,12 +74,21 @@ class BuildManifestTests(unittest.TestCase):
                 })
                 manifest.main([*supplied, '--verify', str(output)])
                 document = json.loads(output.read_text())
+                for field, value, diagnostic in (
+                    ('commit', 'c' * 40, 'packaged commit'),
+                    ('target', 'other-target', 'packaged target'),
+                    ('feature_variant', 'other-mode', 'packaged feature_variant'),
+                    ('binary', 'renamed-binary', 'packaged binary'),
+                ):
+                    output.write_text(json.dumps(document | {field: value}))
+                    with self.subTest(field=field), self.assertRaisesRegex(SystemExit, diagnostic):
+                        manifest.main([*supplied, '--verify', str(output)])
                 for version in ('packetcraftr earlier', 'packetcraftr later'):
                     output.write_text(json.dumps(document | {'version': version}))
                     with self.subTest(version=version), self.assertRaisesRegex(SystemExit, 'packaged version'):
                         manifest.main([*supplied, '--verify', str(output)])
                 output.write_text(json.dumps(document))
-                binary.write_text(binary.read_text() + 'changed = True\n')
+                binary.write_text(binary.read_text() + '\n')
                 with self.assertRaisesRegex(SystemExit, 'packaged binary'):
                     manifest.main([*supplied, '--verify', str(output)])
 
@@ -88,11 +100,15 @@ class BuildManifestTests(unittest.TestCase):
                 manifest.validate_identity(document)
 
     def test_complete_provenance_is_required(self) -> None:
-        for field in manifest.REQUIRED_FIELDS:
+        for field in identity():
             document = identity()
             del document[field]
             with self.subTest(field=field), self.assertRaises(ValueError):
                 manifest.validate_identity(document)
+            for invalid in ('', ' ', None, True, 7):
+                invalid_document: dict[str, object] = identity() | {field: invalid}
+                with self.subTest(field=field, invalid=invalid), self.assertRaisesRegex(ValueError, field):
+                    manifest.validate_identity(invalid_document)
 
     def test_binary_digest_must_be_sha256(self) -> None:
         document = identity()
@@ -111,10 +127,10 @@ class BuildManifestTests(unittest.TestCase):
 
     def test_compiler_identity_preserves_multiline_but_rejects_controls(self) -> None:
         document = identity()
-        document['rustc'] = 'rustc 1.98.1\r\nbinary:\trustc\nhost: test'
+        document['rustc'] = 'rustc fixture-version\r\nbinary:\trustc\nhost: test'
         manifest.validate_identity(document)
         for control in ('\x00', '\x1b', '\x7f', '\x85'):
-            document['rustc'] = 'rustc 1.98.1' + control
+            document['rustc'] = 'rustc fixture-version' + control
             with self.subTest(control=control), self.assertRaisesRegex(ValueError, 'control'):
                 manifest.validate_identity(document)
 
@@ -128,10 +144,17 @@ class BuildManifestTests(unittest.TestCase):
     def test_invalid_metadata_has_a_contextual_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'BUILD-METADATA.json'
-            for data in [b'\xff', b'{}', b'{"binary":1,"binary":2}', b' ' * (manifest.MAX_MANIFEST_BYTES + 1)]:
+            for data in [b'\xff', b'{}', b'{"binary":1,"binary":2}']:
                 path.write_bytes(data)
                 with self.assertRaisesRegex(SystemExit, 'cannot load build metadata'):
                     manifest.load_manifest(path)
+            encoded = json.dumps(identity()).encode()
+            limit = 64 * 1024
+            path.write_bytes(encoded + b' ' * (limit - len(encoded)))
+            self.assertEqual(manifest.load_manifest(path), identity())
+            path.write_bytes(path.read_bytes() + b' ')
+            with self.assertRaisesRegex(SystemExit, 'cannot load build metadata'):
+                manifest.load_manifest(path)
 
     def test_mode_is_required_before_binary_access(self) -> None:
         with patch.object(manifest, 'digest') as digest:
@@ -152,5 +175,8 @@ class BuildManifestTests(unittest.TestCase):
                     manifest.binary_version(Path('/binary'), 'original')
 
     def test_missing_binary_is_a_clean_failure(self) -> None:
-        with self.assertRaisesRegex(SystemExit, '1'):
-            manifest.main(['--binary', '/missing/binary', '--verify', '/missing/metadata'])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaises(SystemExit) as failure:
+                manifest.main(['--binary', str(root / 'missing-binary'), '--verify', str(root / 'metadata.json')])
+            self.assertEqual(failure.exception.code, 1)

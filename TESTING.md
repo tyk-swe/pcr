@@ -72,7 +72,7 @@ The initial inventory contained 282 Rust tests and 50 Python tests. The initial 
 | Policy resolution | Injected a refusing resolver so denial tests detect provider calls without relying on external DNS. |
 | CLI decode selectors | Replaced a success-only assertion with the actual selected UDP codec. |
 | CLI ranges and stream selectors | Reviewed decimal syntax, one-based positions, frame selection, timestamp scaling and scan-selection cases. Added range/sampling intersection, endpoint bounds, malformed-range diagnostics and complete TCP/UDP stream identities. |
-| Python JSON support | Replaced interpreter allocation measurements with all values preserved and nonfinite values rejected in a wide document. |
+| Python JSON support | Reviewed all 23 helper cases. Replaced allocation measurements with preserved contents, exercised exact byte and nesting boundaries, validated nested siblings after empty containers, and checked file read budgets through a controlled source. Digest validation and atomic replacement permissions now have meaningful coverage. |
 | Mutation enforcement | Added behavioral checks for strict score boundaries, weak groups, incomplete and duplicate results, timeouts, worker failures, shard coverage, deleted tests, shared inputs, source identity and disposable source snapshots. A real two-crate fixture verified that dependent-crate tests kill all five mutants. |
 | Native workers and cleanup | Reviewed runtime, operation, sink, native worker, capture and all nine native registry cases. They now verify admission refusal during callbacks, TLS destruction, panic cleanup and capture shutdown, then successful replacement work after release. Registry tests check delivered replies and recovered capacity rather than private state. Published resource diagnostics remain covered. |
 | CLI serialization | Application, stream and followup cases now verify complete flushed records, byte-budget refusal, terminal errors and worker admission after cancellation. Followup scans use injected providers that cannot access the host network. Machine rendering and remaining serialization cases still need review. |
@@ -210,6 +210,56 @@ All 39 cases from `protocol/message/tests.rs`, `review_tests.rs` and `improvemen
 | `mqtt_persistent_sessions_require_a_client_identifier` | Strengthened. Valid session combinations build exact independent wire bytes and expose the supplied flags, identifier and lifetime. Invalid combinations fail. | Accepting an anonymous persistent session or returning placeholder fields. |
 | `mqtt_subscription_and_will_topics` | Strengthened. Valid subscriptions and will messages expose independent topic, packet and payload fields. Malformed wildcard placement is refused. | Accepting a valid packet but discarding its topic or will payload. |
 | `malformed_resp_lines_and_modbus_ranges_are_refused` | Retained. A RESP line with an embedded carriage return and an excessive Modbus register quantity are refused. | Treating a forbidden line byte or out-of-range request as valid. |
+
+# Python helper case audit
+
+All 23 cases in `scripts/tests/test_script_support.py` are reviewed below. Files and permissions are controlled fixtures. Hash and reserved-name vectors cite primary sources and check dates beside their assertions. The file budget provider permits bounded reads and raises an I/O failure if the consumer exhausts its available bytes. The expected application behavior is a size refusal within that budget, without depending on a particular number of read calls. The default 32 MiB and 64-level boundaries are project-owned parser limits.
+
+| Case | Disposition and protected behavior | Representative defect |
+| --- | --- | --- |
+| `test_digest_rejects_non_regular_inputs` | Retained. A directory cannot be hashed as a file. | Omitting the regular-file check. |
+| `test_digest_matches_sha256` | Strengthened. A cited independent vector and a larger input with distinct final bytes produce the expected SHA-256 digest. No chunk size is pinned. | Hashing only the first block or dropping the tail. |
+| `test_digest_validation_requires_the_complete_lowercase_hex_value` | Added. Complete lowercase hexadecimal digests at supplied widths pass. Wrong lengths, characters, types and trailing data fail. | Accepting a matching prefix or ignoring the supplied digest width. |
+| `test_supported_names_and_reserved_components_are_distinguished` | Added. Supported Unicode and ordinary names pass, while reserved components, separators and control bytes fail. | Rejecting ordinary spaces or permitting a device name with an extension. |
+| `test_wide_json_values_preserve_every_item` | Repaired. All supplied items survive a wide document and a nonfinite final item is rejected. | Returning a truncated list or stopping validation early. |
+| `test_json_reader_rejects_fifo_without_waiting_for_writer` | Retained. An actual named pipe is refused before opening it, with a bounded subprocess wait. | Blocking on a pipe instead of reporting a regular-file refusal. |
+| `test_duplicate_keys_are_rejected_at_any_depth` | Retained. Root and nested duplicates fail. | Silently replacing an earlier object value. |
+| `test_all_nonfinite_spellings_are_rejected` | Retained. Nonfinite tokens and numeric overflow fail. | Trusting the decoder's permissive number defaults. |
+| `test_input_must_be_utf8_not_auto_detected_utf16` | Retained. UTF-16 and UTF-32 byte input cannot bypass the UTF-8 contract. | Passing bytes to an auto-detecting decoder. |
+| `test_surrogates_in_additive_fields_and_keys_are_rejected` | Retained. Invalid surrogate strings and keys fail while a valid supplementary character survives. | Validating only fields consumed by a particular tool. |
+| `test_depth_is_bounded_without_uncaught_recursion` | Strengthened. The complete value survives at the nesting boundary, while excess nesting fails safely. | Rejecting the boundary or silently increasing accepted depth. |
+| `test_nested_siblings_are_validated_after_empty_containers` | Added. Expected nested siblings survive, while later invalid numbers or strings are refused after empty containers. | Ending traversal when the first nested iterator finishes. |
+| `test_default_byte_budget_accepts_its_boundary_and_refuses_excess` | Added. A complete value fits the project byte ceiling and excess input is refused. | Changing the published default ceiling or accepting oversized bytes. |
+| `test_size_is_measured_in_utf8_bytes` | Retained. A multibyte string fits its exact byte budget and fails below it. | Counting characters rather than encoded bytes. |
+| `test_read_has_a_finite_limit` | Strengthened. Odd, even and minimum budgets accept complete boundary values, while oversized input with a valid prefix fails. | Reading too little or accepting a truncated valid prefix as a complete file. |
+| `test_rejected_file_still_respects_the_available_read_budget` | Added. A bounded source yields a normal application size refusal without exhausting its available read credit. | Attempting to read substantially beyond the configured ceiling. |
+| `test_invalid_json_limits_are_rejected_before_io` | Strengthened. Both text and file entry points reject invalid limits and accept the minimum positive limit. | Allowing zero, booleans or fractional limits through one entry point. |
+| `test_prepare_report_removes_stale_success_but_not_input` | Retained. A stale report is removed, while alias refusal preserves the input. | Removing an input before checking aliases. |
+| `test_success_creates_parents_and_utf8_newline` | Retained. A complete UTF-8 JSON value is published under newly created parents with a final portable newline. | Leaving invalid, truncated or platform-dependent report bytes. |
+| `test_serialization_failure_preserves_existing_report` | Strengthened. Invalid numbers, keys and strings leave the previous report intact, including invalid nested siblings. | Replacing the previous report before validating all content. |
+| `test_replacement_retains_the_existing_reports_permissions` | Added. A successful replacement preserves deliberately supplied POSIX permissions and publishes the complete new content. | Replacing a report with temporary-file permissions. |
+| `test_replace_failure_cleans_temporary_file` | Retained. A controlled publication failure preserves the previous report and leaves no partial file. | Leaving an abandoned temporary report after failure. |
+| `test_output_cannot_alias_input` | Retained. Same-path and hard-link aliases are refused, while a distinct output is accepted. | Checking path spelling without checking file identity. |
+
+# Build metadata case audit
+
+All 13 cases in `scripts/tests/test_build_manifest.py` are reviewed below. Version and compiler strings are supplied fixtures, and shell launchers quote the test interpreter path. No installed compiler or binary version is pinned. Required fields come from the independently supplied identity fixture rather than the validator's required-field list. The 64 KiB metadata ceiling is project policy. Release-asset cases are recorded in the enforcement table below, covering all eight cases in their owning file.
+
+| Case | Disposition and protected behavior | Representative defect |
+| --- | --- | --- |
+| `test_command_failures_have_a_clean_diagnostic_and_no_success_report` | Retained. Controlled binary or compiler failure produces exit one, a contextual diagnostic and no success artifact. | Publishing metadata after a failed identity command. |
+| `test_write_and_verify_preserve_supplied_identity_and_detect_binary_changes` | Strengthened. Complete supplied identity is published and verified. Independent commit, target, feature, basename, version and binary-content changes fail verification. | Ignoring one provenance field or a changed binary. |
+| `test_version_and_compiler_payload_cannot_be_blank` | Retained. Prefix-only version and compiler fields are refused. | Treating a product name alone as identity. |
+| `test_complete_provenance_is_required` | Strengthened. Every independently declared identity field is required and rejects blank or incorrectly typed values. | Removing a field from the implementation's required list or accepting a nonstring value. |
+| `test_binary_digest_must_be_sha256` | Retained. A non-digest identity is refused. Detailed width and character cases belong to the shared helper. | Skipping digest validation at the metadata boundary. |
+| `test_binary_name_is_not_an_archive_path` | Retained. Traversal, path separators, reserved components and malformed basenames fail metadata validation. | Allowing metadata to name an unsafe archive destination. |
+| `test_compiler_identity_preserves_multiline_but_rejects_controls` | Retained with controlled strings. Normal multiline verbose output is accepted and forbidden controls fail. | Flattening legitimate compiler output or allowing hidden controls. |
+| `test_version_is_an_unambiguous_product_line` | Retained. Wrong products, multiple lines and control-bearing version strings fail. | Accepting ambiguous executable identity. |
+| `test_invalid_metadata_has_a_contextual_diagnostic` | Strengthened. Malformed and oversized metadata have contextual diagnostics. A complete identity at the exact byte ceiling loads unchanged. | Rejecting the valid boundary or accepting excess metadata. |
+| `test_mode_is_required_before_binary_access` | Retained. Missing operation mode is refused before accessing the binary. The forbidden I/O interaction is the contract. | Hashing a binary before argument validation. |
+| `test_invalid_release_inputs_do_not_execute_binary` | Retained. Invalid release provenance is refused before an executable runs. | Executing unvalidated release input. |
+| `test_binary_mutation_during_version_query_is_rejected` | Retained. A supplied changed digest after version lookup cannot establish identity. | Combining a version and digest from different binary contents. |
+| `test_missing_binary_is_a_clean_failure` | Repaired. A missing file inside a controlled temporary directory produces exit one. | Depending on an unrelated absolute path being absent or returning the wrong exit status. |
 
 # Mutation progress
 

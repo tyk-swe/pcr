@@ -167,11 +167,11 @@ def prepare_report(output: Path, *inputs: Path) -> None:
     Path(output).unlink(missing_ok=True)
 
 
-def valid_digest(value, width=64):
+def valid_digest(value: object, width: int = 64) -> bool:
     return isinstance(value, str) and re.fullmatch(r'[0-9a-f]{' + str(width) + r'}', value) is not None
 
 
-def digest(path):
+def digest(path: Path | str) -> str:
     path = Path(path)
     if not path.is_file():
         raise ValueError(f'digest input is not a regular file: {path}')

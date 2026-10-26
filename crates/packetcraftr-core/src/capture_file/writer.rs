@@ -565,3 +565,6 @@ fn validate_pcap_frame(
 
     Ok((seconds, fraction))
 }
+
+#[cfg(test)]
+mod tests;

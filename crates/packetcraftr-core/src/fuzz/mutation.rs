@@ -513,3 +513,6 @@ pub(super) fn shrink_values(value: &field::Value, maximum: usize) -> Vec<field::
     }
     values
 }
+
+#[cfg(test)]
+mod tests;

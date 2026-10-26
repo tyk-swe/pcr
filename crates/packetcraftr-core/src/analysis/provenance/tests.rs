@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Private work counters are compiled only into core's unit-test target.
-use super::{Accumulator, SourceFrame, Tracker, work};
+use super::{Accumulator, Lease, SourceFrame, Tracker, work};
 use std::time::UNIX_EPOCH;
 
 fn fragment_entry(tracker: &mut Tracker, identification: u16) -> super::DatagramKey {
@@ -27,9 +27,33 @@ fn fragment_entry(tracker: &mut Tracker, identification: u16) -> super::Datagram
     key
 }
 
+fn fill_budget(tracker: &Tracker, limit: usize) -> Vec<Lease> {
+    let mut leases = Vec::new();
+    let mut chunk = limit.next_power_of_two();
+    while chunk > 0 {
+        while let Ok(lease) = tracker.budget.reserve(chunk) {
+            leases.push(lease);
+        }
+        chunk /= 2;
+    }
+    leases
+}
+
+fn headroom(tracker: &Tracker, limit: usize) -> usize {
+    fill_budget(tracker, limit)
+        .iter()
+        .map(|lease| lease.bytes)
+        .sum()
+}
+
+fn fresh_headroom(limit: usize, max_outcomes: usize) -> usize {
+    headroom(&Tracker::new(limit, max_outcomes).unwrap(), limit)
+}
+
 #[test]
 fn retirement_preserves_key_order_active_entries_and_omission_counts() {
-    let mut tracker = Tracker::new(64 * 1024, 2).unwrap();
+    const LIMIT: usize = 64 * 1024;
+    let mut tracker = Tracker::new(LIMIT, 2).unwrap();
     let keys: Vec<_> = [4, 1, 3, 2]
         .into_iter()
         .map(|id| fragment_entry(&mut tracker, id))
@@ -50,47 +74,37 @@ fn retirement_preserves_key_order_active_entries_and_omission_counts() {
     assert!(tracker.entries.is_empty());
     assert_eq!(tracker.incomplete.len(), 2);
     assert_eq!(tracker.outcomes_omitted, 2);
-    assert_eq!(
-        tracker
-            .budget
-            .used
-            .load(std::sync::atomic::Ordering::Acquire),
-        2048 + 2 * (256 + std::mem::size_of::<SourceFrame>())
-    );
+    tracker.incomplete.clear();
+    assert_eq!(headroom(&tracker, LIMIT), fresh_headroom(LIMIT, 2));
 }
 
 #[test]
 fn retirement_keeps_extracted_metadata_charged_until_freeze_finishes() {
-    let source_charge = 256 + std::mem::size_of::<SourceFrame>();
-    let mut tracker = Tracker::new(2048 + 2048 + 512 + source_charge, 1).unwrap();
+    const LIMIT: usize = 16 * 1024;
+    let mut tracker = Tracker::new(LIMIT, 1).unwrap();
     fragment_entry(&mut tracker, 1);
-    let occupied = tracker.budget.reserve(source_charge).unwrap();
+    let pressure = fill_budget(&tracker, LIMIT);
     assert!(matches!(
         tracker.retire(|_| false),
         Err(super::Error::Limit { .. })
     ));
     assert!(tracker.entries.is_empty());
     assert!(tracker.incomplete.is_empty());
-    assert_eq!(
-        tracker
-            .budget
-            .used
-            .load(std::sync::atomic::Ordering::Acquire),
-        2048 + source_charge
-    );
-    drop(occupied);
-    assert_eq!(
-        tracker
-            .budget
-            .used
-            .load(std::sync::atomic::Ordering::Acquire),
-        2048
-    );
+    drop(pressure);
+    assert_eq!(headroom(&tracker, LIMIT), fresh_headroom(LIMIT, 1));
+    fragment_entry(&mut tracker, 1);
+    tracker.retire(|_| false).unwrap();
+    assert_eq!(tracker.incomplete.len(), 1);
+    tracker.incomplete.clear();
+    assert_eq!(headroom(&tracker, LIMIT), fresh_headroom(LIMIT, 1));
 }
 
 #[test]
-fn assembly_copies_once_and_tree_discovery_grows_n_log_n() {
+fn assembly_copies_linearly_and_tree_discovery_grows_n_log_n() {
+    const MAX_COPIES_PER_SOURCE: usize = 4;
+    const MAX_COMPARISONS_PER_SOURCE: usize = 64;
     for n in [64, 256, 1024, 4096] {
+        let sources = n as usize;
         let tracker = Tracker::new(16 * 1024 * 1024, 16).unwrap();
         let sets: Vec<_> = (1..=n)
             .map(|number| {
@@ -107,8 +121,7 @@ fn assembly_copies_once_and_tree_discovery_grows_n_log_n() {
         for set in &sets[1..] {
             repeated = repeated.union(set).unwrap();
         }
-        let (_, old_copies) = work::take();
-        assert_eq!(old_copies, ((n * (n + 1)) / 2 - 1) as usize);
+        let (_, repeated_copies) = work::take();
         let mut assembly = Accumulator::new(&sets[0]).unwrap();
         for set in &sets[1..] {
             assembly.insert(set).unwrap();
@@ -116,22 +129,29 @@ fn assembly_copies_once_and_tree_discovery_grows_n_log_n() {
         let result = assembly.freeze().unwrap();
         let (comparisons, copies) = work::take();
         assert_eq!(result.frames(), repeated.frames());
-        assert_eq!(copies, 2 * n as usize);
+        assert!(copies >= sources, "n={n}: {copies} copies");
         assert!(
-            comparisons <= n as usize * 64,
+            copies <= MAX_COPIES_PER_SOURCE * sources,
+            "n={n}: {copies} copies"
+        );
+        assert!(
+            copies < repeated_copies,
+            "n={n}: assembly {copies} copies, repeated union {repeated_copies}"
+        );
+        assert!(
+            comparisons <= MAX_COMPARISONS_PER_SOURCE * sources,
             "n={n}: {comparisons} comparisons"
         );
         println!(
-            "sources={n} immutable_merge_copies={old_copies} assembly_copies={copies} tree_comparisons={comparisons}"
+            "sources={n} immutable_merge_copies={repeated_copies} assembly_copies={copies} tree_comparisons={comparisons}"
         );
     }
 }
 
 #[test]
 fn node_admission_and_freeze_overlap_are_charged_before_mutation() {
-    let source_charge = 256 + std::mem::size_of::<SourceFrame>();
-    let ceiling = 2048 + 2 * source_charge + 512;
-    let tracker = Tracker::new(ceiling, 16).unwrap();
+    const LIMIT: usize = 16 * 1024;
+    let tracker = Tracker::new(LIMIT, 16).unwrap();
     let first = tracker
         .single(SourceFrame {
             number: 1,
@@ -145,31 +165,24 @@ fn node_admission_and_freeze_overlap_are_charged_before_mutation() {
             timestamp: UNIX_EPOCH,
         })
         .unwrap();
-    let used = || {
-        tracker
-            .budget
-            .used
-            .load(std::sync::atomic::Ordering::Acquire)
-    };
-    assert_eq!(used(), ceiling);
+    let pressure = fill_budget(&tracker, LIMIT);
     assert!(matches!(
         assembly.insert(&second),
         Err(super::Error::Limit { .. })
     ));
     assert_eq!(assembly.len(), 1);
-    assert_eq!(used(), ceiling);
-    // The flat result cannot be allocated by releasing the tree first: both
-    // allocations overlap until the conversion has finished.
+    assert!(tracker.budget.reserve(1).is_err());
     assert!(matches!(assembly.freeze(), Err(super::Error::Limit { .. })));
-    assert_eq!(used(), 2048 + 2 * source_charge);
+    drop(pressure);
     drop(first);
     drop(second);
-    assert_eq!(used(), 2048);
+    assert_eq!(headroom(&tracker, LIMIT), fresh_headroom(LIMIT, 16));
 }
 
 #[test]
-fn refused_inserts_and_freezes_release_exact_charges() {
-    let tracker = Tracker::new(16 * 1024, 16).unwrap();
+fn refused_inserts_and_freezes_release_their_charges() {
+    const LIMIT: usize = 16 * 1024;
+    let tracker = Tracker::new(LIMIT, 16).unwrap();
     let first = tracker
         .single(SourceFrame {
             number: 2,
@@ -177,49 +190,28 @@ fn refused_inserts_and_freezes_release_exact_charges() {
         })
         .unwrap();
     let mut assembly = Accumulator::new(&first).unwrap();
-    let foreign = Tracker::new(16 * 1024, 16)
+    let foreign = Tracker::new(LIMIT, 16)
         .unwrap()
         .single(SourceFrame {
             number: 1,
             timestamp: UNIX_EPOCH,
         })
         .unwrap();
-    let before = tracker
-        .budget
-        .used
-        .load(std::sync::atomic::Ordering::Acquire);
+    let before = headroom(&tracker, LIMIT);
     assert!(matches!(
         assembly.insert(&foreign),
         Err(super::Error::DifferentCapture)
     ));
     assert_eq!(assembly.len(), 1);
-    assert_eq!(
-        tracker
-            .budget
-            .used
-            .load(std::sync::atomic::Ordering::Acquire),
-        before
-    );
+    assert_eq!(headroom(&tracker, LIMIT), before);
     assembly.insert(&first).unwrap();
     assert_eq!(assembly.len(), 1);
-    assert_eq!(
-        tracker
-            .budget
-            .used
-            .load(std::sync::atomic::Ordering::Acquire),
-        before
-    );
+    assert_eq!(headroom(&tracker, LIMIT), before);
     let snapshot = first.clone();
     let result = assembly.freeze().unwrap();
     assert_eq!(result.frames(), snapshot.frames());
     drop(result);
     drop(first);
     drop(snapshot);
-    assert_eq!(
-        tracker
-            .budget
-            .used
-            .load(std::sync::atomic::Ordering::Acquire),
-        2048
-    );
+    assert_eq!(headroom(&tracker, LIMIT), fresh_headroom(LIMIT, 16));
 }

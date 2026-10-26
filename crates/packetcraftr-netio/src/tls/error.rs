@@ -47,14 +47,13 @@ impl Error {
     }
 
     pub(super) fn from_io(source: io::Error) -> Self {
-        if let Some(inner) = source.get_ref()
-            && inner.is::<Self>()
-        {
-            // The type was checked above; retaining the original error avoids
-            // erasing wire-limit and cancellation outcomes at rustls's I/O API.
-            *source.into_inner().unwrap().downcast::<Self>().unwrap()
-        } else {
-            Self::Io(source)
+        let kind = source.kind();
+        match source.into_inner() {
+            Some(inner) => match inner.downcast::<Self>() {
+                Ok(error) => *error,
+                Err(other) => Self::Io(io::Error::new(kind, other)),
+            },
+            None => Self::Io(io::Error::from(kind)),
         }
     }
 }
@@ -72,6 +71,60 @@ impl Classified for Error {
             }
             Self::Io(_) => Classification::new("io.tls_transport", Kind::Io, None),
             Self::Protocol(_) => Classification::new("io.tls_protocol", Kind::Io, None),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn io_roundtrip_retains_the_typed_error() {
+        let recovered = Error::from_io(
+            Error::WireLimit {
+                direction: Direction::Sent,
+                limit: 9,
+            }
+            .into_io(),
+        );
+        assert!(matches!(
+            recovered,
+            Error::WireLimit {
+                direction: Direction::Sent,
+                limit: 9
+            }
+        ));
+    }
+
+    #[test]
+    fn into_io_preserves_the_kind_each_variant_promises() {
+        assert_eq!(
+            Error::Io(io::Error::from(io::ErrorKind::ConnectionReset))
+                .into_io()
+                .kind(),
+            io::ErrorKind::ConnectionReset
+        );
+        assert_eq!(
+            Error::Protocol(rustls::Error::DecryptError)
+                .into_io()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(Error::InvalidLimits.into_io().kind(), io::ErrorKind::Other);
+    }
+
+    #[test]
+    fn io_roundtrip_keeps_plain_io_errors_and_their_kind() {
+        let recovered = Error::from_io(io::Error::from(io::ErrorKind::ConnectionReset));
+        match recovered {
+            Error::Io(source) => assert_eq!(source.kind(), io::ErrorKind::ConnectionReset),
+            other => panic!("expected Io, got {other:?}"),
+        }
+        let recovered = Error::from_io(io::Error::new(io::ErrorKind::InvalidData, "plain"));
+        match recovered {
+            Error::Io(source) => assert_eq!(source.kind(), io::ErrorKind::InvalidData),
+            other => panic!("expected Io, got {other:?}"),
         }
     }
 }

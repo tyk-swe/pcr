@@ -266,14 +266,18 @@ impl Classified for Error {
     }
 
     fn causes(&self) -> Vec<String> {
-        let mut causes = source_chain(self);
-        if let Self::CaptureCleanup { remaining, .. } = self {
-            for failure in remaining {
-                causes.push(failure.to_string());
-                causes.extend(failure.causes());
-            }
-        }
-        causes
+        let remaining: &[Self] = match self {
+            Self::CaptureCleanup { remaining, .. } => remaining,
+            _ => &[],
+        };
+        source_chain(self)
+            .into_iter()
+            .chain(
+                remaining.iter().flat_map(|failure| {
+                    std::iter::once(failure.to_string()).chain(failure.causes())
+                }),
+            )
+            .collect()
     }
 }
 
@@ -303,4 +307,35 @@ fn classified(code: &'static str, kind: Kind, remediation: &'static str) -> Clas
 
 fn classified_cli(code: &'static str, remediation: &'static str) -> Classification {
     classified(code, Kind::Usage, remediation)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_causes_include_every_remaining_failure_after_the_first_chain() {
+        let cleanup = Error::CaptureCleanup {
+            first: Box::new(Error::UnresolvedLinkMode),
+            remaining: vec![Error::CaptureReadiness {
+                message: "second failure".to_owned(),
+            }],
+        };
+        let causes = cleanup.causes();
+        assert!(
+            causes.iter().any(|cause| cause.contains("second failure")),
+            "{causes:?}"
+        );
+        assert!(
+            causes
+                .iter()
+                .any(|cause| cause.contains("unresolved automatic link mode")),
+            "{causes:?}"
+        );
+    }
+
+    #[test]
+    fn plain_error_causes_carry_no_invented_entries() {
+        assert!(Error::UnresolvedLinkMode.causes().is_empty());
+    }
 }

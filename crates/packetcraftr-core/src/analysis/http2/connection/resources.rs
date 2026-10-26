@@ -7,6 +7,7 @@ use super::super::model::{Event, Status, Summary};
 use super::super::{Error, Limits};
 use super::{ConnectionState, DirectionState};
 use crate::analysis::application;
+use crate::analysis::http2::side::Side;
 use crate::analysis::provenance::SourceSet;
 use crate::budget::Deadline;
 
@@ -61,11 +62,12 @@ impl Context<'_> {
         *self.buffered = next;
         Ok(())
     }
-    pub(crate) fn release_live(&mut self, bytes: usize) {
+    pub(crate) fn release_live(&mut self, bytes: usize) -> Result<(), Error> {
         *self.buffered = self
             .buffered
             .checked_sub(bytes)
-            .expect("live accounting underflow");
+            .ok_or(Error::Invariant("live accounting underflow"))?;
+        Ok(())
     }
     pub(crate) fn charge_retained(&mut self, bytes: usize) -> Result<(), Error> {
         let next = self
@@ -100,10 +102,14 @@ impl Context<'_> {
         *self.spans = next;
         Ok(())
     }
-    pub(crate) fn release_sources(&mut self, set: &SourceSet) {
+    pub(crate) fn release_sources(&mut self, set: &SourceSet) -> Result<(), Error> {
         let frames = set.frames().len();
-        *self.spans = self.spans.checked_sub(frames).expect("span underflow");
-        self.release_live(SET_OVERHEAD + frames * SPAN_OVERHEAD);
+        *self.spans = self
+            .spans
+            .checked_sub(frames)
+            .ok_or(Error::Invariant("span underflow"))?;
+        self.release_live(SET_OVERHEAD + frames * SPAN_OVERHEAD)?;
+        Ok(())
     }
     pub(crate) fn check_frames(&mut self) -> Result<(), Error> {
         if *self.frames >= self.limits.max_frames {
@@ -166,13 +172,24 @@ impl ConnectionState {
         bytes: usize,
     ) -> Result<(), Error> {
         context.charge_live(bytes)?;
-        self.live = self.live.checked_add(bytes).expect("conn charge");
+        self.live = self
+            .live
+            .checked_add(bytes)
+            .ok_or(Error::Invariant("conn charge"))?;
         Ok(())
     }
 
-    pub(crate) fn release_conn(&mut self, context: &mut Context<'_>, bytes: usize) {
-        context.release_live(bytes);
-        self.live = self.live.checked_sub(bytes).expect("conn release");
+    pub(crate) fn release_conn(
+        &mut self,
+        context: &mut Context<'_>,
+        bytes: usize,
+    ) -> Result<(), Error> {
+        context.release_live(bytes)?;
+        self.live = self
+            .live
+            .checked_sub(bytes)
+            .ok_or(Error::Invariant("conn release"))?;
+        Ok(())
     }
 
     pub(crate) fn charge_dir(
@@ -181,13 +198,24 @@ impl ConnectionState {
         bytes: usize,
     ) -> Result<(), Error> {
         context.charge_live(bytes)?;
-        dir.charged = dir.charged.checked_add(bytes).expect("dir charge");
+        dir.charged = dir
+            .charged
+            .checked_add(bytes)
+            .ok_or(Error::Invariant("dir charge"))?;
         Ok(())
     }
 
-    pub(crate) fn release_dir(dir: &mut DirectionState, context: &mut Context<'_>, bytes: usize) {
-        context.release_live(bytes);
-        dir.charged = dir.charged.checked_sub(bytes).expect("dir release");
+    pub(crate) fn release_dir(
+        dir: &mut DirectionState,
+        context: &mut Context<'_>,
+        bytes: usize,
+    ) -> Result<(), Error> {
+        context.release_live(bytes)?;
+        dir.charged = dir
+            .charged
+            .checked_sub(bytes)
+            .ok_or(Error::Invariant("dir release"))?;
+        Ok(())
     }
 
     pub(crate) fn track_sources(
@@ -205,31 +233,30 @@ impl ConnectionState {
         dir: &mut DirectionState,
         dropped: Vec<SourceSet>,
         context: &mut Context<'_>,
-    ) {
+    ) -> Result<(), Error> {
         for set in dropped {
             let frames = set.frames().len();
-            context.release_sources(&set);
+            context.release_sources(&set)?;
             dir.charged_spans -= frames;
             dir.charged -= SET_OVERHEAD + frames * SPAN_OVERHEAD;
         }
+        Ok(())
     }
 
     pub(crate) fn decoder_sync(
         &mut self,
-        dir_index: usize,
+        side: Side,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        let dir = self.dirs[dir_index].as_mut().ok_or(Error::Application(
-            application::Error::Sources {
-                number: self.number,
-            },
-        ))?;
+        let dir = self.dirs[side]
+            .as_mut()
+            .ok_or(Error::Invariant("direction not found"))?;
         if let Some(decoder) = dir.decoder.as_ref() {
             let now = decoder.buffered_bytes();
             if now > dir.decoder_charge {
                 Self::charge_dir(dir, context, now - dir.decoder_charge)?;
             } else if now < dir.decoder_charge {
-                Self::release_dir(dir, context, dir.decoder_charge - now);
+                Self::release_dir(dir, context, dir.decoder_charge - now)?;
             }
             dir.decoder_charge = now;
         }

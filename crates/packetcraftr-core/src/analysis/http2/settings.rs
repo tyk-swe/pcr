@@ -13,17 +13,6 @@ pub(crate) const MAX_FRAME_SIZE: u16 = 0x5;
 pub(crate) const MAX_HEADER_LIST_SIZE: u16 = 0x6;
 pub(crate) const WINDOW_MAX: i64 = 0x7fff_ffff;
 
-pub(crate) fn defaults() -> PeerSettings {
-    PeerSettings {
-        header_table_size: 4096,
-        enable_push: true,
-        max_concurrent_streams: None,
-        initial_window_size: 65535,
-        max_frame_size: 16384,
-        max_header_list_size: None,
-    }
-}
-
 pub(crate) struct SettingIssue {
     pub code: &'static str,
     pub detail: &'static str,
@@ -67,8 +56,8 @@ pub(crate) struct DirectionSettings {
 impl DirectionSettings {
     pub(crate) fn new() -> Self {
         Self {
-            advertised: defaults(),
-            acknowledged: defaults(),
+            advertised: PeerSettings::default(),
+            acknowledged: PeerSettings::default(),
             seen: false,
             pending: VecDeque::new(),
             uncertain_table_minimum: None,

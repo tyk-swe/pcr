@@ -5,22 +5,24 @@ use bytes::Bytes;
 
 use super::{Error, Frame, FrameHeader, Limit, Payload, Priority, Setting};
 
-const HEADER_LEN: usize = 9;
+pub(crate) const HEADER_LEN: usize = 9;
 
-const TYPE_DATA: u8 = 0x0;
-const TYPE_HEADERS: u8 = 0x1;
-const TYPE_PRIORITY: u8 = 0x2;
-const TYPE_RESET: u8 = 0x3;
-const TYPE_SETTINGS: u8 = 0x4;
-const TYPE_PUSH_PROMISE: u8 = 0x5;
-const TYPE_PING: u8 = 0x6;
-const TYPE_GOAWAY: u8 = 0x7;
-const TYPE_WINDOW_UPDATE: u8 = 0x8;
-const TYPE_CONTINUATION: u8 = 0x9;
+pub(crate) const TYPE_DATA: u8 = 0x0;
+pub(crate) const TYPE_HEADERS: u8 = 0x1;
+pub(crate) const TYPE_PRIORITY: u8 = 0x2;
+pub(crate) const TYPE_RESET: u8 = 0x3;
+pub(crate) const TYPE_SETTINGS: u8 = 0x4;
+pub(crate) const TYPE_PUSH_PROMISE: u8 = 0x5;
+pub(crate) const TYPE_PING: u8 = 0x6;
+pub(crate) const TYPE_GOAWAY: u8 = 0x7;
+pub(crate) const TYPE_WINDOW_UPDATE: u8 = 0x8;
+pub(crate) const TYPE_CONTINUATION: u8 = 0x9;
 
-const FLAG_ACK: u8 = 0x1;
-const FLAG_PADDED: u8 = 0x8;
-const FLAG_PRIORITY: u8 = 0x20;
+pub(crate) const FLAG_END_STREAM: u8 = 0x1;
+pub(crate) const FLAG_END_HEADERS: u8 = 0x4;
+pub(crate) const FLAG_ACK: u8 = 0x1;
+pub(crate) const FLAG_PADDED: u8 = 0x8;
+pub(crate) const FLAG_PRIORITY: u8 = 0x20;
 
 pub fn parse_frame(input: &Bytes, max_frame_bytes: usize) -> Result<Option<(Frame, usize)>, Error> {
     parse_frame_inner(input, max_frame_bytes, false)
@@ -244,4 +246,11 @@ fn priority(bytes: &[u8], stream_id: u32, allow_stream_errors: bool) -> Result<P
 
 fn be32(bytes: &[u8]) -> u32 {
     u32::from_be_bytes(bytes[..4].try_into().expect("four-octet field"))
+}
+
+pub(crate) fn declared_length(header: &[u8]) -> usize {
+    header
+        .iter()
+        .take(3)
+        .fold(0usize, |length, byte| length << 8 | usize::from(*byte))
 }

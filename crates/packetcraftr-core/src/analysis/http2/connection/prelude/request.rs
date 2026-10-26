@@ -4,21 +4,17 @@
 use super::super::super::Error;
 use super::super::super::buffer::union_balanced;
 use super::super::super::model::{Certainty, Header, IssueScope, MessageKind, Status};
-use super::super::super::stream::CLIENT;
 use super::super::super::upgrade::{self, Offer, Pending};
 use super::super::{ConnectionState, Context, Fault, resources};
-use crate::analysis::application;
+use crate::analysis::http2::side::Side;
 use crate::protocol::application::http::{self, BodyDecoder, StartLine};
 use bytes::Bytes;
 
 impl ConnectionState {
     pub(super) fn client_prelude_step(&mut self, context: &mut Context<'_>) -> Result<bool, Error> {
-        let dir =
-            self.dirs[CLIENT]
-                .as_mut()
-                .ok_or(Error::Application(application::Error::Sources {
-                    number: self.number,
-                }))?;
+        let dir = self.dirs[Side::Client]
+            .as_mut()
+            .ok_or(Error::Invariant("direction not found"))?;
         let need = dir.buffer.len().min(http::MAX_HEADER_BYTES + 1);
         let view = Bytes::copy_from_slice(&dir.buffer.bytes()[..need]);
         let (head, consumed) = match http::parse_head(&view) {
@@ -30,8 +26,8 @@ impl ConnectionState {
                 let sets = dir.buffer.contributors(take);
                 let (wire, dropped) = dir.buffer.take(take);
                 let sources = union_balanced(sets)?;
-                Self::release_dir(dir, context, take);
-                Self::release_dropped(dir, dropped, context);
+                Self::release_dir(dir, context, take)?;
+                Self::release_dropped(dir, dropped, context)?;
                 self.issue(
                     context,
                     Fault {
@@ -55,8 +51,8 @@ impl ConnectionState {
             let sets = dir.buffer.contributors(consumed.min(dir.buffer.len()));
             let (_, dropped) = dir.buffer.take(consumed.min(dir.buffer.len()));
             let sources = union_balanced(sets)?;
-            Self::release_dir(dir, context, consumed);
-            Self::release_dropped(dir, dropped, context);
+            Self::release_dir(dir, context, consumed)?;
+            Self::release_dropped(dir, dropped, context)?;
             self.issue(
                 context,
                 Fault {
@@ -76,10 +72,10 @@ impl ConnectionState {
         }
         let sets = dir.buffer.contributors(consumed);
         let (head_wire_bytes, dropped) = dir.buffer.take(consumed);
-        Self::release_dir(dir, context, consumed);
-        Self::release_dropped(dir, dropped, context);
-        let (head, _) =
-            http::parse_head(&head_wire_bytes)?.expect("previously parsed complete HTTP/1 head");
+        Self::release_dir(dir, context, consumed)?;
+        Self::release_dropped(dir, dropped, context)?;
+        let (head, _) = http::parse_head(&head_wire_bytes)?
+            .ok_or(Error::Invariant("previously parsed complete HTTP/1 head"))?;
         let head_wire = head_wire_bytes.len();
         let method = head.method().map(str::to_owned);
         let offer = match upgrade::upgrade_offer(&head) {
@@ -88,7 +84,7 @@ impl ConnectionState {
                 self.issue(
                     context,
                     Fault {
-                        flow: self.dir_flow(CLIENT),
+                        flow: self.dir_flow(Side::Client),
                         http2_stream_id: None,
                         scope: IssueScope::Connection,
                         certainty: Certainty::Confirmed,
@@ -133,15 +129,20 @@ impl ConnectionState {
             msg.sets.push(set);
         }
         let index = msg.index;
-        if self.prelude.as_ref().expect("prelude").requests.len()
+        if self
+            .prelude
+            .as_ref()
+            .ok_or(Error::Invariant("prelude"))?
+            .requests
+            .len()
             >= context.limits.max_active_streams
         {
             let sources = union_balanced(std::mem::take(&mut msg.sets))?;
-            self.drop_msg(msg, context);
+            self.drop_msg(msg, context)?;
             self.issue(
                 context,
                 Fault {
-                    flow: self.dir_flow(CLIENT),
+                    flow: self.dir_flow(Side::Client),
                     http2_stream_id: None,
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
@@ -156,7 +157,7 @@ impl ConnectionState {
             return Ok(true);
         }
         self.charge_conn(context, resources::PENDING_OVERHEAD)?;
-        let prelude = self.prelude.as_mut().expect("prelude");
+        let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
         prelude.requests.push_back(Pending {
             index,
             method: method.clone(),
@@ -165,7 +166,7 @@ impl ConnectionState {
         if let Some(settings) = offer {
             let charge = resources::OFFER_OVERHEAD + settings.capacity() * 24;
             self.charge_conn(context, charge)?;
-            let prelude = self.prelude.as_mut().expect("prelude");
+            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
             prelude.offers.insert(
                 index,
                 Offer {
@@ -178,11 +179,11 @@ impl ConnectionState {
             Ok(framing) => framing,
             Err(error) => {
                 let sources = union_balanced(std::mem::take(&mut msg.sets))?;
-                self.drop_msg(msg, context);
+                self.drop_msg(msg, context)?;
                 self.issue(
                     context,
                     Fault {
-                        flow: self.dir_flow(CLIENT),
+                        flow: self.dir_flow(Side::Client),
                         http2_stream_id: None,
                         scope: IssueScope::Connection,
                         certainty: Certainty::Confirmed,
@@ -203,28 +204,33 @@ impl ConnectionState {
             .is_some_and(|p| p.offers.contains_key(&index));
         if matches!(framing, http::Body::Chunked) {
             if let Err(error) = self.charge_conn(context, resources::PRELUDE_BODY_RESERVE) {
-                self.drop_msg(msg, context);
+                self.drop_msg(msg, context)?;
                 return Err(error);
             }
-            self.prelude.as_mut().expect("prelude").body_charge[CLIENT] =
-                resources::PRELUDE_BODY_RESERVE;
+            self.prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?
+                .body_charge[Side::Client] = resources::PRELUDE_BODY_RESERVE;
         }
         let decoder = BodyDecoder::new(framing, context.limits.max_body_bytes);
         if decoder.complete() {
             if is_offer {
-                let prelude = self.prelude.as_mut().expect("prelude");
+                let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
                 if let Some(offer) = prelude.offers.get_mut(&index) {
                     offer.msg = Some(msg);
                 }
                 if prelude.upgraded {
-                    let offer = prelude.offers.remove(&index).expect("offer");
+                    let offer = prelude
+                        .offers
+                        .remove(&index)
+                        .ok_or(Error::Invariant("offer"))?;
                     self.complete_upgrade_request(offer, context)?;
                 }
             } else {
-                self.drop_msg(msg, context);
+                self.drop_msg(msg, context)?;
             }
         } else {
-            let prelude = self.prelude.as_mut().expect("prelude");
+            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
             prelude.client_body = Some(decoder);
             prelude.live_request = Some(msg);
         }

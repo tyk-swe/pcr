@@ -9,6 +9,7 @@ mod headers;
 mod limits;
 mod model;
 mod settings;
+mod side;
 mod stream;
 mod upgrade;
 
@@ -240,13 +241,11 @@ impl Collector {
         detail: &'static str,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
-        let keys: Vec<ConnectionKey> = self
+        let keys: std::collections::BTreeSet<ConnectionKey> = self
             .flow_index
             .iter()
             .filter(|(f, _)| *f == flow || f.reverse() == *flow)
             .map(|(_, key)| *key)
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
             .collect();
         for key in keys {
             if let Some(mut conn) = self.connections.remove(&key) {

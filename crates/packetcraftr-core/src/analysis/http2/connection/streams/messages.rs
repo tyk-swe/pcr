@@ -4,12 +4,12 @@
 //! Message construction, resource accounting, and ordered publication.
 
 use super::super::{ConnectionState, Context, Decoded, Fault, Head, resources};
-use crate::analysis::application;
 use crate::analysis::http2::Error;
 use crate::analysis::http2::buffer::union_balanced;
 use crate::analysis::http2::headers::FieldRole;
 use crate::analysis::http2::model::{Certainty, IssueScope, Message, MessageKind, Status};
-use crate::analysis::http2::stream::{CLIENT, MessageBuilder, SERVER};
+use crate::analysis::http2::side::Side;
+use crate::analysis::http2::stream::MessageBuilder;
 use bytes::Bytes;
 
 impl ConnectionState {
@@ -45,13 +45,13 @@ impl ConnectionState {
 
     pub(crate) fn emit_message(
         &mut self,
-        side: usize,
+        side: Side,
         build: MessageBuilder,
         status: Status,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if status == Status::Complete
-            && (self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER))
+            && (self.waiting_settings_ack(Side::Client) || self.waiting_settings_ack(Side::Server))
         {
             self.charge_conn(context, resources::PENDING_OVERHEAD)?;
             self.ack_deferred.push_back((side, build, status));
@@ -63,7 +63,7 @@ impl ConnectionState {
 
     pub(super) fn emit_message_with_completion(
         &mut self,
-        side: usize,
+        side: Side,
         mut build: MessageBuilder,
         status: Status,
         complete: bool,
@@ -125,17 +125,14 @@ impl ConnectionState {
             build.failure = build.failure.or(Some(Status::Malformed));
         }
         let status = build.failure.unwrap_or(status);
-        let sources = union_balanced(std::mem::take(&mut build.sets))?.ok_or(
-            Error::Application(application::Error::Sources {
-                number: self.number,
-            }),
-        )?;
+        let sources = union_balanced(std::mem::take(&mut build.sets))?
+            .ok_or(Error::Invariant("message sources missing"))?;
         let compression_sources = union_balanced(std::mem::take(&mut build.compression))?;
-        self.release_conn(context, build.charged);
+        self.release_conn(context, build.charged)?;
         *context.spans = context
             .spans
             .checked_sub(build.charged_spans)
-            .expect("msg spans");
+            .ok_or(Error::Invariant("msg spans"))?;
         context.charge_retained(
             Self::msg_content_charge(&build)
                 + resources::EVENT_OVERHEAD
@@ -169,7 +166,7 @@ impl ConnectionState {
 
     pub(crate) fn start_message(
         &mut self,
-        side: usize,
+        side: Side,
         stream_id: u32,
         head: Head,
         decoded: Decoded,
@@ -189,9 +186,7 @@ impl ConnectionState {
                 _ => MessageKind::Response,
             },
             FieldRole::Trailer => {
-                return Err(Error::Application(application::Error::Sources {
-                    number: self.number,
-                }));
+                return Err(Error::Invariant("direction not found"));
             }
         };
         let mut msg = self.new_message(stream_id, kind, context)?;
@@ -227,7 +222,10 @@ impl ConnectionState {
             msg.charged_spans += frames;
             msg.compression.push(set);
         }
-        let stream = self.streams.get_mut(&stream_id).expect("stream");
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or(Error::Invariant("stream"))?;
         if let Some(method) = meta.method {
             stream.method = Some(method);
         }
@@ -255,7 +253,10 @@ impl ConnectionState {
                 context,
             )?;
         } else {
-            let stream = self.streams.get_mut(&stream_id).expect("stream");
+            let stream = self
+                .streams
+                .get_mut(&stream_id)
+                .ok_or(Error::Invariant("stream"))?;
             stream.msgs[side] = Some(msg);
         }
         if role == FieldRole::Request {
@@ -268,11 +269,11 @@ impl ConnectionState {
         &mut self,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        if self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER) {
+        if self.waiting_settings_ack(Side::Client) || self.waiting_settings_ack(Side::Server) {
             return Ok(());
         }
         let immediate = std::mem::take(&mut self.ack_deferred);
-        self.release_conn(context, immediate.len() * resources::PENDING_OVERHEAD);
+        self.release_conn(context, immediate.len() * resources::PENDING_OVERHEAD)?;
         for (side, msg, status) in immediate {
             context.check_deadline()?;
             self.emit_message(side, msg, status, context)?;
@@ -286,7 +287,7 @@ impl ConnectionState {
             let mut completed = Vec::with_capacity(self.streams.len().saturating_mul(2));
             for (id, stream) in &self.streams {
                 context.check_deadline()?;
-                for side in [CLIENT, SERVER] {
+                for side in Side::BOTH {
                     if stream.ended[side] && stream.msgs[side].is_some() {
                         completed.push((side, *id));
                     }
@@ -298,7 +299,7 @@ impl ConnectionState {
             }
             Ok(())
         })();
-        context.release_live(scratch);
+        context.release_live(scratch)?;
         result
     }
 }

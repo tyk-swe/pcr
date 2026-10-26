@@ -8,13 +8,14 @@ mod settings;
 
 use super::super::Error;
 use super::super::model::{Certainty, IssueScope, Status};
-use super::super::stream::{SERVER, peer};
 use super::{ConnectionState, Context, Evidence, Fault};
+use crate::analysis::http2::side::Side;
+use crate::protocol::application::http2 as wire;
 
 impl ConnectionState {
     pub(crate) fn goaway_frame(
         &mut self,
-        side: usize,
+        side: Side,
         last_stream_id: u32,
         evidence: Evidence,
         context: &mut Context<'_>,
@@ -55,63 +56,79 @@ impl ConnectionState {
         }
         let scratch = capacity * size_of::<u32>();
         context.charge_live(scratch)?;
-        let result = (|| {
-            let mut emitted = Vec::with_capacity(capacity);
-            for (id, stream) in &mut self.streams {
-                context.check_deadline()?;
-                let initiated_by_receiver = stream.by_client == (side == SERVER);
-                if *id > last_stream_id && initiated_by_receiver {
-                    if !stream.unprocessed && stream.ended[peer(side)] {
-                        emitted.push(*id);
-                    }
-                    stream.unprocessed = true;
-                }
-            }
-            for (id, _) in self.closed.range(closed_range) {
-                context.check_deadline()?;
-                let initiated_by_receiver = !id.is_multiple_of(2) == (side == SERVER);
-                if initiated_by_receiver {
+        let result = self.goaway_unprocessed(
+            side,
+            last_stream_id,
+            capacity,
+            closed_range,
+            &evidence,
+            context,
+        );
+        context.release_live(scratch)?;
+        result
+    }
+
+    fn goaway_unprocessed(
+        &mut self,
+        side: Side,
+        last_stream_id: u32,
+        capacity: usize,
+        closed_range: (std::ops::Bound<u32>, std::ops::Bound<u32>),
+        evidence: &Evidence,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
+        let mut emitted = Vec::with_capacity(capacity);
+        for (id, stream) in &mut self.streams {
+            context.check_deadline()?;
+            let initiated_by_receiver = stream.initiator == side.peer();
+            if *id > last_stream_id && initiated_by_receiver {
+                if !stream.unprocessed && stream.ended[side.peer()] {
                     emitted.push(*id);
                 }
+                stream.unprocessed = true;
             }
-            for id in emitted {
-                self.issue(context, Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Unprocessed,
-                    code: "goaway_unprocessed",
-                    detail: "GOAWAY excludes this already-emitted request; the earlier event records byte completeness only".into(),
-                    wire: evidence.wire.clone(),
-                    sources: evidence.sources.clone(),
-                })?;
+        }
+        for (id, _) in self.closed.range(closed_range) {
+            context.check_deadline()?;
+            if Side::initiator_of(*id) == side.peer() {
+                emitted.push(*id);
             }
-            Ok(())
-        })();
-        context.release_live(scratch);
-        result
+        }
+        for id in emitted {
+            self.issue(context, Fault {
+                flow: self.dir_flow(side),
+                http2_stream_id: Some(id),
+                scope: IssueScope::Stream,
+                certainty: Certainty::Confirmed,
+                status: Status::Unprocessed,
+                code: "goaway_unprocessed",
+                detail: "GOAWAY excludes this already-emitted request; the earlier event records byte completeness only".into(),
+                wire: evidence.wire.clone(),
+                sources: evidence.sources.clone(),
+            })?;
+        }
+        Ok(())
     }
 }
 
 impl ConnectionState {
     pub(crate) fn ping_frame(
         &mut self,
-        side: usize,
+        side: Side,
         flags: u8,
         opaque: [u8; 8],
         evidence: Evidence,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         const PING_ENTRY: usize = 64;
-        if flags & 0x1 != 0 {
-            let pending = &mut self.pings[peer(side)];
+        if flags & wire::FLAG_ACK != 0 {
+            let pending = &mut self.pings[side.peer()];
             match pending.get_mut(&opaque) {
                 Some(count) => {
                     *count -= 1;
                     if *count == 0 {
                         pending.remove(&opaque);
-                        self.release_conn(context, PING_ENTRY);
+                        self.release_conn(context, PING_ENTRY)?;
                     }
                 }
                 None => {

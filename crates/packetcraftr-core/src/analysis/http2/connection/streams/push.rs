@@ -7,13 +7,14 @@ use super::super::{ConnectionState, Context, Decoded, Fault, resources};
 use crate::analysis::http2::Error;
 use crate::analysis::http2::headers::{FieldRole, validate};
 use crate::analysis::http2::model::{Certainty, IssueScope, MessageKind, Status};
-use crate::analysis::http2::stream::{CLIENT, Phase as StreamPhase, SERVER, StreamState, peer};
+use crate::analysis::http2::side::{PerSide, Side};
+use crate::analysis::http2::stream::{Phase as StreamPhase, StreamState};
 use bytes::Bytes;
 
 impl ConnectionState {
     pub(crate) fn push_promise(
         &mut self,
-        side: usize,
+        side: Side,
         stream_id: u32,
         promised: u32,
         decoded: Decoded,
@@ -25,7 +26,7 @@ impl ConnectionState {
             sources: block_sources,
             compression,
         } = decoded;
-        if side == CLIENT {
+        if side == Side::Client {
             self.issue(
                 context,
                 Fault {
@@ -43,8 +44,8 @@ impl ConnectionState {
             self.fail(context, Status::Malformed)?;
             return Ok(());
         }
-        if !self.settings[CLIENT].acknowledged.enable_push {
-            let certainty = if self.settings[CLIENT].pending.is_empty() {
+        if !self.settings[Side::Client].acknowledged.enable_push {
+            let certainty = if self.settings[Side::Client].pending.is_empty() {
                 Certainty::Confirmed
             } else {
                 Certainty::ObservedOrder
@@ -68,15 +69,14 @@ impl ConnectionState {
                 return Ok(());
             }
         }
-        let promised_reset_in_flight = self
-            .closed
-            .get(&promised)
-            .is_some_and(|closed| closed.reset_by == Some(CLIENT) && !closed.ended[SERVER]);
-        if promised.is_multiple_of(2)
-            && promised > self.max_initiated[SERVER]
+        let promised_reset_in_flight = self.closed.get(&promised).is_some_and(|closed| {
+            closed.reset_by == Some(Side::Client) && !closed.ended[Side::Server]
+        });
+        if Side::initiator_of(promised) == Side::Server
+            && promised > self.max_initiated[Side::Server]
             && (!self.closed.contains_key(&promised) || promised_reset_in_flight)
         {
-            self.max_initiated[SERVER] = promised;
+            self.max_initiated[Side::Server] = promised;
         } else {
             self.issue(
                 context,
@@ -95,19 +95,18 @@ impl ConnectionState {
             self.fail(context, Status::Malformed)?;
             return Ok(());
         }
-        let parent_open = self
-            .streams
-            .get(&stream_id)
-            .is_some_and(|s| s.phase == StreamPhase::Open && s.by_client && !s.ended[SERVER]);
+        let parent_open = self.streams.get(&stream_id).is_some_and(|s| {
+            s.phase == StreamPhase::Open && s.initiator == Side::Client && !s.ended[Side::Server]
+        });
         // A peer promise may have been sent before it received our reset.
         // RFC 9113 §5.1 still requires HPACK processing and stream reservation.
         let in_flight_after_reset = self
             .closed
             .get(&stream_id)
-            .is_some_and(|closed| closed.reset_by == Some(peer(side)) && !closed.ended[side]);
-        let delayed_parent = !self.opener_exhausted(CLIENT)
-            && !stream_id.is_multiple_of(2)
-            && stream_id > self.max_initiated[CLIENT]
+            .is_some_and(|closed| closed.reset_by == Some(side.peer()) && !closed.ended[side]);
+        let delayed_parent = !self.opener_exhausted(Side::Client)
+            && Side::initiator_of(stream_id) == Side::Client
+            && stream_id > self.max_initiated[Side::Client]
             && !self.streams.contains_key(&stream_id)
             && !self.closed.contains_key(&stream_id)
             && !self
@@ -134,7 +133,7 @@ impl ConnectionState {
         }
         // A rejected promise never opens the promised stream, so provisional
         // idle-stream evidence for that id is only released once it is admitted.
-        self.resolve_pending_opener(promised, context);
+        self.resolve_pending_opener(promised, context)?;
         let meta = validate(FieldRole::Request, &headers).and_then(|meta| {
             if !matches!(meta.method.as_deref(), Some(b"GET" | b"HEAD")) {
                 return Err("a pushed request must use a known safe and cacheable method");
@@ -206,7 +205,7 @@ impl ConnectionState {
             self.charge_conn(context, resources::PENDING_OVERHEAD)?;
             self.parent_deferred.push_back(msg);
         } else {
-            self.emit_message(SERVER, msg, Status::Complete, context)?;
+            self.emit_message(Side::Server, msg, Status::Complete, context)?;
         }
         if promised_reset_in_flight {
             // The promise can precede receipt of a peer reset, but must not
@@ -220,7 +219,7 @@ impl ConnectionState {
             self.closed.insert(
                 promised,
                 super::super::ClosedStream {
-                    ended: [true, true],
+                    ended: PerSide::new(true, true),
                     reset_by: None,
                     request: Some(index),
                 },
@@ -253,14 +252,14 @@ impl ConnectionState {
         context.check_streams()?;
         self.admitted_streams += 1;
         self.charge_conn(context, resources::STREAM_OVERHEAD)?;
-        let windows = [
-            i64::from(self.settings[SERVER].acknowledged.initial_window_size),
-            i64::from(self.settings[CLIENT].acknowledged.initial_window_size),
-        ];
+        let windows = PerSide::new(
+            i64::from(self.settings[Side::Server].acknowledged.initial_window_size),
+            i64::from(self.settings[Side::Client].acknowledged.initial_window_size),
+        );
         let mut promised_stream = StreamState::reserved(stream_id, windows);
         promised_stream.request = Some(index);
         promised_stream.method = promised_method;
-        promised_stream.unprocessed = self.goaway[CLIENT].is_some_and(|last| promised > last);
+        promised_stream.unprocessed = self.goaway[Side::Client].is_some_and(|last| promised > last);
         self.streams.insert(promised, promised_stream);
         Ok(())
     }
@@ -288,11 +287,14 @@ impl ConnectionState {
         let request = self.streams.get(&id).and_then(|stream| stream.request);
         for _ in 0..count {
             context.check_deadline()?;
-            let mut msg = self.parent_deferred.pop_front().expect("pending promise");
+            let mut msg = self
+                .parent_deferred
+                .pop_front()
+                .ok_or(Error::Invariant("pending promise"))?;
             if msg.promised_by == Some(id) {
-                self.release_conn(context, resources::PENDING_OVERHEAD);
+                self.release_conn(context, resources::PENDING_OVERHEAD)?;
                 msg.request = request;
-                self.emit_message(SERVER, msg, Status::Complete, context)?;
+                self.emit_message(Side::Server, msg, Status::Complete, context)?;
             } else {
                 self.parent_deferred.push_back(msg);
             }

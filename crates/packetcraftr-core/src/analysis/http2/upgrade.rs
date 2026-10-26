@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::analysis::http2::side::PerSide;
 use crate::protocol::application::http::{self, Head, StartLine};
 use crate::protocol::application::http2::Setting;
 use std::collections::{BTreeMap, VecDeque};
@@ -13,7 +14,7 @@ pub(crate) struct Prelude {
     pub live_request: Option<super::stream::MessageBuilder>,
     pub live_response: Option<super::stream::MessageBuilder>,
     pub upgraded: bool,
-    pub body_charge: [usize; 2],
+    pub body_charge: PerSide<usize>,
 }
 
 pub(crate) struct Pending {
@@ -37,7 +38,7 @@ impl Prelude {
             live_request: None,
             live_response: None,
             upgraded: false,
-            body_charge: [0; 2],
+            body_charge: PerSide::new(0, 0),
         }
     }
 }

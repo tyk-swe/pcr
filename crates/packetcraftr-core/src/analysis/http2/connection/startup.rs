@@ -5,7 +5,8 @@ use super::super::Error;
 use super::super::buffer::union_balanced;
 use super::super::model::{Certainty, IssueScope, Startup, Status};
 use super::super::upgrade::Prelude;
-use super::{CLIENT, ConnectionState, Context, DirectionPhase, Fault, PREFACE_LEN, Phase, SERVER};
+use super::{ConnectionState, Context, DirectionPhase, Fault, PREFACE_LEN, Phase};
+use crate::analysis::http2::side::Side;
 use crate::protocol::application::http;
 use crate::protocol::application::http2 as wire;
 use crate::protocol::application::http2::hpack;
@@ -93,7 +94,7 @@ impl ConnectionState {
                 }
                 Verdict::Prior => {
                     self.elect_client(index, Startup::PriorKnowledge, context)?;
-                    if let Some(dir) = self.dirs[CLIENT].as_mut() {
+                    if let Some(dir) = self.dirs[Side::Client].as_mut() {
                         dir.phase = DirectionPhase::Preface;
                     }
                     self.phase = Phase::H2;
@@ -101,10 +102,10 @@ impl ConnectionState {
                 }
                 Verdict::Prelude => {
                     self.elect_client(index, Startup::Unknown, context)?;
-                    if let Some(dir) = self.dirs[CLIENT].as_mut() {
+                    if let Some(dir) = self.dirs[Side::Client].as_mut() {
                         dir.phase = DirectionPhase::Prelude;
                     }
-                    for dir in self.dirs[SERVER].iter_mut() {
+                    for dir in self.dirs[Side::Server].iter_mut() {
                         dir.phase = DirectionPhase::Prelude;
                     }
                     self.prelude = Some(Prelude::new());
@@ -127,7 +128,7 @@ impl ConnectionState {
         let mut client = pending.swap_remove(index);
         client.decoder = Some(hpack::Decoder::new(context.limits.hpack())?);
         self.startup = startup;
-        self.dirs[CLIENT] = Some(client);
+        self.dirs[Side::Client] = Some(client);
         for mut dir in pending {
             if !dir.buffer.is_empty() {
                 self.clean_start = false;
@@ -137,21 +138,19 @@ impl ConnectionState {
                 Startup::PriorKnowledge => DirectionPhase::Frames,
                 _ => DirectionPhase::Prelude,
             };
-            self.dirs[SERVER] = Some(dir);
+            self.dirs[Side::Server] = Some(dir);
         }
         Ok(())
     }
 
     pub(crate) fn preface_step(
         &mut self,
-        side: usize,
+        side: Side,
         context: &mut Context<'_>,
     ) -> Result<bool, Error> {
-        let dir = self.dirs[side].as_mut().ok_or(Error::Application(
-            crate::analysis::application::Error::Sources {
-                number: self.number,
-            },
-        ))?;
+        let dir = self.dirs[side]
+            .as_mut()
+            .ok_or(Error::Invariant("direction not found"))?;
         let have = dir.buffer.len().min(PREFACE_LEN);
         if dir.buffer.bytes()[..have] != wire::CLIENT_PREFACE[..have] {
             let flow = dir.flow.clone();
@@ -159,8 +158,8 @@ impl ConnectionState {
             let sets = dir.buffer.contributors(take);
             let (wire, dropped) = dir.buffer.take(take);
             let sources = union_balanced(sets)?;
-            Self::release_dir(dir, context, take);
-            Self::release_dropped(dir, dropped, context);
+            Self::release_dir(dir, context, take)?;
+            Self::release_dropped(dir, dropped, context)?;
             self.issue(
                 context,
                 Fault {
@@ -181,9 +180,9 @@ impl ConnectionState {
         if dir.buffer.len() < PREFACE_LEN {
             return Ok(false);
         }
-        let dropped = dir.buffer.discard(PREFACE_LEN);
-        Self::release_dir(dir, context, PREFACE_LEN);
-        Self::release_dropped(dir, dropped, context);
+        let dropped = dir.buffer.consume(PREFACE_LEN);
+        Self::release_dir(dir, context, PREFACE_LEN)?;
+        Self::release_dropped(dir, dropped, context)?;
         if let Some(dir) = self.dirs[side].as_mut() {
             dir.phase = DirectionPhase::Frames;
         }

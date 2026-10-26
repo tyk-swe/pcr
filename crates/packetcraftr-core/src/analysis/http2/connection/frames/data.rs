@@ -6,10 +6,10 @@
 use super::super::{ConnectionState, Context, Evidence, Fault, resources};
 use crate::analysis::http2::Error;
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
-use crate::analysis::http2::stream::{CLIENT, SERVER, peer};
+use crate::analysis::http2::side::Side;
 
 pub(super) struct DataHead {
-    pub(super) side: usize,
+    pub(super) side: Side,
     pub(super) stream_id: u32,
     pub(super) length: u32,
     pub(super) data_bytes: u64,
@@ -83,22 +83,18 @@ impl ConnectionState {
         if self
             .closed
             .get(&stream_id)
-            .is_some_and(|closed| closed.reset_by == Some(peer(side)) && !closed.ended[side])
+            .is_some_and(|closed| closed.reset_by == Some(side.peer()) && !closed.ended[side])
         {
             return Ok(());
         }
         let Some(stream) = self.streams.get_mut(&stream_id) else {
-            let owner = if stream_id.is_multiple_of(2) {
-                SERVER
-            } else {
-                CLIENT
-            };
+            let owner = Side::initiator_of(stream_id);
             let closed =
                 self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner];
             if !closed
                 && self.clean_start
-                && side == SERVER
-                && owner == CLIENT
+                && side == Side::Server
+                && owner == Side::Client
                 && self
                     .early_response_headers
                     .get(&stream_id)
@@ -126,8 +122,8 @@ impl ConnectionState {
             // contradicted by content in the server's own ordered bytes.
             if !closed
                 && self.clean_start
-                && side == SERVER
-                && owner == CLIENT
+                && side == Side::Server
+                && owner == Side::Client
                 && data_bytes > 0
                 && let Some(early) = self.early_response_headers.get_mut(&stream_id)
                 && early.final_seen
@@ -154,7 +150,7 @@ impl ConnectionState {
                 return Ok(());
             }
             let uncertain = !closed && (!self.clean_start || side != owner);
-            if side == SERVER
+            if side == Side::Server
                 && end_stream
                 && let Some(early) = self.early_response_headers.get_mut(&stream_id)
             {
@@ -202,7 +198,7 @@ impl ConnectionState {
         };
         if stream.phase != crate::analysis::http2::stream::Phase::Open || stream.ended[side] {
             let reserved = stream.phase == crate::analysis::http2::stream::Phase::Reserved;
-            let preserve_delayed_request = side == SERVER && stream.early_response.is_some();
+            let preserve_delayed_request = side == Side::Server && stream.early_response.is_some();
             let flow = self.dir_flow(side);
             self.issue(
                 context,
@@ -271,9 +267,12 @@ impl ConnectionState {
         if self.reconcile_closed_credit(side, Some(stream_id), context)? {
             return Ok(());
         }
-        let stream = self.streams.get_mut(&stream_id).expect("stream");
-        let trace_content = side == CLIENT && stream.method.as_deref() == Some(b"TRACE");
-        if data_bytes > 0 && (trace_content || (stream.response_bodyless && side == SERVER)) {
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or(Error::Invariant("stream"))?;
+        let trace_content = side == Side::Client && stream.method.as_deref() == Some(b"TRACE");
+        if data_bytes > 0 && (trace_content || (stream.response_bodyless && side == Side::Server)) {
             let flow = self.dir_flow(side);
             self.issue(
                 context,
@@ -293,12 +292,18 @@ impl ConnectionState {
                     sources: evidence.sources.clone(),
                 },
             )?;
-            let stream = self.streams.get_mut(&stream_id).expect("stream");
+            let stream = self
+                .streams
+                .get_mut(&stream_id)
+                .ok_or(Error::Invariant("stream"))?;
             if let Some(msg) = stream.msgs[side].as_mut() {
                 msg.failure = Some(Status::Malformed);
             }
         }
-        let stream = self.streams.get_mut(&stream_id).expect("stream");
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or(Error::Invariant("stream"))?;
         if stream.msgs[side]
             .as_ref()
             .is_some_and(|msg| msg.trailers_seen)
@@ -318,12 +323,18 @@ impl ConnectionState {
                     sources: evidence.sources.clone(),
                 },
             )?;
-            let stream = self.streams.get_mut(&stream_id).expect("stream");
+            let stream = self
+                .streams
+                .get_mut(&stream_id)
+                .ok_or(Error::Invariant("stream"))?;
             if let Some(msg) = stream.msgs[side].as_mut() {
                 msg.failure = Some(Status::Malformed);
             }
         }
-        let stream = self.streams.get_mut(&stream_id).expect("stream");
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or(Error::Invariant("stream"))?;
         if let Some(msg) = stream.msgs[side].as_mut() {
             msg.saw_body = true;
             msg.body_bytes = msg.body_bytes.saturating_add(data_bytes);
@@ -350,7 +361,10 @@ impl ConnectionState {
                 let charge =
                     resources::SET_OVERHEAD + sources.frames().len() * resources::SPAN_OVERHEAD;
                 self.charge_conn(context, charge)?;
-                let stream = self.streams.get_mut(&stream_id).expect("stream");
+                let stream = self
+                    .streams
+                    .get_mut(&stream_id)
+                    .ok_or(Error::Invariant("stream"))?;
                 if let Some(msg) = stream.msgs[side].as_mut() {
                     msg.charged += charge;
                     msg.charged_spans += sources.frames().len();
@@ -358,7 +372,9 @@ impl ConnectionState {
                     msg.sets.push(sources);
                 }
             }
-        } else if side == SERVER && stream.early_response.is_some_and(|early| early.final_seen) {
+        } else if side == Side::Server
+            && stream.early_response.is_some_and(|early| early.final_seen)
+        {
             self.issue(
                 context,
                 Fault {

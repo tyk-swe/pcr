@@ -4,9 +4,9 @@
 use super::super::super::Error;
 use super::super::super::buffer::union_balanced;
 use super::super::super::model::{Certainty, Header, IssueScope, Status};
-use super::super::super::stream::{CLIENT, MessageBuilder};
+use super::super::super::stream::MessageBuilder;
 use super::super::{ConnectionState, Context, Fault, resources};
-use crate::analysis::application;
+use crate::analysis::http2::side::Side;
 use crate::protocol::application::http;
 use bytes::Bytes;
 
@@ -20,17 +20,14 @@ pub(super) enum BodyStep {
 impl ConnectionState {
     pub(super) fn prelude_body_step(
         &mut self,
-        side: usize,
+        side: Side,
         context: &mut Context<'_>,
     ) -> Result<BodyStep, Error> {
-        let dir =
-            self.dirs[side]
-                .as_mut()
-                .ok_or(Error::Application(application::Error::Sources {
-                    number: self.number,
-                }))?;
+        let dir = self.dirs[side]
+            .as_mut()
+            .ok_or(Error::Invariant("direction not found"))?;
         let has_body = self.prelude.as_ref().is_some_and(|p| {
-            if side == CLIENT {
+            if side == Side::Client {
                 p.client_body.is_some()
             } else {
                 p.server_body.is_some()
@@ -39,11 +36,17 @@ impl ConnectionState {
         if !has_body {
             return Ok(BodyStep::NotBody);
         }
-        let prelude = self.prelude.as_mut().expect("prelude");
-        let body = if side == CLIENT {
-            prelude.client_body.as_mut().expect("body")
+        let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+        let body = if side == Side::Client {
+            prelude
+                .client_body
+                .as_mut()
+                .ok_or(Error::Invariant("body"))?
         } else {
-            prelude.server_body.as_mut().expect("body")
+            prelude
+                .server_body
+                .as_mut()
+                .ok_or(Error::Invariant("body"))?
         };
         let progress = match body.consume(dir.buffer.bytes()) {
             Ok(progress) => progress,
@@ -53,8 +56,8 @@ impl ConnectionState {
                 let sets = dir.buffer.contributors(take);
                 let (wire, dropped) = dir.buffer.take(take);
                 let sources = union_balanced(sets)?;
-                Self::release_dir(dir, context, take);
-                Self::release_dropped(dir, dropped, context);
+                Self::release_dir(dir, context, take)?;
+                Self::release_dropped(dir, dropped, context)?;
                 let status = if matches!(error, http::Error::Limit(_)) {
                     Status::Limit
                 } else {
@@ -98,11 +101,11 @@ impl ConnectionState {
         };
         if consumed > 0 {
             let sets = dir.buffer.contributors(consumed);
-            let dropped = dir.buffer.discard(consumed);
-            Self::release_dir(dir, context, consumed);
-            Self::release_dropped(dir, dropped, context);
-            let prelude = self.prelude.as_mut().expect("prelude");
-            let msg_slot = if side == CLIENT {
+            let dropped = dir.buffer.consume(consumed);
+            Self::release_dir(dir, context, consumed)?;
+            Self::release_dropped(dir, dropped, context)?;
+            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            let msg_slot = if side == Side::Client {
                 &mut prelude.live_request
             } else {
                 &mut prelude.live_response
@@ -114,11 +117,17 @@ impl ConnectionState {
                     let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
                     self.charge_conn(context, charge)?;
                     context.charge_spans(frames)?;
-                    let prelude = self.prelude.as_mut().expect("prelude");
-                    let msg = if side == CLIENT {
-                        prelude.live_request.as_mut().expect("request")
+                    let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+                    let msg = if side == Side::Client {
+                        prelude
+                            .live_request
+                            .as_mut()
+                            .ok_or(Error::Invariant("request"))?
                     } else {
-                        prelude.live_response.as_mut().expect("response")
+                        prelude
+                            .live_response
+                            .as_mut()
+                            .ok_or(Error::Invariant("response"))?
                     };
                     msg.charged += charge;
                     msg.charged_spans += frames;
@@ -131,13 +140,13 @@ impl ConnectionState {
                 .iter()
                 .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
                 .sum::<usize>();
-            let prelude = self.prelude.as_mut().expect("prelude");
-            if side == CLIENT {
+            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            if side == Side::Client {
                 prelude.client_body = None;
             } else {
                 prelude.server_body = None;
             }
-            let msg = if side == CLIENT {
+            let msg = if side == Side::Client {
                 prelude.live_request.take()
             } else {
                 prelude.live_response.take()
@@ -153,9 +162,14 @@ impl ConnectionState {
                 }
                 None => BodyStep::Progress,
             };
-            let charge =
-                std::mem::take(&mut self.prelude.as_mut().expect("prelude").body_charge[side]);
-            self.release_conn(context, charge);
+            let charge = std::mem::take(
+                &mut self
+                    .prelude
+                    .as_mut()
+                    .ok_or(Error::Invariant("prelude"))?
+                    .body_charge[side],
+            );
+            self.release_conn(context, charge)?;
             return Ok(step);
         }
         Ok(BodyStep::Progress)

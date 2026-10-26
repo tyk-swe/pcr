@@ -42,14 +42,12 @@ impl SourceBuffer {
             sources,
         });
     }
-    fn consume(&mut self, n: usize) -> Vec<SourceSet> {
+    pub(crate) fn consume(&mut self, n: usize) -> Vec<SourceSet> {
         self.base += n as u64;
         let _ = self.bytes.split_to(n);
         let mut dropped = Vec::new();
-        while self.spans.front().is_some_and(|span| span.end <= self.base) {
-            if let Some(span) = self.spans.pop_front() {
-                dropped.push(span.sources);
-            }
+        while let Some(span) = self.spans.pop_front_if(|span| span.end <= self.base) {
+            dropped.push(span.sources);
         }
         if self.bytes.is_empty() {
             self.bytes = BytesMut::new();
@@ -58,9 +56,6 @@ impl SourceBuffer {
             self.spans = VecDeque::new();
         }
         dropped
-    }
-    pub(crate) fn discard(&mut self, n: usize) -> Vec<SourceSet> {
-        self.consume(n)
     }
     pub(crate) fn take(&mut self, n: usize) -> (Bytes, Vec<SourceSet>) {
         let taken = Bytes::copy_from_slice(&self.bytes[..n]);

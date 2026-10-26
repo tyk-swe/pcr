@@ -4,20 +4,21 @@
 //! WINDOW_UPDATE handling and reconciliation of closed-stream credit.
 
 use super::super::super::model::{Certainty, IssueScope, Status};
-use super::super::super::stream::{Phase as StreamPhase, SERVER, peer};
+use super::super::super::stream::Phase as StreamPhase;
 use super::super::super::{Error, settings};
 use super::super::{ConnectionState, Context, Evidence, Fault, resources};
+use crate::analysis::http2::side::{PerSide, Side};
 
 impl ConnectionState {
     pub(crate) fn window_update(
         &mut self,
-        side: usize,
+        side: Side,
         stream_id: u32,
         increment: u32,
         evidence: Evidence,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        let grant = peer(side);
+        let grant = side.peer();
         if stream_id == 0 {
             self.send_window[grant] = self.send_window[grant].saturating_add(i64::from(increment));
             if self.send_window[grant] > settings::WINDOW_MAX {
@@ -59,13 +60,13 @@ impl ConnectionState {
                     debt[grant] = None;
                 }
             }
-            self.release_credit(stream_id, context);
+            self.release_credit(stream_id, context)?;
         }
         let Some(stream) = self.streams.get_mut(&stream_id) else {
-            let owner = if stream_id.is_multiple_of(2) {
-                SERVER
+            let owner = if Side::initiator_of(stream_id) == Side::Server {
+                Side::Server
             } else {
-                super::super::super::stream::CLIENT
+                Side::Client
             };
             if self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner] {
                 return Ok(());
@@ -141,13 +142,13 @@ impl ConnectionState {
     /// A clean, fully consumed granting direction cannot hide later credit.
     pub(crate) fn reconcile_closed_credit(
         &mut self,
-        side: usize,
+        side: Side,
         only_stream: Option<u32>,
         context: &mut Context<'_>,
     ) -> Result<bool, Error> {
         if self.phase != super::super::Phase::H2
             || !self.clean_start
-            || !self.dirs[peer(side)]
+            || !self.dirs[side.peer()]
                 .as_ref()
                 .is_some_and(|dir| dir.closed && dir.buffer.is_empty() && dir.chain.is_none())
         {
@@ -167,7 +168,7 @@ impl ConnectionState {
         // A not-yet-ACKed SETTINGS increase may already have supplied credit.
         let mut delta = 0i64;
         let mut extra = 0i64;
-        for pending in &self.settings[peer(side)].pending {
+        for pending in &self.settings[side.peer()].pending {
             context.check_deadline()?;
             delta += pending.window_delta;
             extra = extra.max(delta);
@@ -201,7 +202,10 @@ impl ConnectionState {
                     detail: "DATA exhausted stream credit after the granting direction ended; prior DATA evidence is retained".into(),
                     wire: bytes::Bytes::new(), sources: None,
                 })?;
-                self.streams.get_mut(&id).expect("stream").credit_exceeded[side] = false;
+                self.streams
+                    .get_mut(&id)
+                    .ok_or(Error::Invariant("stream"))?
+                    .credit_exceeded[side] = false;
                 self.close_stream(id, Status::Malformed, None, context)?;
                 if only_stream.is_some() {
                     return Ok(true);
@@ -240,8 +244,10 @@ impl ConnectionState {
                     detail: "completed stream DATA exhausted credit before the granting direction ended; earlier DATA evidence is retained".into(),
                     wire: bytes::Bytes::new(), sources: None,
                 })?;
-                self.closed_credit.get_mut(&id).expect("debt")[side] = None;
-                self.release_credit(id, context);
+                self.closed_credit
+                    .get_mut(&id)
+                    .ok_or(Error::Invariant("debt"))?[side] = None;
+                self.release_credit(id, context)?;
             }
         }
         Ok(false)
@@ -252,11 +258,12 @@ impl ConnectionState {
         id: u32,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        let stream = self.streams.get(&id).expect("stream");
-        let debt = std::array::from_fn(|side| {
+        let stream = self.streams.get(&id).ok_or(Error::Invariant("stream"))?;
+        let debt_at = |side| {
             (stream.credit_exceeded[side] && stream.send_window[side] < 0)
                 .then_some(stream.send_window[side])
-        });
+        };
+        let debt = PerSide::new(debt_at(Side::Client), debt_at(Side::Server));
         if debt.iter().any(Option::is_some) && !self.closed_credit.contains_key(&id) {
             self.charge_conn(context, resources::CLOSED_CREDIT_OVERHEAD)?;
             self.closed_credit.insert(id, debt);
@@ -264,24 +271,28 @@ impl ConnectionState {
         Ok(())
     }
 
-    fn release_credit(&mut self, id: u32, context: &mut Context<'_>) {
+    fn release_credit(&mut self, id: u32, context: &mut Context<'_>) -> Result<(), Error> {
         if self
             .closed_credit
             .get(&id)
             .is_some_and(|debt| debt.iter().all(Option::is_none))
         {
             self.closed_credit.remove(&id);
-            self.release_conn(context, resources::CLOSED_CREDIT_OVERHEAD);
+            self.release_conn(context, resources::CLOSED_CREDIT_OVERHEAD)?;
         }
+        Ok(())
     }
 
-    pub(super) fn release_resolved_credit(&mut self, context: &mut Context<'_>) {
+    pub(super) fn release_resolved_credit(
+        &mut self,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
         let before = self.closed_credit.len();
         self.closed_credit
             .retain(|_, debt| debt.iter().any(Option::is_some));
         self.release_conn(
             context,
             (before - self.closed_credit.len()) * resources::CLOSED_CREDIT_OVERHEAD,
-        );
+        )
     }
 }

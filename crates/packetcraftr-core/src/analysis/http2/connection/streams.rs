@@ -7,12 +7,13 @@ mod push;
 
 use super::super::Error;
 use super::super::model::{Certainty, IssueScope, Status};
-use super::super::stream::{CLIENT, Phase as StreamPhase, SERVER, StreamState, peer};
+use super::super::stream::{Phase as StreamPhase, StreamState};
 use super::{ConnectionState, Context, Evidence, Fault, Phase, resources};
+use crate::analysis::http2::side::{PerSide, Side};
 use bytes::Bytes;
 
 impl ConnectionState {
-    pub(crate) fn opener_exhausted(&self, owner: usize) -> bool {
+    pub(crate) fn opener_exhausted(&self, owner: Side) -> bool {
         self.clean_start
             && self.dirs[owner]
                 .as_ref()
@@ -32,15 +33,16 @@ impl ConnectionState {
         Ok(())
     }
 
-    fn resolve_pending_opener(&mut self, id: u32, context: &mut Context<'_>) {
+    fn resolve_pending_opener(&mut self, id: u32, context: &mut Context<'_>) -> Result<(), Error> {
         if self.pending_openers.remove(&id).is_some() {
-            self.release_conn(context, resources::CLOSED_STREAM_OVERHEAD);
+            self.release_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
         }
+        Ok(())
     }
 
     pub(crate) fn reconcile_pending_openers(
         &mut self,
-        owner: usize,
+        owner: Side,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         self.confirm_pending_openers(
@@ -55,7 +57,7 @@ impl ConnectionState {
     /// id it never opened will stay idle: initiators use ids in increasing order.
     pub(crate) fn reconcile_pending_openers_below(
         &mut self,
-        owner: usize,
+        owner: Side,
         bound: u32,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
@@ -69,7 +71,7 @@ impl ConnectionState {
 
     fn confirm_pending_openers(
         &mut self,
-        owner: usize,
+        owner: Side,
         below: Option<u32>,
         detail: &'static str,
         context: &mut Context<'_>,
@@ -77,7 +79,7 @@ impl ConnectionState {
         let mut fault = None;
         for (&id, &code) in &self.pending_openers {
             context.check_deadline()?;
-            if id.is_multiple_of(2) == (owner == SERVER) && below.is_none_or(|bound| id < bound) {
+            if Side::initiator_of(id) == owner && below.is_none_or(|bound| id < bound) {
                 fault = Some((id, code));
                 break;
             }
@@ -86,7 +88,7 @@ impl ConnectionState {
             self.issue(
                 context,
                 Fault {
-                    flow: self.dir_flow(peer(owner)),
+                    flow: self.dir_flow(owner.peer()),
                     http2_stream_id: Some(id),
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
@@ -104,60 +106,18 @@ impl ConnectionState {
 
     pub(crate) fn begin_stream(
         &mut self,
-        side: usize,
+        side: Side,
         stream_id: u32,
         evidence: Option<&Evidence>,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        let initiator = if stream_id.is_multiple_of(2) {
-            SERVER
-        } else {
-            CLIENT
-        };
-        if side != initiator {
-            let flow = self.dir_flow(side);
-            self.issue(
-                context,
-                Fault {
-                    flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: "unpromised_stream",
-                    detail: "HEADERS opened a stream the endpoint did not initiate".into(),
-                    wire: evidence.map_or_else(Bytes::new, |e| e.wire.clone()),
-                    sources: evidence.and_then(|e| e.sources.clone()),
-                },
-            )?;
-            self.fail(context, Status::Malformed)?;
-            return Ok(());
-        }
-        if initiator == CLIENT && stream_id <= self.max_initiated[CLIENT] {
-            let flow = self.dir_flow(side);
-            self.issue(
-                context,
-                Fault {
-                    flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: "stream_id_not_monotonic",
-                    detail: "a new client stream id did not exceed previously initiated ids".into(),
-                    wire: evidence.map_or_else(Bytes::new, |e| e.wire.clone()),
-                    sources: evidence.and_then(|e| e.sources.clone()),
-                },
-            )?;
-            self.fail(context, Status::Malformed)?;
-            return Ok(());
-        }
-        if initiator == CLIENT {
-            self.max_initiated[CLIENT] = stream_id;
+        let initiator = Side::initiator_of(stream_id);
+        if initiator == Side::Client {
+            self.max_initiated[Side::Client] = stream_id;
             // Only a connection observed from its start proves lower ids were
             // never opened; a mid-capture start may have missed their openers.
             if self.clean_start {
-                self.reconcile_pending_openers_below(CLIENT, stream_id, context)?;
+                self.reconcile_pending_openers_below(Side::Client, stream_id, context)?;
                 if matches!(self.phase, Phase::Dead) {
                     return Ok(());
                 }
@@ -189,23 +149,23 @@ impl ConnectionState {
             self.fail(context, Status::Limit)?;
             return Ok(());
         }
-        self.resolve_pending_opener(stream_id, context);
+        self.resolve_pending_opener(stream_id, context)?;
         let early_response = self.early_response_headers.remove(&stream_id);
         if early_response.is_some() {
-            self.release_conn(context, resources::CLOSED_STREAM_OVERHEAD);
+            self.release_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
         } else {
             context.check_streams()?;
             self.admitted_streams += 1;
         }
         self.charge_conn(context, resources::STREAM_OVERHEAD)?;
-        let windows = [
-            i64::from(self.settings[SERVER].acknowledged.initial_window_size),
-            i64::from(self.settings[CLIENT].acknowledged.initial_window_size),
-        ];
-        let mut state = StreamState::open(initiator == CLIENT, windows);
+        let windows = PerSide::new(
+            i64::from(self.settings[Side::Server].acknowledged.initial_window_size),
+            i64::from(self.settings[Side::Client].acknowledged.initial_window_size),
+        );
+        let mut state = StreamState::open(initiator, windows);
         state.early_response = early_response;
-        state.ended[SERVER] = early_response.is_some_and(|early| early.ended);
-        state.unprocessed = self.goaway[peer(initiator)].is_some_and(|last| stream_id > last);
+        state.ended[Side::Server] = early_response.is_some_and(|early| early.ended);
+        state.unprocessed = self.goaway[initiator.peer()].is_some_and(|last| stream_id > last);
         self.streams.insert(stream_id, state);
         self.active[initiator] += 1;
         self.enforce_concurrency(initiator, stream_id, evidence, context)?;
@@ -214,12 +174,12 @@ impl ConnectionState {
 
     fn enforce_concurrency(
         &mut self,
-        initiator: usize,
+        initiator: Side,
         stream_id: u32,
         evidence: Option<&Evidence>,
         context: &mut Context<'_>,
     ) -> Result<bool, Error> {
-        let receiver = &self.settings[peer(initiator)];
+        let receiver = &self.settings[initiator.peer()];
         let Some(max) = receiver.acknowledged.max_concurrent_streams else {
             return Ok(false);
         };
@@ -232,7 +192,7 @@ impl ConnectionState {
         // consumed receiving FIN also rules out any hidden peer resets.
         let confirmed = receiver.pending.is_empty()
             && (max == 0
-                || self.dirs[peer(initiator)]
+                || self.dirs[initiator.peer()]
                     .as_ref()
                     .is_some_and(|dir| dir.closed && dir.buffer.is_empty() && dir.chain.is_none()));
         self.issue(
@@ -261,7 +221,7 @@ impl ConnectionState {
 
     pub(crate) fn stream_window_overflows(
         &self,
-        side: usize,
+        side: Side,
         stream_id: u32,
         context: &Context<'_>,
     ) -> Result<bool, Error> {
@@ -278,7 +238,7 @@ impl ConnectionState {
         // Unacknowledged increases cannot establish receipt; only a nonpositive
         // cumulative delta lowers the bound. ACKed increases are already in base.
         // Subtracting all observed DATA makes each intermediate bound conservative.
-        for pending in &self.settings[peer(side)].pending {
+        for pending in &self.settings[side.peer()].pending {
             context.check_deadline()?;
             let before = pending.window_grants.get(&stream_id).copied().unwrap_or(0);
             if before > previous_grants {
@@ -288,7 +248,7 @@ impl ConnectionState {
             previous_grants = before;
             delta = delta.saturating_add(pending.window_delta);
         }
-        if granted > previous_grants || self.settings[peer(side)].pending.is_empty() {
+        if granted > previous_grants || self.settings[side.peer()].pending.is_empty() {
             overflow |= stream.send_window[side].saturating_add(delta.min(0))
                 > super::super::settings::WINDOW_MAX;
         }
@@ -297,7 +257,7 @@ impl ConnectionState {
 
     pub(crate) fn confirm_stream_window_overflow(
         &mut self,
-        side: usize,
+        side: Side,
         stream_id: u32,
         context: &mut Context<'_>,
     ) -> Result<bool, Error> {
@@ -321,7 +281,7 @@ impl ConnectionState {
 
     pub(crate) fn end_side(
         &mut self,
-        side: usize,
+        side: Side,
         stream_id: u32,
         status: Status,
         context: &mut Context<'_>,
@@ -332,12 +292,12 @@ impl ConnectionState {
             return Ok(());
         }
         let defer_complete = status == Status::Complete
-            && (self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER));
+            && (self.waiting_settings_ack(Side::Client) || self.waiting_settings_ack(Side::Server));
         let Some(stream) = self.streams.get_mut(&stream_id) else {
             return Ok(());
         };
         stream.ended[side] = true;
-        if side == SERVER
+        if side == Side::Server
             && let Some(early) = stream.early_response.as_mut()
         {
             early.ended = true;
@@ -359,10 +319,13 @@ impl ConnectionState {
                 return self.close_stream(stream_id, Status::Malformed, None, context);
             }
         }
-        let stream = self.streams.get_mut(&stream_id).expect("stream");
-        if stream.ended == [true, true] {
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or(Error::Invariant("stream"))?;
+        if stream.ended.all(|ended| *ended) {
             if stream.phase == StreamPhase::Open {
-                let owner = if stream.by_client { CLIENT } else { SERVER };
+                let owner = stream.initiator;
                 self.active[owner] = self.active[owner].saturating_sub(1);
             }
             stream.phase = StreamPhase::Closed;
@@ -373,7 +336,7 @@ impl ConnectionState {
                 self.closed.insert(
                     stream_id,
                     super::ClosedStream {
-                        ended: [true, true],
+                        ended: PerSide::new(true, true),
                         reset_by: None,
                         request,
                     },
@@ -381,7 +344,7 @@ impl ConnectionState {
                 self.release_conn(
                     context,
                     resources::STREAM_OVERHEAD - resources::CLOSED_STREAM_OVERHEAD,
-                );
+                )?;
             }
         }
         Ok(())
@@ -391,22 +354,22 @@ impl ConnectionState {
     // direction without discarding the opener's independently valid evidence.
     pub(crate) fn reject_priority_stream(
         &mut self,
-        side: usize,
+        side: Side,
         id: u32,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if self.streams.contains_key(&id) {
             return self.close_stream(id, Status::Malformed, None, context);
         }
-        let owner = if id.is_multiple_of(2) { SERVER } else { CLIENT };
+        let owner = Side::initiator_of(id);
         if self.closed.contains_key(&id) || id <= self.max_initiated[owner] {
             return Ok(());
         }
-        if side == SERVER && owner == CLIENT {
+        if side == Side::Server && owner == Side::Client {
             self.retain_early_parent(id, context)?;
             self.early_response_headers
                 .get_mut(&id)
-                .expect("early parent")
+                .ok_or(Error::Invariant("early parent"))?
                 .ended = true;
         } else {
             context.check_streams()?;
@@ -415,7 +378,7 @@ impl ConnectionState {
             self.closed.insert(
                 id,
                 super::ClosedStream {
-                    ended: [true, true],
+                    ended: PerSide::new(true, true),
                     reset_by: None,
                     request: None,
                 },
@@ -426,17 +389,13 @@ impl ConnectionState {
 
     pub(crate) fn reset_stream(
         &mut self,
-        side: usize,
+        side: Side,
         stream_id: u32,
         evidence: Evidence,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if !self.streams.contains_key(&stream_id) {
-            let owner = if stream_id.is_multiple_of(2) {
-                SERVER
-            } else {
-                CLIENT
-            };
+            let owner = Side::initiator_of(stream_id);
             if self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner] {
                 return Ok(());
             }
@@ -465,12 +424,12 @@ impl ConnectionState {
             )?;
             if confirmed {
                 self.fail(context, Status::Malformed)?;
-            } else if side == SERVER && owner == CLIENT {
+            } else if side == Side::Server && owner == Side::Client {
                 self.retain_pending_opener(stream_id, "reset_idle_stream", context)?;
                 self.retain_early_parent(stream_id, context)?;
                 self.early_response_headers
                     .get_mut(&stream_id)
-                    .expect("early parent")
+                    .ok_or(Error::Invariant("early parent"))?
                     .ended = true;
             } else {
                 self.retain_pending_opener(stream_id, "reset_idle_stream", context)?;
@@ -480,7 +439,7 @@ impl ConnectionState {
                 self.closed.insert(
                     stream_id,
                     super::ClosedStream {
-                        ended: [side == CLIENT, side == SERVER],
+                        ended: PerSide::new(side == Side::Client, side == Side::Server),
                         reset_by: Some(side),
                         request: None,
                     },
@@ -495,12 +454,15 @@ impl ConnectionState {
         &mut self,
         stream_id: u32,
         status: Status,
-        reset_by: Option<usize>,
+        reset_by: Option<Side>,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        let stream = self.streams.get_mut(&stream_id).expect("stream");
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or(Error::Invariant("stream"))?;
         if stream.phase == StreamPhase::Closed
-            && stream.ended == [true, true]
+            && stream.ended.all(|ended| *ended)
             && stream.msgs.iter().all(Option::is_none)
         {
             return Ok(());
@@ -509,16 +471,16 @@ impl ConnectionState {
         if let Some(side) = reset_by {
             ended[side] = true;
         } else {
-            ended = [true, true];
+            ended = PerSide::new(true, true);
         }
         let was_open = stream.phase == StreamPhase::Open;
         stream.phase = StreamPhase::Closed;
-        stream.ended = [true, true];
+        stream.ended = PerSide::new(true, true);
         if was_open {
-            let owner = if stream.by_client { CLIENT } else { SERVER };
+            let owner = stream.initiator;
             self.active[owner] = self.active[owner].saturating_sub(1);
         }
-        for msg_side in [CLIENT, SERVER] {
+        for msg_side in Side::BOTH {
             if let Some(msg) = self
                 .streams
                 .get_mut(&stream_id)
@@ -541,7 +503,7 @@ impl ConnectionState {
         self.release_conn(
             context,
             resources::STREAM_OVERHEAD - resources::CLOSED_STREAM_OVERHEAD,
-        );
+        )?;
         Ok(())
     }
 }

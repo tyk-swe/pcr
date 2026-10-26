@@ -11,7 +11,8 @@ use crate::analysis::http2::connection::{
     ConnectionState, Context, DirectionPhase, Fault, Phase, resources,
 };
 use crate::analysis::http2::model::{Certainty, Connection, IssueScope, Startup, Status};
-use crate::analysis::http2::stream::{CLIENT, Phase as StreamPhase, SERVER};
+use crate::analysis::http2::side::Side;
+use crate::analysis::http2::stream::Phase as StreamPhase;
 
 impl ConnectionState {
     pub(crate) fn flush_messages(
@@ -21,18 +22,18 @@ impl ConnectionState {
     ) -> Result<usize, Error> {
         let mut pending_msgs = Vec::new();
         let promises = std::mem::take(&mut self.parent_deferred);
-        self.release_conn(context, promises.len() * resources::PENDING_OVERHEAD);
+        self.release_conn(context, promises.len() * resources::PENDING_OVERHEAD)?;
         for msg in promises {
-            pending_msgs.push((SERVER, msg.stream_id, msg));
+            pending_msgs.push((Side::Server, msg.stream_id, msg));
         }
         let immediate = std::mem::take(&mut self.ack_deferred);
-        self.release_conn(context, immediate.len() * resources::PENDING_OVERHEAD);
+        self.release_conn(context, immediate.len() * resources::PENDING_OVERHEAD)?;
         for (side, msg, _) in immediate {
             pending_msgs.push((side, msg.stream_id, msg));
         }
 
         for (id, stream) in self.streams.iter_mut() {
-            for side in [CLIENT, SERVER] {
+            for side in Side::BOTH {
                 if let Some(msg) = stream.msgs[side].take() {
                     pending_msgs.push((side, *id, msg));
                 }
@@ -46,7 +47,7 @@ impl ConnectionState {
                 if prelude.offers.contains_key(&msg.index) {
                     if prelude.upgraded {
                         msg.stream_id = 1;
-                        pending_msgs.push((CLIENT, 1, msg));
+                        pending_msgs.push((Side::Client, 1, msg));
                     } else {
                         upgrade_evidence.push(msg);
                     }
@@ -59,7 +60,7 @@ impl ConnectionState {
                 if let Some(mut msg) = offer.msg.take() {
                     if prelude.upgraded {
                         msg.stream_id = 1;
-                        pending_msgs.push((CLIENT, 1, msg));
+                        pending_msgs.push((Side::Client, 1, msg));
                     } else {
                         upgrade_evidence.push(msg);
                     }
@@ -67,17 +68,20 @@ impl ConnectionState {
             }
         }
         for mut msg in upgrade_evidence {
-            let head = msg.upgrade_head.take().expect("upgrade request head");
+            let head = msg
+                .upgrade_head
+                .take()
+                .ok_or(Error::Invariant("upgrade request head"))?;
             let sources = union_balanced(std::mem::take(&mut msg.sets))?;
-            self.release_conn(context, msg.charged);
+            self.release_conn(context, msg.charged)?;
             *context.spans = context
                 .spans
                 .checked_sub(msg.charged_spans)
-                .expect("msg spans");
+                .ok_or(Error::Invariant("msg spans"))?;
             self.issue(
                 context,
                 Fault {
-                    flow: self.dir_flow(CLIENT),
+                    flow: self.dir_flow(Side::Client),
                     http2_stream_id: None,
                     scope: IssueScope::Capture,
                     certainty: Certainty::Confirmed,
@@ -90,11 +94,11 @@ impl ConnectionState {
             )?;
         }
         for msg in release {
-            self.release_conn(context, msg.charged);
+            self.release_conn(context, msg.charged)?;
             *context.spans = context
                 .spans
                 .checked_sub(msg.charged_spans)
-                .expect("msg spans");
+                .ok_or(Error::Invariant("msg spans"))?;
         }
         let emitted = pending_msgs.len();
         for (side, _, msg) in pending_msgs {
@@ -125,8 +129,11 @@ impl ConnectionState {
             charged += msg.charged;
             spans += msg.charged_spans;
         }
-        self.release_conn(context, release + charged);
-        *context.spans = context.spans.checked_sub(spans).expect("prelude spans");
+        self.release_conn(context, release + charged)?;
+        *context.spans = context
+            .spans
+            .checked_sub(spans)
+            .ok_or(Error::Invariant("prelude spans"))?;
         Ok(())
     }
 
@@ -137,15 +144,15 @@ impl ConnectionState {
             self.pump(context)?;
         }
         self.report_unmatched_response_at_eof(context)?;
-        for side in [CLIENT, SERVER] {
+        for side in Side::BOTH {
             if let Some(dir) = self.dirs[side].as_mut() {
                 if !dir.buffer.is_empty() && !matches!(self.phase, Phase::Dead) {
                     let partial = dir.buffer.len();
                     let sets = dir.buffer.contributors(partial);
                     let (wire, dropped) = dir.buffer.take(partial);
                     let sources = union_balanced(sets)?;
-                    Self::release_dir(dir, context, partial);
-                    Self::release_dropped(dir, dropped, context);
+                    Self::release_dir(dir, context, partial)?;
+                    Self::release_dropped(dir, dropped, context)?;
                     let flow = dir.flow.clone();
                     self.issue(
                         context,
@@ -197,11 +204,11 @@ impl ConnectionState {
                     || self
                         .streams
                         .values()
-                        .any(|stream| stream.ended != [true, true]))
+                        .any(|stream| !stream.ended.all(|ended| *ended)))
             {
                 self.worst(Status::Incomplete);
             }
-            if self.dirs[CLIENT].is_none() {
+            if self.dirs[Side::Client].is_none() {
                 let all_garbage = self.pending.iter().any(|dir| dir.received)
                     && self.pending.iter().all(|dir| !dir.received || dir.garbage);
                 self.worst(if self.startup == Startup::Unknown && all_garbage {
@@ -227,7 +234,7 @@ impl ConnectionState {
                 self.worst(Status::Incomplete);
             } else if self.refused {
                 self.worst(Status::Unsupported);
-            } else if self.dirs[SERVER].is_none() && self.frames > 0 {
+            } else if self.dirs[Side::Server].is_none() && self.frames > 0 {
                 self.worst(Status::Incomplete);
             }
             if !self.done {
@@ -277,15 +284,16 @@ impl ConnectionState {
             flow: self.flow(),
             startup: self.startup,
             status: self.status,
-            client_settings: self.settings[CLIENT].advertised,
-            server_settings: self.settings[SERVER].advertised,
-            client_window: self.send_window[CLIENT],
-            server_window: self.send_window[SERVER],
+            client_settings: self.settings[Side::Client].advertised,
+            server_settings: self.settings[Side::Server].advertised,
+            client_window: self.send_window[Side::Client],
+            server_window: self.send_window[Side::Server],
             streams: self.admitted_streams,
             frames: self.frames,
             issues: self.issues,
             pending_settings: self.final_pending_settings.unwrap_or_else(|| {
-                (self.settings[CLIENT].pending.len() + self.settings[SERVER].pending.len()) as u64
+                (self.settings[Side::Client].pending.len()
+                    + self.settings[Side::Server].pending.len()) as u64
             }),
             pending_pings: self.final_pending_pings.unwrap_or_else(|| {
                 self.pings
@@ -297,7 +305,7 @@ impl ConnectionState {
             upgrade_sources: self.upgrade_sources.take(),
         });
         let upgrade_charge = std::mem::take(&mut self.upgrade_charge);
-        self.release_conn(context, upgrade_charge);
+        self.release_conn(context, upgrade_charge)?;
         Ok(())
     }
 }

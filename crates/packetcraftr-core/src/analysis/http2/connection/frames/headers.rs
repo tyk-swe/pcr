@@ -9,7 +9,8 @@ use super::super::{
 use crate::analysis::http2::Error;
 use crate::analysis::http2::buffer::union_balanced;
 use crate::analysis::http2::model::{Certainty, Header, IssueScope, Status};
-use crate::analysis::http2::stream::peer;
+use crate::analysis::http2::side::Side;
+
 use crate::protocol::application::http2 as wire;
 use crate::protocol::application::http2::hpack;
 use bytes::Bytes;
@@ -44,7 +45,7 @@ impl ConnectionState {
         };
         if let Some(sources) = sources.clone() {
             if let Err(error) = context.charge_sources(&sources) {
-                context.release_live(charge);
+                context.release_live(charge)?;
                 return Err(error);
             }
             chain.charged_spans += sources.frames().len();
@@ -53,18 +54,18 @@ impl ConnectionState {
             chain.sets.push(sources);
         }
         if chain.bytes.len() > context.limits.max_header_block_bytes {
-            context.release_live(chain.charged);
+            context.release_live(chain.charged)?;
             *context.spans = context
                 .spans
                 .checked_sub(chain.charged_spans)
-                .expect("chain spans");
+                .ok_or(Error::Invariant("chain spans"))?;
             self.limited_block(context, side, stream_id, wire, sources)?;
             return Ok(());
         }
         if end_headers {
             self.block_done(side, chain, context)
         } else {
-            let dir = self.dirs[side].as_mut().expect("dir");
+            let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
             dir.charged += chain.charged;
             dir.charged_spans += chain.charged_spans;
             dir.chain = Some(chain);
@@ -74,7 +75,7 @@ impl ConnectionState {
 
     pub(super) fn block_continue(
         &mut self,
-        side: usize,
+        side: Side,
         stream_id: u32,
         fragment: Bytes,
         flags: u8,
@@ -82,7 +83,7 @@ impl ConnectionState {
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let Evidence { wire, sources } = evidence;
-        let dir = self.dirs[side].as_mut().expect("dir");
+        let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
         let Some(mut chain) = dir.chain.take() else {
             return Ok(());
         };
@@ -92,16 +93,16 @@ impl ConnectionState {
         if chain.bytes.len() + fragment.len() > context.limits.max_header_block_bytes
             || chain.frames + 1 > context.limits.max_continuations + 1
         {
-            context.release_live(chain.charged);
+            context.release_live(chain.charged)?;
             *context.spans = context
                 .spans
                 .checked_sub(chain.charged_spans)
-                .expect("chain spans");
+                .ok_or(Error::Invariant("chain spans"))?;
             self.limited_block(context, side, stream_id, wire, sources)?;
             return Ok(());
         }
         if let Err(error) = context.charge_live(fragment.len()) {
-            context.release_live(chain.charged);
+            context.release_live(chain.charged)?;
             *context.spans -= chain.charged_spans;
             return Err(error);
         }
@@ -110,11 +111,11 @@ impl ConnectionState {
         chain.frames += 1;
         if let Some(sources) = sources.clone() {
             if let Err(error) = context.charge_sources(&sources) {
-                context.release_live(chain.charged);
+                context.release_live(chain.charged)?;
                 *context.spans = context
                     .spans
                     .checked_sub(chain.charged_spans)
-                    .expect("chain spans");
+                    .ok_or(Error::Invariant("chain spans"))?;
                 return Err(error);
             }
             chain.charged_spans += sources.frames().len();
@@ -122,10 +123,10 @@ impl ConnectionState {
                 resources::SET_OVERHEAD + sources.frames().len() * resources::SPAN_OVERHEAD;
             chain.sets.push(sources);
         }
-        if flags & 0x4 != 0 {
+        if flags & wire::FLAG_END_HEADERS != 0 {
             self.block_done(side, chain, context)
         } else {
-            let dir = self.dirs[side].as_mut().expect("dir");
+            let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
             dir.charged += chain.charged;
             dir.charged_spans += chain.charged_spans;
             dir.chain = Some(chain);
@@ -136,7 +137,7 @@ impl ConnectionState {
     fn limited_block(
         &mut self,
         context: &mut Context<'_>,
-        side: usize,
+        side: Side,
         stream_id: u32,
         wire: Bytes,
         sources: Option<crate::analysis::provenance::SourceSet>,
@@ -161,11 +162,11 @@ impl ConnectionState {
 
     fn block_done(
         &mut self,
-        side: usize,
+        side: Side,
         mut chain: Chain,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        context.release_live(chain.charged);
+        context.release_live(chain.charged)?;
         *context.spans -= chain.charged_spans;
         context.check_deadline()?;
         let bytes = chain.bytes.freeze();
@@ -174,10 +175,10 @@ impl ConnectionState {
         self.next_origin += 1;
         let block_sets = std::mem::take(&mut chain.sets);
         let block_sources = union_balanced(block_sets)?;
-        let dir = self.dirs[side].as_mut().expect("dir");
+        let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
         if let Some(sources) = block_sources.clone() {
             Self::track_sources(dir, context, &sources)?;
-            let dir = self.dirs[side].as_mut().expect("dir");
+            let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
             dir.block_sources.insert(origin, sources);
             Self::charge_dir(dir, context, resources::ORIGIN_ENTRY_OVERHEAD)?;
         }
@@ -214,21 +215,21 @@ impl ConnectionState {
                 Ok(updates) => {
                     let (minimum, confirmed_prefix, pending_uncertain) = updates
                         .map_or((None, 0, None), |(_, maximum)| {
-                            self.settings[peer(side)].causal_table_minimum(maximum)
+                            self.settings[side.peer()].causal_table_minimum(maximum)
                         });
                     let uncertain = [
                         pending_uncertain,
-                        self.settings[peer(side)].uncertain_table_minimum,
+                        self.settings[side.peer()].uncertain_table_minimum,
                     ]
                     .into_iter()
                     .flatten()
                     .min();
                     let decoder = self.dirs[side]
                         .as_mut()
-                        .expect("dir")
+                        .ok_or(Error::Invariant("dir"))?
                         .decoder
                         .as_mut()
-                        .expect("decoder");
+                        .ok_or(Error::Invariant("decoder"))?;
                     ambiguous_minimum = uncertain.is_some_and(|bound| {
                         decoder.table_maximum() > bound
                             && updates.is_none_or(|(observed, _)| observed > bound)
@@ -242,9 +243,9 @@ impl ConnectionState {
                             .map_err(hpack::DecodeError::Interrupted)
                     });
                     if decoded.is_ok() {
-                        self.settings[peer(side)].uncertain_table_minimum = None;
+                        self.settings[side.peer()].uncertain_table_minimum = None;
                         if let Some((minimum, _)) = updates {
-                            self.settings[peer(side)]
+                            self.settings[side.peer()]
                                 .observed_table_updates(minimum, confirmed_prefix);
                         }
                     }
@@ -299,7 +300,7 @@ impl ConnectionState {
                     let mut compression_sets: Vec<crate::analysis::provenance::SourceSet> =
                         Vec::new();
                     {
-                        let dir = self.dirs[side].as_ref().expect("dir");
+                        let dir = self.dirs[side].as_ref().ok_or(Error::Invariant("dir"))?;
                         let mut seen = HashSet::new();
                         for field in &block.fields {
                             for origin in &field.origins {
@@ -308,11 +309,7 @@ impl ConnectionState {
                                     continue;
                                 }
                                 let Some(set) = dir.block_sources.get(origin) else {
-                                    return Err(Error::Application(
-                                        crate::analysis::application::Error::Sources {
-                                            number: self.number,
-                                        },
-                                    ));
+                                    return Err(Error::Invariant("origin sources missing"));
                                 };
                                 // Origins are keyed above; the balanced source union
                                 // deduplicates overlapping physical frames without an
@@ -324,11 +321,11 @@ impl ConnectionState {
                     let compression = union_balanced(compression_sets)?;
                     let decoded_bytes = block.decoded_bytes;
                     {
-                        let dir = self.dirs[side].as_mut().expect("dir");
+                        let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
                         let kept: HashSet<u64> = dir
                             .decoder
                             .as_ref()
-                            .expect("decoder")
+                            .ok_or(Error::Invariant("decoder"))?
                             .retained_origins()
                             .into_iter()
                             .collect();
@@ -340,12 +337,12 @@ impl ConnectionState {
                             .collect();
                         for id in removed {
                             if let Some(set) = dir.block_sources.remove(&id) {
-                                Self::release_dropped(dir, vec![set], context);
-                                Self::release_dir(dir, context, resources::ORIGIN_ENTRY_OVERHEAD);
+                                Self::release_dropped(dir, vec![set], context)?;
+                                Self::release_dir(dir, context, resources::ORIGIN_ENTRY_OVERHEAD)?;
                             }
                         }
                     }
-                    if let Some(limit) = self.settings[peer(side)].advertised.max_header_list_size
+                    if let Some(limit) = self.settings[side.peer()].advertised.max_header_list_size
                         && decoded_bytes > limit as usize
                     {
                         let flow = self.dir_flow(side);
@@ -391,7 +388,7 @@ impl ConnectionState {
                 }
             }
         })();
-        context.release_live(scratch);
+        context.release_live(scratch)?;
         result
     }
 }

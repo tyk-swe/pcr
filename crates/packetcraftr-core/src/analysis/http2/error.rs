@@ -10,6 +10,8 @@ use crate::error::{Classification, Classified};
 pub enum Error {
     #[error("HTTP/2 collector cannot continue after a fatal analysis error")]
     Failed,
+    #[error("HTTP/2 analyzer invariant violated: {0}")]
+    Invariant(&'static str),
     #[error(transparent)]
     Application(#[from] application::Error),
     #[error(transparent)]
@@ -30,6 +32,11 @@ impl Classified for Error {
                 "internal.http2_failed",
                 crate::error::Kind::Internal,
                 Some("resolve the original error and create a new collector"),
+            ),
+            Self::Invariant(_) => Classification::new(
+                "internal.http2_invariant",
+                crate::error::Kind::Internal,
+                Some("report this as a bug"),
             ),
             Self::Application(source) => source.classification(),
             Self::Provenance(source) => source.classification(),

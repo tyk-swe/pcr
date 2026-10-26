@@ -47,14 +47,18 @@ impl Error {
     }
 
     pub(super) fn from_io(source: io::Error) -> Self {
-        let kind = source.kind();
-        match source.into_inner() {
-            Some(inner) => match inner.downcast::<Self>() {
-                Ok(error) => *error,
-                Err(other) => Self::Io(io::Error::new(kind, other)),
-            },
-            None => Self::Io(io::Error::from(kind)),
+        if let Some(inner) = source.get_ref()
+            && inner.is::<Self>()
+        {
+            let kind = source.kind();
+            if let Some(inner) = source.into_inner()
+                && let Ok(error) = inner.downcast::<Self>()
+            {
+                return *error;
+            }
+            return Self::Io(io::Error::from(kind));
         }
+        Self::Io(source)
     }
 }
 
@@ -112,6 +116,43 @@ mod tests {
             io::ErrorKind::InvalidData
         );
         assert_eq!(Error::InvalidLimits.into_io().kind(), io::ErrorKind::Other);
+        assert_eq!(
+            Error::InvalidServerName.into_io().kind(),
+            io::ErrorKind::Other
+        );
+        assert_eq!(
+            Error::WireLimit {
+                direction: Direction::Read,
+                limit: 1
+            }
+            .into_io()
+            .kind(),
+            io::ErrorKind::Other
+        );
+        assert_eq!(
+            Error::StepLimit { limit: 1 }.into_io().kind(),
+            io::ErrorKind::Other
+        );
+        assert_eq!(
+            Error::Interrupted(Interrupted::Cancelled(packetcraftr_core::budget::Cancelled))
+                .into_io()
+                .kind(),
+            io::ErrorKind::Other
+        );
+    }
+
+    #[test]
+    fn io_roundtrip_preserves_os_error_detail() {
+        let recovered = Error::from_io(io::Error::from_raw_os_error(2));
+        match recovered {
+            Error::Io(source) => assert_eq!(source.raw_os_error(), Some(2)),
+            other => panic!("expected Io, got {other:?}"),
+        }
+        let recovered = Error::from_io(io::Error::new(io::ErrorKind::InvalidData, "plain detail"));
+        match recovered {
+            Error::Io(source) => assert!(source.to_string().contains("plain detail")),
+            other => panic!("expected Io, got {other:?}"),
+        }
     }
 
     #[test]

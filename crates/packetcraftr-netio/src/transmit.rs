@@ -346,6 +346,20 @@ mod tests {
                 actual: Mode::Layer3
             })
         ));
+        assert!(matches!(
+            Layer2Frame::try_new(&bytes, route(&decision, Mode::Auto)),
+            Err(Error::TransmissionModeMismatch {
+                expected: Mode::Layer2,
+                actual: Mode::Auto
+            })
+        ));
+        assert!(matches!(
+            Layer3Frame::try_new(&bytes, route(&decision, Mode::Auto)),
+            Err(Error::TransmissionModeMismatch {
+                expected: Mode::Layer3,
+                actual: Mode::Auto
+            })
+        ));
         assert!(Layer3Frame::try_new(&bytes, route(&decision, Mode::Layer3)).is_ok());
         assert!(matches!(
             Layer3Frame::try_new(&bytes, route(&decision, Mode::Layer2)),
@@ -384,12 +398,45 @@ mod tests {
         );
         assert!(matches!(
             Report::committed(expected.len() - 1, expected.clone()).validate_exact(&expected),
-            Err(Error::PartialSend { .. })
+            Err(Error::PartialSend {
+                expected: 5,
+                actual: 4
+            })
+        ));
+        assert!(matches!(
+            Report::committed(expected.len() + 1, expected.clone()).validate_exact(&expected),
+            Err(Error::PartialSend {
+                expected: 5,
+                actual: 6
+            })
         ));
         assert!(matches!(
             Report::committed(expected.len(), Bytes::from_static(b"exac"))
                 .validate_exact(&expected),
-            Err(Error::InvalidSendReport { .. })
+            Err(Error::InvalidSendReport {
+                bytes_sent: 5,
+                wire_bytes: 4
+            })
+        ));
+        let earlier = TimeMarker::now();
+        let later = TimeMarker {
+            monotonic: earlier.monotonic + std::time::Duration::from_secs(1),
+            wall_clock: earlier.wall_clock,
+        };
+        let mistimed = Report {
+            bytes_sent: expected.len(),
+            wire_bytes: expected.clone(),
+            timing: Timing {
+                started: later,
+                completed: earlier,
+                exact: false,
+            },
+        };
+        assert!(matches!(
+            mistimed.validate_exact(&expected),
+            Err(Error::InvalidSendEvidence {
+                fault: SendEvidenceFault::InconsistentTiming
+            })
         ));
         assert!(matches!(
             Report::committed(expected.len(), Bytes::from_static(b"EXACT"))

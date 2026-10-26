@@ -149,37 +149,108 @@ mod tests {
                 receiver_dropped_frames: 66,
             }
         );
-        let overflowing = Stats {
-            received_frames: u64::MAX,
-            ..Stats::default()
+        let cases: [(Stats, Stats); 6] = [
+            (
+                Stats {
+                    received_frames: u64::MAX,
+                    ..Stats::default()
+                },
+                Stats {
+                    received_frames: 1,
+                    ..Stats::default()
+                },
+            ),
+            (
+                Stats {
+                    received_bytes: u64::MAX,
+                    ..Stats::default()
+                },
+                Stats {
+                    received_bytes: 1,
+                    ..Stats::default()
+                },
+            ),
+            (
+                Stats {
+                    dropped_frames: u64::MAX,
+                    ..Stats::default()
+                },
+                Stats {
+                    dropped_frames: 1,
+                    ..Stats::default()
+                },
+            ),
+            (
+                Stats {
+                    dropped_bytes: u64::MAX,
+                    ..Stats::default()
+                },
+                Stats {
+                    dropped_bytes: 1,
+                    ..Stats::default()
+                },
+            ),
+            (
+                Stats {
+                    overflow_events: u64::MAX,
+                    ..Stats::default()
+                },
+                Stats {
+                    overflow_events: 1,
+                    ..Stats::default()
+                },
+            ),
+            (
+                Stats {
+                    receiver_dropped_frames: u64::MAX,
+                    ..Stats::default()
+                },
+                Stats {
+                    receiver_dropped_frames: 1,
+                    ..Stats::default()
+                },
+            ),
+        ];
+        for (left, right) in cases {
+            assert_eq!(left.checked_add(right), None, "{left:?} + {right:?}");
         }
-        .checked_add(Stats {
-            received_frames: 1,
+    }
+
+    #[test]
+    fn serialized_stats_omit_zero_receiver_drops() {
+        let rendered = serde_json::to_string(&Stats::default()).unwrap();
+        assert!(!rendered.contains("receiver_dropped_frames"), "{rendered}");
+        let rendered = serde_json::to_string(&Stats {
+            receiver_dropped_frames: 3,
             ..Stats::default()
-        });
-        assert_eq!(overflowing, None);
+        })
+        .unwrap();
+        assert!(
+            rendered.contains("\"receiver_dropped_frames\":3"),
+            "{rendered}"
+        );
     }
 
     #[test]
     fn validate_rejects_inconsistent_drop_accounting() {
         assert!(Stats::default().validate().is_ok());
-        assert!(
+        assert!(matches!(
             Stats {
                 dropped_bytes: 1,
                 ..Stats::default()
             }
-            .validate()
-            .is_err()
-        );
-        assert!(
+            .validate(),
+            Err(Error::InvalidCaptureStatistics { .. })
+        ));
+        assert!(matches!(
             Stats {
                 dropped_frames: 1,
                 receiver_dropped_frames: 2,
                 ..Stats::default()
             }
-            .validate()
-            .is_err()
-        );
+            .validate(),
+            Err(Error::InvalidCaptureStatistics { .. })
+        ));
         assert!(
             Stats {
                 dropped_frames: 2,
@@ -216,8 +287,6 @@ mod tests {
                 "{stats:?}"
             );
         }
-        assert!(is_zero(&0));
-        assert!(!is_zero(&1));
     }
 
     #[test]
@@ -229,14 +298,42 @@ mod tests {
         }
         .evidence_loss_error()
         .unwrap();
-        assert!(matches!(loss, Error::CaptureEvidenceLoss { .. }));
+        assert!(matches!(
+            loss,
+            Error::CaptureEvidenceLoss {
+                dropped_frames: 1,
+                dropped_bytes: 0,
+                receiver_dropped_frames: 0
+            }
+        ));
         let overflow = Stats {
-            dropped_frames: 1,
+            dropped_frames: 2,
+            dropped_bytes: 9,
+            overflow_events: 3,
+            ..Stats::default()
+        }
+        .evidence_loss_error()
+        .unwrap();
+        assert!(matches!(
+            overflow,
+            Error::CaptureQueueOverflow {
+                dropped_frames: 2,
+                dropped_bytes: 9,
+                overflow_events: 3
+            }
+        ));
+        let overflow_alone = Stats {
             overflow_events: 1,
             ..Stats::default()
         }
         .evidence_loss_error()
         .unwrap();
-        assert!(matches!(overflow, Error::CaptureQueueOverflow { .. }));
+        assert!(matches!(
+            overflow_alone,
+            Error::CaptureQueueOverflow {
+                dropped_frames: 0,
+                ..
+            }
+        ));
     }
 }

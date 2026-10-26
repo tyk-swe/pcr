@@ -195,7 +195,9 @@ impl Pool {
                     Err(error) => return Err((job, std::io::Error::other(error))),
                 };
                 for id in finished_busy {
-                    if let Some(worker) = state.busy.remove(&id) {
+                    let removed = state.busy.remove(&id);
+                    debug_assert!(removed.is_some(), "finished worker vanished under lock");
+                    if let Some(worker) = removed {
                         Self::retire(&mut state, worker, &reaper);
                     }
                 }
@@ -246,7 +248,9 @@ impl Pool {
                     Ok(reaper) => reaper,
                     Err(error) => return Err((job, std::io::Error::other(error))),
                 };
-                if let Some(worker) = state.idle.pop() {
+                let popped = state.idle.pop();
+                debug_assert!(popped.is_some(), "idle worker vanished under lock");
+                if let Some(worker) = popped {
                     Self::retire(&mut state, worker, &reaper);
                 }
             }

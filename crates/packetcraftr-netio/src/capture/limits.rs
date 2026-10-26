@@ -102,10 +102,31 @@ mod tests {
     }
 
     #[test]
-    fn stable_maxima_keep_their_documented_sizes() {
-        assert_eq!(MAX_CAPTURE_QUEUE_FRAMES, 4_096);
-        assert_eq!(MAX_CAPTURE_QUEUE_BYTES, 256 * 1024 * 1024);
-        assert_eq!(MAX_SNAP_LENGTH, 16 * 1024 * 1024);
+    fn rejection_reports_the_offending_value_and_reason() {
+        let limits = Limits {
+            max_frames: MAX_CAPTURE_QUEUE_FRAMES + 7,
+            ..Limits::default()
+        };
+        match limits.validate() {
+            Err(Error::InvalidCaptureQueueLimit {
+                field,
+                value,
+                reason,
+            }) => {
+                assert_eq!(field, "max_frames");
+                assert_eq!(value, MAX_CAPTURE_QUEUE_FRAMES + 7);
+                assert!(!reason.is_empty());
+            }
+            other => panic!("expected InvalidCaptureQueueLimit, got {other:?}"),
+        }
+        let limits = Limits {
+            snap_length: 0,
+            ..Limits::default()
+        };
+        match limits.validate() {
+            Err(Error::InvalidCaptureQueueLimit { value, .. }) => assert_eq!(value, 0),
+            other => panic!("expected InvalidCaptureQueueLimit, got {other:?}"),
+        }
     }
 
     #[test]
@@ -190,22 +211,10 @@ mod tests {
     }
 
     #[test]
-    fn overflow_policies_render_distinctly_and_display_agrees() {
-        let policies = [
-            OverflowPolicy::Fail,
-            OverflowPolicy::DropNewest,
-            OverflowPolicy::DropOldest,
-        ];
-        for policy in policies {
-            assert_eq!(policy.to_string(), policy.as_str());
-        }
-        assert_ne!(
-            OverflowPolicy::Fail.as_str(),
-            OverflowPolicy::DropNewest.as_str()
-        );
-        assert_ne!(
-            OverflowPolicy::DropNewest.as_str(),
-            OverflowPolicy::DropOldest.as_str()
-        );
+    fn overflow_policies_render_with_their_cli_names() {
+        assert_eq!(OverflowPolicy::Fail.as_str(), "fail");
+        assert_eq!(OverflowPolicy::DropNewest.as_str(), "drop-newest");
+        assert_eq!(OverflowPolicy::DropOldest.as_str(), "drop-oldest");
+        assert_eq!(OverflowPolicy::DropNewest.to_string(), "drop-newest");
     }
 }

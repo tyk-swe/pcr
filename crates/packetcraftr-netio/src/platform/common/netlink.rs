@@ -230,6 +230,7 @@ fn ensure_worker(
                 .find_map(|(id, worker)| worker.inbox.retire_if_idle().then_some(*id));
             let Some(idle) = idle else { break };
             let Some(worker) = workers.get_mut(&idle) else {
+                debug_assert!(false, "idle netlink worker vanished under lock");
                 break;
             };
             let remaining = wait_remaining(caller, deadline, "retiring idle netlink worker")?;

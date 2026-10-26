@@ -315,27 +315,44 @@ mod tests {
 
     #[test]
     fn cleanup_causes_include_every_remaining_failure_after_the_first_chain() {
-        let cleanup = Error::CaptureCleanup {
-            first: Box::new(Error::UnresolvedLinkMode),
-            remaining: vec![Error::CaptureReadiness {
-                message: "second failure".to_owned(),
-            }],
+        let inner = Error::CaptureReadiness {
+            message: "wrapped failure".to_owned(),
         };
-        let causes = cleanup.causes();
-        assert!(
-            causes.iter().any(|cause| cause.contains("second failure")),
-            "{causes:?}"
-        );
-        assert!(
-            causes
-                .iter()
-                .any(|cause| cause.contains("unresolved automatic link mode")),
-            "{causes:?}"
-        );
+        let wrapped = Error::CaptureSource {
+            index: 2,
+            interface: InterfaceId {
+                name: "test0".to_owned(),
+                index: 1,
+            },
+            phase: CapturePhase::Arm,
+            source: Box::new(inner.clone()),
+        };
+        let plain = Error::CaptureReadiness {
+            message: "plain failure".to_owned(),
+        };
+        let first = Error::UnresolvedLinkMode;
+        let expected = vec![
+            first.to_string(),
+            wrapped.to_string(),
+            inner.to_string(),
+            plain.to_string(),
+        ];
+        let cleanup = Error::CaptureCleanup {
+            first: Box::new(first),
+            remaining: vec![wrapped, plain],
+        };
+        assert_eq!(cleanup.causes(), expected);
     }
 
     #[test]
     fn plain_error_causes_carry_no_invented_entries() {
         assert!(Error::UnresolvedLinkMode.causes().is_empty());
+        let sourced = Error::InvalidSendEvidence {
+            fault: SendEvidenceFault::AcceptedBytesDiffer,
+        };
+        assert_eq!(
+            sourced.causes(),
+            vec![SendEvidenceFault::AcceptedBytesDiffer.to_string()]
+        );
     }
 }

@@ -103,6 +103,10 @@ mod tests {
         SocketAddrV6::new(ip, port, 0, scope_id).into()
     }
 
+    fn v6_flow(ip: Ipv6Addr, port: u16, flowinfo: u32, scope_id: u32) -> SocketAddr {
+        SocketAddrV6::new(ip, port, flowinfo, scope_id).into()
+    }
+
     #[test]
     fn same_peer_requires_equal_canonical_address_and_port() {
         let peer: SocketAddr = "127.0.0.1:53".parse().unwrap();
@@ -119,6 +123,35 @@ mod tests {
     }
 
     #[test]
+    fn same_peer_does_not_treat_flow_information_as_identity() {
+        let global: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        assert!(same_peer(
+            v6_flow(global, 53, 0, 0),
+            v6_flow(global, 53, 0x12345, 0)
+        ));
+        let link_local: Ipv6Addr = "fe80::1".parse().unwrap();
+        assert!(same_peer(
+            v6_flow(link_local, 53, 7, 2),
+            v6_flow(link_local, 53, 9, 2)
+        ));
+        assert!(!same_peer(
+            v6_flow(link_local, 53, 7, 1),
+            v6_flow(link_local, 53, 7, 2)
+        ));
+    }
+
+    #[test]
+    fn socket_endpoint_preserves_native_flow_information() {
+        let global: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let endpoint = socket_endpoint(v6_flow(global, 53, 0xabc, 4));
+        let SocketAddr::V6(endpoint) = endpoint else {
+            panic!("expected IPv6 endpoint, got {endpoint:?}");
+        };
+        assert_eq!(endpoint.flowinfo(), 0xabc);
+        assert_eq!(endpoint.scope_id(), 0);
+    }
+
+    #[test]
     fn same_peer_ignores_scope_only_where_scope_is_irrelevant() {
         let global: Ipv6Addr = "2001:db8::1".parse().unwrap();
         assert!(same_peer(v6(global, 53, 0), v6(global, 53, 7)));
@@ -131,7 +164,7 @@ mod tests {
 
     #[test]
     fn interrupted_maps_cancellation_apart_from_expiry() {
-        use packetcraftr_core::budget::{Cancelled, DeadlineExceeded};
+        use packetcraftr_core::budget::Cancelled;
         assert!(matches!(
             Outcome::interrupted(Interrupted::Cancelled(Cancelled)),
             Outcome::Cancelled
@@ -140,20 +173,25 @@ mod tests {
             .live_remaining()
             .unwrap_err();
         assert!(matches!(exceeded, Interrupted::Exceeded(_)));
-        let Interrupted::Exceeded(exceeded) = exceeded else {
-            unreachable!()
-        };
-        let _: DeadlineExceeded = exceeded;
-        assert!(matches!(
-            Outcome::interrupted(Interrupted::Exceeded(exceeded)),
-            Outcome::TimedOut
-        ));
+        assert!(matches!(Outcome::interrupted(exceeded), Outcome::TimedOut));
     }
 
     #[test]
     fn prepare_transfer_fails_closed_on_expiry_and_timeout_errors() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        };
         let live = Deadline::new(std::time::Duration::from_secs(5));
-        assert!(prepare_transfer(&live, |_| Ok(())).is_ok());
+        let mut armed = None;
+        assert!(
+            prepare_transfer(&live, |timeout| {
+                armed = Some(timeout);
+                Ok(())
+            })
+            .is_ok()
+        );
+        assert_eq!(armed, Some(Some(crate::deadline::POLL_INTERVAL)));
         assert!(matches!(
             prepare_transfer(&live, |_| Err(io::Error::from(io::ErrorKind::InvalidInput))),
             Err(Outcome::Failed(_))
@@ -161,8 +199,21 @@ mod tests {
         let expired = Deadline::new(std::time::Duration::ZERO);
         assert!(matches!(
             prepare_transfer(&expired, |_| Ok(())),
-            Err(Outcome::TimedOut | Outcome::Cancelled)
+            Err(Outcome::TimedOut)
         ));
+        let advanced = Arc::new(AtomicU64::new(0));
+        let clock = Arc::clone(&advanced);
+        let origin = std::time::Instant::now();
+        let parent = Deadline::with_time_source(std::time::Duration::from_secs(30), move || {
+            origin + std::time::Duration::from_secs(clock.load(Ordering::SeqCst))
+        });
+        let caller =
+            Deadline::new(std::time::Duration::from_secs(30)).with_parent(Some(Arc::new(parent)));
+        let outcome = prepare_transfer(&caller, |_| {
+            advanced.store(31, Ordering::SeqCst);
+            Ok(())
+        });
+        assert!(matches!(outcome, Err(Outcome::TimedOut)), "{outcome:?}");
     }
 
     #[test]
@@ -174,7 +225,13 @@ mod tests {
         ] {
             assert!(retryable(&io::Error::from(kind)), "{kind:?}");
         }
-        for kind in [io::ErrorKind::NotFound, io::ErrorKind::InvalidInput] {
+        for kind in [
+            io::ErrorKind::NotFound,
+            io::ErrorKind::InvalidInput,
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::PermissionDenied,
+            io::ErrorKind::UnexpectedEof,
+        ] {
             assert!(!retryable(&io::Error::from(kind)), "{kind:?}");
         }
     }

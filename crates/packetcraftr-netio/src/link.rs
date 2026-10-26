@@ -89,36 +89,14 @@ mod tests {
     }
 
     #[test]
-    fn as_str_names_are_nonempty_and_distinct_per_variant() {
-        let capabilities = [
-            Capability::Layer2.as_str(),
-            Capability::Layer3.as_str(),
-            Capability::Layer2AndLayer3.as_str(),
-        ];
-        let modes = [
-            Mode::Auto.as_str(),
-            Mode::Layer2.as_str(),
-            Mode::Layer3.as_str(),
-        ];
-        for names in [capabilities, modes] {
-            assert!(names.iter().all(|name| !name.is_empty()));
-            assert_ne!(names[0], names[1]);
-            assert_ne!(names[1], names[2]);
-            assert_ne!(names[0], names[2]);
-        }
-    }
-
-    #[test]
-    fn display_agrees_with_as_str() {
-        for capability in [
-            Capability::Layer2,
-            Capability::Layer3,
-            Capability::Layer2AndLayer3,
-        ] {
-            assert_eq!(capability.to_string(), capability.as_str());
-        }
-        for mode in [Mode::Auto, Mode::Layer2, Mode::Layer3] {
-            assert_eq!(mode.to_string(), mode.as_str());
-        }
+    fn rendered_names_match_the_serialized_vocabulary() {
+        assert_eq!(Capability::Layer2.as_str(), "layer2");
+        assert_eq!(Capability::Layer3.as_str(), "layer3");
+        assert_eq!(Capability::Layer2AndLayer3.as_str(), "layer2_and3");
+        assert_eq!(Capability::Layer2AndLayer3.to_string(), "layer2_and3");
+        assert_eq!(Mode::Auto.as_str(), "auto");
+        assert_eq!(Mode::Layer2.as_str(), "layer2");
+        assert_eq!(Mode::Layer3.as_str(), "layer3");
+        assert_eq!(Mode::Auto.to_string(), "auto");
     }
 }

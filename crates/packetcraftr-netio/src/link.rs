@@ -61,3 +61,64 @@ impl std::fmt::Display for Mode {
         formatter.write_str(self.as_str())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supports_matches_each_concrete_mode_and_never_auto() {
+        let cases = [
+            (Capability::Layer2, Mode::Layer2, true),
+            (Capability::Layer2, Mode::Layer3, false),
+            (Capability::Layer3, Mode::Layer2, false),
+            (Capability::Layer3, Mode::Layer3, true),
+            (Capability::Layer2AndLayer3, Mode::Layer2, true),
+            (Capability::Layer2AndLayer3, Mode::Layer3, true),
+            (Capability::Layer2, Mode::Auto, false),
+            (Capability::Layer3, Mode::Auto, false),
+            (Capability::Layer2AndLayer3, Mode::Auto, false),
+        ];
+        for (capability, mode, expected) in cases {
+            assert_eq!(
+                capability.supports(mode),
+                expected,
+                "{capability:?} {mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn as_str_names_are_nonempty_and_distinct_per_variant() {
+        let capabilities = [
+            Capability::Layer2.as_str(),
+            Capability::Layer3.as_str(),
+            Capability::Layer2AndLayer3.as_str(),
+        ];
+        let modes = [
+            Mode::Auto.as_str(),
+            Mode::Layer2.as_str(),
+            Mode::Layer3.as_str(),
+        ];
+        for names in [capabilities, modes] {
+            assert!(names.iter().all(|name| !name.is_empty()));
+            assert_ne!(names[0], names[1]);
+            assert_ne!(names[1], names[2]);
+            assert_ne!(names[0], names[2]);
+        }
+    }
+
+    #[test]
+    fn display_agrees_with_as_str() {
+        for capability in [
+            Capability::Layer2,
+            Capability::Layer3,
+            Capability::Layer2AndLayer3,
+        ] {
+            assert_eq!(capability.to_string(), capability.as_str());
+        }
+        for mode in [Mode::Auto, Mode::Layer2, Mode::Layer3] {
+            assert_eq!(mode.to_string(), mode.as_str());
+        }
+    }
+}

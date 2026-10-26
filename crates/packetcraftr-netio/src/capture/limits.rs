@@ -89,3 +89,123 @@ impl Limits {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rejected_field(limits: Limits) -> &'static str {
+        match limits.validate() {
+            Err(Error::InvalidCaptureQueueLimit { field, .. }) => field,
+            other => panic!("expected InvalidCaptureQueueLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stable_maxima_keep_their_documented_sizes() {
+        assert_eq!(MAX_CAPTURE_QUEUE_FRAMES, 4_096);
+        assert_eq!(MAX_CAPTURE_QUEUE_BYTES, 256 * 1024 * 1024);
+        assert_eq!(MAX_SNAP_LENGTH, 16 * 1024 * 1024);
+    }
+
+    #[test]
+    fn defaults_and_boundary_values_validate() {
+        assert!(Limits::default().validate().is_ok());
+        let boundary = Limits {
+            max_frames: 1,
+            max_bytes: 1,
+            snap_length: 1,
+            overflow_policy: OverflowPolicy::DropOldest,
+        };
+        assert!(boundary.validate().is_ok());
+    }
+
+    #[test]
+    fn zero_and_over_maximum_fields_are_rejected_by_name() {
+        let base = Limits::default();
+        assert_eq!(
+            rejected_field(Limits {
+                max_frames: 0,
+                ..base
+            }),
+            "max_frames"
+        );
+        assert_eq!(
+            rejected_field(Limits {
+                max_bytes: 0,
+                ..base
+            }),
+            "max_bytes"
+        );
+        assert_eq!(
+            rejected_field(Limits {
+                snap_length: 0,
+                ..base
+            }),
+            "snap_length"
+        );
+        assert_eq!(
+            rejected_field(Limits {
+                max_frames: MAX_CAPTURE_QUEUE_FRAMES + 1,
+                ..base
+            }),
+            "max_frames"
+        );
+        assert_eq!(
+            rejected_field(Limits {
+                max_bytes: MAX_CAPTURE_QUEUE_BYTES + 1,
+                ..base
+            }),
+            "max_bytes"
+        );
+        assert_eq!(
+            rejected_field(Limits {
+                snap_length: MAX_SNAP_LENGTH + 1,
+                ..base
+            }),
+            "snap_length"
+        );
+    }
+
+    #[test]
+    fn snap_length_must_fit_the_aggregate_byte_ceiling() {
+        let base = Limits::default();
+        assert_eq!(
+            rejected_field(Limits {
+                max_bytes: 10,
+                snap_length: 11,
+                ..base
+            }),
+            "snap_length"
+        );
+        assert!(
+            Limits {
+                max_bytes: 10,
+                snap_length: 10,
+                ..base
+            }
+            .validate()
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn overflow_policies_render_distinctly_and_display_agrees() {
+        let policies = [
+            OverflowPolicy::Fail,
+            OverflowPolicy::DropNewest,
+            OverflowPolicy::DropOldest,
+        ];
+        for policy in policies {
+            assert_eq!(policy.to_string(), policy.as_str());
+        }
+        assert_ne!(
+            OverflowPolicy::Fail.as_str(),
+            OverflowPolicy::DropNewest.as_str()
+        );
+        assert_ne!(
+            OverflowPolicy::DropNewest.as_str(),
+            OverflowPolicy::DropOldest.as_str()
+        );
+    }
+}

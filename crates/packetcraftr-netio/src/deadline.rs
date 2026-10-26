@@ -25,3 +25,30 @@ pub fn expires_at(deadline: &Deadline) -> Result<Instant, Interrupted> {
     let now = Instant::now();
     Ok(now.checked_add(remaining).unwrap_or(now))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remaining_before_treats_past_and_present_as_expired() {
+        let past = Instant::now() - Duration::from_secs(1);
+        assert_eq!(remaining_before(past), None);
+        let future = Instant::now() + Duration::from_secs(5);
+        let remaining = remaining_before(future).unwrap();
+        assert!(!remaining.is_zero() && remaining <= Duration::from_secs(5));
+    }
+
+    #[test]
+    fn expires_at_never_exceeds_the_max_wait_cap() {
+        let before = Instant::now();
+        let expiry = expires_at(&Deadline::new(Duration::from_secs(10 * 60 * 60))).unwrap();
+        assert!(expiry.duration_since(before) <= MAX_WAIT + Duration::from_secs(5));
+        assert!(expiry > before);
+    }
+
+    #[test]
+    fn expires_at_rejects_an_already_expired_deadline() {
+        assert!(expires_at(&Deadline::new(Duration::ZERO)).is_err());
+    }
+}

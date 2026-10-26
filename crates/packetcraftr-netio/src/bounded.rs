@@ -93,3 +93,89 @@ pub(crate) fn retryable(source: &io::Error) -> bool {
         io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{Ipv6Addr, SocketAddrV6};
+
+    fn v6(ip: Ipv6Addr, port: u16, scope_id: u32) -> SocketAddr {
+        SocketAddrV6::new(ip, port, 0, scope_id).into()
+    }
+
+    #[test]
+    fn same_peer_requires_equal_canonical_address_and_port() {
+        let peer: SocketAddr = "127.0.0.1:53".parse().unwrap();
+        assert!(same_peer(peer, peer));
+        assert!(!same_peer(peer, "127.0.0.1:54".parse().unwrap()));
+        assert!(!same_peer(peer, "127.0.0.2:53".parse().unwrap()));
+    }
+
+    #[test]
+    fn same_peer_treats_mapped_ipv4_as_the_ipv4_peer() {
+        let mapped = v6("::ffff:127.0.0.1".parse().unwrap(), 53, 0);
+        assert!(same_peer(mapped, "127.0.0.1:53".parse().unwrap()));
+        assert!(!same_peer(mapped, "127.0.0.1:54".parse().unwrap()));
+    }
+
+    #[test]
+    fn same_peer_ignores_scope_only_where_scope_is_irrelevant() {
+        let global: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        assert!(same_peer(v6(global, 53, 0), v6(global, 53, 7)));
+        let link_local: Ipv6Addr = "fe80::1".parse().unwrap();
+        assert!(same_peer(v6(link_local, 53, 2), v6(link_local, 53, 2)));
+        assert!(!same_peer(v6(link_local, 53, 1), v6(link_local, 53, 2)));
+        let multicast: Ipv6Addr = "ff02::1".parse().unwrap();
+        assert!(!same_peer(v6(multicast, 53, 1), v6(multicast, 53, 2)));
+    }
+
+    #[test]
+    fn interrupted_maps_cancellation_apart_from_expiry() {
+        use packetcraftr_core::budget::{Cancelled, DeadlineExceeded};
+        assert!(matches!(
+            Outcome::interrupted(Interrupted::Cancelled(Cancelled)),
+            Outcome::Cancelled
+        ));
+        let exceeded = Deadline::new(std::time::Duration::ZERO)
+            .live_remaining()
+            .unwrap_err();
+        assert!(matches!(exceeded, Interrupted::Exceeded(_)));
+        let Interrupted::Exceeded(exceeded) = exceeded else {
+            unreachable!()
+        };
+        let _: DeadlineExceeded = exceeded;
+        assert!(matches!(
+            Outcome::interrupted(Interrupted::Exceeded(exceeded)),
+            Outcome::TimedOut
+        ));
+    }
+
+    #[test]
+    fn prepare_transfer_fails_closed_on_expiry_and_timeout_errors() {
+        let live = Deadline::new(std::time::Duration::from_secs(5));
+        assert!(prepare_transfer(&live, |_| Ok(())).is_ok());
+        assert!(matches!(
+            prepare_transfer(&live, |_| Err(io::Error::from(io::ErrorKind::InvalidInput))),
+            Err(Outcome::Failed(_))
+        ));
+        let expired = Deadline::new(std::time::Duration::ZERO);
+        assert!(matches!(
+            prepare_transfer(&expired, |_| Ok(())),
+            Err(Outcome::TimedOut | Outcome::Cancelled)
+        ));
+    }
+
+    #[test]
+    fn retryable_covers_only_transient_io_kinds() {
+        for kind in [
+            io::ErrorKind::Interrupted,
+            io::ErrorKind::WouldBlock,
+            io::ErrorKind::TimedOut,
+        ] {
+            assert!(retryable(&io::Error::from(kind)), "{kind:?}");
+        }
+        for kind in [io::ErrorKind::NotFound, io::ErrorKind::InvalidInput] {
+            assert!(!retryable(&io::Error::from(kind)), "{kind:?}");
+        }
+    }
+}

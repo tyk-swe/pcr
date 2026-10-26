@@ -297,3 +297,162 @@ impl Provider for SystemProvider {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        interface::Id as InterfaceId,
+        link::Capability,
+        route::{Scope, SelectionReason},
+    };
+    use packetcraftr_core::frame::LinkType;
+
+    fn decision() -> Decision {
+        Decision {
+            interface: InterfaceId {
+                name: "test0".to_owned(),
+                index: 1,
+            },
+            source_mac: None,
+            selected_source: None,
+            preferred_source: None,
+            next_hop: None,
+            selection_reason: SelectionReason::OnLink,
+            destination_scope: Scope::Link,
+            mtu: 1500,
+            capability: Capability::Layer2AndLayer3,
+            link_type: LinkType::ETHERNET,
+        }
+    }
+
+    fn route<'a>(decision: &'a Decision, mode: Mode) -> Route<'a> {
+        Route {
+            decision,
+            mode,
+            lookup_destination: None,
+        }
+    }
+
+    #[test]
+    fn frames_require_their_exact_link_mode() {
+        let decision = decision();
+        let bytes = Bytes::from_static(b"frame");
+        assert!(Layer2Frame::try_new(&bytes, route(&decision, Mode::Layer2)).is_ok());
+        assert!(matches!(
+            Layer2Frame::try_new(&bytes, route(&decision, Mode::Layer3)),
+            Err(Error::TransmissionModeMismatch {
+                expected: Mode::Layer2,
+                actual: Mode::Layer3
+            })
+        ));
+        assert!(Layer3Frame::try_new(&bytes, route(&decision, Mode::Layer3)).is_ok());
+        assert!(matches!(
+            Layer3Frame::try_new(&bytes, route(&decision, Mode::Layer2)),
+            Err(Error::TransmissionModeMismatch {
+                expected: Mode::Layer3,
+                actual: Mode::Layer2
+            })
+        ));
+    }
+
+    #[test]
+    fn outbound_dispatches_on_resolved_mode_and_rejects_auto() {
+        let decision = decision();
+        let bytes = Bytes::from_static(b"frame");
+        assert!(matches!(
+            Outbound::try_new(&bytes, route(&decision, Mode::Layer2)),
+            Ok(Outbound::Layer2(_))
+        ));
+        assert!(matches!(
+            Outbound::try_new(&bytes, route(&decision, Mode::Layer3)),
+            Ok(Outbound::Layer3(_))
+        ));
+        assert!(matches!(
+            Outbound::try_new(&bytes, route(&decision, Mode::Auto)),
+            Err(Error::UnresolvedLinkMode)
+        ));
+    }
+
+    #[test]
+    fn validate_exact_accepts_only_the_exact_submitted_bytes() {
+        let expected = Bytes::from_static(b"exact");
+        assert!(
+            Report::committed(expected.len(), expected.clone())
+                .validate_exact(&expected)
+                .is_ok()
+        );
+        assert!(matches!(
+            Report::committed(expected.len() - 1, expected.clone()).validate_exact(&expected),
+            Err(Error::PartialSend { .. })
+        ));
+        assert!(matches!(
+            Report::committed(expected.len(), Bytes::from_static(b"exac"))
+                .validate_exact(&expected),
+            Err(Error::InvalidSendReport { .. })
+        ));
+        assert!(matches!(
+            Report::committed(expected.len(), Bytes::from_static(b"EXACT"))
+                .validate_exact(&expected),
+            Err(Error::InvalidSendEvidence {
+                fault: SendEvidenceFault::AcceptedBytesDiffer
+            })
+        ));
+    }
+
+    #[test]
+    fn accessors_return_the_exact_submitted_frame_and_counts() {
+        let decision = decision();
+        let bytes = Bytes::from_static(b"frame");
+        let frame = Layer2Frame::try_new(&bytes, route(&decision, Mode::Layer2)).unwrap();
+        assert_eq!(frame.bytes(), &bytes);
+        let frame = Layer3Frame::try_new(&bytes, route(&decision, Mode::Layer3)).unwrap();
+        assert_eq!(frame.bytes(), &bytes);
+        let outbound = Outbound::try_new(&bytes, route(&decision, Mode::Layer3)).unwrap();
+        assert_eq!(outbound.bytes(), &bytes);
+        assert_eq!(outbound.route().mode, Mode::Layer3);
+        let report = Report::committed(5, bytes.clone());
+        assert_eq!(report.bytes_sent(), 5);
+        assert_eq!(report.wire_bytes(), &bytes);
+    }
+
+    #[test]
+    fn inconsistent_timing_is_rejected() {
+        let earlier = TimeMarker::now();
+        let later = TimeMarker {
+            monotonic: earlier.monotonic + std::time::Duration::from_secs(1),
+            wall_clock: earlier.wall_clock,
+        };
+        let reversed = Timing {
+            started: later,
+            completed: earlier,
+            exact: false,
+        };
+        assert!(!reversed.is_consistent());
+        let inexact = Timing {
+            started: earlier,
+            completed: later,
+            exact: true,
+        };
+        assert!(!inexact.is_consistent());
+        let ordered = Timing {
+            started: earlier,
+            completed: later,
+            exact: false,
+        };
+        assert!(ordered.is_consistent());
+    }
+
+    #[test]
+    fn committed_and_completed_reports_have_consistent_timing() {
+        let report = Report::committed(3, Bytes::from_static(b"abc"));
+        assert!(report.timing().is_consistent());
+        assert_eq!(
+            report.timing().started().monotonic(),
+            report.timing().completed().monotonic()
+        );
+        let report = Submission::start().complete(3, Bytes::from_static(b"abc"));
+        assert!(report.timing().is_consistent());
+        assert!(report.timing().started().monotonic() <= report.timing().completed().monotonic());
+    }
+}

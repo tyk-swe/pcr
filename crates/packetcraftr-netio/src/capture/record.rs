@@ -114,3 +114,129 @@ impl Captured {
         self.identity
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_add_sums_every_field_and_rejects_overflow() {
+        let summed = Stats {
+            received_frames: 1,
+            received_bytes: 2,
+            dropped_frames: 3,
+            dropped_bytes: 4,
+            overflow_events: 5,
+            receiver_dropped_frames: 6,
+        }
+        .checked_add(Stats {
+            received_frames: 10,
+            received_bytes: 20,
+            dropped_frames: 30,
+            dropped_bytes: 40,
+            overflow_events: 50,
+            receiver_dropped_frames: 60,
+        })
+        .unwrap();
+        assert_eq!(
+            summed,
+            Stats {
+                received_frames: 11,
+                received_bytes: 22,
+                dropped_frames: 33,
+                dropped_bytes: 44,
+                overflow_events: 55,
+                receiver_dropped_frames: 66,
+            }
+        );
+        let overflowing = Stats {
+            received_frames: u64::MAX,
+            ..Stats::default()
+        }
+        .checked_add(Stats {
+            received_frames: 1,
+            ..Stats::default()
+        });
+        assert_eq!(overflowing, None);
+    }
+
+    #[test]
+    fn validate_rejects_inconsistent_drop_accounting() {
+        assert!(Stats::default().validate().is_ok());
+        assert!(
+            Stats {
+                dropped_bytes: 1,
+                ..Stats::default()
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Stats {
+                dropped_frames: 1,
+                receiver_dropped_frames: 2,
+                ..Stats::default()
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Stats {
+                dropped_frames: 2,
+                dropped_bytes: 8,
+                receiver_dropped_frames: 2,
+                ..Stats::default()
+            }
+            .validate()
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn any_single_drop_counter_alone_is_evidence_loss() {
+        for stats in [
+            Stats {
+                dropped_frames: 1,
+                ..Stats::default()
+            },
+            Stats {
+                dropped_bytes: 1,
+                ..Stats::default()
+            },
+            Stats {
+                receiver_dropped_frames: 1,
+                ..Stats::default()
+            },
+        ] {
+            assert!(
+                matches!(
+                    stats.evidence_loss_error(),
+                    Some(Error::CaptureEvidenceLoss { .. })
+                ),
+                "{stats:?}"
+            );
+        }
+        assert!(is_zero(&0));
+        assert!(!is_zero(&1));
+    }
+
+    #[test]
+    fn evidence_loss_prefers_overflow_over_plain_loss() {
+        assert!(Stats::default().evidence_loss_error().is_none());
+        let loss = Stats {
+            dropped_frames: 1,
+            ..Stats::default()
+        }
+        .evidence_loss_error()
+        .unwrap();
+        assert!(matches!(loss, Error::CaptureEvidenceLoss { .. }));
+        let overflow = Stats {
+            dropped_frames: 1,
+            overflow_events: 1,
+            ..Stats::default()
+        }
+        .evidence_loss_error()
+        .unwrap();
+        assert!(matches!(overflow, Error::CaptureQueueOverflow { .. }));
+    }
+}

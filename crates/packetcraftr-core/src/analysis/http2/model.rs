@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::analysis::http2::IssueCode;
 use crate::analysis::provenance::SourceSet;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::protocol::application::http;
@@ -79,11 +80,19 @@ pub struct Frame {
     pub flow: ScopedFlowKey,
     pub header: wire::FrameHeader,
     pub header_wire: [u8; 9],
-    pub control: Option<wire::Payload>,
-    pub payload_wire: Option<Bytes>,
-    pub data_bytes: u64,
-    pub padding_bytes: usize,
+    pub body: FrameBody,
     pub sources: SourceSet,
+}
+#[derive(Clone, Debug)]
+pub enum FrameBody {
+    Data {
+        data_bytes: u64,
+        padding_bytes: usize,
+    },
+    Control {
+        control: wire::Control,
+        payload_wire: Bytes,
+    },
 }
 #[derive(Clone, Debug)]
 pub struct Issue {
@@ -92,7 +101,7 @@ pub struct Issue {
     pub generation: u64,
     pub http2_stream_id: Option<u32>,
     pub flow: ScopedFlowKey,
-    pub code: &'static str,
+    pub code: IssueCode,
     pub scope: IssueScope,
     pub certainty: Certainty,
     pub status: Status,

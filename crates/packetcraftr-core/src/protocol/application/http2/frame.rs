@@ -3,24 +3,26 @@
 
 use bytes::Bytes;
 
-use super::{Error, Frame, FrameHeader, Limit, Payload, Priority, Setting};
+use super::{Control, Error, Frame, FrameHeader, Limit, Payload, Priority, Setting};
 
-const HEADER_LEN: usize = 9;
+pub(crate) const HEADER_LEN: usize = 9;
 
-const TYPE_DATA: u8 = 0x0;
-const TYPE_HEADERS: u8 = 0x1;
-const TYPE_PRIORITY: u8 = 0x2;
-const TYPE_RESET: u8 = 0x3;
-const TYPE_SETTINGS: u8 = 0x4;
-const TYPE_PUSH_PROMISE: u8 = 0x5;
-const TYPE_PING: u8 = 0x6;
-const TYPE_GOAWAY: u8 = 0x7;
-const TYPE_WINDOW_UPDATE: u8 = 0x8;
-const TYPE_CONTINUATION: u8 = 0x9;
+pub(crate) const TYPE_DATA: u8 = 0x0;
+pub(crate) const TYPE_HEADERS: u8 = 0x1;
+pub(crate) const TYPE_PRIORITY: u8 = 0x2;
+pub(crate) const TYPE_RESET: u8 = 0x3;
+pub(crate) const TYPE_SETTINGS: u8 = 0x4;
+pub(crate) const TYPE_PUSH_PROMISE: u8 = 0x5;
+pub(crate) const TYPE_PING: u8 = 0x6;
+pub(crate) const TYPE_GOAWAY: u8 = 0x7;
+pub(crate) const TYPE_WINDOW_UPDATE: u8 = 0x8;
+pub(crate) const TYPE_CONTINUATION: u8 = 0x9;
 
-const FLAG_ACK: u8 = 0x1;
-const FLAG_PADDED: u8 = 0x8;
-const FLAG_PRIORITY: u8 = 0x20;
+pub(crate) const FLAG_END_STREAM: u8 = 0x1;
+pub(crate) const FLAG_END_HEADERS: u8 = 0x4;
+pub(crate) const FLAG_ACK: u8 = 0x1;
+pub(crate) const FLAG_PADDED: u8 = 0x8;
+pub(crate) const FLAG_PRIORITY: u8 = 0x20;
 
 pub fn parse_frame(input: &Bytes, max_frame_bytes: usize) -> Result<Option<(Frame, usize)>, Error> {
     parse_frame_inner(input, max_frame_bytes, false)
@@ -136,6 +138,16 @@ fn parse_payload(
                 padding: payload.slice_ref(padding),
             })
         }
+        _ => parse_control(header, payload, allow_stream_errors).map(Payload::Control),
+    }
+}
+
+fn parse_control(
+    header: &FrameHeader,
+    payload: &Bytes,
+    allow_stream_errors: bool,
+) -> Result<Control, Error> {
+    match header.frame_type {
         TYPE_HEADERS => {
             let (rest, padding) = split_padding(header, payload)?;
             let (priority, fragment) = if header.flags & FLAG_PRIORITY != 0 {
@@ -149,18 +161,18 @@ fn parse_payload(
             } else {
                 (None, rest)
             };
-            Ok(Payload::Headers {
+            Ok(Control::Headers {
                 fragment: payload.slice_ref(fragment),
                 priority,
                 padding: payload.slice_ref(padding),
             })
         }
-        TYPE_PRIORITY => Ok(Payload::Priority(priority(
+        TYPE_PRIORITY => Ok(Control::Priority(priority(
             payload,
             header.stream_id,
             allow_stream_errors,
         )?)),
-        TYPE_RESET => Ok(Payload::Reset {
+        TYPE_RESET => Ok(Control::Reset {
             error_code: be32(&payload[..4]),
         }),
         TYPE_SETTINGS => {
@@ -172,7 +184,7 @@ fn parse_payload(
                     value: be32(&chunk[2..]),
                 });
             }
-            Ok(Payload::Settings(settings))
+            Ok(Control::Settings(settings))
         }
         TYPE_PUSH_PROMISE => {
             let (rest, padding) = split_padding(header, payload)?;
@@ -185,7 +197,7 @@ fn parse_payload(
             if promised_stream_id == 0 {
                 return Err(Error::Invalid("PUSH_PROMISE promises stream zero"));
             }
-            Ok(Payload::PushPromise {
+            Ok(Control::PushPromise {
                 promised_stream_id,
                 fragment: payload.slice_ref(fragment),
                 padding: payload.slice_ref(padding),
@@ -194,9 +206,9 @@ fn parse_payload(
         TYPE_PING => {
             let mut opaque = [0; 8];
             opaque.copy_from_slice(payload);
-            Ok(Payload::Ping(opaque))
+            Ok(Control::Ping(opaque))
         }
-        TYPE_GOAWAY => Ok(Payload::Goaway {
+        TYPE_GOAWAY => Ok(Control::Goaway {
             last_stream_id: be32(&payload[..4]) & 0x7fff_ffff,
             error_code: be32(&payload[4..8]),
             debug: payload.slice_ref(&payload[8..]),
@@ -206,10 +218,10 @@ fn parse_payload(
             if increment == 0 && !allow_stream_errors {
                 return Err(Error::Invalid("WINDOW_UPDATE has a zero increment"));
             }
-            Ok(Payload::WindowUpdate { increment })
+            Ok(Control::WindowUpdate { increment })
         }
-        TYPE_CONTINUATION => Ok(Payload::Continuation(payload.clone())),
-        _ => Ok(Payload::Unknown(payload.clone())),
+        TYPE_CONTINUATION => Ok(Control::Continuation(payload.clone())),
+        _ => Ok(Control::Unknown(payload.clone())),
     }
 }
 
@@ -244,4 +256,11 @@ fn priority(bytes: &[u8], stream_id: u32, allow_stream_errors: bool) -> Result<P
 
 fn be32(bytes: &[u8]) -> u32 {
     u32::from_be_bytes(bytes[..4].try_into().expect("four-octet field"))
+}
+
+pub(crate) fn declared_length(header: &[u8]) -> usize {
+    header
+        .iter()
+        .take(3)
+        .fold(0usize, |length, byte| length << 8 | usize::from(*byte))
 }

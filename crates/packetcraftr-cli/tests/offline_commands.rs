@@ -146,3 +146,87 @@ fn files_read_missing_capture_exits_nonzero() {
         "packetcraftr {args:?} should explain the failure on stderr"
     );
 }
+
+fn analyze_http2_json(capture_name: &str) -> serde_json::Value {
+    let capture = capture_path(capture_name);
+    let capture = capture.to_string_lossy().into_owned();
+    let args = ["--output", "json", "analyze", "http2", capture.as_str()];
+    let output = run(&args);
+    let text = assert_success(&output, &args);
+    serde_json::from_str(&text)
+        .unwrap_or_else(|error| panic!("analyze http2 should emit valid JSON: {error}\n{text}"))
+}
+
+#[test]
+fn analyze_http2_multiplexed_capture_reports_streams_and_push() {
+    let json = analyze_http2_json("http2-multiplexed.pcapng");
+    let result = &json["result"];
+    let connections = result["connections"].as_array().unwrap();
+    assert_eq!(connections.len(), 1);
+    assert_eq!(connections[0]["startup"], "prior_knowledge");
+    assert_eq!(connections[0]["status"], "complete");
+    let messages = result["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 7);
+    let kinds: Vec<_> = messages
+        .iter()
+        .map(|message| message["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "request",
+            "request",
+            "push_promise",
+            "response",
+            "response",
+            "response",
+            "request"
+        ]
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|message| message["status"] == "complete")
+    );
+    assert!(result["issues"].as_array().unwrap().is_empty());
+    let summary = &result["summary"];
+    assert_eq!(summary["connections"], 1);
+    assert_eq!(summary["prior_knowledge_connections"], 1);
+    assert_eq!(summary["upgraded_connections"], 0);
+    assert_eq!(summary["unsupported_connections"], 0);
+    assert_eq!(summary["frames"], 22);
+    assert_eq!(summary["streams"], 4);
+    assert_eq!(summary["messages"], 7);
+    assert_eq!(summary["complete_messages"], 7);
+    assert_eq!(summary["issues"], 0);
+}
+
+#[test]
+fn analyze_http2_upgrade_capture_reports_h2c_startup() {
+    let json = analyze_http2_json("http2-upgrade.pcapng");
+    let result = &json["result"];
+    let connections = result["connections"].as_array().unwrap();
+    assert_eq!(connections.len(), 1);
+    assert_eq!(connections[0]["startup"], "h2c");
+    assert_eq!(connections[0]["status"], "complete");
+    let messages = result["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["kind"], "request");
+    assert_eq!(messages[0]["status"], "complete");
+    assert_eq!(messages[0]["http2_stream_id"], 1);
+    assert_eq!(messages[1]["kind"], "response");
+    assert_eq!(messages[1]["status"], "complete");
+    assert_eq!(messages[1]["http2_stream_id"], 1);
+    assert_eq!(messages[1]["request"], 1);
+    assert!(result["issues"].as_array().unwrap().is_empty());
+    let summary = &result["summary"];
+    assert_eq!(summary["connections"], 1);
+    assert_eq!(summary["prior_knowledge_connections"], 0);
+    assert_eq!(summary["upgraded_connections"], 1);
+    assert_eq!(summary["unsupported_connections"], 0);
+    assert_eq!(summary["frames"], 6);
+    assert_eq!(summary["streams"], 1);
+    assert_eq!(summary["messages"], 2);
+    assert_eq!(summary["complete_messages"], 2);
+    assert_eq!(summary["issues"], 0);
+}

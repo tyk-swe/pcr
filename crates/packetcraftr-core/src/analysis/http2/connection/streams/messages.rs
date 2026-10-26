@@ -3,13 +3,15 @@
 
 //! Message construction, resource accounting, and ordered publication.
 
-use super::super::{ConnectionState, Context, Decoded, Fault, Head, resources};
-use crate::analysis::application;
+use super::super::{ConnectionState, Context, Decoded, Fault, Head};
 use crate::analysis::http2::Error;
+use crate::analysis::http2::IssueCode;
+use crate::analysis::http2::budget;
 use crate::analysis::http2::buffer::union_balanced;
 use crate::analysis::http2::headers::FieldRole;
-use crate::analysis::http2::model::{Certainty, IssueScope, Message, MessageKind, Status};
-use crate::analysis::http2::stream::{CLIENT, MessageBuilder, SERVER};
+use crate::analysis::http2::model::{IssueScope, Message, MessageKind, Status};
+use crate::analysis::http2::side::Side;
+use crate::analysis::http2::stream::MessageBuilder;
 use bytes::Bytes;
 
 impl ConnectionState {
@@ -21,20 +23,19 @@ impl ConnectionState {
     ) -> Result<MessageBuilder, Error> {
         let index = context.check_messages()?;
         let mut msg = MessageBuilder::new(index, stream_id, kind);
-        self.charge_conn(context, resources::MESSAGE_OVERHEAD)?;
-        msg.charged = resources::MESSAGE_OVERHEAD;
+        context.charge(&mut msg.charge, budget::MESSAGE_OVERHEAD)?;
         Ok(msg)
     }
 
     fn msg_content_charge(msg: &MessageBuilder) -> usize {
         msg.headers
             .iter()
-            .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
+            .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
             .sum::<usize>()
             + msg
                 .trailers
                 .iter()
-                .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
+                .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
                 .sum::<usize>()
             + msg.header_blocks.iter().map(Bytes::len).sum::<usize>()
             + msg
@@ -45,16 +46,16 @@ impl ConnectionState {
 
     pub(crate) fn emit_message(
         &mut self,
-        side: usize,
+        side: Side,
         build: MessageBuilder,
         status: Status,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if status == Status::Complete
-            && (self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER))
+            && (self.waiting_settings_ack(Side::Client) || self.waiting_settings_ack(Side::Server))
         {
-            self.charge_conn(context, resources::PENDING_OVERHEAD)?;
-            self.ack_deferred.push_back((side, build, status));
+            context.charge(&mut self.charge, budget::PENDING_OVERHEAD)?;
+            self.deferred.awaiting_ack.push_back((side, build, status));
             return Ok(());
         }
         self.emit_message_with_completion(side, build, status, status == Status::Complete, context)
@@ -63,7 +64,7 @@ impl ConnectionState {
 
     pub(super) fn emit_message_with_completion(
         &mut self,
-        side: usize,
+        side: Side,
         mut build: MessageBuilder,
         status: Status,
         complete: bool,
@@ -71,7 +72,7 @@ impl ConnectionState {
     ) -> Result<Status, Error> {
         let (cl_exempt, connect_cl_illegal) = match build.status_code {
             Some(status) => {
-                let stream = self.streams.get(&build.stream_id);
+                let stream = self.streams.open.get(&build.stream_id);
                 let method = stream.and_then(|s| s.method.as_deref());
                 let connect = method == Some(b"CONNECT") && (200..300).contains(&status);
                 (
@@ -88,17 +89,18 @@ impl ConnectionState {
         if connect_cl_illegal {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(build.stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: "connect_content_length",
-                    detail: "a CONNECT 2xx response must not carry content-length".into(),
-                    wire: build.header_blocks.last().cloned().unwrap_or_default(),
-                    sources: union_balanced(build.sets.clone())?,
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::ConnectContentLength,
+                    "a CONNECT 2xx response must not carry content-length",
+                )
+                .stream(Some(build.stream_id))
+                .evidence(
+                    build.header_blocks.last().cloned().unwrap_or_default(),
+                    union_balanced(build.sets.clone())?,
+                ),
             )?;
             build.failure = build.failure.or(Some(Status::Malformed));
         }
@@ -110,40 +112,30 @@ impl ConnectionState {
             let flow = self.dir_flow(side);
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(build.stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: "content_length_mismatch",
-                    detail: "observed body length does not match content-length".into(),
-                    wire: Bytes::new(),
-                    sources: None,
-                },
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::ContentLengthMismatch,
+                    "observed body length does not match content-length",
+                )
+                .stream(Some(build.stream_id)),
             )?;
             build.failure = build.failure.or(Some(Status::Malformed));
         }
         let status = build.failure.unwrap_or(status);
-        let sources = union_balanced(std::mem::take(&mut build.sets))?.ok_or(
-            Error::Application(application::Error::Sources {
-                number: self.number,
-            }),
-        )?;
+        let sources = union_balanced(std::mem::take(&mut build.sets))?
+            .ok_or(Error::Invariant("message sources missing"))?;
         let compression_sources = union_balanced(std::mem::take(&mut build.compression))?;
-        self.release_conn(context, build.charged);
-        *context.spans = context
-            .spans
-            .checked_sub(build.charged_spans)
-            .expect("msg spans");
+        context.release_all(&mut build.charge)?;
         context.charge_retained(
             Self::msg_content_charge(&build)
-                + resources::EVENT_OVERHEAD
-                + resources::MESSAGE_OVERHEAD
-                + resources::SET_OVERHEAD
-                + sources.frames().len() * resources::SPAN_OVERHEAD
+                + budget::EVENT_OVERHEAD
+                + budget::MESSAGE_OVERHEAD
+                + budget::SET_OVERHEAD
+                + sources.frames().len() * budget::SPAN_OVERHEAD
                 + compression_sources.as_ref().map_or(0, |set| {
-                    resources::SET_OVERHEAD + set.frames().len() * resources::SPAN_OVERHEAD
+                    budget::SET_OVERHEAD + set.frames().len() * budget::SPAN_OVERHEAD
                 }),
         )?;
         context.message(Message {
@@ -169,7 +161,7 @@ impl ConnectionState {
 
     pub(crate) fn start_message(
         &mut self,
-        side: usize,
+        side: Side,
         stream_id: u32,
         head: Head,
         decoded: Decoded,
@@ -189,9 +181,7 @@ impl ConnectionState {
                 _ => MessageKind::Response,
             },
             FieldRole::Trailer => {
-                return Err(Error::Application(application::Error::Sources {
-                    number: self.number,
-                }));
+                return Err(Error::Invariant("direction not found"));
             }
         };
         let mut msg = self.new_message(stream_id, kind, context)?;
@@ -200,34 +190,27 @@ impl ConnectionState {
         }
         let content_charge = headers
             .iter()
-            .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
+            .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
             .sum::<usize>()
             + block.len();
-        self.charge_conn(context, content_charge)?;
-        msg.charged += content_charge;
+        context.charge(&mut msg.charge, content_charge)?;
         msg.headers = headers;
         msg.header_blocks.push(block);
         msg.content_length = meta.content_length;
         msg.status_code = meta.status;
         if let Some(sources) = block_sources {
-            let frames = sources.frames().len();
-            let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
-            self.charge_conn(context, charge)?;
-            context.charge_spans(frames)?;
-            msg.charged += charge;
-            msg.charged_spans += frames;
+            context.track(&mut msg.charge, &sources)?;
             msg.sets.push(sources);
         }
         if let Some(set) = compression {
-            let frames = set.frames().len();
-            let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
-            self.charge_conn(context, charge)?;
-            context.charge_spans(frames)?;
-            msg.charged += charge;
-            msg.charged_spans += frames;
+            context.track(&mut msg.charge, &set)?;
             msg.compression.push(set);
         }
-        let stream = self.streams.get_mut(&stream_id).expect("stream");
+        let stream = self
+            .streams
+            .open
+            .get_mut(&stream_id)
+            .ok_or(Error::Invariant("stream"))?;
         if let Some(method) = meta.method {
             stream.method = Some(method);
         }
@@ -255,7 +238,11 @@ impl ConnectionState {
                 context,
             )?;
         } else {
-            let stream = self.streams.get_mut(&stream_id).expect("stream");
+            let stream = self
+                .streams
+                .open
+                .get_mut(&stream_id)
+                .ok_or(Error::Invariant("stream"))?;
             stream.msgs[side] = Some(msg);
         }
         if role == FieldRole::Request {
@@ -268,25 +255,26 @@ impl ConnectionState {
         &mut self,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        if self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER) {
+        if self.waiting_settings_ack(Side::Client) || self.waiting_settings_ack(Side::Server) {
             return Ok(());
         }
-        let immediate = std::mem::take(&mut self.ack_deferred);
-        self.release_conn(context, immediate.len() * resources::PENDING_OVERHEAD);
+        let immediate = std::mem::take(&mut self.deferred.awaiting_ack);
+        context.release(&mut self.charge, immediate.len() * budget::PENDING_OVERHEAD)?;
         for (side, msg, status) in immediate {
             context.check_deadline()?;
             self.emit_message(side, msg, status, context)?;
         }
         let scratch = self
             .streams
+            .open
             .len()
             .saturating_mul(2 * size_of::<(usize, u32)>());
-        context.charge_live(scratch)?;
+        context.reserve_scratch(scratch)?;
         let result = (|| {
-            let mut completed = Vec::with_capacity(self.streams.len().saturating_mul(2));
-            for (id, stream) in &self.streams {
+            let mut completed = Vec::with_capacity(self.streams.open.len().saturating_mul(2));
+            for (id, stream) in &self.streams.open {
                 context.check_deadline()?;
-                for side in [CLIENT, SERVER] {
+                for side in Side::BOTH {
                     if stream.ended[side] && stream.msgs[side].is_some() {
                         completed.push((side, *id));
                     }
@@ -298,7 +286,7 @@ impl ConnectionState {
             }
             Ok(())
         })();
-        context.release_live(scratch);
+        context.release_scratch(scratch)?;
         result
     }
 }

@@ -3,32 +3,40 @@
 
 //! Sourced cleartext HTTP/2 and h2c analysis over reassembled TCP.
 
+mod budget;
 mod buffer;
 mod connection;
 mod headers;
+mod issue;
 mod limits;
 mod model;
 mod settings;
+mod side;
 mod stream;
 mod upgrade;
 
 mod error;
 
+#[cfg(test)]
+mod tests;
+
 pub use error::Error;
+pub use issue::IssueCode;
 pub use limits::{
     Limits, MAX_ACTIVE_STREAMS, MAX_BODY_BYTES, MAX_CONTINUATIONS, MAX_FRAME_BYTES, MAX_FRAMES,
     MAX_HEADER_BLOCK_BYTES, MAX_HEADER_BYTES, MAX_HEADERS, MAX_PENDING_SETTINGS, MAX_STREAMS,
     MAX_TABLE_BYTES,
 };
 pub use model::{
-    Certainty, Connection, Event, Frame, Header, Issue, IssueScope, Message, MessageKind,
-    PeerSettings, Startup, Status, Summary,
+    Certainty, Connection, Event, Frame, FrameBody, Header, Issue, IssueScope, Message,
+    MessageKind, PeerSettings, Startup, Status, Summary,
 };
 
 use crate::budget::Deadline;
 use crate::error::BoundaryError;
-use connection::{ConnectionState, Context, Phase};
-use std::collections::BTreeMap;
+use budget::{Budget, Context};
+use connection::{ConnectionState, Phase};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::{
@@ -41,21 +49,38 @@ use super::{
 
 type ConnectionKey = (u64, u64);
 
-pub struct Collector {
+struct Resources {
     app_limits: application::Limits,
     limits: Limits,
     deadline: Option<Arc<Deadline>>,
+    budget: Budget,
+}
+
+impl Resources {
+    fn context<'a>(&'a mut self, out: &'a mut Vec<Event>) -> Context<'a> {
+        Context {
+            limits: &self.limits,
+            app: &self.app_limits,
+            deadline: self.deadline.as_deref(),
+            budget: &mut self.budget,
+            out,
+        }
+    }
+
+    fn enforce_deadline(&self) -> Result<(), Error> {
+        if let Some(deadline) = self.deadline.as_deref() {
+            deadline.enforce()?;
+        }
+        Ok(())
+    }
+}
+
+pub struct Collector {
+    resources: Resources,
     tcp: TcpSources,
-    // Boxed so each delivery moves a pointer rather than the whole connection.
+    // Boxed to keep B-tree nodes small; connection state is large.
     connections: BTreeMap<ConnectionKey, Box<ConnectionState>>,
     flow_index: BTreeMap<ScopedFlowKey, ConnectionKey>,
-    buffered: usize,
-    retained: usize,
-    spans: usize,
-    frames: u64,
-    streams: u64,
-    messages: u64,
-    summary: Summary,
     failed: bool,
 }
 
@@ -69,26 +94,22 @@ impl Collector {
         let ports = application::normalize_ports(ports, "http2_ports")?;
         limits.validate()?;
         Ok(Self {
-            app_limits: application,
-            limits,
-            deadline: None,
+            resources: Resources {
+                app_limits: application,
+                limits,
+                deadline: None,
+                budget: Budget::default(),
+            },
             tcp: TcpSources::new(ports, application),
             connections: BTreeMap::new(),
             flow_index: BTreeMap::new(),
-            buffered: 0,
-            retained: 0,
-            spans: 0,
-            frames: 0,
-            streams: 0,
-            messages: 0,
-            summary: Summary::default(),
             failed: false,
         })
     }
 
     #[must_use]
     pub fn with_deadline(mut self, deadline: Arc<Deadline>) -> Self {
-        self.deadline = Some(deadline);
+        self.resources.deadline = Some(deadline);
         self
     }
 
@@ -115,29 +136,11 @@ impl Collector {
         record: &FrameRecord<'_>,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
-        if let Some(deadline) = self.deadline.as_deref() {
-            deadline.enforce()?;
-        }
+        self.resources.enforce_deadline()?;
         for event in self.tcp.observe(record)? {
             self.dispatch(event, record.number, out)?;
         }
         Ok(())
-    }
-
-    fn with_context<'a>(&'a mut self, out: &'a mut Vec<Event>) -> Context<'a> {
-        Context {
-            limits: &self.limits,
-            app: &self.app_limits,
-            deadline: self.deadline.as_deref(),
-            buffered: &mut self.buffered,
-            retained: &mut self.retained,
-            spans: &mut self.spans,
-            frames: &mut self.frames,
-            streams: &mut self.streams,
-            messages: &mut self.messages,
-            summary: &mut self.summary,
-            out,
-        }
     }
 
     fn dispatch(
@@ -159,32 +162,28 @@ impl Collector {
                         conn.terminate(
                             &delivery.flow,
                             Status::Evicted,
-                            "generation_replaced",
+                            IssueCode::GenerationReplaced,
                             "the TCP tuple was reused for a newer connection",
-                            &mut self.with_context(out),
+                            &mut self.resources.context(out),
                         )?;
                     }
-                    conn.finish(&mut self.with_context(out))?;
+                    conn.finish(&mut self.resources.context(out))?;
                 }
-                let mut conn = self.connections.remove(&key).unwrap_or_else(|| {
+                self.flow_index.insert(delivery.flow.clone(), key);
+                let conn = self.connections.entry(key).or_insert_with(|| {
                     Box::new(ConnectionState::new(
                         delivery.stream,
                         delivery.generation,
                         delivery.flow.clone(),
                     ))
                 });
-                if self.flow_index.get(&delivery.flow) != Some(&key) {
-                    self.flow_index.insert(delivery.flow.clone(), key);
-                }
-                let result = conn.data(&delivery, number, &mut self.with_context(out));
-                self.connections.insert(key, conn);
-                result
+                conn.data(&delivery, number, &mut self.resources.context(out))
             }
             application::Event::Gap { flow, .. } => self.fail_flow(
                 &flow,
                 number,
                 Status::Gap,
-                "tcp_gap",
+                IssueCode::TcpGap,
                 "a TCP sequence gap invalidated the byte stream",
                 out,
             ),
@@ -192,7 +191,7 @@ impl Collector {
                 &flow,
                 number,
                 Status::Conflict,
-                "tcp_conflict",
+                IssueCode::TcpConflict,
                 "conflicting TCP retransmissions invalidated the byte stream",
                 out,
             ),
@@ -200,30 +199,22 @@ impl Collector {
                 &flow,
                 number,
                 Status::Evicted,
-                "tcp_evicted",
+                IssueCode::TcpEvicted,
                 "reassembly state was evicted before the stream completed",
                 out,
             ),
             application::Event::Closed { flow, reset, .. } => {
-                let Some(key) = self
+                let Some(conn) = self
                     .flow_index
                     .get(&flow)
                     .or_else(|| self.flow_index.get(&flow.reverse()))
-                    .copied()
+                    .and_then(|key| self.connections.get_mut(key))
+                    .filter(|conn| conn.has_flow(&flow) || conn.has_flow(&flow.reverse()))
                 else {
                     return Ok(());
                 };
-                let Some(mut conn) = self.connections.remove(&key) else {
-                    return Ok(());
-                };
-                if !conn.has_flow(&flow) && !conn.has_flow(&flow.reverse()) {
-                    self.connections.insert(key, conn);
-                    return Ok(());
-                }
                 conn.number = number;
-                let result = conn.close(&flow, reset, &mut self.with_context(out));
-                self.connections.insert(key, conn);
-                result
+                conn.close(&flow, reset, &mut self.resources.context(out))
             }
         }
     }
@@ -233,23 +224,20 @@ impl Collector {
         flow: &ScopedFlowKey,
         number: u64,
         status: Status,
-        code: &'static str,
+        code: IssueCode,
         detail: &'static str,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
-        let keys: Vec<ConnectionKey> = self
+        let keys: BTreeSet<ConnectionKey> = self
             .flow_index
             .iter()
             .filter(|(f, _)| *f == flow || f.reverse() == *flow)
             .map(|(_, key)| *key)
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
             .collect();
         for key in keys {
-            if let Some(mut conn) = self.connections.remove(&key) {
+            if let Some(conn) = self.connections.get_mut(&key) {
                 conn.number = number;
-                conn.terminate(flow, status, code, detail, &mut self.with_context(out))?;
-                self.connections.insert(key, conn);
+                conn.terminate(flow, status, code, detail, &mut self.resources.context(out))?;
             }
         }
         Ok(())
@@ -272,16 +260,12 @@ impl Collector {
         if self.failed {
             return Err(Error::Failed);
         }
-        if let Some(deadline) = self.deadline.as_deref() {
-            deadline.enforce()?;
-        }
+        self.resources.enforce_deadline()?;
         for event in self
             .tcp
             .trailing(&run.trailing_tcp_events, run.frames_read)?
         {
-            if let Some(deadline) = self.deadline.as_deref() {
-                deadline.enforce()?;
-            }
+            self.resources.enforce_deadline()?;
             let mut out = Vec::new();
             if !matches!(event, application::Event::Evicted { .. }) {
                 self.dispatch(event, run.frames_read, &mut out)?;
@@ -289,18 +273,14 @@ impl Collector {
             emit(out)?;
         }
         for mut conn in std::mem::take(&mut self.connections).into_values() {
-            if let Some(deadline) = self.deadline.as_deref() {
-                deadline.enforce()?;
-            }
+            self.resources.enforce_deadline()?;
             let mut out = Vec::new();
             conn.number = run.frames_read;
-            conn.finish(&mut self.with_context(&mut out))?;
+            conn.finish(&mut self.resources.context(&mut out))?;
             emit(out)?;
         }
-        if let Some(deadline) = self.deadline.as_deref() {
-            deadline.enforce()?;
-        }
-        Ok(self.summary)
+        self.resources.enforce_deadline()?;
+        Ok(self.resources.budget.into_summary())
     }
 }
 
@@ -335,7 +315,9 @@ impl session::Collector for Collector {
         deadline: &Deadline,
         event_sink: &mut dyn FnMut(Event) -> Result<(), BoundaryError>,
     ) -> Result<Summary, BoundaryError> {
-        self.deadline = Some(Arc::new(deadline.clone().with_parent(self.deadline.take())));
+        self.resources.deadline = Some(Arc::new(
+            deadline.clone().with_parent(self.resources.deadline.take()),
+        ));
         self.finalize(run, |events| {
             session::deliver(deadline, events, event_sink).map_err(Error::Output)
         })

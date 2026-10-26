@@ -4,29 +4,36 @@
 //! Connection and direction state, input buffering, and processing pumps.
 
 pub(crate) mod control;
+pub(crate) mod directions;
 pub(crate) mod frames;
 pub(crate) mod lifecycle;
 pub(crate) mod prelude;
-pub(crate) mod resources;
 pub(crate) mod startup;
 pub(crate) mod streams;
 
-pub(crate) use resources::Context;
+pub(crate) use super::budget::Context;
+pub(crate) use directions::{Chain, ChainHead, DirectionPhase, DirectionState, Directions};
+
+use super::budget::{self, Charge};
+use crate::analysis::http2::IssueCode;
 
 use super::Error;
-use super::buffer::SourceBuffer;
 use super::model::{Certainty, Issue, IssueScope, Startup, Status};
 use super::settings::DirectionSettings;
-use super::stream::{CLIENT, MessageBuilder, SERVER, StreamState};
+use super::stream::{MessageBuilder, StreamState};
 use super::upgrade::Prelude;
 use crate::analysis::application::{self, Delivery};
+use crate::analysis::http2::side::{PerSide, Side};
 use crate::analysis::provenance::SourceSet;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
+use crate::protocol::application::http2 as wire;
 use crate::protocol::application::http2::hpack;
 use bytes::Bytes;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::borrow::Cow;
+use std::collections::{BTreeMap, VecDeque};
 
 pub(crate) const PREFACE_LEN: usize = 24;
+const READ_CHUNK: usize = 4096;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Phase {
@@ -36,76 +43,57 @@ pub(crate) enum Phase {
     Dead,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DirectionPhase {
-    Sniff,
-    Prelude,
-    Preface,
-    Frames,
+pub(crate) struct Fault {
+    flow: ScopedFlowKey,
+    http2_stream_id: Option<u32>,
+    scope: IssueScope,
+    certainty: Certainty,
+    status: Status,
+    code: IssueCode,
+    detail: Cow<'static, str>,
+    wire: Bytes,
+    sources: Option<SourceSet>,
 }
 
-pub(crate) struct Chain {
-    pub stream_id: u32,
-    pub head: ChainHead,
-    pub bytes: bytes::BytesMut,
-    pub frames: usize,
-    pub sets: Vec<SourceSet>,
-    pub charged: usize,
-    pub charged_spans: usize,
-}
-#[derive(Clone, Copy)]
-pub(crate) enum ChainHead {
-    Headers { end_stream: bool, malformed: bool },
-    PushPromise { promised: u32 },
-}
-
-pub(crate) struct DirectionState {
-    pub flow: ScopedFlowKey,
-    pub phase: DirectionPhase,
-    pub buffer: SourceBuffer,
-    pub decoder: Option<hpack::Decoder>,
-    pub decoder_charge: usize,
-    pub block_sources: HashMap<u64, SourceSet>,
-    pub chain: Option<Chain>,
-    pub closed: bool,
-    pub fully_consumed_fin: bool,
-    pub saw_frame: bool,
-    pub received: bool,
-    pub garbage: bool,
-    pub charged: usize,
-    pub charged_spans: usize,
-}
-impl DirectionState {
-    pub(crate) fn new(flow: ScopedFlowKey) -> Self {
+impl Fault {
+    pub(crate) fn new(
+        flow: ScopedFlowKey,
+        scope: IssueScope,
+        status: Status,
+        code: IssueCode,
+        detail: impl Into<Cow<'static, str>>,
+    ) -> Self {
         Self {
             flow,
-            phase: DirectionPhase::Sniff,
-            buffer: SourceBuffer::new(),
-            decoder: None,
-            decoder_charge: 0,
-            block_sources: HashMap::new(),
-            chain: None,
-            closed: false,
-            fully_consumed_fin: false,
-            saw_frame: false,
-            received: false,
-            garbage: false,
-            charged: 0,
-            charged_spans: 0,
+            http2_stream_id: None,
+            scope,
+            certainty: Certainty::Confirmed,
+            status,
+            code,
+            detail: detail.into(),
+            wire: Bytes::new(),
+            sources: None,
         }
     }
-}
 
-pub(crate) struct Fault {
-    pub flow: ScopedFlowKey,
-    pub http2_stream_id: Option<u32>,
-    pub scope: IssueScope,
-    pub certainty: Certainty,
-    pub status: Status,
-    pub code: &'static str,
-    pub detail: std::borrow::Cow<'static, str>,
-    pub wire: Bytes,
-    pub sources: Option<SourceSet>,
+    pub(crate) fn stream(self, http2_stream_id: Option<u32>) -> Self {
+        Self {
+            http2_stream_id,
+            ..self
+        }
+    }
+
+    pub(crate) fn certainty(self, certainty: Certainty) -> Self {
+        Self { certainty, ..self }
+    }
+
+    pub(crate) fn evidence(self, wire: Bytes, sources: Option<SourceSet>) -> Self {
+        Self {
+            wire,
+            sources,
+            ..self
+        }
+    }
 }
 
 pub(crate) struct Decoded {
@@ -122,7 +110,7 @@ pub(crate) struct Head {
 }
 
 pub(crate) struct Pos {
-    pub side: usize,
+    pub side: Side,
     pub stream_id: u32,
 }
 
@@ -133,8 +121,8 @@ pub(crate) struct Evidence {
 }
 
 pub(crate) struct ClosedStream {
-    pub ended: [bool; 2],
-    pub reset_by: Option<usize>,
+    pub ended: PerSide<bool>,
+    pub reset_by: Option<Side>,
     pub request: Option<u64>,
 }
 
@@ -145,39 +133,78 @@ pub(crate) struct ConnectionState {
     pub startup: Startup,
     pub status: Status,
     pub phase: Phase,
-    pub pending: Vec<DirectionState>,
-    pub dirs: [Option<DirectionState>; 2],
-    pub prelude: Option<Prelude>,
-    pub streams: BTreeMap<u32, StreamState>,
-    pub closed: BTreeMap<u32, ClosedStream>,
-    pub early_response_headers: BTreeMap<u32, super::stream::EarlyResponse>,
-    pub closed_credit: BTreeMap<u32, [Option<i64>; 2]>,
-    pub admitted_streams: u64,
-    pub max_initiated: [u32; 2],
-    pub active: [usize; 2],
-    pub send_window: [i64; 2],
-    pub settings: [DirectionSettings; 2],
-    pub goaway: [Option<u32>; 2],
-    pub next_origin: u64,
+    pub directions: Directions,
+    pub streams: StreamTable,
+    pub control: Control,
+    pub upgrade: Upgrade,
+    pub deferred: Deferred,
     pub frames: u64,
     pub issues: u64,
     pub emitted: bool,
     pub clean_start: bool,
     pub number: u64,
-    pub live: usize,
-    pub upgrade_response: Option<crate::protocol::application::http::Head>,
-    pub upgrade_sources: Option<SourceSet>,
-    pub upgrade_charge: usize,
-    pub final_pending_settings: Option<u64>,
-    pub pings: [BTreeMap<[u8; 8], u64>; 2],
-    pub final_pending_pings: Option<u64>,
-    pub refused: bool,
+    pub charge: Charge,
     pub done: bool,
     pub finalizing: bool,
-    pub resume_side: Option<usize>,
-    pub pending_openers: BTreeMap<u32, &'static str>,
-    pub parent_deferred: VecDeque<MessageBuilder>,
-    pub ack_deferred: VecDeque<(usize, MessageBuilder, Status)>,
+}
+
+pub(crate) struct StreamTable {
+    pub open: BTreeMap<u32, StreamState>,
+    pub closed: BTreeMap<u32, ClosedStream>,
+    pub early_responses: BTreeMap<u32, super::stream::EarlyResponse>,
+    pub closed_credit: BTreeMap<u32, PerSide<Option<i64>>>,
+    pub pending_openers: BTreeMap<u32, IssueCode>,
+    pub admitted: u64,
+    pub max_initiated: PerSide<u32>,
+    pub active: PerSide<usize>,
+    pub next_origin: u64,
+}
+
+pub(crate) struct Control {
+    pub settings: PerSide<DirectionSettings>,
+    pub send_window: PerSide<i64>,
+    pub goaway: PerSide<Option<u32>>,
+    pub pings: PerSide<BTreeMap<[u8; 8], u64>>,
+    pub final_pending: Option<PendingCounts>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PendingCounts {
+    pub settings: u64,
+    pub pings: u64,
+}
+
+impl Control {
+    pub(crate) fn pending_counts(&self) -> PendingCounts {
+        self.final_pending.unwrap_or_else(|| PendingCounts {
+            settings: self
+                .settings
+                .iter()
+                .map(|direction| direction.pending.len() as u64)
+                .sum(),
+            pings: self
+                .pings
+                .iter()
+                .map(|pings| pings.values().sum::<u64>())
+                .sum(),
+        })
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct Upgrade {
+    pub prelude: Option<Prelude>,
+    pub response: Option<crate::protocol::application::http::Head>,
+    pub sources: Option<SourceSet>,
+    pub charge: Charge,
+    pub refused: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct Deferred {
+    pub promises: VecDeque<MessageBuilder>,
+    pub awaiting_ack: VecDeque<(Side, MessageBuilder, Status)>,
+    pub resume_side: Option<Side>,
 }
 
 impl ConnectionState {
@@ -189,47 +216,43 @@ impl ConnectionState {
             startup: Startup::Unknown,
             status: Status::Complete,
             phase: Phase::Sniff,
-            pending: Vec::new(),
-            dirs: [None, None],
-            prelude: None,
-            streams: BTreeMap::new(),
-            closed: BTreeMap::new(),
-            early_response_headers: BTreeMap::new(),
-            closed_credit: BTreeMap::new(),
-            admitted_streams: 0,
-            max_initiated: [0, 0],
-            active: [0, 0],
-            send_window: [65_535, 65_535],
-            settings: [DirectionSettings::new(), DirectionSettings::new()],
-            goaway: [None, None],
-            next_origin: 1,
+            directions: Directions::Candidates(Vec::new()),
+            streams: StreamTable {
+                open: BTreeMap::new(),
+                closed: BTreeMap::new(),
+                early_responses: BTreeMap::new(),
+                closed_credit: BTreeMap::new(),
+                pending_openers: BTreeMap::new(),
+                admitted: 0,
+                max_initiated: PerSide::new(0, 0),
+                active: PerSide::new(0, 0),
+                next_origin: 1,
+            },
+            control: Control {
+                settings: PerSide::new(DirectionSettings::new(), DirectionSettings::new()),
+                send_window: PerSide::new(65_535, 65_535),
+                goaway: PerSide::new(None, None),
+                pings: PerSide::default(),
+                final_pending: None,
+            },
+            upgrade: Upgrade::default(),
+            deferred: Deferred::default(),
             frames: 0,
             issues: 0,
             emitted: false,
             clean_start: true,
             number: 0,
-            live: 0,
-            upgrade_response: None,
-            upgrade_sources: None,
-            upgrade_charge: 0,
-            final_pending_settings: None,
-            pings: [BTreeMap::new(), BTreeMap::new()],
-            final_pending_pings: None,
-            refused: false,
+            charge: Charge::default(),
             done: false,
             finalizing: false,
-            resume_side: None,
-            pending_openers: BTreeMap::new(),
-            parent_deferred: VecDeque::new(),
-            ack_deferred: VecDeque::new(),
         }
     }
 
     pub(crate) fn flow(&self) -> ScopedFlowKey {
-        self.dirs[CLIENT]
-            .as_ref()
-            .or(self.dirs[SERVER].as_ref())
-            .or_else(|| self.pending.first())
+        self.directions
+            .elected()
+            .chain(self.directions.candidates().first())
+            .next()
             .map(|dir| dir.flow.clone())
             .unwrap_or_else(|| self.first_flow.clone())
     }
@@ -240,40 +263,32 @@ impl ConnectionState {
             .and_then(|set| set.frames().last().map(|frame| frame.number))
     }
 
-    pub(crate) fn dir_flow(&self, side: usize) -> ScopedFlowKey {
-        self.dirs[side]
-            .as_ref()
+    pub(crate) fn dir_flow(&self, side: Side) -> ScopedFlowKey {
+        self.directions
+            .get(side)
             .map(|dir| dir.flow.clone())
             .unwrap_or_else(|| self.flow())
     }
 
     pub(crate) fn dir_mut(&mut self, flow: &ScopedFlowKey) -> Option<&mut DirectionState> {
-        self.dirs
-            .iter_mut()
-            .flatten()
-            .find(|dir| dir.flow == *flow)
-            .or_else(|| self.pending.iter_mut().find(|dir| dir.flow == *flow))
+        self.directions.find_mut(flow)
     }
 
-    pub(crate) fn side_of(&self, flow: &ScopedFlowKey) -> Option<usize> {
-        self.dirs
-            .iter()
-            .position(|dir| dir.as_ref().is_some_and(|dir| dir.flow == *flow))
+    pub(crate) fn side_of(&self, flow: &ScopedFlowKey) -> Option<Side> {
+        self.directions.side_of(flow)
     }
 
     pub(crate) fn has_flow(&self, flow: &ScopedFlowKey) -> bool {
-        self.side_of(flow).is_some() || self.pending.iter().any(|dir| dir.flow == *flow)
+        self.directions.find(flow).is_some()
     }
 
     pub(crate) fn issue(&mut self, context: &mut Context<'_>, fault: Fault) -> Result<(), Error> {
-        let charge = fault.wire.len()
-            + fault.detail.len()
-            + resources::ISSUE_OVERHEAD
-            + resources::EVENT_OVERHEAD;
+        let charge =
+            fault.wire.len() + fault.detail.len() + budget::ISSUE_OVERHEAD + budget::EVENT_OVERHEAD;
         context.charge_retained(charge)?;
         if let Some(sources) = &fault.sources {
             context.charge_retained(
-                resources::SET_OVERHEAD + sources.frames().len() * resources::SPAN_OVERHEAD,
+                budget::SET_OVERHEAD + sources.frames().len() * budget::SPAN_OVERHEAD,
             )?;
         }
         self.issues += 1;
@@ -302,6 +317,12 @@ impl ConnectionState {
         Ok(())
     }
 
+    pub(crate) fn reject(&mut self, context: &mut Context<'_>, fault: Fault) -> Result<(), Error> {
+        let status = fault.status;
+        self.issue(context, fault)?;
+        self.fail(context, status)
+    }
+
     pub(crate) fn worst(&mut self, status: Status) {
         fn rank(s: Status) -> u8 {
             match s {
@@ -328,12 +349,16 @@ impl ConnectionState {
             return Ok(());
         }
         if self.dir_mut(&delivery.flow).is_none() {
-            let elected = self.dirs[CLIENT].is_some();
-            if elected && self.dirs[SERVER].is_none() {
+            let elected = self.directions.is_elected();
+            if elected && self.directions.get(Side::Server).is_none() {
                 let mut dir = DirectionState::new(delivery.flow.clone());
                 let mut decoder = hpack::Decoder::new(context.limits.hpack())?;
-                decoder.permit_table_size(self.settings[CLIENT].advertised.header_table_size);
-                for pending in &self.settings[CLIENT].pending {
+                decoder.permit_table_size(
+                    self.control.settings[Side::Client]
+                        .advertised
+                        .header_table_size,
+                );
+                for pending in &self.control.settings[Side::Client].pending {
                     decoder.permit_table_size(pending.final_values.header_table_size);
                 }
                 dir.decoder = Some(decoder);
@@ -342,12 +367,12 @@ impl ConnectionState {
                     Phase::Prelude => DirectionPhase::Prelude,
                     _ => DirectionPhase::Sniff,
                 };
-                self.charge_conn(context, resources::DIR_OVERHEAD)?;
-                self.dirs[SERVER] = Some(dir);
-            } else if !elected && self.pending.len() < 2 {
-                self.charge_conn(context, resources::DIR_OVERHEAD)?;
-                self.pending
-                    .push(DirectionState::new(delivery.flow.clone()));
+                context.charge(&mut self.charge, budget::DIR_OVERHEAD)?;
+                self.directions.place(Side::Server, dir)?;
+            } else if !elected && self.directions.candidates().len() < 2 {
+                context.charge(&mut self.charge, budget::DIR_OVERHEAD)?;
+                self.directions
+                    .add_candidate(DirectionState::new(delivery.flow.clone()))?;
             }
         }
         if !delivery.bytes.is_empty()
@@ -377,9 +402,11 @@ impl ConnectionState {
                 continue;
             }
             let chunk = delivery.bytes.slice(cursor..cursor + want);
-            let dir = self.dir_mut(&delivery.flow).expect("dir");
-            Self::charge_dir(dir, context, chunk.len())?;
-            Self::track_sources(dir, context, &delivery.sources)?;
+            let dir = self
+                .dir_mut(&delivery.flow)
+                .ok_or(Error::Invariant("dir"))?;
+            context.charge(&mut dir.charge, chunk.len())?;
+            context.track(&mut dir.charge, &delivery.sources)?;
             dir.buffer.push(chunk, delivery.sources.clone());
             cursor += want;
             self.pump(context)?;
@@ -391,30 +418,25 @@ impl ConnectionState {
     }
 
     fn buffered_len(&self) -> usize {
-        self.dirs
-            .iter()
-            .flatten()
-            .chain(self.pending.iter())
-            .map(|dir| dir.buffer.len())
-            .sum()
+        self.directions.iter().map(|dir| dir.buffer.len()).sum()
     }
 
-    pub(crate) fn waiting_settings_ack(&self, side: usize) -> bool {
-        let peer = 1 - side;
+    pub(crate) fn waiting_settings_ack(&self, side: Side) -> bool {
+        let peer = side.peer();
         if self.finalizing
-            || !self.settings[peer].pending.is_empty()
-            || self.dirs[peer].as_ref().is_some_and(|dir| dir.closed)
+            || !self.control.settings[peer].pending.is_empty()
+            || self.directions.get(peer).is_some_and(|dir| dir.closed)
         {
             return false;
         }
-        self.dirs[side].as_ref().is_some_and(|dir| {
+        self.directions.get(side).is_some_and(|dir| {
             let bytes = dir.buffer.bytes();
             dir.saw_frame
                 && dir.chain.is_none()
-                && bytes.len() >= 9
-                && bytes[..3] == [0, 0, 0]
-                && bytes[3] == 4
-                && bytes[4] & 1 != 0
+                && bytes.len() >= wire::HEADER_LEN
+                && wire::declared_length(bytes) == 0
+                && bytes[3] == wire::TYPE_SETTINGS
+                && bytes[4] & wire::FLAG_ACK != 0
                 && bytes[5] & 0x7f == 0
                 && bytes[6..9] == [0, 0, 0]
         })
@@ -427,34 +449,29 @@ impl ConnectionState {
         {
             // The already charged directional buffer bounds deferred ACKs and
             // following bytes while the opposite reassembly direction advances.
-            return Some(4096);
+            return Some(READ_CHUNK);
         }
-        let dir = self
-            .dirs
-            .iter()
-            .flatten()
-            .find(|dir| dir.flow == *flow)
-            .or_else(|| self.pending.iter().find(|dir| dir.flow == *flow))?;
+        let dir = self.directions.find(flow)?;
         Some(match dir.phase {
             DirectionPhase::Preface => PREFACE_LEN.saturating_sub(dir.buffer.len()),
             DirectionPhase::Frames => {
-                if dir.buffer.len() < 9 {
-                    9 - dir.buffer.len()
+                if dir.buffer.len() < wire::HEADER_LEN {
+                    wire::HEADER_LEN - dir.buffer.len()
                 } else {
                     let bytes = dir.buffer.bytes();
-                    let length =
-                        usize::try_from(u32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]]))
-                            .expect("24-bit frame length");
-                    (9 + length).saturating_sub(dir.buffer.len())
+                    let length = wire::declared_length(bytes);
+                    (wire::HEADER_LEN + length).saturating_sub(dir.buffer.len())
                 }
             }
             DirectionPhase::Prelude => {
                 let head_pending = match self.side_of(&dir.flow) {
-                    Some(CLIENT) => self
+                    Some(Side::Client) => self
+                        .upgrade
                         .prelude
                         .as_ref()
                         .is_none_or(|prelude| prelude.client_body.is_none()),
                     Some(_) => self
+                        .upgrade
                         .prelude
                         .as_ref()
                         .is_none_or(|prelude| prelude.server_body.is_none()),
@@ -463,16 +480,16 @@ impl ConnectionState {
                 if head_pending {
                     (crate::protocol::application::http::MAX_HEADER_BYTES + 1)
                         .saturating_sub(dir.buffer.len())
-                        .min(4096)
+                        .min(READ_CHUNK)
                 } else {
-                    4096
+                    READ_CHUNK
                 }
             }
             DirectionPhase::Sniff => {
                 if dir.buffer.len() < PREFACE_LEN {
                     PREFACE_LEN - dir.buffer.len()
                 } else {
-                    4096
+                    READ_CHUNK
                 }
             }
         })
@@ -490,17 +507,17 @@ impl ConnectionState {
                     }
                 }
                 Phase::Prelude | Phase::H2 => {
-                    if let Some(side) = self.resume_side.take() {
+                    if let Some(side) = self.deferred.resume_side.take() {
                         self.pump_side(side, context)?;
                         continue;
                     }
                     let before = self.buffered_len();
-                    self.pump_side(CLIENT, context)?;
-                    if self.resume_side.is_some() {
+                    self.pump_side(Side::Client, context)?;
+                    if self.deferred.resume_side.is_some() {
                         continue;
                     }
-                    self.pump_side(SERVER, context)?;
-                    if self.resume_side.is_some() {
+                    self.pump_side(Side::Server, context)?;
+                    if self.deferred.resume_side.is_some() {
                         continue;
                     }
                     if !matches!(self.phase, Phase::Dead) && self.buffered_len() == before {
@@ -511,12 +528,12 @@ impl ConnectionState {
         }
     }
 
-    fn pump_side(&mut self, side: usize, context: &mut Context<'_>) -> Result<(), Error> {
+    fn pump_side(&mut self, side: Side, context: &mut Context<'_>) -> Result<(), Error> {
         loop {
             if matches!(self.phase, Phase::Dead) {
                 return Ok(());
             }
-            let Some(dir) = self.dirs[side].as_ref() else {
+            let Some(dir) = self.directions.get(side) else {
                 return Ok(());
             };
             if dir.buffer.is_empty() || (dir.closed && dir.phase != DirectionPhase::Frames) {
@@ -528,9 +545,32 @@ impl ConnectionState {
                 DirectionPhase::Frames => self.frame_step(side, context)?,
                 DirectionPhase::Sniff => false,
             };
-            if !progressed || self.resume_side.is_some() {
+            if !progressed || self.deferred.resume_side.is_some() {
                 return Ok(());
             }
         }
+    }
+}
+
+impl ConnectionState {
+    pub(crate) fn decoder_sync(
+        &mut self,
+        side: Side,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
+        let dir = self
+            .directions
+            .get_mut(side)
+            .ok_or(Error::Invariant("direction not found"))?;
+        if let Some(decoder) = dir.decoder.as_ref() {
+            let now = decoder.buffered_bytes();
+            let charged = dir.decoder_charge.bytes();
+            if now > charged {
+                context.charge(&mut dir.decoder_charge, now - charged)?;
+            } else {
+                context.release(&mut dir.decoder_charge, charged - now)?;
+            }
+        }
+        Ok(())
     }
 }

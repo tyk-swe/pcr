@@ -96,65 +96,84 @@ pub struct Frame {
     pub padding_bytes: usize,
     pub sources: Vec<Source>,
 }
-impl TryFrom<analysis::Frame> for Frame {
-    type Error = Error;
-    fn try_from(value: analysis::Frame) -> Result<Self, Error> {
-        let control = value.control.map(|payload| match payload {
-            wire::Payload::Data { .. } => unreachable!("DATA control is never retained"),
-            wire::Payload::Headers {
+impl From<wire::Control> for Control {
+    fn from(control: wire::Control) -> Self {
+        match control {
+            wire::Control::Headers {
                 fragment,
                 priority,
                 padding,
-            } => Control::Headers {
+            } => Self::Headers {
                 fragment_hex: compact_hex(&fragment),
                 priority: priority.map(Into::into),
                 padding_hex: compact_hex(&padding),
             },
-            wire::Payload::Priority(priority) => Control::Priority {
+            wire::Control::Priority(priority) => Self::Priority {
                 exclusive: priority.exclusive,
                 dependency: priority.dependency,
                 weight: priority.weight,
             },
-            wire::Payload::Reset { error_code } => Control::Reset { error_code },
-            wire::Payload::Settings(settings) => Control::Settings {
+            wire::Control::Reset { error_code } => Self::Reset { error_code },
+            wire::Control::Settings(settings) => Self::Settings {
                 settings: settings.into_iter().map(Into::into).collect(),
             },
-            wire::Payload::PushPromise {
+            wire::Control::PushPromise {
                 promised_stream_id,
                 fragment,
                 padding,
-            } => Control::PushPromise {
+            } => Self::PushPromise {
                 promised_stream_id,
                 fragment_hex: compact_hex(&fragment),
                 padding_hex: compact_hex(&padding),
             },
-            wire::Payload::Ping(opaque) => Control::Ping {
+            wire::Control::Ping(opaque) => Self::Ping {
                 opaque_hex: compact_hex(&opaque),
             },
-            wire::Payload::Goaway {
+            wire::Control::Goaway {
                 last_stream_id,
                 error_code,
                 debug,
-            } => Control::Goaway {
+            } => Self::Goaway {
                 last_stream_id,
                 error_code,
                 debug_hex: compact_hex(&debug),
             },
-            wire::Payload::WindowUpdate { increment } => Control::WindowUpdate { increment },
-            wire::Payload::Continuation(fragment) => Control::Continuation {
+            wire::Control::WindowUpdate { increment } => Self::WindowUpdate { increment },
+            wire::Control::Continuation(fragment) => Self::Continuation {
                 fragment_hex: compact_hex(&fragment),
             },
-            wire::Payload::Unknown(payload) => Control::Unknown {
+            wire::Control::Unknown(payload) => Self::Unknown {
                 payload_hex: compact_hex(&payload),
             },
-            _ => Control::Unknown {
-                payload_hex: value
-                    .payload_wire
-                    .as_deref()
-                    .map(compact_hex)
-                    .unwrap_or_default(),
-            },
-        });
+        }
+    }
+}
+
+impl TryFrom<analysis::Frame> for Frame {
+    type Error = Error;
+    fn try_from(value: analysis::Frame) -> Result<Self, Error> {
+        let (control, payload_wire_hex, data_bytes, padding_bytes) = match value.body {
+            analysis::FrameBody::Data {
+                data_bytes,
+                padding_bytes,
+            } => (None, None, data_bytes, padding_bytes),
+            analysis::FrameBody::Control {
+                control,
+                payload_wire,
+            } => {
+                let padding_bytes = match &control {
+                    wire::Control::Headers { padding, .. }
+                    | wire::Control::PushPromise { padding, .. } => padding.len(),
+                    _ => 0,
+                };
+                (
+                    Some(control.into()),
+                    Some(compact_hex(&payload_wire)),
+                    0,
+                    padding_bytes,
+                )
+            }
+        };
         Ok(Self {
             index: value.index,
             stream: value.stream,
@@ -167,9 +186,9 @@ impl TryFrom<analysis::Frame> for Frame {
             reserved: value.header.reserved,
             header_wire_hex: compact_hex(&value.header_wire),
             control,
-            payload_wire_hex: value.payload_wire.as_deref().map(compact_hex),
-            data_bytes: value.data_bytes,
-            padding_bytes: value.padding_bytes,
+            payload_wire_hex,
+            data_bytes,
+            padding_bytes,
             sources: sources(&value.sources)?,
         })
     }

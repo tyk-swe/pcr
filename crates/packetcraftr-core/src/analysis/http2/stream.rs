@@ -3,15 +3,11 @@
 
 //! Stream lifecycle and in-progress request and response message state.
 
+use super::budget::Charge;
 use super::model::{Header, MessageKind};
+use crate::analysis::http2::side::{PerSide, Side};
 use crate::analysis::provenance::SourceSet;
 use bytes::Bytes;
-
-pub(crate) const CLIENT: usize = 0;
-pub(crate) const SERVER: usize = 1;
-pub(crate) fn peer(side: usize) -> usize {
-    1 - side
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
@@ -38,8 +34,7 @@ pub(crate) struct MessageBuilder {
     pub trailers_seen: bool,
     pub content_length: Option<u64>,
     pub status_code: Option<u16>,
-    pub charged: usize,
-    pub charged_spans: usize,
+    pub charge: Charge,
 }
 
 impl MessageBuilder {
@@ -62,8 +57,7 @@ impl MessageBuilder {
             trailers_seen: false,
             content_length: None,
             status_code: None,
-            charged: 0,
-            charged_spans: 0,
+            charge: Charge::default(),
         }
     }
 }
@@ -79,14 +73,14 @@ pub(crate) struct EarlyResponse {
 
 pub(crate) struct StreamState {
     pub phase: Phase,
-    pub by_client: bool,
+    pub initiator: Side,
     pub promised_by: Option<u32>,
-    pub ended: [bool; 2],
+    pub ended: PerSide<bool>,
     pub request: Option<u64>,
-    pub msgs: [Option<MessageBuilder>; 2],
-    pub send_window: [i64; 2],
-    pub credit_exceeded: [bool; 2],
-    pub window_granted: [i64; 2],
+    pub msgs: PerSide<Option<MessageBuilder>>,
+    pub send_window: PerSide<i64>,
+    pub credit_exceeded: PerSide<bool>,
+    pub window_granted: PerSide<i64>,
     pub early_response: Option<EarlyResponse>,
     pub method: Option<Bytes>,
     pub response_bodyless: bool,
@@ -94,28 +88,28 @@ pub(crate) struct StreamState {
 }
 
 impl StreamState {
-    pub(crate) fn open(by_client: bool, windows: [i64; 2]) -> Self {
+    pub(crate) fn open(initiator: Side, windows: PerSide<i64>) -> Self {
         Self {
             phase: Phase::Open,
-            by_client,
+            initiator,
             promised_by: None,
-            ended: [false, false],
+            ended: PerSide::default(),
             request: None,
-            msgs: [None, None],
+            msgs: PerSide::new(None, None),
             send_window: windows,
-            credit_exceeded: [false; 2],
-            window_granted: [0; 2],
+            credit_exceeded: PerSide::new(false, false),
+            window_granted: PerSide::new(0, 0),
             early_response: None,
             method: None,
             response_bodyless: false,
             unprocessed: false,
         }
     }
-    pub(crate) fn reserved(promised_by: u32, windows: [i64; 2]) -> Self {
-        let mut stream = Self::open(false, windows);
+    pub(crate) fn reserved(promised_by: u32, windows: PerSide<i64>) -> Self {
+        let mut stream = Self::open(Side::Server, windows);
         stream.phase = Phase::Reserved;
         stream.promised_by = Some(promised_by);
-        stream.ended = [true, false];
+        stream.ended = PerSide::new(true, false);
         stream
     }
 }

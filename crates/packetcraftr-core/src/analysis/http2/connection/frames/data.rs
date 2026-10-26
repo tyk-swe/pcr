@@ -3,13 +3,15 @@
 
 //! DATA payload validation, stream flow control, and message body retention.
 
-use super::super::{ConnectionState, Context, Evidence, Fault, resources};
+use super::super::{ConnectionState, Context, Evidence, Fault};
 use crate::analysis::http2::Error;
+use crate::analysis::http2::IssueCode;
+use crate::analysis::http2::budget;
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
-use crate::analysis::http2::stream::{CLIENT, SERVER, peer};
+use crate::analysis::http2::side::Side;
 
 pub(super) struct DataHead {
-    pub(super) side: usize,
+    pub(super) side: Side,
     pub(super) stream_id: u32,
     pub(super) length: u32,
     pub(super) data_bytes: u64,
@@ -30,7 +32,7 @@ impl ConnectionState {
             data_bytes,
             end_stream,
         } = head;
-        self.send_window[side] = self.send_window[side]
+        self.control.send_window[side] = self.control.send_window[side]
             .checked_sub(i64::from(length))
             .ok_or(Error::Application(
                 crate::analysis::application::Error::Limit {
@@ -38,42 +40,38 @@ impl ConnectionState {
                     limit: 0x8000_0000,
                 },
             ))?;
-        if self.send_window[side] < -(1i64 << 31) {
+        if self.control.send_window[side] < -(1i64 << 31) {
             let flow = self.dir_flow(side);
-            self.issue(
+            self.reject(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: "connection_window_underflow",
-                    detail: "connection flow window passed the 31-bit floor".into(),
-                    wire: evidence.wire.clone(),
-                    sources: evidence.sources.clone(),
-                },
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::ConnectionWindowUnderflow,
+                    "connection flow window passed the 31-bit floor",
+                )
+                .stream(Some(stream_id))
+                .evidence(evidence.wire.clone(), evidence.sources.clone()),
             )?;
-            self.fail(context, Status::Malformed)?;
             return Ok(());
-        } else if length > 0 && self.send_window[side] < 0 {
+        } else if length > 0 && self.control.send_window[side] < 0 {
             let flow = self.dir_flow(side);
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::ObservedOrder,
-                    status: Status::Malformed,
-                    code: "connection_window_exceeded",
-                    detail: "DATA exceeded the observed connection window".into(),
-                    wire: evidence.wire.clone(),
-                    sources: evidence.sources.clone(),
-                },
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::ConnectionWindowExceeded,
+                    "DATA exceeded the observed connection window",
+                )
+                .stream(Some(stream_id))
+                .certainty(Certainty::ObservedOrder)
+                .evidence(evidence.wire.clone(), evidence.sources.clone()),
             )?;
         }
-        if self.send_window[side] < 0
+        if self.control.send_window[side] < 0
             && self.reconcile_closed_credit(side, Some(stream_id), context)?
         {
             return Ok(());
@@ -81,42 +79,46 @@ impl ConnectionState {
         // In-flight peer DATA after a reset still consumes connection credit,
         // but cannot establish a stream error from cross-direction ordering.
         if self
+            .streams
             .closed
             .get(&stream_id)
-            .is_some_and(|closed| closed.reset_by == Some(peer(side)) && !closed.ended[side])
+            .is_some_and(|closed| closed.reset_by == Some(side.peer()) && !closed.ended[side])
         {
             return Ok(());
         }
-        let Some(stream) = self.streams.get_mut(&stream_id) else {
-            let owner = if stream_id.is_multiple_of(2) {
-                SERVER
-            } else {
-                CLIENT
-            };
-            let closed =
-                self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner];
+        let Some(stream) = self.streams.open.get_mut(&stream_id) else {
+            let owner = Side::initiator_of(stream_id);
+            let closed = self.streams.closed.contains_key(&stream_id)
+                || stream_id <= self.streams.max_initiated[owner];
             if !closed
                 && self.clean_start
-                && side == SERVER
-                && owner == CLIENT
+                && side == Side::Server
+                && owner == Side::Client
                 && self
-                    .early_response_headers
+                    .streams
+                    .early_responses
                     .get(&stream_id)
                     .is_none_or(|early| !early.final_seen || early.ended)
             {
-                self.issue(context, Fault {
-                    flow: self.dir_flow(side), http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream, certainty: Certainty::Confirmed,
-                    status: Status::Malformed, code: "data_without_headers",
-                    detail: "server DATA preceded any response HEADERS in the same ordered byte stream".into(),
-                    wire: evidence.wire, sources: evidence.sources,
-                })?;
-                if !self.early_response_headers.contains_key(&stream_id) {
+                self.issue(
+                    context,
+                    Fault::new(
+                        self.dir_flow(side),
+                        IssueScope::Stream,
+                        Status::Malformed,
+                        IssueCode::DataWithoutHeaders,
+                        "server DATA preceded any response HEADERS in the same ordered byte stream",
+                    )
+                    .stream(Some(stream_id))
+                    .evidence(evidence.wire, evidence.sources),
+                )?;
+                if !self.streams.early_responses.contains_key(&stream_id) {
                     context.check_streams()?;
-                    self.admitted_streams += 1;
-                    self.charge_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
+                    self.streams.admitted += 1;
+                    context.charge(&mut self.charge, budget::CLOSED_STREAM_OVERHEAD)?;
                 }
-                self.early_response_headers
+                self.streams
+                    .early_responses
                     .entry(stream_id)
                     .or_default()
                     .ended = true;
@@ -126,10 +128,10 @@ impl ConnectionState {
             // contradicted by content in the server's own ordered bytes.
             if !closed
                 && self.clean_start
-                && side == SERVER
-                && owner == CLIENT
+                && side == Side::Server
+                && owner == Side::Client
                 && data_bytes > 0
-                && let Some(early) = self.early_response_headers.get_mut(&stream_id)
+                && let Some(early) = self.streams.early_responses.get_mut(&stream_id)
                 && early.final_seen
                 && early.bodyless
                 && !early.ended
@@ -137,63 +139,58 @@ impl ConnectionState {
                 early.ended = true;
                 self.issue(
                     context,
-                    Fault {
-                        flow: self.dir_flow(side),
-                        http2_stream_id: Some(stream_id),
-                        scope: IssueScope::Stream,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: "bodyless_response_body",
-                        detail:
-                            "a capture-delayed response that must not carry content carried DATA"
-                                .into(),
-                        wire: evidence.wire,
-                        sources: evidence.sources,
-                    },
+                    Fault::new(
+                        self.dir_flow(side),
+                        IssueScope::Stream,
+                        Status::Malformed,
+                        IssueCode::BodylessResponseBody,
+                        "a capture-delayed response that must not carry content carried DATA",
+                    )
+                    .stream(Some(stream_id))
+                    .evidence(evidence.wire, evidence.sources),
                 )?;
                 return Ok(());
             }
             let uncertain = !closed && (!self.clean_start || side != owner);
-            if side == SERVER
+            if side == Side::Server
                 && end_stream
-                && let Some(early) = self.early_response_headers.get_mut(&stream_id)
+                && let Some(early) = self.streams.early_responses.get_mut(&stream_id)
             {
                 early.ended = true;
             }
             let flow = self.dir_flow(side);
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: if closed {
+                    if closed {
                         IssueScope::Stream
                     } else {
                         IssueScope::Connection
                     },
-                    certainty: if uncertain {
-                        Certainty::Indeterminate
-                    } else {
-                        Certainty::Confirmed
-                    },
-                    status: if uncertain {
+                    if uncertain {
                         Status::Incomplete
                     } else {
                         Status::Malformed
                     },
-                    code: if closed {
-                        "data_closed_stream"
+                    if closed {
+                        IssueCode::DataClosedStream
                     } else {
-                        "data_unknown_stream"
+                        IssueCode::DataUnknownStream
                     },
-                    detail: if closed {
-                        "DATA arrived on a fully closed stream".into()
+                    if closed {
+                        "DATA arrived on a fully closed stream"
                     } else {
-                        "DATA arrived on a stream that was never opened".into()
+                        "DATA arrived on a stream that was never opened"
                     },
-                    wire: evidence.wire,
-                    sources: evidence.sources,
-                },
+                )
+                .stream(Some(stream_id))
+                .certainty(if uncertain {
+                    Certainty::Indeterminate
+                } else {
+                    Certainty::Confirmed
+                })
+                .evidence(evidence.wire, evidence.sources),
             )?;
             if !closed && !uncertain {
                 self.fail(context, Status::Malformed)?;
@@ -202,25 +199,23 @@ impl ConnectionState {
         };
         if stream.phase != crate::analysis::http2::stream::Phase::Open || stream.ended[side] {
             let reserved = stream.phase == crate::analysis::http2::stream::Phase::Reserved;
-            let preserve_delayed_request = side == SERVER && stream.early_response.is_some();
+            let preserve_delayed_request = side == Side::Server && stream.early_response.is_some();
             let flow = self.dir_flow(side);
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: if reserved {
+                    if reserved {
                         IssueScope::Connection
                     } else {
                         IssueScope::Stream
                     },
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: "data_closed_stream",
-                    detail: "DATA arrived on a stream closed to the sender".into(),
-                    wire: evidence.wire,
-                    sources: evidence.sources,
-                },
+                    Status::Malformed,
+                    IssueCode::DataClosedStream,
+                    "DATA arrived on a stream closed to the sender",
+                )
+                .stream(Some(stream_id))
+                .evidence(evidence.wire, evidence.sources),
             )?;
             if reserved {
                 self.fail(context, Status::Malformed)?;
@@ -237,17 +232,15 @@ impl ConnectionState {
             let flow = self.dir_flow(side);
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: "stream_window_underflow",
-                    detail: "stream flow window passed the 31-bit floor".into(),
-                    wire: evidence.wire.clone(),
-                    sources: evidence.sources.clone(),
-                },
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::StreamWindowUnderflow,
+                    "stream flow window passed the 31-bit floor",
+                )
+                .stream(Some(stream_id))
+                .evidence(evidence.wire.clone(), evidence.sources.clone()),
             )?;
             self.close_stream(stream_id, Status::Malformed, None, context)?;
             return Ok(());
@@ -255,50 +248,59 @@ impl ConnectionState {
             let flow = self.dir_flow(side);
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::ObservedOrder,
-                    status: Status::Malformed,
-                    code: "stream_window_exceeded",
-                    detail: "DATA exceeded the observed stream window".into(),
-                    wire: evidence.wire.clone(),
-                    sources: evidence.sources.clone(),
-                },
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::StreamWindowExceeded,
+                    "DATA exceeded the observed stream window",
+                )
+                .stream(Some(stream_id))
+                .certainty(Certainty::ObservedOrder)
+                .evidence(evidence.wire.clone(), evidence.sources.clone()),
             )?;
         }
         if self.reconcile_closed_credit(side, Some(stream_id), context)? {
             return Ok(());
         }
-        let stream = self.streams.get_mut(&stream_id).expect("stream");
-        let trace_content = side == CLIENT && stream.method.as_deref() == Some(b"TRACE");
-        if data_bytes > 0 && (trace_content || (stream.response_bodyless && side == SERVER)) {
+        let stream = self
+            .streams
+            .open
+            .get_mut(&stream_id)
+            .ok_or(Error::Invariant("stream"))?;
+        let trace_content = side == Side::Client && stream.method.as_deref() == Some(b"TRACE");
+        if data_bytes > 0 && (trace_content || (stream.response_bodyless && side == Side::Server)) {
             let flow = self.dir_flow(side);
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: if trace_content {
-                        "trace_request_body"
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    if trace_content {
+                        IssueCode::TraceRequestBody
                     } else {
-                        "bodyless_response_body"
+                        IssueCode::BodylessResponseBody
                     },
-                    detail: "a message that must not carry content carried DATA".into(),
-                    wire: evidence.wire.clone(),
-                    sources: evidence.sources.clone(),
-                },
+                    "a message that must not carry content carried DATA",
+                )
+                .stream(Some(stream_id))
+                .evidence(evidence.wire.clone(), evidence.sources.clone()),
             )?;
-            let stream = self.streams.get_mut(&stream_id).expect("stream");
+            let stream = self
+                .streams
+                .open
+                .get_mut(&stream_id)
+                .ok_or(Error::Invariant("stream"))?;
             if let Some(msg) = stream.msgs[side].as_mut() {
                 msg.failure = Some(Status::Malformed);
             }
         }
-        let stream = self.streams.get_mut(&stream_id).expect("stream");
+        let stream = self
+            .streams
+            .open
+            .get_mut(&stream_id)
+            .ok_or(Error::Invariant("stream"))?;
         if stream.msgs[side]
             .as_ref()
             .is_some_and(|msg| msg.trailers_seen)
@@ -306,96 +308,102 @@ impl ConnectionState {
             let flow = self.dir_flow(side);
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: "data_after_trailers",
-                    detail: "DATA arrived after a trailer block".into(),
-                    wire: evidence.wire.clone(),
-                    sources: evidence.sources.clone(),
-                },
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::DataAfterTrailers,
+                    "DATA arrived after a trailer block",
+                )
+                .stream(Some(stream_id))
+                .evidence(evidence.wire.clone(), evidence.sources.clone()),
             )?;
-            let stream = self.streams.get_mut(&stream_id).expect("stream");
+            let stream = self
+                .streams
+                .open
+                .get_mut(&stream_id)
+                .ok_or(Error::Invariant("stream"))?;
             if let Some(msg) = stream.msgs[side].as_mut() {
                 msg.failure = Some(Status::Malformed);
             }
         }
-        let stream = self.streams.get_mut(&stream_id).expect("stream");
+        let stream = self
+            .streams
+            .open
+            .get_mut(&stream_id)
+            .ok_or(Error::Invariant("stream"))?;
         if let Some(msg) = stream.msgs[side].as_mut() {
             msg.saw_body = true;
             msg.body_bytes = msg.body_bytes.saturating_add(data_bytes);
             if msg.body_bytes > context.limits.max_body_bytes {
                 let flow = self.dir_flow(side);
-                self.issue(
+                self.reject(
                     context,
-                    Fault {
+                    Fault::new(
                         flow,
-                        http2_stream_id: Some(stream_id),
-                        scope: IssueScope::Stream,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Limit,
-                        code: "body_limit",
-                        detail: "observed message body exceeds the configured bound".into(),
-                        wire: evidence.wire.clone(),
-                        sources: evidence.sources.clone(),
-                    },
+                        IssueScope::Stream,
+                        Status::Limit,
+                        IssueCode::BodyLimit,
+                        "observed message body exceeds the configured bound",
+                    )
+                    .stream(Some(stream_id))
+                    .evidence(evidence.wire.clone(), evidence.sources.clone()),
                 )?;
-                self.fail(context, Status::Limit)?;
                 return Ok(());
             }
             if let Some(sources) = evidence.sources.clone() {
-                let charge =
-                    resources::SET_OVERHEAD + sources.frames().len() * resources::SPAN_OVERHEAD;
-                self.charge_conn(context, charge)?;
-                let stream = self.streams.get_mut(&stream_id).expect("stream");
-                if let Some(msg) = stream.msgs[side].as_mut() {
-                    msg.charged += charge;
-                    msg.charged_spans += sources.frames().len();
-                    context.charge_spans(sources.frames().len())?;
-                    msg.sets.push(sources);
+                let stream = self
+                    .streams
+                    .open
+                    .get_mut(&stream_id)
+                    .ok_or(Error::Invariant("stream"))?;
+                match stream.msgs[side].as_mut() {
+                    Some(msg) => {
+                        context.track(&mut msg.charge, &sources)?;
+                        msg.sets.push(sources);
+                    }
+                    None => context.charge(
+                        &mut self.charge,
+                        budget::SET_OVERHEAD + sources.frames().len() * budget::SPAN_OVERHEAD,
+                    )?,
                 }
             }
-        } else if side == SERVER && stream.early_response.is_some_and(|early| early.final_seen) {
+        } else if side == Side::Server
+            && stream.early_response.is_some_and(|early| early.final_seen)
+        {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Indeterminate,
-                    status: Status::Incomplete,
-                    code: "data_after_early_response",
-                    detail:
-                        "DATA follows response HEADERS observed before the delayed client opener"
-                            .into(),
-                    wire: evidence.wire,
-                    sources: evidence.sources,
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Stream,
+                    Status::Incomplete,
+                    IssueCode::DataAfterEarlyResponse,
+                    "DATA follows response HEADERS observed before the delayed client opener",
+                )
+                .stream(Some(stream_id))
+                .certainty(Certainty::Indeterminate)
+                .evidence(evidence.wire, evidence.sources),
             )?;
         } else {
             let flow = self.dir_flow(side);
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: "data_without_headers",
-                    detail: "DATA arrived before a header block on the stream".into(),
-                    wire: evidence.wire,
-                    sources: evidence.sources,
-                },
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::DataWithoutHeaders,
+                    "DATA arrived before a header block on the stream",
+                )
+                .stream(Some(stream_id))
+                .evidence(evidence.wire, evidence.sources),
             )?;
             self.close_stream(stream_id, Status::Malformed, None, context)?;
             return Ok(());
         }
         if self
             .streams
+            .open
             .get(&stream_id)
             .and_then(|stream| stream.msgs[side].as_ref())
             .is_some_and(|msg| msg.failure == Some(Status::Malformed))

@@ -3,10 +3,12 @@
 
 use super::super::super::Error;
 use super::super::super::buffer::union_balanced;
-use super::super::super::model::{Certainty, Header, IssueScope, Status};
-use super::super::super::stream::{CLIENT, MessageBuilder};
-use super::super::{ConnectionState, Context, Fault, resources};
-use crate::analysis::application;
+use super::super::super::model::{Header, IssueScope, Status};
+use super::super::super::stream::MessageBuilder;
+use super::super::{ConnectionState, Context, Fault};
+use crate::analysis::http2::IssueCode;
+use crate::analysis::http2::budget;
+use crate::analysis::http2::side::Side;
 use crate::protocol::application::http;
 use bytes::Bytes;
 
@@ -20,17 +22,15 @@ pub(super) enum BodyStep {
 impl ConnectionState {
     pub(super) fn prelude_body_step(
         &mut self,
-        side: usize,
+        side: Side,
         context: &mut Context<'_>,
     ) -> Result<BodyStep, Error> {
-        let dir =
-            self.dirs[side]
-                .as_mut()
-                .ok_or(Error::Application(application::Error::Sources {
-                    number: self.number,
-                }))?;
-        let has_body = self.prelude.as_ref().is_some_and(|p| {
-            if side == CLIENT {
+        let dir = self
+            .directions
+            .get_mut(side)
+            .ok_or(Error::Invariant("direction not found"))?;
+        let has_body = self.upgrade.prelude.as_ref().is_some_and(|p| {
+            if side == Side::Client {
                 p.client_body.is_some()
             } else {
                 p.server_body.is_some()
@@ -39,11 +39,21 @@ impl ConnectionState {
         if !has_body {
             return Ok(BodyStep::NotBody);
         }
-        let prelude = self.prelude.as_mut().expect("prelude");
-        let body = if side == CLIENT {
-            prelude.client_body.as_mut().expect("body")
+        let prelude = self
+            .upgrade
+            .prelude
+            .as_mut()
+            .ok_or(Error::Invariant("prelude"))?;
+        let body = if side == Side::Client {
+            prelude
+                .client_body
+                .as_mut()
+                .ok_or(Error::Invariant("body"))?
         } else {
-            prelude.server_body.as_mut().expect("body")
+            prelude
+                .server_body
+                .as_mut()
+                .ok_or(Error::Invariant("body"))?
         };
         let progress = match body.consume(dir.buffer.bytes()) {
             Ok(progress) => progress,
@@ -53,8 +63,7 @@ impl ConnectionState {
                 let sets = dir.buffer.contributors(take);
                 let (wire, dropped) = dir.buffer.take(take);
                 let sources = union_balanced(sets)?;
-                Self::release_dir(dir, context, take);
-                Self::release_dropped(dir, dropped, context);
+                dir.release_consumed(take, dropped, context)?;
                 let status = if matches!(error, http::Error::Limit(_)) {
                     Status::Limit
                 } else {
@@ -62,17 +71,14 @@ impl ConnectionState {
                 };
                 self.issue(
                     context,
-                    Fault {
+                    Fault::new(
                         flow,
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
+                        IssueScope::Connection,
                         status,
-                        code: "prelude_body",
-                        detail: error.to_string().into(),
-                        wire,
-                        sources,
-                    },
+                        IssueCode::PreludeBody,
+                        error.to_string(),
+                    )
+                    .evidence(wire, sources),
                 )?;
                 self.fail(context, status)?;
                 return Ok(BodyStep::Progress);
@@ -98,11 +104,14 @@ impl ConnectionState {
         };
         if consumed > 0 {
             let sets = dir.buffer.contributors(consumed);
-            let dropped = dir.buffer.discard(consumed);
-            Self::release_dir(dir, context, consumed);
-            Self::release_dropped(dir, dropped, context);
-            let prelude = self.prelude.as_mut().expect("prelude");
-            let msg_slot = if side == CLIENT {
+            let dropped = dir.buffer.consume(consumed);
+            dir.release_consumed(consumed, dropped, context)?;
+            let prelude = self
+                .upgrade
+                .prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?;
+            let msg_slot = if side == Side::Client {
                 &mut prelude.live_request
             } else {
                 &mut prelude.live_response
@@ -110,18 +119,7 @@ impl ConnectionState {
             if let Some(msg) = msg_slot.as_mut() {
                 msg.body_bytes = body_bytes;
                 for set in sets {
-                    let frames = set.frames().len();
-                    let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
-                    self.charge_conn(context, charge)?;
-                    context.charge_spans(frames)?;
-                    let prelude = self.prelude.as_mut().expect("prelude");
-                    let msg = if side == CLIENT {
-                        prelude.live_request.as_mut().expect("request")
-                    } else {
-                        prelude.live_response.as_mut().expect("response")
-                    };
-                    msg.charged += charge;
-                    msg.charged_spans += frames;
+                    context.track(&mut msg.charge, &set)?;
                     msg.sets.push(set);
                 }
             }
@@ -129,15 +127,19 @@ impl ConnectionState {
         if complete {
             let trailer_charge = trailers
                 .iter()
-                .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
+                .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
                 .sum::<usize>();
-            let prelude = self.prelude.as_mut().expect("prelude");
-            if side == CLIENT {
+            let prelude = self
+                .upgrade
+                .prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?;
+            if side == Side::Client {
                 prelude.client_body = None;
             } else {
                 prelude.server_body = None;
             }
-            let msg = if side == CLIENT {
+            let msg = if side == Side::Client {
                 prelude.live_request.take()
             } else {
                 prelude.live_response.take()
@@ -145,17 +147,19 @@ impl ConnectionState {
             let step = match msg {
                 Some(mut msg) => {
                     if !trailers.is_empty() {
-                        self.charge_conn(context, trailer_charge)?;
-                        msg.charged += trailer_charge;
+                        context.charge(&mut msg.charge, trailer_charge)?;
                         msg.trailers = trailers;
                     }
                     BodyStep::Complete(Box::new(msg))
                 }
                 None => BodyStep::Progress,
             };
-            let charge =
-                std::mem::take(&mut self.prelude.as_mut().expect("prelude").body_charge[side]);
-            self.release_conn(context, charge);
+            let prelude = self
+                .upgrade
+                .prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?;
+            context.release_all(&mut prelude.body_charge[side])?;
             return Ok(step);
         }
         Ok(BodyStep::Progress)

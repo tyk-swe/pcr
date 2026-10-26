@@ -1,7 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use super::budget::Charge;
 use super::model::PeerSettings;
+use crate::analysis::http2::IssueCode;
 use crate::protocol::application::http2::Setting;
 use std::collections::VecDeque;
 
@@ -13,19 +15,8 @@ pub(crate) const MAX_FRAME_SIZE: u16 = 0x5;
 pub(crate) const MAX_HEADER_LIST_SIZE: u16 = 0x6;
 pub(crate) const WINDOW_MAX: i64 = 0x7fff_ffff;
 
-pub(crate) fn defaults() -> PeerSettings {
-    PeerSettings {
-        header_table_size: 4096,
-        enable_push: true,
-        max_concurrent_streams: None,
-        initial_window_size: 65535,
-        max_frame_size: 16384,
-        max_header_list_size: None,
-    }
-}
-
 pub(crate) struct SettingIssue {
-    pub code: &'static str,
+    pub code: IssueCode,
     pub detail: &'static str,
 }
 
@@ -37,7 +28,7 @@ pub(crate) struct PendingSettings {
     pub peak_window_delta: Option<i64>,
     pub sender_stream_limit: u32,
     pub window_grants: std::collections::BTreeMap<u32, i64>,
-    pub charged: usize,
+    pub charge: Charge,
 }
 
 pub(crate) struct Applied {
@@ -53,7 +44,7 @@ pub(crate) struct Acked {
     pub peak_window_delta: Option<i64>,
     pub sender_stream_limit: u32,
     pub window_grants: std::collections::BTreeMap<u32, i64>,
-    pub charged: usize,
+    pub charge: Charge,
 }
 
 pub(crate) struct DirectionSettings {
@@ -67,8 +58,8 @@ pub(crate) struct DirectionSettings {
 impl DirectionSettings {
     pub(crate) fn new() -> Self {
         Self {
-            advertised: defaults(),
-            acknowledged: defaults(),
+            advertised: PeerSettings::default(),
+            acknowledged: PeerSettings::default(),
             seen: false,
             pending: VecDeque::new(),
             uncertain_table_minimum: None,
@@ -92,18 +83,18 @@ impl DirectionSettings {
             peak_window_delta: None,
             sender_stream_limit: 0,
             window_grants: std::collections::BTreeMap::new(),
-            charged: 0,
+            charge: Charge::default(),
         };
         let mut issues = Vec::new();
         for setting in settings {
             let code = match setting.id {
-                ENABLE_PUSH if setting.value > 1 => Some("settings_enable_push_value"),
-                ENABLE_PUSH if server_sent => Some("settings_enable_push_role"),
+                ENABLE_PUSH if setting.value > 1 => Some(IssueCode::SettingsEnablePushValue),
+                ENABLE_PUSH if server_sent => Some(IssueCode::SettingsEnablePushRole),
                 INITIAL_WINDOW_SIZE if setting.value > WINDOW_MAX as u32 => {
-                    Some("settings_initial_window_size")
+                    Some(IssueCode::SettingsInitialWindowSize)
                 }
                 MAX_FRAME_SIZE if !(16384..=16_777_215).contains(&setting.value) => {
-                    Some("settings_max_frame_size")
+                    Some(IssueCode::SettingsMaxFrameSize)
                 }
                 _ => None,
             };
@@ -124,14 +115,14 @@ impl DirectionSettings {
                     0 | 1 => {
                         if server_sent {
                             issues.push(SettingIssue {
-                                code: "settings_enable_push_role",
+                                code: IssueCode::SettingsEnablePushRole,
                                 detail: "a server must not send SETTINGS_ENABLE_PUSH",
                             });
                         }
                         pending.final_values.enable_push = setting.value != 0;
                     }
                     _ => issues.push(SettingIssue {
-                        code: "settings_enable_push_value",
+                        code: IssueCode::SettingsEnablePushValue,
                         detail: "SETTINGS_ENABLE_PUSH value is not 0 or 1",
                     }),
                 },
@@ -141,7 +132,7 @@ impl DirectionSettings {
                 INITIAL_WINDOW_SIZE => {
                     if setting.value > WINDOW_MAX as u32 {
                         issues.push(SettingIssue {
-                            code: "settings_initial_window_size",
+                            code: IssueCode::SettingsInitialWindowSize,
                             detail: "SETTINGS_INITIAL_WINDOW_SIZE exceeds 2^31-1",
                         });
                     } else {
@@ -162,7 +153,7 @@ impl DirectionSettings {
                 MAX_FRAME_SIZE => {
                     if !(16384..=16_777_215).contains(&setting.value) {
                         issues.push(SettingIssue {
-                            code: "settings_max_frame_size",
+                            code: IssueCode::SettingsMaxFrameSize,
                             detail: "SETTINGS_MAX_FRAME_SIZE is outside 16384..=16777215",
                         });
                     } else {
@@ -231,7 +222,7 @@ impl DirectionSettings {
             peak_window_delta: pending.peak_window_delta,
             sender_stream_limit: pending.sender_stream_limit,
             window_grants: pending.window_grants,
-            charged: pending.charged,
+            charge: pending.charge,
         })
     }
 }

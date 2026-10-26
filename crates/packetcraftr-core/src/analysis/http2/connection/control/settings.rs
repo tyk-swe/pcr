@@ -4,50 +4,54 @@
 //! SETTINGS application and acknowledgments.
 
 use super::super::super::model::{Certainty, IssueScope, Status};
-use super::super::super::stream::{Phase as StreamPhase, SERVER, peer};
+use super::super::super::stream::Phase as StreamPhase;
 use super::super::super::{Error, settings};
-use super::super::{ConnectionState, Context, Evidence, Fault, resources};
+use super::super::{ConnectionState, Context, Evidence, Fault};
+use crate::analysis::http2::IssueCode;
+use crate::analysis::http2::budget;
+use crate::analysis::http2::side::Side;
 use crate::protocol::application::http2 as wire;
 
 impl ConnectionState {
     pub(crate) fn settings_frame(
         &mut self,
-        side: usize,
+        side: Side,
         flags: u8,
         settings: Vec<wire::Setting>,
         evidence: Evidence,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        if flags & 0x1 != 0 {
-            let Some(acked) = self.settings[super::super::super::stream::peer(side)].acknowledge()
-            else {
+        if flags & wire::FLAG_ACK != 0 {
+            let Some(mut acked) = self.control.settings[side.peer()].acknowledge() else {
                 // Two unmatched ACK heads cannot be explained by reordering:
                 // both matching SETTINGS would have to precede the other's ACK.
                 // Retain the peer's still-buffered evidence before failure drains it.
-                let peer_ack = self.dirs[peer(side)]
-                    .as_ref()
+                let peer_ack = self
+                    .directions
+                    .get(side.peer())
                     .filter(|dir| {
                         let bytes = dir.buffer.bytes();
-                        self.settings[side].pending.is_empty()
+                        self.control.settings[side].pending.is_empty()
                             && dir.saw_frame
                             && dir.chain.is_none()
-                            && bytes.len() >= 9
-                            && bytes[..3] == [0, 0, 0]
-                            && bytes[3] == 4
-                            && bytes[4] & 1 != 0
+                            && bytes.len() >= wire::HEADER_LEN
+                            && wire::declared_length(bytes) == 0
+                            && bytes[3] == wire::TYPE_SETTINGS
+                            && bytes[4] & wire::FLAG_ACK != 0
                             && bytes[5] & 0x7f == 0
                             && bytes[6..9] == [0, 0, 0]
                     })
                     .map(|dir| {
                         (
-                            bytes::Bytes::copy_from_slice(&dir.buffer.bytes()[..9]),
-                            dir.buffer.contributors(9),
+                            bytes::Bytes::copy_from_slice(&dir.buffer.bytes()[..wire::HEADER_LEN]),
+                            dir.buffer.contributors(wire::HEADER_LEN),
                         )
                     });
                 let confirmed = self.clean_start
                     && (peer_ack.is_some()
-                        || self.dirs[peer(side)]
-                            .as_ref()
+                        || self
+                            .directions
+                            .get(side.peer())
                             .is_some_and(|dir| dir.buffer.is_empty()));
                 let status = if confirmed {
                     Status::Malformed
@@ -56,57 +60,51 @@ impl ConnectionState {
                 };
                 self.issue(
                     context,
-                    Fault {
-                        flow: self.dir_flow(side),
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: if confirmed {
-                            Certainty::Confirmed
-                        } else {
-                            Certainty::Indeterminate
-                        },
+                    Fault::new(
+                        self.dir_flow(side),
+                        IssueScope::Connection,
                         status,
-                        code: "unsolicited_settings_ack",
-                        detail: "a SETTINGS acknowledgment does not match a pending SETTINGS"
-                            .into(),
-                        wire: evidence.wire,
-                        sources: evidence.sources,
-                    },
+                        IssueCode::UnsolicitedSettingsAck,
+                        "a SETTINGS acknowledgment does not match a pending SETTINGS",
+                    )
+                    .certainty(if confirmed {
+                        Certainty::Confirmed
+                    } else {
+                        Certainty::Indeterminate
+                    })
+                    .evidence(evidence.wire, evidence.sources),
                 )?;
                 if let Some((wire, sets)) = peer_ack {
                     self.issue(
                         context,
-                        Fault {
-                            flow: self.dir_flow(peer(side)),
-                            http2_stream_id: None,
-                            scope: IssueScope::Connection,
-                            certainty: if confirmed {
-                                Certainty::Confirmed
-                            } else {
-                                Certainty::Indeterminate
-                            },
+                        Fault::new(
+                            self.dir_flow(side.peer()),
+                            IssueScope::Connection,
                             status,
-                            code: "unsolicited_settings_ack",
-                            detail: "both directional ACK heads lack preceding matching SETTINGS"
-                                .into(),
-                            wire,
-                            sources: super::super::super::buffer::union_balanced(sets)?,
-                        },
+                            IssueCode::UnsolicitedSettingsAck,
+                            "both directional ACK heads lack preceding matching SETTINGS",
+                        )
+                        .certainty(if confirmed {
+                            Certainty::Confirmed
+                        } else {
+                            Certainty::Indeterminate
+                        })
+                        .evidence(wire, super::super::super::buffer::union_balanced(sets)?),
                     )?;
                 }
                 self.fail(context, status)?;
                 return Ok(());
             };
             let mut overflow = false;
-            for (id, stream) in &mut self.streams {
+            for (id, stream) in &mut self.streams.open {
                 context.check_deadline()?;
                 if stream.phase != StreamPhase::Closed {
-                    let owner = if stream.by_client {
-                        super::super::super::stream::CLIENT
+                    let owner = if stream.initiator == Side::Client {
+                        Side::Client
                     } else {
-                        SERVER
+                        Side::Server
                     };
-                    let existed = owner != peer(side) || *id <= acked.sender_stream_limit;
+                    let existed = owner != side.peer() || *id <= acked.sender_stream_limit;
                     let later_grants = stream.window_granted[side]
                         - acked.window_grants.get(id).copied().unwrap_or(0);
                     // Grants following SETTINGS cannot have taken effect before
@@ -125,8 +123,8 @@ impl ConnectionState {
                 }
             }
             drop(acked.window_grants);
-            self.release_conn(context, acked.charged);
-            for debt in self.closed_credit.values_mut() {
+            context.release_all(&mut acked.charge)?;
+            for debt in self.streams.closed_credit.values_mut() {
                 context.check_deadline()?;
                 if let Some(window) = debt[side].as_mut() {
                     *window += acked.window_delta;
@@ -135,38 +133,35 @@ impl ConnectionState {
                     }
                 }
             }
-            self.release_resolved_credit(context);
+            self.release_resolved_credit(context)?;
             if overflow {
-                self.issue(
+                self.reject(
                     context,
-                    Fault {
-                        flow: self.dir_flow(side),
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: "window_overflow",
-                        detail: "SETTINGS window change pushed a stream window out of range".into(),
-                        wire: evidence.wire.clone(),
-                        sources: evidence.sources.clone(),
-                    },
+                    Fault::new(
+                        self.dir_flow(side),
+                        IssueScope::Connection,
+                        Status::Malformed,
+                        IssueCode::WindowOverflow,
+                        "SETTINGS window change pushed a stream window out of range",
+                    )
+                    .evidence(evidence.wire.clone(), evidence.sources.clone()),
                 )?;
-                self.fail(context, Status::Malformed)?;
                 return Ok(());
             }
-            if let Some(dir) = self.dirs[side].as_mut()
+            if let Some(dir) = self.directions.get_mut(side)
                 && let Some(decoder) = dir.decoder.as_mut()
             {
                 if let Some(minimum) = acked.minimum_table_size {
                     if acked.possibly_applied_table_minimum {
-                        let uncertain = &mut self.settings[peer(side)].uncertain_table_minimum;
+                        let uncertain =
+                            &mut self.control.settings[side.peer()].uncertain_table_minimum;
                         *uncertain = Some(uncertain.map_or(minimum, |old| old.min(minimum)));
                     } else {
                         decoder.acknowledge_table_size(minimum)?;
                     }
                 }
                 decoder.acknowledge_table_size(acked.values.header_table_size)?;
-                for pending in &self.settings[peer(side)].pending {
+                for pending in &self.control.settings[side.peer()].pending {
                     decoder.permit_table_size(pending.final_values.header_table_size);
                 }
             }
@@ -175,45 +170,45 @@ impl ConnectionState {
             self.release_ack_deferred_messages(context)?;
             return Ok(());
         }
-        if self.settings[side].pending.len() + 1 > context.limits.max_pending_settings {
+        if self.control.settings[side].pending.len() + 1 > context.limits.max_pending_settings {
             let flow = self.dir_flow(side);
-            self.issue(
+            self.reject(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Limit,
-                    code: "pending_settings",
-                    detail: "unacknowledged SETTINGS frames exceed the configured bound".into(),
-                    wire: evidence.wire,
-                    sources: evidence.sources,
-                },
+                    IssueScope::Connection,
+                    Status::Limit,
+                    IssueCode::PendingSettings,
+                    "unacknowledged SETTINGS frames exceed the configured bound",
+                )
+                .evidence(evidence.wire, evidence.sources),
             )?;
-            self.fail(context, Status::Limit)?;
             return Ok(());
         }
-        let resume_peer = self.waiting_settings_ack(peer(side));
-        let applied = self.settings[side].apply(&settings, side == SERVER);
+        let resume_peer = self.waiting_settings_ack(side.peer());
+        let applied = self.control.settings[side].apply(&settings, side == Side::Server);
         let mut pending = applied.pending;
-        pending.sender_stream_limit = self.max_initiated[side];
-        pending.charged = resources::PENDING_OVERHEAD
-            + self
-                .streams
-                .len()
-                .saturating_mul(resources::CLOSED_STREAM_OVERHEAD);
-        self.charge_conn(context, pending.charged)?;
-        for (id, stream) in &self.streams {
+        pending.sender_stream_limit = self.streams.max_initiated[side];
+        context.charge(
+            &mut pending.charge,
+            budget::PENDING_OVERHEAD
+                + self
+                    .streams
+                    .open
+                    .len()
+                    .saturating_mul(budget::CLOSED_STREAM_OVERHEAD),
+        )?;
+        for (id, stream) in &self.streams.open {
             context.check_deadline()?;
             pending
                 .window_grants
-                .insert(*id, stream.window_granted[peer(side)]);
+                .insert(*id, stream.window_granted[side.peer()]);
         }
         let advertised_table_size = pending.final_values.header_table_size;
-        self.settings[side].pending.push_back(pending);
-        if let Some(decoder) = self.dirs[peer(side)]
-            .as_mut()
+        self.control.settings[side].pending.push_back(pending);
+        if let Some(decoder) = self
+            .directions
+            .get_mut(side.peer())
             .and_then(|dir| dir.decoder.as_mut())
         {
             decoder.permit_table_size(advertised_table_size);
@@ -223,23 +218,20 @@ impl ConnectionState {
         for issue in issues {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: issue.code,
-                    detail: issue.detail.into(),
-                    wire: evidence.wire.clone(),
-                    sources: evidence.sources.clone(),
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    issue.code,
+                    issue.detail,
+                )
+                .evidence(evidence.wire.clone(), evidence.sources.clone()),
             )?;
         }
         if invalid {
             self.fail(context, Status::Malformed)?;
         } else if resume_peer {
-            self.resume_side = Some(peer(side));
+            self.deferred.resume_side = Some(side.peer());
         }
         Ok(())
     }

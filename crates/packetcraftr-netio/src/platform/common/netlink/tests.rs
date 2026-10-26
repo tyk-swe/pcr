@@ -86,13 +86,13 @@ fn request_arrival_and_retirement_have_no_unreachable_accepted_request() {
 fn an_empty_inbox_retires_and_an_abandoned_initializer_stops() {
     let idle = Inbox::new();
     assert!(idle.next_with_idle(Duration::ZERO).is_none());
-    assert!(!super::lock(&idle.state).serving);
+    assert!(!idle.serving());
     let failed = Inbox::new();
     failed.abandon();
     assert!(failed.next().is_none());
     // The exit guard also rejects any queued submissions after initialization fails.
     failed.stop();
-    assert!(!super::lock(&failed.state).serving);
+    assert!(!failed.serving());
     let failed = Inbox::new();
     failed.stop();
     assert!(matches!(
@@ -172,9 +172,8 @@ fn sequential_historical_identities_recover_resident_capacity_and_root_headroom(
                 .is_ok()
         );
         assert!(reply.recv_timeout(Duration::from_secs(5)).unwrap().is_ok());
-        // Wait until the completion guard has returned the service to idle.
         let guard = Instant::now() + Duration::from_secs(5);
-        while super::lock(&inbox.state).active {
+        while inbox.active() {
             assert!(Instant::now() < guard);
             std::thread::yield_now();
         }
@@ -271,7 +270,7 @@ fn full_inbox_wait_observes_inherited_elapsed_control_without_accepting_an_expir
     starting.recv_timeout(Duration::from_secs(5)).unwrap();
     advanced.store(31, Ordering::SeqCst);
     let returned_under_control = result.recv_timeout(Duration::from_secs(5));
-    let retained = super::lock(&inbox.state).queue.len();
+    let retained = inbox.queued();
     inbox.stop();
     waiter.join().unwrap();
     assert_eq!(

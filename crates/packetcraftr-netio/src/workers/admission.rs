@@ -251,7 +251,6 @@ impl Permit {
 }
 
 impl ConnectPermit {
-    /// Splits the attempt into its execution permit and its single socket promotion right.
     pub(super) fn into_parts(self) -> (Permit, SocketReservation) {
         let reservation = SocketReservation(self.0.lease());
         (self.0, reservation)

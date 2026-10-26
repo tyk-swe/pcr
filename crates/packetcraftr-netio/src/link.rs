@@ -61,3 +61,51 @@ impl std::fmt::Display for Mode {
         formatter.write_str(self.as_str())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supports_matches_each_concrete_mode_and_never_auto() {
+        let cases = [
+            (Capability::Layer2, Mode::Layer2, true),
+            (Capability::Layer2, Mode::Layer3, false),
+            (Capability::Layer3, Mode::Layer2, false),
+            (Capability::Layer3, Mode::Layer3, true),
+            (Capability::Layer2AndLayer3, Mode::Layer2, true),
+            (Capability::Layer2AndLayer3, Mode::Layer3, true),
+            (Capability::Layer2, Mode::Auto, false),
+            (Capability::Layer3, Mode::Auto, false),
+            (Capability::Layer2AndLayer3, Mode::Auto, false),
+        ];
+        for (capability, mode, expected) in cases {
+            assert_eq!(
+                capability.supports(mode),
+                expected,
+                "{capability:?} {mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rendered_names_match_the_serialized_vocabulary() {
+        assert_eq!(Capability::Layer2.as_str(), "layer2");
+        assert_eq!(Capability::Layer3.as_str(), "layer3");
+        assert_eq!(Capability::Layer2AndLayer3.as_str(), "layer2_and3");
+        assert_eq!(Capability::Layer2AndLayer3.to_string(), "layer2_and3");
+        assert_eq!(Mode::Auto.as_str(), "auto");
+        assert_eq!(Mode::Layer2.as_str(), "layer2");
+        assert_eq!(Mode::Layer3.as_str(), "layer3");
+        assert_eq!(Mode::Auto.to_string(), "auto");
+        assert_eq!(
+            serde_json::to_string(&Capability::Layer2AndLayer3).unwrap(),
+            "\"layer2_and3\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Capability::Layer2).unwrap(),
+            "\"layer2\""
+        );
+        assert_eq!(serde_json::to_string(&Mode::Auto).unwrap(), "\"auto\"");
+    }
+}

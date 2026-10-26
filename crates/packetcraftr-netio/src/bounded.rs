@@ -93,3 +93,165 @@ pub(crate) fn retryable(source: &io::Error) -> bool {
         io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{Ipv6Addr, SocketAddrV6};
+
+    fn v6(ip: Ipv6Addr, port: u16, scope_id: u32) -> SocketAddr {
+        SocketAddrV6::new(ip, port, 0, scope_id).into()
+    }
+
+    fn v6_flow(ip: Ipv6Addr, port: u16, flowinfo: u32, scope_id: u32) -> SocketAddr {
+        SocketAddrV6::new(ip, port, flowinfo, scope_id).into()
+    }
+
+    #[test]
+    fn same_peer_requires_equal_canonical_address_and_port() {
+        let peer: SocketAddr = "127.0.0.1:53".parse().unwrap();
+        assert!(same_peer(peer, peer));
+        assert!(!same_peer(peer, "127.0.0.1:54".parse().unwrap()));
+        assert!(!same_peer(peer, "127.0.0.2:53".parse().unwrap()));
+    }
+
+    #[test]
+    fn same_peer_treats_mapped_ipv4_as_the_ipv4_peer() {
+        let mapped = v6("::ffff:127.0.0.1".parse().unwrap(), 53, 0);
+        assert!(same_peer(mapped, "127.0.0.1:53".parse().unwrap()));
+        assert!(!same_peer(mapped, "127.0.0.1:54".parse().unwrap()));
+    }
+
+    #[test]
+    fn same_peer_does_not_treat_flow_information_as_identity() {
+        let global: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        assert!(same_peer(
+            v6_flow(global, 53, 0, 0),
+            v6_flow(global, 53, 0x12345, 0)
+        ));
+        let link_local: Ipv6Addr = "fe80::1".parse().unwrap();
+        assert!(same_peer(
+            v6_flow(link_local, 53, 7, 2),
+            v6_flow(link_local, 53, 9, 2)
+        ));
+        assert!(!same_peer(
+            v6_flow(link_local, 53, 7, 1),
+            v6_flow(link_local, 53, 7, 2)
+        ));
+    }
+
+    #[test]
+    fn socket_endpoint_preserves_native_flow_information() {
+        let global: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let endpoint = socket_endpoint(v6_flow(global, 53, 0xabc, 4));
+        let SocketAddr::V6(endpoint) = endpoint else {
+            panic!("expected IPv6 endpoint, got {endpoint:?}");
+        };
+        assert_eq!(endpoint.flowinfo(), 0xabc);
+        assert_eq!(endpoint.scope_id(), 0);
+    }
+
+    #[test]
+    fn same_peer_ignores_scope_only_where_scope_is_irrelevant() {
+        let global: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        assert!(same_peer(v6(global, 53, 0), v6(global, 53, 7)));
+        let link_local: Ipv6Addr = "fe80::1".parse().unwrap();
+        assert!(same_peer(v6(link_local, 53, 2), v6(link_local, 53, 2)));
+        assert!(!same_peer(v6(link_local, 53, 1), v6(link_local, 53, 2)));
+        let multicast: Ipv6Addr = "ff02::1".parse().unwrap();
+        assert!(!same_peer(v6(multicast, 53, 1), v6(multicast, 53, 2)));
+    }
+
+    #[test]
+    fn interrupted_maps_cancellation_apart_from_expiry() {
+        use packetcraftr_core::budget::Cancelled;
+        assert!(matches!(
+            Outcome::interrupted(Interrupted::Cancelled(Cancelled)),
+            Outcome::Cancelled
+        ));
+        let exceeded = Deadline::new(std::time::Duration::ZERO)
+            .live_remaining()
+            .unwrap_err();
+        assert!(matches!(exceeded, Interrupted::Exceeded(_)));
+        assert!(matches!(Outcome::interrupted(exceeded), Outcome::TimedOut));
+    }
+
+    #[test]
+    fn prepare_transfer_fails_closed_on_expiry_and_timeout_errors() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        };
+        let live = Deadline::new(std::time::Duration::from_secs(5));
+        let mut armed = None;
+        assert!(
+            prepare_transfer(&live, |timeout| {
+                armed = Some(timeout);
+                Ok(())
+            })
+            .is_ok()
+        );
+        assert_eq!(armed, Some(Some(crate::deadline::POLL_INTERVAL)));
+        let frozen = std::time::Instant::now();
+        let brief =
+            Deadline::with_time_source(std::time::Duration::from_millis(10), move || frozen);
+        let mut brief_armed = None;
+        assert!(
+            prepare_transfer(&brief, |timeout| {
+                brief_armed = timeout;
+                Ok(())
+            })
+            .is_ok()
+        );
+        assert_eq!(brief_armed, Some(std::time::Duration::from_millis(10)));
+        match prepare_transfer(&live, |_| Err(io::Error::from(io::ErrorKind::InvalidInput))) {
+            Err(Outcome::Failed(source)) => {
+                assert_eq!(source.kind(), io::ErrorKind::InvalidInput);
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+        let expired = Deadline::new(std::time::Duration::ZERO);
+        let mut setter_called = false;
+        assert!(matches!(
+            prepare_transfer(&expired, |_| {
+                setter_called = true;
+                Ok(())
+            }),
+            Err(Outcome::TimedOut)
+        ));
+        assert!(!setter_called);
+        let advanced = Arc::new(AtomicU64::new(0));
+        let clock = Arc::clone(&advanced);
+        let origin = std::time::Instant::now();
+        let parent = Deadline::with_time_source(std::time::Duration::from_secs(30), move || {
+            origin + std::time::Duration::from_secs(clock.load(Ordering::SeqCst))
+        });
+        let caller =
+            Deadline::new(std::time::Duration::from_secs(30)).with_parent(Some(Arc::new(parent)));
+        let outcome = prepare_transfer(&caller, |_| {
+            advanced.store(31, Ordering::SeqCst);
+            Ok(())
+        });
+        assert!(matches!(outcome, Err(Outcome::TimedOut)), "{outcome:?}");
+    }
+
+    #[test]
+    fn retryable_covers_only_transient_io_kinds() {
+        for kind in [
+            io::ErrorKind::Interrupted,
+            io::ErrorKind::WouldBlock,
+            io::ErrorKind::TimedOut,
+        ] {
+            assert!(retryable(&io::Error::from(kind)), "{kind:?}");
+        }
+        for kind in [
+            io::ErrorKind::NotFound,
+            io::ErrorKind::InvalidInput,
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::PermissionDenied,
+            io::ErrorKind::UnexpectedEof,
+        ] {
+            assert!(!retryable(&io::Error::from(kind)), "{kind:?}");
+        }
+    }
+}

@@ -5,11 +5,10 @@
 
 use std::{
     any::Any,
-    collections::{BTreeMap, VecDeque},
+    collections::BTreeMap,
     fs::File,
     future::Future,
     panic::{AssertUnwindSafe, catch_unwind},
-    pin::Pin,
     sync::{
         Arc, Condvar, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicU64, Ordering},
@@ -29,21 +28,14 @@ use crate::{
     workers::{self, ExecutionContext, NAMESPACE_PATH, Task, Waited},
 };
 
-const NETLINK_QUEUE_DEPTH: usize = crate::workers::CAPACITY;
 // Namespace services are a bounded cache, rather than immortal historical work.
 const RESIDENT_CAPACITY: usize = crate::workers::CAPACITY / 4;
-const IDLE_RETIREMENT: Duration = Duration::from_millis(250);
 
-type OperationResult = Result<Box<dyn Any + Send>, route::Error>;
-type OperationFuture = Pin<Box<dyn Future<Output = OperationResult> + Send>>;
-type Operation = Box<dyn FnOnce(Handle) -> OperationFuture + Send>;
+mod inbox;
 
-struct NetlinkRequest {
-    operation: Operation,
-    respond: SyncSender<OperationResult>,
-    deadline: Instant,
-    control: Arc<Deadline>,
-}
+#[cfg(test)]
+use inbox::NETLINK_QUEUE_DEPTH;
+use inbox::{Inbox, NetlinkRequest, Refused, RequestInFlight, StopOnExit};
 
 struct WorkerSlot {
     generation: u64,
@@ -51,150 +43,8 @@ struct WorkerSlot {
     worker: Task<()>,
 }
 
-struct Inbox {
-    state: Mutex<InboxState>,
-    changed: Condvar,
-}
-
-struct InboxState {
-    queue: VecDeque<NetlinkRequest>,
-    serving: bool,
-    owned: bool,
-    active: bool,
-}
-
-enum Refused {
-    Retired(NetlinkRequest),
-    Stopped(NetlinkRequest),
-    Interrupted(route::Error),
-}
-
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-impl Inbox {
-    fn new() -> Self {
-        Self {
-            state: Mutex::new(InboxState {
-                queue: VecDeque::new(),
-                serving: true,
-                owned: true,
-                active: false,
-            }),
-            changed: Condvar::new(),
-        }
-    }
-
-    fn submit(
-        &self,
-        request: NetlinkRequest,
-        caller: &Deadline,
-        deadline: Instant,
-    ) -> Result<(), Refused> {
-        let mut state = lock(&self.state);
-        loop {
-            let remaining = wait_remaining(caller, deadline, "submitting the netlink request")
-                .map_err(Refused::Interrupted)?;
-            if !state.serving {
-                return Err(if state.owned {
-                    Refused::Stopped(request)
-                } else {
-                    Refused::Retired(request)
-                });
-            }
-            if state.queue.len() < NETLINK_QUEUE_DEPTH {
-                state.queue.push_back(request);
-                self.changed.notify_all();
-                return Ok(());
-            }
-            // The caller's cancellation has no waker, so the wait is sliced to notice it.
-            state = self
-                .changed
-                .wait_timeout(state, remaining.min(POLL_INTERVAL))
-                .unwrap_or_else(PoisonError::into_inner)
-                .0;
-        }
-    }
-
-    fn next(&self) -> Option<NetlinkRequest> {
-        self.next_with_idle(IDLE_RETIREMENT)
-    }
-
-    fn next_with_idle(&self, idle: Duration) -> Option<NetlinkRequest> {
-        let mut state = lock(&self.state);
-        let expires = Instant::now() + idle;
-        loop {
-            if let Some(request) = state.queue.pop_front() {
-                state.active = true;
-                self.changed.notify_all();
-                return Some(request);
-            }
-            if !state.owned {
-                return None;
-            }
-            let Some(remaining) = remaining_before(expires) else {
-                // Submission and retirement hold this same lock: a request is
-                // either queued on a reachable worker or returned undelivered.
-                state.serving = false;
-                state.owned = false;
-                self.changed.notify_all();
-                return None;
-            };
-            state = self
-                .changed
-                .wait_timeout(state, remaining)
-                .unwrap_or_else(PoisonError::into_inner)
-                .0;
-        }
-    }
-
-    fn retire_if_idle(&self) -> bool {
-        let mut state = lock(&self.state);
-        if state.active || !state.queue.is_empty() {
-            return false;
-        }
-        state.serving = false;
-        state.owned = false;
-        self.changed.notify_all();
-        true
-    }
-
-    fn complete_request(&self) {
-        lock(&self.state).active = false;
-        self.changed.notify_all();
-    }
-
-    fn abandon(&self) {
-        lock(&self.state).owned = false;
-        self.changed.notify_all();
-    }
-
-    fn stop(&self) {
-        let queued = {
-            let mut state = lock(&self.state);
-            state.serving = false;
-            std::mem::take(&mut state.queue)
-        };
-        self.changed.notify_all();
-        drop(queued);
-    }
-}
-
-struct RequestInFlight<'a>(&'a Inbox);
-
-impl Drop for RequestInFlight<'_> {
-    fn drop(&mut self) {
-        self.0.complete_request();
-    }
-}
-
-struct StopOnExit<'a>(&'a Inbox);
-
-impl Drop for StopOnExit<'_> {
-    fn drop(&mut self) {
-        self.0.stop();
-    }
 }
 
 type NamespaceId = ExecutionContext;
@@ -222,26 +72,26 @@ struct Registry {
 }
 
 struct Checkout {
-    workers: Option<Workers>,
+    workers: Workers,
 }
 
 impl std::ops::Deref for Checkout {
     type Target = Workers;
 
     fn deref(&self) -> &Workers {
-        self.workers.as_ref().expect("a checkout holds the map")
+        &self.workers
     }
 }
 
 impl std::ops::DerefMut for Checkout {
     fn deref_mut(&mut self) -> &mut Workers {
-        self.workers.as_mut().expect("a checkout holds the map")
+        &mut self.workers
     }
 }
 
 impl Drop for Checkout {
     fn drop(&mut self) {
-        *lock(&REGISTRY.workers) = self.workers.take();
+        *lock(&REGISTRY.workers) = Some(std::mem::take(&mut self.workers));
         REGISTRY.returned.notify_one();
     }
 }
@@ -329,7 +179,7 @@ fn shared_workers(caller: &Deadline, deadline: Instant) -> Result<Checkout, rout
         let remaining = wait_remaining(caller, deadline, "waiting for netlink worker admission")?;
         if let Some(checked_out) = workers.take() {
             return Ok(Checkout {
-                workers: Some(checked_out),
+                workers: checked_out,
             });
         }
         workers = REGISTRY
@@ -379,7 +229,10 @@ fn ensure_worker(
                 .iter()
                 .find_map(|(id, worker)| worker.inbox.retire_if_idle().then_some(*id));
             let Some(idle) = idle else { break };
-            let worker = workers.get_mut(&idle).expect("the idle worker is retained");
+            let Some(worker) = workers.get_mut(&idle) else {
+                debug_assert!(false, "idle netlink worker vanished under lock");
+                break;
+            };
             let remaining = wait_remaining(caller, deadline, "retiring idle netlink worker")?;
             let wait = caller
                 .for_wait(remaining)
@@ -398,7 +251,9 @@ fn ensure_worker(
     }
     let worker = workers
         .get(&namespace.id)
-        .expect("the namespace worker was initialized");
+        .ok_or_else(|| route::Error::InvalidResponse {
+            message: "Linux netlink namespace worker missing after initialization".to_owned(),
+        })?;
     wait_remaining(caller, deadline, "reserving netlink namespace worker")?;
     Ok((worker.generation, Arc::clone(&worker.inbox)))
 }

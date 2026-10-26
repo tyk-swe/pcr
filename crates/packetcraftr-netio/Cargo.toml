@@ -35,6 +35,9 @@ native-route = [
 native-layer2 = ["native-route", "dep:libloading", "dep:pcap"]
 native-layer3 = ["native-route"]
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [dependencies]
 webpki-roots.workspace = true
 bytes.workspace = true

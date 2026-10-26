@@ -195,11 +195,11 @@ impl Pool {
                     Err(error) => return Err((job, std::io::Error::other(error))),
                 };
                 for id in finished_busy {
-                    let worker = state
-                        .busy
-                        .remove(&id)
-                        .expect("the finished worker remains owned");
-                    Self::retire(&mut state, worker, &reaper);
+                    let removed = state.busy.remove(&id);
+                    debug_assert!(removed.is_some(), "finished worker vanished under lock");
+                    if let Some(worker) = removed {
+                        Self::retire(&mut state, worker, &reaper);
+                    }
                 }
                 let finished_idle: Vec<_> = state
                     .idle
@@ -248,8 +248,11 @@ impl Pool {
                     Ok(reaper) => reaper,
                     Err(error) => return Err((job, std::io::Error::other(error))),
                 };
-                let worker = state.idle.pop().expect("an idle worker remains owned");
-                Self::retire(&mut state, worker, &reaper);
+                let popped = state.idle.pop();
+                debug_assert!(popped.is_some(), "idle worker vanished under lock");
+                if let Some(worker) = popped {
+                    Self::retire(&mut state, worker, &reaper);
+                }
             }
             state
                 .retiring

@@ -11,8 +11,11 @@ assets = load_script('release_assets')
 
 
 class ReleaseAssetTests(unittest.TestCase):
-    def test_repository_inventory_is_valid(self):
-        assets.validate_manifest(assets.MANIFEST)
+    def test_minimal_valid_inventory_is_accepted(self):
+        manifest = {'schema': 'packetcraftr.release-assets/v1',
+                    'source_assets': ['source.txt'],
+                    'generated_assets': ['generated/out.txt']}
+        self.assertEqual(assets.validate_manifest(manifest), manifest)
 
     def test_inventory_shape_is_explicit(self):
         for value in ([], {}, {'schema': 'packetcraftr.release-assets/v1', 'source_assets': 'LICENSE'}):

@@ -63,10 +63,11 @@ jobs:
           cargo clippy --locked --workspace --all-targets --no-default-features --features packetcraftr-cli/native-layer2 -- -D warnings
           cargo clippy --locked --workspace --all-targets --no-default-features --features packetcraftr-cli/native-layer3 -- -D warnings
           cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - name: Run library unit tests with default and all features
+      - name: Run workspace tests with default, all, and Layer 2 only features
         run: |
-          cargo test --locked --workspace --lib
-          cargo test --locked --workspace --lib --all-features
+          cargo test --locked --workspace
+          cargo test --locked --workspace --all-features
+          cargo test --locked --workspace --no-default-features --features packetcraftr-cli/native-layer2
       - name: Documentation for supported feature profiles
         env:
           RUSTDOCFLAGS: -D warnings
@@ -130,12 +131,15 @@ jobs:
             ~/.cargo/git/db
             target
           key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
-      - name: Run library unit tests without default features
-        run: cargo test --locked --workspace --lib --no-default-features
-      - name: Compile library examples
-        run: cargo check --locked --workspace --examples --no-default-features
-      - name: Run library unit tests with the pcap-free feature profile
-        run: cargo test --locked --lib -p packetcraftr-cli -p packetcraftr-netio --no-default-features --features packetcraftr-cli/native-layer3,packetcraftr-netio/native-layer3
+      - name: Run workspace tests without default features
+        run: cargo test --locked --workspace --no-default-features
+      - name: Run library examples
+        run: |
+          cargo run --locked -p packetcraftr-core --example build_decode_filter --no-default-features
+          cargo run --locked -p packetcraftr-core --example capture_analysis --no-default-features
+          cargo run --locked -p packetcraftr --example client_composition --no-default-features
+      - name: Run tests with the pcap-free feature profile
+        run: cargo test --locked -p packetcraftr-cli -p packetcraftr-netio --no-default-features --features packetcraftr-cli/native-layer3,packetcraftr-netio/native-layer3
       - name: Build the pcap-free CLI
         run: cargo build --locked -p packetcraftr-cli --no-default-features --features native-layer3
       - name: Drop workspace artifacts from the Cargo cache
@@ -202,12 +206,56 @@ jobs:
             ~/.cargo/git/db
             target
           key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
-      - name: Run library unit tests with default features
-        run: cargo test --locked --workspace --lib
-      - name: Run library unit tests with all features
-        run: cargo test --locked --workspace --lib --all-features
-      - name: Run library unit tests without default features
-        run: cargo test --locked --workspace --lib --no-default-features
+      - name: Run workspace tests with default features
+        run: cargo test --locked --workspace
+      - name: Run workspace tests with all features
+        run: cargo test --locked --workspace --all-features
+      - name: Run workspace tests without default features
+        run: cargo test --locked --workspace --no-default-features
+      - name: Drop workspace artifacts from the Cargo cache
+        shell: bash
+        run: |
+          rm -rf target/*/incremental
+          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+
+  # Ratchet ledger: no crate has a blocking mutation or coverage gate yet.
+  # Crates move to blocking gates one at a time as their test alignment
+  # phase lands. Thresholds are never lowered once set.
+  test-quality:
+    name: Test quality baseline
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install native development library
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - name: Install the pinned toolchain with coverage tools
+        run: |
+          rustup toolchain install
+          rustup component add llvm-tools-preview
+      - name: Restore Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b3f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-llvm-cov
+      - name: Report coverage summary
+        run: cargo llvm-cov --locked --workspace --all-features --summary-only
+      - name: Report mutant counts per crate
+        shell: bash
+        run: |
+          cargo install --locked cargo-mutants
+          for package in packetcraftr-core packetcraftr packetcraftr-cli packetcraftr-netio; do
+            echo "$package mutants: $(cargo mutants --list -p "$package" | wc -l)"
+          done
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |

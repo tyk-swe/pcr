@@ -111,7 +111,7 @@ impl ConnectionState {
                     if let Some(dir) = self.directions.get_mut(Side::Server) {
                         dir.phase = DirectionPhase::Prelude;
                     }
-                    self.prelude = Some(Prelude::new());
+                    self.upgrade.prelude = Some(Prelude::new());
                     context.charge(&mut self.charge, budget::DIR_OVERHEAD)?;
                     self.phase = Phase::Prelude;
                     return Ok(());

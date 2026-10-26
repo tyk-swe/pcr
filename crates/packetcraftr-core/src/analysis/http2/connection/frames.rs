@@ -41,7 +41,7 @@ impl ConnectionState {
                 return self.frame_fault(side, error, context);
             }
             let length = wire::declared_length(&header);
-            let receiver = &self.settings[side.peer()];
+            let receiver = &self.control.settings[side.peer()];
             let effective_max = receiver.permitted_frame_size();
             if length as u32 > effective_max {
                 let flow = dir.flow.clone();
@@ -259,7 +259,7 @@ impl ConnectionState {
             )?;
             return Ok(());
         }
-        let receiver = &self.settings[side.peer()];
+        let receiver = &self.control.settings[side.peer()];
         let effective_max = receiver.permitted_frame_size();
         if header.length > effective_max {
             let flow = self.dir_flow(side);
@@ -344,7 +344,7 @@ impl ConnectionState {
         if semantic_error.is_some() && !matches!(control, Some(wire::Control::Headers { .. })) {
             // Invalid control values remain in the issue's exact wire evidence,
             // rather than being emitted as a valid typed control payload.
-            if self.streams.contains_key(&stream_id) {
+            if self.streams.open.contains_key(&stream_id) {
                 self.close_stream(stream_id, Status::Malformed, None, context)?;
             } else if matches!(control, Some(wire::Control::Priority(_))) {
                 self.reject_priority_stream(side, stream_id, context)?;

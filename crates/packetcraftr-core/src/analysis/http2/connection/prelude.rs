@@ -25,7 +25,7 @@ impl ConnectionState {
         side: Side,
         context: &mut Context<'_>,
     ) -> Result<bool, Error> {
-        let body_active = self.prelude.as_ref().is_some_and(|prelude| {
+        let body_active = self.upgrade.prelude.as_ref().is_some_and(|prelude| {
             if side == Side::Client {
                 prelude.client_body.is_some()
             } else {
@@ -102,7 +102,7 @@ impl ConnectionState {
             self.drop_msg(msg, context)?;
             return Ok(true);
         }
-        let Some(prelude) = self.prelude.as_mut() else {
+        let Some(prelude) = self.upgrade.prelude.as_mut() else {
             self.drop_msg(msg, context)?;
             return Ok(true);
         };
@@ -154,9 +154,13 @@ impl ConnectionState {
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let sources = union_balanced(sets)?;
-        let mut prelude = self.prelude.take().ok_or(Error::Invariant("prelude"))?;
+        let mut prelude = self
+            .upgrade
+            .prelude
+            .take()
+            .ok_or(Error::Invariant("prelude"))?;
         let Some(mut offer) = prelude.offers.remove(&index) else {
-            self.prelude = Some(prelude);
+            self.upgrade.prelude = Some(prelude);
             return Ok(());
         };
         context.release(
@@ -169,11 +173,11 @@ impl ConnectionState {
             + sources.as_ref().map_or(0, |s| s.frames().len()) * budget::SPAN_OVERHEAD
             + offer.settings.len() * 8
             + budget::OFFER_OVERHEAD;
-        context.charge(&mut self.upgrade_charge, upgrade_charge)?;
-        self.upgrade_response = Some(head);
-        self.upgrade_sources = sources;
+        context.charge(&mut self.upgrade.charge, upgrade_charge)?;
+        self.upgrade.response = Some(head);
+        self.upgrade.sources = sources;
         let applied = {
-            let direction = &mut self.settings[Side::Client];
+            let direction = &mut self.control.settings[Side::Client];
             let applied = direction.apply(&offer.settings, false);
             // Upgrade header values do not satisfy the mandatory wire preface.
             direction.seen = false;
@@ -212,7 +216,7 @@ impl ConnectionState {
                         .as_ref()
                         .map_or_else(|| head_wire.clone(), |(wire, _)| wire.clone()),
                     request_evidence.as_ref().map_or_else(
-                        || self.upgrade_sources.clone(),
+                        || self.upgrade.sources.clone(),
                         |(_, sources)| sources.clone(),
                     ),
                 ),
@@ -222,7 +226,7 @@ impl ConnectionState {
             if let Some(msg) = offer.msg.take() {
                 self.drop_msg(msg, context)?;
             }
-            self.prelude = Some(prelude);
+            self.upgrade.prelude = Some(prelude);
             self.fail(context, Status::Malformed)?;
             return Ok(());
         }
@@ -235,17 +239,25 @@ impl ConnectionState {
             decoder.acknowledge_table_size(applied.pending.final_values.header_table_size)?;
         }
         self.decoder_sync(Side::Server, context)?;
-        for stream in self.streams.values_mut() {
+        for stream in self.streams.open.values_mut() {
             context.check_deadline()?;
             stream.send_window[Side::Server] += applied.pending.window_delta;
         }
         self.startup = Startup::H2c;
-        self.refused = false;
-        self.max_initiated[Side::Client] = 1;
+        self.upgrade.refused = false;
+        self.streams.max_initiated[Side::Client] = 1;
         context.charge(&mut self.charge, budget::STREAM_OVERHEAD)?;
         let windows = PerSide::new(
-            i64::from(self.settings[Side::Server].acknowledged.initial_window_size),
-            i64::from(self.settings[Side::Client].acknowledged.initial_window_size),
+            i64::from(
+                self.control.settings[Side::Server]
+                    .acknowledged
+                    .initial_window_size,
+            ),
+            i64::from(
+                self.control.settings[Side::Client]
+                    .acknowledged
+                    .initial_window_size,
+            ),
         );
         let mut stream = StreamState::open(Side::Client, windows);
         stream.request = Some(index);
@@ -253,9 +265,9 @@ impl ConnectionState {
         let request_done = offer.msg.is_some() || prelude.live_request.is_none();
         stream.ended[Side::Client] = request_done;
         context.check_streams()?;
-        self.admitted_streams += 1;
-        self.streams.insert(1, stream);
-        self.active[Side::Client] += 1;
+        self.streams.admitted += 1;
+        self.streams.open.insert(1, stream);
+        self.streams.active[Side::Client] += 1;
         if let Some(dir) = self.directions.get_mut(Side::Server) {
             dir.phase = DirectionPhase::Frames;
         }
@@ -268,7 +280,7 @@ impl ConnectionState {
                 dir.phase = DirectionPhase::Preface;
             }
             self.phase = Phase::H2;
-            self.prelude = Some(prelude);
+            self.upgrade.prelude = Some(prelude);
             self.release_prelude(context)?;
         } else {
             context.charge(&mut self.charge, budget::OFFER_OVERHEAD)?;
@@ -279,7 +291,7 @@ impl ConnectionState {
                     msg: offer.msg.take(),
                 },
             );
-            self.prelude = Some(prelude);
+            self.upgrade.prelude = Some(prelude);
         }
         Ok(())
     }

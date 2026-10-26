@@ -18,7 +18,11 @@ impl ConnectionState {
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if !matches!(self.phase, Phase::Prelude)
-            || !self.prelude.as_ref().is_some_and(|p| p.requests.is_empty())
+            || !self
+                .upgrade
+                .prelude
+                .as_ref()
+                .is_some_and(|p| p.requests.is_empty())
         {
             return Ok(());
         }
@@ -36,6 +40,7 @@ impl ConnectionState {
                 .get(Side::Client)
                 .is_some_and(|dir| !dir.buffer.is_empty())
             || self
+                .upgrade
                 .prelude
                 .as_ref()
                 .is_some_and(|p| p.live_request.is_some());
@@ -82,7 +87,11 @@ impl ConnectionState {
     }
 
     pub(super) fn server_prelude_step(&mut self, context: &mut Context<'_>) -> Result<bool, Error> {
-        let unmatched = self.prelude.as_ref().is_some_and(|p| p.requests.is_empty());
+        let unmatched = self
+            .upgrade
+            .prelude
+            .as_ref()
+            .is_some_and(|p| p.requests.is_empty());
         let partial_request = self
             .directions
             .get(Side::Client)
@@ -150,7 +159,7 @@ impl ConnectionState {
             .ok_or(Error::Invariant("previously parsed complete HTTP/1 head"))?;
         let head_wire = head_wire_bytes.len();
         let status = head.status().ok_or(Error::Invariant("response"))?;
-        let front = self.prelude.as_mut().and_then(|p| {
+        let front = self.upgrade.prelude.as_mut().and_then(|p| {
             p.requests
                 .front()
                 .map(|p| (p.index, p.method.clone(), p.upgrade))
@@ -158,6 +167,7 @@ impl ConnectionState {
         let matched = front.as_ref().is_some_and(|(index, _, upgrade)| {
             *upgrade
                 && self
+                    .upgrade
                     .prelude
                     .as_ref()
                     .is_some_and(|p| p.offers.contains_key(index))
@@ -182,7 +192,11 @@ impl ConnectionState {
         if status == 101 {
             if matched && upgrade::accepts_upgrade(&head) {
                 let (index, method, _) = front.clone().ok_or(Error::Invariant("front"))?;
-                let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+                let prelude = self
+                    .upgrade
+                    .prelude
+                    .as_mut()
+                    .ok_or(Error::Invariant("prelude"))?;
                 prelude.requests.pop_front();
                 context.release(&mut self.charge, budget::PENDING_OVERHEAD)?;
                 self.accept_upgrade(index, head, head_wire_bytes, sets, method, context)?;
@@ -253,12 +267,17 @@ impl ConnectionState {
         let had_front = front.is_some();
         let (front_index, method, was_upgrade) = front.unwrap_or((0, None, false));
         if had_front {
-            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            let prelude = self
+                .upgrade
+                .prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?;
             prelude.requests.pop_front();
             context.release(&mut self.charge, budget::PENDING_OVERHEAD)?;
         }
         if was_upgrade {
             if let Some(mut offer) = self
+                .upgrade
                 .prelude
                 .as_mut()
                 .and_then(|prelude| prelude.offers.remove(&front_index))
@@ -271,7 +290,7 @@ impl ConnectionState {
                     self.refused_upgrade(held, context)?;
                 }
             }
-            let live = self.prelude.as_mut().and_then(|prelude| {
+            let live = self.upgrade.prelude.as_mut().and_then(|prelude| {
                 if prelude
                     .live_request
                     .as_ref()
@@ -285,7 +304,7 @@ impl ConnectionState {
             if let Some(live) = live {
                 self.refused_upgrade(live, context)?;
             }
-            self.refused = true;
+            self.upgrade.refused = true;
         }
         let framing = match head.body(method.as_deref()) {
             Ok(framing) => framing,
@@ -307,7 +326,11 @@ impl ConnectionState {
             }
         };
         if matches!(framing, http::Body::Chunked) {
-            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            let prelude = self
+                .upgrade
+                .prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?;
             if let Err(error) = context.charge(
                 &mut prelude.body_charge[Side::Server],
                 budget::PRELUDE_BODY_RESERVE,
@@ -320,7 +343,11 @@ impl ConnectionState {
         if decoder.complete() {
             self.drop_msg(msg, context)?;
         } else {
-            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            let prelude = self
+                .upgrade
+                .prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?;
             prelude.server_body = Some(decoder);
             prelude.live_response = Some(msg);
         }

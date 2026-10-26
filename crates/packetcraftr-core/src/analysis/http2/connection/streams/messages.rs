@@ -55,7 +55,7 @@ impl ConnectionState {
             && (self.waiting_settings_ack(Side::Client) || self.waiting_settings_ack(Side::Server))
         {
             context.charge(&mut self.charge, budget::PENDING_OVERHEAD)?;
-            self.ack_deferred.push_back((side, build, status));
+            self.deferred.awaiting_ack.push_back((side, build, status));
             return Ok(());
         }
         self.emit_message_with_completion(side, build, status, status == Status::Complete, context)
@@ -72,7 +72,7 @@ impl ConnectionState {
     ) -> Result<Status, Error> {
         let (cl_exempt, connect_cl_illegal) = match build.status_code {
             Some(status) => {
-                let stream = self.streams.get(&build.stream_id);
+                let stream = self.streams.open.get(&build.stream_id);
                 let method = stream.and_then(|s| s.method.as_deref());
                 let connect = method == Some(b"CONNECT") && (200..300).contains(&status);
                 (
@@ -208,6 +208,7 @@ impl ConnectionState {
         }
         let stream = self
             .streams
+            .open
             .get_mut(&stream_id)
             .ok_or(Error::Invariant("stream"))?;
         if let Some(method) = meta.method {
@@ -239,6 +240,7 @@ impl ConnectionState {
         } else {
             let stream = self
                 .streams
+                .open
                 .get_mut(&stream_id)
                 .ok_or(Error::Invariant("stream"))?;
             stream.msgs[side] = Some(msg);
@@ -256,7 +258,7 @@ impl ConnectionState {
         if self.waiting_settings_ack(Side::Client) || self.waiting_settings_ack(Side::Server) {
             return Ok(());
         }
-        let immediate = std::mem::take(&mut self.ack_deferred);
+        let immediate = std::mem::take(&mut self.deferred.awaiting_ack);
         context.release(&mut self.charge, immediate.len() * budget::PENDING_OVERHEAD)?;
         for (side, msg, status) in immediate {
             context.check_deadline()?;
@@ -264,12 +266,13 @@ impl ConnectionState {
         }
         let scratch = self
             .streams
+            .open
             .len()
             .saturating_mul(2 * size_of::<(usize, u32)>());
         context.reserve_scratch(scratch)?;
         let result = (|| {
-            let mut completed = Vec::with_capacity(self.streams.len().saturating_mul(2));
-            for (id, stream) in &self.streams {
+            let mut completed = Vec::with_capacity(self.streams.open.len().saturating_mul(2));
+            for (id, stream) in &self.streams.open {
                 context.check_deadline()?;
                 for side in Side::BOTH {
                     if stream.ended[side] && stream.msgs[side].is_some() {

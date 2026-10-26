@@ -43,8 +43,8 @@ impl ConnectionState {
             )?;
             return Ok(());
         }
-        if !self.settings[Side::Client].acknowledged.enable_push {
-            let certainty = if self.settings[Side::Client].pending.is_empty() {
+        if !self.control.settings[Side::Client].acknowledged.enable_push {
+            let certainty = if self.control.settings[Side::Client].pending.is_empty() {
                 Certainty::Confirmed
             } else {
                 Certainty::ObservedOrder
@@ -67,14 +67,14 @@ impl ConnectionState {
                 return Ok(());
             }
         }
-        let promised_reset_in_flight = self.closed.get(&promised).is_some_and(|closed| {
+        let promised_reset_in_flight = self.streams.closed.get(&promised).is_some_and(|closed| {
             closed.reset_by == Some(Side::Client) && !closed.ended[Side::Server]
         });
         if Side::initiator_of(promised) == Side::Server
-            && promised > self.max_initiated[Side::Server]
-            && (!self.closed.contains_key(&promised) || promised_reset_in_flight)
+            && promised > self.streams.max_initiated[Side::Server]
+            && (!self.streams.closed.contains_key(&promised) || promised_reset_in_flight)
         {
-            self.max_initiated[Side::Server] = promised;
+            self.streams.max_initiated[Side::Server] = promised;
         } else {
             self.reject(
                 context,
@@ -90,22 +90,24 @@ impl ConnectionState {
             )?;
             return Ok(());
         }
-        let parent_open = self.streams.get(&stream_id).is_some_and(|s| {
+        let parent_open = self.streams.open.get(&stream_id).is_some_and(|s| {
             s.phase == StreamPhase::Open && s.initiator == Side::Client && !s.ended[Side::Server]
         });
         // A peer promise may have been sent before it received our reset.
         // RFC 9113 §5.1 still requires HPACK processing and stream reservation.
         let in_flight_after_reset = self
+            .streams
             .closed
             .get(&stream_id)
             .is_some_and(|closed| closed.reset_by == Some(side.peer()) && !closed.ended[side]);
         let delayed_parent = !self.opener_exhausted(Side::Client)
             && Side::initiator_of(stream_id) == Side::Client
-            && stream_id > self.max_initiated[Side::Client]
-            && !self.streams.contains_key(&stream_id)
-            && !self.closed.contains_key(&stream_id)
+            && stream_id > self.streams.max_initiated[Side::Client]
+            && !self.streams.open.contains_key(&stream_id)
+            && !self.streams.closed.contains_key(&stream_id)
             && !self
-                .early_response_headers
+                .streams
+                .early_responses
                 .get(&stream_id)
                 .is_some_and(|early| early.ended);
         if !parent_open && !in_flight_after_reset && !delayed_parent {
@@ -147,9 +149,10 @@ impl ConnectionState {
         msg.promised_by = Some(stream_id);
         msg.request = self
             .streams
+            .open
             .get(&stream_id)
             .and_then(|s| s.request)
-            .or_else(|| self.closed.get(&stream_id).and_then(|s| s.request));
+            .or_else(|| self.streams.closed.get(&stream_id).and_then(|s| s.request));
         if let Some(sources) = block_sources.clone() {
             context.track(&mut msg.charge, &sources)?;
             msg.sets.push(sources);
@@ -182,7 +185,7 @@ impl ConnectionState {
         if delayed_parent && !rejected {
             self.retain_early_parent(stream_id, context)?;
             context.charge(&mut self.charge, budget::PENDING_OVERHEAD)?;
-            self.parent_deferred.push_back(msg);
+            self.deferred.promises.push_back(msg);
         } else {
             self.emit_message(Side::Server, msg, Status::Complete, context)?;
         }
@@ -193,9 +196,9 @@ impl ConnectionState {
         }
         if rejected {
             context.check_streams()?;
-            self.admitted_streams += 1;
+            self.streams.admitted += 1;
             context.charge(&mut self.charge, budget::CLOSED_STREAM_OVERHEAD)?;
-            self.closed.insert(
+            self.streams.closed.insert(
                 promised,
                 super::super::ClosedStream {
                     ended: PerSide::new(true, true),
@@ -207,6 +210,7 @@ impl ConnectionState {
         }
         let open_count = self
             .streams
+            .open
             .values()
             .filter(|stream| stream.phase != StreamPhase::Closed)
             .count();
@@ -225,17 +229,26 @@ impl ConnectionState {
             return Ok(());
         }
         context.check_streams()?;
-        self.admitted_streams += 1;
+        self.streams.admitted += 1;
         context.charge(&mut self.charge, budget::STREAM_OVERHEAD)?;
         let windows = PerSide::new(
-            i64::from(self.settings[Side::Server].acknowledged.initial_window_size),
-            i64::from(self.settings[Side::Client].acknowledged.initial_window_size),
+            i64::from(
+                self.control.settings[Side::Server]
+                    .acknowledged
+                    .initial_window_size,
+            ),
+            i64::from(
+                self.control.settings[Side::Client]
+                    .acknowledged
+                    .initial_window_size,
+            ),
         );
         let mut promised_stream = StreamState::reserved(stream_id, windows);
         promised_stream.request = Some(index);
         promised_stream.method = promised_method;
-        promised_stream.unprocessed = self.goaway[Side::Client].is_some_and(|last| promised > last);
-        self.streams.insert(promised, promised_stream);
+        promised_stream.unprocessed =
+            self.control.goaway[Side::Client].is_some_and(|last| promised > last);
+        self.streams.open.insert(promised, promised_stream);
         Ok(())
     }
 
@@ -244,11 +257,11 @@ impl ConnectionState {
         id: u32,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        if !self.early_response_headers.contains_key(&id) {
+        if !self.streams.early_responses.contains_key(&id) {
             context.check_streams()?;
-            self.admitted_streams += 1;
+            self.streams.admitted += 1;
             context.charge(&mut self.charge, budget::CLOSED_STREAM_OVERHEAD)?;
-            self.early_response_headers.insert(id, Default::default());
+            self.streams.early_responses.insert(id, Default::default());
         }
         Ok(())
     }
@@ -258,12 +271,13 @@ impl ConnectionState {
         id: u32,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        let count = self.parent_deferred.len();
-        let request = self.streams.get(&id).and_then(|stream| stream.request);
+        let count = self.deferred.promises.len();
+        let request = self.streams.open.get(&id).and_then(|stream| stream.request);
         for _ in 0..count {
             context.check_deadline()?;
             let mut msg = self
-                .parent_deferred
+                .deferred
+                .promises
                 .pop_front()
                 .ok_or(Error::Invariant("pending promise"))?;
             if msg.promised_by == Some(id) {
@@ -271,7 +285,7 @@ impl ConnectionState {
                 msg.request = request;
                 self.emit_message(Side::Server, msg, Status::Complete, context)?;
             } else {
-                self.parent_deferred.push_back(msg);
+                self.deferred.promises.push_back(msg);
             }
         }
         Ok(())

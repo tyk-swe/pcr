@@ -20,18 +20,18 @@ impl ConnectionState {
         context: &mut Context<'_>,
     ) -> Result<usize, Error> {
         let mut pending_msgs = Vec::new();
-        let promises = std::mem::take(&mut self.parent_deferred);
+        let promises = std::mem::take(&mut self.deferred.promises);
         context.release(&mut self.charge, promises.len() * budget::PENDING_OVERHEAD)?;
         for msg in promises {
             pending_msgs.push((Side::Server, msg.stream_id, msg));
         }
-        let immediate = std::mem::take(&mut self.ack_deferred);
+        let immediate = std::mem::take(&mut self.deferred.awaiting_ack);
         context.release(&mut self.charge, immediate.len() * budget::PENDING_OVERHEAD)?;
         for (side, msg, _) in immediate {
             pending_msgs.push((side, msg.stream_id, msg));
         }
 
-        for (id, stream) in self.streams.iter_mut() {
+        for (id, stream) in self.streams.open.iter_mut() {
             for side in Side::BOTH {
                 if let Some(msg) = stream.msgs[side].take() {
                     pending_msgs.push((side, *id, msg));
@@ -41,7 +41,7 @@ impl ConnectionState {
         }
         let mut upgrade_evidence = Vec::new();
         let mut release = Vec::new();
-        if let Some(prelude) = self.prelude.as_mut() {
+        if let Some(prelude) = self.upgrade.prelude.as_mut() {
             if let Some(mut msg) = prelude.live_request.take() {
                 if prelude.offers.contains_key(&msg.index) {
                     if prelude.upgraded {
@@ -96,7 +96,7 @@ impl ConnectionState {
     }
 
     pub(crate) fn release_prelude(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
-        let Some(mut prelude) = self.prelude.take() else {
+        let Some(mut prelude) = self.upgrade.prelude.take() else {
             return Ok(());
         };
         let mut release = prelude.requests.len() * budget::PENDING_OVERHEAD;
@@ -148,7 +148,7 @@ impl ConnectionState {
                         .evidence(wire, sources),
                     )?;
                 }
-                if !self.settings[side].seen
+                if !self.control.settings[side].seen
                     && self.directions.get(side).is_some_and(|dir| {
                         self.clean_start || dir.saw_frame || !dir.buffer.is_empty()
                     })
@@ -177,9 +177,14 @@ impl ConnectionState {
                     self.directions
                         .get(side)
                         .is_none_or(|dir| dir.phase != DirectionPhase::Frames)
-                }) || self.settings.iter().any(|direction| !direction.seen)
+                }) || self
+                    .control
+                    .settings
+                    .iter()
+                    .any(|direction| !direction.seen)
                     || self
                         .streams
+                        .open
                         .values()
                         .any(|stream| !stream.ended.all(|ended| *ended)))
             {
@@ -196,9 +201,10 @@ impl ConnectionState {
                 });
             } else if matches!(self.phase, Phase::Prelude | Phase::Sniff) {
                 self.worst(
-                    if self.refused
+                    if self.upgrade.refused
                         || (self.done
                             && self
+                                .upgrade
                                 .prelude
                                 .as_ref()
                                 .is_none_or(|prelude| prelude.offers.is_empty()))
@@ -208,9 +214,9 @@ impl ConnectionState {
                         Status::Incomplete
                     },
                 );
-            } else if self.prelude.is_some() && !self.refused {
+            } else if self.upgrade.prelude.is_some() && !self.upgrade.refused {
                 self.worst(Status::Incomplete);
-            } else if self.refused {
+            } else if self.upgrade.refused {
                 self.worst(Status::Unsupported);
             } else if self.directions.get(Side::Server).is_none() && self.frames > 0 {
                 self.worst(Status::Incomplete);
@@ -243,40 +249,34 @@ impl ConnectionState {
         let charge = budget::EVENT_OVERHEAD
             + budget::MESSAGE_OVERHEAD
             + self
-                .upgrade_response
+                .upgrade
+                .response
                 .as_ref()
                 .map_or(0, |head| head.wire().len())
-            + self.upgrade_sources.as_ref().map_or(0, |set| {
+            + self.upgrade.sources.as_ref().map_or(0, |set| {
                 budget::SET_OVERHEAD + set.frames().len() * budget::SPAN_OVERHEAD
             });
         context.charge_retained(charge)?;
+        let pending = self.control.pending_counts();
         context.connection(Connection {
             stream: self.stream,
             generation: self.generation,
             flow: self.flow(),
             startup: self.startup,
             status: self.status,
-            client_settings: self.settings[Side::Client].advertised,
-            server_settings: self.settings[Side::Server].advertised,
-            client_window: self.send_window[Side::Client],
-            server_window: self.send_window[Side::Server],
-            streams: self.admitted_streams,
+            client_settings: self.control.settings[Side::Client].advertised,
+            server_settings: self.control.settings[Side::Server].advertised,
+            client_window: self.control.send_window[Side::Client],
+            server_window: self.control.send_window[Side::Server],
+            streams: self.streams.admitted,
             frames: self.frames,
             issues: self.issues,
-            pending_settings: self.final_pending_settings.unwrap_or_else(|| {
-                (self.settings[Side::Client].pending.len()
-                    + self.settings[Side::Server].pending.len()) as u64
-            }),
-            pending_pings: self.final_pending_pings.unwrap_or_else(|| {
-                self.pings
-                    .iter()
-                    .map(|pings| pings.values().sum::<u64>())
-                    .sum()
-            }),
-            upgrade_response: self.upgrade_response.take(),
-            upgrade_sources: self.upgrade_sources.take(),
+            pending_settings: pending.settings,
+            pending_pings: pending.pings,
+            upgrade_response: self.upgrade.response.take(),
+            upgrade_sources: self.upgrade.sources.take(),
         });
-        context.release_all(&mut self.upgrade_charge)?;
+        context.release_all(&mut self.upgrade.charge)?;
         Ok(())
     }
 }

@@ -150,8 +150,8 @@ impl ConnectionState {
         context.check_deadline()?;
         let bytes = chain.bytes.freeze();
         let stream_id = chain.stream_id;
-        let origin = self.next_origin;
-        self.next_origin += 1;
+        let origin = self.streams.next_origin;
+        self.streams.next_origin += 1;
         let block_sets = std::mem::take(&mut chain.sets);
         let block_sources = union_balanced(block_sets)?;
         let dir = self
@@ -194,13 +194,13 @@ impl ConnectionState {
             let decoded = match updates {
                 Err(error) => Err(error),
                 Ok(updates) => {
-                    let (minimum, confirmed_prefix, pending_uncertain) = updates
-                        .map_or((None, 0, None), |(_, maximum)| {
-                            self.settings[side.peer()].causal_table_minimum(maximum)
+                    let (minimum, confirmed_prefix, pending_uncertain) =
+                        updates.map_or((None, 0, None), |(_, maximum)| {
+                            self.control.settings[side.peer()].causal_table_minimum(maximum)
                         });
                     let uncertain = [
                         pending_uncertain,
-                        self.settings[side.peer()].uncertain_table_minimum,
+                        self.control.settings[side.peer()].uncertain_table_minimum,
                     ]
                     .into_iter()
                     .flatten()
@@ -225,9 +225,9 @@ impl ConnectionState {
                             .map_err(hpack::DecodeError::Interrupted)
                     });
                     if decoded.is_ok() {
-                        self.settings[side.peer()].uncertain_table_minimum = None;
+                        self.control.settings[side.peer()].uncertain_table_minimum = None;
                         if let Some((minimum, _)) = updates {
-                            self.settings[side.peer()]
+                            self.control.settings[side.peer()]
                                 .observed_table_updates(minimum, confirmed_prefix);
                         }
                     }
@@ -315,7 +315,9 @@ impl ConnectionState {
                             }
                         }
                     }
-                    if let Some(limit) = self.settings[side.peer()].advertised.max_header_list_size
+                    if let Some(limit) = self.control.settings[side.peer()]
+                        .advertised
+                        .max_header_list_size
                         && decoded_bytes > limit as usize
                     {
                         let flow = self.dir_flow(side);

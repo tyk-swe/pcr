@@ -112,6 +112,7 @@ impl ConnectionState {
         }
         let index = msg.index;
         if self
+            .upgrade
             .prelude
             .as_ref()
             .ok_or(Error::Invariant("prelude"))?
@@ -135,7 +136,11 @@ impl ConnectionState {
             return Ok(true);
         }
         context.charge(&mut self.charge, budget::PENDING_OVERHEAD)?;
-        let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+        let prelude = self
+            .upgrade
+            .prelude
+            .as_mut()
+            .ok_or(Error::Invariant("prelude"))?;
         prelude.requests.push_back(Pending {
             index,
             method: method.clone(),
@@ -144,7 +149,11 @@ impl ConnectionState {
         if let Some(settings) = offer {
             let charge = budget::OFFER_OVERHEAD + settings.capacity() * 24;
             context.charge(&mut self.charge, charge)?;
-            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            let prelude = self
+                .upgrade
+                .prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?;
             prelude.offers.insert(
                 index,
                 Offer {
@@ -173,11 +182,16 @@ impl ConnectionState {
             }
         };
         let is_offer = self
+            .upgrade
             .prelude
             .as_ref()
             .is_some_and(|p| p.offers.contains_key(&index));
         if matches!(framing, http::Body::Chunked) {
-            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            let prelude = self
+                .upgrade
+                .prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?;
             if let Err(error) = context.charge(
                 &mut prelude.body_charge[Side::Client],
                 budget::PRELUDE_BODY_RESERVE,
@@ -189,7 +203,11 @@ impl ConnectionState {
         let decoder = BodyDecoder::new(framing, context.limits.max_body_bytes);
         if decoder.complete() {
             if is_offer {
-                let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+                let prelude = self
+                    .upgrade
+                    .prelude
+                    .as_mut()
+                    .ok_or(Error::Invariant("prelude"))?;
                 if let Some(offer) = prelude.offers.get_mut(&index) {
                     offer.msg = Some(msg);
                 }
@@ -204,7 +222,11 @@ impl ConnectionState {
                 self.drop_msg(msg, context)?;
             }
         } else {
-            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            let prelude = self
+                .upgrade
+                .prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?;
             prelude.client_body = Some(decoder);
             prelude.live_request = Some(msg);
         }

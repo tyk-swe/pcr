@@ -22,7 +22,7 @@ impl ConnectionState {
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if flags & wire::FLAG_ACK != 0 {
-            let Some(mut acked) = self.settings[side.peer()].acknowledge() else {
+            let Some(mut acked) = self.control.settings[side.peer()].acknowledge() else {
                 // Two unmatched ACK heads cannot be explained by reordering:
                 // both matching SETTINGS would have to precede the other's ACK.
                 // Retain the peer's still-buffered evidence before failure drains it.
@@ -31,7 +31,7 @@ impl ConnectionState {
                     .get(side.peer())
                     .filter(|dir| {
                         let bytes = dir.buffer.bytes();
-                        self.settings[side].pending.is_empty()
+                        self.control.settings[side].pending.is_empty()
                             && dir.saw_frame
                             && dir.chain.is_none()
                             && bytes.len() >= wire::HEADER_LEN
@@ -96,7 +96,7 @@ impl ConnectionState {
                 return Ok(());
             };
             let mut overflow = false;
-            for (id, stream) in &mut self.streams {
+            for (id, stream) in &mut self.streams.open {
                 context.check_deadline()?;
                 if stream.phase != StreamPhase::Closed {
                     let owner = if stream.initiator == Side::Client {
@@ -124,7 +124,7 @@ impl ConnectionState {
             }
             drop(acked.window_grants);
             context.release_all(&mut acked.charge)?;
-            for debt in self.closed_credit.values_mut() {
+            for debt in self.streams.closed_credit.values_mut() {
                 context.check_deadline()?;
                 if let Some(window) = debt[side].as_mut() {
                     *window += acked.window_delta;
@@ -153,14 +153,15 @@ impl ConnectionState {
             {
                 if let Some(minimum) = acked.minimum_table_size {
                     if acked.possibly_applied_table_minimum {
-                        let uncertain = &mut self.settings[side.peer()].uncertain_table_minimum;
+                        let uncertain =
+                            &mut self.control.settings[side.peer()].uncertain_table_minimum;
                         *uncertain = Some(uncertain.map_or(minimum, |old| old.min(minimum)));
                     } else {
                         decoder.acknowledge_table_size(minimum)?;
                     }
                 }
                 decoder.acknowledge_table_size(acked.values.header_table_size)?;
-                for pending in &self.settings[side.peer()].pending {
+                for pending in &self.control.settings[side.peer()].pending {
                     decoder.permit_table_size(pending.final_values.header_table_size);
                 }
             }
@@ -169,7 +170,7 @@ impl ConnectionState {
             self.release_ack_deferred_messages(context)?;
             return Ok(());
         }
-        if self.settings[side].pending.len() + 1 > context.limits.max_pending_settings {
+        if self.control.settings[side].pending.len() + 1 > context.limits.max_pending_settings {
             let flow = self.dir_flow(side);
             self.reject(
                 context,
@@ -185,25 +186,26 @@ impl ConnectionState {
             return Ok(());
         }
         let resume_peer = self.waiting_settings_ack(side.peer());
-        let applied = self.settings[side].apply(&settings, side == Side::Server);
+        let applied = self.control.settings[side].apply(&settings, side == Side::Server);
         let mut pending = applied.pending;
-        pending.sender_stream_limit = self.max_initiated[side];
+        pending.sender_stream_limit = self.streams.max_initiated[side];
         context.charge(
             &mut pending.charge,
             budget::PENDING_OVERHEAD
                 + self
                     .streams
+                    .open
                     .len()
                     .saturating_mul(budget::CLOSED_STREAM_OVERHEAD),
         )?;
-        for (id, stream) in &self.streams {
+        for (id, stream) in &self.streams.open {
             context.check_deadline()?;
             pending
                 .window_grants
                 .insert(*id, stream.window_granted[side.peer()]);
         }
         let advertised_table_size = pending.final_values.header_table_size;
-        self.settings[side].pending.push_back(pending);
+        self.control.settings[side].pending.push_back(pending);
         if let Some(decoder) = self
             .directions
             .get_mut(side.peer())
@@ -229,7 +231,7 @@ impl ConnectionState {
         if invalid {
             self.fail(context, Status::Malformed)?;
         } else if resume_peer {
-            self.resume_side = Some(side.peer());
+            self.deferred.resume_side = Some(side.peer());
         }
         Ok(())
     }

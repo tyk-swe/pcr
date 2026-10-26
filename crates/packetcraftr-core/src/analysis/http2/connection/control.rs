@@ -21,7 +21,7 @@ impl ConnectionState {
         evidence: Evidence,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        if let Some(previous) = self.goaway[side]
+        if let Some(previous) = self.control.goaway[side]
             && last_stream_id > previous
         {
             self.reject(
@@ -37,17 +37,17 @@ impl ConnectionState {
             )?;
             return Ok(());
         }
-        let previous_last = self.goaway[side];
+        let previous_last = self.control.goaway[side];
         let effective_last = previous_last.map_or(last_stream_id, |p| p.min(last_stream_id));
-        self.goaway[side] = Some(effective_last);
+        self.control.goaway[side] = Some(effective_last);
         let closed_range = (
             std::ops::Bound::Excluded(effective_last),
             previous_last.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Included),
         );
         // Successive GOAWAY bounds only decrease: scan newly excluded closed
         // IDs, rather than revisiting every completed stream for every frame.
-        let mut capacity = self.streams.len();
-        for _ in self.closed.range(closed_range) {
+        let mut capacity = self.streams.open.len();
+        for _ in self.streams.closed.range(closed_range) {
             context.check_deadline()?;
             capacity += 1;
         }
@@ -75,7 +75,7 @@ impl ConnectionState {
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let mut emitted = Vec::with_capacity(capacity);
-        for (id, stream) in &mut self.streams {
+        for (id, stream) in &mut self.streams.open {
             context.check_deadline()?;
             let initiated_by_receiver = stream.initiator == side.peer();
             if *id > last_stream_id && initiated_by_receiver {
@@ -85,7 +85,7 @@ impl ConnectionState {
                 stream.unprocessed = true;
             }
         }
-        for (id, _) in self.closed.range(closed_range) {
+        for (id, _) in self.streams.closed.range(closed_range) {
             context.check_deadline()?;
             if Side::initiator_of(*id) == side.peer() {
                 emitted.push(*id);
@@ -109,7 +109,7 @@ impl ConnectionState {
     ) -> Result<(), Error> {
         const PING_ENTRY: usize = 64;
         if flags & wire::FLAG_ACK != 0 {
-            let pending = &mut self.pings[side.peer()];
+            let pending = &mut self.control.pings[side.peer()];
             match pending.get_mut(&opaque) {
                 Some(count) => {
                     *count -= 1;
@@ -135,12 +135,12 @@ impl ConnectionState {
             }
             return Ok(());
         }
-        if let Some(count) = self.pings[side].get_mut(&opaque) {
+        if let Some(count) = self.control.pings[side].get_mut(&opaque) {
             *count += 1;
             return Ok(());
         }
         context.charge(&mut self.charge, PING_ENTRY)?;
-        self.pings[side].insert(opaque, 1);
+        self.control.pings[side].insert(opaque, 1);
         Ok(())
     }
 }

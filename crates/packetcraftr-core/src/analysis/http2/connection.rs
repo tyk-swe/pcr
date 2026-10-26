@@ -134,37 +134,77 @@ pub(crate) struct ConnectionState {
     pub status: Status,
     pub phase: Phase,
     pub directions: Directions,
-    pub prelude: Option<Prelude>,
-    pub streams: BTreeMap<u32, StreamState>,
-    pub closed: BTreeMap<u32, ClosedStream>,
-    pub early_response_headers: BTreeMap<u32, super::stream::EarlyResponse>,
-    pub closed_credit: BTreeMap<u32, PerSide<Option<i64>>>,
-    pub admitted_streams: u64,
-    pub max_initiated: PerSide<u32>,
-    pub active: PerSide<usize>,
-    pub send_window: PerSide<i64>,
-    pub settings: PerSide<DirectionSettings>,
-    pub goaway: PerSide<Option<u32>>,
-    pub next_origin: u64,
+    pub streams: StreamTable,
+    pub control: Control,
+    pub upgrade: Upgrade,
+    pub deferred: Deferred,
     pub frames: u64,
     pub issues: u64,
     pub emitted: bool,
     pub clean_start: bool,
     pub number: u64,
     pub charge: Charge,
-    pub upgrade_response: Option<crate::protocol::application::http::Head>,
-    pub upgrade_sources: Option<SourceSet>,
-    pub upgrade_charge: Charge,
-    pub final_pending_settings: Option<u64>,
-    pub pings: PerSide<BTreeMap<[u8; 8], u64>>,
-    pub final_pending_pings: Option<u64>,
-    pub refused: bool,
     pub done: bool,
     pub finalizing: bool,
-    pub resume_side: Option<Side>,
+}
+
+pub(crate) struct StreamTable {
+    pub open: BTreeMap<u32, StreamState>,
+    pub closed: BTreeMap<u32, ClosedStream>,
+    pub early_responses: BTreeMap<u32, super::stream::EarlyResponse>,
+    pub closed_credit: BTreeMap<u32, PerSide<Option<i64>>>,
     pub pending_openers: BTreeMap<u32, IssueCode>,
-    pub parent_deferred: VecDeque<MessageBuilder>,
-    pub ack_deferred: VecDeque<(Side, MessageBuilder, Status)>,
+    pub admitted: u64,
+    pub max_initiated: PerSide<u32>,
+    pub active: PerSide<usize>,
+    pub next_origin: u64,
+}
+
+pub(crate) struct Control {
+    pub settings: PerSide<DirectionSettings>,
+    pub send_window: PerSide<i64>,
+    pub goaway: PerSide<Option<u32>>,
+    pub pings: PerSide<BTreeMap<[u8; 8], u64>>,
+    pub final_pending: Option<PendingCounts>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PendingCounts {
+    pub settings: u64,
+    pub pings: u64,
+}
+
+impl Control {
+    pub(crate) fn pending_counts(&self) -> PendingCounts {
+        self.final_pending.unwrap_or_else(|| PendingCounts {
+            settings: self
+                .settings
+                .iter()
+                .map(|direction| direction.pending.len() as u64)
+                .sum(),
+            pings: self
+                .pings
+                .iter()
+                .map(|pings| pings.values().sum::<u64>())
+                .sum(),
+        })
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct Upgrade {
+    pub prelude: Option<Prelude>,
+    pub response: Option<crate::protocol::application::http::Head>,
+    pub sources: Option<SourceSet>,
+    pub charge: Charge,
+    pub refused: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct Deferred {
+    pub promises: VecDeque<MessageBuilder>,
+    pub awaiting_ack: VecDeque<(Side, MessageBuilder, Status)>,
+    pub resume_side: Option<Side>,
 }
 
 impl ConnectionState {
@@ -177,37 +217,34 @@ impl ConnectionState {
             status: Status::Complete,
             phase: Phase::Sniff,
             directions: Directions::Candidates(Vec::new()),
-            prelude: None,
-            streams: BTreeMap::new(),
-            closed: BTreeMap::new(),
-            early_response_headers: BTreeMap::new(),
-            closed_credit: BTreeMap::new(),
-            admitted_streams: 0,
-            max_initiated: PerSide::new(0, 0),
-            active: PerSide::new(0, 0),
-            send_window: PerSide::new(65_535, 65_535),
-            settings: PerSide::new(DirectionSettings::new(), DirectionSettings::new()),
-            goaway: PerSide::new(None, None),
-            next_origin: 1,
+            streams: StreamTable {
+                open: BTreeMap::new(),
+                closed: BTreeMap::new(),
+                early_responses: BTreeMap::new(),
+                closed_credit: BTreeMap::new(),
+                pending_openers: BTreeMap::new(),
+                admitted: 0,
+                max_initiated: PerSide::new(0, 0),
+                active: PerSide::new(0, 0),
+                next_origin: 1,
+            },
+            control: Control {
+                settings: PerSide::new(DirectionSettings::new(), DirectionSettings::new()),
+                send_window: PerSide::new(65_535, 65_535),
+                goaway: PerSide::new(None, None),
+                pings: PerSide::default(),
+                final_pending: None,
+            },
+            upgrade: Upgrade::default(),
+            deferred: Deferred::default(),
             frames: 0,
             issues: 0,
             emitted: false,
             clean_start: true,
             number: 0,
             charge: Charge::default(),
-            upgrade_response: None,
-            upgrade_sources: None,
-            upgrade_charge: Charge::default(),
-            final_pending_settings: None,
-            pings: PerSide::new(BTreeMap::new(), BTreeMap::new()),
-            final_pending_pings: None,
-            refused: false,
             done: false,
             finalizing: false,
-            resume_side: None,
-            pending_openers: BTreeMap::new(),
-            parent_deferred: VecDeque::new(),
-            ack_deferred: VecDeque::new(),
         }
     }
 
@@ -316,8 +353,12 @@ impl ConnectionState {
             if elected && self.directions.get(Side::Server).is_none() {
                 let mut dir = DirectionState::new(delivery.flow.clone());
                 let mut decoder = hpack::Decoder::new(context.limits.hpack())?;
-                decoder.permit_table_size(self.settings[Side::Client].advertised.header_table_size);
-                for pending in &self.settings[Side::Client].pending {
+                decoder.permit_table_size(
+                    self.control.settings[Side::Client]
+                        .advertised
+                        .header_table_size,
+                );
+                for pending in &self.control.settings[Side::Client].pending {
                     decoder.permit_table_size(pending.final_values.header_table_size);
                 }
                 dir.decoder = Some(decoder);
@@ -383,7 +424,7 @@ impl ConnectionState {
     pub(crate) fn waiting_settings_ack(&self, side: Side) -> bool {
         let peer = side.peer();
         if self.finalizing
-            || !self.settings[peer].pending.is_empty()
+            || !self.control.settings[peer].pending.is_empty()
             || self.directions.get(peer).is_some_and(|dir| dir.closed)
         {
             return false;
@@ -425,10 +466,12 @@ impl ConnectionState {
             DirectionPhase::Prelude => {
                 let head_pending = match self.side_of(&dir.flow) {
                     Some(Side::Client) => self
+                        .upgrade
                         .prelude
                         .as_ref()
                         .is_none_or(|prelude| prelude.client_body.is_none()),
                     Some(_) => self
+                        .upgrade
                         .prelude
                         .as_ref()
                         .is_none_or(|prelude| prelude.server_body.is_none()),
@@ -464,17 +507,17 @@ impl ConnectionState {
                     }
                 }
                 Phase::Prelude | Phase::H2 => {
-                    if let Some(side) = self.resume_side.take() {
+                    if let Some(side) = self.deferred.resume_side.take() {
                         self.pump_side(side, context)?;
                         continue;
                     }
                     let before = self.buffered_len();
                     self.pump_side(Side::Client, context)?;
-                    if self.resume_side.is_some() {
+                    if self.deferred.resume_side.is_some() {
                         continue;
                     }
                     self.pump_side(Side::Server, context)?;
-                    if self.resume_side.is_some() {
+                    if self.deferred.resume_side.is_some() {
                         continue;
                     }
                     if !matches!(self.phase, Phase::Dead) && self.buffered_len() == before {
@@ -502,7 +545,7 @@ impl ConnectionState {
                 DirectionPhase::Frames => self.frame_step(side, context)?,
                 DirectionPhase::Sniff => false,
             };
-            if !progressed || self.resume_side.is_some() {
+            if !progressed || self.deferred.resume_side.is_some() {
                 return Ok(());
             }
         }

@@ -29,16 +29,17 @@ impl ConnectionState {
         }
         for msg in self
             .streams
+            .open
             .values_mut()
             .flat_map(|stream| stream.msgs.iter_mut().flatten())
-            .chain(self.parent_deferred.iter_mut())
-            .chain(self.ack_deferred.iter_mut().map(|(_, msg, _)| msg))
+            .chain(self.deferred.promises.iter_mut())
+            .chain(self.deferred.awaiting_ack.iter_mut().map(|(_, msg, _)| msg))
         {
             context.release_all(&mut msg.charge)?;
         }
-        self.parent_deferred.clear();
-        self.ack_deferred.clear();
-        if let Some(mut prelude) = self.prelude.take() {
+        self.deferred.promises.clear();
+        self.deferred.awaiting_ack.clear();
+        if let Some(mut prelude) = self.upgrade.prelude.take() {
             for side in Side::BOTH {
                 context.release_all(&mut prelude.body_charge[side])?;
             }
@@ -50,31 +51,20 @@ impl ConnectionState {
                 context.release_all(&mut msg.charge)?;
             }
         }
-        self.final_pending_settings.get_or_insert(
-            self.settings
-                .iter()
-                .map(|direction| direction.pending.len() as u64)
-                .sum(),
-        );
-        for direction in self.settings.iter_mut() {
+        self.control.final_pending = Some(self.control.pending_counts());
+        for direction in self.control.settings.iter_mut() {
             for mut pending in direction.pending.drain(..) {
                 context.release_all(&mut pending.charge)?;
             }
         }
-        self.final_pending_pings.get_or_insert(
-            self.pings
-                .iter()
-                .map(|pings| pings.values().sum::<u64>())
-                .sum::<u64>(),
-        );
-        for pings in self.pings.iter_mut() {
+        for pings in self.control.pings.iter_mut() {
             pings.clear();
         }
-        self.streams.clear();
-        self.closed.clear();
-        self.early_response_headers.clear();
-        self.pending_openers.clear();
-        self.closed_credit.clear();
+        self.streams.open.clear();
+        self.streams.closed.clear();
+        self.streams.early_responses.clear();
+        self.streams.pending_openers.clear();
+        self.streams.closed_credit.clear();
         context.release_all(&mut self.charge)
     }
 
@@ -130,7 +120,7 @@ impl ConnectionState {
             }
         }
         if let Some(side) = self.side_of(flow)
-            && self.send_window[side] > super::super::settings::WINDOW_MAX
+            && self.control.send_window[side] > super::super::settings::WINDOW_MAX
             && self
                 .directions
                 .get(side)
@@ -155,7 +145,11 @@ impl ConnectionState {
         {
             if side == Side::Client
                 && self.clean_start
-                && let Some(parent) = self.parent_deferred.front().and_then(|msg| msg.promised_by)
+                && let Some(parent) = self
+                    .deferred
+                    .promises
+                    .front()
+                    .and_then(|msg| msg.promised_by)
             {
                 self.reject(context, Fault::new(self.dir_flow(Side::Server), IssueScope::Connection, Status::Malformed, IssueCode::PushPromiseClosedParent, "client FIN proves the pending promise has no parent opener; promise evidence is retained in its message").stream(Some(parent)))?;
                 return Ok(());
@@ -167,6 +161,7 @@ impl ConnectionState {
                 context.check_deadline()?;
                 let Some(id) = self
                     .streams
+                    .open
                     .range((
                         std::ops::Bound::Excluded(cursor),
                         std::ops::Bound::Unbounded,
@@ -237,6 +232,7 @@ impl ConnectionState {
         if let Some(side) = self.side_of(flow) {
             let ids: Vec<u32> = self
                 .streams
+                .open
                 .iter()
                 .filter(|(_, s)| s.msgs[side].is_some() && !s.ended[side])
                 .map(|(id, _)| *id)
@@ -259,12 +255,14 @@ impl ConnectionState {
             .all(|side| self.directions.get(side).is_some_and(|dir| dir.closed))
             && self
                 .streams
+                .open
                 .values()
                 .all(|s| s.msgs.iter().all(Option::is_none))
         {
             self.done = true;
             if self
                 .streams
+                .open
                 .values()
                 .any(|stream| !stream.ended.all(|ended| *ended))
             {

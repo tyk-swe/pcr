@@ -29,7 +29,7 @@ impl ConnectionState {
             .directions
             .get_mut(side)
             .ok_or(Error::Invariant("direction not found"))?;
-        let has_body = self.prelude.as_ref().is_some_and(|p| {
+        let has_body = self.upgrade.prelude.as_ref().is_some_and(|p| {
             if side == Side::Client {
                 p.client_body.is_some()
             } else {
@@ -39,7 +39,11 @@ impl ConnectionState {
         if !has_body {
             return Ok(BodyStep::NotBody);
         }
-        let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+        let prelude = self
+            .upgrade
+            .prelude
+            .as_mut()
+            .ok_or(Error::Invariant("prelude"))?;
         let body = if side == Side::Client {
             prelude
                 .client_body
@@ -102,7 +106,11 @@ impl ConnectionState {
             let sets = dir.buffer.contributors(consumed);
             let dropped = dir.buffer.consume(consumed);
             dir.release_consumed(consumed, dropped, context)?;
-            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            let prelude = self
+                .upgrade
+                .prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?;
             let msg_slot = if side == Side::Client {
                 &mut prelude.live_request
             } else {
@@ -121,7 +129,11 @@ impl ConnectionState {
                 .iter()
                 .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
                 .sum::<usize>();
-            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            let prelude = self
+                .upgrade
+                .prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?;
             if side == Side::Client {
                 prelude.client_body = None;
             } else {
@@ -142,7 +154,11 @@ impl ConnectionState {
                 }
                 None => BodyStep::Progress,
             };
-            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            let prelude = self
+                .upgrade
+                .prelude
+                .as_mut()
+                .ok_or(Error::Invariant("prelude"))?;
             context.release_all(&mut prelude.body_charge[side])?;
             return Ok(step);
         }

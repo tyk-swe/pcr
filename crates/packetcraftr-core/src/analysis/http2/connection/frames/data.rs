@@ -32,7 +32,7 @@ impl ConnectionState {
             data_bytes,
             end_stream,
         } = head;
-        self.send_window[side] = self.send_window[side]
+        self.control.send_window[side] = self.control.send_window[side]
             .checked_sub(i64::from(length))
             .ok_or(Error::Application(
                 crate::analysis::application::Error::Limit {
@@ -40,7 +40,7 @@ impl ConnectionState {
                     limit: 0x8000_0000,
                 },
             ))?;
-        if self.send_window[side] < -(1i64 << 31) {
+        if self.control.send_window[side] < -(1i64 << 31) {
             let flow = self.dir_flow(side);
             self.reject(
                 context,
@@ -55,7 +55,7 @@ impl ConnectionState {
                 .evidence(evidence.wire.clone(), evidence.sources.clone()),
             )?;
             return Ok(());
-        } else if length > 0 && self.send_window[side] < 0 {
+        } else if length > 0 && self.control.send_window[side] < 0 {
             let flow = self.dir_flow(side);
             self.issue(
                 context,
@@ -71,7 +71,7 @@ impl ConnectionState {
                 .evidence(evidence.wire.clone(), evidence.sources.clone()),
             )?;
         }
-        if self.send_window[side] < 0
+        if self.control.send_window[side] < 0
             && self.reconcile_closed_credit(side, Some(stream_id), context)?
         {
             return Ok(());
@@ -79,22 +79,24 @@ impl ConnectionState {
         // In-flight peer DATA after a reset still consumes connection credit,
         // but cannot establish a stream error from cross-direction ordering.
         if self
+            .streams
             .closed
             .get(&stream_id)
             .is_some_and(|closed| closed.reset_by == Some(side.peer()) && !closed.ended[side])
         {
             return Ok(());
         }
-        let Some(stream) = self.streams.get_mut(&stream_id) else {
+        let Some(stream) = self.streams.open.get_mut(&stream_id) else {
             let owner = Side::initiator_of(stream_id);
-            let closed =
-                self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner];
+            let closed = self.streams.closed.contains_key(&stream_id)
+                || stream_id <= self.streams.max_initiated[owner];
             if !closed
                 && self.clean_start
                 && side == Side::Server
                 && owner == Side::Client
                 && self
-                    .early_response_headers
+                    .streams
+                    .early_responses
                     .get(&stream_id)
                     .is_none_or(|early| !early.final_seen || early.ended)
             {
@@ -110,12 +112,13 @@ impl ConnectionState {
                     .stream(Some(stream_id))
                     .evidence(evidence.wire, evidence.sources),
                 )?;
-                if !self.early_response_headers.contains_key(&stream_id) {
+                if !self.streams.early_responses.contains_key(&stream_id) {
                     context.check_streams()?;
-                    self.admitted_streams += 1;
+                    self.streams.admitted += 1;
                     context.charge(&mut self.charge, budget::CLOSED_STREAM_OVERHEAD)?;
                 }
-                self.early_response_headers
+                self.streams
+                    .early_responses
                     .entry(stream_id)
                     .or_default()
                     .ended = true;
@@ -128,7 +131,7 @@ impl ConnectionState {
                 && side == Side::Server
                 && owner == Side::Client
                 && data_bytes > 0
-                && let Some(early) = self.early_response_headers.get_mut(&stream_id)
+                && let Some(early) = self.streams.early_responses.get_mut(&stream_id)
                 && early.final_seen
                 && early.bodyless
                 && !early.ended
@@ -151,7 +154,7 @@ impl ConnectionState {
             let uncertain = !closed && (!self.clean_start || side != owner);
             if side == Side::Server
                 && end_stream
-                && let Some(early) = self.early_response_headers.get_mut(&stream_id)
+                && let Some(early) = self.streams.early_responses.get_mut(&stream_id)
             {
                 early.ended = true;
             }
@@ -262,6 +265,7 @@ impl ConnectionState {
         }
         let stream = self
             .streams
+            .open
             .get_mut(&stream_id)
             .ok_or(Error::Invariant("stream"))?;
         let trace_content = side == Side::Client && stream.method.as_deref() == Some(b"TRACE");
@@ -285,6 +289,7 @@ impl ConnectionState {
             )?;
             let stream = self
                 .streams
+                .open
                 .get_mut(&stream_id)
                 .ok_or(Error::Invariant("stream"))?;
             if let Some(msg) = stream.msgs[side].as_mut() {
@@ -293,6 +298,7 @@ impl ConnectionState {
         }
         let stream = self
             .streams
+            .open
             .get_mut(&stream_id)
             .ok_or(Error::Invariant("stream"))?;
         if stream.msgs[side]
@@ -314,6 +320,7 @@ impl ConnectionState {
             )?;
             let stream = self
                 .streams
+                .open
                 .get_mut(&stream_id)
                 .ok_or(Error::Invariant("stream"))?;
             if let Some(msg) = stream.msgs[side].as_mut() {
@@ -322,6 +329,7 @@ impl ConnectionState {
         }
         let stream = self
             .streams
+            .open
             .get_mut(&stream_id)
             .ok_or(Error::Invariant("stream"))?;
         if let Some(msg) = stream.msgs[side].as_mut() {
@@ -346,6 +354,7 @@ impl ConnectionState {
             if let Some(sources) = evidence.sources.clone() {
                 let stream = self
                     .streams
+                    .open
                     .get_mut(&stream_id)
                     .ok_or(Error::Invariant("stream"))?;
                 match stream.msgs[side].as_mut() {
@@ -394,6 +403,7 @@ impl ConnectionState {
         }
         if self
             .streams
+            .open
             .get(&stream_id)
             .and_then(|stream| stream.msgs[side].as_ref())
             .is_some_and(|msg| msg.failure == Some(Status::Malformed))

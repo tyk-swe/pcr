@@ -32,7 +32,7 @@ impl ConnectionState {
                 self.stream_headers(side, stream_id, end_stream, malformed, decoded, context)?;
                 if malformed
                     && !matches!(self.phase, Phase::Dead)
-                    && self.streams.contains_key(&stream_id)
+                    && self.streams.open.contains_key(&stream_id)
                 {
                     self.close_stream(stream_id, Status::Malformed, None, context)?;
                 }
@@ -66,9 +66,10 @@ impl ConnectionState {
         };
         let early = self
             .streams
+            .open
             .get(&stream_id)
             .and_then(|stream| stream.early_response)
-            .or_else(|| self.early_response_headers.get(&stream_id).copied());
+            .or_else(|| self.streams.early_responses.get(&stream_id).copied());
         if side == Side::Server
             && let Some(early) = early
             && self.early_response_followup(
@@ -82,8 +83,9 @@ impl ConnectionState {
         {
             return Ok(());
         }
-        if !self.streams.contains_key(&stream_id) {
+        if !self.streams.open.contains_key(&stream_id) {
             if self
+                .streams
                 .closed
                 .get(&stream_id)
                 .is_some_and(|closed| closed.reset_by == Some(side.peer()) && !closed.ended[side])
@@ -92,9 +94,9 @@ impl ConnectionState {
                 // reset. HPACK has already been decoded to preserve table state.
                 return Ok(());
             }
-            if self.closed.contains_key(&stream_id)
+            if self.streams.closed.contains_key(&stream_id)
                 || stream_id
-                    <= self.max_initiated[if client_initiated {
+                    <= self.streams.max_initiated[if client_initiated {
                         Side::Client
                     } else {
                         Side::Server
@@ -131,7 +133,7 @@ impl ConnectionState {
                 let delayed_opener = side == Side::Server
                     && client_initiated
                     && !self.opener_exhausted(Side::Client)
-                    && (!self.clean_start || stream_id > self.max_initiated[Side::Client]);
+                    && (!self.clean_start || stream_id > self.streams.max_initiated[Side::Client]);
                 self.issue(
                     context,
                     Fault::new(
@@ -156,18 +158,19 @@ impl ConnectionState {
                 if delayed_opener {
                     self.retain_pending_opener(stream_id, code, context)?;
                 }
-                if delayed_opener && !self.early_response_headers.contains_key(&stream_id) {
+                if delayed_opener && !self.streams.early_responses.contains_key(&stream_id) {
                     context.check_streams()?;
-                    self.admitted_streams += 1;
+                    self.streams.admitted += 1;
                     context.charge(&mut self.charge, budget::CLOSED_STREAM_OVERHEAD)?;
-                    self.early_response_headers
+                    self.streams
+                        .early_responses
                         .insert(stream_id, Default::default());
                 }
                 if delayed_opener {
                     // The server's own ordered bytes place this response after
                     // its GOAWAY, which promised the stream was not processed.
                     let above_goaway =
-                        self.goaway[Side::Server].is_some_and(|last| stream_id > last);
+                        self.control.goaway[Side::Server].is_some_and(|last| stream_id > last);
                     let validation = validate(FieldRole::Response, &headers)
                         .map_err(|detail| (IssueCode::HeaderSemantics, detail))
                         .and_then(|meta| {
@@ -189,7 +192,8 @@ impl ConnectionState {
                     match validation {
                         Ok(meta) => {
                             let early = self
-                                .early_response_headers
+                                .streams
+                                .early_responses
                                 .get_mut(&stream_id)
                                 .ok_or(Error::Invariant("early response"))?;
                             early.final_seen = meta
@@ -214,7 +218,8 @@ impl ConnectionState {
                             )?;
                             // Reject further response activity while retaining the
                             // capture-delayed request's admission and evidence.
-                            self.early_response_headers
+                            self.streams
+                                .early_responses
                                 .get_mut(&stream_id)
                                 .ok_or(Error::Invariant("early response"))?
                                 .ended = true;
@@ -231,6 +236,7 @@ impl ConnectionState {
         }
         if self
             .streams
+            .open
             .get(&stream_id)
             .is_some_and(|stream| stream.phase != StreamPhase::Reserved && stream.ended[side])
         {
@@ -249,7 +255,7 @@ impl ConnectionState {
             return self.close_stream(stream_id, Status::Malformed, None, context);
         }
         let (role, new_head) = {
-            let Some(stream) = self.streams.get(&stream_id) else {
+            let Some(stream) = self.streams.open.get(&stream_id) else {
                 return Ok(());
             };
             match stream.phase {
@@ -289,11 +295,11 @@ impl ConnectionState {
         if matches!(self.phase, Phase::Dead) {
             return Ok(());
         }
-        if let Some(stream) = self.streams.get_mut(&stream_id)
+        if let Some(stream) = self.streams.open.get_mut(&stream_id)
             && stream.phase == StreamPhase::Reserved
         {
             stream.phase = StreamPhase::Open;
-            self.active[Side::Server] += 1;
+            self.streams.active[Side::Server] += 1;
             if self.enforce_concurrency(Side::Server, stream_id, Some(&block_evidence), context)? {
                 return Ok(());
             }
@@ -333,7 +339,7 @@ impl ConnectionState {
         if side == Side::Server
             && role == FieldRole::Response
             && client_initiated
-            && self.goaway[Side::Server].is_some_and(|last| stream_id > last)
+            && self.control.goaway[Side::Server].is_some_and(|last| stream_id > last)
         {
             self.issue(
                 context,
@@ -352,6 +358,7 @@ impl ConnectionState {
         if role == FieldRole::Trailer
             && self
                 .streams
+                .open
                 .get(&stream_id)
                 .and_then(|stream| stream.msgs[side].as_ref())
                 .is_some_and(|msg| matches!(msg.status_code, Some(204 | 304)))
@@ -439,7 +446,7 @@ impl ConnectionState {
                 context,
             )?;
             if let Some(status) = failure
-                && let Some(stream) = self.streams.get_mut(&stream_id)
+                && let Some(stream) = self.streams.open.get_mut(&stream_id)
                 && let Some(msg) = stream.msgs[side].as_mut()
             {
                 msg.failure = Some(status);
@@ -447,6 +454,7 @@ impl ConnectionState {
         } else {
             let trailer_conflict = self
                 .streams
+                .open
                 .get(&stream_id)
                 .and_then(|stream| stream.msgs[side].as_ref())
                 .is_some_and(|msg| msg.trailers_seen);
@@ -470,6 +478,7 @@ impl ConnectionState {
             let flawed = failure.is_some();
             let stream = self
                 .streams
+                .open
                 .get_mut(&stream_id)
                 .ok_or(Error::Invariant("stream"))?;
             if let Some(msg) = stream.msgs[side].as_mut() {
@@ -484,6 +493,7 @@ impl ConnectionState {
                     + block.len();
                 let stream = self
                     .streams
+                    .open
                     .get_mut(&stream_id)
                     .ok_or(Error::Invariant("stream"))?;
                 match stream.msgs[side].as_mut() {
@@ -547,7 +557,7 @@ impl ConnectionState {
             || !end_stream
             || validate(FieldRole::Trailer, headers).is_err();
         self.issue(context, Fault::new(self.dir_flow(Side::Server), IssueScope::Stream, if invalid { Status::Malformed } else { Status::Incomplete }, if early.ended { IssueCode::HeadersAfterEnd } else if invalid { IssueCode::HeaderSemantics } else { IssueCode::EarlyResponseTrailers }, "HEADERS follow a previously observed final response whose opener was capture-delayed").stream(Some(id)).certainty(if invalid { Certainty::Confirmed } else { Certainty::Indeterminate }).evidence(evidence.wire.clone(), evidence.sources.clone()))?;
-        if self.streams.contains_key(&id) {
+        if self.streams.open.contains_key(&id) {
             // The provisional response has no message builder to emit. Its
             // error must not terminate the independently captured request.
             self.end_side(
@@ -560,7 +570,7 @@ impl ConnectionState {
                 },
                 context,
             )?;
-        } else if let Some(state) = self.early_response_headers.get_mut(&id) {
+        } else if let Some(state) = self.streams.early_responses.get_mut(&id) {
             state.ended = true;
         }
         Ok(true)

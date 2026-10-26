@@ -5,7 +5,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{Error, capture::TimestampPrecision};
 
-// the guard below rejects fractions outside 0..precision bound
 pub(crate) fn system_time(
     seconds: i64,
     fraction: i64,

@@ -77,8 +77,6 @@ pub struct Unsupported {
 }
 
 impl Unsupported {
-    /// The failure for a capability this build has no native backend for:
-    /// either `feature` is disabled or the target has no backend for it.
     pub(crate) fn unbuilt(
         capability: NativeCapability,
         feature_enabled: bool,

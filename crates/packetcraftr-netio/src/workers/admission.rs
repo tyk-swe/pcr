@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Root, TCP data, execution, and socket accounting for admitted native work.
-
 use std::sync::{
     Arc,
     atomic::{AtomicU8, Ordering},
@@ -251,7 +249,6 @@ impl Permit {
 }
 
 impl ConnectPermit {
-    /// Splits the attempt into its execution permit and its single socket promotion right.
     pub(super) fn into_parts(self) -> (Permit, SocketReservation) {
         let reservation = SocketReservation(self.0.lease());
         (self.0, reservation)

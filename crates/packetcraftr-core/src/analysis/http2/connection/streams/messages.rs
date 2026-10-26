@@ -5,6 +5,7 @@
 
 use super::super::{ConnectionState, Context, Decoded, Fault, Head};
 use crate::analysis::http2::Error;
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::buffer::union_balanced;
 use crate::analysis::http2::headers::FieldRole;
@@ -94,7 +95,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "connect_content_length",
+                    code: IssueCode::ConnectContentLength,
                     detail: "a CONNECT 2xx response must not carry content-length".into(),
                     wire: build.header_blocks.last().cloned().unwrap_or_default(),
                     sources: union_balanced(build.sets.clone())?,
@@ -116,7 +117,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "content_length_mismatch",
+                    code: IssueCode::ContentLengthMismatch,
                     detail: "observed body length does not match content-length".into(),
                     wire: Bytes::new(),
                     sources: None,

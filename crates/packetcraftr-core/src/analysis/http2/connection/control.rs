@@ -9,6 +9,7 @@ mod settings;
 use super::super::Error;
 use super::super::model::{Certainty, IssueScope, Status};
 use super::{ConnectionState, Context, Evidence, Fault};
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::side::Side;
 use crate::protocol::application::http2 as wire;
 
@@ -31,7 +32,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "goaway_last_stream_increased",
+                    code: IssueCode::GoawayLastStreamIncreased,
                     detail: "GOAWAY last_stream_id must not increase".into(),
                     wire: evidence.wire.clone(),
                     sources: evidence.sources.clone(),
@@ -101,7 +102,7 @@ impl ConnectionState {
                 scope: IssueScope::Stream,
                 certainty: Certainty::Confirmed,
                 status: Status::Unprocessed,
-                code: "goaway_unprocessed",
+                code: IssueCode::GoawayUnprocessed,
                 detail: "GOAWAY excludes this already-emitted request; the earlier event records byte completeness only".into(),
                 wire: evidence.wire.clone(),
                 sources: evidence.sources.clone(),
@@ -140,7 +141,7 @@ impl ConnectionState {
                             scope: IssueScope::Connection,
                             certainty: Certainty::ObservedOrder,
                             status: Status::Incomplete,
-                            code: "unmatched_ping_ack",
+                            code: IssueCode::UnmatchedPingAck,
                             detail: "a PING acknowledgment carries an opaque value never observed"
                                 .into(),
                             wire: evidence.wire,

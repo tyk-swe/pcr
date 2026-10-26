@@ -6,6 +6,7 @@ use super::super::super::buffer::union_balanced;
 use super::super::super::model::{Certainty, Header, IssueScope, Status};
 use super::super::super::stream::MessageBuilder;
 use super::super::{ConnectionState, Context, Fault};
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::protocol::application::http;
@@ -71,7 +72,7 @@ impl ConnectionState {
                         scope: IssueScope::Connection,
                         certainty: Certainty::Confirmed,
                         status,
-                        code: "prelude_body",
+                        code: IssueCode::PreludeBody,
                         detail: error.to_string().into(),
                         wire,
                         sources,

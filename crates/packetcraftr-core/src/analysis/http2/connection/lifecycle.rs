@@ -9,6 +9,7 @@ use super::super::Error;
 use super::super::buffer::union_balanced;
 use super::super::model::{Certainty, IssueScope, Status};
 use super::{ConnectionState, Context, DirectionPhase, Fault, Phase};
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::analysis::provenance::SourceSet;
@@ -92,7 +93,7 @@ impl ConnectionState {
             return self.terminate(
                 flow,
                 Status::Reset,
-                "connection_reset",
+                IssueCode::ConnectionReset,
                 "the TCP connection reset",
                 context,
             );
@@ -146,7 +147,7 @@ impl ConnectionState {
                 scope: IssueScope::Connection,
                 certainty: Certainty::Confirmed,
                 status: Status::Malformed,
-                code: "connection_window_overflow",
+                code: IssueCode::ConnectionWindowOverflow,
                 detail: "connection flow window remains above 2^31-1 after sender FIN; earlier WINDOW_UPDATE evidence is retained".into(),
                 wire: Bytes::new(),
                 sources: None,
@@ -176,7 +177,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "push_promise_closed_parent",
+                    code: IssueCode::PushPromiseClosedParent,
                     detail: "client FIN proves the pending promise has no parent opener; promise evidence is retained in its message".into(),
                     wire: Bytes::new(),
                     sources: None,
@@ -232,7 +233,7 @@ impl ConnectionState {
                     scope: IssueScope::Capture,
                     certainty: Certainty::Confirmed,
                     status: Status::Incomplete,
-                    code: "truncated_stream",
+                    code: IssueCode::TruncatedStream,
                     detail: detail.into(),
                     wire,
                     sources,
@@ -246,7 +247,7 @@ impl ConnectionState {
                     scope: IssueScope::Capture,
                     certainty: Certainty::Confirmed,
                     status: Status::Incomplete,
-                    code: "truncated_header_block",
+                    code: IssueCode::TruncatedHeaderBlock,
                     detail: "connection closed inside a header block".into(),
                     wire: Bytes::copy_from_slice(&chain.bytes),
                     sources: union_balanced(chain.sets)?,
@@ -306,11 +307,11 @@ impl ConnectionState {
         &mut self,
         flow: &ScopedFlowKey,
         status: Status,
-        code: &'static str,
+        code: IssueCode,
         detail: &'static str,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        if (self.done || matches!(self.phase, Phase::Dead)) && matches!(code, "tcp_evicted") {
+        if (self.done || matches!(self.phase, Phase::Dead)) && code == IssueCode::TcpEvicted {
             return Ok(());
         }
         self.issue(
@@ -358,12 +359,12 @@ impl ConnectionState {
         for (flow, stream_id, wire, sources) in partials {
             let (code, detail) = if stream_id.is_some() {
                 (
-                    "truncated_header_block",
+                    IssueCode::TruncatedHeaderBlock,
                     "the byte stream ended inside a header block",
                 )
             } else {
                 (
-                    "unconsumed_bytes",
+                    IssueCode::UnconsumedBytes,
                     "the byte stream ended with undecoded bytes",
                 )
             };
@@ -410,7 +411,7 @@ impl ConnectionState {
                     scope: IssueScope::Capture,
                     certainty: Certainty::Confirmed,
                     status,
-                    code: "truncated_header_block",
+                    code: IssueCode::TruncatedHeaderBlock,
                     detail: "the connection failed inside a header block".into(),
                     wire,
                     sources: union_balanced(sets)?,

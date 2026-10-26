@@ -9,6 +9,7 @@ use super::super::Error;
 use super::super::model::{Certainty, IssueScope, Status};
 use super::super::stream::{Phase as StreamPhase, StreamState};
 use super::{ConnectionState, Context, Evidence, Fault, Phase};
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::side::{PerSide, Side};
 use bytes::Bytes;
@@ -24,7 +25,7 @@ impl ConnectionState {
     pub(crate) fn retain_pending_opener(
         &mut self,
         id: u32,
-        code: &'static str,
+        code: IssueCode,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if !self.pending_openers.contains_key(&id) {
@@ -141,7 +142,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Limit,
-                    code: "active_streams",
+                    code: IssueCode::ActiveStreams,
                     detail: "concurrent streams exceed the configured bound".into(),
                     wire: evidence.map_or_else(Bytes::new, |e| e.wire.clone()),
                     sources: evidence.and_then(|e| e.sources.clone()),
@@ -208,7 +209,7 @@ impl ConnectionState {
                     Certainty::ObservedOrder
                 },
                 status: Status::Malformed,
-                code: "concurrent_streams",
+                code: IssueCode::ConcurrentStreams,
                 detail: "open streams exceed the peer's acknowledged limit".into(),
                 wire: evidence.map_or_else(Bytes::new, |e| e.wire.clone()),
                 sources: evidence.and_then(|e| e.sources.clone()),
@@ -269,7 +270,7 @@ impl ConnectionState {
                 scope: IssueScope::Stream,
                 certainty: Certainty::Confirmed,
                 status: Status::Malformed,
-                code: "stream_window_overflow",
+                code: IssueCode::StreamWindowOverflow,
                 detail: "stream flow window remains above 2^31-1 after the sender ended; earlier WINDOW_UPDATE evidence is retained".into(),
                 wire: Bytes::new(),
                 sources: None,
@@ -417,7 +418,7 @@ impl ConnectionState {
                     } else {
                         Status::Incomplete
                     },
-                    code: "reset_idle_stream",
+                    code: IssueCode::ResetIdleStream,
                     detail: "RST_STREAM on a stream that was never opened".into(),
                     wire: evidence.wire,
                     sources: evidence.sources,
@@ -426,14 +427,14 @@ impl ConnectionState {
             if confirmed {
                 self.fail(context, Status::Malformed)?;
             } else if side == Side::Server && owner == Side::Client {
-                self.retain_pending_opener(stream_id, "reset_idle_stream", context)?;
+                self.retain_pending_opener(stream_id, IssueCode::ResetIdleStream, context)?;
                 self.retain_early_parent(stream_id, context)?;
                 self.early_response_headers
                     .get_mut(&stream_id)
                     .ok_or(Error::Invariant("early parent"))?
                     .ended = true;
             } else {
-                self.retain_pending_opener(stream_id, "reset_idle_stream", context)?;
+                self.retain_pending_opener(stream_id, IssueCode::ResetIdleStream, context)?;
                 context.check_streams()?;
                 self.admitted_streams += 1;
                 context.charge(&mut self.charge, budget::CLOSED_STREAM_OVERHEAD)?;

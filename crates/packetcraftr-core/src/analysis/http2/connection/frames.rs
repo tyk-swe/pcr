@@ -8,6 +8,7 @@ use super::super::Error;
 use super::super::buffer::union_balanced;
 use super::super::model::{Certainty, FrameBody, IssueScope, Status};
 use super::{ChainHead, ConnectionState, Context, Evidence, Fault, Pos};
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::protocol::application::http2 as wire;
 use bytes::Bytes;
@@ -55,7 +56,7 @@ impl ConnectionState {
                         scope: IssueScope::Connection,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
-                        code: "frame_over_max_size",
+                        code: IssueCode::FrameOverMaxSize,
                         detail: format!("frame payload {length} exceeds the permitted maximum")
                             .into(),
                         wire: header,
@@ -164,16 +165,20 @@ impl ConnectionState {
         let (status, code, detail) = match &error {
             _ if interrupted_chain => (
                 Status::Malformed,
-                "broken_header_block",
+                IssueCode::BrokenHeaderBlock,
                 "an invalid PRIORITY frame interrupts an unfinished header block".to_owned(),
             ),
-            wire::Error::Limit(limit) => (Status::Limit, "frame_limit", format!("{limit}")),
-            wire::Error::Invalid(reason) => {
-                (Status::Malformed, "frame_invalid", (*reason).to_string())
-            }
-            wire::Error::Compression(reason) => {
-                (Status::Malformed, "compression", (*reason).to_string())
-            }
+            wire::Error::Limit(limit) => (Status::Limit, IssueCode::FrameLimit, format!("{limit}")),
+            wire::Error::Invalid(reason) => (
+                Status::Malformed,
+                IssueCode::FrameInvalid,
+                (*reason).to_string(),
+            ),
+            wire::Error::Compression(reason) => (
+                Status::Malformed,
+                IssueCode::Compression,
+                (*reason).to_string(),
+            ),
         };
         self.issue(
             context,
@@ -225,7 +230,7 @@ impl ConnectionState {
                         scope: IssueScope::Connection,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
-                        code: "broken_header_block",
+                        code: IssueCode::BrokenHeaderBlock,
                         detail: "a frame interrupts an unfinished header block".into(),
                         wire: wire_bytes.clone(),
                         sources: sources.clone(),
@@ -244,7 +249,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "stray_continuation",
+                    code: IssueCode::StrayContinuation,
                     detail: "CONTINUATION does not follow a header block".into(),
                     wire: wire_bytes.clone(),
                     sources: sources.clone(),
@@ -265,7 +270,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "frame_over_max_size",
+                    code: IssueCode::FrameOverMaxSize,
                     detail: format!(
                         "frame payload {} exceeds the permitted maximum",
                         header.length
@@ -290,7 +295,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::ObservedOrder,
                     status: Status::Malformed,
-                    code: "frame_size_ordering",
+                    code: IssueCode::FrameSizeOrdering,
                     detail: format!(
                         "frame payload {} exceeds an unacknowledged bound",
                         header.length
@@ -331,7 +336,7 @@ impl ConnectionState {
                     },
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "frame_invalid",
+                    code: IssueCode::FrameInvalid,
                     detail: detail.into(),
                     wire: wire_bytes.clone(),
                     sources: sources.clone(),
@@ -458,7 +463,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty,
                     status: Status::Malformed,
-                    code: "missing_initial_settings",
+                    code: IssueCode::MissingInitialSettings,
                     detail: "the first frame on a direction was not a non-ACK SETTINGS".into(),
                     wire: evidence.wire.slice(..wire::HEADER_LEN),
                     sources: evidence.sources.clone(),

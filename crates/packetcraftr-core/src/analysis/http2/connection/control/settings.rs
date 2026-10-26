@@ -7,6 +7,7 @@ use super::super::super::model::{Certainty, IssueScope, Status};
 use super::super::super::stream::Phase as StreamPhase;
 use super::super::super::{Error, settings};
 use super::super::{ConnectionState, Context, Evidence, Fault};
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::protocol::application::http2 as wire;
@@ -67,7 +68,7 @@ impl ConnectionState {
                             Certainty::Indeterminate
                         },
                         status,
-                        code: "unsolicited_settings_ack",
+                        code: IssueCode::UnsolicitedSettingsAck,
                         detail: "a SETTINGS acknowledgment does not match a pending SETTINGS"
                             .into(),
                         wire: evidence.wire,
@@ -87,7 +88,7 @@ impl ConnectionState {
                                 Certainty::Indeterminate
                             },
                             status,
-                            code: "unsolicited_settings_ack",
+                            code: IssueCode::UnsolicitedSettingsAck,
                             detail: "both directional ACK heads lack preceding matching SETTINGS"
                                 .into(),
                             wire,
@@ -146,7 +147,7 @@ impl ConnectionState {
                         scope: IssueScope::Connection,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
-                        code: "window_overflow",
+                        code: IssueCode::WindowOverflow,
                         detail: "SETTINGS window change pushed a stream window out of range".into(),
                         wire: evidence.wire.clone(),
                         sources: evidence.sources.clone(),
@@ -186,7 +187,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Limit,
-                    code: "pending_settings",
+                    code: IssueCode::PendingSettings,
                     detail: "unacknowledged SETTINGS frames exceed the configured bound".into(),
                     wire: evidence.wire,
                     sources: evidence.sources,

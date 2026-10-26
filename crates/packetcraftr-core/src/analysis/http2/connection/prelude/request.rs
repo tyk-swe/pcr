@@ -6,6 +6,7 @@ use super::super::super::buffer::union_balanced;
 use super::super::super::model::{Certainty, Header, IssueScope, MessageKind, Status};
 use super::super::super::upgrade::{self, Offer, Pending};
 use super::super::{ConnectionState, Context, Fault};
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::protocol::application::http::{self, BodyDecoder, StartLine};
@@ -36,7 +37,7 @@ impl ConnectionState {
                         scope: IssueScope::Connection,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
-                        code: "prelude_head",
+                        code: IssueCode::PreludeHead,
                         detail: error.to_string().into(),
                         wire,
                         sources,
@@ -60,7 +61,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "prelude_not_request",
+                    code: IssueCode::PreludeNotRequest,
                     detail: "the client direction did not carry a request head".into(),
                     wire: Bytes::copy_from_slice(&view[..consumed.min(256)]),
                     sources,
@@ -87,7 +88,7 @@ impl ConnectionState {
                         scope: IssueScope::Connection,
                         certainty: Certainty::Confirmed,
                         status: Status::Unsupported,
-                        code: "bad_upgrade_offer",
+                        code: IssueCode::BadUpgradeOffer,
                         detail: detail.into(),
                         wire: head_wire_bytes,
                         sources: union_balanced(sets.clone())?,
@@ -138,7 +139,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Limit,
-                    code: "pending_requests",
+                    code: IssueCode::PendingRequests,
                     detail: "pre-upgrade requests exceed the configured bound".into(),
                     wire: head.wire().clone(),
                     sources,
@@ -179,7 +180,7 @@ impl ConnectionState {
                         scope: IssueScope::Connection,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
-                        code: "prelude_framing",
+                        code: IssueCode::PreludeFraming,
                         detail: error.to_string().into(),
                         wire: head.wire().clone(),
                         sources,

@@ -5,6 +5,7 @@
 
 use super::super::{ChainHead, ConnectionState, Context, Decoded, Evidence, Fault, Head, Phase};
 use crate::analysis::http2::Error;
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::headers::{FieldRole, validate};
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
@@ -107,7 +108,7 @@ impl ConnectionState {
                         scope: IssueScope::Stream,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
-                        code: "closed_stream_headers",
+                        code: IssueCode::ClosedStreamHeaders,
                         detail: "HEADERS arrived on a fully closed stream".into(),
                         wire: block.clone(),
                         sources: block_sources.clone(),
@@ -120,12 +121,12 @@ impl ConnectionState {
             } else {
                 let (code, detail) = if side == Side::Server && client_initiated {
                     (
-                        "response_without_stream",
+                        IssueCode::ResponseWithoutStream,
                         "the server sent HEADERS on a stream the client never opened",
                     )
                 } else {
                     (
-                        "unpromised_stream",
+                        IssueCode::UnpromisedStream,
                         "HEADERS opened a stream the endpoint did not initiate",
                     )
                 };
@@ -171,16 +172,19 @@ impl ConnectionState {
                     let above_goaway =
                         self.goaway[Side::Server].is_some_and(|last| stream_id > last);
                     let validation = validate(FieldRole::Response, &headers)
-                        .map_err(|detail| ("header_semantics", detail))
+                        .map_err(|detail| (IssueCode::HeaderSemantics, detail))
                         .and_then(|meta| {
                             if end_stream
                                 && meta
                                     .status
                                     .is_some_and(|status| (100..200).contains(&status))
                             {
-                                Err(("header_semantics", "a 1xx response must not end the stream"))
+                                Err((
+                                    IssueCode::HeaderSemantics,
+                                    "a 1xx response must not end the stream",
+                                ))
                             } else if above_goaway {
-                                Err(("response_after_goaway", RESPONSE_AFTER_GOAWAY))
+                                Err((IssueCode::ResponseAfterGoaway, RESPONSE_AFTER_GOAWAY))
                             } else {
                                 Ok(meta)
                             }
@@ -243,7 +247,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "headers_after_end",
+                    code: IssueCode::HeadersAfterEnd,
                     detail: "HEADERS arrived after the sender already ended the stream".into(),
                     wire: block,
                     sources: block_sources,
@@ -268,7 +272,7 @@ impl ConnectionState {
                                 scope: IssueScope::Connection,
                                 certainty: Certainty::Confirmed,
                                 status: Status::Malformed,
-                                code: "reserved_stream_headers",
+                                code: IssueCode::ReservedStreamHeaders,
                                 detail: "a client sent HEADERS on a reserved stream".into(),
                                 wire: block,
                                 sources: block_sources,
@@ -316,7 +320,7 @@ impl ConnectionState {
                         scope: IssueScope::Stream,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
-                        code: "header_semantics",
+                        code: IssueCode::HeaderSemantics,
                         detail: detail.into(),
                         wire: block.clone(),
                         sources: block_sources.clone(),
@@ -351,7 +355,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "response_after_goaway",
+                    code: IssueCode::ResponseAfterGoaway,
                     detail: RESPONSE_AFTER_GOAWAY.into(),
                     wire: block.clone(),
                     sources: block_sources.clone(),
@@ -374,7 +378,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "header_semantics",
+                    code: IssueCode::HeaderSemantics,
                     detail: "204 and 304 responses cannot contain trailers".into(),
                     wire: block.clone(),
                     sources: block_sources.clone(),
@@ -391,7 +395,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "trailer_without_end_stream",
+                    code: IssueCode::TrailerWithoutEndStream,
                     detail: "a trailer block must terminate the stream".into(),
                     wire: block.clone(),
                     sources: block_sources.clone(),
@@ -411,7 +415,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "informational_end_stream",
+                    code: IssueCode::InformationalEndStream,
                     detail: "a 1xx response must not end the stream".into(),
                     wire: block.clone(),
                     sources: block_sources.clone(),
@@ -428,7 +432,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Unsupported,
-                    code: "extended_connect",
+                    code: IssueCode::ExtendedConnect,
                     detail: ":protocol extended CONNECT is outside this analyzer's semantics"
                         .into(),
                     wire: block.clone(),
@@ -478,7 +482,7 @@ impl ConnectionState {
                         scope: IssueScope::Stream,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
-                        code: "second_trailer_block",
+                        code: IssueCode::SecondTrailerBlock,
                         detail: "a third header block follows completed trailers".into(),
                         wire: block.clone(),
                         sources: block_sources.clone(),
@@ -533,7 +537,7 @@ impl ConnectionState {
                         scope: IssueScope::Stream,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
-                        code: "headers_after_end",
+                        code: IssueCode::HeadersAfterEnd,
                         detail: "HEADERS arrived after the sender already ended the stream".into(),
                         wire: block,
                         sources: block_sources,
@@ -573,7 +577,7 @@ impl ConnectionState {
             flow: self.dir_flow(Side::Server), http2_stream_id: Some(id), scope: IssueScope::Stream,
             certainty: if invalid { Certainty::Confirmed } else { Certainty::Indeterminate },
             status: if invalid { Status::Malformed } else { Status::Incomplete },
-            code: if early.ended { "headers_after_end" } else if invalid { "header_semantics" } else { "early_response_trailers" },
+            code: if early.ended { IssueCode::HeadersAfterEnd } else if invalid { IssueCode::HeaderSemantics } else { IssueCode::EarlyResponseTrailers },
             detail: "HEADERS follow a previously observed final response whose opener was capture-delayed".into(),
             wire: evidence.wire.clone(), sources: evidence.sources.clone(),
         })?;

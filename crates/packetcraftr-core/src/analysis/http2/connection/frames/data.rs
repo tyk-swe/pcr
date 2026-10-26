@@ -5,6 +5,7 @@
 
 use super::super::{ConnectionState, Context, Evidence, Fault};
 use crate::analysis::http2::Error;
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
 use crate::analysis::http2::side::Side;
@@ -49,7 +50,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "connection_window_underflow",
+                    code: IssueCode::ConnectionWindowUnderflow,
                     detail: "connection flow window passed the 31-bit floor".into(),
                     wire: evidence.wire.clone(),
                     sources: evidence.sources.clone(),
@@ -67,7 +68,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::ObservedOrder,
                     status: Status::Malformed,
-                    code: "connection_window_exceeded",
+                    code: IssueCode::ConnectionWindowExceeded,
                     detail: "DATA exceeded the observed connection window".into(),
                     wire: evidence.wire.clone(),
                     sources: evidence.sources.clone(),
@@ -104,7 +105,7 @@ impl ConnectionState {
                 self.issue(context, Fault {
                     flow: self.dir_flow(side), http2_stream_id: Some(stream_id),
                     scope: IssueScope::Stream, certainty: Certainty::Confirmed,
-                    status: Status::Malformed, code: "data_without_headers",
+                    status: Status::Malformed, code: IssueCode::DataWithoutHeaders,
                     detail: "server DATA preceded any response HEADERS in the same ordered byte stream".into(),
                     wire: evidence.wire, sources: evidence.sources,
                 })?;
@@ -140,7 +141,7 @@ impl ConnectionState {
                         scope: IssueScope::Stream,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
-                        code: "bodyless_response_body",
+                        code: IssueCode::BodylessResponseBody,
                         detail:
                             "a capture-delayed response that must not carry content carried DATA"
                                 .into(),
@@ -179,9 +180,9 @@ impl ConnectionState {
                         Status::Malformed
                     },
                     code: if closed {
-                        "data_closed_stream"
+                        IssueCode::DataClosedStream
                     } else {
-                        "data_unknown_stream"
+                        IssueCode::DataUnknownStream
                     },
                     detail: if closed {
                         "DATA arrived on a fully closed stream".into()
@@ -213,7 +214,7 @@ impl ConnectionState {
                     },
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "data_closed_stream",
+                    code: IssueCode::DataClosedStream,
                     detail: "DATA arrived on a stream closed to the sender".into(),
                     wire: evidence.wire,
                     sources: evidence.sources,
@@ -240,7 +241,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "stream_window_underflow",
+                    code: IssueCode::StreamWindowUnderflow,
                     detail: "stream flow window passed the 31-bit floor".into(),
                     wire: evidence.wire.clone(),
                     sources: evidence.sources.clone(),
@@ -258,7 +259,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::ObservedOrder,
                     status: Status::Malformed,
-                    code: "stream_window_exceeded",
+                    code: IssueCode::StreamWindowExceeded,
                     detail: "DATA exceeded the observed stream window".into(),
                     wire: evidence.wire.clone(),
                     sources: evidence.sources.clone(),
@@ -284,9 +285,9 @@ impl ConnectionState {
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
                     code: if trace_content {
-                        "trace_request_body"
+                        IssueCode::TraceRequestBody
                     } else {
-                        "bodyless_response_body"
+                        IssueCode::BodylessResponseBody
                     },
                     detail: "a message that must not carry content carried DATA".into(),
                     wire: evidence.wire.clone(),
@@ -318,7 +319,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "data_after_trailers",
+                    code: IssueCode::DataAfterTrailers,
                     detail: "DATA arrived after a trailer block".into(),
                     wire: evidence.wire.clone(),
                     sources: evidence.sources.clone(),
@@ -349,7 +350,7 @@ impl ConnectionState {
                         scope: IssueScope::Stream,
                         certainty: Certainty::Confirmed,
                         status: Status::Limit,
-                        code: "body_limit",
+                        code: IssueCode::BodyLimit,
                         detail: "observed message body exceeds the configured bound".into(),
                         wire: evidence.wire.clone(),
                         sources: evidence.sources.clone(),
@@ -385,7 +386,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Indeterminate,
                     status: Status::Incomplete,
-                    code: "data_after_early_response",
+                    code: IssueCode::DataAfterEarlyResponse,
                     detail:
                         "DATA follows response HEADERS observed before the delayed client opener"
                             .into(),
@@ -403,7 +404,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "data_without_headers",
+                    code: IssueCode::DataWithoutHeaders,
                     detail: "DATA arrived before a header block on the stream".into(),
                     wire: evidence.wire,
                     sources: evidence.sources,

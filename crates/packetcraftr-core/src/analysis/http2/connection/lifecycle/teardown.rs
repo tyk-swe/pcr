@@ -3,6 +3,7 @@
 
 //! Partial-message flushing, final resource teardown, and connection publication.
 
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use bytes::Bytes;
 
@@ -81,7 +82,7 @@ impl ConnectionState {
                     scope: IssueScope::Capture,
                     certainty: Certainty::Confirmed,
                     status,
-                    code: "incomplete_upgrade",
+                    code: IssueCode::IncompleteUpgrade,
                     detail: "the byte stream ended before the h2c upgrade completed".into(),
                     wire: head.wire().clone(),
                     sources,
@@ -147,7 +148,7 @@ impl ConnectionState {
                             scope: IssueScope::Capture,
                             certainty: Certainty::Confirmed,
                             status: Status::Incomplete,
-                            code: "unconsumed_bytes",
+                            code: IssueCode::UnconsumedBytes,
                             detail: "the capture ended with undecoded bytes".into(),
                             wire,
                             sources,
@@ -171,7 +172,7 @@ impl ConnectionState {
                                 Certainty::Indeterminate
                             },
                             status: Status::Incomplete,
-                            code: "settings_unobserved",
+                            code: IssueCode::SettingsUnobserved,
                             detail: "the endpoint's initial SETTINGS were never observed".into(),
                             wire: Bytes::new(),
                             sources: None,
@@ -227,7 +228,7 @@ impl ConnectionState {
                 self.terminate(
                     &flow,
                     Status::Incomplete,
-                    "capture_end",
+                    IssueCode::CaptureEnd,
                     "the capture ended before connection analysis completed",
                     context,
                 )?;

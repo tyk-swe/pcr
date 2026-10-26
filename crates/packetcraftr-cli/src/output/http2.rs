@@ -193,7 +193,7 @@ impl TryFrom<analysis::Issue> for Issue {
             generation: value.generation,
             http2_stream_id: value.http2_stream_id,
             flow: value.flow.into(),
-            code: value.code.to_owned(),
+            code: value.code.as_str().to_owned(),
             scope: value.scope.into(),
             certainty: value.certainty.into(),
             status: value.status.into(),

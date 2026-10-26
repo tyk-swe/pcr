@@ -6,6 +6,7 @@ use super::super::buffer::union_balanced;
 use super::super::model::{Certainty, IssueScope, Startup, Status};
 use super::super::upgrade::Prelude;
 use super::{ConnectionState, Context, DirectionPhase, Fault, PREFACE_LEN, Phase};
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::protocol::application::http;
@@ -168,7 +169,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "bad_preface",
+                    code: IssueCode::BadPreface,
                     detail: "client connection preface does not match the HTTP/2 magic".into(),
                     wire,
                     sources,

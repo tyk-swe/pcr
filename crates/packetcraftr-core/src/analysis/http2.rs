@@ -7,6 +7,7 @@ mod budget;
 mod buffer;
 mod connection;
 mod headers;
+mod issue;
 mod limits;
 mod model;
 mod settings;
@@ -20,6 +21,7 @@ mod error;
 mod tests;
 
 pub use error::Error;
+pub use issue::IssueCode;
 pub use limits::{
     Limits, MAX_ACTIVE_STREAMS, MAX_BODY_BYTES, MAX_CONTINUATIONS, MAX_FRAME_BYTES, MAX_FRAMES,
     MAX_HEADER_BLOCK_BYTES, MAX_HEADER_BYTES, MAX_HEADERS, MAX_PENDING_SETTINGS, MAX_STREAMS,
@@ -160,7 +162,7 @@ impl Collector {
                         conn.terminate(
                             &delivery.flow,
                             Status::Evicted,
-                            "generation_replaced",
+                            IssueCode::GenerationReplaced,
                             "the TCP tuple was reused for a newer connection",
                             &mut self.resources.context(out),
                         )?;
@@ -181,7 +183,7 @@ impl Collector {
                 &flow,
                 number,
                 Status::Gap,
-                "tcp_gap",
+                IssueCode::TcpGap,
                 "a TCP sequence gap invalidated the byte stream",
                 out,
             ),
@@ -189,7 +191,7 @@ impl Collector {
                 &flow,
                 number,
                 Status::Conflict,
-                "tcp_conflict",
+                IssueCode::TcpConflict,
                 "conflicting TCP retransmissions invalidated the byte stream",
                 out,
             ),
@@ -197,7 +199,7 @@ impl Collector {
                 &flow,
                 number,
                 Status::Evicted,
-                "tcp_evicted",
+                IssueCode::TcpEvicted,
                 "reassembly state was evicted before the stream completed",
                 out,
             ),
@@ -222,7 +224,7 @@ impl Collector {
         flow: &ScopedFlowKey,
         number: u64,
         status: Status,
-        code: &'static str,
+        code: IssueCode,
         detail: &'static str,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {

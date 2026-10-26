@@ -5,6 +5,7 @@
 
 use super::super::{ConnectionState, Context, Decoded, Fault};
 use crate::analysis::http2::Error;
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::headers::{FieldRole, validate};
 use crate::analysis::http2::model::{Certainty, IssueScope, MessageKind, Status};
@@ -36,7 +37,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "client_push_promise",
+                    code: IssueCode::ClientPushPromise,
                     detail: "a client sent PUSH_PROMISE".into(),
                     wire: block,
                     sources: block_sources,
@@ -59,7 +60,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty,
                     status: Status::Malformed,
-                    code: "push_disabled",
+                    code: IssueCode::PushDisabled,
                     detail: "PUSH_PROMISE while the client has push disabled".into(),
                     wire: block.clone(),
                     sources: block_sources.clone(),
@@ -87,7 +88,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "promised_stream_id",
+                    code: IssueCode::PromisedStreamId,
                     detail: "PUSH_PROMISE names a reused or client-numbered stream".into(),
                     wire: block,
                     sources: block_sources,
@@ -123,7 +124,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "push_promise_closed_parent",
+                    code: IssueCode::PushPromiseClosedParent,
                     detail: "PUSH_PROMISE on a parent stream that cannot push".into(),
                     wire: block.clone(),
                     sources: block_sources.clone(),
@@ -179,7 +180,7 @@ impl ConnectionState {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "push_promise_headers",
+                    code: IssueCode::PushPromiseHeaders,
                     detail: detail.into(),
                     wire: Bytes::new(),
                     sources: block_sources,
@@ -230,7 +231,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Limit,
-                    code: "active_streams",
+                    code: IssueCode::ActiveStreams,
                     detail: "concurrent streams exceed the configured bound".into(),
                     wire: Bytes::new(),
                     sources: None,

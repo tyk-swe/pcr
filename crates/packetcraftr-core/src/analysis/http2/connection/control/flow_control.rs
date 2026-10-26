@@ -7,6 +7,7 @@ use super::super::super::model::{Certainty, IssueScope, Status};
 use super::super::super::stream::Phase as StreamPhase;
 use super::super::super::{Error, settings};
 use super::super::{ConnectionState, Context, Evidence, Fault};
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::side::{PerSide, Side};
 
@@ -42,7 +43,7 @@ impl ConnectionState {
                         } else {
                             Status::Incomplete
                         },
-                        code: "connection_window_overflow",
+                        code: IssueCode::ConnectionWindowOverflow,
                         detail: "connection flow window exceeds 2^31-1".into(),
                         wire: evidence.wire,
                         sources: evidence.sources,
@@ -86,7 +87,7 @@ impl ConnectionState {
                         Certainty::ObservedOrder
                     },
                     status: Status::Malformed,
-                    code: "window_update_unknown_stream",
+                    code: IssueCode::WindowUpdateUnknownStream,
                     detail: "WINDOW_UPDATE on a stream that is not open".into(),
                     wire: evidence.wire,
                     sources: evidence.sources,
@@ -95,7 +96,11 @@ impl ConnectionState {
             if confirmed_idle {
                 self.fail(context, Status::Malformed)?;
             } else {
-                self.retain_pending_opener(stream_id, "window_update_unknown_stream", context)?;
+                self.retain_pending_opener(
+                    stream_id,
+                    IssueCode::WindowUpdateUnknownStream,
+                    context,
+                )?;
             }
             return Ok(());
         };
@@ -127,7 +132,7 @@ impl ConnectionState {
                     } else {
                         Status::Incomplete
                     },
-                    code: "stream_window_overflow",
+                    code: IssueCode::StreamWindowOverflow,
                     detail: "stream flow window exceeds 2^31-1".into(),
                     wire: evidence.wire,
                     sources: evidence.sources,
@@ -159,7 +164,7 @@ impl ConnectionState {
             self.issue(context, Fault {
                 flow: self.dir_flow(side), http2_stream_id: Some(0),
                 scope: IssueScope::Connection, certainty: Certainty::Confirmed,
-                status: Status::Malformed, code: "connection_window_exceeded",
+                status: Status::Malformed, code: IssueCode::ConnectionWindowExceeded,
                 detail: "DATA exhausted connection credit after the granting direction ended; prior DATA evidence is retained".into(),
                 wire: bytes::Bytes::new(), sources: None,
             })?;
@@ -199,7 +204,7 @@ impl ConnectionState {
                 self.issue(context, Fault {
                     flow: self.dir_flow(side), http2_stream_id: Some(id),
                     scope: IssueScope::Stream, certainty: Certainty::Confirmed,
-                    status: Status::Malformed, code: "stream_window_exceeded",
+                    status: Status::Malformed, code: IssueCode::StreamWindowExceeded,
                     detail: "DATA exhausted stream credit after the granting direction ended; prior DATA evidence is retained".into(),
                     wire: bytes::Bytes::new(), sources: None,
                 })?;
@@ -241,7 +246,7 @@ impl ConnectionState {
                 self.issue(context, Fault {
                     flow: self.dir_flow(side), http2_stream_id: Some(id),
                     scope: IssueScope::Stream, certainty: Certainty::Confirmed,
-                    status: Status::Malformed, code: "stream_window_exceeded",
+                    status: Status::Malformed, code: IssueCode::StreamWindowExceeded,
                     detail: "completed stream DATA exhausted credit before the granting direction ended; earlier DATA evidence is retained".into(),
                     wire: bytes::Bytes::new(), sources: None,
                 })?;

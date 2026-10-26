@@ -5,6 +5,7 @@
 
 use super::super::{Chain, ChainHead, ConnectionState, Context, Decoded, Evidence, Fault, Pos};
 use crate::analysis::http2::Error;
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget::{self, Charge};
 use crate::analysis::http2::buffer::union_balanced;
 use crate::analysis::http2::model::{Certainty, Header, IssueScope, Status};
@@ -123,7 +124,7 @@ impl ConnectionState {
                 scope: IssueScope::Connection,
                 certainty: Certainty::Confirmed,
                 status: Status::Limit,
-                code: "block_limit",
+                code: IssueCode::BlockLimit,
                 detail: "a header block exceeded its configured bound".into(),
                 wire,
                 sources,
@@ -234,7 +235,7 @@ impl ConnectionState {
                     scope: IssueScope::Compression,
                     certainty: Certainty::ObservedOrder,
                     status: Status::Incomplete,
-                    code: "hpack_table_size_ordering",
+                    code: IssueCode::HpackTableSizeOrdering,
                     detail: "an earlier table shrink may precede or follow receipt of SETTINGS; its required minimum cannot be confirmed".into(),
                     wire: bytes.clone(),
                     sources: block_sources.clone(),
@@ -245,8 +246,8 @@ impl ConnectionState {
                 Err(error) => {
                     let flow = self.dir_flow(side);
                     let (code, status) = match &error {
-                        wire::Error::Limit(_) => ("header_block_limit", Status::Limit),
-                        _ => ("hpack_decode", Status::Malformed),
+                        wire::Error::Limit(_) => (IssueCode::HeaderBlockLimit, Status::Limit),
+                        _ => (IssueCode::HpackDecode, Status::Malformed),
                     };
                     self.issue(
                         context,
@@ -324,7 +325,7 @@ impl ConnectionState {
                             scope: IssueScope::Stream,
                             certainty: Certainty::ObservedOrder,
                             status: Status::Incomplete,
-                            code: "header_list_size_advisory",
+                            code: IssueCode::HeaderListSizeAdvisory,
                             detail: format!(
                                 "decoded header list {decoded_bytes} exceeds the peer's advertised maximum"
                             )

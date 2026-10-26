@@ -13,6 +13,7 @@ pub(crate) mod streams;
 pub(crate) use super::budget::Context;
 
 use super::budget::{self, Charge};
+use crate::analysis::http2::IssueCode;
 
 use super::Error;
 use super::buffer::SourceBuffer;
@@ -123,7 +124,7 @@ pub(crate) struct Fault {
     pub scope: IssueScope,
     pub certainty: Certainty,
     pub status: Status,
-    pub code: &'static str,
+    pub code: IssueCode,
     pub detail: std::borrow::Cow<'static, str>,
     pub wire: Bytes,
     pub sources: Option<SourceSet>,
@@ -196,7 +197,7 @@ pub(crate) struct ConnectionState {
     pub done: bool,
     pub finalizing: bool,
     pub resume_side: Option<Side>,
-    pub pending_openers: BTreeMap<u32, &'static str>,
+    pub pending_openers: BTreeMap<u32, IssueCode>,
     pub parent_deferred: VecDeque<MessageBuilder>,
     pub ack_deferred: VecDeque<(Side, MessageBuilder, Status)>,
 }

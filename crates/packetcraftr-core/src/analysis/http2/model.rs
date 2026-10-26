@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::analysis::http2::IssueCode;
 use crate::analysis::provenance::SourceSet;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::protocol::application::http;
@@ -100,7 +101,7 @@ pub struct Issue {
     pub generation: u64,
     pub http2_stream_id: Option<u32>,
     pub flow: ScopedFlowKey,
-    pub code: &'static str,
+    pub code: IssueCode,
     pub scope: IssueScope,
     pub certainty: Certainty,
     pub status: Status,

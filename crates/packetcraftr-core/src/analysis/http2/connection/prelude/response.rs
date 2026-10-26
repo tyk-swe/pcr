@@ -6,6 +6,7 @@ use super::super::super::buffer::union_balanced;
 use super::super::super::model::{Certainty, Header, IssueScope, MessageKind, Status};
 use super::super::super::upgrade;
 use super::super::{ConnectionState, Context, Fault, Phase};
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::protocol::application::http::{self, BodyDecoder, StartLine};
@@ -69,7 +70,7 @@ impl ConnectionState {
                     } else {
                         Status::Incomplete
                     },
-                    code: "prelude_unsolicited_response",
+                    code: IssueCode::PreludeUnsolicitedResponse,
                     detail: "capture ended without a request matching this HTTP/1 response".into(),
                     wire,
                     sources: union_balanced(sets)?,
@@ -114,7 +115,7 @@ impl ConnectionState {
                         scope: IssueScope::Connection,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
-                        code: "prelude_head",
+                        code: IssueCode::PreludeHead,
                         detail: error.to_string().into(),
                         wire,
                         sources,
@@ -139,7 +140,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "prelude_not_response",
+                    code: IssueCode::PreludeNotResponse,
                     detail: "the server direction did not carry a response head".into(),
                     wire: Bytes::copy_from_slice(&view[..consumed.min(256)]),
                     sources,
@@ -179,7 +180,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "prelude_framing",
+                    code: IssueCode::PreludeFraming,
                     detail:
                         "informational responses cannot contain Content-Length or Transfer-Encoding"
                             .into(),
@@ -207,7 +208,7 @@ impl ConnectionState {
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Unsupported,
-                    code: "unexpected_101",
+                    code: IssueCode::Unexpected101,
                     detail: "a 101 response does not match a pending h2c offer".into(),
                     wire: head_wire_bytes,
                     sources: union_balanced(sets)?,
@@ -229,7 +230,7 @@ impl ConnectionState {
                         Certainty::Indeterminate
                     },
                     status: Status::Malformed,
-                    code: "prelude_unsolicited_response",
+                    code: IssueCode::PreludeUnsolicitedResponse,
                     detail: "HTTP/1 response has no pending request".into(),
                     wire: head_wire_bytes,
                     sources: union_balanced(sets)?,
@@ -318,7 +319,7 @@ impl ConnectionState {
                         scope: IssueScope::Connection,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
-                        code: "prelude_framing",
+                        code: IssueCode::PreludeFraming,
                         detail: error.to_string().into(),
                         wire: head.wire().clone(),
                         sources,

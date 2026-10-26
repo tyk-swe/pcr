@@ -5,6 +5,7 @@ mod body;
 mod request;
 mod response;
 
+use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use body::BodyStep;
 
@@ -86,7 +87,7 @@ impl ConnectionState {
                 // A refusal is a complete HTTP/1 exchange, not an HTTP/2 error.
                 // EOF classifies the connection as unsupported if no retry succeeds.
                 status: Status::Complete,
-                code: "refused_upgrade",
+                code: IssueCode::RefusedUpgrade,
                 detail: "the server declined this h2c upgrade request".into(),
                 wire: head.wire().clone(),
                 sources,

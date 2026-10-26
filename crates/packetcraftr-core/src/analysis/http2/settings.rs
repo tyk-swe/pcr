@@ -3,6 +3,7 @@
 
 use super::budget::Charge;
 use super::model::PeerSettings;
+use crate::analysis::http2::IssueCode;
 use crate::protocol::application::http2::Setting;
 use std::collections::VecDeque;
 
@@ -15,7 +16,7 @@ pub(crate) const MAX_HEADER_LIST_SIZE: u16 = 0x6;
 pub(crate) const WINDOW_MAX: i64 = 0x7fff_ffff;
 
 pub(crate) struct SettingIssue {
-    pub code: &'static str,
+    pub code: IssueCode,
     pub detail: &'static str,
 }
 
@@ -87,13 +88,13 @@ impl DirectionSettings {
         let mut issues = Vec::new();
         for setting in settings {
             let code = match setting.id {
-                ENABLE_PUSH if setting.value > 1 => Some("settings_enable_push_value"),
-                ENABLE_PUSH if server_sent => Some("settings_enable_push_role"),
+                ENABLE_PUSH if setting.value > 1 => Some(IssueCode::SettingsEnablePushValue),
+                ENABLE_PUSH if server_sent => Some(IssueCode::SettingsEnablePushRole),
                 INITIAL_WINDOW_SIZE if setting.value > WINDOW_MAX as u32 => {
-                    Some("settings_initial_window_size")
+                    Some(IssueCode::SettingsInitialWindowSize)
                 }
                 MAX_FRAME_SIZE if !(16384..=16_777_215).contains(&setting.value) => {
-                    Some("settings_max_frame_size")
+                    Some(IssueCode::SettingsMaxFrameSize)
                 }
                 _ => None,
             };
@@ -114,14 +115,14 @@ impl DirectionSettings {
                     0 | 1 => {
                         if server_sent {
                             issues.push(SettingIssue {
-                                code: "settings_enable_push_role",
+                                code: IssueCode::SettingsEnablePushRole,
                                 detail: "a server must not send SETTINGS_ENABLE_PUSH",
                             });
                         }
                         pending.final_values.enable_push = setting.value != 0;
                     }
                     _ => issues.push(SettingIssue {
-                        code: "settings_enable_push_value",
+                        code: IssueCode::SettingsEnablePushValue,
                         detail: "SETTINGS_ENABLE_PUSH value is not 0 or 1",
                     }),
                 },
@@ -131,7 +132,7 @@ impl DirectionSettings {
                 INITIAL_WINDOW_SIZE => {
                     if setting.value > WINDOW_MAX as u32 {
                         issues.push(SettingIssue {
-                            code: "settings_initial_window_size",
+                            code: IssueCode::SettingsInitialWindowSize,
                             detail: "SETTINGS_INITIAL_WINDOW_SIZE exceeds 2^31-1",
                         });
                     } else {
@@ -152,7 +153,7 @@ impl DirectionSettings {
                 MAX_FRAME_SIZE => {
                     if !(16384..=16_777_215).contains(&setting.value) {
                         issues.push(SettingIssue {
-                            code: "settings_max_frame_size",
+                            code: IssueCode::SettingsMaxFrameSize,
                             detail: "SETTINGS_MAX_FRAME_SIZE is outside 16384..=16777215",
                         });
                     } else {

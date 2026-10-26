@@ -14,8 +14,9 @@ use bytes::Bytes;
 
 impl ConnectionState {
     pub(super) fn client_prelude_step(&mut self, context: &mut Context<'_>) -> Result<bool, Error> {
-        let dir = self.dirs[Side::Client]
-            .as_mut()
+        let dir = self
+            .directions
+            .get_mut(Side::Client)
             .ok_or(Error::Invariant("direction not found"))?;
         let need = dir.buffer.len().min(http::MAX_HEADER_BYTES + 1);
         let view = Bytes::copy_from_slice(&dir.buffer.bytes()[..need]);

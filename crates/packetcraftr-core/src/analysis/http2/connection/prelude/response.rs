@@ -22,7 +22,7 @@ impl ConnectionState {
         {
             return Ok(());
         }
-        let Some(dir) = self.dirs[Side::Server].as_ref() else {
+        let Some(dir) = self.directions.get(Side::Server) else {
             return Ok(());
         };
         let need = dir.buffer.len().min(http::MAX_HEADER_BYTES + 1);
@@ -31,8 +31,9 @@ impl ConnectionState {
         }
         let uncertain = !self.clean_start
             || self.status != Status::Complete
-            || self.dirs[Side::Client]
-                .as_ref()
+            || self
+                .directions
+                .get(Side::Client)
                 .is_some_and(|dir| !dir.buffer.is_empty())
             || self
                 .prelude
@@ -41,8 +42,9 @@ impl ConnectionState {
         let scratch = need * 4 + budget::PRELUDE_HEADER_OVERHEAD;
         context.reserve_scratch(scratch)?;
         let result = (|| {
-            let dir = self.dirs[Side::Server]
-                .as_mut()
+            let dir = self
+                .directions
+                .get_mut(Side::Server)
                 .ok_or(Error::Invariant("server"))?;
             let view = Bytes::copy_from_slice(&dir.buffer.bytes()[..need]);
             let Ok(Some((head, consumed))) = http::parse_head(&view) else {
@@ -81,8 +83,9 @@ impl ConnectionState {
 
     pub(super) fn server_prelude_step(&mut self, context: &mut Context<'_>) -> Result<bool, Error> {
         let unmatched = self.prelude.as_ref().is_some_and(|p| p.requests.is_empty());
-        let partial_request = self.dirs[Side::Client]
-            .as_ref()
+        let partial_request = self
+            .directions
+            .get(Side::Client)
             .is_some_and(|dir| !dir.buffer.is_empty());
         if unmatched && (!self.clean_start || partial_request) {
             // Capture order can expose a response before the request head is
@@ -90,8 +93,9 @@ impl ConnectionState {
             // buffer; the next client delivery pumps this direction again.
             return Ok(false);
         }
-        let dir = self.dirs[Side::Server]
-            .as_mut()
+        let dir = self
+            .directions
+            .get_mut(Side::Server)
             .ok_or(Error::Invariant("direction not found"))?;
         let need = dir.buffer.len().min(http::MAX_HEADER_BYTES + 1);
         let view = Bytes::copy_from_slice(&dir.buffer.bytes()[..need]);

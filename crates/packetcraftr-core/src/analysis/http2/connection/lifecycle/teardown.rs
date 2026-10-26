@@ -128,7 +128,7 @@ impl ConnectionState {
         }
         self.report_unmatched_response_at_eof(context)?;
         for side in Side::BOTH {
-            if let Some(dir) = self.dirs[side].as_mut() {
+            if let Some(dir) = self.directions.get_mut(side) {
                 if !dir.buffer.is_empty() && !matches!(self.phase, Phase::Dead) {
                     let partial = dir.buffer.len();
                     let sets = dir.buffer.contributors(partial);
@@ -149,7 +149,7 @@ impl ConnectionState {
                     )?;
                 }
                 if !self.settings[side].seen
-                    && self.dirs[side].as_ref().is_some_and(|dir| {
+                    && self.directions.get(side).is_some_and(|dir| {
                         self.clean_start || dir.saw_frame || !dir.buffer.is_empty()
                     })
                 {
@@ -173,8 +173,9 @@ impl ConnectionState {
         }
         if !matches!(self.phase, Phase::Dead) {
             if matches!(self.phase, Phase::H2)
-                && (self.dirs.iter().any(|dir| {
-                    dir.as_ref()
+                && (Side::BOTH.into_iter().any(|side| {
+                    self.directions
+                        .get(side)
                         .is_none_or(|dir| dir.phase != DirectionPhase::Frames)
                 }) || self.settings.iter().any(|direction| !direction.seen)
                     || self
@@ -184,9 +185,10 @@ impl ConnectionState {
             {
                 self.worst(Status::Incomplete);
             }
-            if self.dirs[Side::Client].is_none() {
-                let all_garbage = self.pending.iter().any(|dir| dir.received)
-                    && self.pending.iter().all(|dir| !dir.received || dir.garbage);
+            if self.directions.get(Side::Client).is_none() {
+                let candidates = self.directions.candidates();
+                let all_garbage = candidates.iter().any(|dir| dir.received)
+                    && candidates.iter().all(|dir| !dir.received || dir.garbage);
                 self.worst(if self.startup == Startup::Unknown && all_garbage {
                     Status::Unsupported
                 } else {
@@ -210,7 +212,7 @@ impl ConnectionState {
                 self.worst(Status::Incomplete);
             } else if self.refused {
                 self.worst(Status::Unsupported);
-            } else if self.dirs[Side::Server].is_none() && self.frames > 0 {
+            } else if self.directions.get(Side::Server).is_none() && self.frames > 0 {
                 self.worst(Status::Incomplete);
             }
             if !self.done {

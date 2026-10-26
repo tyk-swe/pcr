@@ -32,7 +32,7 @@ impl ConnectionState {
                 prelude.server_body.is_some()
             }
         });
-        let buffered = self.dirs[side].as_ref().map_or(0, |dir| dir.buffer.len());
+        let buffered = self.directions.get(side).map_or(0, |dir| dir.buffer.len());
         let scratch = if body_active || buffered == 0 {
             0
         } else {
@@ -136,7 +136,7 @@ impl ConnectionState {
             self.emit_message(Side::Client, msg, Status::Complete, context)?;
         }
         self.end_side(Side::Client, 1, Status::Complete, context)?;
-        if let Some(dir) = self.dirs[Side::Client].as_mut() {
+        if let Some(dir) = self.directions.get_mut(Side::Client) {
             dir.phase = DirectionPhase::Preface;
         }
         self.phase = Phase::H2;
@@ -226,7 +226,7 @@ impl ConnectionState {
             self.fail(context, Status::Malformed)?;
             return Ok(());
         }
-        if let Some(dir) = self.dirs[Side::Server].as_mut()
+        if let Some(dir) = self.directions.get_mut(Side::Server)
             && let Some(decoder) = dir.decoder.as_mut()
         {
             if let Some(min) = applied.pending.minimum_table_size {
@@ -256,7 +256,7 @@ impl ConnectionState {
         self.admitted_streams += 1;
         self.streams.insert(1, stream);
         self.active[Side::Client] += 1;
-        if let Some(dir) = self.dirs[Side::Server].as_mut() {
+        if let Some(dir) = self.directions.get_mut(Side::Server) {
             dir.phase = DirectionPhase::Frames;
         }
         if request_done {
@@ -264,7 +264,7 @@ impl ConnectionState {
                 msg.stream_id = 1;
                 self.emit_message(Side::Client, msg, Status::Complete, context)?;
             }
-            if let Some(dir) = self.dirs[Side::Client].as_mut() {
+            if let Some(dir) = self.directions.get_mut(Side::Client) {
                 dir.phase = DirectionPhase::Preface;
             }
             self.phase = Phase::H2;

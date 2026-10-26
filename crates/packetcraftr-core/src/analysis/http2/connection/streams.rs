@@ -17,8 +17,9 @@ use bytes::Bytes;
 impl ConnectionState {
     pub(crate) fn opener_exhausted(&self, owner: Side) -> bool {
         self.clean_start
-            && self.dirs[owner]
-                .as_ref()
+            && self
+                .directions
+                .get(owner)
                 .is_some_and(|dir| dir.fully_consumed_fin)
     }
 
@@ -190,8 +191,9 @@ impl ConnectionState {
         // consumed receiving FIN also rules out any hidden peer resets.
         let confirmed = receiver.pending.is_empty()
             && (max == 0
-                || self.dirs[initiator.peer()]
-                    .as_ref()
+                || self
+                    .directions
+                    .get(initiator.peer())
                     .is_some_and(|dir| dir.closed && dir.buffer.is_empty() && dir.chain.is_none()));
         self.issue(
             context,

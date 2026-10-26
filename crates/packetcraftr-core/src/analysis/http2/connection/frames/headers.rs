@@ -57,7 +57,10 @@ impl ConnectionState {
         if end_headers {
             self.block_done(side, chain, context)
         } else {
-            let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
+            let dir = self
+                .directions
+                .get_mut(side)
+                .ok_or(Error::Invariant("dir"))?;
             dir.chain = Some(chain);
             Ok(())
         }
@@ -73,7 +76,10 @@ impl ConnectionState {
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let Evidence { wire, sources } = evidence;
-        let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
+        let dir = self
+            .directions
+            .get_mut(side)
+            .ok_or(Error::Invariant("dir"))?;
         let Some(mut chain) = dir.chain.take() else {
             return Ok(());
         };
@@ -101,7 +107,10 @@ impl ConnectionState {
         if flags & wire::FLAG_END_HEADERS != 0 {
             self.block_done(side, chain, context)
         } else {
-            let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
+            let dir = self
+                .directions
+                .get_mut(side)
+                .ok_or(Error::Invariant("dir"))?;
             dir.chain = Some(chain);
             Ok(())
         }
@@ -145,7 +154,10 @@ impl ConnectionState {
         self.next_origin += 1;
         let block_sets = std::mem::take(&mut chain.sets);
         let block_sources = union_balanced(block_sets)?;
-        let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
+        let dir = self
+            .directions
+            .get_mut(side)
+            .ok_or(Error::Invariant("dir"))?;
         if let Some(sources) = block_sources.clone() {
             context.track(&mut dir.charge, &sources)?;
             dir.block_sources.insert(origin, sources);
@@ -193,8 +205,9 @@ impl ConnectionState {
                     .into_iter()
                     .flatten()
                     .min();
-                    let decoder = self.dirs[side]
-                        .as_mut()
+                    let decoder = self
+                        .directions
+                        .get_mut(side)
                         .ok_or(Error::Invariant("dir"))?
                         .decoder
                         .as_mut()
@@ -257,7 +270,7 @@ impl ConnectionState {
                     let mut compression_sets: Vec<crate::analysis::provenance::SourceSet> =
                         Vec::new();
                     {
-                        let dir = self.dirs[side].as_ref().ok_or(Error::Invariant("dir"))?;
+                        let dir = self.directions.get(side).ok_or(Error::Invariant("dir"))?;
                         let mut seen = HashSet::new();
                         for field in &block.fields {
                             for origin in &field.origins {
@@ -278,7 +291,10 @@ impl ConnectionState {
                     let compression = union_balanced(compression_sets)?;
                     let decoded_bytes = block.decoded_bytes;
                     {
-                        let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
+                        let dir = self
+                            .directions
+                            .get_mut(side)
+                            .ok_or(Error::Invariant("dir"))?;
                         let kept: HashSet<u64> = dir
                             .decoder
                             .as_ref()

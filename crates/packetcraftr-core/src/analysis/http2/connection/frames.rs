@@ -27,8 +27,9 @@ impl ConnectionState {
             return Ok(false);
         }
         {
-            let dir = self.dirs[side]
-                .as_mut()
+            let dir = self
+                .directions
+                .get_mut(side)
                 .ok_or(Error::Invariant("direction not found"))?;
             if dir.buffer.len() < wire::HEADER_LEN {
                 return Ok(false);
@@ -65,7 +66,10 @@ impl ConnectionState {
                 return Ok(false);
             }
         }
-        let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
+        let dir = self
+            .directions
+            .get_mut(side)
+            .ok_or(Error::Invariant("dir"))?;
         let length = wire::declared_length(dir.buffer.bytes());
         let total = wire::HEADER_LEN + length;
         let setting_words = size_of::<wire::Setting>();
@@ -97,13 +101,19 @@ impl ConnectionState {
         total: usize,
         context: &mut Context<'_>,
     ) -> Result<bool, Error> {
-        let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
+        let dir = self
+            .directions
+            .get_mut(side)
+            .ok_or(Error::Invariant("dir"))?;
         let wire_bytes = Bytes::copy_from_slice(&dir.buffer.bytes()[..total]);
         let parsed = wire::parse_frame_for_analysis(&wire_bytes, context.limits.max_frame_bytes);
         match parsed {
             Ok(Some((frame, _))) => {
                 context.check_frames()?;
-                let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
+                let dir = self
+                    .directions
+                    .get_mut(side)
+                    .ok_or(Error::Invariant("dir"))?;
                 let sets = dir.buffer.contributors(total);
                 let dropped = dir.buffer.consume(total);
                 dir.release_consumed(total, dropped, context)?;
@@ -123,7 +133,10 @@ impl ConnectionState {
         error: wire::Error,
         context: &mut Context<'_>,
     ) -> Result<bool, Error> {
-        let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
+        let dir = self
+            .directions
+            .get_mut(side)
+            .ok_or(Error::Invariant("dir"))?;
         let bytes = dir.buffer.bytes();
         let priority_length_error = matches!(
             error,
@@ -209,8 +222,9 @@ impl ConnectionState {
     ) -> Result<(), Error> {
         let header = frame.header.clone();
         let stream_id = header.stream_id;
-        let chained = self.dirs[side]
-            .as_ref()
+        let chained = self
+            .directions
+            .get(side)
             .and_then(|dir| dir.chain.as_ref().map(|chain| chain.stream_id));
         if let Some(chained) = chained {
             if header.frame_type != wire::TYPE_CONTINUATION || stream_id != chained {
@@ -420,7 +434,7 @@ impl ConnectionState {
         let flags = frame.header.flags;
         let stream_id = frame.header.stream_id;
         let first_frame = {
-            let Some(dir) = self.dirs[side].as_mut() else {
+            let Some(dir) = self.directions.get_mut(side) else {
                 return Ok(());
             };
             let first = !dir.saw_frame;

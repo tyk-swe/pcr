@@ -25,8 +25,9 @@ impl ConnectionState {
         side: Side,
         context: &mut Context<'_>,
     ) -> Result<BodyStep, Error> {
-        let dir = self.dirs[side]
-            .as_mut()
+        let dir = self
+            .directions
+            .get_mut(side)
             .ok_or(Error::Invariant("direction not found"))?;
         let has_body = self.prelude.as_ref().is_some_and(|p| {
             if side == Side::Client {

@@ -4,6 +4,7 @@
 //! Connection and direction state, input buffering, and processing pumps.
 
 pub(crate) mod control;
+pub(crate) mod directions;
 pub(crate) mod frames;
 pub(crate) mod lifecycle;
 pub(crate) mod prelude;
@@ -11,12 +12,12 @@ pub(crate) mod startup;
 pub(crate) mod streams;
 
 pub(crate) use super::budget::Context;
+pub(crate) use directions::{Chain, ChainHead, DirectionPhase, DirectionState, Directions};
 
 use super::budget::{self, Charge};
 use crate::analysis::http2::IssueCode;
 
 use super::Error;
-use super::buffer::SourceBuffer;
 use super::model::{Certainty, Issue, IssueScope, Startup, Status};
 use super::settings::DirectionSettings;
 use super::stream::{MessageBuilder, StreamState};
@@ -29,7 +30,7 @@ use crate::protocol::application::http2 as wire;
 use crate::protocol::application::http2::hpack;
 use bytes::Bytes;
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 pub(crate) const PREFACE_LEN: usize = 24;
 const READ_CHUNK: usize = 4096;
@@ -40,83 +41,6 @@ pub(crate) enum Phase {
     Prelude,
     H2,
     Dead,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DirectionPhase {
-    Sniff,
-    Prelude,
-    Preface,
-    Frames,
-}
-
-pub(crate) struct Chain {
-    pub stream_id: u32,
-    pub head: ChainHead,
-    pub bytes: bytes::BytesMut,
-    pub frames: usize,
-    pub sets: Vec<SourceSet>,
-    pub charge: Charge,
-}
-#[derive(Clone, Copy)]
-pub(crate) enum ChainHead {
-    Headers { end_stream: bool, malformed: bool },
-    PushPromise { promised: u32 },
-}
-
-pub(crate) struct DirectionState {
-    pub flow: ScopedFlowKey,
-    pub phase: DirectionPhase,
-    pub buffer: SourceBuffer,
-    pub decoder: Option<hpack::Decoder>,
-    pub decoder_charge: Charge,
-    pub block_sources: HashMap<u64, SourceSet>,
-    pub chain: Option<Chain>,
-    pub closed: bool,
-    pub fully_consumed_fin: bool,
-    pub saw_frame: bool,
-    pub received: bool,
-    pub garbage: bool,
-    pub charge: Charge,
-}
-impl DirectionState {
-    pub(crate) fn new(flow: ScopedFlowKey) -> Self {
-        Self {
-            flow,
-            phase: DirectionPhase::Sniff,
-            buffer: SourceBuffer::new(),
-            decoder: None,
-            decoder_charge: Charge::default(),
-            block_sources: HashMap::new(),
-            chain: None,
-            closed: false,
-            fully_consumed_fin: false,
-            saw_frame: false,
-            received: false,
-            garbage: false,
-            charge: Charge::default(),
-        }
-    }
-
-    pub(crate) fn release_consumed(
-        &mut self,
-        bytes: usize,
-        dropped: Vec<SourceSet>,
-        context: &mut Context<'_>,
-    ) -> Result<(), Error> {
-        context.release(&mut self.charge, bytes)?;
-        dropped
-            .iter()
-            .try_for_each(|set| context.untrack(&mut self.charge, set))
-    }
-
-    pub(crate) fn release_all(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
-        context.release_all(&mut self.charge)?;
-        context.release_all(&mut self.decoder_charge)?;
-        self.chain
-            .as_mut()
-            .map_or(Ok(()), |chain| context.release_all(&mut chain.charge))
-    }
 }
 
 pub(crate) struct Fault {
@@ -209,8 +133,7 @@ pub(crate) struct ConnectionState {
     pub startup: Startup,
     pub status: Status,
     pub phase: Phase,
-    pub pending: Vec<DirectionState>,
-    pub dirs: PerSide<Option<DirectionState>>,
+    pub directions: Directions,
     pub prelude: Option<Prelude>,
     pub streams: BTreeMap<u32, StreamState>,
     pub closed: BTreeMap<u32, ClosedStream>,
@@ -253,8 +176,7 @@ impl ConnectionState {
             startup: Startup::Unknown,
             status: Status::Complete,
             phase: Phase::Sniff,
-            pending: Vec::new(),
-            dirs: PerSide::new(None, None),
+            directions: Directions::Candidates(Vec::new()),
             prelude: None,
             streams: BTreeMap::new(),
             closed: BTreeMap::new(),
@@ -290,10 +212,10 @@ impl ConnectionState {
     }
 
     pub(crate) fn flow(&self) -> ScopedFlowKey {
-        self.dirs[Side::Client]
-            .as_ref()
-            .or(self.dirs[Side::Server].as_ref())
-            .or_else(|| self.pending.first())
+        self.directions
+            .elected()
+            .chain(self.directions.candidates().first())
+            .next()
             .map(|dir| dir.flow.clone())
             .unwrap_or_else(|| self.first_flow.clone())
     }
@@ -305,30 +227,22 @@ impl ConnectionState {
     }
 
     pub(crate) fn dir_flow(&self, side: Side) -> ScopedFlowKey {
-        self.dirs[side]
-            .as_ref()
+        self.directions
+            .get(side)
             .map(|dir| dir.flow.clone())
             .unwrap_or_else(|| self.flow())
     }
 
     pub(crate) fn dir_mut(&mut self, flow: &ScopedFlowKey) -> Option<&mut DirectionState> {
-        self.dirs
-            .iter_mut()
-            .flatten()
-            .find(|dir| dir.flow == *flow)
-            .or_else(|| self.pending.iter_mut().find(|dir| dir.flow == *flow))
+        self.directions.find_mut(flow)
     }
 
     pub(crate) fn side_of(&self, flow: &ScopedFlowKey) -> Option<Side> {
-        Side::BOTH.into_iter().find(|side| {
-            self.dirs[*side]
-                .as_ref()
-                .is_some_and(|dir| dir.flow == *flow)
-        })
+        self.directions.side_of(flow)
     }
 
     pub(crate) fn has_flow(&self, flow: &ScopedFlowKey) -> bool {
-        self.side_of(flow).is_some() || self.pending.iter().any(|dir| dir.flow == *flow)
+        self.directions.find(flow).is_some()
     }
 
     pub(crate) fn issue(&mut self, context: &mut Context<'_>, fault: Fault) -> Result<(), Error> {
@@ -398,8 +312,8 @@ impl ConnectionState {
             return Ok(());
         }
         if self.dir_mut(&delivery.flow).is_none() {
-            let elected = self.dirs[Side::Client].is_some();
-            if elected && self.dirs[Side::Server].is_none() {
+            let elected = self.directions.is_elected();
+            if elected && self.directions.get(Side::Server).is_none() {
                 let mut dir = DirectionState::new(delivery.flow.clone());
                 let mut decoder = hpack::Decoder::new(context.limits.hpack())?;
                 decoder.permit_table_size(self.settings[Side::Client].advertised.header_table_size);
@@ -413,11 +327,11 @@ impl ConnectionState {
                     _ => DirectionPhase::Sniff,
                 };
                 context.charge(&mut self.charge, budget::DIR_OVERHEAD)?;
-                self.dirs[Side::Server] = Some(dir);
-            } else if !elected && self.pending.len() < 2 {
+                self.directions.place(Side::Server, dir)?;
+            } else if !elected && self.directions.candidates().len() < 2 {
                 context.charge(&mut self.charge, budget::DIR_OVERHEAD)?;
-                self.pending
-                    .push(DirectionState::new(delivery.flow.clone()));
+                self.directions
+                    .add_candidate(DirectionState::new(delivery.flow.clone()))?;
             }
         }
         if !delivery.bytes.is_empty()
@@ -463,23 +377,18 @@ impl ConnectionState {
     }
 
     fn buffered_len(&self) -> usize {
-        self.dirs
-            .iter()
-            .flatten()
-            .chain(self.pending.iter())
-            .map(|dir| dir.buffer.len())
-            .sum()
+        self.directions.iter().map(|dir| dir.buffer.len()).sum()
     }
 
     pub(crate) fn waiting_settings_ack(&self, side: Side) -> bool {
         let peer = side.peer();
         if self.finalizing
             || !self.settings[peer].pending.is_empty()
-            || self.dirs[peer].as_ref().is_some_and(|dir| dir.closed)
+            || self.directions.get(peer).is_some_and(|dir| dir.closed)
         {
             return false;
         }
-        self.dirs[side].as_ref().is_some_and(|dir| {
+        self.directions.get(side).is_some_and(|dir| {
             let bytes = dir.buffer.bytes();
             dir.saw_frame
                 && dir.chain.is_none()
@@ -501,12 +410,7 @@ impl ConnectionState {
             // following bytes while the opposite reassembly direction advances.
             return Some(READ_CHUNK);
         }
-        let dir = self
-            .dirs
-            .iter()
-            .flatten()
-            .find(|dir| dir.flow == *flow)
-            .or_else(|| self.pending.iter().find(|dir| dir.flow == *flow))?;
+        let dir = self.directions.find(flow)?;
         Some(match dir.phase {
             DirectionPhase::Preface => PREFACE_LEN.saturating_sub(dir.buffer.len()),
             DirectionPhase::Frames => {
@@ -586,7 +490,7 @@ impl ConnectionState {
             if matches!(self.phase, Phase::Dead) {
                 return Ok(());
             }
-            let Some(dir) = self.dirs[side].as_ref() else {
+            let Some(dir) = self.directions.get(side) else {
                 return Ok(());
             };
             if dir.buffer.is_empty() || (dir.closed && dir.phase != DirectionPhase::Frames) {
@@ -611,8 +515,9 @@ impl ConnectionState {
         side: Side,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        let dir = self.dirs[side]
-            .as_mut()
+        let dir = self
+            .directions
+            .get_mut(side)
             .ok_or(Error::Invariant("direction not found"))?;
         if let Some(decoder) = dir.decoder.as_ref() {
             let now = decoder.buffered_bytes();

@@ -24,8 +24,9 @@ impl ConnectionState {
         if stream_id == 0 {
             self.send_window[grant] = self.send_window[grant].saturating_add(i64::from(increment));
             if self.send_window[grant] > settings::WINDOW_MAX {
-                let confirmed = self.dirs[grant]
-                    .as_ref()
+                let confirmed = self
+                    .directions
+                    .get(grant)
                     .is_some_and(|dir| dir.closed && dir.buffer.is_empty());
                 self.issue(
                     context,
@@ -151,8 +152,9 @@ impl ConnectionState {
     ) -> Result<bool, Error> {
         if self.phase != super::super::Phase::H2
             || !self.clean_start
-            || !self.dirs[side.peer()]
-                .as_ref()
+            || !self
+                .directions
+                .get(side.peer())
                 .is_some_and(|dir| dir.closed && dir.buffer.is_empty() && dir.chain.is_none())
         {
             return Ok(false);

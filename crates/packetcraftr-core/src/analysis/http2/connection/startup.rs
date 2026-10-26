@@ -5,7 +5,8 @@ use super::super::Error;
 use super::super::buffer::union_balanced;
 use super::super::model::{IssueScope, Startup, Status};
 use super::super::upgrade::Prelude;
-use super::{ConnectionState, Context, DirectionPhase, Fault, PREFACE_LEN, Phase};
+use super::directions::Elected;
+use super::{ConnectionState, Context, DirectionPhase, Directions, Fault, PREFACE_LEN, Phase};
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
@@ -82,8 +83,8 @@ pub(crate) fn classify(bytes: &[u8]) -> Verdict {
 
 impl ConnectionState {
     pub(crate) fn elect(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
-        for index in 0..self.pending.len() {
-            match classify(self.pending[index].buffer.bytes()) {
+        for index in 0..self.directions.candidates().len() {
+            match classify(self.directions.candidates()[index].buffer.bytes()) {
                 Verdict::Wait => continue,
                 Verdict::Tls => {
                     self.status = Status::Unsupported;
@@ -91,12 +92,12 @@ impl ConnectionState {
                     return Ok(());
                 }
                 Verdict::Garbage => {
-                    self.pending[index].garbage = true;
+                    self.directions.candidates_mut()[index].garbage = true;
                     continue;
                 }
                 Verdict::Prior => {
                     self.elect_client(index, Startup::PriorKnowledge, context)?;
-                    if let Some(dir) = self.dirs[Side::Client].as_mut() {
+                    if let Some(dir) = self.directions.get_mut(Side::Client) {
                         dir.phase = DirectionPhase::Preface;
                     }
                     self.phase = Phase::H2;
@@ -104,10 +105,10 @@ impl ConnectionState {
                 }
                 Verdict::Prelude => {
                     self.elect_client(index, Startup::Unknown, context)?;
-                    if let Some(dir) = self.dirs[Side::Client].as_mut() {
+                    if let Some(dir) = self.directions.get_mut(Side::Client) {
                         dir.phase = DirectionPhase::Prelude;
                     }
-                    for dir in self.dirs[Side::Server].iter_mut() {
+                    if let Some(dir) = self.directions.get_mut(Side::Server) {
                         dir.phase = DirectionPhase::Prelude;
                     }
                     self.prelude = Some(Prelude::new());
@@ -126,12 +127,16 @@ impl ConnectionState {
         startup: Startup,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        let mut pending = std::mem::take(&mut self.pending);
-        let mut client = pending.swap_remove(index);
+        let Directions::Candidates(mut candidates) =
+            std::mem::replace(&mut self.directions, Directions::Candidates(Vec::new()))
+        else {
+            return Err(Error::Invariant("election after election"));
+        };
+        let mut client = candidates.swap_remove(index);
         client.decoder = Some(hpack::Decoder::new(context.limits.hpack())?);
         self.startup = startup;
-        self.dirs[Side::Client] = Some(client);
-        for mut dir in pending {
+        let mut server = None;
+        for mut dir in candidates {
             if !dir.buffer.is_empty() {
                 self.clean_start = false;
             }
@@ -140,8 +145,9 @@ impl ConnectionState {
                 Startup::PriorKnowledge => DirectionPhase::Frames,
                 _ => DirectionPhase::Prelude,
             };
-            self.dirs[Side::Server] = Some(dir);
+            server = Some(dir);
         }
+        self.directions = Directions::Elected(Box::new(Elected { client, server }));
         Ok(())
     }
 
@@ -150,8 +156,9 @@ impl ConnectionState {
         side: Side,
         context: &mut Context<'_>,
     ) -> Result<bool, Error> {
-        let dir = self.dirs[side]
-            .as_mut()
+        let dir = self
+            .directions
+            .get_mut(side)
             .ok_or(Error::Invariant("direction not found"))?;
         let have = dir.buffer.len().min(PREFACE_LEN);
         if dir.buffer.bytes()[..have] != wire::CLIENT_PREFACE[..have] {
@@ -179,7 +186,7 @@ impl ConnectionState {
         }
         let dropped = dir.buffer.consume(PREFACE_LEN);
         dir.release_consumed(PREFACE_LEN, dropped, context)?;
-        if let Some(dir) = self.dirs[side].as_mut() {
+        if let Some(dir) = self.directions.get_mut(side) {
             dir.phase = DirectionPhase::Frames;
         }
         Ok(true)

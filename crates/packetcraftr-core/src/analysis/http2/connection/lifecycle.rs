@@ -19,12 +19,7 @@ use std::collections::HashMap;
 
 impl ConnectionState {
     pub(crate) fn drain(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
-        for dir in self
-            .dirs
-            .iter_mut()
-            .flatten()
-            .chain(self.pending.iter_mut())
-        {
+        for dir in self.directions.iter_mut() {
             let pending = dir.buffer.len();
             dir.buffer.consume(pending);
             dir.release_all(context)?;
@@ -108,9 +103,9 @@ impl ConnectionState {
                     Phase::Prelude => DirectionPhase::Prelude,
                     _ => DirectionPhase::Sniff,
                 };
-                self.dirs[reverse.peer()] = Some(dir);
+                self.directions.place(reverse.peer(), dir)?;
             } else {
-                self.pending.push(dir);
+                self.directions.add_candidate(dir)?;
             }
         }
         if let Some(dir) = self.dir_mut(flow) {
@@ -121,7 +116,7 @@ impl ConnectionState {
         }
         if self.phase == Phase::H2
             && let Some(side) = self.side_of(flow)
-            && let Some(dir) = self.dirs[side].as_mut()
+            && let Some(dir) = self.directions.get_mut(side)
             && dir.buffer.is_empty()
             && dir.chain.is_none()
             && dir.phase == DirectionPhase::Frames
@@ -136,8 +131,9 @@ impl ConnectionState {
         }
         if let Some(side) = self.side_of(flow)
             && self.send_window[side] > super::super::settings::WINDOW_MAX
-            && self.dirs[side]
-                .as_ref()
+            && self
+                .directions
+                .get(side)
                 .is_some_and(|dir| dir.buffer.is_empty())
             && self.phase == Phase::H2
         {
@@ -152,8 +148,9 @@ impl ConnectionState {
         }
         if let Some(side) = self.side_of(flow)
             && self.phase == Phase::H2
-            && self.dirs[side]
-                .as_ref()
+            && self
+                .directions
+                .get(side)
                 .is_some_and(|dir| dir.buffer.is_empty() && dir.chain.is_none())
         {
             if side == Side::Client
@@ -257,10 +254,9 @@ impl ConnectionState {
     }
 
     fn maybe_done(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
-        if self
-            .dirs
-            .iter()
-            .all(|d| d.as_ref().is_some_and(|d| d.closed))
+        if Side::BOTH
+            .into_iter()
+            .all(|side| self.directions.get(side).is_some_and(|dir| dir.closed))
             && self
                 .streams
                 .values()
@@ -274,7 +270,7 @@ impl ConnectionState {
             {
                 self.worst(Status::Incomplete);
             }
-            for dir in self.dirs.iter_mut().flatten() {
+            for dir in self.directions.elected_mut() {
                 dir.release_all(context)?;
                 dir.decoder = None;
                 dir.block_sources.clear();
@@ -301,12 +297,7 @@ impl ConnectionState {
         self.clean_start = false;
         self.report_unmatched_response_at_eof(context)?;
         let mut partials: Vec<(ScopedFlowKey, Option<u32>, Bytes, Option<SourceSet>)> = Vec::new();
-        for dir in self
-            .dirs
-            .iter_mut()
-            .flatten()
-            .chain(self.pending.iter_mut())
-        {
+        for dir in self.directions.iter_mut() {
             let partial = dir.buffer.len();
             if partial > 0 {
                 let sets = dir.buffer.contributors(partial);
@@ -353,7 +344,7 @@ impl ConnectionState {
         self.worst(status);
         self.phase = Phase::Dead;
         let mut faults = Vec::new();
-        for dir in self.dirs.iter_mut().flatten() {
+        for dir in self.directions.elected_mut() {
             if let Some(mut chain) = dir.chain.take() {
                 context.release_all(&mut chain.charge)?;
                 faults.push((

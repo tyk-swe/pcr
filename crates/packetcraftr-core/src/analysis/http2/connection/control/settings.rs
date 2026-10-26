@@ -26,8 +26,9 @@ impl ConnectionState {
                 // Two unmatched ACK heads cannot be explained by reordering:
                 // both matching SETTINGS would have to precede the other's ACK.
                 // Retain the peer's still-buffered evidence before failure drains it.
-                let peer_ack = self.dirs[side.peer()]
-                    .as_ref()
+                let peer_ack = self
+                    .directions
+                    .get(side.peer())
                     .filter(|dir| {
                         let bytes = dir.buffer.bytes();
                         self.settings[side].pending.is_empty()
@@ -48,8 +49,9 @@ impl ConnectionState {
                     });
                 let confirmed = self.clean_start
                     && (peer_ack.is_some()
-                        || self.dirs[side.peer()]
-                            .as_ref()
+                        || self
+                            .directions
+                            .get(side.peer())
                             .is_some_and(|dir| dir.buffer.is_empty()));
                 let status = if confirmed {
                     Status::Malformed
@@ -146,7 +148,7 @@ impl ConnectionState {
                 )?;
                 return Ok(());
             }
-            if let Some(dir) = self.dirs[side].as_mut()
+            if let Some(dir) = self.directions.get_mut(side)
                 && let Some(decoder) = dir.decoder.as_mut()
             {
                 if let Some(minimum) = acked.minimum_table_size {
@@ -202,8 +204,9 @@ impl ConnectionState {
         }
         let advertised_table_size = pending.final_values.header_table_size;
         self.settings[side].pending.push_back(pending);
-        if let Some(decoder) = self.dirs[side.peer()]
-            .as_mut()
+        if let Some(decoder) = self
+            .directions
+            .get_mut(side.peer())
             .and_then(|dir| dir.decoder.as_mut())
         {
             decoder.permit_table_size(advertised_table_size);

@@ -56,25 +56,23 @@ impl ConnectionState {
             dir.release_consumed(consumed, dropped, context)?;
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(Side::Server),
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: if !uncertain {
-                        Certainty::Confirmed
-                    } else {
-                        Certainty::Indeterminate
-                    },
-                    status: if !uncertain {
+                Fault::new(
+                    self.dir_flow(Side::Server),
+                    IssueScope::Connection,
+                    if !uncertain {
                         Status::Malformed
                     } else {
                         Status::Incomplete
                     },
-                    code: IssueCode::PreludeUnsolicitedResponse,
-                    detail: "capture ended without a request matching this HTTP/1 response".into(),
-                    wire,
-                    sources: union_balanced(sets)?,
-                },
+                    IssueCode::PreludeUnsolicitedResponse,
+                    "capture ended without a request matching this HTTP/1 response",
+                )
+                .certainty(if !uncertain {
+                    Certainty::Confirmed
+                } else {
+                    Certainty::Indeterminate
+                })
+                .evidence(wire, union_balanced(sets)?),
             )
         })();
         context.release_scratch(scratch)?;
@@ -107,21 +105,17 @@ impl ConnectionState {
                 let (wire, dropped) = dir.buffer.take(take);
                 let sources = union_balanced(sets)?;
                 dir.release_consumed(take, dropped, context)?;
-                self.issue(
+                self.reject(
                     context,
-                    Fault {
+                    Fault::new(
                         flow,
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: IssueCode::PreludeHead,
-                        detail: error.to_string().into(),
-                        wire,
-                        sources,
-                    },
+                        IssueScope::Connection,
+                        Status::Malformed,
+                        IssueCode::PreludeHead,
+                        error.to_string(),
+                    )
+                    .evidence(wire, sources),
                 )?;
-                self.fail(context, Status::Malformed)?;
                 return Ok(true);
             }
         };
@@ -132,21 +126,17 @@ impl ConnectionState {
             let (_, dropped) = dir.buffer.take(release_len);
             let sources = union_balanced(sets)?;
             dir.release_consumed(release_len, dropped, context)?;
-            self.issue(
+            self.reject(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::PreludeNotResponse,
-                    detail: "the server direction did not carry a response head".into(),
-                    wire: Bytes::copy_from_slice(&view[..consumed.min(256)]),
-                    sources,
-                },
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::PreludeNotResponse,
+                    "the server direction did not carry a response head",
+                )
+                .evidence(Bytes::copy_from_slice(&view[..consumed.min(256)]), sources),
             )?;
-            self.fail(context, Status::Malformed)?;
             return Ok(true);
         }
         let sets = dir.buffer.contributors(consumed);
@@ -172,23 +162,17 @@ impl ConnectionState {
             && (head.values("content-length").next().is_some()
                 || head.values("transfer-encoding").next().is_some())
         {
-            self.issue(
+            self.reject(
                 context,
-                Fault {
-                    flow: self.dir_flow(Side::Server),
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::PreludeFraming,
-                    detail:
-                        "informational responses cannot contain Content-Length or Transfer-Encoding"
-                            .into(),
-                    wire: head_wire_bytes,
-                    sources: union_balanced(sets)?,
-                },
+                Fault::new(
+                    self.dir_flow(Side::Server),
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::PreludeFraming,
+                    "informational responses cannot contain Content-Length or Transfer-Encoding",
+                )
+                .evidence(head_wire_bytes, union_balanced(sets)?),
             )?;
-            self.fail(context, Status::Malformed)?;
             return Ok(true);
         }
         if status == 101 {
@@ -200,43 +184,36 @@ impl ConnectionState {
                 self.accept_upgrade(index, head, head_wire_bytes, sets, method, context)?;
                 return Ok(true);
             }
-            self.issue(
+            self.reject(
                 context,
-                Fault {
-                    flow: self.dir_flow(Side::Server),
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Unsupported,
-                    code: IssueCode::Unexpected101,
-                    detail: "a 101 response does not match a pending h2c offer".into(),
-                    wire: head_wire_bytes,
-                    sources: union_balanced(sets)?,
-                },
+                Fault::new(
+                    self.dir_flow(Side::Server),
+                    IssueScope::Connection,
+                    Status::Unsupported,
+                    IssueCode::Unexpected101,
+                    "a 101 response does not match a pending h2c offer",
+                )
+                .evidence(head_wire_bytes, union_balanced(sets)?),
             )?;
-            self.fail(context, Status::Unsupported)?;
             return Ok(true);
         }
         if front.is_none() {
-            self.issue(
+            self.reject(
                 context,
-                Fault {
-                    flow: self.dir_flow(Side::Server),
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: if self.clean_start {
-                        Certainty::Confirmed
-                    } else {
-                        Certainty::Indeterminate
-                    },
-                    status: Status::Malformed,
-                    code: IssueCode::PreludeUnsolicitedResponse,
-                    detail: "HTTP/1 response has no pending request".into(),
-                    wire: head_wire_bytes,
-                    sources: union_balanced(sets)?,
-                },
+                Fault::new(
+                    self.dir_flow(Side::Server),
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::PreludeUnsolicitedResponse,
+                    "HTTP/1 response has no pending request",
+                )
+                .certainty(if self.clean_start {
+                    Certainty::Confirmed
+                } else {
+                    Certainty::Indeterminate
+                })
+                .evidence(head_wire_bytes, union_balanced(sets)?),
             )?;
-            self.fail(context, Status::Malformed)?;
             return Ok(true);
         }
         let mut msg = self.new_message(0, MessageKind::Response, context)?;
@@ -311,21 +288,17 @@ impl ConnectionState {
             Err(error) => {
                 let sources = union_balanced(std::mem::take(&mut msg.sets))?;
                 self.drop_msg(msg, context)?;
-                self.issue(
+                self.reject(
                     context,
-                    Fault {
-                        flow: self.dir_flow(Side::Server),
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: IssueCode::PreludeFraming,
-                        detail: error.to_string().into(),
-                        wire: head.wire().clone(),
-                        sources,
-                    },
+                    Fault::new(
+                        self.dir_flow(Side::Server),
+                        IssueScope::Connection,
+                        Status::Malformed,
+                        IssueCode::PreludeFraming,
+                        error.to_string(),
+                    )
+                    .evidence(head.wire().clone(), sources),
                 )?;
-                self.fail(context, Status::Malformed)?;
                 return Ok(true);
             }
         };

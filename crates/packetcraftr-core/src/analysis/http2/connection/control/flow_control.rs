@@ -29,25 +29,24 @@ impl ConnectionState {
                     .is_some_and(|dir| dir.closed && dir.buffer.is_empty());
                 self.issue(
                     context,
-                    Fault {
-                        flow: self.dir_flow(side),
-                        http2_stream_id: Some(0),
-                        scope: IssueScope::Connection,
-                        certainty: if confirmed {
-                            Certainty::Confirmed
-                        } else {
-                            Certainty::ObservedOrder
-                        },
-                        status: if confirmed {
+                    Fault::new(
+                        self.dir_flow(side),
+                        IssueScope::Connection,
+                        if confirmed {
                             Status::Malformed
                         } else {
                             Status::Incomplete
                         },
-                        code: IssueCode::ConnectionWindowOverflow,
-                        detail: "connection flow window exceeds 2^31-1".into(),
-                        wire: evidence.wire,
-                        sources: evidence.sources,
-                    },
+                        IssueCode::ConnectionWindowOverflow,
+                        "connection flow window exceeds 2^31-1",
+                    )
+                    .stream(Some(0))
+                    .certainty(if confirmed {
+                        Certainty::Confirmed
+                    } else {
+                        Certainty::ObservedOrder
+                    })
+                    .evidence(evidence.wire, evidence.sources),
                 )?;
                 if confirmed {
                     self.fail(context, Status::Malformed)?;
@@ -77,21 +76,20 @@ impl ConnectionState {
                 self.clean_start && (side == owner || self.opener_exhausted(owner));
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: if confirmed_idle {
-                        Certainty::Confirmed
-                    } else {
-                        Certainty::ObservedOrder
-                    },
-                    status: Status::Malformed,
-                    code: IssueCode::WindowUpdateUnknownStream,
-                    detail: "WINDOW_UPDATE on a stream that is not open".into(),
-                    wire: evidence.wire,
-                    sources: evidence.sources,
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::WindowUpdateUnknownStream,
+                    "WINDOW_UPDATE on a stream that is not open",
+                )
+                .stream(Some(stream_id))
+                .certainty(if confirmed_idle {
+                    Certainty::Confirmed
+                } else {
+                    Certainty::ObservedOrder
+                })
+                .evidence(evidence.wire, evidence.sources),
             )?;
             if confirmed_idle {
                 self.fail(context, Status::Malformed)?;
@@ -118,25 +116,24 @@ impl ConnectionState {
                 stream.ended[grant] && self.stream_window_overflows(grant, stream_id, context)?;
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: if confirmed {
-                        Certainty::Confirmed
-                    } else {
-                        Certainty::ObservedOrder
-                    },
-                    status: if confirmed {
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Stream,
+                    if confirmed {
                         Status::Malformed
                     } else {
                         Status::Incomplete
                     },
-                    code: IssueCode::StreamWindowOverflow,
-                    detail: "stream flow window exceeds 2^31-1".into(),
-                    wire: evidence.wire,
-                    sources: evidence.sources,
-                },
+                    IssueCode::StreamWindowOverflow,
+                    "stream flow window exceeds 2^31-1",
+                )
+                .stream(Some(stream_id))
+                .certainty(if confirmed {
+                    Certainty::Confirmed
+                } else {
+                    Certainty::ObservedOrder
+                })
+                .evidence(evidence.wire, evidence.sources),
             )?;
             if confirmed {
                 self.close_stream(stream_id, Status::Malformed, None, context)?;
@@ -161,14 +158,7 @@ impl ConnectionState {
             return Ok(false);
         }
         if self.send_window[side] < 0 {
-            self.issue(context, Fault {
-                flow: self.dir_flow(side), http2_stream_id: Some(0),
-                scope: IssueScope::Connection, certainty: Certainty::Confirmed,
-                status: Status::Malformed, code: IssueCode::ConnectionWindowExceeded,
-                detail: "DATA exhausted connection credit after the granting direction ended; prior DATA evidence is retained".into(),
-                wire: bytes::Bytes::new(), sources: None,
-            })?;
-            self.fail(context, Status::Malformed)?;
+            self.reject(context, Fault::new(self.dir_flow(side), IssueScope::Connection, Status::Malformed, IssueCode::ConnectionWindowExceeded, "DATA exhausted connection credit after the granting direction ended; prior DATA evidence is retained").stream(Some(0)).evidence(bytes::Bytes::new(), None))?;
             return Ok(true);
         }
         // A not-yet-ACKed SETTINGS increase may already have supplied credit.
@@ -201,13 +191,7 @@ impl ConnectionState {
             if self.streams.get(&id).is_some_and(|stream| {
                 stream.credit_exceeded[side] && stream.send_window[side] + extra < 0
             }) {
-                self.issue(context, Fault {
-                    flow: self.dir_flow(side), http2_stream_id: Some(id),
-                    scope: IssueScope::Stream, certainty: Certainty::Confirmed,
-                    status: Status::Malformed, code: IssueCode::StreamWindowExceeded,
-                    detail: "DATA exhausted stream credit after the granting direction ended; prior DATA evidence is retained".into(),
-                    wire: bytes::Bytes::new(), sources: None,
-                })?;
+                self.issue(context, Fault::new(self.dir_flow(side), IssueScope::Stream, Status::Malformed, IssueCode::StreamWindowExceeded, "DATA exhausted stream credit after the granting direction ended; prior DATA evidence is retained").stream(Some(id)).evidence(bytes::Bytes::new(), None))?;
                 self.streams
                     .get_mut(&id)
                     .ok_or(Error::Invariant("stream"))?
@@ -243,13 +227,7 @@ impl ConnectionState {
                 .and_then(|debt| debt[side])
                 .is_some_and(|window| window + extra < 0)
             {
-                self.issue(context, Fault {
-                    flow: self.dir_flow(side), http2_stream_id: Some(id),
-                    scope: IssueScope::Stream, certainty: Certainty::Confirmed,
-                    status: Status::Malformed, code: IssueCode::StreamWindowExceeded,
-                    detail: "completed stream DATA exhausted credit before the granting direction ended; earlier DATA evidence is retained".into(),
-                    wire: bytes::Bytes::new(), sources: None,
-                })?;
+                self.issue(context, Fault::new(self.dir_flow(side), IssueScope::Stream, Status::Malformed, IssueCode::StreamWindowExceeded, "completed stream DATA exhausted credit before the granting direction ended; earlier DATA evidence is retained").stream(Some(id)).evidence(bytes::Bytes::new(), None))?;
                 self.closed_credit
                     .get_mut(&id)
                     .ok_or(Error::Invariant("debt"))?[side] = None;

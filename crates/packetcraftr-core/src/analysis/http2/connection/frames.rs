@@ -48,22 +48,17 @@ impl ConnectionState {
                 let (_, dropped) = dir.buffer.take(wire::HEADER_LEN);
                 let sources = union_balanced(sets)?;
                 dir.release_consumed(wire::HEADER_LEN, dropped, context)?;
-                self.issue(
+                self.reject(
                     context,
-                    Fault {
+                    Fault::new(
                         flow,
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: IssueCode::FrameOverMaxSize,
-                        detail: format!("frame payload {length} exceeds the permitted maximum")
-                            .into(),
-                        wire: header,
-                        sources,
-                    },
+                        IssueScope::Connection,
+                        Status::Malformed,
+                        IssueCode::FrameOverMaxSize,
+                        format!("frame payload {length} exceeds the permitted maximum"),
+                    )
+                    .evidence(header, sources),
                 )?;
-                self.fail(context, Status::Malformed)?;
                 return Ok(true);
             }
             if dir.buffer.len() < wire::HEADER_LEN + length {
@@ -182,21 +177,19 @@ impl ConnectionState {
         };
         self.issue(
             context,
-            Fault {
+            Fault::new(
                 flow,
-                http2_stream_id: stream_id,
-                scope: if stream_error {
+                if stream_error {
                     IssueScope::Stream
                 } else {
                     IssueScope::Connection
                 },
-                certainty: Certainty::Confirmed,
                 status,
                 code,
-                detail: detail.into(),
-                wire,
-                sources,
-            },
+                detail,
+            )
+            .stream(stream_id)
+            .evidence(wire, sources),
         )?;
         if !stream_error {
             self.fail(context, status)?;
@@ -222,40 +215,34 @@ impl ConnectionState {
         if let Some(chained) = chained {
             if header.frame_type != wire::TYPE_CONTINUATION || stream_id != chained {
                 let flow = self.dir_flow(side);
-                self.issue(
+                self.reject(
                     context,
-                    Fault {
+                    Fault::new(
                         flow,
-                        http2_stream_id: Some(stream_id),
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: IssueCode::BrokenHeaderBlock,
-                        detail: "a frame interrupts an unfinished header block".into(),
-                        wire: wire_bytes.clone(),
-                        sources: sources.clone(),
-                    },
+                        IssueScope::Connection,
+                        Status::Malformed,
+                        IssueCode::BrokenHeaderBlock,
+                        "a frame interrupts an unfinished header block",
+                    )
+                    .stream(Some(stream_id))
+                    .evidence(wire_bytes.clone(), sources.clone()),
                 )?;
-                self.fail(context, Status::Malformed)?;
                 return Ok(());
             }
         } else if header.frame_type == wire::TYPE_CONTINUATION {
             let flow = self.dir_flow(side);
-            self.issue(
+            self.reject(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::StrayContinuation,
-                    detail: "CONTINUATION does not follow a header block".into(),
-                    wire: wire_bytes.clone(),
-                    sources: sources.clone(),
-                },
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::StrayContinuation,
+                    "CONTINUATION does not follow a header block",
+                )
+                .stream(Some(stream_id))
+                .evidence(wire_bytes.clone(), sources.clone()),
             )?;
-            self.fail(context, Status::Malformed)?;
             return Ok(());
         }
         let receiver = &self.settings[side.peer()];
@@ -264,21 +251,18 @@ impl ConnectionState {
             let flow = self.dir_flow(side);
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: (stream_id != 0).then_some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::FrameOverMaxSize,
-                    detail: format!(
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::FrameOverMaxSize,
+                    format!(
                         "frame payload {} exceeds the permitted maximum",
                         header.length
-                    )
-                    .into(),
-                    wire: wire_bytes.slice(..wire::HEADER_LEN),
-                    sources: sources.clone(),
-                },
+                    ),
+                )
+                .stream((stream_id != 0).then_some(stream_id))
+                .evidence(wire_bytes.slice(..wire::HEADER_LEN), sources.clone()),
             )?;
         } else if header.length
             > receiver
@@ -289,21 +273,19 @@ impl ConnectionState {
             let flow = self.dir_flow(side);
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: (stream_id != 0).then_some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::ObservedOrder,
-                    status: Status::Malformed,
-                    code: IssueCode::FrameSizeOrdering,
-                    detail: format!(
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::FrameSizeOrdering,
+                    format!(
                         "frame payload {} exceeds an unacknowledged bound",
                         header.length
-                    )
-                    .into(),
-                    wire: wire_bytes.slice(..wire::HEADER_LEN),
-                    sources: sources.clone(),
-                },
+                    ),
+                )
+                .stream((stream_id != 0).then_some(stream_id))
+                .certainty(Certainty::ObservedOrder)
+                .evidence(wire_bytes.slice(..wire::HEADER_LEN), sources.clone()),
             )?;
         }
         let control = match &frame.payload {
@@ -326,21 +308,19 @@ impl ConnectionState {
         if let Some(detail) = semantic_error {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: (stream_id != 0).then_some(stream_id),
-                    scope: if stream_id == 0 {
+                Fault::new(
+                    self.dir_flow(side),
+                    if stream_id == 0 {
                         IssueScope::Connection
                     } else {
                         IssueScope::Stream
                     },
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::FrameInvalid,
-                    detail: detail.into(),
-                    wire: wire_bytes.clone(),
-                    sources: sources.clone(),
-                },
+                    Status::Malformed,
+                    IssueCode::FrameInvalid,
+                    detail,
+                )
+                .stream((stream_id != 0).then_some(stream_id))
+                .evidence(wire_bytes.clone(), sources.clone()),
             )?;
             if stream_id == 0 {
                 self.fail(context, Status::Malformed)?;
@@ -457,17 +437,18 @@ impl ConnectionState {
             };
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty,
-                    status: Status::Malformed,
-                    code: IssueCode::MissingInitialSettings,
-                    detail: "the first frame on a direction was not a non-ACK SETTINGS".into(),
-                    wire: evidence.wire.slice(..wire::HEADER_LEN),
-                    sources: evidence.sources.clone(),
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::MissingInitialSettings,
+                    "the first frame on a direction was not a non-ACK SETTINGS",
+                )
+                .certainty(certainty)
+                .evidence(
+                    evidence.wire.slice(..wire::HEADER_LEN),
+                    evidence.sources.clone(),
+                ),
             )?;
             if certainty == Certainty::Confirmed {
                 self.fail(context, Status::Malformed)?;

@@ -7,7 +7,7 @@ mod teardown;
 
 use super::super::Error;
 use super::super::buffer::union_balanced;
-use super::super::model::{Certainty, IssueScope, Status};
+use super::super::model::{IssueScope, Status};
 use super::{ConnectionState, Context, DirectionPhase, Fault, Phase};
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
@@ -141,18 +141,7 @@ impl ConnectionState {
                 .is_some_and(|dir| dir.buffer.is_empty())
             && self.phase == Phase::H2
         {
-            self.issue(context, Fault {
-                flow: flow.clone(),
-                http2_stream_id: Some(0),
-                scope: IssueScope::Connection,
-                certainty: Certainty::Confirmed,
-                status: Status::Malformed,
-                code: IssueCode::ConnectionWindowOverflow,
-                detail: "connection flow window remains above 2^31-1 after sender FIN; earlier WINDOW_UPDATE evidence is retained".into(),
-                wire: Bytes::new(),
-                sources: None,
-            })?;
-            self.fail(context, Status::Malformed)?;
+            self.reject(context, Fault::new(flow.clone(), IssueScope::Connection, Status::Malformed, IssueCode::ConnectionWindowOverflow, "connection flow window remains above 2^31-1 after sender FIN; earlier WINDOW_UPDATE evidence is retained").stream(Some(0)))?;
             return Ok(());
         }
         if let Some(grant) = self.side_of(flow) {
@@ -171,18 +160,7 @@ impl ConnectionState {
                 && self.clean_start
                 && let Some(parent) = self.parent_deferred.front().and_then(|msg| msg.promised_by)
             {
-                self.issue(context, Fault {
-                    flow: self.dir_flow(Side::Server),
-                    http2_stream_id: Some(parent),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::PushPromiseClosedParent,
-                    detail: "client FIN proves the pending promise has no parent opener; promise evidence is retained in its message".into(),
-                    wire: Bytes::new(),
-                    sources: None,
-                })?;
-                self.fail(context, Status::Malformed)?;
+                self.reject(context, Fault::new(self.dir_flow(Side::Server), IssueScope::Connection, Status::Malformed, IssueCode::PushPromiseClosedParent, "client FIN proves the pending promise has no parent opener; promise evidence is retained in its message").stream(Some(parent)))?;
                 return Ok(());
             }
             // Check before truncation handling discards any undecoded bytes.
@@ -227,31 +205,33 @@ impl ConnectionState {
                     DirectionPhase::Preface => "connection closed inside the client preface",
                     DirectionPhase::Frames => "connection closed mid-frame",
                 };
-                faults.push(Fault {
-                    flow: dir.flow.clone(),
-                    http2_stream_id: None,
-                    scope: IssueScope::Capture,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Incomplete,
-                    code: IssueCode::TruncatedStream,
-                    detail: detail.into(),
-                    wire,
-                    sources,
-                });
+                faults.push(
+                    Fault::new(
+                        dir.flow.clone(),
+                        IssueScope::Capture,
+                        Status::Incomplete,
+                        IssueCode::TruncatedStream,
+                        detail,
+                    )
+                    .evidence(wire, sources),
+                );
             }
             if let Some(mut chain) = dir.chain.take() {
                 context.release_all(&mut chain.charge)?;
-                faults.push(Fault {
-                    flow: dir.flow.clone(),
-                    http2_stream_id: Some(chain.stream_id),
-                    scope: IssueScope::Capture,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Incomplete,
-                    code: IssueCode::TruncatedHeaderBlock,
-                    detail: "connection closed inside a header block".into(),
-                    wire: Bytes::copy_from_slice(&chain.bytes),
-                    sources: union_balanced(chain.sets)?,
-                });
+                faults.push(
+                    Fault::new(
+                        dir.flow.clone(),
+                        IssueScope::Capture,
+                        Status::Incomplete,
+                        IssueCode::TruncatedHeaderBlock,
+                        "connection closed inside a header block",
+                    )
+                    .stream(Some(chain.stream_id))
+                    .evidence(
+                        Bytes::copy_from_slice(&chain.bytes),
+                        union_balanced(chain.sets)?,
+                    ),
+                );
             }
         }
         for fault in faults {
@@ -316,17 +296,7 @@ impl ConnectionState {
         }
         self.issue(
             context,
-            Fault {
-                flow: flow.clone(),
-                http2_stream_id: None,
-                scope: IssueScope::Capture,
-                certainty: Certainty::Confirmed,
-                status,
-                code,
-                detail: detail.into(),
-                wire: Bytes::new(),
-                sources: None,
-            },
+            Fault::new(flow.clone(), IssueScope::Capture, status, code, detail),
         )?;
         self.clean_start = false;
         self.report_unmatched_response_at_eof(context)?;
@@ -370,17 +340,9 @@ impl ConnectionState {
             };
             self.issue(
                 context,
-                Fault {
-                    flow,
-                    http2_stream_id: stream_id,
-                    scope: IssueScope::Capture,
-                    certainty: Certainty::Confirmed,
-                    status,
-                    code,
-                    detail: detail.into(),
-                    wire,
-                    sources,
-                },
+                Fault::new(flow, IssueScope::Capture, status, code, detail)
+                    .stream(stream_id)
+                    .evidence(wire, sources),
             )?;
         }
         self.flush_messages(status, context)?;
@@ -405,17 +367,15 @@ impl ConnectionState {
         for (flow, stream_id, wire, sets) in faults {
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Capture,
-                    certainty: Certainty::Confirmed,
+                    IssueScope::Capture,
                     status,
-                    code: IssueCode::TruncatedHeaderBlock,
-                    detail: "the connection failed inside a header block".into(),
-                    wire,
-                    sources: union_balanced(sets)?,
-                },
+                    IssueCode::TruncatedHeaderBlock,
+                    "the connection failed inside a header block",
+                )
+                .stream(Some(stream_id))
+                .evidence(wire, union_balanced(sets)?),
             )?;
         }
         self.flush_messages(status, context)?;

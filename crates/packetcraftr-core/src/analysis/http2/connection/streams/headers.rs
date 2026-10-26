@@ -102,17 +102,15 @@ impl ConnectionState {
             {
                 self.issue(
                     context,
-                    Fault {
-                        flow: self.dir_flow(side),
-                        http2_stream_id: Some(stream_id),
-                        scope: IssueScope::Stream,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: IssueCode::ClosedStreamHeaders,
-                        detail: "HEADERS arrived on a fully closed stream".into(),
-                        wire: block.clone(),
-                        sources: block_sources.clone(),
-                    },
+                    Fault::new(
+                        self.dir_flow(side),
+                        IssueScope::Stream,
+                        Status::Malformed,
+                        IssueCode::ClosedStreamHeaders,
+                        "HEADERS arrived on a fully closed stream",
+                    )
+                    .stream(Some(stream_id))
+                    .evidence(block.clone(), block_sources.clone()),
                 )?;
                 return Ok(());
             }
@@ -136,25 +134,24 @@ impl ConnectionState {
                     && (!self.clean_start || stream_id > self.max_initiated[Side::Client]);
                 self.issue(
                     context,
-                    Fault {
-                        flow: self.dir_flow(side),
-                        http2_stream_id: Some(stream_id),
-                        scope: IssueScope::Connection,
-                        certainty: if delayed_opener {
-                            Certainty::Indeterminate
-                        } else {
-                            Certainty::Confirmed
-                        },
-                        status: if delayed_opener {
+                    Fault::new(
+                        self.dir_flow(side),
+                        IssueScope::Connection,
+                        if delayed_opener {
                             Status::Incomplete
                         } else {
                             Status::Malformed
                         },
                         code,
-                        detail: detail.into(),
-                        wire: block.clone(),
-                        sources: block_sources.clone(),
-                    },
+                        detail,
+                    )
+                    .stream(Some(stream_id))
+                    .certainty(if delayed_opener {
+                        Certainty::Indeterminate
+                    } else {
+                        Certainty::Confirmed
+                    })
+                    .evidence(block.clone(), block_sources.clone()),
                 )?;
                 if delayed_opener {
                     self.retain_pending_opener(stream_id, code, context)?;
@@ -205,17 +202,15 @@ impl ConnectionState {
                         Err((code, detail)) => {
                             self.issue(
                                 context,
-                                Fault {
-                                    flow: self.dir_flow(side),
-                                    http2_stream_id: Some(stream_id),
-                                    scope: IssueScope::Stream,
-                                    certainty: Certainty::Confirmed,
-                                    status: Status::Malformed,
+                                Fault::new(
+                                    self.dir_flow(side),
+                                    IssueScope::Stream,
+                                    Status::Malformed,
                                     code,
-                                    detail: detail.into(),
-                                    wire: block.clone(),
-                                    sources: block_sources.clone(),
-                                },
+                                    detail,
+                                )
+                                .stream(Some(stream_id))
+                                .evidence(block.clone(), block_sources.clone()),
                             )?;
                             // Reject further response activity while retaining the
                             // capture-delayed request's admission and evidence.
@@ -241,17 +236,15 @@ impl ConnectionState {
         {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::HeadersAfterEnd,
-                    detail: "HEADERS arrived after the sender already ended the stream".into(),
-                    wire: block,
-                    sources: block_sources,
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::HeadersAfterEnd,
+                    "HEADERS arrived after the sender already ended the stream",
+                )
+                .stream(Some(stream_id))
+                .evidence(block, block_sources),
             )?;
             return self.close_stream(stream_id, Status::Malformed, None, context);
         }
@@ -264,21 +257,18 @@ impl ConnectionState {
                     if side == Side::Server {
                         (FieldRole::Response, true)
                     } else {
-                        self.issue(
+                        self.reject(
                             context,
-                            Fault {
-                                flow: self.dir_flow(side),
-                                http2_stream_id: Some(stream_id),
-                                scope: IssueScope::Connection,
-                                certainty: Certainty::Confirmed,
-                                status: Status::Malformed,
-                                code: IssueCode::ReservedStreamHeaders,
-                                detail: "a client sent HEADERS on a reserved stream".into(),
-                                wire: block,
-                                sources: block_sources,
-                            },
+                            Fault::new(
+                                self.dir_flow(side),
+                                IssueScope::Connection,
+                                Status::Malformed,
+                                IssueCode::ReservedStreamHeaders,
+                                "a client sent HEADERS on a reserved stream",
+                            )
+                            .stream(Some(stream_id))
+                            .evidence(block, block_sources),
                         )?;
-                        self.fail(context, Status::Malformed)?;
                         return Ok(());
                     }
                 }
@@ -314,17 +304,15 @@ impl ConnectionState {
             Err(detail) => {
                 self.issue(
                     context,
-                    Fault {
-                        flow: self.dir_flow(side),
-                        http2_stream_id: Some(stream_id),
-                        scope: IssueScope::Stream,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: IssueCode::HeaderSemantics,
-                        detail: detail.into(),
-                        wire: block.clone(),
-                        sources: block_sources.clone(),
-                    },
+                    Fault::new(
+                        self.dir_flow(side),
+                        IssueScope::Stream,
+                        Status::Malformed,
+                        IssueCode::HeaderSemantics,
+                        detail,
+                    )
+                    .stream(Some(stream_id))
+                    .evidence(block.clone(), block_sources.clone()),
                 )?;
                 failure = Some(Status::Malformed);
                 super::super::super::headers::Meta {
@@ -349,17 +337,15 @@ impl ConnectionState {
         {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::ResponseAfterGoaway,
-                    detail: RESPONSE_AFTER_GOAWAY.into(),
-                    wire: block.clone(),
-                    sources: block_sources.clone(),
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::ResponseAfterGoaway,
+                    RESPONSE_AFTER_GOAWAY,
+                )
+                .stream(Some(stream_id))
+                .evidence(block.clone(), block_sources.clone()),
             )?;
             failure = Some(Status::Malformed);
         }
@@ -372,34 +358,30 @@ impl ConnectionState {
         {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::HeaderSemantics,
-                    detail: "204 and 304 responses cannot contain trailers".into(),
-                    wire: block.clone(),
-                    sources: block_sources.clone(),
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::HeaderSemantics,
+                    "204 and 304 responses cannot contain trailers",
+                )
+                .stream(Some(stream_id))
+                .evidence(block.clone(), block_sources.clone()),
             )?;
             failure = Some(Status::Malformed);
         }
         if role == FieldRole::Trailer && !end_stream {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::TrailerWithoutEndStream,
-                    detail: "a trailer block must terminate the stream".into(),
-                    wire: block.clone(),
-                    sources: block_sources.clone(),
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::TrailerWithoutEndStream,
+                    "a trailer block must terminate the stream",
+                )
+                .stream(Some(stream_id))
+                .evidence(block.clone(), block_sources.clone()),
             )?;
             failure = failure.or(Some(Status::Malformed));
         }
@@ -409,35 +391,30 @@ impl ConnectionState {
         {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::InformationalEndStream,
-                    detail: "a 1xx response must not end the stream".into(),
-                    wire: block.clone(),
-                    sources: block_sources.clone(),
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::InformationalEndStream,
+                    "a 1xx response must not end the stream",
+                )
+                .stream(Some(stream_id))
+                .evidence(block.clone(), block_sources.clone()),
             )?;
             failure = failure.or(Some(Status::Malformed));
         }
         if meta.protocol {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Unsupported,
-                    code: IssueCode::ExtendedConnect,
-                    detail: ":protocol extended CONNECT is outside this analyzer's semantics"
-                        .into(),
-                    wire: block.clone(),
-                    sources: block_sources.clone(),
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Stream,
+                    Status::Unsupported,
+                    IssueCode::ExtendedConnect,
+                    ":protocol extended CONNECT is outside this analyzer's semantics",
+                )
+                .stream(Some(stream_id))
+                .evidence(block.clone(), block_sources.clone()),
             )?;
             failure = failure.or(Some(Status::Unsupported));
         }
@@ -476,17 +453,15 @@ impl ConnectionState {
             if trailer_conflict {
                 self.issue(
                     context,
-                    Fault {
-                        flow: self.dir_flow(side),
-                        http2_stream_id: Some(stream_id),
-                        scope: IssueScope::Stream,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: IssueCode::SecondTrailerBlock,
-                        detail: "a third header block follows completed trailers".into(),
-                        wire: block.clone(),
-                        sources: block_sources.clone(),
-                    },
+                    Fault::new(
+                        self.dir_flow(side),
+                        IssueScope::Stream,
+                        Status::Malformed,
+                        IssueCode::SecondTrailerBlock,
+                        "a third header block follows completed trailers",
+                    )
+                    .stream(Some(stream_id))
+                    .evidence(block.clone(), block_sources.clone()),
                 )?;
             }
             if trailer_conflict {
@@ -531,17 +506,15 @@ impl ConnectionState {
                 failure = Some(Status::Malformed);
                 self.issue(
                     context,
-                    Fault {
-                        flow: self.dir_flow(side),
-                        http2_stream_id: Some(stream_id),
-                        scope: IssueScope::Stream,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: IssueCode::HeadersAfterEnd,
-                        detail: "HEADERS arrived after the sender already ended the stream".into(),
-                        wire: block,
-                        sources: block_sources,
-                    },
+                    Fault::new(
+                        self.dir_flow(side),
+                        IssueScope::Stream,
+                        Status::Malformed,
+                        IssueCode::HeadersAfterEnd,
+                        "HEADERS arrived after the sender already ended the stream",
+                    )
+                    .stream(Some(stream_id))
+                    .evidence(block, block_sources),
                 )?;
             }
         }
@@ -573,14 +546,7 @@ impl ConnectionState {
             || early.forbids_trailers
             || !end_stream
             || validate(FieldRole::Trailer, headers).is_err();
-        self.issue(context, Fault {
-            flow: self.dir_flow(Side::Server), http2_stream_id: Some(id), scope: IssueScope::Stream,
-            certainty: if invalid { Certainty::Confirmed } else { Certainty::Indeterminate },
-            status: if invalid { Status::Malformed } else { Status::Incomplete },
-            code: if early.ended { IssueCode::HeadersAfterEnd } else if invalid { IssueCode::HeaderSemantics } else { IssueCode::EarlyResponseTrailers },
-            detail: "HEADERS follow a previously observed final response whose opener was capture-delayed".into(),
-            wire: evidence.wire.clone(), sources: evidence.sources.clone(),
-        })?;
+        self.issue(context, Fault::new(self.dir_flow(Side::Server), IssueScope::Stream, if invalid { Status::Malformed } else { Status::Incomplete }, if early.ended { IssueCode::HeadersAfterEnd } else if invalid { IssueCode::HeaderSemantics } else { IssueCode::EarlyResponseTrailers }, "HEADERS follow a previously observed final response whose opener was capture-delayed").stream(Some(id)).certainty(if invalid { Certainty::Confirmed } else { Certainty::Indeterminate }).evidence(evidence.wire.clone(), evidence.sources.clone()))?;
         if self.streams.contains_key(&id) {
             // The provisional response has no message builder to emit. Its
             // error must not terminate the independently captured request.

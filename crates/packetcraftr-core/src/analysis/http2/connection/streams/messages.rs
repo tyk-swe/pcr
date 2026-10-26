@@ -9,7 +9,7 @@ use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::buffer::union_balanced;
 use crate::analysis::http2::headers::FieldRole;
-use crate::analysis::http2::model::{Certainty, IssueScope, Message, MessageKind, Status};
+use crate::analysis::http2::model::{IssueScope, Message, MessageKind, Status};
 use crate::analysis::http2::side::Side;
 use crate::analysis::http2::stream::MessageBuilder;
 use bytes::Bytes;
@@ -89,17 +89,18 @@ impl ConnectionState {
         if connect_cl_illegal {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(build.stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::ConnectContentLength,
-                    detail: "a CONNECT 2xx response must not carry content-length".into(),
-                    wire: build.header_blocks.last().cloned().unwrap_or_default(),
-                    sources: union_balanced(build.sets.clone())?,
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::ConnectContentLength,
+                    "a CONNECT 2xx response must not carry content-length",
+                )
+                .stream(Some(build.stream_id))
+                .evidence(
+                    build.header_blocks.last().cloned().unwrap_or_default(),
+                    union_balanced(build.sets.clone())?,
+                ),
             )?;
             build.failure = build.failure.or(Some(Status::Malformed));
         }
@@ -111,17 +112,14 @@ impl ConnectionState {
             let flow = self.dir_flow(side);
             self.issue(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(build.stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::ContentLengthMismatch,
-                    detail: "observed body length does not match content-length".into(),
-                    wire: Bytes::new(),
-                    sources: None,
-                },
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::ContentLengthMismatch,
+                    "observed body length does not match content-length",
+                )
+                .stream(Some(build.stream_id)),
             )?;
             build.failure = build.failure.or(Some(Status::Malformed));
         }

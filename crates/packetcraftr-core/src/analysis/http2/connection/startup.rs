@@ -3,7 +3,7 @@
 
 use super::super::Error;
 use super::super::buffer::union_balanced;
-use super::super::model::{Certainty, IssueScope, Startup, Status};
+use super::super::model::{IssueScope, Startup, Status};
 use super::super::upgrade::Prelude;
 use super::{ConnectionState, Context, DirectionPhase, Fault, PREFACE_LEN, Phase};
 use crate::analysis::http2::IssueCode;
@@ -161,21 +161,17 @@ impl ConnectionState {
             let (wire, dropped) = dir.buffer.take(take);
             let sources = union_balanced(sets)?;
             dir.release_consumed(take, dropped, context)?;
-            self.issue(
+            self.reject(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::BadPreface,
-                    detail: "client connection preface does not match the HTTP/2 magic".into(),
-                    wire,
-                    sources,
-                },
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::BadPreface,
+                    "client connection preface does not match the HTTP/2 magic",
+                )
+                .evidence(wire, sources),
             )?;
-            self.fail(context, Status::Malformed)?;
             return Ok(true);
         }
         if dir.buffer.len() < PREFACE_LEN {

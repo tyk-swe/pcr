@@ -28,6 +28,7 @@ use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::protocol::application::http2 as wire;
 use crate::protocol::application::http2::hpack;
 use bytes::Bytes;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 pub(crate) const PREFACE_LEN: usize = 24;
@@ -119,15 +120,56 @@ impl DirectionState {
 }
 
 pub(crate) struct Fault {
-    pub flow: ScopedFlowKey,
-    pub http2_stream_id: Option<u32>,
-    pub scope: IssueScope,
-    pub certainty: Certainty,
-    pub status: Status,
-    pub code: IssueCode,
-    pub detail: std::borrow::Cow<'static, str>,
-    pub wire: Bytes,
-    pub sources: Option<SourceSet>,
+    flow: ScopedFlowKey,
+    http2_stream_id: Option<u32>,
+    scope: IssueScope,
+    certainty: Certainty,
+    status: Status,
+    code: IssueCode,
+    detail: Cow<'static, str>,
+    wire: Bytes,
+    sources: Option<SourceSet>,
+}
+
+impl Fault {
+    pub(crate) fn new(
+        flow: ScopedFlowKey,
+        scope: IssueScope,
+        status: Status,
+        code: IssueCode,
+        detail: impl Into<Cow<'static, str>>,
+    ) -> Self {
+        Self {
+            flow,
+            http2_stream_id: None,
+            scope,
+            certainty: Certainty::Confirmed,
+            status,
+            code,
+            detail: detail.into(),
+            wire: Bytes::new(),
+            sources: None,
+        }
+    }
+
+    pub(crate) fn stream(self, http2_stream_id: Option<u32>) -> Self {
+        Self {
+            http2_stream_id,
+            ..self
+        }
+    }
+
+    pub(crate) fn certainty(self, certainty: Certainty) -> Self {
+        Self { certainty, ..self }
+    }
+
+    pub(crate) fn evidence(self, wire: Bytes, sources: Option<SourceSet>) -> Self {
+        Self {
+            wire,
+            sources,
+            ..self
+        }
+    }
 }
 
 pub(crate) struct Decoded {
@@ -322,6 +364,12 @@ impl ConnectionState {
             self.worst(Status::Incomplete);
         }
         Ok(())
+    }
+
+    pub(crate) fn reject(&mut self, context: &mut Context<'_>, fault: Fault) -> Result<(), Error> {
+        let status = fault.status;
+        self.issue(context, fault)?;
+        self.fail(context, status)
     }
 
     pub(crate) fn worst(&mut self, status: Status) {

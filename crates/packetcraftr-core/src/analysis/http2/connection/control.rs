@@ -24,21 +24,17 @@ impl ConnectionState {
         if let Some(previous) = self.goaway[side]
             && last_stream_id > previous
         {
-            self.issue(
+            self.reject(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::GoawayLastStreamIncreased,
-                    detail: "GOAWAY last_stream_id must not increase".into(),
-                    wire: evidence.wire.clone(),
-                    sources: evidence.sources.clone(),
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::GoawayLastStreamIncreased,
+                    "GOAWAY last_stream_id must not increase",
+                )
+                .evidence(evidence.wire.clone(), evidence.sources.clone()),
             )?;
-            self.fail(context, Status::Malformed)?;
             return Ok(());
         }
         let previous_last = self.goaway[side];
@@ -96,17 +92,7 @@ impl ConnectionState {
             }
         }
         for id in emitted {
-            self.issue(context, Fault {
-                flow: self.dir_flow(side),
-                http2_stream_id: Some(id),
-                scope: IssueScope::Stream,
-                certainty: Certainty::Confirmed,
-                status: Status::Unprocessed,
-                code: IssueCode::GoawayUnprocessed,
-                detail: "GOAWAY excludes this already-emitted request; the earlier event records byte completeness only".into(),
-                wire: evidence.wire.clone(),
-                sources: evidence.sources.clone(),
-            })?;
+            self.issue(context, Fault::new(self.dir_flow(side), IssueScope::Stream, Status::Unprocessed, IssueCode::GoawayUnprocessed, "GOAWAY excludes this already-emitted request; the earlier event records byte completeness only").stream(Some(id)).evidence(evidence.wire.clone(), evidence.sources.clone()))?;
         }
         Ok(())
     }
@@ -135,18 +121,15 @@ impl ConnectionState {
                 None => {
                     self.issue(
                         context,
-                        Fault {
-                            flow: self.dir_flow(side),
-                            http2_stream_id: None,
-                            scope: IssueScope::Connection,
-                            certainty: Certainty::ObservedOrder,
-                            status: Status::Incomplete,
-                            code: IssueCode::UnmatchedPingAck,
-                            detail: "a PING acknowledgment carries an opaque value never observed"
-                                .into(),
-                            wire: evidence.wire,
-                            sources: evidence.sources,
-                        },
+                        Fault::new(
+                            self.dir_flow(side),
+                            IssueScope::Connection,
+                            Status::Incomplete,
+                            IssueCode::UnmatchedPingAck,
+                            "a PING acknowledgment carries an opaque value never observed",
+                        )
+                        .certainty(Certainty::ObservedOrder)
+                        .evidence(evidence.wire, evidence.sources),
                     )?;
                 }
             }

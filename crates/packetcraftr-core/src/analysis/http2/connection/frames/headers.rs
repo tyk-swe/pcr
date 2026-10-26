@@ -118,17 +118,15 @@ impl ConnectionState {
         let flow = self.dir_flow(side);
         self.issue(
             context,
-            Fault {
+            Fault::new(
                 flow,
-                http2_stream_id: Some(stream_id),
-                scope: IssueScope::Connection,
-                certainty: Certainty::Confirmed,
-                status: Status::Limit,
-                code: IssueCode::BlockLimit,
-                detail: "a header block exceeded its configured bound".into(),
-                wire,
-                sources,
-            },
+                IssueScope::Connection,
+                Status::Limit,
+                IssueCode::BlockLimit,
+                "a header block exceeded its configured bound",
+            )
+            .stream(Some(stream_id))
+            .evidence(wire, sources),
         )?;
         self.fail(context, Status::Limit)
     }
@@ -229,17 +227,7 @@ impl ConnectionState {
                 Err(hpack::DecodeError::Interrupted(error)) => return Err(error),
             };
             if decoded.is_ok() && ambiguous_minimum {
-                self.issue(context, Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Compression,
-                    certainty: Certainty::ObservedOrder,
-                    status: Status::Incomplete,
-                    code: IssueCode::HpackTableSizeOrdering,
-                    detail: "an earlier table shrink may precede or follow receipt of SETTINGS; its required minimum cannot be confirmed".into(),
-                    wire: bytes.clone(),
-                    sources: block_sources.clone(),
-                })?;
+                self.issue(context, Fault::new(self.dir_flow(side), IssueScope::Compression, Status::Incomplete, IssueCode::HpackTableSizeOrdering, "an earlier table shrink may precede or follow receipt of SETTINGS; its required minimum cannot be confirmed").stream(Some(stream_id)).certainty(Certainty::ObservedOrder).evidence(bytes.clone(), block_sources.clone()))?;
             }
             self.decoder_sync(side, context)?;
             match decoded {
@@ -251,17 +239,15 @@ impl ConnectionState {
                     };
                     self.issue(
                         context,
-                        Fault {
+                        Fault::new(
                             flow,
-                            http2_stream_id: Some(stream_id),
-                            scope: IssueScope::Compression,
-                            certainty: Certainty::Confirmed,
+                            IssueScope::Compression,
                             status,
                             code,
-                            detail: error.to_string().into(),
-                            wire: bytes,
-                            sources: block_sources,
-                        },
+                            error.to_string(),
+                        )
+                        .stream(Some(stream_id))
+                        .evidence(bytes, block_sources),
                     )?;
                     self.fail(context, status)?;
                     Ok(())
@@ -319,20 +305,7 @@ impl ConnectionState {
                         let flow = self.dir_flow(side);
                         self.issue(
                         context,
-                        Fault {
-                            flow,
-                            http2_stream_id: Some(stream_id),
-                            scope: IssueScope::Stream,
-                            certainty: Certainty::ObservedOrder,
-                            status: Status::Incomplete,
-                            code: IssueCode::HeaderListSizeAdvisory,
-                            detail: format!(
-                                "decoded header list {decoded_bytes} exceeds the peer's advertised maximum"
-                            )
-                            .into(),
-                            wire: Bytes::new(),
-                            sources: None,
-                        },
+                        Fault::new(flow, IssueScope::Stream, Status::Incomplete, IssueCode::HeaderListSizeAdvisory, format!( "decoded header list {decoded_bytes} exceeds the peer's advertised maximum" )).stream(Some(stream_id)).certainty(Certainty::ObservedOrder),
                     )?;
                     }
                     let headers: Vec<Header> = block

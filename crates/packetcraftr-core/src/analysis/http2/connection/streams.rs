@@ -87,21 +87,17 @@ impl ConnectionState {
             }
         }
         if let Some((id, code)) = fault {
-            self.issue(
+            self.reject(
                 context,
-                Fault {
-                    flow: self.dir_flow(owner.peer()),
-                    http2_stream_id: Some(id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
+                Fault::new(
+                    self.dir_flow(owner.peer()),
+                    IssueScope::Connection,
+                    Status::Malformed,
                     code,
-                    detail: detail.into(),
-                    wire: Bytes::new(),
-                    sources: None,
-                },
+                    detail,
+                )
+                .stream(Some(id)),
             )?;
-            self.fail(context, Status::Malformed)?;
         }
         Ok(())
     }
@@ -134,21 +130,21 @@ impl ConnectionState {
             || self.active[initiator] + 1 > context.limits.max_active_streams
         {
             let flow = self.dir_flow(side);
-            self.issue(
+            self.reject(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Limit,
-                    code: IssueCode::ActiveStreams,
-                    detail: "concurrent streams exceed the configured bound".into(),
-                    wire: evidence.map_or_else(Bytes::new, |e| e.wire.clone()),
-                    sources: evidence.and_then(|e| e.sources.clone()),
-                },
+                    IssueScope::Connection,
+                    Status::Limit,
+                    IssueCode::ActiveStreams,
+                    "concurrent streams exceed the configured bound",
+                )
+                .stream(Some(stream_id))
+                .evidence(
+                    evidence.map_or_else(Bytes::new, |e| e.wire.clone()),
+                    evidence.and_then(|e| e.sources.clone()),
+                ),
             )?;
-            self.fail(context, Status::Limit)?;
             return Ok(());
         }
         self.resolve_pending_opener(stream_id, context)?;
@@ -199,21 +195,23 @@ impl ConnectionState {
                     .is_some_and(|dir| dir.closed && dir.buffer.is_empty() && dir.chain.is_none()));
         self.issue(
             context,
-            Fault {
-                flow: self.dir_flow(initiator),
-                http2_stream_id: Some(stream_id),
-                scope: IssueScope::Stream,
-                certainty: if confirmed {
-                    Certainty::Confirmed
-                } else {
-                    Certainty::ObservedOrder
-                },
-                status: Status::Malformed,
-                code: IssueCode::ConcurrentStreams,
-                detail: "open streams exceed the peer's acknowledged limit".into(),
-                wire: evidence.map_or_else(Bytes::new, |e| e.wire.clone()),
-                sources: evidence.and_then(|e| e.sources.clone()),
-            },
+            Fault::new(
+                self.dir_flow(initiator),
+                IssueScope::Stream,
+                Status::Malformed,
+                IssueCode::ConcurrentStreams,
+                "open streams exceed the peer's acknowledged limit",
+            )
+            .stream(Some(stream_id))
+            .certainty(if confirmed {
+                Certainty::Confirmed
+            } else {
+                Certainty::ObservedOrder
+            })
+            .evidence(
+                evidence.map_or_else(Bytes::new, |e| e.wire.clone()),
+                evidence.and_then(|e| e.sources.clone()),
+            ),
         )?;
         if confirmed {
             self.close_stream(stream_id, Status::Malformed, None, context)?;
@@ -264,17 +262,7 @@ impl ConnectionState {
         context: &mut Context<'_>,
     ) -> Result<bool, Error> {
         if self.stream_window_overflows(side, stream_id, context)? {
-            self.issue(context, Fault {
-                flow: self.dir_flow(side),
-                http2_stream_id: Some(stream_id),
-                scope: IssueScope::Stream,
-                certainty: Certainty::Confirmed,
-                status: Status::Malformed,
-                code: IssueCode::StreamWindowOverflow,
-                detail: "stream flow window remains above 2^31-1 after the sender ended; earlier WINDOW_UPDATE evidence is retained".into(),
-                wire: Bytes::new(),
-                sources: None,
-            })?;
+            self.issue(context, Fault::new(self.dir_flow(side), IssueScope::Stream, Status::Malformed, IssueCode::StreamWindowOverflow, "stream flow window remains above 2^31-1 after the sender ended; earlier WINDOW_UPDATE evidence is retained").stream(Some(stream_id)))?;
             self.close_stream(stream_id, Status::Malformed, None, context)?;
             return Ok(true);
         }
@@ -404,25 +392,24 @@ impl ConnectionState {
             let confirmed = self.clean_start && (side == owner || self.opener_exhausted(owner));
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: if confirmed {
-                        Certainty::Confirmed
-                    } else {
-                        Certainty::Indeterminate
-                    },
-                    status: if confirmed {
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Connection,
+                    if confirmed {
                         Status::Malformed
                     } else {
                         Status::Incomplete
                     },
-                    code: IssueCode::ResetIdleStream,
-                    detail: "RST_STREAM on a stream that was never opened".into(),
-                    wire: evidence.wire,
-                    sources: evidence.sources,
-                },
+                    IssueCode::ResetIdleStream,
+                    "RST_STREAM on a stream that was never opened",
+                )
+                .stream(Some(stream_id))
+                .certainty(if confirmed {
+                    Certainty::Confirmed
+                } else {
+                    Certainty::Indeterminate
+                })
+                .evidence(evidence.wire, evidence.sources),
             )?;
             if confirmed {
                 self.fail(context, Status::Malformed)?;

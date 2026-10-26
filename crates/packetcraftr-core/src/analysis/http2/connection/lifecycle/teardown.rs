@@ -5,7 +5,6 @@
 
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
-use bytes::Bytes;
 
 use crate::analysis::http2::Error;
 use crate::analysis::http2::buffer::union_balanced;
@@ -76,17 +75,14 @@ impl ConnectionState {
             context.release_all(&mut msg.charge)?;
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(Side::Client),
-                    http2_stream_id: None,
-                    scope: IssueScope::Capture,
-                    certainty: Certainty::Confirmed,
+                Fault::new(
+                    self.dir_flow(Side::Client),
+                    IssueScope::Capture,
                     status,
-                    code: IssueCode::IncompleteUpgrade,
-                    detail: "the byte stream ended before the h2c upgrade completed".into(),
-                    wire: head.wire().clone(),
-                    sources,
-                },
+                    IssueCode::IncompleteUpgrade,
+                    "the byte stream ended before the h2c upgrade completed",
+                )
+                .evidence(head.wire().clone(), sources),
             )?;
         }
         for mut msg in release {
@@ -142,17 +138,14 @@ impl ConnectionState {
                     let flow = dir.flow.clone();
                     self.issue(
                         context,
-                        Fault {
+                        Fault::new(
                             flow,
-                            http2_stream_id: None,
-                            scope: IssueScope::Capture,
-                            certainty: Certainty::Confirmed,
-                            status: Status::Incomplete,
-                            code: IssueCode::UnconsumedBytes,
-                            detail: "the capture ended with undecoded bytes".into(),
-                            wire,
-                            sources,
-                        },
+                            IssueScope::Capture,
+                            Status::Incomplete,
+                            IssueCode::UnconsumedBytes,
+                            "the capture ended with undecoded bytes",
+                        )
+                        .evidence(wire, sources),
                     )?;
                 }
                 if !self.settings[side].seen
@@ -162,21 +155,18 @@ impl ConnectionState {
                 {
                     self.issue(
                         context,
-                        Fault {
-                            flow: self.dir_flow(side),
-                            http2_stream_id: None,
-                            scope: IssueScope::Connection,
-                            certainty: if self.clean_start {
-                                Certainty::Confirmed
-                            } else {
-                                Certainty::Indeterminate
-                            },
-                            status: Status::Incomplete,
-                            code: IssueCode::SettingsUnobserved,
-                            detail: "the endpoint's initial SETTINGS were never observed".into(),
-                            wire: Bytes::new(),
-                            sources: None,
-                        },
+                        Fault::new(
+                            self.dir_flow(side),
+                            IssueScope::Connection,
+                            Status::Incomplete,
+                            IssueCode::SettingsUnobserved,
+                            "the endpoint's initial SETTINGS were never observed",
+                        )
+                        .certainty(if self.clean_start {
+                            Certainty::Confirmed
+                        } else {
+                            Certainty::Indeterminate
+                        }),
                     )?;
                 }
             }

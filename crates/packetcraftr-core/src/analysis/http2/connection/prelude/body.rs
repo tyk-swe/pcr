@@ -3,7 +3,7 @@
 
 use super::super::super::Error;
 use super::super::super::buffer::union_balanced;
-use super::super::super::model::{Certainty, Header, IssueScope, Status};
+use super::super::super::model::{Header, IssueScope, Status};
 use super::super::super::stream::MessageBuilder;
 use super::super::{ConnectionState, Context, Fault};
 use crate::analysis::http2::IssueCode;
@@ -66,17 +66,14 @@ impl ConnectionState {
                 };
                 self.issue(
                     context,
-                    Fault {
+                    Fault::new(
                         flow,
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
+                        IssueScope::Connection,
                         status,
-                        code: IssueCode::PreludeBody,
-                        detail: error.to_string().into(),
-                        wire,
-                        sources,
-                    },
+                        IssueCode::PreludeBody,
+                        error.to_string(),
+                    )
+                    .evidence(wire, sources),
                 )?;
                 self.fail(context, status)?;
                 return Ok(BodyStep::Progress);

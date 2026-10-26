@@ -11,7 +11,7 @@ use body::BodyStep;
 
 use super::super::Error;
 use super::super::buffer::union_balanced;
-use super::super::model::{Certainty, IssueScope, Startup, Status};
+use super::super::model::{IssueScope, Startup, Status};
 use super::super::stream::{MessageBuilder, StreamState};
 use super::super::upgrade::Offer;
 use super::{ConnectionState, Context, DirectionPhase, Fault, Phase};
@@ -79,19 +79,16 @@ impl ConnectionState {
         self.drop_msg(msg, context)?;
         self.issue(
             context,
-            Fault {
-                flow: self.dir_flow(Side::Client),
-                http2_stream_id: None,
-                scope: IssueScope::Connection,
-                certainty: Certainty::Confirmed,
-                // A refusal is a complete HTTP/1 exchange, not an HTTP/2 error.
-                // EOF classifies the connection as unsupported if no retry succeeds.
-                status: Status::Complete,
-                code: IssueCode::RefusedUpgrade,
-                detail: "the server declined this h2c upgrade request".into(),
-                wire: head.wire().clone(),
-                sources,
-            },
+            // A refusal is a complete HTTP/1 exchange, not an HTTP/2 error.
+            // EOF classifies the connection as unsupported if no retry succeeds.
+            Fault::new(
+                self.dir_flow(Side::Client),
+                IssueScope::Connection,
+                Status::Complete,
+                IssueCode::RefusedUpgrade,
+                "the server declined this h2c upgrade request",
+            )
+            .evidence(head.wire().clone(), sources),
         )
     }
 
@@ -203,22 +200,22 @@ impl ConnectionState {
         for issue in applied.issues {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(Side::Client),
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: issue.code,
-                    detail: issue.detail.into(),
-                    wire: request_evidence
+                Fault::new(
+                    self.dir_flow(Side::Client),
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    issue.code,
+                    issue.detail,
+                )
+                .evidence(
+                    request_evidence
                         .as_ref()
                         .map_or_else(|| head_wire.clone(), |(wire, _)| wire.clone()),
-                    sources: request_evidence.as_ref().map_or_else(
+                    request_evidence.as_ref().map_or_else(
                         || self.upgrade_sources.clone(),
                         |(_, sources)| sources.clone(),
                     ),
-                },
+                ),
             )?;
         }
         if invalid {

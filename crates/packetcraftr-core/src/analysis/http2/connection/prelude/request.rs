@@ -3,7 +3,7 @@
 
 use super::super::super::Error;
 use super::super::super::buffer::union_balanced;
-use super::super::super::model::{Certainty, Header, IssueScope, MessageKind, Status};
+use super::super::super::model::{Header, IssueScope, MessageKind, Status};
 use super::super::super::upgrade::{self, Offer, Pending};
 use super::super::{ConnectionState, Context, Fault};
 use crate::analysis::http2::IssueCode;
@@ -29,21 +29,17 @@ impl ConnectionState {
                 let (wire, dropped) = dir.buffer.take(take);
                 let sources = union_balanced(sets)?;
                 dir.release_consumed(take, dropped, context)?;
-                self.issue(
+                self.reject(
                     context,
-                    Fault {
+                    Fault::new(
                         flow,
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: IssueCode::PreludeHead,
-                        detail: error.to_string().into(),
-                        wire,
-                        sources,
-                    },
+                        IssueScope::Connection,
+                        Status::Malformed,
+                        IssueCode::PreludeHead,
+                        error.to_string(),
+                    )
+                    .evidence(wire, sources),
                 )?;
-                self.fail(context, Status::Malformed)?;
                 return Ok(true);
             }
         };
@@ -53,21 +49,17 @@ impl ConnectionState {
             let (_, dropped) = dir.buffer.take(consumed.min(dir.buffer.len()));
             let sources = union_balanced(sets)?;
             dir.release_consumed(consumed, dropped, context)?;
-            self.issue(
+            self.reject(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::PreludeNotRequest,
-                    detail: "the client direction did not carry a request head".into(),
-                    wire: Bytes::copy_from_slice(&view[..consumed.min(256)]),
-                    sources,
-                },
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::PreludeNotRequest,
+                    "the client direction did not carry a request head",
+                )
+                .evidence(Bytes::copy_from_slice(&view[..consumed.min(256)]), sources),
             )?;
-            self.fail(context, Status::Malformed)?;
             return Ok(true);
         }
         let sets = dir.buffer.contributors(consumed);
@@ -82,17 +74,14 @@ impl ConnectionState {
             Err(detail) => {
                 self.issue(
                     context,
-                    Fault {
-                        flow: self.dir_flow(Side::Client),
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Unsupported,
-                        code: IssueCode::BadUpgradeOffer,
-                        detail: detail.into(),
-                        wire: head_wire_bytes,
-                        sources: union_balanced(sets.clone())?,
-                    },
+                    Fault::new(
+                        self.dir_flow(Side::Client),
+                        IssueScope::Connection,
+                        Status::Unsupported,
+                        IssueCode::BadUpgradeOffer,
+                        detail,
+                    )
+                    .evidence(head_wire_bytes, union_balanced(sets.clone())?),
                 )?;
                 None
             }
@@ -131,21 +120,17 @@ impl ConnectionState {
         {
             let sources = union_balanced(std::mem::take(&mut msg.sets))?;
             self.drop_msg(msg, context)?;
-            self.issue(
+            self.reject(
                 context,
-                Fault {
-                    flow: self.dir_flow(Side::Client),
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Limit,
-                    code: IssueCode::PendingRequests,
-                    detail: "pre-upgrade requests exceed the configured bound".into(),
-                    wire: head.wire().clone(),
-                    sources,
-                },
+                Fault::new(
+                    self.dir_flow(Side::Client),
+                    IssueScope::Connection,
+                    Status::Limit,
+                    IssueCode::PendingRequests,
+                    "pre-upgrade requests exceed the configured bound",
+                )
+                .evidence(head.wire().clone(), sources),
             )?;
-            self.fail(context, Status::Limit)?;
             return Ok(true);
         }
         context.charge(&mut self.charge, budget::PENDING_OVERHEAD)?;
@@ -172,21 +157,17 @@ impl ConnectionState {
             Err(error) => {
                 let sources = union_balanced(std::mem::take(&mut msg.sets))?;
                 self.drop_msg(msg, context)?;
-                self.issue(
+                self.reject(
                     context,
-                    Fault {
-                        flow: self.dir_flow(Side::Client),
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: IssueCode::PreludeFraming,
-                        detail: error.to_string().into(),
-                        wire: head.wire().clone(),
-                        sources,
-                    },
+                    Fault::new(
+                        self.dir_flow(Side::Client),
+                        IssueScope::Connection,
+                        Status::Malformed,
+                        IssueCode::PreludeFraming,
+                        error.to_string(),
+                    )
+                    .evidence(head.wire().clone(), sources),
                 )?;
-                self.fail(context, Status::Malformed)?;
                 return Ok(true);
             }
         };

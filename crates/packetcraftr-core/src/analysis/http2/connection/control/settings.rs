@@ -58,42 +58,36 @@ impl ConnectionState {
                 };
                 self.issue(
                     context,
-                    Fault {
-                        flow: self.dir_flow(side),
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: if confirmed {
-                            Certainty::Confirmed
-                        } else {
-                            Certainty::Indeterminate
-                        },
+                    Fault::new(
+                        self.dir_flow(side),
+                        IssueScope::Connection,
                         status,
-                        code: IssueCode::UnsolicitedSettingsAck,
-                        detail: "a SETTINGS acknowledgment does not match a pending SETTINGS"
-                            .into(),
-                        wire: evidence.wire,
-                        sources: evidence.sources,
-                    },
+                        IssueCode::UnsolicitedSettingsAck,
+                        "a SETTINGS acknowledgment does not match a pending SETTINGS",
+                    )
+                    .certainty(if confirmed {
+                        Certainty::Confirmed
+                    } else {
+                        Certainty::Indeterminate
+                    })
+                    .evidence(evidence.wire, evidence.sources),
                 )?;
                 if let Some((wire, sets)) = peer_ack {
                     self.issue(
                         context,
-                        Fault {
-                            flow: self.dir_flow(side.peer()),
-                            http2_stream_id: None,
-                            scope: IssueScope::Connection,
-                            certainty: if confirmed {
-                                Certainty::Confirmed
-                            } else {
-                                Certainty::Indeterminate
-                            },
+                        Fault::new(
+                            self.dir_flow(side.peer()),
+                            IssueScope::Connection,
                             status,
-                            code: IssueCode::UnsolicitedSettingsAck,
-                            detail: "both directional ACK heads lack preceding matching SETTINGS"
-                                .into(),
-                            wire,
-                            sources: super::super::super::buffer::union_balanced(sets)?,
-                        },
+                            IssueCode::UnsolicitedSettingsAck,
+                            "both directional ACK heads lack preceding matching SETTINGS",
+                        )
+                        .certainty(if confirmed {
+                            Certainty::Confirmed
+                        } else {
+                            Certainty::Indeterminate
+                        })
+                        .evidence(wire, super::super::super::buffer::union_balanced(sets)?),
                     )?;
                 }
                 self.fail(context, status)?;
@@ -139,21 +133,17 @@ impl ConnectionState {
             }
             self.release_resolved_credit(context)?;
             if overflow {
-                self.issue(
+                self.reject(
                     context,
-                    Fault {
-                        flow: self.dir_flow(side),
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: IssueCode::WindowOverflow,
-                        detail: "SETTINGS window change pushed a stream window out of range".into(),
-                        wire: evidence.wire.clone(),
-                        sources: evidence.sources.clone(),
-                    },
+                    Fault::new(
+                        self.dir_flow(side),
+                        IssueScope::Connection,
+                        Status::Malformed,
+                        IssueCode::WindowOverflow,
+                        "SETTINGS window change pushed a stream window out of range",
+                    )
+                    .evidence(evidence.wire.clone(), evidence.sources.clone()),
                 )?;
-                self.fail(context, Status::Malformed)?;
                 return Ok(());
             }
             if let Some(dir) = self.dirs[side].as_mut()
@@ -179,21 +169,17 @@ impl ConnectionState {
         }
         if self.settings[side].pending.len() + 1 > context.limits.max_pending_settings {
             let flow = self.dir_flow(side);
-            self.issue(
+            self.reject(
                 context,
-                Fault {
+                Fault::new(
                     flow,
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Limit,
-                    code: IssueCode::PendingSettings,
-                    detail: "unacknowledged SETTINGS frames exceed the configured bound".into(),
-                    wire: evidence.wire,
-                    sources: evidence.sources,
-                },
+                    IssueScope::Connection,
+                    Status::Limit,
+                    IssueCode::PendingSettings,
+                    "unacknowledged SETTINGS frames exceed the configured bound",
+                )
+                .evidence(evidence.wire, evidence.sources),
             )?;
-            self.fail(context, Status::Limit)?;
             return Ok(());
         }
         let resume_peer = self.waiting_settings_ack(side.peer());
@@ -227,17 +213,14 @@ impl ConnectionState {
         for issue in issues {
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: None,
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: issue.code,
-                    detail: issue.detail.into(),
-                    wire: evidence.wire.clone(),
-                    sources: evidence.sources.clone(),
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    issue.code,
+                    issue.detail,
+                )
+                .evidence(evidence.wire.clone(), evidence.sources.clone()),
             )?;
         }
         if invalid {

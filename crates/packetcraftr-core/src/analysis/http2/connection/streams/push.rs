@@ -29,21 +29,18 @@ impl ConnectionState {
             compression,
         } = decoded;
         if side == Side::Client {
-            self.issue(
+            self.reject(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::ClientPushPromise,
-                    detail: "a client sent PUSH_PROMISE".into(),
-                    wire: block,
-                    sources: block_sources,
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::ClientPushPromise,
+                    "a client sent PUSH_PROMISE",
+                )
+                .stream(Some(stream_id))
+                .evidence(block, block_sources),
             )?;
-            self.fail(context, Status::Malformed)?;
             return Ok(());
         }
         if !self.settings[Side::Client].acknowledged.enable_push {
@@ -54,17 +51,16 @@ impl ConnectionState {
             };
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty,
-                    status: Status::Malformed,
-                    code: IssueCode::PushDisabled,
-                    detail: "PUSH_PROMISE while the client has push disabled".into(),
-                    wire: block.clone(),
-                    sources: block_sources.clone(),
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::PushDisabled,
+                    "PUSH_PROMISE while the client has push disabled",
+                )
+                .stream(Some(stream_id))
+                .certainty(certainty)
+                .evidence(block.clone(), block_sources.clone()),
             )?;
             if certainty == Certainty::Confirmed {
                 self.fail(context, Status::Malformed)?;
@@ -80,21 +76,18 @@ impl ConnectionState {
         {
             self.max_initiated[Side::Server] = promised;
         } else {
-            self.issue(
+            self.reject(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::PromisedStreamId,
-                    detail: "PUSH_PROMISE names a reused or client-numbered stream".into(),
-                    wire: block,
-                    sources: block_sources,
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::PromisedStreamId,
+                    "PUSH_PROMISE names a reused or client-numbered stream",
+                )
+                .stream(Some(stream_id))
+                .evidence(block, block_sources),
             )?;
-            self.fail(context, Status::Malformed)?;
             return Ok(());
         }
         let parent_open = self.streams.get(&stream_id).is_some_and(|s| {
@@ -116,21 +109,18 @@ impl ConnectionState {
                 .get(&stream_id)
                 .is_some_and(|early| early.ended);
         if !parent_open && !in_flight_after_reset && !delayed_parent {
-            self.issue(
+            self.reject(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::PushPromiseClosedParent,
-                    detail: "PUSH_PROMISE on a parent stream that cannot push".into(),
-                    wire: block.clone(),
-                    sources: block_sources.clone(),
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    IssueCode::PushPromiseClosedParent,
+                    "PUSH_PROMISE on a parent stream that cannot push",
+                )
+                .stream(Some(stream_id))
+                .evidence(block.clone(), block_sources.clone()),
             )?;
-            self.fail(context, Status::Malformed)?;
             return Ok(());
         }
         // A rejected promise never opens the promised stream, so provisional
@@ -174,17 +164,15 @@ impl ConnectionState {
             msg.failure = Some(Status::Malformed);
             self.issue(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(promised),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
-                    code: IssueCode::PushPromiseHeaders,
-                    detail: detail.into(),
-                    wire: Bytes::new(),
-                    sources: block_sources,
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Stream,
+                    Status::Malformed,
+                    IssueCode::PushPromiseHeaders,
+                    detail,
+                )
+                .stream(Some(promised))
+                .evidence(Bytes::new(), block_sources),
             )?;
         } else if let Ok(meta) = meta {
             msg.content_length = meta.content_length;
@@ -223,21 +211,17 @@ impl ConnectionState {
             .filter(|stream| stream.phase != StreamPhase::Closed)
             .count();
         if open_count + 1 > context.limits.max_active_streams {
-            self.issue(
+            self.reject(
                 context,
-                Fault {
-                    flow: self.dir_flow(side),
-                    http2_stream_id: Some(promised),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Limit,
-                    code: IssueCode::ActiveStreams,
-                    detail: "concurrent streams exceed the configured bound".into(),
-                    wire: Bytes::new(),
-                    sources: None,
-                },
+                Fault::new(
+                    self.dir_flow(side),
+                    IssueScope::Connection,
+                    Status::Limit,
+                    IssueCode::ActiveStreams,
+                    "concurrent streams exceed the configured bound",
+                )
+                .stream(Some(promised)),
             )?;
-            self.fail(context, Status::Limit)?;
             return Ok(());
         }
         context.check_streams()?;

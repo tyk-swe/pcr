@@ -192,11 +192,6 @@ mod tests {
         );
         assert!(report.findings.iter().any(|f| f.rule_id == "http.framing"));
     }
-}
-
-#[cfg(test)]
-mod policy_regressions {
-    use super::*;
 
     fn report(extra: &str) -> Report {
         let (head, _) = crate::protocol::application::http::parse_head(&bytes::Bytes::from(

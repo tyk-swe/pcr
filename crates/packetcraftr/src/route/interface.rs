@@ -102,3 +102,6 @@ impl ResolvedInterface {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -244,7 +244,7 @@ fn address_scope(address: IpAddr) -> Scope {
 }
 
 #[cfg(test)]
-mod network_improvements {
+mod tests {
     use super::*;
     #[test]
     fn scope_precedes_prefix_specificity() {

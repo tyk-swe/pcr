@@ -407,7 +407,7 @@ impl Codec for HttpCodec {
 }
 
 #[cfg(test)]
-mod start_line_regressions {
+mod tests {
     use super::*;
 
     #[test]

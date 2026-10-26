@@ -363,8 +363,9 @@ mod tests {
     use crate::{
         analysis::Collector as _,
         budget::{Cancellation, Deadline},
+        security::indicators::{Indicator, Kind, SCHEMA},
     };
-    use std::time::Duration;
+    use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
     fn threshold_validation_reports_each_invalid_field_and_accepts_boundaries() {
@@ -588,13 +589,6 @@ mod tests {
         );
         assert_eq!(delivered, 1);
     }
-}
-
-#[cfg(test)]
-mod improvement_tests {
-    use super::*;
-    use crate::security::indicators::{Indicator, Kind, SCHEMA};
-    use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
     fn directly_constructed_hunt_documents_are_validated_and_normalized() {

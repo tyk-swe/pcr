@@ -317,7 +317,7 @@ fn deliver_on(
 }
 
 #[test]
-fn review_selected_source_port_is_not_hidden_by_an_unselected_destination() {
+fn selected_source_port_is_not_hidden_by_an_unselected_destination() {
     let mut collector = Collector::new(
         Limits::default(),
         crate::protocol::builtin::registry(),
@@ -342,7 +342,7 @@ fn review_selected_source_port_is_not_hidden_by_an_unselected_destination() {
 }
 
 #[test]
-fn review_mqtt5_stays_opaque_in_both_directions_until_a_new_generation() {
+fn mqtt5_stays_opaque_in_both_directions_until_a_new_generation() {
     let connect5 = b"\x10\x0d\0\x04MQTT\x05\x02\0\x3c\0\0\0";
     let publish5 = b"\x30\x05\0\x01a\0x";
     for split in 1..connect5.len() {
@@ -407,7 +407,7 @@ fn review_mqtt5_stays_opaque_in_both_directions_until_a_new_generation() {
 }
 
 #[test]
-fn review_events_before_the_first_delivery_disable_the_generation() {
+fn events_before_the_first_delivery_disable_the_generation() {
     for event in [
         application::Event::Gap {
             flow: flow(),
@@ -472,7 +472,7 @@ fn review_events_before_the_first_delivery_disable_the_generation() {
 }
 
 #[test]
-fn review_amqp_unsupported_version_keeps_both_directions_opaque() {
+fn amqp_unsupported_version_keeps_both_directions_opaque() {
     let mut collector = Collector::new(
         Limits::default(),
         crate::protocol::builtin::registry(),
@@ -514,7 +514,7 @@ fn review_amqp_unsupported_version_keeps_both_directions_opaque() {
 }
 
 #[test]
-fn review_capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
+fn capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
     use crate::{
         codec::Addresses,
         frame::{Frame, LinkType},
@@ -599,7 +599,7 @@ fn review_capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
 }
 
 #[test]
-fn review_server_first_payload_uses_the_handshake_server_port() {
+fn server_first_payload_uses_the_handshake_server_port() {
     use crate::{
         codec::Addresses,
         frame::{Frame, LinkType},
@@ -689,7 +689,7 @@ fn review_server_first_payload_uses_the_handshake_server_port() {
 }
 
 #[test]
-fn review_sip_keepalives_across_deliveries_do_not_disable_messages() {
+fn sip_keepalives_across_deliveries_do_not_disable_messages() {
     let message = b"OPTIONS sip:service SIP/2.0\r\nContent-Length: 0\r\n\r\n";
     let mut bytes = b"\r\n".to_vec();
     bytes.extend_from_slice(message);
@@ -760,7 +760,7 @@ fn review_sip_keepalives_across_deliveries_do_not_disable_messages() {
 }
 
 #[test]
-fn review_modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
+fn modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
     use crate::{
         codec::Addresses,
         frame::{Frame, LinkType},
@@ -874,7 +874,7 @@ fn review_modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
 }
 
 #[test]
-fn review_many_coalesced_messages_preserve_the_layer_budget_and_stream() {
+fn many_coalesced_messages_preserve_the_layer_budget_and_stream() {
     use crate::{
         codec::Addresses,
         frame::{Frame, LinkType},
@@ -944,7 +944,7 @@ fn review_many_coalesced_messages_preserve_the_layer_budget_and_stream() {
 }
 
 #[test]
-fn review_declared_buffer_limits_are_policy_errors_for_every_segmentation() {
+fn declared_buffer_limits_are_policy_errors_for_every_segmentation() {
     let mut mqtt = vec![0x30, 103, 0, 1, b'a'];
     mqtt.extend_from_slice(&[b'x'; 100]);
     let mut resp = b"$100\r\n".to_vec();

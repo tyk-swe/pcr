@@ -176,11 +176,6 @@ mod tests {
         assert!(!d.indicators[1].matches_domain("badexample.test"));
         for input in [br#"{"schema":"packetcraftr.indicators/v2","indicators":[]}"#.as_slice(),br#"{"schema":"packetcraftr.indicators/v1","indicators":[{"id":"a","kind":"ja3","value":"invalid"}]}"#,br#"{"schema":"packetcraftr.indicators/v1","indicators":[{"id":"a","kind":"ip","value":"127.0.0.1"},{"id":"a","kind":"ip","value":"127.0.0.2"}]}"#] { assert!(Document::parse(input).is_err()); }
     }
-}
-
-#[cfg(test)]
-mod input_regressions {
-    use super::*;
 
     fn document(id: &str, kind: Kind, value: &str) -> Result<Document, Error> {
         let bytes = serde_json::to_vec(&Document {

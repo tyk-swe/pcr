@@ -236,3 +236,24 @@ pub(crate) fn distinct_addresses(
     }
     Ok(addresses)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::distinct_addresses;
+    use crate::target::Error as TargetError;
+
+    #[test]
+    fn distinct_resolver_order_and_limit() {
+        let hostname = "test.local".parse().unwrap();
+        let a = "127.0.0.1".parse().unwrap();
+        let b = "127.0.0.2".parse().unwrap();
+        assert_eq!(
+            distinct_addresses(&hostname, [b, a, b, a], 2).unwrap(),
+            [b, a]
+        );
+        assert!(matches!(
+            distinct_addresses(&hostname, [b, a, b], 1),
+            Err(TargetError::AddressLimit { .. })
+        ));
+    }
+}

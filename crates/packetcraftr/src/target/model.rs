@@ -454,3 +454,43 @@ impl Classified for Error {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{net::IpAddr, time::Duration};
+
+    use packetcraftr_core::budget::Deadline;
+
+    use crate::target::{Error as TargetError, Hostname, Resolver, Target};
+
+    #[test]
+    fn absolute_hostname_and_resolver_spelling() {
+        struct Recording;
+        impl Resolver for Recording {
+            fn resolve(&self, host: &Hostname, _: usize) -> Result<Vec<IpAddr>, TargetError> {
+                assert_eq!(host.as_str(), "example.test.");
+                Ok(vec!["127.0.0.1".parse().unwrap()])
+            }
+        }
+        let absolute: Hostname = "Example.TEST.".parse().unwrap();
+        assert_eq!(absolute.to_string(), "example.test.");
+        assert_eq!(
+            serde_json::to_string(&absolute).unwrap(),
+            "\"example.test.\""
+        );
+        assert_ne!(absolute, "example.test".parse::<Hostname>().unwrap());
+        let policy = crate::policy::Policy {
+            allow_hostname_resolution: true,
+            ..Default::default()
+        };
+        assert!(
+            policy
+                .resolve_target(
+                    &Target::Hostname(absolute),
+                    &Recording,
+                    &Deadline::new(Duration::from_secs(1))
+                )
+                .is_ok()
+        );
+    }
+}

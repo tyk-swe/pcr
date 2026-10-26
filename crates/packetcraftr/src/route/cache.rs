@@ -107,3 +107,6 @@ impl<R: packetcraftr_netio::route::Provider> packetcraftr_netio::route::Provider
         result
     }
 }
+
+#[cfg(test)]
+mod tests;

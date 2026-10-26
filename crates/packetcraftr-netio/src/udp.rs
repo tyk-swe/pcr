@@ -161,7 +161,7 @@ impl Classified for Error {
 }
 
 #[cfg(test)]
-mod network_improvements {
+mod tests {
     use super::*;
     use std::time::Duration;
     #[test]

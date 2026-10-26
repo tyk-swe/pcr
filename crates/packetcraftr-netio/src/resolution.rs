@@ -155,7 +155,7 @@ fn retain_addresses(
 }
 
 #[cfg(test)]
-mod network_improvements {
+mod tests {
     use super::*;
     #[test]
     fn native_resolver_retains_unique_addresses_in_first_seen_order() {

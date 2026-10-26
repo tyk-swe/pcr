@@ -61,3 +61,17 @@ pub(crate) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
         / rate;
     Some(Duration::from_nanos(u64::try_from(nanos).ok()?))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clock_stops_at_spent_deadline() {
+        let start = std::time::Instant::now();
+        SystemClock
+            .sleep(Duration::from_secs(10), &Deadline::immediate(None))
+            .unwrap();
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+}

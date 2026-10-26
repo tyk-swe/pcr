@@ -136,7 +136,7 @@ enum ScanFailure {
 }
 
 #[cfg(test)]
-mod improvement_tests {
+mod tests {
     use super::*;
     #[test]
     fn crossed_delimiters_fail_at_the_crossing_and_quotes_are_preserved() {

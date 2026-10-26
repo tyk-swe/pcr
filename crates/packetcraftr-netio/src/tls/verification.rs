@@ -133,7 +133,7 @@ pub fn verify(evidence: &Evidence, name: &ServerName, roots: &TrustStore) -> Ver
 }
 
 #[cfg(test)]
-mod network_improvements {
+mod tests {
     use super::*;
     #[test]
     fn ca_bundles_reject_every_other_pem_section() {

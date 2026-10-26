@@ -505,3 +505,6 @@ fn strategy_compatible(strategy: Strategy, field: &ResolvedField) -> bool {
         Strategy::Malformed => field.is_derived,
     }
 }
+
+#[cfg(test)]
+mod tests;

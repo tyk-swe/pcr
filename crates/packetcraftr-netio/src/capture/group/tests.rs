@@ -4,7 +4,7 @@
 use super::*;
 use packetcraftr_core::frame::Frame;
 use std::sync::{
-    Arc, Mutex,
+    Arc, Condvar, Mutex,
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     mpsc,
 };
@@ -13,8 +13,24 @@ use std::sync::{
 struct Control {
     advanced: AtomicU64,
     stopping: AtomicBool,
+    state: Mutex<()>,
+    changed: Condvar,
     entered: Mutex<Option<mpsc::SyncSender<()>>>,
     shutdowns: AtomicUsize,
+}
+
+impl Control {
+    fn advance(&self, seconds: u64) {
+        self.advanced.store(seconds, Ordering::SeqCst);
+        let _state = self.state.lock().unwrap();
+        self.changed.notify_all();
+    }
+
+    fn stop(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
+        let _state = self.state.lock().unwrap();
+        self.changed.notify_all();
+    }
 }
 struct Backend {
     control: Arc<Control>,
@@ -54,7 +70,7 @@ impl Session for Capture {
     }
     fn wait_ready(&mut self, _: &Deadline) -> Result<(), Error> {
         if self.expire_ready {
-            self.control.advanced.store(31, Ordering::SeqCst);
+            self.control.advance(31);
         }
         Ok(())
     }
@@ -68,9 +84,22 @@ impl Session for Capture {
         if let Some(entered) = self.control.entered.lock().unwrap().take() {
             entered.send(()).unwrap();
         }
+        let mut state = self.control.state.lock().unwrap();
         while deadline.enforce().is_ok() && !self.control.stopping.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(1));
+            let Ok(remaining) = deadline.remaining() else {
+                break;
+            };
+            if remaining.is_zero() {
+                break;
+            }
+            state = self
+                .control
+                .changed
+                .wait_timeout(state, remaining)
+                .unwrap()
+                .0;
         }
+        drop(state);
         if self.control.stopping.load(Ordering::SeqCst) {
             return Err(Error::CaptureReadiness {
                 message: "controlled read released".into(),
@@ -82,7 +111,7 @@ impl Session for Capture {
         Stats::default()
     }
     fn request_stop(&mut self) -> Result<(), Error> {
-        self.control.stopping.store(true, Ordering::SeqCst);
+        self.control.stop();
         Ok(())
     }
     fn shutdown_until(&mut self, deadline: &Deadline) -> Result<(), Error> {
@@ -164,9 +193,9 @@ fn inherited_elapsed_quiet_group_wait_stops_without_restarting_local_allowances(
         returned.send(outcome).unwrap();
     });
     reading.recv_timeout(Duration::from_secs(5)).unwrap();
-    observed.advanced.store(31, Ordering::SeqCst);
+    observed.advance(31);
     let returned_under_control = result.recv_timeout(Duration::from_secs(5));
-    observed.stopping.store(true, Ordering::SeqCst);
+    observed.stop();
     waiter.join().unwrap();
     assert!(
         returned_under_control

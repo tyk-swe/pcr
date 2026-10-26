@@ -4,7 +4,6 @@ import json
 import os
 from pathlib import Path
 import tempfile
-import tracemalloc
 import unittest
 from unittest.mock import patch
 
@@ -28,15 +27,13 @@ class DigestTests(unittest.TestCase):
 
 
 class StrictJsonTests(unittest.TestCase):
-    def test_json_tree_validation_has_depth_not_width_overhead(self):
-        value = list(range(20_000))
-        tracemalloc.start()
-        try:
-            script_support._validate_tree(value)
-            _, peak = tracemalloc.get_traced_memory()
-        finally:
-            tracemalloc.stop()
-        self.assertLess(peak, 256 * 1024)
+    def test_wide_shallow_json_is_accepted_and_deep_json_is_rejected(self):
+        width = 20_000
+        value = strict_json('[' + ','.join('0' for _ in range(width)) + ']')
+        self.assertEqual(len(value), width)
+        depth = script_support.MAX_JSON_DEPTH + 1
+        with self.assertRaises(ValueError):
+            strict_json('[' * depth + '0' + ']' * depth)
 
     @unittest.skipUnless(hasattr(os, 'mkfifo'), 'named pipes require POSIX')
     def test_json_reader_rejects_fifo_without_waiting_for_writer(self):

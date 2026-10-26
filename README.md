@@ -42,7 +42,7 @@ packetcraftr --output hex packet build --packet-file examples/documents/packet-d
 packetcraftr files read examples/captures/dns-response.pcap --dissect
 packetcraftr analyze dns examples/captures/dns-response.pcap
 packetcraftr analyze http examples/captures/http-stream.pcap
-packetcraftr --output json files read examples/captures/protocol-mqtt.pcap --dissect
+packetcraftr --output json files read examples/captures/protocol-mqtt.pcap --field frame.number
 ```
 
 Use `--help` on a command for all options, defaults, prerequisites, and output

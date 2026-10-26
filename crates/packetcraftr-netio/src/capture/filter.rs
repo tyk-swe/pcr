@@ -183,7 +183,7 @@ fn is_bpf_keyword(atom: &str) -> bool {
 }
 
 #[cfg(test)]
-mod network_improvements {
+mod tests {
     use super::*;
     #[test]
     fn ecn_flags_are_numeric_symbols() {

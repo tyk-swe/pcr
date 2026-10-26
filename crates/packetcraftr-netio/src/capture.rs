@@ -272,7 +272,7 @@ impl Provider for SystemProvider {
 }
 
 #[cfg(test)]
-mod network_improvements {
+mod tests {
     use super::*;
     fn request() -> Request {
         Request {

@@ -13,102 +13,6 @@ use super::address::is_public;
 use super::model::{Error, MAX_DESTINATION_CONSTRAINTS, MAX_RESOLVED_ADDRESSES, Policy};
 use crate::target::{Authorized, Hostname, Resolver, Target, distinct_addresses};
 
-#[cfg(test)]
-mod tests {
-    use std::error::Error as _;
-    use std::net::IpAddr;
-    use std::time::Duration;
-
-    use packetcraftr_core::budget::Deadline;
-    use packetcraftr_core::error::Classified;
-
-    use super::Policy;
-    use crate::policy::{Error as PolicyError, ResolutionError};
-    use crate::target::{Error as TargetError, Hostname, Resolver, Target};
-
-    #[test]
-    fn resolution_policy_denial_preserves_classification_and_causes() {
-        let policy = Policy::default();
-        let target: Target = "example.test".parse().unwrap();
-        let error = policy
-            .resolve_target(
-                &target,
-                &crate::target::SystemResolver,
-                &Deadline::new(Duration::from_secs(1)),
-            )
-            .expect_err("hostname resolution is denied");
-        let ResolutionError::Policy(PolicyError::HostnameResolution { hostname }) = &error else {
-            panic!("expected policy hostname denial, got {error:?}");
-        };
-        assert_eq!(hostname, "example.test");
-        let expected = PolicyError::HostnameResolution {
-            hostname: hostname.clone(),
-        };
-        assert_eq!(error.classification(), expected.classification());
-        assert_eq!(error.causes(), expected.causes());
-        assert!(error.source().is_none());
-    }
-
-    #[test]
-    fn resolution_target_failure_preserves_classification_and_causes() {
-        struct FailingResolver;
-        impl Resolver for FailingResolver {
-            fn resolve(&self, hostname: &Hostname, _: usize) -> Result<Vec<IpAddr>, TargetError> {
-                Err(TargetError::Resolver {
-                    hostname: hostname.to_string(),
-                    source: std::io::Error::other("resolver unavailable").into(),
-                })
-            }
-        }
-
-        let policy = Policy {
-            allow_hostname_resolution: true,
-            ..Policy::default()
-        };
-        let target: Target = "example.test".parse().unwrap();
-        let error = policy
-            .resolve_target(
-                &target,
-                &FailingResolver,
-                &Deadline::new(Duration::from_secs(1)),
-            )
-            .expect_err("resolver fails");
-        let ResolutionError::Target(TargetError::Resolver { source, .. }) = &error else {
-            panic!("expected target resolver failure, got {error:?}");
-        };
-        assert_eq!(source.to_string(), "resolver unavailable");
-        assert_eq!(error.classification().code, "io.hostname_resolution");
-        assert_eq!(
-            error.classification().kind,
-            packetcraftr_core::error::Kind::Io
-        );
-        assert_eq!(error.causes(), ["resolver unavailable"]);
-        assert_eq!(
-            error.source().map(ToString::to_string).as_deref(),
-            Some("resolver unavailable")
-        );
-    }
-
-    #[test]
-    fn resolution_deadline_interruption_preserves_target_control() {
-        let policy = Policy::default();
-        let target: Target = "127.0.0.1".parse().unwrap();
-        let error = policy
-            .resolve_target(
-                &target,
-                &crate::target::SystemResolver,
-                &Deadline::immediate(None),
-            )
-            .expect_err("immediate deadline interrupts resolution");
-        let ResolutionError::Target(TargetError::Control(source)) = &error else {
-            panic!("expected target deadline control, got {error:?}");
-        };
-        assert_eq!(error.classification(), source.classification());
-        assert_eq!(error.causes(), source.causes());
-        assert!(error.source().is_some());
-    }
-}
-
 impl Policy {
     pub fn validate(&self) -> Result<(), Error> {
         if !(1..=MAX_RESOLVED_ADDRESSES).contains(&self.max_resolved_addresses) {
@@ -325,5 +229,145 @@ impl Policy {
             declared: target.clone(),
             selected,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+    use std::net::IpAddr;
+    use std::time::Duration;
+
+    use packetcraftr_core::budget::Deadline;
+    use packetcraftr_core::error::Classified;
+
+    use super::Policy;
+    use crate::policy::{Error as PolicyError, ResolutionError};
+    use crate::target::{Error as TargetError, Hostname, Resolver, Target};
+
+    #[test]
+    fn resolution_policy_denial_preserves_classification_and_causes() {
+        let policy = Policy::default();
+        let target: Target = "example.test".parse().unwrap();
+        let error = policy
+            .resolve_target(
+                &target,
+                &crate::target::SystemResolver,
+                &Deadline::new(Duration::from_secs(1)),
+            )
+            .expect_err("hostname resolution is denied");
+        let ResolutionError::Policy(PolicyError::HostnameResolution { hostname }) = &error else {
+            panic!("expected policy hostname denial, got {error:?}");
+        };
+        assert_eq!(hostname, "example.test");
+        let expected = PolicyError::HostnameResolution {
+            hostname: hostname.clone(),
+        };
+        assert_eq!(error.classification(), expected.classification());
+        assert_eq!(error.causes(), expected.causes());
+        assert!(error.source().is_none());
+    }
+
+    #[test]
+    fn resolution_target_failure_preserves_classification_and_causes() {
+        struct FailingResolver;
+        impl Resolver for FailingResolver {
+            fn resolve(&self, hostname: &Hostname, _: usize) -> Result<Vec<IpAddr>, TargetError> {
+                Err(TargetError::Resolver {
+                    hostname: hostname.to_string(),
+                    source: std::io::Error::other("resolver unavailable").into(),
+                })
+            }
+        }
+
+        let policy = Policy {
+            allow_hostname_resolution: true,
+            ..Policy::default()
+        };
+        let target: Target = "example.test".parse().unwrap();
+        let error = policy
+            .resolve_target(
+                &target,
+                &FailingResolver,
+                &Deadline::new(Duration::from_secs(1)),
+            )
+            .expect_err("resolver fails");
+        let ResolutionError::Target(TargetError::Resolver { source, .. }) = &error else {
+            panic!("expected target resolver failure, got {error:?}");
+        };
+        assert_eq!(source.to_string(), "resolver unavailable");
+        assert_eq!(error.classification().code, "io.hostname_resolution");
+        assert_eq!(
+            error.classification().kind,
+            packetcraftr_core::error::Kind::Io
+        );
+        assert_eq!(error.causes(), ["resolver unavailable"]);
+        assert_eq!(
+            error.source().map(ToString::to_string).as_deref(),
+            Some("resolver unavailable")
+        );
+    }
+
+    #[test]
+    fn resolution_deadline_interruption_preserves_target_control() {
+        let policy = Policy::default();
+        let target: Target = "127.0.0.1".parse().unwrap();
+        let error = policy
+            .resolve_target(
+                &target,
+                &crate::target::SystemResolver,
+                &Deadline::immediate(None),
+            )
+            .expect_err("immediate deadline interrupts resolution");
+        let ResolutionError::Target(TargetError::Control(source)) = &error else {
+            panic!("expected target deadline control, got {error:?}");
+        };
+        assert_eq!(error.classification(), source.classification());
+        assert_eq!(error.causes(), source.causes());
+        assert!(error.source().is_some());
+    }
+
+    #[test]
+    fn numeric_and_custom_resolution_boundaries() {
+        use std::sync::Arc;
+
+        use packetcraftr_core::budget::Cancellation;
+
+        struct Late(Cancellation);
+        impl Resolver for Late {
+            fn resolve(&self, _: &Hostname, _: usize) -> Result<Vec<IpAddr>, TargetError> {
+                unreachable!()
+            }
+
+            fn resolve_controlled(
+                &self,
+                _: &Hostname,
+                _: usize,
+                _: &Deadline,
+            ) -> Result<Vec<IpAddr>, TargetError> {
+                self.0.cancel();
+                Ok(vec!["127.0.0.1".parse().unwrap()])
+            }
+        }
+        let policy = Policy {
+            allow_hostname_resolution: true,
+            ..Default::default()
+        };
+        let cancel = Cancellation::default();
+        let resolver = Late(cancel.clone());
+        assert!(matches!(
+            policy.resolve_target(
+                &"127.0.0.1".parse().unwrap(),
+                &resolver,
+                &Deadline::immediate(None)
+            ),
+            Err(ResolutionError::Target(TargetError::Control(_)))
+        ));
+        let parent = Deadline::new(Duration::from_secs(1)).with_cancellation(Some(cancel));
+        let deadline = Deadline::new(Duration::from_secs(1)).with_parent(Some(Arc::new(parent)));
+        assert!(matches!(
+            policy.resolve_target(&"example.test".parse().unwrap(), &resolver, &deadline),
+            Err(ResolutionError::Target(TargetError::Control(_)))
+        ));
     }
 }

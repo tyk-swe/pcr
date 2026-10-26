@@ -272,3 +272,6 @@ impl<R: Read + Seek> Reader<R> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

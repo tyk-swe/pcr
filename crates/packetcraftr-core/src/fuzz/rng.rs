@@ -37,3 +37,6 @@ impl SplitMix64 {
         output
     }
 }
+
+#[cfg(test)]
+mod tests;

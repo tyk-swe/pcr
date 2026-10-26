@@ -45,15 +45,18 @@ fn discovery_request(probes: Vec<arguments::DiscoveryProbe>) -> DiscoveryRequest
     }
 }
 
+fn assert_usage_error(error: CliError, code: &'static str) {
+    assert_eq!(error.exit_code(), 2);
+    assert_eq!(error.classification.kind, Kind::Usage);
+    assert_eq!(error.classification.code, code);
+}
+
 #[test]
 fn live_port_selection_requires_omitted_ports() {
     let error = endpoint_request(&[Transport::Tcp], vec![], vec![], vec![], vec![])
         .select()
         .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "invalid scan ports: TCP and UDP scans require at least one destination port"
-    );
+    assert_usage_error(error, "cli.scan_limit");
 }
 
 #[test]
@@ -80,41 +83,32 @@ fn ip_protocol_only_selection_uses_protocol_endpoints() {
 }
 
 #[test]
-fn invalid_port_and_protocol_combinations_keep_their_messages() {
+fn invalid_port_and_protocol_combinations_are_usage_errors() {
     let cases = [
-        (
-            endpoint_request(
-                &[Transport::Ip],
-                vec![port(None, 80)],
-                vec![],
-                vec![],
-                vec![],
-            ),
-            "--ports and --exclude-ports do not apply to portless IP-protocol scans; use --ip-protocols",
+        endpoint_request(
+            &[Transport::Ip],
+            vec![port(None, 80)],
+            vec![],
+            vec![],
+            vec![],
         ),
-        (
-            endpoint_request(
-                &[Transport::Icmp],
-                vec![port(None, 80)],
-                vec![],
-                vec![],
-                vec![],
-            ),
-            "--ports and --exclude-ports do not apply to portless ICMP echo scans",
+        endpoint_request(
+            &[Transport::Icmp],
+            vec![port(None, 80)],
+            vec![],
+            vec![],
+            vec![],
         ),
-        (
-            endpoint_request(
-                &[Transport::Tcp],
-                vec![port(None, 80)],
-                vec![],
-                vec![protocol(1)],
-                vec![],
-            ),
-            "--ip-protocols and --exclude-ip-protocols require --transport ip",
+        endpoint_request(
+            &[Transport::Tcp],
+            vec![port(None, 80)],
+            vec![],
+            vec![protocol(1)],
+            vec![],
         ),
     ];
-    for (request, expected) in cases {
-        assert_eq!(request.select().unwrap_err().to_string(), expected);
+    for request in cases {
+        assert_usage_error(request.select().unwrap_err(), "cli.error");
     }
 }
 
@@ -129,11 +123,6 @@ fn listing_preserves_icmp_combined_invalid_option_precedence() {
     )
     .select_if_requested()
     .unwrap_err();
-    assert_eq!(
-        listing.to_string(),
-        "--ip-protocols and --exclude-ip-protocols require --transport ip"
-    );
-
     let scan = endpoint_request(
         &[Transport::Icmp],
         vec![port(None, 80)],
@@ -143,10 +132,29 @@ fn listing_preserves_icmp_combined_invalid_option_precedence() {
     )
     .select()
     .unwrap_err();
-    assert_eq!(
-        scan.to_string(),
-        "--ports and --exclude-ports do not apply to portless ICMP echo scans"
-    );
+    let ip_protocols_only = endpoint_request(
+        &[Transport::Icmp],
+        vec![],
+        vec![],
+        vec![protocol(1)],
+        vec![],
+    )
+    .select()
+    .unwrap_err();
+    let ports_only = endpoint_request(
+        &[Transport::Icmp],
+        vec![port(None, 80)],
+        vec![],
+        vec![],
+        vec![],
+    )
+    .select()
+    .unwrap_err();
+
+    assert_eq!(listing.to_string(), ip_protocols_only.to_string());
+    assert_eq!(scan.to_string(), ports_only.to_string());
+    assert_usage_error(listing, "cli.error");
+    assert_usage_error(scan, "cli.error");
 }
 
 #[test]

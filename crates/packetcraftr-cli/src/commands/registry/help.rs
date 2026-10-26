@@ -218,7 +218,25 @@ mod tests {
     }
 
     #[test]
-    fn every_is_a_frame_selection_option() {
-        assert_eq!(heading("every"), heading("frames"));
+    fn rendered_read_help_groups_every_with_the_frame_selection_options() {
+        use clap::CommandFactory;
+
+        let mut command = crate::app::cli::Cli::command();
+        command.build();
+        let mut read = command
+            .find_subcommand("files")
+            .and_then(|files| files.find_subcommand("read"))
+            .expect("files read is registered")
+            .clone();
+        let rendered =
+            anstream::adapter::strip_str(&read.render_long_help().to_string()).to_string();
+        let section = rendered
+            .split_once("Selection and decoding:\n")
+            .map(|(_, tail)| tail)
+            .and_then(|tail| tail.split_once("\nGlobal options:"))
+            .map(|(section, _)| section)
+            .expect("read help renders a selection section before the global options");
+        assert!(section.contains("--frames <RANGES>"));
+        assert!(section.contains("--every <N>"));
     }
 }

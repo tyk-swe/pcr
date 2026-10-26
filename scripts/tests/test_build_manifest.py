@@ -1,5 +1,7 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
+from contextlib import redirect_stderr
+import io
 from pathlib import Path
 import tempfile
 import unittest
@@ -90,5 +92,8 @@ class BuildManifestTests(unittest.TestCase):
                     manifest.binary_version(Path('/binary'), 'original')
 
     def test_missing_binary_is_a_clean_failure(self):
-        with self.assertRaisesRegex(SystemExit, '1'):
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit) as caught:
             manifest.main(['--binary', '/missing/binary', '--verify', '/missing/metadata'])
+        self.assertEqual(caught.exception.code, 1)
+        self.assertIn('binary is not a regular file', stderr.getvalue())

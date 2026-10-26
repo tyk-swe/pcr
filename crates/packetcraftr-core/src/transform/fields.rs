@@ -395,7 +395,7 @@ fn write_uint(bytes: &mut [u8], range: ByteRange, value: u64) {
 }
 
 #[cfg(test)]
-mod improvement_tests {
+mod tests {
     use super::*;
     #[test]
     fn assignment_limit_precedes_compilation() {

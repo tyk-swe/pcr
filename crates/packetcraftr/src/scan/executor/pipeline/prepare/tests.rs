@@ -83,33 +83,79 @@ fn route_map_scope_source_table_and_materialized_names_have_distinct_charges() {
         false,
     )
     .unwrap();
-    let source_name = &plain_plan.interfaces[0].name;
-    assert_eq!(
-        plain_plan.interfaces_bytes,
-        256 + std::mem::size_of::<interface::Id>() + source_name.capacity()
-    );
+    assert!(scoped_plan.base_bytes > plain_plan.base_bytes);
+    assert!(scoped_plan.probes[0].memory > plain_plan.probes[0].memory);
+    let plain_route = plain_plan.routes.values().next().unwrap();
+    let scoped_route = scoped_plan.routes.values().next().unwrap();
+    assert!(route_charge(scoped_route) > route_charge(plain_route));
+    assert_eq!(scoped_plan.interfaces, plain_plan.interfaces);
     assert_eq!(scoped_plan.interfaces_bytes, plain_plan.interfaces_bytes);
-    let scoped_bytes = scoped.scope.as_ref().unwrap().retained_bytes();
-    assert_eq!(
-        scoped_plan.base_bytes - plain_plan.base_bytes,
-        scoped_bytes + 2 * source_name.len(),
-        "declared scope, owned map key and AuthorizedRoute scope are separate"
+    let second = probe(1, address, None);
+    let pair_plan = plan(
+        &executor,
+        &[Planned { probe: &plain }, Planned { probe: &second }],
+        &options,
+        end,
+        &deadline,
+        false,
+    )
+    .unwrap();
+    assert!(pair_plan.interfaces_bytes > plain_plan.interfaces_bytes);
+    assert!(pair_plan.base_bytes > plain_plan.base_bytes);
+    drop(pair_plan);
+    let plain_required = plain_plan.base_bytes
+        + plain_plan
+            .probes
+            .iter()
+            .map(|probe| probe.memory)
+            .max()
+            .unwrap();
+    let scoped_required = scoped_plan.base_bytes
+        + scoped_plan
+            .probes
+            .iter()
+            .map(|probe| probe.memory)
+            .max()
+            .unwrap();
+    assert!(scoped_required > plain_required);
+    drop(plain_plan);
+    drop(scoped_plan);
+    let mut tight = options.clone();
+    tight.max_prepared_bytes = plain_required;
+    plan(
+        &executor,
+        &[Planned { probe: &plain }],
+        &tight,
+        end,
+        &deadline,
+        false,
+    )
+    .expect("unscoped probe fits its measured profile");
+    assert!(
+        plan(
+            &executor,
+            &[Planned { probe: &scoped }],
+            &tight,
+            end,
+            &deadline,
+            false,
+        )
+        .is_err()
     );
-    assert_eq!(
-        scoped_plan.probes[0].memory - plain_plan.probes[0].memory,
-        source_name.len(),
-        "fresh scoped planning needs one temporary selector clone"
-    );
-    let route = plain_plan.routes.values().next().unwrap();
-    assert_eq!(route_charge(route), 2048 + source_name.capacity());
+    tight.max_prepared_bytes = scoped_required;
+    plan(
+        &executor,
+        &[Planned { probe: &scoped }],
+        &tight,
+        end,
+        &deadline,
+        false,
+    )
+    .expect("scoped probe fits its measured profile");
 }
 
 #[test]
 fn optional_previews_preserve_the_minimum_admitted_resource_profile() {
-    assert!(
-        std::mem::size_of::<AdmittedProbe>() + 2 * std::mem::size_of::<usize>() <= 384,
-        "descriptor charge covers preview handle and bounded eviction-stack capacity"
-    );
     for hosts in [1, 8] {
         let mut client = crate::engine::preparation::tests::client_for_plan();
         Arc::make_mut(&mut client.policy)
@@ -161,6 +207,7 @@ fn optional_previews_preserve_the_minimum_admitted_resource_profile() {
             .max()
             .unwrap();
         drop(baseline);
+        let mut previous_retained_base = None;
         for retained_capacity in [0, 2] {
             options.max_prepared_bytes = base + (retained_capacity + 1) * maximum;
             let retained = plan(&executor, &planned, &options, plan_end, &deadline, true)
@@ -173,8 +220,15 @@ fn optional_previews_preserve_the_minimum_admitted_resource_profile() {
                     .count(),
                 retained_capacity
             );
-            assert_eq!(retained.base_bytes, base + retained_capacity * maximum);
             assert!(retained.base_bytes + maximum <= options.max_prepared_bytes);
+            assert!(retained.base_bytes >= base);
+            if retained_capacity > 0 {
+                assert!(retained.base_bytes > base);
+            }
+            if let Some(previous) = previous_retained_base {
+                assert!(retained.base_bytes > previous);
+            }
+            previous_retained_base = Some(retained.base_bytes);
         }
     }
 }

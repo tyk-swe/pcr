@@ -76,3 +76,56 @@ pub fn merge(operator: BTreeMap<u16, Arc<UdpProfile>>, endpoints: &[probe::Endpo
     merged.overridden.sort_unstable();
     merged
 }
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use packetcraftr_core::document::udp_profiles::{Config, Payload, ResponseCheck};
+
+    use super::*;
+
+    fn operator_profile() -> Arc<UdpProfile> {
+        Arc::new(
+            UdpProfile::new(Config {
+                name: "operator".into(),
+                request: Payload::Bytes {
+                    data: Bytes::from_static(b"x"),
+                },
+                response: ResponseCheck::Any {},
+            })
+            .unwrap(),
+        )
+    }
+
+    #[test]
+    fn bundled_payloads_parse_compile_and_publish_their_version() {
+        assert!(!bundled().is_empty());
+        assert_eq!(data_set().version, CURATED_UDP_PAYLOADS_VERSION);
+        assert_eq!(data_set().name, "udp-payloads");
+    }
+
+    #[test]
+    fn curated_payload_applies_only_to_planned_udp_endpoints() {
+        let port = *bundled().keys().next().unwrap();
+        let applied = merge(BTreeMap::new(), &[probe::Endpoint::Udp { port }]);
+        assert_eq!(applied.applied, [port]);
+        assert!(applied.overridden.is_empty());
+        assert!(Arc::ptr_eq(&applied.profiles[&port], &bundled()[&port]));
+        let skipped = merge(BTreeMap::new(), &[probe::Endpoint::Tcp { port }]);
+        assert!(skipped.applied.is_empty());
+        assert!(skipped.profiles.is_empty());
+    }
+
+    #[test]
+    fn operator_profile_overrides_the_curated_payload_for_its_port() {
+        let port = *bundled().keys().next().unwrap();
+        let operator = operator_profile();
+        let merged = merge(
+            BTreeMap::from([(port, Arc::clone(&operator))]),
+            &[probe::Endpoint::Udp { port }],
+        );
+        assert_eq!(merged.overridden, [port]);
+        assert!(merged.applied.is_empty());
+        assert!(Arc::ptr_eq(&merged.profiles[&port], &operator));
+    }
+}

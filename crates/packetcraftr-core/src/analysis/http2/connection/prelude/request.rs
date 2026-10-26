@@ -27,8 +27,7 @@ impl ConnectionState {
                 let sets = dir.buffer.contributors(take);
                 let (wire, dropped) = dir.buffer.take(take);
                 let sources = union_balanced(sets)?;
-                Self::release_dir(dir, context, take)?;
-                Self::release_dropped(dir, dropped, context)?;
+                dir.release_consumed(take, dropped, context)?;
                 self.issue(
                     context,
                     Fault {
@@ -52,8 +51,7 @@ impl ConnectionState {
             let sets = dir.buffer.contributors(consumed.min(dir.buffer.len()));
             let (_, dropped) = dir.buffer.take(consumed.min(dir.buffer.len()));
             let sources = union_balanced(sets)?;
-            Self::release_dir(dir, context, consumed)?;
-            Self::release_dropped(dir, dropped, context)?;
+            dir.release_consumed(consumed, dropped, context)?;
             self.issue(
                 context,
                 Fault {
@@ -73,8 +71,7 @@ impl ConnectionState {
         }
         let sets = dir.buffer.contributors(consumed);
         let (head_wire_bytes, dropped) = dir.buffer.take(consumed);
-        Self::release_dir(dir, context, consumed)?;
-        Self::release_dropped(dir, dropped, context)?;
+        dir.release_consumed(consumed, dropped, context)?;
         let (head, _) = http::parse_head(&head_wire_bytes)?
             .ok_or(Error::Invariant("previously parsed complete HTTP/1 head"))?;
         let head_wire = head_wire_bytes.len();
@@ -100,16 +97,14 @@ impl ConnectionState {
             }
         };
         let mut msg = self.new_message(0, MessageKind::Request, context)?;
-        self.charge_conn(context, head_wire)?;
-        msg.charged += head_wire;
+        context.charge(&mut msg.charge, head_wire)?;
         msg.upgrade_head = Some(head.clone());
         let header_charge = head
             .headers
             .iter()
             .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
             .sum::<usize>();
-        self.charge_conn(context, header_charge)?;
-        msg.charged += header_charge;
+        context.charge(&mut msg.charge, header_charge)?;
         let headers: Vec<Header> = head
             .headers
             .iter()
@@ -121,12 +116,7 @@ impl ConnectionState {
             .collect();
         msg.headers = headers;
         for set in sets {
-            let frames = set.frames().len();
-            let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
-            self.charge_conn(context, charge)?;
-            context.charge_spans(frames)?;
-            msg.charged += charge;
-            msg.charged_spans += frames;
+            context.track(&mut msg.charge, &set)?;
             msg.sets.push(set);
         }
         let index = msg.index;
@@ -157,7 +147,7 @@ impl ConnectionState {
             self.fail(context, Status::Limit)?;
             return Ok(true);
         }
-        self.charge_conn(context, budget::PENDING_OVERHEAD)?;
+        context.charge(&mut self.charge, budget::PENDING_OVERHEAD)?;
         let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
         prelude.requests.push_back(Pending {
             index,
@@ -166,7 +156,7 @@ impl ConnectionState {
         });
         if let Some(settings) = offer {
             let charge = budget::OFFER_OVERHEAD + settings.capacity() * 24;
-            self.charge_conn(context, charge)?;
+            context.charge(&mut self.charge, charge)?;
             let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
             prelude.offers.insert(
                 index,
@@ -204,14 +194,14 @@ impl ConnectionState {
             .as_ref()
             .is_some_and(|p| p.offers.contains_key(&index));
         if matches!(framing, http::Body::Chunked) {
-            if let Err(error) = self.charge_conn(context, budget::PRELUDE_BODY_RESERVE) {
+            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            if let Err(error) = context.charge(
+                &mut prelude.body_charge[Side::Client],
+                budget::PRELUDE_BODY_RESERVE,
+            ) {
                 self.drop_msg(msg, context)?;
                 return Err(error);
             }
-            self.prelude
-                .as_mut()
-                .ok_or(Error::Invariant("prelude"))?
-                .body_charge[Side::Client] = budget::PRELUDE_BODY_RESERVE;
         }
         let decoder = BodyDecoder::new(framing, context.limits.max_body_bytes);
         if decoder.complete() {

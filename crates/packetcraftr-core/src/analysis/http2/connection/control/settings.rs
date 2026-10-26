@@ -21,7 +21,7 @@ impl ConnectionState {
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if flags & wire::FLAG_ACK != 0 {
-            let Some(acked) = self.settings[side.peer()].acknowledge() else {
+            let Some(mut acked) = self.settings[side.peer()].acknowledge() else {
                 // Two unmatched ACK heads cannot be explained by reordering:
                 // both matching SETTINGS would have to precede the other's ACK.
                 // Retain the peer's still-buffered evidence before failure drains it.
@@ -126,7 +126,7 @@ impl ConnectionState {
                 }
             }
             drop(acked.window_grants);
-            self.release_conn(context, acked.charged)?;
+            context.release_all(&mut acked.charge)?;
             for debt in self.closed_credit.values_mut() {
                 context.check_deadline()?;
                 if let Some(window) = debt[side].as_mut() {
@@ -199,12 +199,14 @@ impl ConnectionState {
         let applied = self.settings[side].apply(&settings, side == Side::Server);
         let mut pending = applied.pending;
         pending.sender_stream_limit = self.max_initiated[side];
-        pending.charged = budget::PENDING_OVERHEAD
-            + self
-                .streams
-                .len()
-                .saturating_mul(budget::CLOSED_STREAM_OVERHEAD);
-        self.charge_conn(context, pending.charged)?;
+        context.charge(
+            &mut pending.charge,
+            budget::PENDING_OVERHEAD
+                + self
+                    .streams
+                    .len()
+                    .saturating_mul(budget::CLOSED_STREAM_OVERHEAD),
+        )?;
         for (id, stream) in &self.streams {
             context.check_deadline()?;
             pending

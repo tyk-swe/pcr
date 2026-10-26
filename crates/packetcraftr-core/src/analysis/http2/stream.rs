@@ -3,6 +3,7 @@
 
 //! Stream lifecycle and in-progress request and response message state.
 
+use super::budget::Charge;
 use super::model::{Header, MessageKind};
 use crate::analysis::http2::side::{PerSide, Side};
 use crate::analysis::provenance::SourceSet;
@@ -33,8 +34,7 @@ pub(crate) struct MessageBuilder {
     pub trailers_seen: bool,
     pub content_length: Option<u64>,
     pub status_code: Option<u16>,
-    pub charged: usize,
-    pub charged_spans: usize,
+    pub charge: Charge,
 }
 
 impl MessageBuilder {
@@ -57,8 +57,7 @@ impl MessageBuilder {
             trailers_seen: false,
             content_length: None,
             status_code: None,
-            charged: 0,
-            charged_spans: 0,
+            charge: Charge::default(),
         }
     }
 }

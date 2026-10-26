@@ -46,8 +46,7 @@ impl ConnectionState {
                 let sets = dir.buffer.contributors(wire::HEADER_LEN);
                 let (_, dropped) = dir.buffer.take(wire::HEADER_LEN);
                 let sources = union_balanced(sets)?;
-                Self::release_dir(dir, context, wire::HEADER_LEN)?;
-                Self::release_dropped(dir, dropped, context)?;
+                dir.release_consumed(wire::HEADER_LEN, dropped, context)?;
                 self.issue(
                     context,
                     Fault {
@@ -90,9 +89,9 @@ impl ConnectionState {
                     limit: total,
                 },
             ))?;
-        context.charge_live(scratch)?;
+        context.reserve_scratch(scratch)?;
         let result = self.frame_step_parsed(side, total, context);
-        context.release_live(scratch)?;
+        context.release_scratch(scratch)?;
         result
     }
 
@@ -111,8 +110,7 @@ impl ConnectionState {
                 let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
                 let sets = dir.buffer.contributors(total);
                 let dropped = dir.buffer.consume(total);
-                Self::release_dir(dir, context, total)?;
-                Self::release_dropped(dir, dropped, context)?;
+                dir.release_consumed(total, dropped, context)?;
                 let sources = union_balanced(sets)?;
                 self.frames += 1;
                 self.handle_frame(side, frame, wire_bytes, sources, context)?;
@@ -161,8 +159,7 @@ impl ConnectionState {
         let sets = dir.buffer.contributors(take);
         let (wire, dropped) = dir.buffer.take(take);
         let sources = union_balanced(sets)?;
-        Self::release_dir(dir, context, take)?;
-        Self::release_dropped(dir, dropped, context)?;
+        dir.release_consumed(take, dropped, context)?;
         let flow = dir.flow.clone();
         let (status, code, detail) = match &error {
             _ if interrupted_chain => (

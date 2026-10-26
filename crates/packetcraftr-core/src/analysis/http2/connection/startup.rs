@@ -110,7 +110,7 @@ impl ConnectionState {
                         dir.phase = DirectionPhase::Prelude;
                     }
                     self.prelude = Some(Prelude::new());
-                    self.charge_conn(context, budget::DIR_OVERHEAD)?;
+                    context.charge(&mut self.charge, budget::DIR_OVERHEAD)?;
                     self.phase = Phase::Prelude;
                     return Ok(());
                 }
@@ -159,8 +159,7 @@ impl ConnectionState {
             let sets = dir.buffer.contributors(take);
             let (wire, dropped) = dir.buffer.take(take);
             let sources = union_balanced(sets)?;
-            Self::release_dir(dir, context, take)?;
-            Self::release_dropped(dir, dropped, context)?;
+            dir.release_consumed(take, dropped, context)?;
             self.issue(
                 context,
                 Fault {
@@ -182,8 +181,7 @@ impl ConnectionState {
             return Ok(false);
         }
         let dropped = dir.buffer.consume(PREFACE_LEN);
-        Self::release_dir(dir, context, PREFACE_LEN)?;
-        Self::release_dropped(dir, dropped, context)?;
+        dir.release_consumed(PREFACE_LEN, dropped, context)?;
         if let Some(dir) = self.dirs[side].as_mut() {
             dir.phase = DirectionPhase::Frames;
         }

@@ -55,7 +55,7 @@ impl ConnectionState {
             capacity += 1;
         }
         let scratch = capacity * size_of::<u32>();
-        context.charge_live(scratch)?;
+        context.reserve_scratch(scratch)?;
         let result = self.goaway_unprocessed(
             side,
             last_stream_id,
@@ -64,7 +64,7 @@ impl ConnectionState {
             &evidence,
             context,
         );
-        context.release_live(scratch)?;
+        context.release_scratch(scratch)?;
         result
     }
 
@@ -128,7 +128,7 @@ impl ConnectionState {
                     *count -= 1;
                     if *count == 0 {
                         pending.remove(&opaque);
-                        self.release_conn(context, PING_ENTRY)?;
+                        context.release(&mut self.charge, PING_ENTRY)?;
                     }
                 }
                 None => {
@@ -155,7 +155,7 @@ impl ConnectionState {
             *count += 1;
             return Ok(());
         }
-        self.charge_conn(context, PING_ENTRY)?;
+        context.charge(&mut self.charge, PING_ENTRY)?;
         self.pings[side].insert(opaque, 1);
         Ok(())
     }

@@ -161,7 +161,7 @@ impl ConnectionState {
                 if delayed_opener && !self.early_response_headers.contains_key(&stream_id) {
                     context.check_streams()?;
                     self.admitted_streams += 1;
-                    self.charge_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
+                    context.charge(&mut self.charge, budget::CLOSED_STREAM_OVERHEAD)?;
                     self.early_response_headers
                         .insert(stream_id, Default::default());
                 }
@@ -503,43 +503,25 @@ impl ConnectionState {
                     .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
                     .sum::<usize>()
                     + block.len();
-                self.charge_conn(context, added)?;
                 let stream = self
                     .streams
                     .get_mut(&stream_id)
                     .ok_or(Error::Invariant("stream"))?;
-                if let Some(msg) = stream.msgs[side].as_mut() {
-                    msg.charged += added;
-                    msg.trailers.extend(headers);
-                    msg.header_blocks.push(block);
-                    if let Some(sources) = block_sources {
-                        let frames = sources.frames().len();
-                        let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
-                        self.charge_conn(context, charge)?;
-                        context.charge_spans(frames)?;
-                        let msg = self
-                            .streams
-                            .get_mut(&stream_id)
-                            .and_then(|s| s.msgs[side].as_mut())
-                            .ok_or(Error::Invariant("msg"))?;
-                        msg.charged += charge;
-                        msg.charged_spans += frames;
-                        msg.sets.push(sources);
+                match stream.msgs[side].as_mut() {
+                    Some(msg) => {
+                        context.charge(&mut msg.charge, added)?;
+                        msg.trailers.extend(headers);
+                        msg.header_blocks.push(block);
+                        if let Some(sources) = block_sources {
+                            context.track(&mut msg.charge, &sources)?;
+                            msg.sets.push(sources);
+                        }
+                        if let Some(set) = compression {
+                            context.track(&mut msg.charge, &set)?;
+                            msg.compression.push(set);
+                        }
                     }
-                    if let Some(set) = compression {
-                        let frames = set.frames().len();
-                        let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
-                        self.charge_conn(context, charge)?;
-                        context.charge_spans(frames)?;
-                        let msg = self
-                            .streams
-                            .get_mut(&stream_id)
-                            .and_then(|s| s.msgs[side].as_mut())
-                            .ok_or(Error::Invariant("msg"))?;
-                        msg.charged += charge;
-                        msg.charged_spans += frames;
-                        msg.compression.push(set);
-                    }
+                    None => context.charge(&mut self.charge, added)?,
                 }
             } else {
                 failure = Some(Status::Malformed);

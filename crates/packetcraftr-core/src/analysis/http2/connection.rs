@@ -12,7 +12,7 @@ pub(crate) mod streams;
 
 pub(crate) use super::budget::Context;
 
-use super::budget::{self, SET_OVERHEAD, SPAN_OVERHEAD};
+use super::budget::{self, Charge};
 
 use super::Error;
 use super::buffer::SourceBuffer;
@@ -54,8 +54,7 @@ pub(crate) struct Chain {
     pub bytes: bytes::BytesMut,
     pub frames: usize,
     pub sets: Vec<SourceSet>,
-    pub charged: usize,
-    pub charged_spans: usize,
+    pub charge: Charge,
 }
 #[derive(Clone, Copy)]
 pub(crate) enum ChainHead {
@@ -68,7 +67,7 @@ pub(crate) struct DirectionState {
     pub phase: DirectionPhase,
     pub buffer: SourceBuffer,
     pub decoder: Option<hpack::Decoder>,
-    pub decoder_charge: usize,
+    pub decoder_charge: Charge,
     pub block_sources: HashMap<u64, SourceSet>,
     pub chain: Option<Chain>,
     pub closed: bool,
@@ -76,8 +75,7 @@ pub(crate) struct DirectionState {
     pub saw_frame: bool,
     pub received: bool,
     pub garbage: bool,
-    pub charged: usize,
-    pub charged_spans: usize,
+    pub charge: Charge,
 }
 impl DirectionState {
     pub(crate) fn new(flow: ScopedFlowKey) -> Self {
@@ -86,7 +84,7 @@ impl DirectionState {
             phase: DirectionPhase::Sniff,
             buffer: SourceBuffer::new(),
             decoder: None,
-            decoder_charge: 0,
+            decoder_charge: Charge::default(),
             block_sources: HashMap::new(),
             chain: None,
             closed: false,
@@ -94,9 +92,28 @@ impl DirectionState {
             saw_frame: false,
             received: false,
             garbage: false,
-            charged: 0,
-            charged_spans: 0,
+            charge: Charge::default(),
         }
+    }
+
+    pub(crate) fn release_consumed(
+        &mut self,
+        bytes: usize,
+        dropped: Vec<SourceSet>,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
+        context.release(&mut self.charge, bytes)?;
+        dropped
+            .iter()
+            .try_for_each(|set| context.untrack(&mut self.charge, set))
+    }
+
+    pub(crate) fn release_all(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
+        context.release_all(&mut self.charge)?;
+        context.release_all(&mut self.decoder_charge)?;
+        self.chain
+            .as_mut()
+            .map_or(Ok(()), |chain| context.release_all(&mut chain.charge))
     }
 }
 
@@ -168,10 +185,10 @@ pub(crate) struct ConnectionState {
     pub emitted: bool,
     pub clean_start: bool,
     pub number: u64,
-    pub live: usize,
+    pub charge: Charge,
     pub upgrade_response: Option<crate::protocol::application::http::Head>,
     pub upgrade_sources: Option<SourceSet>,
-    pub upgrade_charge: usize,
+    pub upgrade_charge: Charge,
     pub final_pending_settings: Option<u64>,
     pub pings: PerSide<BTreeMap<[u8; 8], u64>>,
     pub final_pending_pings: Option<u64>,
@@ -212,10 +229,10 @@ impl ConnectionState {
             emitted: false,
             clean_start: true,
             number: 0,
-            live: 0,
+            charge: Charge::default(),
             upgrade_response: None,
             upgrade_sources: None,
-            upgrade_charge: 0,
+            upgrade_charge: Charge::default(),
             final_pending_settings: None,
             pings: PerSide::new(BTreeMap::new(), BTreeMap::new()),
             final_pending_pings: None,
@@ -346,10 +363,10 @@ impl ConnectionState {
                     Phase::Prelude => DirectionPhase::Prelude,
                     _ => DirectionPhase::Sniff,
                 };
-                self.charge_conn(context, budget::DIR_OVERHEAD)?;
+                context.charge(&mut self.charge, budget::DIR_OVERHEAD)?;
                 self.dirs[Side::Server] = Some(dir);
             } else if !elected && self.pending.len() < 2 {
-                self.charge_conn(context, budget::DIR_OVERHEAD)?;
+                context.charge(&mut self.charge, budget::DIR_OVERHEAD)?;
                 self.pending
                     .push(DirectionState::new(delivery.flow.clone()));
             }
@@ -384,8 +401,8 @@ impl ConnectionState {
             let dir = self
                 .dir_mut(&delivery.flow)
                 .ok_or(Error::Invariant("dir"))?;
-            Self::charge_dir(dir, context, chunk.len())?;
-            Self::track_sources(dir, context, &delivery.sources)?;
+            context.charge(&mut dir.charge, chunk.len())?;
+            context.track(&mut dir.charge, &delivery.sources)?;
             dir.buffer.push(chunk, delivery.sources.clone());
             cursor += want;
             self.pump(context)?;
@@ -540,83 +557,6 @@ impl ConnectionState {
 }
 
 impl ConnectionState {
-    pub(crate) fn charge_conn(
-        &mut self,
-        context: &mut Context<'_>,
-        bytes: usize,
-    ) -> Result<(), Error> {
-        context.charge_live(bytes)?;
-        self.live = self
-            .live
-            .checked_add(bytes)
-            .ok_or(Error::Invariant("conn charge"))?;
-        Ok(())
-    }
-
-    pub(crate) fn release_conn(
-        &mut self,
-        context: &mut Context<'_>,
-        bytes: usize,
-    ) -> Result<(), Error> {
-        context.release_live(bytes)?;
-        self.live = self
-            .live
-            .checked_sub(bytes)
-            .ok_or(Error::Invariant("conn release"))?;
-        Ok(())
-    }
-
-    pub(crate) fn charge_dir(
-        dir: &mut DirectionState,
-        context: &mut Context<'_>,
-        bytes: usize,
-    ) -> Result<(), Error> {
-        context.charge_live(bytes)?;
-        dir.charged = dir
-            .charged
-            .checked_add(bytes)
-            .ok_or(Error::Invariant("dir charge"))?;
-        Ok(())
-    }
-
-    pub(crate) fn release_dir(
-        dir: &mut DirectionState,
-        context: &mut Context<'_>,
-        bytes: usize,
-    ) -> Result<(), Error> {
-        context.release_live(bytes)?;
-        dir.charged = dir
-            .charged
-            .checked_sub(bytes)
-            .ok_or(Error::Invariant("dir release"))?;
-        Ok(())
-    }
-
-    pub(crate) fn track_sources(
-        dir: &mut DirectionState,
-        context: &mut Context<'_>,
-        set: &SourceSet,
-    ) -> Result<(), Error> {
-        context.charge_sources(set)?;
-        dir.charged_spans += set.frames().len();
-        dir.charged += SET_OVERHEAD + set.frames().len() * SPAN_OVERHEAD;
-        Ok(())
-    }
-
-    pub(crate) fn release_dropped(
-        dir: &mut DirectionState,
-        dropped: Vec<SourceSet>,
-        context: &mut Context<'_>,
-    ) -> Result<(), Error> {
-        for set in dropped {
-            let frames = set.frames().len();
-            context.release_sources(&set)?;
-            dir.charged_spans -= frames;
-            dir.charged -= SET_OVERHEAD + frames * SPAN_OVERHEAD;
-        }
-        Ok(())
-    }
-
     pub(crate) fn decoder_sync(
         &mut self,
         side: Side,
@@ -627,12 +567,12 @@ impl ConnectionState {
             .ok_or(Error::Invariant("direction not found"))?;
         if let Some(decoder) = dir.decoder.as_ref() {
             let now = decoder.buffered_bytes();
-            if now > dir.decoder_charge {
-                Self::charge_dir(dir, context, now - dir.decoder_charge)?;
-            } else if now < dir.decoder_charge {
-                Self::release_dir(dir, context, dir.decoder_charge - now)?;
+            let charged = dir.decoder_charge.bytes();
+            if now > charged {
+                context.charge(&mut dir.decoder_charge, now - charged)?;
+            } else {
+                context.release(&mut dir.decoder_charge, charged - now)?;
             }
-            dir.decoder_charge = now;
         }
         Ok(())
     }

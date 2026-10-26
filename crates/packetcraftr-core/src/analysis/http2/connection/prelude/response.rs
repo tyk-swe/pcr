@@ -38,7 +38,7 @@ impl ConnectionState {
                 .as_ref()
                 .is_some_and(|p| p.live_request.is_some());
         let scratch = need * 4 + budget::PRELUDE_HEADER_OVERHEAD;
-        context.charge_live(scratch)?;
+        context.reserve_scratch(scratch)?;
         let result = (|| {
             let dir = self.dirs[Side::Server]
                 .as_mut()
@@ -52,8 +52,7 @@ impl ConnectionState {
             }
             let sets = dir.buffer.contributors(consumed);
             let (wire, dropped) = dir.buffer.take(consumed);
-            Self::release_dir(dir, context, consumed)?;
-            Self::release_dropped(dir, dropped, context)?;
+            dir.release_consumed(consumed, dropped, context)?;
             self.issue(
                 context,
                 Fault {
@@ -77,7 +76,7 @@ impl ConnectionState {
                 },
             )
         })();
-        context.release_live(scratch)?;
+        context.release_scratch(scratch)?;
         result
     }
 
@@ -106,8 +105,7 @@ impl ConnectionState {
                 let sets = dir.buffer.contributors(take);
                 let (wire, dropped) = dir.buffer.take(take);
                 let sources = union_balanced(sets)?;
-                Self::release_dir(dir, context, take)?;
-                Self::release_dropped(dir, dropped, context)?;
+                dir.release_consumed(take, dropped, context)?;
                 self.issue(
                     context,
                     Fault {
@@ -132,8 +130,7 @@ impl ConnectionState {
             let sets = dir.buffer.contributors(release_len);
             let (_, dropped) = dir.buffer.take(release_len);
             let sources = union_balanced(sets)?;
-            Self::release_dir(dir, context, release_len)?;
-            Self::release_dropped(dir, dropped, context)?;
+            dir.release_consumed(release_len, dropped, context)?;
             self.issue(
                 context,
                 Fault {
@@ -153,8 +150,7 @@ impl ConnectionState {
         }
         let sets = dir.buffer.contributors(consumed);
         let (head_wire_bytes, dropped) = dir.buffer.take(consumed);
-        Self::release_dir(dir, context, consumed)?;
-        Self::release_dropped(dir, dropped, context)?;
+        dir.release_consumed(consumed, dropped, context)?;
         let (head, _) = http::parse_head(&head_wire_bytes)?
             .ok_or(Error::Invariant("previously parsed complete HTTP/1 head"))?;
         let head_wire = head_wire_bytes.len();
@@ -199,7 +195,7 @@ impl ConnectionState {
                 let (index, method, _) = front.clone().ok_or(Error::Invariant("front"))?;
                 let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
                 prelude.requests.pop_front();
-                self.release_conn(context, budget::PENDING_OVERHEAD)?;
+                context.release(&mut self.charge, budget::PENDING_OVERHEAD)?;
                 self.accept_upgrade(index, head, head_wire_bytes, sets, method, context)?;
                 return Ok(true);
             }
@@ -243,15 +239,13 @@ impl ConnectionState {
             return Ok(true);
         }
         let mut msg = self.new_message(0, MessageKind::Response, context)?;
-        self.charge_conn(context, head_wire)?;
-        msg.charged += head_wire;
+        context.charge(&mut msg.charge, head_wire)?;
         let header_charge = head
             .headers
             .iter()
             .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
             .sum::<usize>();
-        self.charge_conn(context, header_charge)?;
-        msg.charged += header_charge;
+        context.charge(&mut msg.charge, header_charge)?;
         let headers: Vec<Header> = head
             .headers
             .iter()
@@ -263,12 +257,7 @@ impl ConnectionState {
             .collect();
         msg.headers = headers;
         for set in sets {
-            let frames = set.frames().len();
-            let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
-            self.charge_conn(context, charge)?;
-            context.charge_spans(frames)?;
-            msg.charged += charge;
-            msg.charged_spans += frames;
+            context.track(&mut msg.charge, &set)?;
             msg.sets.push(set);
         }
         if let Some((index, ..)) = front {
@@ -284,7 +273,7 @@ impl ConnectionState {
         if had_front {
             let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
             prelude.requests.pop_front();
-            self.release_conn(context, budget::PENDING_OVERHEAD)?;
+            context.release(&mut self.charge, budget::PENDING_OVERHEAD)?;
         }
         if was_upgrade {
             if let Some(mut offer) = self
@@ -292,8 +281,8 @@ impl ConnectionState {
                 .as_mut()
                 .and_then(|prelude| prelude.offers.remove(&front_index))
             {
-                self.release_conn(
-                    context,
+                context.release(
+                    &mut self.charge,
                     budget::OFFER_OVERHEAD + offer.settings.capacity() * 24,
                 )?;
                 if let Some(held) = offer.msg.take() {
@@ -340,14 +329,14 @@ impl ConnectionState {
             }
         };
         if matches!(framing, http::Body::Chunked) {
-            if let Err(error) = self.charge_conn(context, budget::PRELUDE_BODY_RESERVE) {
+            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            if let Err(error) = context.charge(
+                &mut prelude.body_charge[Side::Server],
+                budget::PRELUDE_BODY_RESERVE,
+            ) {
                 self.drop_msg(msg, context)?;
                 return Err(error);
             }
-            self.prelude
-                .as_mut()
-                .ok_or(Error::Invariant("prelude"))?
-                .body_charge[Side::Server] = budget::PRELUDE_BODY_RESERVE;
         }
         let decoder = BodyDecoder::new(framing, context.limits.max_body_bytes);
         if decoder.complete() {

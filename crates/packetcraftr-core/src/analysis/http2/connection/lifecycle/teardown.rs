@@ -21,12 +21,12 @@ impl ConnectionState {
     ) -> Result<usize, Error> {
         let mut pending_msgs = Vec::new();
         let promises = std::mem::take(&mut self.parent_deferred);
-        self.release_conn(context, promises.len() * budget::PENDING_OVERHEAD)?;
+        context.release(&mut self.charge, promises.len() * budget::PENDING_OVERHEAD)?;
         for msg in promises {
             pending_msgs.push((Side::Server, msg.stream_id, msg));
         }
         let immediate = std::mem::take(&mut self.ack_deferred);
-        self.release_conn(context, immediate.len() * budget::PENDING_OVERHEAD)?;
+        context.release(&mut self.charge, immediate.len() * budget::PENDING_OVERHEAD)?;
         for (side, msg, _) in immediate {
             pending_msgs.push((side, msg.stream_id, msg));
         }
@@ -72,8 +72,7 @@ impl ConnectionState {
                 .take()
                 .ok_or(Error::Invariant("upgrade request head"))?;
             let sources = union_balanced(std::mem::take(&mut msg.sets))?;
-            self.release_conn(context, msg.charged)?;
-            context.release_spans(msg.charged_spans)?;
+            context.release_all(&mut msg.charge)?;
             self.issue(
                 context,
                 Fault {
@@ -89,9 +88,8 @@ impl ConnectionState {
                 },
             )?;
         }
-        for msg in release {
-            self.release_conn(context, msg.charged)?;
-            context.release_spans(msg.charged_spans)?;
+        for mut msg in release {
+            context.release_all(&mut msg.charge)?;
         }
         let emitted = pending_msgs.len();
         for (side, _, msg) in pending_msgs {
@@ -101,7 +99,7 @@ impl ConnectionState {
     }
 
     pub(crate) fn release_prelude(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
-        let Some(prelude) = self.prelude.take() else {
+        let Some(mut prelude) = self.prelude.take() else {
             return Ok(());
         };
         let mut release = prelude.requests.len() * budget::PENDING_OVERHEAD;
@@ -111,19 +109,17 @@ impl ConnectionState {
             .map(|offer| budget::OFFER_OVERHEAD + offer.settings.capacity() * 24)
             .sum::<usize>();
         release += budget::DIR_OVERHEAD;
-        release += prelude.body_charge.iter().sum::<usize>();
-        let mut charged = 0usize;
-        let mut spans = 0usize;
-        for msg in [prelude.live_request, prelude.live_response]
+        context.release(&mut self.charge, release)?;
+        for side in Side::BOTH {
+            context.release_all(&mut prelude.body_charge[side])?;
+        }
+        for mut msg in [prelude.live_request, prelude.live_response]
             .into_iter()
             .flatten()
             .chain(prelude.offers.into_values().filter_map(|o| o.msg))
         {
-            charged += msg.charged;
-            spans += msg.charged_spans;
+            context.release_all(&mut msg.charge)?;
         }
-        self.release_conn(context, release + charged)?;
-        context.release_spans(spans)?;
         Ok(())
     }
 
@@ -141,8 +137,7 @@ impl ConnectionState {
                     let sets = dir.buffer.contributors(partial);
                     let (wire, dropped) = dir.buffer.take(partial);
                     let sources = union_balanced(sets)?;
-                    Self::release_dir(dir, context, partial)?;
-                    Self::release_dropped(dir, dropped, context)?;
+                    dir.release_consumed(partial, dropped, context)?;
                     let flow = dir.flow.clone();
                     self.issue(
                         context,
@@ -288,8 +283,7 @@ impl ConnectionState {
             upgrade_response: self.upgrade_response.take(),
             upgrade_sources: self.upgrade_sources.take(),
         });
-        let upgrade_charge = std::mem::take(&mut self.upgrade_charge);
-        self.release_conn(context, upgrade_charge)?;
+        context.release_all(&mut self.upgrade_charge)?;
         Ok(())
     }
 }

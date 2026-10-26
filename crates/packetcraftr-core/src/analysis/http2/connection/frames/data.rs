@@ -111,7 +111,7 @@ impl ConnectionState {
                 if !self.early_response_headers.contains_key(&stream_id) {
                     context.check_streams()?;
                     self.admitted_streams += 1;
-                    self.charge_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
+                    context.charge(&mut self.charge, budget::CLOSED_STREAM_OVERHEAD)?;
                 }
                 self.early_response_headers
                     .entry(stream_id)
@@ -359,17 +359,19 @@ impl ConnectionState {
                 return Ok(());
             }
             if let Some(sources) = evidence.sources.clone() {
-                let charge = budget::SET_OVERHEAD + sources.frames().len() * budget::SPAN_OVERHEAD;
-                self.charge_conn(context, charge)?;
                 let stream = self
                     .streams
                     .get_mut(&stream_id)
                     .ok_or(Error::Invariant("stream"))?;
-                if let Some(msg) = stream.msgs[side].as_mut() {
-                    msg.charged += charge;
-                    msg.charged_spans += sources.frames().len();
-                    context.charge_spans(sources.frames().len())?;
-                    msg.sets.push(sources);
+                match stream.msgs[side].as_mut() {
+                    Some(msg) => {
+                        context.track(&mut msg.charge, &sources)?;
+                        msg.sets.push(sources);
+                    }
+                    None => context.charge(
+                        &mut self.charge,
+                        budget::SET_OVERHEAD + sources.frames().len() * budget::SPAN_OVERHEAD,
+                    )?,
                 }
             }
         } else if side == Side::Server

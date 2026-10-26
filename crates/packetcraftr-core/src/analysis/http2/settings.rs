@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use super::budget::Charge;
 use super::model::PeerSettings;
 use crate::protocol::application::http2::Setting;
 use std::collections::VecDeque;
@@ -26,7 +27,7 @@ pub(crate) struct PendingSettings {
     pub peak_window_delta: Option<i64>,
     pub sender_stream_limit: u32,
     pub window_grants: std::collections::BTreeMap<u32, i64>,
-    pub charged: usize,
+    pub charge: Charge,
 }
 
 pub(crate) struct Applied {
@@ -42,7 +43,7 @@ pub(crate) struct Acked {
     pub peak_window_delta: Option<i64>,
     pub sender_stream_limit: u32,
     pub window_grants: std::collections::BTreeMap<u32, i64>,
-    pub charged: usize,
+    pub charge: Charge,
 }
 
 pub(crate) struct DirectionSettings {
@@ -81,7 +82,7 @@ impl DirectionSettings {
             peak_window_delta: None,
             sender_stream_limit: 0,
             window_grants: std::collections::BTreeMap::new(),
-            charged: 0,
+            charge: Charge::default(),
         };
         let mut issues = Vec::new();
         for setting in settings {
@@ -220,7 +221,7 @@ impl DirectionSettings {
             peak_window_delta: pending.peak_window_delta,
             sender_stream_limit: pending.sender_stream_limit,
             window_grants: pending.window_grants,
-            charged: pending.charged,
+            charge: pending.charge,
         })
     }
 }

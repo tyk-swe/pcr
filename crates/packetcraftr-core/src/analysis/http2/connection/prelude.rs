@@ -37,9 +37,9 @@ impl ConnectionState {
         } else {
             buffered.min(http::MAX_HEADER_BYTES + 1) * 4 + budget::PRELUDE_HEADER_OVERHEAD
         };
-        context.charge_live(scratch)?;
+        context.reserve_scratch(scratch)?;
         let result = self.prelude_step_inner(side, context);
-        context.release_live(scratch)?;
+        context.release_scratch(scratch)?;
         result
     }
 
@@ -57,10 +57,12 @@ impl ConnectionState {
         }
     }
 
-    fn drop_msg(&mut self, msg: MessageBuilder, context: &mut Context<'_>) -> Result<(), Error> {
-        self.release_conn(context, msg.charged)?;
-        context.release_spans(msg.charged_spans)?;
-        Ok(())
+    fn drop_msg(
+        &mut self,
+        mut msg: MessageBuilder,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
+        context.release_all(&mut msg.charge)
     }
 
     fn refused_upgrade(
@@ -127,8 +129,8 @@ impl ConnectionState {
         offer: Offer,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        self.release_conn(
-            context,
+        context.release(
+            &mut self.charge,
             budget::OFFER_OVERHEAD + offer.settings.capacity() * 24,
         )?;
         if let Some(mut msg) = offer.msg {
@@ -159,8 +161,8 @@ impl ConnectionState {
             self.prelude = Some(prelude);
             return Ok(());
         };
-        self.release_conn(
-            context,
+        context.release(
+            &mut self.charge,
             budget::OFFER_OVERHEAD + offer.settings.capacity() * 24,
         )?;
         prelude.upgraded = true;
@@ -169,8 +171,7 @@ impl ConnectionState {
             + sources.as_ref().map_or(0, |s| s.frames().len()) * budget::SPAN_OVERHEAD
             + offer.settings.len() * 8
             + budget::OFFER_OVERHEAD;
-        self.charge_conn(context, upgrade_charge)?;
-        self.upgrade_charge += upgrade_charge;
+        context.charge(&mut self.upgrade_charge, upgrade_charge)?;
         self.upgrade_response = Some(head);
         self.upgrade_sources = sources;
         let applied = {
@@ -243,7 +244,7 @@ impl ConnectionState {
         self.startup = Startup::H2c;
         self.refused = false;
         self.max_initiated[Side::Client] = 1;
-        self.charge_conn(context, budget::STREAM_OVERHEAD)?;
+        context.charge(&mut self.charge, budget::STREAM_OVERHEAD)?;
         let windows = PerSide::new(
             i64::from(self.settings[Side::Server].acknowledged.initial_window_size),
             i64::from(self.settings[Side::Client].acknowledged.initial_window_size),
@@ -272,7 +273,7 @@ impl ConnectionState {
             self.prelude = Some(prelude);
             self.release_prelude(context)?;
         } else {
-            self.charge_conn(context, budget::OFFER_OVERHEAD)?;
+            context.charge(&mut self.charge, budget::OFFER_OVERHEAD)?;
             prelude.offers.insert(
                 index,
                 Offer {

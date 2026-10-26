@@ -5,7 +5,7 @@
 
 use super::super::{Chain, ChainHead, ConnectionState, Context, Decoded, Evidence, Fault, Pos};
 use crate::analysis::http2::Error;
-use crate::analysis::http2::budget;
+use crate::analysis::http2::budget::{self, Charge};
 use crate::analysis::http2::buffer::union_balanced;
 use crate::analysis::http2::model::{Certainty, Header, IssueScope, Status};
 use crate::analysis::http2::side::Side;
@@ -31,29 +31,25 @@ impl ConnectionState {
             self.limited_block(context, side, stream_id, wire, sources)?;
             return Ok(());
         }
-        let charge = fragment.len() + budget::HEADER_OVERHEAD;
-        context.charge_live(charge)?;
+        let mut charge = Charge::default();
+        context.charge(&mut charge, fragment.len() + budget::HEADER_OVERHEAD)?;
         let mut chain = Chain {
             stream_id,
             head,
             bytes: bytes::BytesMut::from(&fragment[..]),
             frames: 1,
             sets: Vec::new(),
-            charged: charge,
-            charged_spans: 0,
+            charge,
         };
         if let Some(sources) = sources.clone() {
-            if let Err(error) = context.charge_sources(&sources) {
-                context.release_live(charge)?;
+            if let Err(error) = context.track(&mut chain.charge, &sources) {
+                context.release_all(&mut chain.charge)?;
                 return Err(error);
             }
-            chain.charged_spans += sources.frames().len();
-            chain.charged += budget::SET_OVERHEAD + sources.frames().len() * budget::SPAN_OVERHEAD;
             chain.sets.push(sources);
         }
         if chain.bytes.len() > context.limits.max_header_block_bytes {
-            context.release_live(chain.charged)?;
-            context.release_spans(chain.charged_spans)?;
+            context.release_all(&mut chain.charge)?;
             self.limited_block(context, side, stream_id, wire, sources)?;
             return Ok(());
         }
@@ -61,8 +57,6 @@ impl ConnectionState {
             self.block_done(side, chain, context)
         } else {
             let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
-            dir.charged += chain.charged;
-            dir.charged_spans += chain.charged_spans;
             dir.chain = Some(chain);
             Ok(())
         }
@@ -82,41 +76,31 @@ impl ConnectionState {
         let Some(mut chain) = dir.chain.take() else {
             return Ok(());
         };
-        dir.charged -= chain.charged;
-        dir.charged_spans -= chain.charged_spans;
         debug_assert_eq!(chain.stream_id, stream_id);
         if chain.bytes.len() + fragment.len() > context.limits.max_header_block_bytes
             || chain.frames + 1 > context.limits.max_continuations + 1
         {
-            context.release_live(chain.charged)?;
-            context.release_spans(chain.charged_spans)?;
+            context.release_all(&mut chain.charge)?;
             self.limited_block(context, side, stream_id, wire, sources)?;
             return Ok(());
         }
-        if let Err(error) = context.charge_live(fragment.len()) {
-            context.release_live(chain.charged)?;
-            context.release_spans(chain.charged_spans)?;
+        if let Err(error) = context.charge(&mut chain.charge, fragment.len()) {
+            context.release_all(&mut chain.charge)?;
             return Err(error);
         }
         chain.bytes.extend_from_slice(&fragment);
-        chain.charged += fragment.len();
         chain.frames += 1;
         if let Some(sources) = sources.clone() {
-            if let Err(error) = context.charge_sources(&sources) {
-                context.release_live(chain.charged)?;
-                context.release_spans(chain.charged_spans)?;
+            if let Err(error) = context.track(&mut chain.charge, &sources) {
+                context.release_all(&mut chain.charge)?;
                 return Err(error);
             }
-            chain.charged_spans += sources.frames().len();
-            chain.charged += budget::SET_OVERHEAD + sources.frames().len() * budget::SPAN_OVERHEAD;
             chain.sets.push(sources);
         }
         if flags & wire::FLAG_END_HEADERS != 0 {
             self.block_done(side, chain, context)
         } else {
             let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
-            dir.charged += chain.charged;
-            dir.charged_spans += chain.charged_spans;
             dir.chain = Some(chain);
             Ok(())
         }
@@ -154,8 +138,7 @@ impl ConnectionState {
         mut chain: Chain,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        context.release_live(chain.charged)?;
-        context.release_spans(chain.charged_spans)?;
+        context.release_all(&mut chain.charge)?;
         context.check_deadline()?;
         let bytes = chain.bytes.freeze();
         let stream_id = chain.stream_id;
@@ -165,10 +148,9 @@ impl ConnectionState {
         let block_sources = union_balanced(block_sets)?;
         let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
         if let Some(sources) = block_sources.clone() {
-            Self::track_sources(dir, context, &sources)?;
-            let dir = self.dirs[side].as_mut().ok_or(Error::Invariant("dir"))?;
+            context.track(&mut dir.charge, &sources)?;
             dir.block_sources.insert(origin, sources);
-            Self::charge_dir(dir, context, budget::ORIGIN_ENTRY_OVERHEAD)?;
+            context.charge(&mut dir.charge, budget::ORIGIN_ENTRY_OVERHEAD)?;
         }
         let scratch = 6usize
             .checked_mul(context.limits.max_header_bytes)
@@ -190,7 +172,7 @@ impl ConnectionState {
                     limit: context.limits.max_header_bytes,
                 },
             ))?;
-        context.charge_live(scratch)?;
+        context.reserve_scratch(scratch)?;
         let result = (|| {
             let updates = hpack::table_size_updates(&bytes, &mut || {
                 context
@@ -325,8 +307,8 @@ impl ConnectionState {
                             .collect();
                         for id in removed {
                             if let Some(set) = dir.block_sources.remove(&id) {
-                                Self::release_dropped(dir, vec![set], context)?;
-                                Self::release_dir(dir, context, budget::ORIGIN_ENTRY_OVERHEAD)?;
+                                context.untrack(&mut dir.charge, &set)?;
+                                context.release(&mut dir.charge, budget::ORIGIN_ENTRY_OVERHEAD)?;
                             }
                         }
                     }
@@ -376,7 +358,7 @@ impl ConnectionState {
                 }
             }
         })();
-        context.release_live(scratch)?;
+        context.release_scratch(scratch)?;
         result
     }
 }

@@ -18,8 +18,6 @@ use std::collections::HashMap;
 
 impl ConnectionState {
     pub(crate) fn drain(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
-        let mut bytes = self.live - self.upgrade_charge;
-        let mut spans = 0usize;
         for dir in self
             .dirs
             .iter_mut()
@@ -27,36 +25,33 @@ impl ConnectionState {
             .chain(self.pending.iter_mut())
         {
             let pending = dir.buffer.len();
-            let dropped = dir.buffer.consume(pending);
-            let _ = dropped;
-            bytes += dir.charged;
-            spans += dir.charged_spans;
-            dir.charged = 0;
-            dir.charged_spans = 0;
+            dir.buffer.consume(pending);
+            dir.release_all(context)?;
             dir.decoder = None;
-            dir.decoder_charge = 0;
             dir.block_sources = HashMap::new();
             dir.chain = None;
         }
-        for stream in self.streams.values_mut() {
-            for msg in stream.msgs.iter_mut().flatten() {
-                spans += msg.charged_spans;
-            }
+        for msg in self
+            .streams
+            .values_mut()
+            .flat_map(|stream| stream.msgs.iter_mut().flatten())
+            .chain(self.parent_deferred.iter_mut())
+            .chain(self.ack_deferred.iter_mut().map(|(_, msg, _)| msg))
+        {
+            context.release_all(&mut msg.charge)?;
         }
-        if let Some(prelude) = self.prelude.as_mut() {
-            for slot in [
-                prelude.live_request.as_mut(),
-                prelude.live_response.as_mut(),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                spans += slot.charged_spans;
+        self.parent_deferred.clear();
+        self.ack_deferred.clear();
+        if let Some(mut prelude) = self.prelude.take() {
+            for side in Side::BOTH {
+                context.release_all(&mut prelude.body_charge[side])?;
             }
-            for offer in prelude.offers.values_mut() {
-                if let Some(msg) = offer.msg.as_mut() {
-                    spans += msg.charged_spans;
-                }
+            for mut msg in [prelude.live_request, prelude.live_response]
+                .into_iter()
+                .flatten()
+                .chain(prelude.offers.into_values().filter_map(|offer| offer.msg))
+            {
+                context.release_all(&mut msg.charge)?;
             }
         }
         self.final_pending_settings.get_or_insert(
@@ -66,7 +61,9 @@ impl ConnectionState {
                 .sum(),
         );
         for direction in self.settings.iter_mut() {
-            direction.pending.clear();
+            for mut pending in direction.pending.drain(..) {
+                context.release_all(&mut pending.charge)?;
+            }
         }
         self.final_pending_pings.get_or_insert(
             self.pings
@@ -77,16 +74,12 @@ impl ConnectionState {
         for pings in self.pings.iter_mut() {
             pings.clear();
         }
-        self.live = self.upgrade_charge;
         self.streams.clear();
         self.closed.clear();
         self.early_response_headers.clear();
         self.pending_openers.clear();
         self.closed_credit.clear();
-        self.prelude = None;
-        context.release_live(bytes)?;
-        context.release_spans(spans)?;
-        Ok(())
+        context.release_all(&mut self.charge)
     }
 
     pub(crate) fn close(
@@ -105,7 +98,7 @@ impl ConnectionState {
             );
         }
         if !self.has_flow(flow) && self.has_flow(&flow.reverse()) {
-            self.charge_conn(context, budget::DIR_OVERHEAD)?;
+            context.charge(&mut self.charge, budget::DIR_OVERHEAD)?;
             let mut dir = super::DirectionState::new(flow.clone());
             dir.closed = true;
             if let Some(reverse) = self.side_of(&flow.reverse()) {
@@ -226,8 +219,7 @@ impl ConnectionState {
                 let sets = dir.buffer.contributors(partial);
                 let (wire, dropped) = dir.buffer.take(partial);
                 let sources = union_balanced(sets)?;
-                Self::release_dir(dir, context, partial)?;
-                Self::release_dropped(dir, dropped, context)?;
+                dir.release_consumed(partial, dropped, context)?;
                 let detail = match phase {
                     DirectionPhase::Sniff => "connection closed before startup was determined",
                     DirectionPhase::Prelude => "connection closed mid HTTP/1 exchange",
@@ -246,10 +238,8 @@ impl ConnectionState {
                     sources,
                 });
             }
-            if let Some(chain) = dir.chain.take() {
-                Self::release_dir(dir, context, chain.charged)?;
-                dir.charged_spans -= chain.charged_spans;
-                context.release_spans(chain.charged_spans)?;
+            if let Some(mut chain) = dir.chain.take() {
+                context.release_all(&mut chain.charge)?;
                 faults.push(Fault {
                     flow: dir.flow.clone(),
                     http2_stream_id: Some(chain.stream_id),
@@ -304,12 +294,8 @@ impl ConnectionState {
                 self.worst(Status::Incomplete);
             }
             for dir in self.dirs.iter_mut().flatten() {
-                context.release_live(dir.charged)?;
-                context.release_spans(dir.charged_spans)?;
-                dir.charged = 0;
-                dir.charged_spans = 0;
+                dir.release_all(context)?;
                 dir.decoder = None;
-                dir.decoder_charge = 0;
                 dir.block_sources.clear();
             }
         }
@@ -355,14 +341,11 @@ impl ConnectionState {
                 let sets = dir.buffer.contributors(partial);
                 let (wire, dropped) = dir.buffer.take(partial);
                 let sources = union_balanced(sets)?;
-                Self::release_dir(dir, context, partial)?;
-                Self::release_dropped(dir, dropped, context)?;
+                dir.release_consumed(partial, dropped, context)?;
                 partials.push((dir.flow.clone(), None, wire, sources));
             }
             if let Some(mut chain) = dir.chain.take() {
-                Self::release_dir(dir, context, chain.charged)?;
-                dir.charged_spans -= chain.charged_spans;
-                context.release_spans(chain.charged_spans)?;
+                context.release_all(&mut chain.charge)?;
                 let sources = union_balanced(std::mem::take(&mut chain.sets))?;
                 partials.push((
                     dir.flow.clone(),
@@ -408,13 +391,8 @@ impl ConnectionState {
         self.phase = Phase::Dead;
         let mut faults = Vec::new();
         for dir in self.dirs.iter_mut().flatten() {
-            if let Some(chain) = dir.chain.take() {
-                Self::release_dir(dir, context, chain.charged)?;
-                dir.charged_spans = dir
-                    .charged_spans
-                    .checked_sub(chain.charged_spans)
-                    .ok_or(Error::Invariant("chain spans"))?;
-                context.release_spans(chain.charged_spans)?;
+            if let Some(mut chain) = dir.chain.take() {
+                context.release_all(&mut chain.charge)?;
                 faults.push((
                     dir.flow.clone(),
                     chain.stream_id,

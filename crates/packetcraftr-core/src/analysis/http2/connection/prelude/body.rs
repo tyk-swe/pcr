@@ -57,8 +57,7 @@ impl ConnectionState {
                 let sets = dir.buffer.contributors(take);
                 let (wire, dropped) = dir.buffer.take(take);
                 let sources = union_balanced(sets)?;
-                Self::release_dir(dir, context, take)?;
-                Self::release_dropped(dir, dropped, context)?;
+                dir.release_consumed(take, dropped, context)?;
                 let status = if matches!(error, http::Error::Limit(_)) {
                     Status::Limit
                 } else {
@@ -103,8 +102,7 @@ impl ConnectionState {
         if consumed > 0 {
             let sets = dir.buffer.contributors(consumed);
             let dropped = dir.buffer.consume(consumed);
-            Self::release_dir(dir, context, consumed)?;
-            Self::release_dropped(dir, dropped, context)?;
+            dir.release_consumed(consumed, dropped, context)?;
             let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
             let msg_slot = if side == Side::Client {
                 &mut prelude.live_request
@@ -114,24 +112,7 @@ impl ConnectionState {
             if let Some(msg) = msg_slot.as_mut() {
                 msg.body_bytes = body_bytes;
                 for set in sets {
-                    let frames = set.frames().len();
-                    let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
-                    self.charge_conn(context, charge)?;
-                    context.charge_spans(frames)?;
-                    let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
-                    let msg = if side == Side::Client {
-                        prelude
-                            .live_request
-                            .as_mut()
-                            .ok_or(Error::Invariant("request"))?
-                    } else {
-                        prelude
-                            .live_response
-                            .as_mut()
-                            .ok_or(Error::Invariant("response"))?
-                    };
-                    msg.charged += charge;
-                    msg.charged_spans += frames;
+                    context.track(&mut msg.charge, &set)?;
                     msg.sets.push(set);
                 }
             }
@@ -155,22 +136,15 @@ impl ConnectionState {
             let step = match msg {
                 Some(mut msg) => {
                     if !trailers.is_empty() {
-                        self.charge_conn(context, trailer_charge)?;
-                        msg.charged += trailer_charge;
+                        context.charge(&mut msg.charge, trailer_charge)?;
                         msg.trailers = trailers;
                     }
                     BodyStep::Complete(Box::new(msg))
                 }
                 None => BodyStep::Progress,
             };
-            let charge = std::mem::take(
-                &mut self
-                    .prelude
-                    .as_mut()
-                    .ok_or(Error::Invariant("prelude"))?
-                    .body_charge[side],
-            );
-            self.release_conn(context, charge)?;
+            let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
+            context.release_all(&mut prelude.body_charge[side])?;
             return Ok(step);
         }
         Ok(BodyStep::Progress)

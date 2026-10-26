@@ -150,8 +150,7 @@ impl ConnectionState {
             .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
             .sum::<usize>()
             + block.len();
-        self.charge_conn(context, content_charge)?;
-        msg.charged += content_charge;
+        context.charge(&mut msg.charge, content_charge)?;
         msg.headers = headers;
         msg.header_blocks.push(block);
         msg.promised_by = Some(stream_id);
@@ -161,21 +160,11 @@ impl ConnectionState {
             .and_then(|s| s.request)
             .or_else(|| self.closed.get(&stream_id).and_then(|s| s.request));
         if let Some(sources) = block_sources.clone() {
-            let frames = sources.frames().len();
-            let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
-            self.charge_conn(context, charge)?;
-            context.charge_spans(frames)?;
-            msg.charged += charge;
-            msg.charged_spans += frames;
+            context.track(&mut msg.charge, &sources)?;
             msg.sets.push(sources);
         }
         if let Some(set) = compression {
-            let frames = set.frames().len();
-            let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
-            self.charge_conn(context, charge)?;
-            context.charge_spans(frames)?;
-            msg.charged += charge;
-            msg.charged_spans += frames;
+            context.track(&mut msg.charge, &set)?;
             msg.compression.push(set);
         }
         let rejected = meta.is_err();
@@ -203,7 +192,7 @@ impl ConnectionState {
         let index = msg.index;
         if delayed_parent && !rejected {
             self.retain_early_parent(stream_id, context)?;
-            self.charge_conn(context, budget::PENDING_OVERHEAD)?;
+            context.charge(&mut self.charge, budget::PENDING_OVERHEAD)?;
             self.parent_deferred.push_back(msg);
         } else {
             self.emit_message(Side::Server, msg, Status::Complete, context)?;
@@ -216,7 +205,7 @@ impl ConnectionState {
         if rejected {
             context.check_streams()?;
             self.admitted_streams += 1;
-            self.charge_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
+            context.charge(&mut self.charge, budget::CLOSED_STREAM_OVERHEAD)?;
             self.closed.insert(
                 promised,
                 super::super::ClosedStream {
@@ -252,7 +241,7 @@ impl ConnectionState {
         }
         context.check_streams()?;
         self.admitted_streams += 1;
-        self.charge_conn(context, budget::STREAM_OVERHEAD)?;
+        context.charge(&mut self.charge, budget::STREAM_OVERHEAD)?;
         let windows = PerSide::new(
             i64::from(self.settings[Side::Server].acknowledged.initial_window_size),
             i64::from(self.settings[Side::Client].acknowledged.initial_window_size),
@@ -273,7 +262,7 @@ impl ConnectionState {
         if !self.early_response_headers.contains_key(&id) {
             context.check_streams()?;
             self.admitted_streams += 1;
-            self.charge_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
+            context.charge(&mut self.charge, budget::CLOSED_STREAM_OVERHEAD)?;
             self.early_response_headers.insert(id, Default::default());
         }
         Ok(())
@@ -293,7 +282,7 @@ impl ConnectionState {
                 .pop_front()
                 .ok_or(Error::Invariant("pending promise"))?;
             if msg.promised_by == Some(id) {
-                self.release_conn(context, budget::PENDING_OVERHEAD)?;
+                context.release(&mut self.charge, budget::PENDING_OVERHEAD)?;
                 msg.request = request;
                 self.emit_message(Side::Server, msg, Status::Complete, context)?;
             } else {

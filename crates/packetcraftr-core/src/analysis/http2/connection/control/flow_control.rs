@@ -266,7 +266,7 @@ impl ConnectionState {
         };
         let debt = PerSide::new(debt_at(Side::Client), debt_at(Side::Server));
         if debt.iter().any(Option::is_some) && !self.closed_credit.contains_key(&id) {
-            self.charge_conn(context, budget::CLOSED_CREDIT_OVERHEAD)?;
+            context.charge(&mut self.charge, budget::CLOSED_CREDIT_OVERHEAD)?;
             self.closed_credit.insert(id, debt);
         }
         Ok(())
@@ -279,7 +279,7 @@ impl ConnectionState {
             .is_some_and(|debt| debt.iter().all(Option::is_none))
         {
             self.closed_credit.remove(&id);
-            self.release_conn(context, budget::CLOSED_CREDIT_OVERHEAD)?;
+            context.release(&mut self.charge, budget::CLOSED_CREDIT_OVERHEAD)?;
         }
         Ok(())
     }
@@ -291,8 +291,8 @@ impl ConnectionState {
         let before = self.closed_credit.len();
         self.closed_credit
             .retain(|_, debt| debt.iter().any(Option::is_some));
-        self.release_conn(
-            context,
+        context.release(
+            &mut self.charge,
             (before - self.closed_credit.len()) * budget::CLOSED_CREDIT_OVERHEAD,
         )
     }

@@ -30,6 +30,18 @@ pub(crate) const PRELUDE_BODY_RESERVE: usize = 4
         + crate::protocol::application::http::MAX_START_LINE)
     + crate::protocol::application::http::MAX_HEADERS * HEADER_OVERHEAD * 2;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Charge {
+    bytes: usize,
+    spans: usize,
+}
+
+impl Charge {
+    pub(crate) fn bytes(self) -> usize {
+        self.bytes
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Budget {
     live: usize,
@@ -68,7 +80,7 @@ impl Context<'_> {
         Ok(())
     }
 
-    pub(crate) fn charge_live(&mut self, bytes: usize) -> Result<(), Error> {
+    fn charge_live(&mut self, bytes: usize) -> Result<(), Error> {
         let next = self
             .budget
             .live
@@ -82,7 +94,7 @@ impl Context<'_> {
         Ok(())
     }
 
-    pub(crate) fn release_live(&mut self, bytes: usize) -> Result<(), Error> {
+    fn release_live(&mut self, bytes: usize) -> Result<(), Error> {
         self.budget.live = self
             .budget
             .live
@@ -105,7 +117,7 @@ impl Context<'_> {
         Ok(())
     }
 
-    pub(crate) fn charge_sources(&mut self, set: &SourceSet) -> Result<(), Error> {
+    fn charge_sources(&mut self, set: &SourceSet) -> Result<(), Error> {
         let frames = set.frames().len();
         let previous = self.budget.spans;
         self.charge_spans(frames)?;
@@ -116,7 +128,7 @@ impl Context<'_> {
         Ok(())
     }
 
-    pub(crate) fn charge_spans(&mut self, frames: usize) -> Result<(), Error> {
+    fn charge_spans(&mut self, frames: usize) -> Result<(), Error> {
         let next = self
             .budget
             .spans
@@ -130,7 +142,7 @@ impl Context<'_> {
         Ok(())
     }
 
-    pub(crate) fn release_spans(&mut self, frames: usize) -> Result<(), Error> {
+    fn release_spans(&mut self, frames: usize) -> Result<(), Error> {
         self.budget.spans = self
             .budget
             .spans
@@ -139,10 +151,50 @@ impl Context<'_> {
         Ok(())
     }
 
-    pub(crate) fn release_sources(&mut self, set: &SourceSet) -> Result<(), Error> {
+    pub(crate) fn reserve_scratch(&mut self, bytes: usize) -> Result<(), Error> {
+        self.charge_live(bytes)
+    }
+
+    pub(crate) fn release_scratch(&mut self, bytes: usize) -> Result<(), Error> {
+        self.release_live(bytes)
+    }
+
+    pub(crate) fn charge(&mut self, owner: &mut Charge, bytes: usize) -> Result<(), Error> {
+        self.charge_live(bytes)?;
+        owner.bytes += bytes;
+        Ok(())
+    }
+
+    pub(crate) fn release(&mut self, owner: &mut Charge, bytes: usize) -> Result<(), Error> {
+        owner.bytes = owner
+            .bytes
+            .checked_sub(bytes)
+            .ok_or(Error::Invariant("owner charge underflow"))?;
+        self.release_live(bytes)
+    }
+
+    pub(crate) fn track(&mut self, owner: &mut Charge, set: &SourceSet) -> Result<(), Error> {
+        self.charge_sources(set)?;
         let frames = set.frames().len();
+        owner.spans += frames;
+        owner.bytes += SET_OVERHEAD + frames * SPAN_OVERHEAD;
+        Ok(())
+    }
+
+    pub(crate) fn untrack(&mut self, owner: &mut Charge, set: &SourceSet) -> Result<(), Error> {
+        let frames = set.frames().len();
+        owner.spans = owner
+            .spans
+            .checked_sub(frames)
+            .ok_or(Error::Invariant("owner span underflow"))?;
         self.release_spans(frames)?;
-        self.release_live(SET_OVERHEAD + frames * SPAN_OVERHEAD)
+        self.release(owner, SET_OVERHEAD + frames * SPAN_OVERHEAD)
+    }
+
+    pub(crate) fn release_all(&mut self, owner: &mut Charge) -> Result<(), Error> {
+        let Charge { bytes, spans } = std::mem::take(owner);
+        self.release_spans(spans)?;
+        self.release_live(bytes)
     }
 
     pub(crate) fn check_frames(&mut self) -> Result<(), Error> {

@@ -137,8 +137,12 @@ fn rig() -> Rig {
 }
 
 fn rig_with(limits: Limits) -> Rig {
+    rig_bounded(application::Limits::default(), limits)
+}
+
+fn rig_bounded(app: application::Limits, limits: Limits) -> Rig {
     Rig {
-        collector: Collector::new(application::Limits::default(), [80], limits).unwrap(),
+        collector: Collector::new(app, [80], limits).unwrap(),
         tracker: Tracker::new(1 << 22, 32).unwrap(),
         events: Vec::new(),
         number: 0,
@@ -281,7 +285,10 @@ fn names(headers: &[Header]) -> Vec<String> {
 }
 
 fn pin(events: &[Event], expected: &[&str]) {
-    let actual = digest(events);
+    pin_lines(&digest(events), expected);
+}
+
+fn pin_lines(actual: &[String], expected: &[&str]) {
     if actual != expected {
         let rendered = actual
             .iter()
@@ -1746,4 +1753,254 @@ fn failed_connection_releases_every_charge() {
     wire.extend_from_slice(&frame(CONTINUATION, END_HEADERS, 1, &[0x82]));
     rig.send(&wire);
     assert_eq!(charges(&rig), (0, 0));
+}
+
+fn numbers(set: Option<&crate::analysis::provenance::SourceSet>) -> Vec<u64> {
+    set.map_or_else(Vec::new, |set| {
+        set.frames().iter().map(|frame| frame.number).collect()
+    })
+}
+
+fn evidence(events: &[Event]) -> Vec<String> {
+    events
+        .iter()
+        .map(|event| match event {
+            Event::Issue(issue) => format!(
+                "issue {} number={} wire={} sources={:?}",
+                issue.code,
+                issue.number,
+                issue
+                    .wire
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>(),
+                numbers(issue.sources.as_ref()),
+            ),
+            Event::Message(message) => format!(
+                "message stream={} sources={:?} compression={:?}",
+                message.http2_stream_id,
+                numbers(Some(&message.sources)),
+                numbers(message.compression_sources.as_ref()),
+            ),
+            Event::Frame(frame) => format!(
+                "frame type={} sources={:?}",
+                frame.header.frame_type,
+                numbers(Some(&frame.sources)),
+            ),
+            Event::Connection(connection) => format!(
+                "connection windows={}/{} upgrade_sources={:?}",
+                connection.client_window,
+                connection.server_window,
+                numbers(connection.upgrade_sources.as_ref()),
+            ),
+        })
+        .collect()
+}
+
+fn counts(summary: &Summary) -> String {
+    format!(
+        "connections={} prior={} upgraded={} unsupported={} frames={} streams={} messages={} complete={} incomplete={} malformed={} limited={} issues={}",
+        summary.connections,
+        summary.prior_knowledge_connections,
+        summary.upgraded_connections,
+        summary.unsupported_connections,
+        summary.frames,
+        summary.streams,
+        summary.messages,
+        summary.complete_messages,
+        summary.incomplete_messages,
+        summary.malformed_messages,
+        summary.limited_messages,
+        summary.issues,
+    )
+}
+
+fn limit_field(error: &Error) -> &'static str {
+    match error {
+        Error::Application(application::Error::Limit { field, .. }) => field,
+        other => panic!("expected a limit error, got {other:?}"),
+    }
+}
+
+#[test]
+fn evidence_follows_the_frames_that_carried_each_byte() {
+    let mut rig = rig();
+    let mut preface = CLIENT_PREFACE.to_vec();
+    preface.extend_from_slice(&settings(&[]));
+    rig.send(&preface[..30]);
+    rig.send(&preface[30..]);
+    let mut server = settings(&[]);
+    server.extend_from_slice(&settings_ack());
+    rig.recv(&server);
+    rig.send(&settings_ack());
+    let request = frame(HEADERS, END_HEADERS | END_STREAM, 1, &request_headers());
+    rig.send(&request[..12]);
+    rig.send(&request[12..]);
+    let mut response = frame(HEADERS, END_HEADERS, 1, &response_headers());
+    response.extend_from_slice(&frame(DATA, END_STREAM, 1, b"hello"));
+    rig.recv(&response);
+    rig.send(&window_update(0, 0));
+    let (events, _) = rig.finish();
+    pin_lines(
+        &evidence(&events),
+        &[
+            "frame type=4 sources=[1, 2]",
+            "frame type=4 sources=[3]",
+            "frame type=4 sources=[3]",
+            "frame type=4 sources=[4]",
+            "frame type=1 sources=[5, 6]",
+            "message stream=1 sources=[5, 6] compression=[5, 6]",
+            "frame type=1 sources=[7]",
+            "frame type=0 sources=[7]",
+            "message stream=1 sources=[7] compression=[7]",
+            "issue frame_invalid number=8 wire=00000408000000000000000000 sources=[8]",
+            "connection windows=65535/65530 upgrade_sources=[]",
+        ],
+    );
+}
+
+#[test]
+fn summary_counts_each_message_outcome() {
+    type Scenario = fn(&mut Rig);
+    let scenarios: [(&str, Scenario); 4] = [
+        ("complete", |rig| {
+            handshake(rig);
+            get_exchange(rig);
+            rig.client_close(false).server_close(false);
+        }),
+        ("malformed", |rig| {
+            handshake(rig);
+            rig.send(&frame(
+                HEADERS,
+                END_HEADERS | END_STREAM,
+                1,
+                &request_headers(),
+            ));
+            rig.recv(&frame(
+                HEADERS,
+                END_HEADERS,
+                1,
+                &response_headers_with_content_length(b"5"),
+            ));
+            rig.recv(&frame(DATA, END_STREAM, 1, b"abc"));
+            rig.client_close(false).server_close(false);
+        }),
+        ("limited", |rig| {
+            handshake(rig);
+            rig.send(&frame(HEADERS, END_HEADERS, 1, &request_headers()));
+            rig.send(&frame(HEADERS, END_HEADERS, 3, &request_headers()));
+        }),
+        ("incomplete", |rig| {
+            handshake(rig);
+            rig.send(&frame(HEADERS, END_HEADERS, 1, &request_headers()));
+        }),
+    ];
+    let actual: Vec<String> = scenarios
+        .into_iter()
+        .map(|(name, scenario)| {
+            let mut rig = rig_with(Limits {
+                max_active_streams: 1,
+                ..Limits::default()
+            });
+            scenario(&mut rig);
+            let (_, summary) = rig.finish();
+            format!("{name}: {}", counts(&summary))
+        })
+        .collect();
+    pin_lines(
+        &actual,
+        &[
+            "complete: connections=1 prior=1 upgraded=0 unsupported=0 frames=7 streams=1 messages=2 complete=2 incomplete=0 malformed=0 limited=0 issues=0",
+            "malformed: connections=1 prior=1 upgraded=0 unsupported=0 frames=7 streams=1 messages=2 complete=1 incomplete=0 malformed=1 limited=0 issues=1",
+            "limited: connections=1 prior=1 upgraded=0 unsupported=0 frames=6 streams=1 messages=1 complete=0 incomplete=0 malformed=0 limited=1 issues=1",
+            "incomplete: connections=1 prior=1 upgraded=0 unsupported=0 frames=5 streams=1 messages=1 complete=0 incomplete=1 malformed=0 limited=0 issues=1",
+        ],
+    );
+}
+
+#[test]
+fn application_limits_stop_the_collector() {
+    let cases: [(&str, application::Limits); 4] = [
+        (
+            "max_messages",
+            application::Limits {
+                max_messages: 1,
+                ..application::Limits::default()
+            },
+        ),
+        (
+            "max_buffer_bytes",
+            application::Limits {
+                max_buffer_bytes: 2048,
+                ..application::Limits::default()
+            },
+        ),
+        (
+            "max_retained_bytes",
+            application::Limits {
+                max_retained_bytes: 2048,
+                ..application::Limits::default()
+            },
+        ),
+        (
+            "max_source_spans",
+            application::Limits {
+                max_source_spans: 2,
+                ..application::Limits::default()
+            },
+        ),
+    ];
+    for (expected, app) in cases {
+        let mut rig = rig_bounded(app, Limits::default());
+        let wire = [
+            {
+                let mut preface = CLIENT_PREFACE.to_vec();
+                preface.extend_from_slice(&settings(&[]));
+                preface
+            },
+            frame(HEADERS, END_HEADERS, 1, &request_headers()),
+            frame(HEADERS, END_HEADERS, 3, &request_headers()),
+            frame(HEADERS, END_HEADERS, 5, &request_headers()),
+        ];
+        let error = wire
+            .iter()
+            .find_map(|bytes| rig.send_on(flow(), bytes, 0).err())
+            .unwrap_or_else(|| panic!("{expected} was never enforced"));
+        assert_eq!(limit_field(&error), expected);
+    }
+}
+
+#[test]
+fn settings_ack_waits_for_the_peer_settings() {
+    let mut rig = rig();
+    rig.send(CLIENT_PREFACE);
+    let mut server = settings(&[]);
+    server.extend_from_slice(&settings_ack());
+    rig.recv(&server);
+    rig.send(&settings(&[]));
+    rig.send(&settings_ack());
+    rig.client_close(false).server_close(false);
+    let (events, _) = rig.finish();
+    pin(
+        &events,
+        &[
+            "frame type=4 stream=0",
+            "frame type=4 stream=0",
+            "frame type=4 stream=0",
+            "frame type=4 stream=0",
+            "connection PriorKnowledge Complete streams=0 frames=4 issues=0 pending_settings=0 pending_pings=0",
+        ],
+    );
+}
+
+#[test]
+fn expired_deadline_stops_analysis() {
+    let mut rig = rig();
+    rig.collector = Collector::new(application::Limits::default(), [80], Limits::default())
+        .unwrap()
+        .with_deadline(std::sync::Arc::new(crate::budget::Deadline::immediate(
+            None,
+        )));
+    let error = rig.send_on(flow(), CLIENT_PREFACE, 0).unwrap_err();
+    assert!(matches!(error, Error::Analysis(_)), "{error:?}");
 }

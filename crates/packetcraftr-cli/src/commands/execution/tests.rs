@@ -196,17 +196,67 @@ fn bounded_ndjson_followup_sink_uses_no_workflow_handoff_and_flushes_each_record
 }
 
 #[test]
-fn text_and_unisolated_writers_keep_the_isolated_callback_default() {
+fn text_and_unisolated_writers_publish_callbacks_on_a_worker_thread() {
     for format in [Format::Text, Format::Ndjson] {
+        let writer = Writer::default();
+        let workflow_runtime = Runtime::new(1).unwrap();
         let invocation = Invocation::new(
             format,
-            StreamEncoder::new(Command::Scan, Writer::default()),
+            StreamEncoder::new(Command::Scan, writer.clone()),
             None,
             Cancellation::default(),
             None,
         );
-        let sink = emitter(&invocation, |_: (), _| Ok(()));
-        assert_eq!(sink.delivery(), Delivery::Isolated);
+        let callbacks = Arc::new(Mutex::new(Vec::new()));
+        let callback_threads = Arc::clone(&callbacks);
+        let sink = emitter(&invocation, move |event: scan::connect::Event, stream| {
+            callback_threads
+                .lock()
+                .unwrap()
+                .push(std::thread::current().id());
+            let scan::connect::Event::Probe(probe) = event;
+            stream
+                .emit_data(
+                    output::scan::connect::ProbeEvent::try_from(probe)
+                        .map_err(CliError::classified)?,
+                    Vec::new(),
+                )
+                .map_err(CliError::from)
+        });
+        let providers = ProviderSet::packet(
+            packetcraftr_netio::route::SystemProvider,
+            packetcraftr_netio::interface::SystemProvider,
+            packetcraftr_netio::capture::SystemProvider,
+            packetcraftr_netio::transmit::SystemProvider,
+        )
+        .with_tcp(Refused)
+        .with_resolver(packetcraftr::target::SystemResolver);
+        let client = Client::new(
+            builtin::registry(),
+            Policy {
+                allowed_destinations: vec![DestinationConstraint::Exact(
+                    "192.0.2.11".parse().unwrap(),
+                )],
+                ..Default::default()
+            },
+            providers,
+        )
+        .with_runtime(workflow_runtime.clone());
+        client
+            .scan_connect_with_followups(
+                scan::followup::ConnectRequest {
+                    scan: request(),
+                    reverse_dns: None,
+                },
+                sink,
+            )
+            .unwrap();
+        let callback_threads = callbacks.lock().unwrap().clone();
+        assert_eq!(callback_threads.len(), 1);
+        assert_ne!(callback_threads[0], std::thread::current().id());
+        assert_eq!(writer.threads.lock().unwrap().clone(), callback_threads);
+        assert_eq!(writer.writes.load(Ordering::Relaxed), 1);
+        assert_eq!(writer.flushes.load(Ordering::Relaxed), 1);
     }
 }
 

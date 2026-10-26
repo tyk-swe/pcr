@@ -192,7 +192,9 @@ mod tests {
             .is_ok()
         );
         assert_eq!(armed, Some(Some(crate::deadline::POLL_INTERVAL)));
-        let brief = Deadline::new(std::time::Duration::from_millis(10));
+        let frozen = std::time::Instant::now();
+        let brief =
+            Deadline::with_time_source(std::time::Duration::from_millis(10), move || frozen);
         let mut brief_armed = None;
         assert!(
             prepare_transfer(&brief, |timeout| {
@@ -201,11 +203,7 @@ mod tests {
             })
             .is_ok()
         );
-        let brief_armed = brief_armed.unwrap();
-        assert!(
-            !brief_armed.is_zero() && brief_armed <= std::time::Duration::from_millis(10),
-            "{brief_armed:?}"
-        );
+        assert_eq!(brief_armed, Some(std::time::Duration::from_millis(10)));
         match prepare_transfer(&live, |_| Err(io::Error::from(io::ErrorKind::InvalidInput))) {
             Err(Outcome::Failed(source)) => {
                 assert_eq!(source.kind(), io::ErrorKind::InvalidInput);

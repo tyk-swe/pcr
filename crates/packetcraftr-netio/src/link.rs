@@ -98,5 +98,14 @@ mod tests {
         assert_eq!(Mode::Layer2.as_str(), "layer2");
         assert_eq!(Mode::Layer3.as_str(), "layer3");
         assert_eq!(Mode::Auto.to_string(), "auto");
+        assert_eq!(
+            serde_json::to_string(&Capability::Layer2AndLayer3).unwrap(),
+            "\"layer2_and3\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Capability::Layer2).unwrap(),
+            "\"layer2\""
+        );
+        assert_eq!(serde_json::to_string(&Mode::Auto).unwrap(), "\"auto\"");
     }
 }

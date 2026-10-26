@@ -139,6 +139,14 @@ mod tests {
                 .kind(),
             io::ErrorKind::Other
         );
+        let exceeded = packetcraftr_core::budget::Deadline::new(std::time::Duration::ZERO)
+            .live_remaining()
+            .unwrap_err();
+        assert!(matches!(exceeded, Interrupted::Exceeded(_)));
+        assert_eq!(
+            Error::Interrupted(exceeded).into_io().kind(),
+            io::ErrorKind::Other
+        );
     }
 
     #[test]

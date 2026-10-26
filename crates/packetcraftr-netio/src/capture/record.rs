@@ -293,7 +293,9 @@ mod tests {
     fn evidence_loss_prefers_overflow_over_plain_loss() {
         assert!(Stats::default().evidence_loss_error().is_none());
         let loss = Stats {
-            dropped_frames: 1,
+            dropped_frames: 4,
+            dropped_bytes: 11,
+            receiver_dropped_frames: 2,
             ..Stats::default()
         }
         .evidence_loss_error()
@@ -301,9 +303,9 @@ mod tests {
         assert!(matches!(
             loss,
             Error::CaptureEvidenceLoss {
-                dropped_frames: 1,
-                dropped_bytes: 0,
-                receiver_dropped_frames: 0
+                dropped_frames: 4,
+                dropped_bytes: 11,
+                receiver_dropped_frames: 2
             }
         ));
         let overflow = Stats {

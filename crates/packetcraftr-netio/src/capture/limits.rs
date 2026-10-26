@@ -115,7 +115,7 @@ mod tests {
             }) => {
                 assert_eq!(field, "max_frames");
                 assert_eq!(value, MAX_CAPTURE_QUEUE_FRAMES + 7);
-                assert!(!reason.is_empty());
+                assert_eq!(reason, "exceeds the stable configured maximum");
             }
             other => panic!("expected InvalidCaptureQueueLimit, got {other:?}"),
         }
@@ -124,7 +124,27 @@ mod tests {
             ..Limits::default()
         };
         match limits.validate() {
-            Err(Error::InvalidCaptureQueueLimit { value, .. }) => assert_eq!(value, 0),
+            Err(Error::InvalidCaptureQueueLimit { value, reason, .. }) => {
+                assert_eq!(value, 0);
+                assert_eq!(reason, "must be greater than zero");
+            }
+            other => panic!("expected InvalidCaptureQueueLimit, got {other:?}"),
+        }
+        let limits = Limits {
+            max_bytes: 10,
+            snap_length: 11,
+            ..Limits::default()
+        };
+        match limits.validate() {
+            Err(Error::InvalidCaptureQueueLimit {
+                field,
+                value,
+                reason,
+            }) => {
+                assert_eq!(field, "snap_length");
+                assert_eq!(value, 11);
+                assert_eq!(reason, "cannot exceed max_bytes");
+            }
             other => panic!("expected InvalidCaptureQueueLimit, got {other:?}"),
         }
     }

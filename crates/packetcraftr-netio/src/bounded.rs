@@ -192,15 +192,36 @@ mod tests {
             .is_ok()
         );
         assert_eq!(armed, Some(Some(crate::deadline::POLL_INTERVAL)));
-        assert!(matches!(
-            prepare_transfer(&live, |_| Err(io::Error::from(io::ErrorKind::InvalidInput))),
-            Err(Outcome::Failed(_))
-        ));
+        let brief = Deadline::new(std::time::Duration::from_millis(10));
+        let mut brief_armed = None;
+        assert!(
+            prepare_transfer(&brief, |timeout| {
+                brief_armed = timeout;
+                Ok(())
+            })
+            .is_ok()
+        );
+        let brief_armed = brief_armed.unwrap();
+        assert!(
+            !brief_armed.is_zero() && brief_armed <= std::time::Duration::from_millis(10),
+            "{brief_armed:?}"
+        );
+        match prepare_transfer(&live, |_| Err(io::Error::from(io::ErrorKind::InvalidInput))) {
+            Err(Outcome::Failed(source)) => {
+                assert_eq!(source.kind(), io::ErrorKind::InvalidInput);
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
         let expired = Deadline::new(std::time::Duration::ZERO);
+        let mut setter_called = false;
         assert!(matches!(
-            prepare_transfer(&expired, |_| Ok(())),
+            prepare_transfer(&expired, |_| {
+                setter_called = true;
+                Ok(())
+            }),
             Err(Outcome::TimedOut)
         ));
+        assert!(!setter_called);
         let advanced = Arc::new(AtomicU64::new(0));
         let clock = Arc::clone(&advanced);
         let origin = std::time::Instant::now();

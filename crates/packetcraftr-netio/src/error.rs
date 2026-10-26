@@ -330,9 +330,19 @@ mod tests {
         let plain = Error::CaptureReadiness {
             message: "plain failure".to_owned(),
         };
-        let first = Error::UnresolvedLinkMode;
+        let leaf = Error::UnresolvedLinkMode;
+        let first = Error::CaptureSource {
+            index: 0,
+            interface: InterfaceId {
+                name: "test0".to_owned(),
+                index: 1,
+            },
+            phase: CapturePhase::Shutdown,
+            source: Box::new(leaf.clone()),
+        };
         let expected = vec![
             first.to_string(),
+            leaf.to_string(),
             wrapped.to_string(),
             inner.to_string(),
             plain.to_string(),

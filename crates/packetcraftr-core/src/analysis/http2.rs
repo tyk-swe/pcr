@@ -14,6 +14,9 @@ mod upgrade;
 
 mod error;
 
+#[cfg(test)]
+mod tests;
+
 pub use error::Error;
 pub use limits::{
     Limits, MAX_ACTIVE_STREAMS, MAX_BODY_BYTES, MAX_CONTINUATIONS, MAX_FRAME_BYTES, MAX_FRAMES,

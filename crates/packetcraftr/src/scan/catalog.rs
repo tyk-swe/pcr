@@ -49,3 +49,48 @@ pub(crate) const fn catalog_transport(transport: Transport) -> Option<CatalogTra
         Transport::Sctp | Transport::Icmp | Transport::Ip => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_catalog_entries_resolve_by_port_name_and_hint() {
+        let catalog = bundled();
+        assert!(!catalog.entries.is_empty());
+        for entry in &catalog.entries {
+            assert_eq!(catalog.entry(entry.transport, entry.port), Some(entry));
+            assert_eq!(
+                catalog
+                    .named(entry.transport, &entry.name)
+                    .map(|named| named.port),
+                Some(entry.port)
+            );
+        }
+        let tcp = catalog
+            .entries
+            .iter()
+            .find(|entry| entry.transport == CatalogTransport::Tcp)
+            .expect("bundled catalog names at least one TCP port");
+        assert_eq!(hint(Transport::Tcp, tcp.port), Some(tcp.name.as_str()));
+        assert_eq!(hint(Transport::Icmp, tcp.port), None);
+    }
+
+    #[test]
+    fn bundled_catalog_presets_only_name_catalog_entries() {
+        let catalog = bundled();
+        for preset in &catalog.presets {
+            assert_eq!(catalog.preset(&preset.name), Some(preset));
+            for (transport, name) in preset.members() {
+                assert!(catalog.named(transport, name).is_some(), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn data_set_publishes_the_bundled_catalog_identity() {
+        let published = data_set();
+        assert_eq!(published.name, bundled().name);
+        assert_eq!(published.version, bundled().version);
+    }
+}

@@ -3,7 +3,7 @@
 
 use bytes::Bytes;
 
-use super::{Error, Frame, FrameHeader, Limit, Payload, Priority, Setting};
+use super::{Control, Error, Frame, FrameHeader, Limit, Payload, Priority, Setting};
 
 pub(crate) const HEADER_LEN: usize = 9;
 
@@ -138,6 +138,16 @@ fn parse_payload(
                 padding: payload.slice_ref(padding),
             })
         }
+        _ => parse_control(header, payload, allow_stream_errors).map(Payload::Control),
+    }
+}
+
+fn parse_control(
+    header: &FrameHeader,
+    payload: &Bytes,
+    allow_stream_errors: bool,
+) -> Result<Control, Error> {
+    match header.frame_type {
         TYPE_HEADERS => {
             let (rest, padding) = split_padding(header, payload)?;
             let (priority, fragment) = if header.flags & FLAG_PRIORITY != 0 {
@@ -151,18 +161,18 @@ fn parse_payload(
             } else {
                 (None, rest)
             };
-            Ok(Payload::Headers {
+            Ok(Control::Headers {
                 fragment: payload.slice_ref(fragment),
                 priority,
                 padding: payload.slice_ref(padding),
             })
         }
-        TYPE_PRIORITY => Ok(Payload::Priority(priority(
+        TYPE_PRIORITY => Ok(Control::Priority(priority(
             payload,
             header.stream_id,
             allow_stream_errors,
         )?)),
-        TYPE_RESET => Ok(Payload::Reset {
+        TYPE_RESET => Ok(Control::Reset {
             error_code: be32(&payload[..4]),
         }),
         TYPE_SETTINGS => {
@@ -174,7 +184,7 @@ fn parse_payload(
                     value: be32(&chunk[2..]),
                 });
             }
-            Ok(Payload::Settings(settings))
+            Ok(Control::Settings(settings))
         }
         TYPE_PUSH_PROMISE => {
             let (rest, padding) = split_padding(header, payload)?;
@@ -187,7 +197,7 @@ fn parse_payload(
             if promised_stream_id == 0 {
                 return Err(Error::Invalid("PUSH_PROMISE promises stream zero"));
             }
-            Ok(Payload::PushPromise {
+            Ok(Control::PushPromise {
                 promised_stream_id,
                 fragment: payload.slice_ref(fragment),
                 padding: payload.slice_ref(padding),
@@ -196,9 +206,9 @@ fn parse_payload(
         TYPE_PING => {
             let mut opaque = [0; 8];
             opaque.copy_from_slice(payload);
-            Ok(Payload::Ping(opaque))
+            Ok(Control::Ping(opaque))
         }
-        TYPE_GOAWAY => Ok(Payload::Goaway {
+        TYPE_GOAWAY => Ok(Control::Goaway {
             last_stream_id: be32(&payload[..4]) & 0x7fff_ffff,
             error_code: be32(&payload[4..8]),
             debug: payload.slice_ref(&payload[8..]),
@@ -208,10 +218,10 @@ fn parse_payload(
             if increment == 0 && !allow_stream_errors {
                 return Err(Error::Invalid("WINDOW_UPDATE has a zero increment"));
             }
-            Ok(Payload::WindowUpdate { increment })
+            Ok(Control::WindowUpdate { increment })
         }
-        TYPE_CONTINUATION => Ok(Payload::Continuation(payload.clone())),
-        _ => Ok(Payload::Unknown(payload.clone())),
+        TYPE_CONTINUATION => Ok(Control::Continuation(payload.clone())),
+        _ => Ok(Control::Unknown(payload.clone())),
     }
 }
 

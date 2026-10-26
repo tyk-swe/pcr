@@ -79,11 +79,19 @@ pub struct Frame {
     pub flow: ScopedFlowKey,
     pub header: wire::FrameHeader,
     pub header_wire: [u8; 9],
-    pub control: Option<wire::Payload>,
-    pub payload_wire: Option<Bytes>,
-    pub data_bytes: u64,
-    pub padding_bytes: usize,
+    pub body: FrameBody,
     pub sources: SourceSet,
+}
+#[derive(Clone, Debug)]
+pub enum FrameBody {
+    Data {
+        data_bytes: u64,
+        padding_bytes: usize,
+    },
+    Control {
+        control: wire::Control,
+        payload_wire: Bytes,
+    },
 }
 #[derive(Clone, Debug)]
 pub struct Issue {

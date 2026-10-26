@@ -42,10 +42,12 @@ impl Frame {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Payload {
-    Data {
-        data: Bytes,
-        padding: Bytes,
-    },
+    Data { data: Bytes, padding: Bytes },
+    Control(Control),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Control {
     Headers {
         fragment: Bytes,
         priority: Option<Priority>,

@@ -26,8 +26,8 @@ pub use limits::{
     MAX_TABLE_BYTES,
 };
 pub use model::{
-    Certainty, Connection, Event, Frame, Header, Issue, IssueScope, Message, MessageKind,
-    PeerSettings, Startup, Status, Summary,
+    Certainty, Connection, Event, Frame, FrameBody, Header, Issue, IssueScope, Message,
+    MessageKind, PeerSettings, Startup, Status, Summary,
 };
 
 use crate::budget::Deadline;

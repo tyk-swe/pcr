@@ -6,7 +6,7 @@ mod headers;
 
 use super::super::Error;
 use super::super::buffer::union_balanced;
-use super::super::model::{Certainty, IssueScope, Status};
+use super::super::model::{Certainty, FrameBody, IssueScope, Status};
 use super::{ChainHead, ConnectionState, Context, Evidence, Fault, Pos};
 use crate::analysis::http2::budget;
 use crate::protocol::application::http2 as wire;
@@ -301,13 +301,19 @@ impl ConnectionState {
                 },
             )?;
         }
-        let semantic_error = match &frame.payload {
-            wire::Payload::Priority(priority)
-            | wire::Payload::Headers {
-                priority: Some(priority),
-                ..
-            } if priority.dependency == stream_id => Some("priority depends on its own stream"),
-            wire::Payload::WindowUpdate { increment: 0 } => {
+        let control = match &frame.payload {
+            wire::Payload::Control(control) => Some(control),
+            wire::Payload::Data { .. } => None,
+        };
+        let semantic_error = match control {
+            Some(
+                wire::Control::Priority(priority)
+                | wire::Control::Headers {
+                    priority: Some(priority),
+                    ..
+                },
+            ) if priority.dependency == stream_id => Some("priority depends on its own stream"),
+            Some(wire::Control::WindowUpdate { increment: 0 }) => {
                 Some("WINDOW_UPDATE has a zero increment")
             }
             _ => None,
@@ -336,14 +342,14 @@ impl ConnectionState {
                 return Ok(());
             }
         }
-        if semantic_error.is_some() && !matches!(frame.payload, wire::Payload::Headers { .. }) {
+        if semantic_error.is_some() && !matches!(control, Some(wire::Control::Headers { .. })) {
             // Invalid control values remain in the issue's exact wire evidence,
             // rather than being emitted as a valid typed control payload.
             if self.streams.contains_key(&stream_id) {
                 self.close_stream(stream_id, Status::Malformed, None, context)?;
-            } else if matches!(frame.payload, wire::Payload::Priority(_)) {
+            } else if matches!(control, Some(wire::Control::Priority(_))) {
                 self.reject_priority_stream(side, stream_id, context)?;
-            } else if matches!(frame.payload, wire::Payload::WindowUpdate { increment: 0 }) {
+            } else if matches!(control, Some(wire::Control::WindowUpdate { increment: 0 })) {
                 // Preserve the idle/closed/capture-delayed classification even
                 // when the control value itself is invalid.
                 self.window_update(
@@ -379,37 +385,26 @@ impl ConnectionState {
         sources: Option<crate::analysis::provenance::SourceSet>,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        let (control, payload_wire, data_bytes, padding_bytes) = match &frame.payload {
-            wire::Payload::Data { data, padding } => (None, None, data.len() as u64, padding.len()),
-            wire::Payload::Headers { padding, .. } | wire::Payload::PushPromise { padding, .. } => {
-                (
-                    Some(frame.payload.clone()),
-                    Some(wire_bytes.slice(wire::HEADER_LEN..)),
-                    0,
-                    padding.len(),
-                )
-            }
-            _ => (
-                Some(frame.payload.clone()),
-                Some(wire_bytes.slice(wire::HEADER_LEN..)),
-                0,
-                0,
-            ),
+        let body = match &frame.payload {
+            wire::Payload::Data { data, padding } => FrameBody::Data {
+                data_bytes: data.len() as u64,
+                padding_bytes: padding.len(),
+            },
+            wire::Payload::Control(control) => FrameBody::Control {
+                control: control.clone(),
+                payload_wire: wire_bytes.slice(wire::HEADER_LEN..),
+            },
         };
         let mut header_wire = [0u8; wire::HEADER_LEN];
         header_wire.copy_from_slice(&wire_bytes[..wire::HEADER_LEN]);
-        let retained = if payload_wire.is_some() {
-            wire_bytes.len()
-        } else {
-            wire::HEADER_LEN
+        let retained = match &body {
+            FrameBody::Data { .. } => wire::HEADER_LEN,
+            FrameBody::Control {
+                control: wire::Control::Settings(values),
+                ..
+            } => wire_bytes.len() + values.capacity() * size_of::<wire::Setting>(),
+            FrameBody::Control { .. } => wire_bytes.len(),
         };
-        let retained = retained
-            + match &control {
-                Some(wire::Payload::Settings(values)) => {
-                    values.capacity() * size_of::<wire::Setting>()
-                }
-                _ => 0,
-            };
         let sources = sources.ok_or(Error::Invariant("frame sources missing"))?;
         context.charge_retained(
             retained
@@ -424,10 +419,7 @@ impl ConnectionState {
             flow: self.dir_flow(side),
             header: frame.header.clone(),
             header_wire,
-            control,
-            payload_wire,
-            data_bytes,
-            padding_bytes,
+            body,
             sources,
         });
         Ok(())
@@ -477,22 +469,27 @@ impl ConnectionState {
                 return Ok(());
             }
         }
-        match frame.payload {
-            wire::Payload::Data { data, .. } => self.data_frame(
-                DataHead {
-                    side,
-                    stream_id,
-                    length: frame.header.length,
-                    data_bytes: data.len() as u64,
-                    end_stream: flags & wire::FLAG_END_STREAM != 0,
-                },
-                Evidence {
-                    wire: Bytes::copy_from_slice(&evidence.wire[..wire::HEADER_LEN]),
-                    sources: evidence.sources,
-                },
-                context,
-            ),
-            wire::Payload::Headers {
+        let control = match frame.payload {
+            wire::Payload::Data { data, .. } => {
+                return self.data_frame(
+                    DataHead {
+                        side,
+                        stream_id,
+                        length: frame.header.length,
+                        data_bytes: data.len() as u64,
+                        end_stream: flags & wire::FLAG_END_STREAM != 0,
+                    },
+                    Evidence {
+                        wire: Bytes::copy_from_slice(&evidence.wire[..wire::HEADER_LEN]),
+                        sources: evidence.sources,
+                    },
+                    context,
+                );
+            }
+            wire::Payload::Control(control) => control,
+        };
+        match control {
+            wire::Control::Headers {
                 fragment, priority, ..
             } => self.block_start(
                 Pos { side, stream_id },
@@ -505,11 +502,11 @@ impl ConnectionState {
                 context,
                 flags & wire::FLAG_END_HEADERS != 0,
             ),
-            wire::Payload::Reset { .. } => self.reset_stream(side, stream_id, evidence, context),
-            wire::Payload::Settings(settings) => {
+            wire::Control::Reset { .. } => self.reset_stream(side, stream_id, evidence, context),
+            wire::Control::Settings(settings) => {
                 self.settings_frame(side, flags, settings, evidence, context)
             }
-            wire::Payload::PushPromise {
+            wire::Control::PushPromise {
                 promised_stream_id,
                 fragment,
                 ..
@@ -523,15 +520,15 @@ impl ConnectionState {
                 context,
                 flags & wire::FLAG_END_HEADERS != 0,
             ),
-            wire::Payload::Ping(opaque) => self.ping_frame(side, flags, opaque, evidence, context),
-            wire::Payload::Priority(_) | wire::Payload::Unknown(_) => Ok(()),
-            wire::Payload::Goaway { last_stream_id, .. } => {
+            wire::Control::Ping(opaque) => self.ping_frame(side, flags, opaque, evidence, context),
+            wire::Control::Priority(_) | wire::Control::Unknown(_) => Ok(()),
+            wire::Control::Goaway { last_stream_id, .. } => {
                 self.goaway_frame(side, last_stream_id, evidence, context)
             }
-            wire::Payload::WindowUpdate { increment } => {
+            wire::Control::WindowUpdate { increment } => {
                 self.window_update(side, stream_id, increment, evidence, context)
             }
-            wire::Payload::Continuation(fragment) => {
+            wire::Control::Continuation(fragment) => {
                 self.block_continue(side, stream_id, fragment, flags, evidence, context)
             }
         }

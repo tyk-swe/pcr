@@ -69,10 +69,15 @@ pub(super) fn trim_at(base: usize, text: &str) -> (usize, &str) {
     (base.saturating_add(leading), trimmed.trim_end())
 }
 
+enum QuoteState {
+    Unquoted,
+    Quoted,
+    Escaped,
+}
+
 struct TopLevelScanner<'a> {
     chars: std::str::CharIndices<'a>,
-    quoted: bool,
-    escaped: bool,
+    quote_state: QuoteState,
     delimiters: Vec<char>,
 }
 
@@ -80,28 +85,32 @@ impl<'a> TopLevelScanner<'a> {
     fn new(input: &'a str) -> Self {
         Self {
             chars: input.char_indices(),
-            quoted: false,
-            escaped: false,
+            quote_state: QuoteState::Unquoted,
             delimiters: Vec::new(),
         }
     }
 
     fn next_top_level(&mut self) -> Result<Option<(usize, char)>, ScanFailure> {
         for (offset, character) in self.chars.by_ref() {
-            if self.escaped {
-                self.escaped = false;
-                continue;
-            }
-            if self.quoted && character == '\\' {
-                self.escaped = true;
-                continue;
-            }
-            if character == '"' {
-                self.quoted = !self.quoted;
-                continue;
-            }
-            if self.quoted {
-                continue;
+            match self.quote_state {
+                QuoteState::Unquoted => {
+                    if character == '"' {
+                        self.quote_state = QuoteState::Quoted;
+                        continue;
+                    }
+                }
+                QuoteState::Quoted => {
+                    self.quote_state = match character {
+                        '\\' => QuoteState::Escaped,
+                        '"' => QuoteState::Unquoted,
+                        _ => QuoteState::Quoted,
+                    };
+                    continue;
+                }
+                QuoteState::Escaped => {
+                    self.quote_state = QuoteState::Quoted;
+                    continue;
+                }
             }
             let unbalanced = |character| ScanFailure::Unbalanced { offset, character };
             match character {
@@ -122,10 +131,12 @@ impl<'a> TopLevelScanner<'a> {
                 _ => {}
             }
         }
-        if self.quoted || !self.delimiters.is_empty() {
-            Err(ScanFailure::Unterminated)
-        } else {
-            Ok(None)
+        if !self.delimiters.is_empty() {
+            return Err(ScanFailure::Unterminated);
+        }
+        match self.quote_state {
+            QuoteState::Unquoted => Ok(None),
+            QuoteState::Quoted | QuoteState::Escaped => Err(ScanFailure::Unterminated),
         }
     }
 }
@@ -152,5 +163,52 @@ mod tests {
             3
         );
         assert!(split_top_level_bounded(0, r#""escaped\"([)]""#, ',', None).is_ok());
+    }
+
+    #[test]
+    fn quotes_and_backslashes_preserve_top_level_parts() {
+        let base = 7;
+        for (input, first) in [
+            (r#""a\",b",tail"#, r#""a\",b""#),
+            (r#""a\\",tail"#, r#""a\\""#),
+            (r#""é([)],=/{}",tail"#, r#""é([)],=/{}""#),
+            (r"a\,tail", r"a\"),
+            (r#"a\"b,c",tail"#, r#"a\"b,c""#),
+            (r"a\(b,c),tail", r"a\(b,c)"),
+        ] {
+            assert_eq!(
+                split_top_level_bounded(base, input, ',', Some(2)).unwrap(),
+                [(base, first), (base + first.len() + 1, "tail")],
+                "{input}",
+            );
+        }
+    }
+
+    #[test]
+    fn unterminated_quotes_report_the_end_byte_offset() {
+        let base = 7;
+        for input in [r#""é"#, r#""é\"#, r#""é\""#] {
+            assert!(
+                matches!(
+                    split_top_level_bounded(base, input, ',', None),
+                    Err(Error::Syntax { offset, message })
+                        if offset == base + input.len()
+                            && message == "unterminated quote or delimiter"
+                ),
+                "{input}",
+            );
+        }
+    }
+
+    #[test]
+    fn unbalanced_delimiters_report_the_byte_offset_after_quotes() {
+        let base = 7;
+        let prefix = r#""é\",([)]",(["#;
+        let input = format!("{prefix})");
+        assert!(matches!(
+            split_top_level_bounded(base, &input, ',', None),
+            Err(Error::Syntax { offset, message })
+                if offset == base + prefix.len() && message == "unexpected ')'"
+        ));
     }
 }

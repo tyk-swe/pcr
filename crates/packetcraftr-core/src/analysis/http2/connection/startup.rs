@@ -6,6 +6,7 @@ use super::super::buffer::union_balanced;
 use super::super::model::{Certainty, IssueScope, Startup, Status};
 use super::super::upgrade::Prelude;
 use super::{ConnectionState, Context, DirectionPhase, Fault, PREFACE_LEN, Phase};
+use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::protocol::application::http;
 use crate::protocol::application::http2 as wire;
@@ -109,7 +110,7 @@ impl ConnectionState {
                         dir.phase = DirectionPhase::Prelude;
                     }
                     self.prelude = Some(Prelude::new());
-                    self.charge_conn(context, super::resources::DIR_OVERHEAD)?;
+                    self.charge_conn(context, budget::DIR_OVERHEAD)?;
                     self.phase = Phase::Prelude;
                     return Ok(());
                 }

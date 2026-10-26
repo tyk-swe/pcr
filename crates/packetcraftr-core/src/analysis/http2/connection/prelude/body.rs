@@ -5,7 +5,8 @@ use super::super::super::Error;
 use super::super::super::buffer::union_balanced;
 use super::super::super::model::{Certainty, Header, IssueScope, Status};
 use super::super::super::stream::MessageBuilder;
-use super::super::{ConnectionState, Context, Fault, resources};
+use super::super::{ConnectionState, Context, Fault};
+use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::protocol::application::http;
 use bytes::Bytes;
@@ -114,7 +115,7 @@ impl ConnectionState {
                 msg.body_bytes = body_bytes;
                 for set in sets {
                     let frames = set.frames().len();
-                    let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
+                    let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
                     self.charge_conn(context, charge)?;
                     context.charge_spans(frames)?;
                     let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
@@ -138,7 +139,7 @@ impl ConnectionState {
         if complete {
             let trailer_charge = trailers
                 .iter()
-                .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
+                .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
                 .sum::<usize>();
             let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
             if side == Side::Client {

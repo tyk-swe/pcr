@@ -3,8 +3,9 @@
 
 //! DATA payload validation, stream flow control, and message body retention.
 
-use super::super::{ConnectionState, Context, Evidence, Fault, resources};
+use super::super::{ConnectionState, Context, Evidence, Fault};
 use crate::analysis::http2::Error;
+use crate::analysis::http2::budget;
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
 use crate::analysis::http2::side::Side;
 
@@ -110,7 +111,7 @@ impl ConnectionState {
                 if !self.early_response_headers.contains_key(&stream_id) {
                     context.check_streams()?;
                     self.admitted_streams += 1;
-                    self.charge_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
+                    self.charge_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
                 }
                 self.early_response_headers
                     .entry(stream_id)
@@ -358,8 +359,7 @@ impl ConnectionState {
                 return Ok(());
             }
             if let Some(sources) = evidence.sources.clone() {
-                let charge =
-                    resources::SET_OVERHEAD + sources.frames().len() * resources::SPAN_OVERHEAD;
+                let charge = budget::SET_OVERHEAD + sources.frames().len() * budget::SPAN_OVERHEAD;
                 self.charge_conn(context, charge)?;
                 let stream = self
                     .streams

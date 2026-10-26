@@ -3,10 +3,9 @@
 
 //! Request, response, and trailer semantics for decoded stream headers.
 
-use super::super::{
-    ChainHead, ConnectionState, Context, Decoded, Evidence, Fault, Head, Phase, resources,
-};
+use super::super::{ChainHead, ConnectionState, Context, Decoded, Evidence, Fault, Head, Phase};
 use crate::analysis::http2::Error;
+use crate::analysis::http2::budget;
 use crate::analysis::http2::headers::{FieldRole, validate};
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
 use crate::analysis::http2::side::Side;
@@ -162,7 +161,7 @@ impl ConnectionState {
                 if delayed_opener && !self.early_response_headers.contains_key(&stream_id) {
                     context.check_streams()?;
                     self.admitted_streams += 1;
-                    self.charge_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
+                    self.charge_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
                     self.early_response_headers
                         .insert(stream_id, Default::default());
                 }
@@ -501,7 +500,7 @@ impl ConnectionState {
                 msg.trailers_seen = true;
                 let added = headers
                     .iter()
-                    .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
+                    .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
                     .sum::<usize>()
                     + block.len();
                 self.charge_conn(context, added)?;
@@ -515,7 +514,7 @@ impl ConnectionState {
                     msg.header_blocks.push(block);
                     if let Some(sources) = block_sources {
                         let frames = sources.frames().len();
-                        let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
+                        let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
                         self.charge_conn(context, charge)?;
                         context.charge_spans(frames)?;
                         let msg = self
@@ -529,7 +528,7 @@ impl ConnectionState {
                     }
                     if let Some(set) = compression {
                         let frames = set.frames().len();
-                        let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
+                        let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
                         self.charge_conn(context, charge)?;
                         context.charge_spans(frames)?;
                         let msg = self

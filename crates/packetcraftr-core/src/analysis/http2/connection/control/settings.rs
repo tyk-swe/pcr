@@ -6,7 +6,8 @@
 use super::super::super::model::{Certainty, IssueScope, Status};
 use super::super::super::stream::Phase as StreamPhase;
 use super::super::super::{Error, settings};
-use super::super::{ConnectionState, Context, Evidence, Fault, resources};
+use super::super::{ConnectionState, Context, Evidence, Fault};
+use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::protocol::application::http2 as wire;
 
@@ -198,11 +199,11 @@ impl ConnectionState {
         let applied = self.settings[side].apply(&settings, side == Side::Server);
         let mut pending = applied.pending;
         pending.sender_stream_limit = self.max_initiated[side];
-        pending.charged = resources::PENDING_OVERHEAD
+        pending.charged = budget::PENDING_OVERHEAD
             + self
                 .streams
                 .len()
-                .saturating_mul(resources::CLOSED_STREAM_OVERHEAD);
+                .saturating_mul(budget::CLOSED_STREAM_OVERHEAD);
         self.charge_conn(context, pending.charged)?;
         for (id, stream) in &self.streams {
             context.check_deadline()?;

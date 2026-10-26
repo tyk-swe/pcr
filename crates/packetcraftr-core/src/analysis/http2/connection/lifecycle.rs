@@ -8,7 +8,8 @@ mod teardown;
 use super::super::Error;
 use super::super::buffer::union_balanced;
 use super::super::model::{Certainty, IssueScope, Status};
-use super::{ConnectionState, Context, DirectionPhase, Fault, Phase, resources};
+use super::{ConnectionState, Context, DirectionPhase, Fault, Phase};
+use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::analysis::provenance::SourceSet;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
@@ -84,10 +85,7 @@ impl ConnectionState {
         self.closed_credit.clear();
         self.prelude = None;
         context.release_live(bytes)?;
-        *context.spans = context
-            .spans
-            .checked_sub(spans)
-            .ok_or(Error::Invariant("span release"))?;
+        context.release_spans(spans)?;
         Ok(())
     }
 
@@ -107,7 +105,7 @@ impl ConnectionState {
             );
         }
         if !self.has_flow(flow) && self.has_flow(&flow.reverse()) {
-            self.charge_conn(context, resources::DIR_OVERHEAD)?;
+            self.charge_conn(context, budget::DIR_OVERHEAD)?;
             let mut dir = super::DirectionState::new(flow.clone());
             dir.closed = true;
             if let Some(reverse) = self.side_of(&flow.reverse()) {
@@ -251,10 +249,7 @@ impl ConnectionState {
             if let Some(chain) = dir.chain.take() {
                 Self::release_dir(dir, context, chain.charged)?;
                 dir.charged_spans -= chain.charged_spans;
-                *context.spans = context
-                    .spans
-                    .checked_sub(chain.charged_spans)
-                    .ok_or(Error::Invariant("chain spans"))?;
+                context.release_spans(chain.charged_spans)?;
                 faults.push(Fault {
                     flow: dir.flow.clone(),
                     http2_stream_id: Some(chain.stream_id),
@@ -310,10 +305,7 @@ impl ConnectionState {
             }
             for dir in self.dirs.iter_mut().flatten() {
                 context.release_live(dir.charged)?;
-                *context.spans = context
-                    .spans
-                    .checked_sub(dir.charged_spans)
-                    .ok_or(Error::Invariant("dir spans"))?;
+                context.release_spans(dir.charged_spans)?;
                 dir.charged = 0;
                 dir.charged_spans = 0;
                 dir.decoder = None;
@@ -370,10 +362,7 @@ impl ConnectionState {
             if let Some(mut chain) = dir.chain.take() {
                 Self::release_dir(dir, context, chain.charged)?;
                 dir.charged_spans -= chain.charged_spans;
-                *context.spans = context
-                    .spans
-                    .checked_sub(chain.charged_spans)
-                    .ok_or(Error::Invariant("chain spans"))?;
+                context.release_spans(chain.charged_spans)?;
                 let sources = union_balanced(std::mem::take(&mut chain.sets))?;
                 partials.push((
                     dir.flow.clone(),
@@ -425,10 +414,7 @@ impl ConnectionState {
                     .charged_spans
                     .checked_sub(chain.charged_spans)
                     .ok_or(Error::Invariant("chain spans"))?;
-                *context.spans = context
-                    .spans
-                    .checked_sub(chain.charged_spans)
-                    .ok_or(Error::Invariant("chain spans"))?;
+                context.release_spans(chain.charged_spans)?;
                 faults.push((
                     dir.flow.clone(),
                     chain.stream_id,

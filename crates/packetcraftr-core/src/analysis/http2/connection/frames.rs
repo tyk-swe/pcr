@@ -7,7 +7,8 @@ mod headers;
 use super::super::Error;
 use super::super::buffer::union_balanced;
 use super::super::model::{Certainty, IssueScope, Status};
-use super::{ChainHead, ConnectionState, Context, Evidence, Fault, Pos, resources};
+use super::{ChainHead, ConnectionState, Context, Evidence, Fault, Pos};
+use crate::analysis::http2::budget;
 use crate::protocol::application::http2 as wire;
 use bytes::Bytes;
 
@@ -80,8 +81,7 @@ impl ConnectionState {
             })
             .and_then(|v| {
                 v.checked_add(
-                    resources::EVENT_OVERHEAD
-                        + 4 * size_of::<super::super::settings::SettingIssue>(),
+                    budget::EVENT_OVERHEAD + 4 * size_of::<super::super::settings::SettingIssue>(),
                 )
             })
             .ok_or(Error::Application(
@@ -416,9 +416,9 @@ impl ConnectionState {
         let sources = sources.ok_or(Error::Invariant("frame sources missing"))?;
         context.charge_retained(
             retained
-                + resources::EVENT_OVERHEAD
-                + resources::SET_OVERHEAD
-                + sources.frames().len() * resources::SPAN_OVERHEAD,
+                + budget::EVENT_OVERHEAD
+                + budget::SET_OVERHEAD
+                + sources.frames().len() * budget::SPAN_OVERHEAD,
         )?;
         context.frame(super::super::model::Frame {
             index: self.frames,

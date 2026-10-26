@@ -3,8 +3,9 @@
 
 //! Push-promise validation, stream reservation, and parent reconciliation.
 
-use super::super::{ConnectionState, Context, Decoded, Fault, resources};
+use super::super::{ConnectionState, Context, Decoded, Fault};
 use crate::analysis::http2::Error;
+use crate::analysis::http2::budget;
 use crate::analysis::http2::headers::{FieldRole, validate};
 use crate::analysis::http2::model::{Certainty, IssueScope, MessageKind, Status};
 use crate::analysis::http2::side::{PerSide, Side};
@@ -146,7 +147,7 @@ impl ConnectionState {
         let mut msg = self.new_message(promised, MessageKind::PushPromise, context)?;
         let content_charge = headers
             .iter()
-            .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
+            .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
             .sum::<usize>()
             + block.len();
         self.charge_conn(context, content_charge)?;
@@ -161,7 +162,7 @@ impl ConnectionState {
             .or_else(|| self.closed.get(&stream_id).and_then(|s| s.request));
         if let Some(sources) = block_sources.clone() {
             let frames = sources.frames().len();
-            let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
+            let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
             self.charge_conn(context, charge)?;
             context.charge_spans(frames)?;
             msg.charged += charge;
@@ -170,7 +171,7 @@ impl ConnectionState {
         }
         if let Some(set) = compression {
             let frames = set.frames().len();
-            let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
+            let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
             self.charge_conn(context, charge)?;
             context.charge_spans(frames)?;
             msg.charged += charge;
@@ -202,7 +203,7 @@ impl ConnectionState {
         let index = msg.index;
         if delayed_parent && !rejected {
             self.retain_early_parent(stream_id, context)?;
-            self.charge_conn(context, resources::PENDING_OVERHEAD)?;
+            self.charge_conn(context, budget::PENDING_OVERHEAD)?;
             self.parent_deferred.push_back(msg);
         } else {
             self.emit_message(Side::Server, msg, Status::Complete, context)?;
@@ -215,7 +216,7 @@ impl ConnectionState {
         if rejected {
             context.check_streams()?;
             self.admitted_streams += 1;
-            self.charge_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
+            self.charge_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
             self.closed.insert(
                 promised,
                 super::super::ClosedStream {
@@ -251,7 +252,7 @@ impl ConnectionState {
         }
         context.check_streams()?;
         self.admitted_streams += 1;
-        self.charge_conn(context, resources::STREAM_OVERHEAD)?;
+        self.charge_conn(context, budget::STREAM_OVERHEAD)?;
         let windows = PerSide::new(
             i64::from(self.settings[Side::Server].acknowledged.initial_window_size),
             i64::from(self.settings[Side::Client].acknowledged.initial_window_size),
@@ -272,7 +273,7 @@ impl ConnectionState {
         if !self.early_response_headers.contains_key(&id) {
             context.check_streams()?;
             self.admitted_streams += 1;
-            self.charge_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
+            self.charge_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
             self.early_response_headers.insert(id, Default::default());
         }
         Ok(())
@@ -292,7 +293,7 @@ impl ConnectionState {
                 .pop_front()
                 .ok_or(Error::Invariant("pending promise"))?;
             if msg.promised_by == Some(id) {
-                self.release_conn(context, resources::PENDING_OVERHEAD)?;
+                self.release_conn(context, budget::PENDING_OVERHEAD)?;
                 msg.request = request;
                 self.emit_message(Side::Server, msg, Status::Complete, context)?;
             } else {

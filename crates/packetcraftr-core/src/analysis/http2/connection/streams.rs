@@ -8,7 +8,8 @@ mod push;
 use super::super::Error;
 use super::super::model::{Certainty, IssueScope, Status};
 use super::super::stream::{Phase as StreamPhase, StreamState};
-use super::{ConnectionState, Context, Evidence, Fault, Phase, resources};
+use super::{ConnectionState, Context, Evidence, Fault, Phase};
+use crate::analysis::http2::budget;
 use crate::analysis::http2::side::{PerSide, Side};
 use bytes::Bytes;
 
@@ -27,7 +28,7 @@ impl ConnectionState {
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         if !self.pending_openers.contains_key(&id) {
-            self.charge_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
+            self.charge_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
             self.pending_openers.insert(id, code);
         }
         Ok(())
@@ -35,7 +36,7 @@ impl ConnectionState {
 
     fn resolve_pending_opener(&mut self, id: u32, context: &mut Context<'_>) -> Result<(), Error> {
         if self.pending_openers.remove(&id).is_some() {
-            self.release_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
+            self.release_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
         }
         Ok(())
     }
@@ -152,12 +153,12 @@ impl ConnectionState {
         self.resolve_pending_opener(stream_id, context)?;
         let early_response = self.early_response_headers.remove(&stream_id);
         if early_response.is_some() {
-            self.release_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
+            self.release_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
         } else {
             context.check_streams()?;
             self.admitted_streams += 1;
         }
-        self.charge_conn(context, resources::STREAM_OVERHEAD)?;
+        self.charge_conn(context, budget::STREAM_OVERHEAD)?;
         let windows = PerSide::new(
             i64::from(self.settings[Side::Server].acknowledged.initial_window_size),
             i64::from(self.settings[Side::Client].acknowledged.initial_window_size),
@@ -343,7 +344,7 @@ impl ConnectionState {
                 );
                 self.release_conn(
                     context,
-                    resources::STREAM_OVERHEAD - resources::CLOSED_STREAM_OVERHEAD,
+                    budget::STREAM_OVERHEAD - budget::CLOSED_STREAM_OVERHEAD,
                 )?;
             }
         }
@@ -374,7 +375,7 @@ impl ConnectionState {
         } else {
             context.check_streams()?;
             self.admitted_streams += 1;
-            self.charge_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
+            self.charge_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
             self.closed.insert(
                 id,
                 super::ClosedStream {
@@ -435,7 +436,7 @@ impl ConnectionState {
                 self.retain_pending_opener(stream_id, "reset_idle_stream", context)?;
                 context.check_streams()?;
                 self.admitted_streams += 1;
-                self.charge_conn(context, resources::CLOSED_STREAM_OVERHEAD)?;
+                self.charge_conn(context, budget::CLOSED_STREAM_OVERHEAD)?;
                 self.closed.insert(
                     stream_id,
                     super::ClosedStream {
@@ -502,7 +503,7 @@ impl ConnectionState {
         );
         self.release_conn(
             context,
-            resources::STREAM_OVERHEAD - resources::CLOSED_STREAM_OVERHEAD,
+            budget::STREAM_OVERHEAD - budget::CLOSED_STREAM_OVERHEAD,
         )?;
         Ok(())
     }

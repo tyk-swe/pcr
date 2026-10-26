@@ -1694,7 +1694,7 @@ fn max_streams_limit() {
 }
 
 fn charges(rig: &Rig) -> (usize, usize) {
-    (rig.collector.buffered, rig.collector.spans)
+    rig.collector.resources.budget.outstanding()
 }
 
 fn charges_after_replacement(earlier: impl FnOnce(&mut Rig)) -> (usize, usize) {

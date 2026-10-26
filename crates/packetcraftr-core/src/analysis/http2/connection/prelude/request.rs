@@ -5,7 +5,8 @@ use super::super::super::Error;
 use super::super::super::buffer::union_balanced;
 use super::super::super::model::{Certainty, Header, IssueScope, MessageKind, Status};
 use super::super::super::upgrade::{self, Offer, Pending};
-use super::super::{ConnectionState, Context, Fault, resources};
+use super::super::{ConnectionState, Context, Fault};
+use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
 use crate::protocol::application::http::{self, BodyDecoder, StartLine};
 use bytes::Bytes;
@@ -105,7 +106,7 @@ impl ConnectionState {
         let header_charge = head
             .headers
             .iter()
-            .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
+            .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
             .sum::<usize>();
         self.charge_conn(context, header_charge)?;
         msg.charged += header_charge;
@@ -121,7 +122,7 @@ impl ConnectionState {
         msg.headers = headers;
         for set in sets {
             let frames = set.frames().len();
-            let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
+            let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
             self.charge_conn(context, charge)?;
             context.charge_spans(frames)?;
             msg.charged += charge;
@@ -156,7 +157,7 @@ impl ConnectionState {
             self.fail(context, Status::Limit)?;
             return Ok(true);
         }
-        self.charge_conn(context, resources::PENDING_OVERHEAD)?;
+        self.charge_conn(context, budget::PENDING_OVERHEAD)?;
         let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
         prelude.requests.push_back(Pending {
             index,
@@ -164,7 +165,7 @@ impl ConnectionState {
             upgrade: offer.is_some(),
         });
         if let Some(settings) = offer {
-            let charge = resources::OFFER_OVERHEAD + settings.capacity() * 24;
+            let charge = budget::OFFER_OVERHEAD + settings.capacity() * 24;
             self.charge_conn(context, charge)?;
             let prelude = self.prelude.as_mut().ok_or(Error::Invariant("prelude"))?;
             prelude.offers.insert(
@@ -203,14 +204,14 @@ impl ConnectionState {
             .as_ref()
             .is_some_and(|p| p.offers.contains_key(&index));
         if matches!(framing, http::Body::Chunked) {
-            if let Err(error) = self.charge_conn(context, resources::PRELUDE_BODY_RESERVE) {
+            if let Err(error) = self.charge_conn(context, budget::PRELUDE_BODY_RESERVE) {
                 self.drop_msg(msg, context)?;
                 return Err(error);
             }
             self.prelude
                 .as_mut()
                 .ok_or(Error::Invariant("prelude"))?
-                .body_charge[Side::Client] = resources::PRELUDE_BODY_RESERVE;
+                .body_charge[Side::Client] = budget::PRELUDE_BODY_RESERVE;
         }
         let decoder = BodyDecoder::new(framing, context.limits.max_body_bytes);
         if decoder.complete() {

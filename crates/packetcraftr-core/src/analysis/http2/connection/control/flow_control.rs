@@ -6,7 +6,8 @@
 use super::super::super::model::{Certainty, IssueScope, Status};
 use super::super::super::stream::Phase as StreamPhase;
 use super::super::super::{Error, settings};
-use super::super::{ConnectionState, Context, Evidence, Fault, resources};
+use super::super::{ConnectionState, Context, Evidence, Fault};
+use crate::analysis::http2::budget;
 use crate::analysis::http2::side::{PerSide, Side};
 
 impl ConnectionState {
@@ -265,7 +266,7 @@ impl ConnectionState {
         };
         let debt = PerSide::new(debt_at(Side::Client), debt_at(Side::Server));
         if debt.iter().any(Option::is_some) && !self.closed_credit.contains_key(&id) {
-            self.charge_conn(context, resources::CLOSED_CREDIT_OVERHEAD)?;
+            self.charge_conn(context, budget::CLOSED_CREDIT_OVERHEAD)?;
             self.closed_credit.insert(id, debt);
         }
         Ok(())
@@ -278,7 +279,7 @@ impl ConnectionState {
             .is_some_and(|debt| debt.iter().all(Option::is_none))
         {
             self.closed_credit.remove(&id);
-            self.release_conn(context, resources::CLOSED_CREDIT_OVERHEAD)?;
+            self.release_conn(context, budget::CLOSED_CREDIT_OVERHEAD)?;
         }
         Ok(())
     }
@@ -292,7 +293,7 @@ impl ConnectionState {
             .retain(|_, debt| debt.iter().any(Option::is_some));
         self.release_conn(
             context,
-            (before - self.closed_credit.len()) * resources::CLOSED_CREDIT_OVERHEAD,
+            (before - self.closed_credit.len()) * budget::CLOSED_CREDIT_OVERHEAD,
         )
     }
 }

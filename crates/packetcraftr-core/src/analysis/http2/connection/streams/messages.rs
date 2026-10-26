@@ -3,8 +3,9 @@
 
 //! Message construction, resource accounting, and ordered publication.
 
-use super::super::{ConnectionState, Context, Decoded, Fault, Head, resources};
+use super::super::{ConnectionState, Context, Decoded, Fault, Head};
 use crate::analysis::http2::Error;
+use crate::analysis::http2::budget;
 use crate::analysis::http2::buffer::union_balanced;
 use crate::analysis::http2::headers::FieldRole;
 use crate::analysis::http2::model::{Certainty, IssueScope, Message, MessageKind, Status};
@@ -21,20 +22,20 @@ impl ConnectionState {
     ) -> Result<MessageBuilder, Error> {
         let index = context.check_messages()?;
         let mut msg = MessageBuilder::new(index, stream_id, kind);
-        self.charge_conn(context, resources::MESSAGE_OVERHEAD)?;
-        msg.charged = resources::MESSAGE_OVERHEAD;
+        self.charge_conn(context, budget::MESSAGE_OVERHEAD)?;
+        msg.charged = budget::MESSAGE_OVERHEAD;
         Ok(msg)
     }
 
     fn msg_content_charge(msg: &MessageBuilder) -> usize {
         msg.headers
             .iter()
-            .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
+            .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
             .sum::<usize>()
             + msg
                 .trailers
                 .iter()
-                .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
+                .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
                 .sum::<usize>()
             + msg.header_blocks.iter().map(Bytes::len).sum::<usize>()
             + msg
@@ -53,7 +54,7 @@ impl ConnectionState {
         if status == Status::Complete
             && (self.waiting_settings_ack(Side::Client) || self.waiting_settings_ack(Side::Server))
         {
-            self.charge_conn(context, resources::PENDING_OVERHEAD)?;
+            self.charge_conn(context, budget::PENDING_OVERHEAD)?;
             self.ack_deferred.push_back((side, build, status));
             return Ok(());
         }
@@ -129,18 +130,15 @@ impl ConnectionState {
             .ok_or(Error::Invariant("message sources missing"))?;
         let compression_sources = union_balanced(std::mem::take(&mut build.compression))?;
         self.release_conn(context, build.charged)?;
-        *context.spans = context
-            .spans
-            .checked_sub(build.charged_spans)
-            .ok_or(Error::Invariant("msg spans"))?;
+        context.release_spans(build.charged_spans)?;
         context.charge_retained(
             Self::msg_content_charge(&build)
-                + resources::EVENT_OVERHEAD
-                + resources::MESSAGE_OVERHEAD
-                + resources::SET_OVERHEAD
-                + sources.frames().len() * resources::SPAN_OVERHEAD
+                + budget::EVENT_OVERHEAD
+                + budget::MESSAGE_OVERHEAD
+                + budget::SET_OVERHEAD
+                + sources.frames().len() * budget::SPAN_OVERHEAD
                 + compression_sources.as_ref().map_or(0, |set| {
-                    resources::SET_OVERHEAD + set.frames().len() * resources::SPAN_OVERHEAD
+                    budget::SET_OVERHEAD + set.frames().len() * budget::SPAN_OVERHEAD
                 }),
         )?;
         context.message(Message {
@@ -195,7 +193,7 @@ impl ConnectionState {
         }
         let content_charge = headers
             .iter()
-            .map(|h| h.name.len() + h.value.len() + resources::HEADER_OVERHEAD)
+            .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
             .sum::<usize>()
             + block.len();
         self.charge_conn(context, content_charge)?;
@@ -206,7 +204,7 @@ impl ConnectionState {
         msg.status_code = meta.status;
         if let Some(sources) = block_sources {
             let frames = sources.frames().len();
-            let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
+            let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
             self.charge_conn(context, charge)?;
             context.charge_spans(frames)?;
             msg.charged += charge;
@@ -215,7 +213,7 @@ impl ConnectionState {
         }
         if let Some(set) = compression {
             let frames = set.frames().len();
-            let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
+            let charge = budget::SET_OVERHEAD + frames * budget::SPAN_OVERHEAD;
             self.charge_conn(context, charge)?;
             context.charge_spans(frames)?;
             msg.charged += charge;
@@ -273,7 +271,7 @@ impl ConnectionState {
             return Ok(());
         }
         let immediate = std::mem::take(&mut self.ack_deferred);
-        self.release_conn(context, immediate.len() * resources::PENDING_OVERHEAD)?;
+        self.release_conn(context, immediate.len() * budget::PENDING_OVERHEAD)?;
         for (side, msg, status) in immediate {
             context.check_deadline()?;
             self.emit_message(side, msg, status, context)?;

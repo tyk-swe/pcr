@@ -3,13 +3,12 @@
 
 //! Partial-message flushing, final resource teardown, and connection publication.
 
+use crate::analysis::http2::budget;
 use bytes::Bytes;
 
 use crate::analysis::http2::Error;
 use crate::analysis::http2::buffer::union_balanced;
-use crate::analysis::http2::connection::{
-    ConnectionState, Context, DirectionPhase, Fault, Phase, resources,
-};
+use crate::analysis::http2::connection::{ConnectionState, Context, DirectionPhase, Fault, Phase};
 use crate::analysis::http2::model::{Certainty, Connection, IssueScope, Startup, Status};
 use crate::analysis::http2::side::Side;
 use crate::analysis::http2::stream::Phase as StreamPhase;
@@ -22,12 +21,12 @@ impl ConnectionState {
     ) -> Result<usize, Error> {
         let mut pending_msgs = Vec::new();
         let promises = std::mem::take(&mut self.parent_deferred);
-        self.release_conn(context, promises.len() * resources::PENDING_OVERHEAD)?;
+        self.release_conn(context, promises.len() * budget::PENDING_OVERHEAD)?;
         for msg in promises {
             pending_msgs.push((Side::Server, msg.stream_id, msg));
         }
         let immediate = std::mem::take(&mut self.ack_deferred);
-        self.release_conn(context, immediate.len() * resources::PENDING_OVERHEAD)?;
+        self.release_conn(context, immediate.len() * budget::PENDING_OVERHEAD)?;
         for (side, msg, _) in immediate {
             pending_msgs.push((side, msg.stream_id, msg));
         }
@@ -74,10 +73,7 @@ impl ConnectionState {
                 .ok_or(Error::Invariant("upgrade request head"))?;
             let sources = union_balanced(std::mem::take(&mut msg.sets))?;
             self.release_conn(context, msg.charged)?;
-            *context.spans = context
-                .spans
-                .checked_sub(msg.charged_spans)
-                .ok_or(Error::Invariant("msg spans"))?;
+            context.release_spans(msg.charged_spans)?;
             self.issue(
                 context,
                 Fault {
@@ -95,10 +91,7 @@ impl ConnectionState {
         }
         for msg in release {
             self.release_conn(context, msg.charged)?;
-            *context.spans = context
-                .spans
-                .checked_sub(msg.charged_spans)
-                .ok_or(Error::Invariant("msg spans"))?;
+            context.release_spans(msg.charged_spans)?;
         }
         let emitted = pending_msgs.len();
         for (side, _, msg) in pending_msgs {
@@ -111,13 +104,13 @@ impl ConnectionState {
         let Some(prelude) = self.prelude.take() else {
             return Ok(());
         };
-        let mut release = prelude.requests.len() * resources::PENDING_OVERHEAD;
+        let mut release = prelude.requests.len() * budget::PENDING_OVERHEAD;
         release += prelude
             .offers
             .values()
-            .map(|offer| resources::OFFER_OVERHEAD + offer.settings.capacity() * 24)
+            .map(|offer| budget::OFFER_OVERHEAD + offer.settings.capacity() * 24)
             .sum::<usize>();
-        release += resources::DIR_OVERHEAD;
+        release += budget::DIR_OVERHEAD;
         release += prelude.body_charge.iter().sum::<usize>();
         let mut charged = 0usize;
         let mut spans = 0usize;
@@ -130,10 +123,7 @@ impl ConnectionState {
             spans += msg.charged_spans;
         }
         self.release_conn(context, release + charged)?;
-        *context.spans = context
-            .spans
-            .checked_sub(spans)
-            .ok_or(Error::Invariant("prelude spans"))?;
+        context.release_spans(spans)?;
         Ok(())
     }
 
@@ -262,22 +252,16 @@ impl ConnectionState {
             return Ok(());
         }
         self.emitted = true;
-        let charge = resources::EVENT_OVERHEAD
-            + resources::MESSAGE_OVERHEAD
+        let charge = budget::EVENT_OVERHEAD
+            + budget::MESSAGE_OVERHEAD
             + self
                 .upgrade_response
                 .as_ref()
                 .map_or(0, |head| head.wire().len())
             + self.upgrade_sources.as_ref().map_or(0, |set| {
-                resources::SET_OVERHEAD + set.frames().len() * resources::SPAN_OVERHEAD
+                budget::SET_OVERHEAD + set.frames().len() * budget::SPAN_OVERHEAD
             });
         context.charge_retained(charge)?;
-        context.summary.connections += 1;
-        match self.startup {
-            Startup::PriorKnowledge => context.summary.prior_knowledge_connections += 1,
-            Startup::H2c => context.summary.upgraded_connections += 1,
-            Startup::Unknown => context.summary.unsupported_connections += 1,
-        }
         context.connection(Connection {
             stream: self.stream,
             generation: self.generation,

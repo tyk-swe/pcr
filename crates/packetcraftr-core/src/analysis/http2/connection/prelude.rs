@@ -5,6 +5,7 @@ mod body;
 mod request;
 mod response;
 
+use crate::analysis::http2::budget;
 use body::BodyStep;
 
 use super::super::Error;
@@ -12,7 +13,7 @@ use super::super::buffer::union_balanced;
 use super::super::model::{Certainty, IssueScope, Startup, Status};
 use super::super::stream::{MessageBuilder, StreamState};
 use super::super::upgrade::Offer;
-use super::{ConnectionState, Context, DirectionPhase, Fault, Phase, resources};
+use super::{ConnectionState, Context, DirectionPhase, Fault, Phase};
 use crate::analysis::http2::side::{PerSide, Side};
 use crate::protocol::application::http;
 use bytes::Bytes;
@@ -34,7 +35,7 @@ impl ConnectionState {
         let scratch = if body_active || buffered == 0 {
             0
         } else {
-            buffered.min(http::MAX_HEADER_BYTES + 1) * 4 + resources::PRELUDE_HEADER_OVERHEAD
+            buffered.min(http::MAX_HEADER_BYTES + 1) * 4 + budget::PRELUDE_HEADER_OVERHEAD
         };
         context.charge_live(scratch)?;
         let result = self.prelude_step_inner(side, context);
@@ -58,10 +59,7 @@ impl ConnectionState {
 
     fn drop_msg(&mut self, msg: MessageBuilder, context: &mut Context<'_>) -> Result<(), Error> {
         self.release_conn(context, msg.charged)?;
-        *context.spans = context
-            .spans
-            .checked_sub(msg.charged_spans)
-            .ok_or(Error::Invariant("msg spans"))?;
+        context.release_spans(msg.charged_spans)?;
         Ok(())
     }
 
@@ -131,7 +129,7 @@ impl ConnectionState {
     ) -> Result<(), Error> {
         self.release_conn(
             context,
-            resources::OFFER_OVERHEAD + offer.settings.capacity() * 24,
+            budget::OFFER_OVERHEAD + offer.settings.capacity() * 24,
         )?;
         if let Some(mut msg) = offer.msg {
             msg.stream_id = 1;
@@ -163,14 +161,14 @@ impl ConnectionState {
         };
         self.release_conn(
             context,
-            resources::OFFER_OVERHEAD + offer.settings.capacity() * 24,
+            budget::OFFER_OVERHEAD + offer.settings.capacity() * 24,
         )?;
         prelude.upgraded = true;
         let upgrade_charge = head_wire.len()
-            + resources::SET_OVERHEAD
-            + sources.as_ref().map_or(0, |s| s.frames().len()) * resources::SPAN_OVERHEAD
+            + budget::SET_OVERHEAD
+            + sources.as_ref().map_or(0, |s| s.frames().len()) * budget::SPAN_OVERHEAD
             + offer.settings.len() * 8
-            + resources::OFFER_OVERHEAD;
+            + budget::OFFER_OVERHEAD;
         self.charge_conn(context, upgrade_charge)?;
         self.upgrade_charge += upgrade_charge;
         self.upgrade_response = Some(head);
@@ -245,7 +243,7 @@ impl ConnectionState {
         self.startup = Startup::H2c;
         self.refused = false;
         self.max_initiated[Side::Client] = 1;
-        self.charge_conn(context, resources::STREAM_OVERHEAD)?;
+        self.charge_conn(context, budget::STREAM_OVERHEAD)?;
         let windows = PerSide::new(
             i64::from(self.settings[Side::Server].acknowledged.initial_window_size),
             i64::from(self.settings[Side::Client].acknowledged.initial_window_size),
@@ -274,7 +272,7 @@ impl ConnectionState {
             self.prelude = Some(prelude);
             self.release_prelude(context)?;
         } else {
-            self.charge_conn(context, resources::OFFER_OVERHEAD)?;
+            self.charge_conn(context, budget::OFFER_OVERHEAD)?;
             prelude.offers.insert(
                 index,
                 Offer {

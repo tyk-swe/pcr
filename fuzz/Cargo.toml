@@ -1,0 +1,47 @@
+# Copyright (C) 2026 tyk-swe
+# SPDX-License-Identifier: AGPL-3.0-only
+
+[package]
+name = "packetcraftr-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.packetcraftr-core]
+path = "../crates/packetcraftr-core"
+
+[[bin]]
+name = "capture_read"
+path = "fuzz_targets/capture_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "packet_decode"
+path = "fuzz_targets/packet_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "document_parse"
+path = "fuzz_targets/document_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns_message"
+path = "fuzz_targets/dns_message.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

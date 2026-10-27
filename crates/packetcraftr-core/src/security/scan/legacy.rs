@@ -117,3 +117,16 @@ fn state(e: &Value) -> Option<State> {
     }
     Some(state)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deeply_nested_json_fails_closed_instead_of_recursing() {
+        let depth = 100_000;
+        let nested = [vec![b'['; depth], vec![b']'; depth]].concat();
+        assert!(nested.len() < MAX_INPUT_BYTES);
+        assert!(parse(&nested, Limits::default()).is_err());
+    }
+}

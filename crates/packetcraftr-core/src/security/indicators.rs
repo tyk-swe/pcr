@@ -228,6 +228,14 @@ mod tests {
     }
 
     #[test]
+    fn deeply_nested_json_fails_closed_instead_of_recursing() {
+        let depth = 100_000;
+        let nested = [vec![b'['; depth], vec![b']'; depth]].concat();
+        assert!(nested.len() < MAX_DOCUMENT_BYTES);
+        assert!(Document::parse(&nested).is_err());
+    }
+
+    #[test]
     fn public_indicators_match_case_insensitively_without_normalization() {
         let indicator = Indicator {
             id: "dns".into(),

@@ -1,6 +1,7 @@
 {
   "schema": "packetcraftr.release-assets/v1",
   "source_assets": [
+    "Cargo.lock",
     "LICENSE",
     "README.md",
     "THIRD_PARTY_NOTICES.md",

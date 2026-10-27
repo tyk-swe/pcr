@@ -287,8 +287,7 @@ jobs:
         run: |
           mkdir -p fuzz/corpus/capture_read fuzz/corpus/packet_decode fuzz/corpus/document_parse fuzz/corpus/dns_message
           cp examples/captures/*.pcap examples/captures/*.pcapng fuzz/corpus/capture_read/
-          cp examples/captures/*.pcap fuzz/corpus/packet_decode/
-          cp examples/captures/dns-response.pcap fuzz/corpus/dns_message/
+          python3 scripts/fuzz_seeds.py --packet-dir fuzz/corpus/packet_decode --dns-dir fuzz/corpus/dns_message examples/captures/*.pcap
           cp examples/documents/*.json fuzz/corpus/document_parse/
       - name: Fuzz every target
         shell: bash

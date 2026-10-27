@@ -33,7 +33,7 @@ fn launch(parsed: Parsed) -> ExitCode {
         definition,
     } = parsed;
     cli.command.start(Launch {
-        format: output::contract::Format::from(cli.format),
+        format: cli.format,
         presentation: crate::invocation::Presentation {
             verbose: cli.verbose,
         },

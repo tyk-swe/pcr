@@ -31,7 +31,7 @@ impl fmt::Display for Command {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, clap::ValueEnum)]
 pub enum Format {
     Text,
     Json,
@@ -40,6 +40,7 @@ pub enum Format {
     Hex,
     Raw,
     Pcap,
+    #[value(name = "pcapng")]
     PcapNg,
 }
 

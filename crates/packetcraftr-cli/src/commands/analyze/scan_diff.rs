@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod scan_input;
-
 use crate::commands::security::{Bounds, input, publish, read, source};
 use crate::commands::{CommandExit, Spec};
 use crate::invocation::Invocation;
@@ -35,10 +33,7 @@ impl Spec for ScanDiff {
         i.check()?;
         let b = read(&self.after, security::scan::MAX_INPUT_BYTES)?;
         i.check()?;
-        let before = scan_input::parse(&a, limits).map_err(CliError::classified)?;
-        let after = scan_input::parse(&b, limits).map_err(CliError::classified)?;
-        let mut result = security::scan::compare_snapshots(&before, &after, limits)
-            .map_err(CliError::classified)?;
+        let mut result = security::scan::compare(&a, &b, limits).map_err(CliError::classified)?;
         result.sources = vec![source(&self.before, &a), source(&self.after, &b)];
         publish(i, Command::ScanDiff, result, self.bounds)
     }

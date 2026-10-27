@@ -10,11 +10,11 @@ pub(crate) use parsing::{Parsed, parse_from};
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
-use crate::output;
 use clap::{Parser, ValueEnum};
 
 use crate::commands::CommandLine;
 use crate::errors::{CANCELLED_EXIT_CODE, KINDS, exit_code_description, exit_code_for};
+use crate::output::contract::Format;
 
 const ROOT_HELP_FORMATS: &str = r"Output formats:
   text    Human-readable summaries and diagnostics.
@@ -170,35 +170,6 @@ pub(crate) struct Cli {
     pub(crate) color: ColorChoice,
     #[command(subcommand)]
     pub(crate) command: CommandLine,
-}
-
-/// The `--output` selector for [`output::contract::Format`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub(crate) enum Format {
-    Text,
-    Json,
-    Csv,
-    Ndjson,
-    Hex,
-    Raw,
-    Pcap,
-    #[value(name = "pcapng")]
-    PcapNg,
-}
-
-impl From<Format> for output::contract::Format {
-    fn from(value: Format) -> Self {
-        match value {
-            Format::Text => Self::Text,
-            Format::Json => Self::Json,
-            Format::Csv => Self::Csv,
-            Format::Ndjson => Self::Ndjson,
-            Format::Hex => Self::Hex,
-            Format::Raw => Self::Raw,
-            Format::Pcap => Self::Pcap,
-            Format::PcapNg => Self::PcapNg,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]

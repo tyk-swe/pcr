@@ -14,14 +14,14 @@ use packetcraftr_core::{
 };
 use std::{
     net::{IpAddr, ToSocketAddrs},
-    sync::{Arc, OnceLock},
+    sync::{Arc, LazyLock},
 };
 
 /// Nested lookup allocation; the process-wide native root must also admit work.
 pub const MAX_PENDING_LOOKUPS: usize = 4;
-static LOOKUPS: OnceLock<Arc<Pool>> = OnceLock::new();
+static LOOKUPS: LazyLock<Arc<Pool>> = LazyLock::new(|| Arc::new(Pool::new(MAX_PENDING_LOOKUPS)));
 fn lookups() -> &'static Arc<Pool> {
-    LOOKUPS.get_or_init(|| Arc::new(Pool::new(MAX_PENDING_LOOKUPS)))
+    &LOOKUPS
 }
 
 #[must_use]

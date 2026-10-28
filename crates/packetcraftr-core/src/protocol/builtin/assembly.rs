@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, LazyLock};
 
 use crate::protocol::{
     application, capture as capture_link, link, matcher, network as ip, transport, tunnel,
@@ -83,10 +83,10 @@ fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate:
 }
 
 pub fn registry() -> Arc<crate::registry::Registry> {
-    static REGISTRY: OnceLock<Arc<crate::registry::Registry>> = OnceLock::new();
-    Arc::clone(REGISTRY.get_or_init(|| {
+    static REGISTRY: LazyLock<Arc<crate::registry::Registry>> = LazyLock::new(|| {
         Arc::new(registry_with(|_builder| Ok(())).expect("built-in catalog must register"))
-    }))
+    });
+    Arc::clone(&REGISTRY)
 }
 
 /// Build the default registry, then let the caller add bindings before it is

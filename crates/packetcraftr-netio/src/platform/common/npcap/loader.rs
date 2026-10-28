@@ -7,7 +7,7 @@ use std::{
     ffi::{OsString, c_char},
     os::windows::ffi::OsStringExt,
     path::PathBuf,
-    sync::{Arc, OnceLock},
+    sync::{Arc, LazyLock},
 };
 
 use libloading::os::windows::{
@@ -162,8 +162,9 @@ impl NpcapApi {
 }
 
 pub(in crate::platform) fn npcap_api() -> Result<Arc<NpcapApi>, Error> {
-    static API: OnceLock<Result<Arc<NpcapApi>, Error>> = OnceLock::new();
-    API.get_or_init(|| NpcapApi::load().map(Arc::new)).clone()
+    static API: LazyLock<Result<Arc<NpcapApi>, Error>> =
+        LazyLock::new(|| NpcapApi::load().map(Arc::new));
+    API.clone()
 }
 
 pub(in crate::platform) fn npcap_device_name(interface: &InterfaceId) -> Result<String, Error> {

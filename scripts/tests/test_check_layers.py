@@ -78,8 +78,30 @@ class CheckLayersTests(unittest.TestCase):
         })
         self.assertEqual(len(problems), 1)
         self.assertIn(
-            "engine::stats (layer 1) depends on engine::high::Thing (layer 3)", problems[0]
+            "engine::stats::inner (layer 1) depends on engine::high::Thing (layer 3)",
+            problems[0],
         )
+
+    def test_inline_modules_keep_their_own_layer_for_comparison(self):
+        problems = self.check({
+            "engine.rs": "mod stats { use crate::high::Thing; }",
+        })
+        self.assertEqual(len(problems), 1)
+        self.assertIn(
+            "engine::stats (layer 1) depends on high::Thing (layer 2)", problems[0]
+        )
+
+    def test_cfg_test_fields_do_not_swallow_following_production_code(self):
+        problems = self.check({
+            "low.rs": (
+                "struct Inner { pending: u32, #[cfg(test)] refuse: bool, }\n"
+                "fn build() -> Inner { Inner { pending: 0, "
+                "#[cfg(test)] refuse: false, } }\n"
+                "pub fn reserve() { let _ = crate::high::Thing; }\n"
+            ),
+        })
+        self.assertEqual(len(problems), 1)
+        self.assertIn("low (layer 1) depends on high::Thing (layer 2)", problems[0])
 
     def test_test_code_comments_and_strings_do_not_create_dependencies(self):
         problems = self.check({

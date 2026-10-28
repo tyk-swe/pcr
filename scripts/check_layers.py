@@ -139,20 +139,58 @@ def balanced_end(text: str, opening: int) -> int:
     return len(text)
 
 
+ITEM_START = re.compile(
+    r"\s*(?:#\[[^\]]*\]\s*)*"
+    r"(?:pub(?:\([^)]*\))?\s+)?"
+    r"(?:async\s+|unsafe\s+|const\s+|extern\s+(?:\"[^\"]*\"\s+)?)*"
+    r"(?:mod|fn|struct|enum|impl|trait|type|static|use|union|if|match|while|for|loop)\b"
+)
+
+
+def field_end(text: str, start: int) -> int:
+    paren = bracket = brace = angle = 0
+    for i in range(start, len(text)):
+        char = text[i]
+        if char == "(":
+            paren += 1
+        elif char == ")":
+            paren -= 1
+        elif char == "[":
+            bracket += 1
+        elif char == "]":
+            bracket -= 1
+        elif char == "{":
+            brace += 1
+        elif char == "}":
+            if paren == bracket == brace == angle == 0:
+                return i
+            brace -= 1
+        elif char == "<":
+            angle += 1
+        elif char == ">" and angle and text[i - 1] not in "-=":
+            angle -= 1
+        elif char in ",;" and paren == bracket == brace == angle == 0:
+            return i + 1
+    return len(text)
+
+
 def strip_test_items(text: str) -> str:
     while True:
         match = CFG_TEST.search(text)
         if match is None:
             return text
-        rest = text[match.end():]
-        brace = rest.find("{")
-        semi = rest.find(";")
-        if semi != -1 and (brace == -1 or semi < brace):
-            end = match.end() + semi + 1
-        elif brace != -1:
-            end = balanced_end(text, match.end() + brace)
+        if ITEM_START.match(text, match.end()):
+            rest = text[match.end():]
+            brace = rest.find("{")
+            semi = rest.find(";")
+            if semi != -1 and (brace == -1 or semi < brace):
+                end = match.end() + semi + 1
+            elif brace != -1:
+                end = balanced_end(text, match.end() + brace)
+            else:
+                end = len(text)
         else:
-            end = len(text)
+            end = field_end(text, match.end())
         text = text[:match.start()] + " " + text[end:]
 
 
@@ -220,7 +258,9 @@ INLINE_MOD = re.compile(rf"\bmod\s+({SEGMENT})\s*\{{")
 VISIBILITY = re.compile(r"\bpub\s*\(\s*(?:crate|super|self)\s*\)|\bpub\s*\(\s*in\s+[^)]*\)")
 
 
-def extract_paths(text: str, owner: tuple[str, ...]) -> list[tuple[str, ...]]:
+def extract_paths(
+    text: str, owner: tuple[str, ...]
+) -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
     paths = []
     spans = []
     for match in PATH_START.finditer(text):
@@ -228,7 +268,10 @@ def extract_paths(text: str, owner: tuple[str, ...]) -> list[tuple[str, ...]]:
             continue
         opening = match.end() - 1
         end = balanced_end(text, opening)
-        paths.extend(expand_group(match_prefix(owner, match), text[opening + 1:end - 1]))
+        paths.extend(
+            (owner, target)
+            for target in expand_group(match_prefix(owner, match), text[opening + 1:end - 1])
+        )
         spans.append((match.start(), end))
     for start, end in reversed(spans):
         text = text[:start] + " " * (end - start) + text[end:]
@@ -237,11 +280,13 @@ def extract_paths(text: str, owner: tuple[str, ...]) -> list[tuple[str, ...]]:
             continue
         resolved = match_prefix(owner, match)
         if resolved:
-            paths.append(resolved)
+            paths.append((owner, resolved))
     return paths
 
 
-def scoped_paths(text: str, owner: tuple[str, ...]) -> list[tuple[str, ...]]:
+def scoped_paths(
+    text: str, owner: tuple[str, ...]
+) -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
     paths = []
     pos = 0
     while True:
@@ -256,7 +301,9 @@ def scoped_paths(text: str, owner: tuple[str, ...]) -> list[tuple[str, ...]]:
         pos = end
 
 
-def crate_paths(text: str, owner: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+def crate_paths(
+    text: str, owner: tuple[str, ...] = ()
+) -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
     text = VISIBILITY.sub("pub", strip_test_items(strip_comments_and_strings(text)))
     return scoped_paths(text, owner)
 
@@ -306,16 +353,19 @@ def check_crate(crate: str, src: Path, table, allowlist, used: set[int]) -> list
         if owner_layer is None:
             problems.append(f"{crate}: {path} module {shown} is not in the layer table")
             continue
-        for target in crate_paths(path.read_text(errors="replace"), owner):
+        for scoped_owner, target in crate_paths(path.read_text(errors="replace"), owner):
+            scoped_layer = layer_of(table, scoped_owner)
+            if scoped_layer is None:
+                scoped_layer = owner_layer
             target_layer = layer_of(table, target)
-            if target_layer is None or target_layer <= owner_layer:
+            if target_layer is None or target_layer <= scoped_layer:
                 continue
-            index = allowlisted(allowlist, crate, owner, target)
+            index = allowlisted(allowlist, crate, scoped_owner, target)
             if index is not None:
                 used.add(index)
                 continue
             problems.append(
-                f"{crate}: {path} {shown} (layer {owner_layer}) depends on "
+                f"{crate}: {path} {'::'.join(scoped_owner)} (layer {scoped_layer}) depends on "
                 f"{'::'.join(target)} (layer {target_layer})"
             )
     return problems

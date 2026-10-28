@@ -43,6 +43,10 @@ class CheckFileLengthsTests(unittest.TestCase):
         self.assertEqual(lengths.rust_code_lines(RUST), 3)
         self.assertEqual(lengths.python_code_lines(PYTHON), 3)
 
+    def test_comment_markers_inside_strings_do_not_hide_code(self):
+        text = 'fn f() {\n    let open = "/*";\n    let a = 1;\n    let close = "*/";\n}\n'
+        self.assertEqual(lengths.rust_code_lines(text), 4)
+
     def test_oversized_non_test_file_fails_but_test_file_only_ranks(self):
         big = "\n".join(f"let v{i} = {i};" for i in range(20))
         root = self.workspace({

@@ -103,6 +103,27 @@ class CheckLayersTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("low (layer 1) depends on high::Thing (layer 2)", problems[0])
 
+    def test_cfg_test_blocks_and_macros_do_not_swallow_following_code(self):
+        problems = self.check({
+            "low.rs": (
+                "pub fn f() { #[cfg(test)] { check(); } let _ = crate::high::Thing; }\n"
+                "#[cfg(test)] thread_local! { static X: u32 = 0; }\n"
+                "pub fn g() { let _ = crate::high::Thing; }"
+            ),
+        })
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(all("high::Thing" in p for p in problems))
+
+    def test_raw_byte_strings_do_not_hide_following_code(self):
+        problems = self.check({
+            "low.rs": (
+                'const S: &[u8] = br#"a" /*"#;\n'
+                "pub fn later() { let _ = crate::high::Thing; }"
+            ),
+        })
+        self.assertEqual(len(problems), 1)
+        self.assertIn("high::Thing", problems[0])
+
     def test_test_code_comments_and_strings_do_not_create_dependencies(self):
         problems = self.check({
             "low.rs": (

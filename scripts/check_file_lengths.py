@@ -37,8 +37,8 @@ def blank_rust_comments_and_strings(text: str) -> str:
                 else:
                     i += 1
             out.append(" ")
-        elif text[i] == "r" and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")) \
-                and (opening := re.match(r"r(#+)?\"", text[i:])):
+        elif text[i] in "brc" and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")) \
+                and (opening := re.match(r"(?:br|cr|r)(#+)?\"", text[i:])):
             closing = '"' + (opening.group(1) or "")
             end = text.find(closing, i + opening.end())
             end = len(text) if end == -1 else end + len(closing)

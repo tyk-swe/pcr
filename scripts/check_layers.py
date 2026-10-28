@@ -99,9 +99,9 @@ def strip_comments_and_strings(text: str) -> str:
                 else:
                     i += 1
             out.append(" ")
-        elif text[i] == "r" and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")) \
-                and re.match(r"r(#+)?\"", text[i:]):
-            opening = re.match(r"r(#+)?\"", text[i:])
+        elif text[i] in "brc" and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")) \
+                and re.match(r"(?:br|cr|r)(#+)?\"", text[i:]):
+            opening = re.match(r"(?:br|cr|r)(#+)?\"", text[i:])
             hashes = opening.group(1) or ""
             closing = '"' + hashes
             end = text.find(closing, i + opening.end())
@@ -174,12 +174,40 @@ def field_end(text: str, start: int) -> int:
     return len(text)
 
 
+MACRO_BRACE = re.compile(rf"(?:{SEGMENT}::)*{SEGMENT}!\s*\{{")
+
+
+def skip_attributes(text: str, start: int) -> int:
+    i = start
+    while True:
+        while i < len(text) and text[i].isspace():
+            i += 1
+        if text[i:i + 2] != "#[":
+            return i
+        depth = 0
+        while i < len(text):
+            if text[i] == "[":
+                depth += 1
+            elif text[i] == "]":
+                depth -= 1
+                if depth == 0:
+                    i += 1
+                    break
+            i += 1
+
+
 def strip_test_items(text: str) -> str:
     while True:
         match = CFG_TEST.search(text)
         if match is None:
             return text
-        if ITEM_START.match(text, match.end()):
+        span = skip_attributes(text, match.end())
+        macro = MACRO_BRACE.match(text, span)
+        if span < len(text) and text[span] == "{":
+            end = balanced_end(text, span)
+        elif macro:
+            end = balanced_end(text, macro.end() - 1)
+        elif ITEM_START.match(text, match.end()):
             rest = text[match.end():]
             brace = rest.find("{")
             semi = rest.find(";")

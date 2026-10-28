@@ -475,12 +475,14 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    const QUERY: &[u8] = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01";
+    const QUERY: &[u8] =
+        b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01";
 
     struct BufferedStream {
         pending: Vec<u8>,
         response: Option<Cursor<Vec<u8>>>,
         flush_errors: VecDeque<io::ErrorKind>,
+        cancellation: Option<Cancellation>,
         reads: Arc<AtomicUsize>,
     }
 
@@ -503,6 +505,9 @@ mod tests {
 
         fn flush(&mut self) -> io::Result<()> {
             if let Some(error) = self.flush_errors.pop_front() {
+                if let Some(cancellation) = self.cancellation.take() {
+                    cancellation.cancel();
+                }
                 return Err(error.into());
             }
             let mut response = std::mem::take(&mut self.pending);
@@ -548,12 +553,16 @@ mod tests {
         }
     }
 
-    fn buffered_query(flush_errors: VecDeque<io::ErrorKind>) -> (Result<Response, Error>, usize) {
+    fn buffered_query(
+        flush_errors: VecDeque<io::ErrorKind>,
+        cancellation: Option<&Cancellation>,
+    ) -> (Result<Response, Error>, usize) {
         let reads = Arc::new(AtomicUsize::new(0));
         let provider = Arc::new(BufferedProvider(Mutex::new(Some(BufferedStream {
             pending: Vec::new(),
             response: None,
             flush_errors,
+            cancellation: cancellation.cloned(),
             reads: reads.clone(),
         }))));
         let result = query(
@@ -561,7 +570,7 @@ mod tests {
                 endpoint: SocketAddr::from(([127, 0, 0, 1], 53)),
                 query: QUERY,
                 timeout: Duration::from_secs(2),
-                cancellation: None,
+                cancellation,
                 max_message_bytes: 512,
             },
             provider,
@@ -579,7 +588,7 @@ mod tests {
                 io::ErrorKind::TimedOut,
             ]),
         ] {
-            let (result, _) = buffered_query(flush_errors);
+            let (result, _) = buffered_query(flush_errors, None);
             let response = result.unwrap();
             let mut expected = vec![0, QUERY.len() as u8];
             expected.extend_from_slice(QUERY);
@@ -592,7 +601,7 @@ mod tests {
 
     #[test]
     fn permanent_flush_failure_retains_written_bytes_without_reading() {
-        let (result, reads) = buffered_query(VecDeque::from([io::ErrorKind::BrokenPipe]));
+        let (result, reads) = buffered_query(VecDeque::from([io::ErrorKind::BrokenPipe]), None);
         let Error::Write {
             written,
             expected,
@@ -608,12 +617,31 @@ mod tests {
     }
 
     #[test]
+    fn retrying_flush_observes_cancellation_without_reading() {
+        let cancellation = Cancellation::default();
+        let (result, reads) = buffered_query(
+            VecDeque::from([io::ErrorKind::Interrupted]),
+            Some(&cancellation),
+        );
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::Cancelled {
+                phase: Phase::Write,
+                transferred,
+                ..
+            } if transferred == QUERY.len() + LENGTH_PREFIX_BYTES
+        ));
+        assert_eq!(reads, 0);
+    }
+
+    #[test]
     fn retrying_flush_stops_at_the_write_deadline() {
         let reads = Arc::new(AtomicUsize::new(0));
         let mut stream = BufferedStream {
             pending: Vec::new(),
             response: None,
             flush_errors: VecDeque::from(vec![io::ErrorKind::TimedOut; 200]),
+            cancellation: None,
             reads: reads.clone(),
         };
         let started = Instant::now();

@@ -10,3 +10,6 @@
 # Local Python caches
 __pycache__/
 *.py[cod]
+
+# Local agent settings
+/.claude/settings.local.json

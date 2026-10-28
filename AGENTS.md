@@ -112,3 +112,21 @@ Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, sim
 Before requesting maintainer review, verify the current PR tip passes required CI and any configured code coverage checks and has acceptable reviews from any review bots configured for the PR. Inspect warnings and findings, fix actionable issues, and rerun the affected checks and reviewers after changes. Record evidence for any false positive or unavailable review. Never treat a pending or missing bot result as a pass. Do not lower coverage thresholds or relax lint or type-checking limits to satisfy a check
 
 Before adding complexity for a speculative or vanishingly unlikely race or security edge case, explain the concrete failure mode, likelihood, and complexity cost to the user and get their buy-in. Do not silently expand scope for theoretical robustness.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues for this repo, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage labels are used as-is (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context, with one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Updating skills
+
+Skills live in `.agents/skills/` as the canonical copy, with `.claude/skills/` and `.devin/skills/` symlinking to it, and Codex, OpenCode and Muse Code reading `.agents/skills/` directly. Update with `npx skills@latest update`, and re-run `npx skills@latest add mattpocock/skills` to pick up new skills. sol-loop is a local fork of t3dotgg/tstack with a Codex app-server route and no lockfile entry, so refresh it by hand from upstream and keep the fork changes. Do not also install the Claude Code or Codex plugin for these skills, or every skill will appear twice in that harness.

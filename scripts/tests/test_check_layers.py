@@ -45,6 +45,23 @@ class CheckLayersTests(unittest.TestCase):
         self.assertTrue(any("engine::stats (layer 1) depends on engine::Run (layer 3)" in p for p in problems))
         self.assertTrue(any("engine::stats (layer 1) depends on high::Other (layer 2)" in p for p in problems))
 
+    def test_relative_super_paths_resolve_against_the_owning_module(self):
+        problems = self.check({
+            "low/child.rs": "use super::super::high::Thing;",
+            "high/child.rs": "use super::super::low::Thing;",
+        })
+        self.assertEqual(len(problems), 1)
+        self.assertIn("low::child (layer 1) depends on high::Thing (layer 2)", problems[0])
+
+    def test_grouped_self_and_glob_imports_keep_their_prefix(self):
+        problems = self.check({
+            "low.rs": "use crate::high::{self as workflows};",
+            "engine/stats.rs": "use crate::high::*;",
+        })
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(any("low (layer 1) depends on high (layer 2)" in p for p in problems))
+        self.assertTrue(any("engine::stats (layer 1) depends on high (layer 2)" in p for p in problems))
+
     def test_test_code_comments_and_strings_do_not_create_dependencies(self):
         problems = self.check({
             "low.rs": (

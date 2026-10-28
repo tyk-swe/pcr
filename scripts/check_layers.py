@@ -60,6 +60,10 @@ ALLOWLIST = (
      "system provider dispatch documented in packetcraftr-netio lib.rs"),
     ("packetcraftr-netio", ("route",), ("platform",),
      "system provider dispatch documented in packetcraftr-netio lib.rs"),
+    ("packetcraftr-netio", ("interface",), ("platform",),
+     "system provider dispatch documented in packetcraftr-netio lib.rs"),
+    ("packetcraftr-netio", ("transmit",), ("platform",),
+     "system provider dispatch documented in packetcraftr-netio lib.rs"),
     ("packetcraftr-netio", ("udp",), ("platform",),
      "system provider dispatch documented in packetcraftr-netio lib.rs"),
     ("packetcraftr-cli", ("output",), ("commands", "Command"),
@@ -69,8 +73,7 @@ ALLOWLIST = (
 )
 
 SEGMENT = r"[A-Za-z_][A-Za-z0-9_]*"
-PLAIN_PATH = re.compile(rf"crate::({SEGMENT}(?:::{SEGMENT})*)")
-GROUP_START = re.compile(rf"crate::((?:{SEGMENT}::)*){{")
+PATH_START = re.compile(rf"\b(crate|super|self)((?:::{SEGMENT})*)(::\{{)?")
 CFG_TEST = re.compile(r"#\[cfg\(test\)\]")
 CHAR_LITERAL = re.compile(r"'(?:\\.|[^\\'])'")
 
@@ -169,6 +172,21 @@ def split_top_level(group: str) -> list[str]:
     return [part.strip() for part in parts if part.strip()]
 
 
+def resolve_relative(
+    prefix: tuple[str, ...], segments: tuple[str, ...]
+) -> tuple[str, ...]:
+    supers = 0
+    while supers < len(segments) and segments[supers] == "super":
+        supers += 1
+    if supers:
+        return prefix[: max(0, len(prefix) - supers)] + segments[supers:]
+    if segments and segments[0] == "crate":
+        return segments[1:]
+    if segments and segments[0] == "self":
+        return prefix + segments[1:]
+    return prefix + segments
+
+
 def expand_group(prefix: tuple[str, ...], group: str) -> list[tuple[str, ...]]:
     paths = []
     for entry in split_top_level(group):
@@ -176,27 +194,47 @@ def expand_group(prefix: tuple[str, ...], group: str) -> list[tuple[str, ...]]:
         brace = entry.find("::{")
         if brace != -1 and entry.endswith("}"):
             head = tuple(entry[:brace].split("::"))
-            paths.extend(expand_group(prefix + head, entry[brace + 3:-1]))
-        elif entry not in ("self", "super", "*"):
-            paths.append(prefix + tuple(entry.split("::")))
+            resolved = resolve_relative(prefix, head)
+            paths.extend(expand_group(resolved, entry[brace + 3:-1]))
+        elif entry in ("self", "*"):
+            if prefix:
+                paths.append(prefix)
+        else:
+            segments = tuple(part for part in entry.split("::") if part != "*")
+            resolved = resolve_relative(prefix, segments)
+            if resolved:
+                paths.append(resolved)
     return paths
 
 
-def crate_paths(text: str) -> list[tuple[str, ...]]:
+def match_prefix(owner: tuple[str, ...], match) -> tuple[str, ...]:
+    parts = (match.group(1),) + tuple(
+        part for part in match.group(2).split("::") if part
+    )
+    if parts[0] == "self":
+        return resolve_relative(owner, parts)
+    return resolve_relative((), parts) if parts[0] == "crate" else resolve_relative(owner, parts)
+
+
+def crate_paths(text: str, owner: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
     text = strip_test_items(strip_comments_and_strings(text))
     paths = []
     spans = []
-    for match in GROUP_START.finditer(text):
+    for match in PATH_START.finditer(text):
+        if not match.group(3):
+            continue
         opening = match.end() - 1
         end = balanced_end(text, opening)
-        prefix = tuple(match.group(1).split("::"))[:-1] if match.group(1) else ()
-        paths.extend(expand_group(prefix, text[opening + 1:end - 1]))
+        paths.extend(expand_group(match_prefix(owner, match), text[opening + 1:end - 1]))
         spans.append((match.start(), end))
     for start, end in reversed(spans):
         text = text[:start] + " " * (end - start) + text[end:]
-    paths.extend(
-        tuple(match.group(1).split("::")) for match in PLAIN_PATH.finditer(text)
-    )
+    for match in PATH_START.finditer(text):
+        if match.group(3):
+            continue
+        resolved = match_prefix(owner, match)
+        if resolved:
+            paths.append(resolved)
     return paths
 
 
@@ -245,7 +283,7 @@ def check_crate(crate: str, src: Path, table, allowlist, used: set[int]) -> list
         if owner_layer is None:
             problems.append(f"{crate}: {path} module {shown} is not in the layer table")
             continue
-        for target in crate_paths(path.read_text(errors="replace")):
+        for target in crate_paths(path.read_text(errors="replace"), owner):
             target_layer = layer_of(table, target)
             if target_layer is None or target_layer <= owner_layer:
                 continue

@@ -56,6 +56,19 @@ class CheckFileLengthsTests(unittest.TestCase):
         rendered = "\n".join(lengths.render(rows, 10, 2))
         self.assertIn("files over 10 code lines: 2 total, 1 non-test", rendered)
 
+    def test_target_named_sources_count_but_build_output_is_skipped(self):
+        big = "\n".join(f"let v{i} = {i};" for i in range(20))
+        root = self.workspace({
+            "crates/x/src/target/model.rs": big,
+            "crates/x/target/generated.rs": big,
+        })
+        rows = lengths.rank_files(root)
+        self.assertEqual([row["path"] for row in rows], ["crates/x/src/target/model.rs"])
+        self.assertEqual(
+            [row["path"] for row in lengths.violations(rows, 10)],
+            ["crates/x/src/target/model.rs"],
+        )
+
     def test_ranking_orders_by_size_then_path(self):
         root = self.workspace({
             "crates/x/src/b.rs": "let a = 1;\nlet b = 2;",

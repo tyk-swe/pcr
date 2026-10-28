@@ -8,7 +8,7 @@ pub(crate) use context::{Context, MachineFormat, parse as error_context};
 pub(crate) use parsing::{Parsed, parse_from};
 
 use std::fmt::Write as _;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 use clap::{Parser, ValueEnum};
 
@@ -73,8 +73,7 @@ fn root_after_help() -> String {
 /// `scripts/build-manifest.py --verify` compares this text against
 /// `BUILD-METADATA.json`, so this format is part of release packaging.
 fn long_version() -> &'static str {
-    static LONG_VERSION: OnceLock<String> = OnceLock::new();
-    LONG_VERSION.get_or_init(|| {
+    static LONG_VERSION: LazyLock<String> = LazyLock::new(|| {
         let enabled = [
             ("native-route", cfg!(feature = "native-route")),
             ("native-layer2", cfg!(feature = "native-layer2")),
@@ -91,7 +90,8 @@ fn long_version() -> &'static str {
             names.join(", ")
         };
         format!("{}\nnative features: {features}", env!("CARGO_PKG_VERSION"))
-    })
+    });
+    &LONG_VERSION
 }
 
 #[derive(Debug, Parser)]

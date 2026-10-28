@@ -55,6 +55,10 @@ jobs:
       - name: Format
         run: |
           cargo fmt --all -- --check
+      - name: Check documented crate layers
+        run: python3 scripts/check_layers.py
+      - name: Rank file lengths and enforce the non-test limit
+        run: python3 scripts/check_file_lengths.py
       - name: Clippy for supported feature profiles
         shell: bash
         run: |
@@ -218,9 +222,9 @@ jobs:
           rm -rf target/*/incremental
           find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
 
-  # Ratchet ledger: no crate has a blocking mutation or coverage gate yet.
-  # Crates move to blocking gates one at a time as their test alignment
-  # phase lands. Thresholds are never lowered once set.
+  # Ratchet ledger: packetcraftr has blocking coverage and mutation gates in
+  # test-quality-gate below. Other crates move to blocking gates one at a
+  # time as their test alignment phase lands. Thresholds are never lowered.
   test-quality:
     name: Test quality baseline
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -257,6 +261,51 @@ jobs:
             count="$(cargo mutants --list -p "$package" | wc -l)"
             echo "$package mutants: $count"
           done
+      - name: Drop workspace artifacts from the Cargo cache
+        shell: bash
+        run: |
+          rm -rf target/*/incremental
+          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+
+  test-quality-gate:
+    name: Test quality gate (packetcraftr)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install native development library
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - name: Install the pinned toolchain with coverage tools
+        run: |
+          rustup toolchain install
+          rustup component add llvm-tools-preview
+      - name: Restore Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-llvm-cov
+      - name: Enforce packetcraftr line coverage floor (measured 25.67%)
+        run: cargo llvm-cov --locked -p packetcraftr --all-features --fail-under-lines 25 --summary-only
+      - name: Install cargo-mutants
+        run: cargo install --locked cargo-mutants
+      # The excluded decode_response mutant swaps | for ^ on disjoint bit
+      # ranges (extended rcode shifted by 4, low rcode in the last 4 bits),
+      # so it cannot change any outcome and no test can kill it.
+      - name: Enforce mutation gate on dns wire files (83 of 83 viable caught)
+        run: >-
+          cargo mutants -p packetcraftr
+          -f 'crates/packetcraftr/src/dns/wire/decode.rs'
+          -f 'crates/packetcraftr/src/dns/wire/encode.rs'
+          -f 'crates/packetcraftr/src/dns/wire/name.rs'
+          -f 'crates/packetcraftr/src/dns/wire/error.rs'
+          -E 'replace \| with \^ in decode_response'
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |

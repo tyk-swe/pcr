@@ -9,10 +9,10 @@ use packetcraftr_core::packet::{MacAddress, VlanTag};
 use packetcraftr_netio::{capture::Stats, interface::Id};
 
 /// Most VLAN tags a neighbor discovery request may carry and a matched reply may show.
-pub const MAX_VLAN_TAGS: usize = 8;
+pub(crate) const MAX_VLAN_TAGS: usize = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Request {
+pub(crate) struct Request {
     pub interface: Id,
     pub interface_source: IpAddr,
     pub interface_mac: MacAddress,

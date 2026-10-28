@@ -6,7 +6,7 @@ use bytes::Bytes;
 use super::name::canonical_query_name;
 use crate::dns::CLASS_IN;
 
-pub fn encode_query(
+pub(crate) fn encode_query(
     query_name: &str,
     query_type: crate::dns::QueryType,
     transaction_id: u16,

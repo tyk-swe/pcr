@@ -62,6 +62,25 @@ class CheckLayersTests(unittest.TestCase):
         self.assertTrue(any("low (layer 1) depends on high (layer 2)" in p for p in problems))
         self.assertTrue(any("engine::stats (layer 1) depends on high (layer 2)" in p for p in problems))
 
+    def test_visibility_qualifiers_are_not_dependencies(self):
+        problems = self.check({
+            "engine/stats.rs": (
+                "pub(super) struct Counter;\n"
+                "pub(crate) fn count() {}\n"
+                "pub(in crate::engine) fn inner() {}"
+            ),
+        })
+        self.assertEqual(problems, [])
+
+    def test_inline_modules_resolve_relative_to_their_own_scope(self):
+        problems = self.check({
+            "engine/stats.rs": "mod inner { use super::super::high::Thing; }",
+        })
+        self.assertEqual(len(problems), 1)
+        self.assertIn(
+            "engine::stats (layer 1) depends on engine::high::Thing (layer 3)", problems[0]
+        )
+
     def test_test_code_comments_and_strings_do_not_create_dependencies(self):
         problems = self.check({
             "low.rs": (

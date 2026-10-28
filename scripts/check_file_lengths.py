@@ -56,10 +56,9 @@ def rank_files(root: Path, globs=SOURCE_GLOBS) -> list[dict]:
     for pattern in globs:
         for path in sorted(root.glob(pattern)):
             relative = path.relative_to(root)
-            if any(
-                part == "target" and (index == 0 or relative.parts[index - 1] != "src")
-                for index, part in enumerate(relative.parts)
-            ):
+            if "target" in relative.parts and "src" not in relative.parts[
+                : relative.parts.index("target")
+            ]:
                 continue
             rows.append({
                 "path": str(path.relative_to(root)),

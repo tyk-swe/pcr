@@ -60,13 +60,17 @@ class CheckFileLengthsTests(unittest.TestCase):
         big = "\n".join(f"let v{i} = {i};" for i in range(20))
         root = self.workspace({
             "crates/x/src/target/model.rs": big,
+            "crates/x/src/protocol/target/model.rs": big,
             "crates/x/target/generated.rs": big,
         })
         rows = lengths.rank_files(root)
-        self.assertEqual([row["path"] for row in rows], ["crates/x/src/target/model.rs"])
         self.assertEqual(
-            [row["path"] for row in lengths.violations(rows, 10)],
-            ["crates/x/src/target/model.rs"],
+            sorted(row["path"] for row in rows),
+            ["crates/x/src/protocol/target/model.rs", "crates/x/src/target/model.rs"],
+        )
+        self.assertEqual(
+            sorted(row["path"] for row in lengths.violations(rows, 10)),
+            ["crates/x/src/protocol/target/model.rs", "crates/x/src/target/model.rs"],
         )
 
     def test_ranking_orders_by_size_then_path(self):

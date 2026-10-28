@@ -216,8 +216,11 @@ def match_prefix(owner: tuple[str, ...], match) -> tuple[str, ...]:
     return resolve_relative((), parts) if parts[0] == "crate" else resolve_relative(owner, parts)
 
 
-def crate_paths(text: str, owner: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
-    text = strip_test_items(strip_comments_and_strings(text))
+INLINE_MOD = re.compile(rf"\bmod\s+({SEGMENT})\s*\{{")
+VISIBILITY = re.compile(r"\bpub\s*\(\s*(?:crate|super|self)\s*\)|\bpub\s*\(\s*in\s+[^)]*\)")
+
+
+def extract_paths(text: str, owner: tuple[str, ...]) -> list[tuple[str, ...]]:
     paths = []
     spans = []
     for match in PATH_START.finditer(text):
@@ -236,6 +239,26 @@ def crate_paths(text: str, owner: tuple[str, ...] = ()) -> list[tuple[str, ...]]
         if resolved:
             paths.append(resolved)
     return paths
+
+
+def scoped_paths(text: str, owner: tuple[str, ...]) -> list[tuple[str, ...]]:
+    paths = []
+    pos = 0
+    while True:
+        match = INLINE_MOD.search(text, pos)
+        if match is None:
+            paths.extend(extract_paths(text[pos:], owner))
+            return paths
+        paths.extend(extract_paths(text[pos:match.start()], owner))
+        opening = match.end() - 1
+        end = balanced_end(text, opening)
+        paths.extend(scoped_paths(text[opening + 1:end - 1], owner + (match.group(1),)))
+        pos = end
+
+
+def crate_paths(text: str, owner: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+    text = VISIBILITY.sub("pub", strip_test_items(strip_comments_and_strings(text)))
+    return scoped_paths(text, owner)
 
 
 def layer_of(table: dict[tuple[str, ...], int], path: tuple[str, ...]) -> int | None:

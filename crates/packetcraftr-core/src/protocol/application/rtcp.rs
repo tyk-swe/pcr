@@ -60,6 +60,11 @@ impl Rtcp {
                 None => &[],
                 _ => return Err(invalid(NAME, "invalid padding")),
             };
+            if !padding.is_empty()
+                && (padding.len() > 255 || padding.last().copied() != Some(padding.len() as u8))
+            {
+                return Err(invalid(NAME, "padding count mismatch"));
+            }
             if (body.len() + padding.len()) % 4 != 0 {
                 return Err(invalid(NAME, "packet must contain whole words"));
             }

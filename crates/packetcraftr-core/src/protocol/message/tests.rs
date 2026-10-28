@@ -1451,6 +1451,51 @@ fn rtsp_and_sip_methods_accept_the_token_grammar() {
 }
 
 #[test]
+fn rtcp_explicit_padding_preserves_report_data_boundaries() {
+    use crate::protocol::application::rtcp::Rtcp;
+
+    let registry = builtin::registry();
+    let report_data = Bytes::from_static(b"\x00\x00\x00\x01\xde\xad\xbe\xef");
+    for (padding, valid) in [
+        (Bytes::from_static(b"\x00\x00\x00\x08"), false),
+        (Bytes::from_static(b"\x00\x00\x00\x00"), false),
+        (Bytes::from(vec![4; 260]), false),
+        (Bytes::from_static(b"\x00\x00\x00\x04"), true),
+        (Bytes::from(vec![252; 252]), true),
+        (Bytes::new(), true),
+    ] {
+        let rtcp = Rtcp {
+            packets: Records(vec![record([
+                ("packet_type", 201u8.into()),
+                ("count", 0u8.into()),
+                ("data", report_data.clone().into()),
+                ("padding", padding.clone().into()),
+            ])]),
+        };
+        let expected = rtcp.field("packets");
+        let mut packet = Packet::new();
+        packet.push(rtcp);
+        let result = crate::build::Builder::new(registry.clone()).build(
+            packet,
+            Addresses::default(),
+            Default::default(),
+        );
+        if !valid {
+            assert!(result.is_err(), "padding length {}", padding.len());
+            continue;
+        }
+        let built = result.unwrap();
+        assert_eq!(built.packet.layer(0).unwrap().field("packets"), expected);
+        let mut wire = vec![if padding.is_empty() { 0x80 } else { 0xa0 }, 201];
+        wire.extend_from_slice(&(((report_data.len() + padding.len()) / 4) as u16).to_be_bytes());
+        wire.extend_from_slice(&report_data);
+        wire.extend_from_slice(&padding);
+        assert_eq!(built.bytes.as_ref(), wire);
+        builder_round_trip("rtcp", &wire);
+    }
+}
+
+#[test]
 fn rtcp_reports_preserve_profile_extensions() {
     let registry = builtin::registry();
     let mut compound = Vec::new();

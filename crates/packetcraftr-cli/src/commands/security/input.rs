@@ -79,6 +79,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn deeply_nested_report_json_fails_closed_instead_of_recursing() {
+        let depth = 100_000;
+        let nested = [vec![b'['; depth], vec![b']'; depth]].concat();
+        assert!(report(&nested).is_err());
+    }
+
+    #[test]
     fn single_stdin_validation_precedes_io_and_hashes_consumed_bytes() {
         assert!(validate_stdin_sources([Path::new("-"), Path::new("missing.json")]).is_ok());
         assert!(validate_stdin_sources([Path::new("-"), Path::new("-")]).is_err());

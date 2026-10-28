@@ -370,4 +370,47 @@ mod tests {
             Err(ResolutionError::Target(TargetError::Control(_)))
         ));
     }
+
+    #[test]
+    fn default_policy_denies_public_destinations_and_allowlist_never_grants_them() {
+        let public_v4: IpAddr = "1.2.3.4".parse().unwrap();
+        let public_v6: IpAddr = "2606:4700:4700::1111".parse().unwrap();
+        let policy = Policy::default();
+        for denied in [public_v4, public_v6, "224.0.0.1".parse().unwrap()] {
+            assert!(
+                matches!(
+                    policy.authorize_destination(denied),
+                    Err(PolicyError::PublicDestination { .. })
+                ),
+                "{denied}"
+            );
+        }
+        for allowed in ["127.0.0.1", "10.0.0.1", "::1"] {
+            assert!(
+                policy
+                    .authorize_destination(allowed.parse().unwrap())
+                    .is_ok(),
+                "{allowed}"
+            );
+        }
+
+        let allowlisted = Policy {
+            allowed_destinations: vec!["1.2.3.4".parse().unwrap()],
+            ..Policy::default()
+        };
+        assert!(matches!(
+            allowlisted.authorize_destination(public_v4),
+            Err(PolicyError::PublicDestination { .. })
+        ));
+        assert!(matches!(
+            allowlisted.authorize_destination("127.0.0.1".parse().unwrap()),
+            Err(PolicyError::DestinationNotAllowed { .. })
+        ));
+
+        let permissive = Policy {
+            allow_public_destinations: true,
+            ..Policy::default()
+        };
+        assert!(permissive.authorize_destination(public_v4).is_ok());
+    }
 }

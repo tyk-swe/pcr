@@ -135,6 +135,55 @@ pub fn verify(evidence: &Evidence, name: &ServerName, roots: &TrustStore) -> Ver
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
+
+    #[test]
+    fn unauthenticated_evidence_never_verifies() {
+        let name = ServerName::Declared("example.test".into());
+        let roots = TrustStore::default();
+
+        let missing = verify(&Evidence::default(), &name, &roots);
+        assert!(!missing.valid());
+        assert_eq!(missing.chain.valid, None);
+
+        let truncated = verify(
+            &Evidence {
+                certificates_truncated: true,
+                ..Evidence::default()
+            },
+            &name,
+            &roots,
+        );
+        assert!(!truncated.valid());
+        assert_eq!(truncated.chain.valid, None);
+
+        let garbage = verify(
+            &Evidence {
+                certificates: vec![Bytes::from_static(b"not a certificate")],
+                ..Evidence::default()
+            },
+            &name,
+            &roots,
+        );
+        assert!(!garbage.valid());
+        assert_eq!(garbage.chain.valid, Some(false));
+
+        let untrusted_der = CertificateDer::pem_slice_iter(include_bytes!("test-ca.pem"))
+            .next()
+            .expect("fixture holds a certificate")
+            .expect("fixture certificate parses");
+        let untrusted = verify(
+            &Evidence {
+                certificates: vec![Bytes::copy_from_slice(untrusted_der.as_ref())],
+                ..Evidence::default()
+            },
+            &name,
+            &roots,
+        );
+        assert!(!untrusted.valid());
+        assert_eq!(untrusted.chain.valid, Some(false));
+    }
+
     #[test]
     fn ca_bundles_reject_every_other_pem_section() {
         let certificate = include_bytes!("test-ca.pem");

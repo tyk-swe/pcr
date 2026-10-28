@@ -1,5 +1,9 @@
 /target/
 
+# Local secrets
+.env
+.env.*
+
 # Editor and tool residue
 .DS_Store
 .idea/

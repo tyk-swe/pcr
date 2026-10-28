@@ -385,7 +385,28 @@ fn write_exact<S: Stream>(
             }
         }
     }
-    Ok(())
+    loop {
+        let timeout = next_wait(deadline, cancellation, now(), Phase::Write, *written)?;
+        stream
+            .set_write_timeout(Some(timeout))
+            .map_err(|source| Error::ConfigureTimeout {
+                phase: Phase::Write,
+                transferred: *written,
+                source: Source::new(source),
+            })?;
+        match stream.flush() {
+            Ok(()) => return Ok(()),
+            Err(source) if is_retryable(&source) => {}
+            Err(source) => {
+                return Err(Error::Write {
+                    written: *written,
+                    expected,
+                    message: "the socket flush failed".to_owned(),
+                    source: Some(Source::new(source)),
+                });
+            }
+        }
+    }
 }
 
 fn read_exact<S: Stream>(
@@ -444,4 +465,185 @@ fn is_timeout(error: &io::Error) -> bool {
         error.kind(),
         io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::io::{Cursor, Read, Write};
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const QUERY: &[u8] = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01";
+
+    struct BufferedStream {
+        pending: Vec<u8>,
+        response: Option<Cursor<Vec<u8>>>,
+        flush_errors: VecDeque<io::ErrorKind>,
+        reads: Arc<AtomicUsize>,
+    }
+
+    impl Read for BufferedStream {
+        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            match &mut self.response {
+                Some(response) => response.read(bytes),
+                None => Err(io::ErrorKind::WouldBlock.into()),
+            }
+        }
+    }
+
+    impl Write for BufferedStream {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            let count = bytes.len().min(3);
+            self.pending.extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            if let Some(error) = self.flush_errors.pop_front() {
+                return Err(error.into());
+            }
+            let mut response = std::mem::take(&mut self.pending);
+            assert_eq!(&response[..2], &(QUERY.len() as u16).to_be_bytes());
+            assert_eq!(&response[2..], QUERY);
+            response[4] = 0x81;
+            response[5] = 0x80;
+            self.response = Some(Cursor::new(response));
+            Ok(())
+        }
+    }
+
+    impl Stream for BufferedStream {
+        fn peer_addr(&self) -> io::Result<SocketAddr> {
+            Ok(SocketAddr::from(([127, 0, 0, 1], 53)))
+        }
+
+        fn local_addr(&self) -> io::Result<SocketAddr> {
+            Ok(SocketAddr::from(([127, 0, 0, 1], 12345)))
+        }
+
+        fn set_read_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+            assert!(timeout.is_some_and(|wait| !wait.is_zero() && wait <= POLL_INTERVAL));
+            Ok(())
+        }
+    }
+
+    struct BufferedProvider(Mutex<Option<BufferedStream>>);
+
+    impl Provider for BufferedProvider {
+        type Stream = BufferedStream;
+
+        fn connect(
+            &self,
+            _endpoint: SocketAddr,
+            _deadline: &Deadline,
+        ) -> Result<Self::Stream, tcp::Error> {
+            Ok(self.0.lock().unwrap().take().unwrap())
+        }
+    }
+
+    fn buffered_query(flush_errors: VecDeque<io::ErrorKind>) -> (Result<Response, Error>, usize) {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let provider = Arc::new(BufferedProvider(Mutex::new(Some(BufferedStream {
+            pending: Vec::new(),
+            response: None,
+            flush_errors,
+            reads: reads.clone(),
+        }))));
+        let result = query(
+            Request {
+                endpoint: SocketAddr::from(([127, 0, 0, 1], 53)),
+                query: QUERY,
+                timeout: Duration::from_secs(2),
+                cancellation: None,
+                max_message_bytes: 512,
+            },
+            provider,
+        );
+        (result, reads.load(Ordering::SeqCst))
+    }
+
+    #[test]
+    fn buffered_query_flushes_the_complete_request_before_reading() {
+        for flush_errors in [
+            VecDeque::new(),
+            VecDeque::from([
+                io::ErrorKind::Interrupted,
+                io::ErrorKind::WouldBlock,
+                io::ErrorKind::TimedOut,
+            ]),
+        ] {
+            let (result, _) = buffered_query(flush_errors);
+            let response = result.unwrap();
+            let mut expected = vec![0, QUERY.len() as u8];
+            expected.extend_from_slice(QUERY);
+            expected[4] = 0x81;
+            expected[5] = 0x80;
+            assert_eq!(response.frame.as_ref(), expected);
+            assert_eq!(response.bytes_written, QUERY.len() + LENGTH_PREFIX_BYTES);
+        }
+    }
+
+    #[test]
+    fn permanent_flush_failure_retains_written_bytes_without_reading() {
+        let (result, reads) = buffered_query(VecDeque::from([io::ErrorKind::BrokenPipe]));
+        let Error::Write {
+            written,
+            expected,
+            source: Some(_),
+            ..
+        } = result.unwrap_err()
+        else {
+            panic!("expected a flush failure");
+        };
+        assert_eq!(written, QUERY.len() + LENGTH_PREFIX_BYTES);
+        assert_eq!(expected, written);
+        assert_eq!(reads, 0);
+    }
+
+    #[test]
+    fn retrying_flush_stops_at_the_write_deadline() {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let mut stream = BufferedStream {
+            pending: Vec::new(),
+            response: None,
+            flush_errors: VecDeque::from(vec![io::ErrorKind::TimedOut; 200]),
+            reads: reads.clone(),
+        };
+        let started = Instant::now();
+        let ticks = std::cell::Cell::new(0);
+        let now = || {
+            ticks.set(ticks.get() + 1);
+            started + Duration::from_millis(ticks.get())
+        };
+        let mut frame = (QUERY.len() as u16).to_be_bytes().to_vec();
+        frame.extend_from_slice(QUERY);
+        let mut written = 0;
+        let error = write_exact(
+            &mut stream,
+            &frame,
+            started + Duration::from_millis(100),
+            None,
+            frame.len(),
+            &mut written,
+            &now,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::Timeout {
+                phase: Phase::Write,
+                transferred,
+            } if transferred == frame.len()
+        ));
+        assert_eq!(stream.pending, frame);
+        assert_eq!(written, frame.len());
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+    }
 }

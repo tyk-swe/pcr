@@ -244,7 +244,7 @@ jobs:
             ~/.cargo/git/db
             target
           key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b3f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-llvm-cov
       - name: Report coverage summary
@@ -254,7 +254,8 @@ jobs:
         run: |
           cargo install --locked cargo-mutants
           for package in packetcraftr-core packetcraftr packetcraftr-cli packetcraftr-netio; do
-            echo "$package mutants: $(cargo mutants --list -p "$package" | wc -l)"
+            count="$(cargo mutants --list -p "$package" | wc -l)"
+            echo "$package mutants: $count"
           done
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash

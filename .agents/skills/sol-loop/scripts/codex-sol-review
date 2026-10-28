@@ -1,0 +1,600 @@
+#!/usr/bin/env python3
+import argparse
+import concurrent.futures
+import hashlib
+import json
+import os
+import queue
+import re
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+EXIT_SETUP = 2
+EXIT_TURN_FAILED = 3
+EXIT_TIMEOUT = 4
+EXIT_INCOMPLETE = 5
+
+
+class SetupError(Exception):
+    pass
+
+
+class TurnFailed(Exception):
+    pass
+
+
+class TurnTimeout(Exception):
+    pass
+
+
+def sol_version(model_id):
+    match = re.match(r"gpt-(\d+(?:\.\d+)*)-sol\b", model_id)
+    if match is None:
+        return None
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def is_sol(model_id):
+    return sol_version(model_id) is not None or "sol" in model_id.split("-")
+
+
+def offers_tier(entry, tier):
+    ids = [
+        item.get("id")
+        for item in entry.get("serviceTiers") or []
+        if isinstance(item, dict)
+    ]
+    return tier in ids or tier in (entry.get("additionalSpeedTiers") or [])
+
+
+def select_sol(models, named, service_tier=None):
+    by_id = {}
+    for entry in models:
+        model_id = entry.get("model") or entry.get("id") or ""
+        if model_id:
+            by_id[model_id] = entry
+    if named:
+        if named not in by_id:
+            raise SetupError(f"model {named} is not available from model/list")
+        if not is_sol(named):
+            raise SetupError(f"model {named} is not a Sol model, refusing to substitute")
+        if service_tier and not offers_tier(by_id[named], service_tier):
+            raise SetupError(
+                f"model {named} does not offer service tier {service_tier}, "
+                "refusing to downgrade"
+            )
+        return named
+    candidates = [
+        (sol_version(model_id) or (0,), bool(entry.get("isDefault")), model_id)
+        for model_id, entry in by_id.items()
+        if is_sol(model_id)
+        and not entry.get("hidden")
+        and (not service_tier or offers_tier(entry, service_tier))
+    ]
+    if not candidates:
+        if service_tier:
+            raise SetupError(
+                f"no Sol model offering service tier {service_tier} "
+                "available from model/list"
+            )
+        raise SetupError("no Sol model available from model/list")
+    candidates.sort()
+    return candidates[-1][2]
+
+
+class AppServer:
+    def __init__(self, debug):
+        self.debug = debug
+        self.next_id = 1
+        self.pending = []
+        self.stderr_file = tempfile.TemporaryFile(mode="w+")
+        try:
+            self.proc = subprocess.Popen(
+                ["codex", "app-server"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=self.stderr_file,
+                text=True,
+                bufsize=1,
+            )
+        except FileNotFoundError:
+            raise SetupError("codex binary not found on PATH")
+        self.lines = queue.Queue()
+        threading.Thread(target=self.pump_lines, daemon=True).start()
+
+    def pump_lines(self):
+        for line in self.proc.stdout:
+            self.lines.put(line)
+        self.lines.put(None)
+
+    def close(self):
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.proc.wait(timeout=5)
+
+    def stderr_tail(self):
+        self.stderr_file.flush()
+        self.stderr_file.seek(0)
+        return self.stderr_file.read()[-4000:]
+
+    def send(self, payload):
+        self.proc.stdin.write(json.dumps(payload) + "\n")
+        self.proc.stdin.flush()
+
+    def read_message(self, deadline):
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return None
+            try:
+                raw = self.lines.get(timeout=min(remaining, 1.0))
+            except queue.Empty:
+                if self.proc.poll() is not None:
+                    raise SetupError(
+                        f"codex app-server exited with {self.proc.returncode}: "
+                        f"{self.stderr_tail()}"
+                    )
+                continue
+            if raw is None:
+                raise SetupError(f"codex app-server closed stdout: {self.stderr_tail()}")
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+    def handle_server_request(self, msg):
+        method = msg.get("method", "")
+        if method in (
+            "item/commandExecution/requestApproval",
+            "item/fileChange/requestApproval",
+        ):
+            self.send({"id": msg["id"], "result": {"decision": "decline"}})
+            return
+        self.send(
+            {
+                "id": msg["id"],
+                "error": {
+                    "code": -32601,
+                    "message": f"declined by sol-loop review client: {method}",
+                },
+            }
+        )
+
+    def dispatch(self, msg):
+        if "id" in msg and "method" in msg:
+            self.handle_server_request(msg)
+            return True
+        return False
+
+    def call(self, method, params, timeout=60):
+        request_id = self.next_id
+        self.next_id += 1
+        self.send({"id": request_id, "method": method, "params": params})
+        deadline = time.time() + timeout
+        while True:
+            msg = self.read_message(deadline)
+            if msg is None:
+                raise SetupError(f"timeout waiting for {method}")
+            if msg.get("id") == request_id and "method" not in msg:
+                if "error" in msg:
+                    raise SetupError(f"{method} failed: {json.dumps(msg['error'])[:600]}")
+                return msg.get("result") or {}
+            if not self.dispatch(msg):
+                self.pending.append(msg)
+
+    def list_models(self):
+        models = []
+        cursor = None
+        for _ in range(20):
+            page = self.call("model/list", {} if cursor is None else {"cursor": cursor})
+            models.extend(page.get("data") or [])
+            cursor = page.get("nextCursor")
+            if not cursor:
+                return models
+        return models
+
+    def run_turn(self, thread_id, brief, effort, service_tier, timeout):
+        params = {
+            "threadId": thread_id,
+            "input": [{"type": "text", "text": brief}],
+            "approvalPolicy": "never",
+            **({"effort": effort} if effort else {}),
+            **({"serviceTier": service_tier} if service_tier else {}),
+        }
+        started = self.call("turn/start", params)
+        turn_id = (started.get("turn") or {}).get("id")
+        deadline = time.time() + timeout
+        messages = []
+        token_usage = None
+        backlog = list(self.pending)
+        self.pending = []
+        while True:
+            if backlog:
+                msg = backlog.pop(0)
+            else:
+                msg = self.read_message(deadline)
+                if msg is None:
+                    self.interrupt(thread_id, turn_id)
+                    raise TurnTimeout(f"turn did not finish within {timeout}s")
+            if self.dispatch(msg):
+                continue
+            method = msg.get("method", "")
+            body = msg.get("params") or {}
+            if self.debug:
+                print(f"sol-review event: {method}", file=sys.stderr)
+            if method == "item/completed":
+                item = body.get("item") or {}
+                if item.get("type") == "agentMessage":
+                    messages.append(item)
+            elif method == "thread/tokenUsage/updated":
+                token_usage = body.get("tokenUsage")
+            elif method == "turn/completed" and body.get("threadId") == thread_id:
+                turn = body.get("turn") or {}
+                if turn.get("status") != "completed":
+                    raise TurnFailed(
+                        f"turn status {turn.get('status')}: "
+                        f"{json.dumps(turn.get('error'))[:600]}"
+                    )
+                return pick_message(messages), token_usage
+
+    def interrupt(self, thread_id, turn_id):
+        if not turn_id:
+            return
+        try:
+            self.call(
+                "turn/interrupt",
+                {"threadId": thread_id, "turnId": turn_id},
+                timeout=10,
+            )
+        except SetupError:
+            pass
+
+
+def pick_message(messages):
+    answers = [
+        text
+        for item in messages
+        if item.get("phase") in ("partial_answer", "final_answer", None)
+        and (text := (item.get("text") or "")).strip()
+    ]
+    if answers:
+        return "\n".join(answers)
+    for item in reversed(messages):
+        text = item.get("text") or ""
+        if text.strip():
+            return text
+    raise TurnFailed("turn completed with no agent message")
+
+
+def open_thread(server, thread_id, model, cwd, service_tier, effort):
+    shared = {
+        "model": model,
+        "cwd": cwd,
+        "approvalPolicy": "never",
+        "sandbox": "read-only",
+        **({"serviceTier": service_tier} if service_tier else {}),
+        **(
+            {"config": {"model_reasoning_effort": effort}}
+            if effort
+            else {}
+        ),
+    }
+    if thread_id:
+        result = server.call("thread/resume", {**shared, "threadId": thread_id})
+    else:
+        result = server.call("thread/start", shared)
+    resolved = (result.get("thread") or {}).get("id")
+    if not resolved:
+        raise SetupError(f"thread open returned no thread id: {json.dumps(result)[:400]}")
+    confirmed_tier = result.get("serviceTier")
+    if service_tier and confirmed_tier != service_tier:
+        raise SetupError(
+            f"thread confirmed service tier {confirmed_tier!r}, "
+            f"not requested {service_tier!r}, refusing to downgrade"
+        )
+    confirmed_effort = result.get("reasoningEffort")
+    if effort and confirmed_effort != effort:
+        raise SetupError(
+            f"thread confirmed reasoning effort {confirmed_effort!r}, "
+            f"not requested {effort!r}"
+        )
+    return (
+        resolved,
+        result.get("model") or model,
+        confirmed_effort,
+        confirmed_tier,
+    )
+
+
+def git_bytes(cwd, *args):
+    try:
+        done = subprocess.run(
+            ["git", "-C", cwd, *args], capture_output=True, check=True
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        raise SetupError(f"git {' '.join(args)} failed in {cwd}: {exc}")
+    return done.stdout
+
+
+def git_snapshot(cwd):
+    digest = hashlib.sha256(git_bytes(cwd, "diff", "HEAD", "--binary"))
+    untracked = [
+        path
+        for path in git_bytes(
+            cwd, "ls-files", "--others", "--exclude-standard", "-z"
+        )
+        .decode(errors="replace")
+        .split("\0")
+        if path
+    ]
+    for path in sorted(untracked):
+        full = os.path.join(cwd, path)
+        try:
+            info = os.stat(full)
+        except OSError:
+            digest.update(f"\0{path}\0missing".encode())
+            continue
+        digest.update(f"\0{path}\0{info.st_size}".encode())
+        if info.st_size <= 8 * 1024 * 1024:
+            try:
+                with open(full, "rb") as handle:
+                    digest.update(handle.read())
+            except OSError:
+                digest.update(b"\0unreadable")
+        else:
+            digest.update(str(info.st_mtime_ns).encode())
+    return {
+        "head": git_bytes(cwd, "rev-parse", "HEAD").decode().strip(),
+        "status": git_bytes(
+            cwd, "status", "--porcelain", "--untracked-files=all"
+        ).decode(errors="replace"),
+        "diffHash": digest.hexdigest(),
+    }
+
+
+def resolve_base(cwd, base):
+    if not base:
+        return None
+    sha = git_bytes(
+        cwd, "rev-parse", "--verify", "--end-of-options", base + "^{commit}"
+    ).decode().strip()
+    return {"ref": base, "sha": sha}
+
+
+def round_status(results, snapshot_ok):
+    if (
+        snapshot_ok
+        and results
+        and all(item.get("status") == "completed" for item in results)
+    ):
+        return "completed"
+    return "incomplete"
+
+
+def child_meta(stderr_path):
+    meta = {}
+    try:
+        lines = open(stderr_path, encoding="utf-8", errors="replace").readlines()
+    except OSError:
+        return meta
+    for line in lines:
+        if line.startswith("sol-review: {"):
+            try:
+                meta = json.loads(line[len("sol-review: "):])
+            except json.JSONDecodeError:
+                pass
+    return meta
+
+
+def run_parallel(args, brief, cwd):
+    out_dir = os.path.abspath(args.out_dir)
+    if os.path.commonpath([out_dir, cwd]) == cwd:
+        print("sol-review: --out-dir must be outside the review checkout",
+              file=sys.stderr)
+        return EXIT_SETUP
+    if os.path.isdir(out_dir) and os.listdir(out_dir):
+        print(f"sol-review: --out-dir is not empty: {out_dir}", file=sys.stderr)
+        return EXIT_SETUP
+    try:
+        before = git_snapshot(cwd)
+        base_before = resolve_base(cwd, args.base)
+    except SetupError as exc:
+        print(f"sol-review: {exc}", file=sys.stderr)
+        return EXIT_SETUP
+    os.makedirs(out_dir, exist_ok=True)
+
+    children = []
+    for number in range(1, args.jobs + 1):
+        review_path = os.path.join(out_dir, f"reviewer-{number}.txt")
+        stderr_path = os.path.join(out_dir, f"reviewer-{number}.stderr.log")
+        command = [
+            sys.executable,
+            os.path.abspath(__file__),
+            "--cwd", cwd,
+            "--effort", args.effort or "",
+            "--service-tier", args.service_tier or "",
+            "--timeout", str(args.timeout),
+        ]
+        if args.model:
+            command += ["--model", args.model]
+        if args.debug:
+            command += ["--debug"]
+        proc = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=open(review_path, "wb"),
+            stderr=open(stderr_path, "wb"),
+        )
+        children.append((number, proc, review_path, stderr_path))
+
+    def wait_child(child):
+        number, proc, review_path, stderr_path = child
+        timed_out = False
+        try:
+            proc.communicate(brief.encode(), timeout=args.timeout + 300)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            proc.kill()
+            proc.communicate()
+        meta = child_meta(stderr_path)
+        completed = (
+            not timed_out
+            and proc.returncode == 0
+            and os.path.getsize(review_path) > 0
+        )
+        return {
+            "reviewer": number,
+            "status": "completed" if completed else "failed",
+            "exitCode": proc.returncode,
+            "threadId": meta.get("threadId"),
+            "model": meta.get("model"),
+            "reasoningEffort": meta.get("reasoningEffort"),
+            "serviceTier": meta.get("serviceTier"),
+            "serviceTierConfirmed": meta.get("serviceTierConfirmed"),
+            "tokenUsage": meta.get("tokenUsage"),
+            "reviewFile": review_path,
+            "stderrFile": stderr_path,
+        }
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        results = list(pool.map(wait_child, children))
+    for item in results:
+        print(f"reviewer {item['reviewer']}: {item['status']}")
+
+    try:
+        after = git_snapshot(cwd)
+        base_after = resolve_base(cwd, args.base)
+        snapshot_ok = before == after and base_before == base_after
+    except SetupError:
+        after, base_after, snapshot_ok = None, None, False
+    status = round_status(results, snapshot_ok)
+    manifest = {
+        "status": status,
+        "jobs": args.jobs,
+        "cwd": cwd,
+        "base": base_before,
+        "snapshotBefore": before,
+        "snapshotAfter": after,
+        "snapshotUnchanged": snapshot_ok,
+        "requestedModel": args.model,
+        "requestedEffort": args.effort,
+        "requestedServiceTier": args.service_tier,
+        "reviewers": results,
+    }
+    manifest_path = os.path.join(out_dir, "result.json")
+    with open(manifest_path, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(manifest, indent=2) + "\n")
+    print(f"round {status}: {manifest_path}")
+    if not snapshot_ok:
+        print("sol-review: checkout changed during review, round discarded",
+              file=sys.stderr)
+    return 0 if status == "completed" else EXIT_INCOMPLETE
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(
+        prog="codex-sol-review",
+        description=(
+            "Run Sol review turns through the installed Codex app-server. "
+            "Reads the review brief from stdin. One reviewer prints its reply "
+            "on stdout with metadata as JSON on stderr. With --jobs N, runs N "
+            "fresh reviewers in parallel into --out-dir and writes result.json."
+        ),
+    )
+    parser.add_argument("--cwd", default=os.getcwd(), help="repo the reviewer reads")
+    parser.add_argument("--thread", default=None, help="resume a saved review thread")
+    parser.add_argument("--model", default=None, help="Sol model id to pin")
+    parser.add_argument("--effort", default="xhigh", help="reasoning effort")
+    parser.add_argument(
+        "--service-tier", default="ultrafast",
+        help="service tier required on every reviewer thread",
+    )
+    parser.add_argument("--jobs", type=int, default=1,
+                        help="run this many independent reviewers in parallel")
+    parser.add_argument("--out-dir", default=None,
+                        help="new directory outside the checkout for parallel results")
+    parser.add_argument("--base", default=None,
+                        help="base ref pinned in the parallel round manifest")
+    parser.add_argument("--timeout", type=int, default=1800, help="turn timeout seconds")
+    parser.add_argument("--debug", action="store_true", help="log event names on stderr")
+    args = parser.parse_args(argv)
+    args.effort = args.effort or None
+    args.service_tier = args.service_tier or None
+    if args.jobs < 1:
+        parser.error("--jobs must be at least 1")
+
+    brief = sys.stdin.read()
+    if not brief.strip():
+        print("sol-review: brief on stdin is empty", file=sys.stderr)
+        return EXIT_SETUP
+    cwd = os.path.abspath(args.cwd)
+    if not os.path.isdir(cwd):
+        print(f"sol-review: cwd is not a directory: {cwd}", file=sys.stderr)
+        return EXIT_SETUP
+    if args.jobs > 1:
+        if args.thread:
+            print("sol-review: --jobs runs fresh threads, --thread is not allowed",
+                  file=sys.stderr)
+            return EXIT_SETUP
+        if not args.out_dir:
+            print("sol-review: --jobs requires --out-dir", file=sys.stderr)
+            return EXIT_SETUP
+        return run_parallel(args, brief, cwd)
+
+    server = None
+    try:
+        server = AppServer(args.debug)
+        server.call(
+            "initialize",
+            {"clientInfo": {"name": "sol-loop", "version": "1"}},
+        )
+        server.send({"method": "initialized"})
+        model = select_sol(server.list_models(), args.model, args.service_tier)
+        thread_id, resolved_model, effort, tier = open_thread(
+            server, args.thread, model, cwd, args.service_tier, args.effort
+        )
+        opened = {
+            "threadId": thread_id,
+            "model": resolved_model,
+            "reasoningEffort": effort,
+            "serviceTier": tier,
+        }
+        print(f"sol-review-thread: {json.dumps(opened)}", file=sys.stderr)
+        text, token_usage = server.run_turn(
+            thread_id, brief, args.effort, args.service_tier, args.timeout
+        )
+        print(text if text.endswith("\n") else text + "\n", end="")
+        meta = {
+            "threadId": thread_id,
+            "model": resolved_model,
+            "reasoningEffort": args.effort or effort,
+            "serviceTier": tier,
+            "serviceTierConfirmed": bool(
+                args.service_tier and tier == args.service_tier
+            ),
+            "tokenUsage": token_usage,
+        }
+        print(f"sol-review: {json.dumps(meta)}", file=sys.stderr)
+        return 0
+    except SetupError as exc:
+        print(f"sol-review: {exc}", file=sys.stderr)
+        return EXIT_SETUP
+    except TurnTimeout as exc:
+        print(f"sol-review: {exc}", file=sys.stderr)
+        return EXIT_TIMEOUT
+    except TurnFailed as exc:
+        print(f"sol-review: {exc}", file=sys.stderr)
+        return EXIT_TURN_FAILED
+    finally:
+        if server is not None:
+            server.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

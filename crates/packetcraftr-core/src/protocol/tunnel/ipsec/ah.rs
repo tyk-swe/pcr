@@ -9,13 +9,13 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     protocol::{BuiltinProtocol, network::ip_protocol},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, ensure_encode_budget, expected_discriminator, invalid, make_layer, protocol,
+    ValueExpectation, ensure_encode_budget, expected_discriminator, invalid, make_layer,
     resolve_u8, strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
     validate_raw_child_discriminator,
 };
@@ -70,7 +70,7 @@ impl Default for Ah {
 }
 
 reflective_layer! {
-    fn ah_schema() => { protocol: protocol(NAME), name: "AH" }
+    fn ah_schema() => { protocol: Id::new(NAME), name: "AH" }
     impl Ah {
         "next_header" => { kind: Unsigned, derived: true, required: false, description: "Protocol number of the authenticated payload", reflect: next_header, layout: (0, 1) },
         "payload_length" => { kind: Unsigned, derived: true, required: false, description: "Header length in 4-byte units minus two", reflect: payload_length, layout: (1, 2) },

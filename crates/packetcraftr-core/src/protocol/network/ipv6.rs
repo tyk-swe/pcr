@@ -21,14 +21,14 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
     ValueExpectation, expected_discriminator, invalid, make_layer, network_from_addresses,
-    payload_without_padding, protocol, resolve_u8, resolve_u16, strict_or_diagnostic, truncated,
-    typed_layer, unsupported, validate_auto_raw_discriminator, validate_ipv6_routing_child,
+    payload_without_padding, resolve_u8, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
+    unsupported, validate_auto_raw_discriminator, validate_ipv6_routing_child,
     validate_raw_child_discriminator,
 };
 
@@ -67,7 +67,7 @@ impl Default for Ipv6 {
 }
 
 reflective_layer! {
-    fn ipv6_schema() => { protocol: protocol(NAME), name: "IPv6" }
+    fn ipv6_schema() => { protocol: Id::new(NAME), name: "IPv6" }
     impl Ipv6 {
         "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "IPv6 traffic class", reflect: traffic_class, layout: (0, 4) },
         "flow_label" => { kind: Unsigned, derived: false, required: false, description: "IPv6 flow label", reflect_bounded: flow_label, 0x000f_ffff_u64, layout: (0, 4) },

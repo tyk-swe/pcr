@@ -5,11 +5,12 @@ use crate::{
     codec::EncodeContext,
     diagnostic::Diagnostic,
     field::WireValue,
+    layer::Id,
     protocol::{BuiltinProtocol, network::ip_protocol},
     registry::Discriminator,
 };
 
-use super::errors::{binding_protocol, child_is_opaque, invalid, protocol, unsupported};
+use super::errors::{binding_protocol, child_is_opaque, invalid, unsupported};
 
 pub(crate) fn validate_ipv6_routing_child(
     name: &'static str,
@@ -213,5 +214,5 @@ pub(crate) fn ensure_encode_budget(
     contribution: usize,
     context: &EncodeContext<'_>,
 ) -> Result<(), crate::codec::Error> {
-    context.ensure_room(protocol(name), contribution)
+    context.ensure_room(Id::new(name), contribution)
 }

@@ -8,11 +8,11 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     field,
-    layer::{Layer, Raw, reflective_layer},
+    layer::{Id, Layer, Raw, reflective_layer},
 };
 
 use crate::protocol::common::{
-    ensure_encode_budget, invalid, make_layer, out_of_range, protocol, typed_layer, wrong_type,
+    ensure_encode_budget, invalid, make_layer, out_of_range, typed_layer, wrong_type,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -82,7 +82,7 @@ impl Ntp {
 }
 
 reflective_layer! {
-    fn ntp_schema() => { protocol: protocol(NAME), name: "NTP" }
+    fn ntp_schema() => { protocol: Id::new(NAME), name: "NTP" }
     impl Ntp {
         "leap" => {
             kind: Unsigned, derived: false, required: false,

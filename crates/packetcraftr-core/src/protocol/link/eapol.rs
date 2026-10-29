@@ -8,12 +8,12 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, ensure_encode_budget, invalid, make_layer, payload_without_padding, protocol,
+    ValueExpectation, ensure_encode_budget, invalid, make_layer, payload_without_padding,
     resolve_u16, truncated, typed_layer,
 };
 
@@ -48,7 +48,7 @@ impl Default for Eapol {
 }
 
 reflective_layer! {
-    fn eapol_schema() => { protocol: protocol(NAME), name: "EAPOL" }
+    fn eapol_schema() => { protocol: Id::new(NAME), name: "EAPOL" }
     impl Eapol {
         "version" => { kind: Unsigned, derived: false, required: false, description: "802.1X protocol version", reflect: version, layout: (0, 1) },
         "packet_type" | "type" => { kind: Unsigned, derived: false, required: false, description: "Packet type: 0 EAP-Packet, 1 Start, 2 Logoff, 3 Key, 4 ASF-Alert, 5 MKA, 6 Announcement", reflect: packet_type, layout: (1, 2) },

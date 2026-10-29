@@ -116,7 +116,7 @@ pub(crate) enum HumanWriteError {
 impl HumanWriteError {
     fn into_cli_error(self) -> CliError {
         match self {
-            Self::Interrupted(interrupted) => crate::invocation::interruption_error(interrupted),
+            Self::Interrupted(interrupted) => CliError::classified(interrupted),
             Self::Write(source) => stdout_error("write stdout failed", source),
         }
     }

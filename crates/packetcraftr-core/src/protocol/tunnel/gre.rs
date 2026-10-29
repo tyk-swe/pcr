@@ -9,14 +9,14 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, GRE_CHECKSUM},
     field::{self, WireValue},
-    layer::{Layer, reflect_get, reflect_set, reflective_layer},
+    layer::{Id, Layer, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
     ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
-    payload_without_padding, protocol, resolve_u16, resolve_u16_discriminator,
-    strict_or_diagnostic, truncated, typed_layer, unsupported,
+    payload_without_padding, resolve_u16, resolve_u16_discriminator, strict_or_diagnostic,
+    truncated, typed_layer, unsupported,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -63,7 +63,7 @@ impl Default for Gre {
 }
 
 reflective_layer! {
-    fn gre_schema() => { protocol: protocol(NAME), name: "GRE" }
+    fn gre_schema() => { protocol: Id::new(NAME), name: "GRE" }
     impl Gre {
         "protocol_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType discriminator", reflect: protocol_type, layout: (2, 4) },
         "checksum" => { kind: Unsigned, derived: true, required: false, description: "Optional checksum over the GRE header and payload", get |layer| layer.checksum.as_ref().map(reflect_get), set |layer, value, name| { let mut checksum = layer.checksum.clone().unwrap_or_default(); reflect_set(&mut checksum, gre_schema(), name, value)?; layer.checksum = Some(checksum); Ok(()) } },

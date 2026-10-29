@@ -7,9 +7,9 @@ use super::{
     Record, RecordValue,
 };
 use crate::field;
-use crate::layer::{FieldSchema, reflect_set, reflective_layer};
+use crate::layer::{FieldSchema, Id, reflect_set, reflective_layer};
 use crate::protocol::common::structured::{Object, list, member, object};
-use crate::protocol::common::{out_of_range, protocol, read_only, wrong_type};
+use crate::protocol::common::{out_of_range, read_only, wrong_type};
 use bytes::Bytes;
 
 impl Dns {
@@ -25,7 +25,7 @@ impl Dns {
 }
 
 reflective_layer! {
-    pub(super) fn dns_schema() => { protocol: protocol(NAME), name: "DNS" }
+    pub(super) fn dns_schema() => { protocol: Id::new(NAME), name: "DNS" }
     impl Dns {
         "id" => { kind: Unsigned, derived: false, required: false, description: "Transaction identifier", get |layer| Some(crate::layer::reflect_get(&layer.id)), set |layer, value, name| layer.assign(name, value), layout: (0, 2) },
         "response" => { kind: Bool, derived: false, required: false, description: "Query/response flag", get |layer| Some(crate::layer::reflect_get(&layer.response)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },

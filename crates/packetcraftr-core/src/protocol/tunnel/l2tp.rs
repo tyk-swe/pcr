@@ -8,13 +8,12 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     field,
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    child_is_opaque, ensure_encode_budget, make_layer, protocol, strict_or_diagnostic, truncated,
-    typed_layer,
+    child_is_opaque, ensure_encode_budget, make_layer, strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -36,7 +35,7 @@ impl Default for L2tpv3 {
 }
 
 reflective_layer! {
-    fn l2tpv3_schema() => { protocol: protocol(NAME), name: "L2TPv3" }
+    fn l2tpv3_schema() => { protocol: Id::new(NAME), name: "L2TPv3" }
     impl L2tpv3 {
         "session_id" => { kind: Unsigned, derived: false, required: true, description: "32-bit session identifier; zero is the control connection", reflect: session_id, layout: (0, 4) }
     }

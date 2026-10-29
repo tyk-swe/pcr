@@ -10,12 +10,12 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded, NetworkEnvelope},
     diagnostic::Diagnostic,
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, invalid, make_layer, protocol, resolve_u8, strict_or_diagnostic, truncated,
+    ValueExpectation, invalid, make_layer, resolve_u8, strict_or_diagnostic, truncated,
     typed_layer, unsupported, wrong_type,
 };
 
@@ -52,7 +52,7 @@ impl Default for SegmentRoutingHeader {
 }
 
 reflective_layer! {
-    fn srh_schema() => { protocol: protocol(NAME), name: "IPv6 Segment Routing Header" }
+    fn srh_schema() => { protocol: Id::new(NAME), name: "IPv6 Segment Routing Header" }
     impl SegmentRoutingHeader {
         "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", reflect: next_header, layout: (0, 1) },
         "segments_left" => { kind: Unsigned, derived: true, required: false, description: "Remaining segments", reflect: segments_left, layout: (3, 4) },

@@ -9,14 +9,14 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field,
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use super::VNI_MAX;
 use crate::protocol::common::{
-    ensure_encode_budget, invalid, make_layer, protocol, strict_or_diagnostic, truncated,
-    typed_layer, validate_raw_child_discriminator,
+    ensure_encode_budget, invalid, make_layer, strict_or_diagnostic, truncated, typed_layer,
+    validate_raw_child_discriminator,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -47,7 +47,7 @@ impl Default for Vxlan {
 }
 
 reflective_layer! {
-    fn vxlan_schema() => { protocol: protocol(NAME), name: "VXLAN" }
+    fn vxlan_schema() => { protocol: Id::new(NAME), name: "VXLAN" }
     impl Vxlan {
         "flags" => { kind: Unsigned, derived: false, required: true, description: "VXLAN flag byte; only the VNI-valid bit 0x08 is defined", reflect: flags, layout: (0, 1) },
         "reserved1" => { kind: Unsigned, derived: false, required: false, description: "Reserved 24 bits between the flags and the VNI", reflect_bounded: reserved1, VNI_MAX, layout: (1, 4) },

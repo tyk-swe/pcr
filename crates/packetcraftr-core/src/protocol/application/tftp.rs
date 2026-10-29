@@ -8,12 +8,12 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     field,
-    layer::{FieldSchema, Layer, Raw, reflective_layer},
+    layer::{FieldSchema, Id, Layer, Raw, reflective_layer},
     layout::{ByteRange, FieldLayout},
     protocol::{
         application::byte_string_field,
         common::{
-            ensure_encode_budget, invalid, make_layer, protocol,
+            ensure_encode_budget, invalid, make_layer,
             structured::{Encoder, Object, list, member, object},
             typed_layer, unsupported,
         },
@@ -112,7 +112,7 @@ fn set_options(layer: &mut Tftp, value: field::Value, name: &str) -> Result<(), 
 }
 
 reflective_layer! {
-    fn tftp_schema() => { protocol: protocol(NAME), name: "TFTP" }
+    fn tftp_schema() => { protocol: Id::new(NAME), name: "TFTP" }
     impl Tftp {
         "opcode" => { kind: Unsigned, derived: false, required: true, description: "Opcode: 1 RRQ, 2 WRQ, 3 DATA, 4 ACK, 5 ERROR, 6 OACK", reflect: opcode, layout: (0, 2) },
         "filename" => {

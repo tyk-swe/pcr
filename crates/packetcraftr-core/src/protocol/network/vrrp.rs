@@ -10,14 +10,14 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, VRRP_CHECKSUM},
     field::{self, WireValue},
-    layer::{Layer, Raw, reflective_layer},
+    layer::{Id, Layer, Raw, reflective_layer},
     layout::FieldLayout,
 };
 
 use super::{ip_protocol, resolve_envelope};
 use crate::protocol::common::{
     ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
-    out_of_range, payload_without_padding, protocol, resolve_u8, resolve_u16, strict_or_diagnostic,
+    out_of_range, payload_without_padding, resolve_u8, resolve_u16, strict_or_diagnostic,
     transport_checksum, transport_checksum_parts, truncated, typed_layer, wrong_type,
 };
 
@@ -132,7 +132,7 @@ fn set_auth_data(
 }
 
 reflective_layer! {
-    fn vrrp_schema() => { protocol: protocol(NAME), name: "VRRP" }
+    fn vrrp_schema() => { protocol: Id::new(NAME), name: "VRRP" }
     impl Vrrp {
         "version" => {
             kind: Unsigned, derived: false, required: true,

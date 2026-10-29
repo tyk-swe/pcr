@@ -10,14 +10,14 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, IPV4_CHECKSUM},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     protocol::semantics::ipv4_source_route_destination,
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
     ValueExpectation, checksum, child_is_opaque, expected_discriminator, invalid, make_layer,
-    network_from_addresses, pad_options_to_four_bytes, payload_without_padding, protocol, rejected,
+    network_from_addresses, pad_options_to_four_bytes, payload_without_padding, rejected,
     resolve_u8, resolve_u16, strict_or_diagnostic, strict_or_diagnostic_error, truncated,
     typed_layer, validate_auto_raw_discriminator, validate_raw_child_discriminator,
 };
@@ -68,7 +68,7 @@ impl Default for Ipv4 {
 }
 
 reflective_layer! {
-    fn ipv4_schema() => { protocol: protocol(NAME), name: "IPv4" }
+    fn ipv4_schema() => { protocol: Id::new(NAME), name: "IPv4" }
     impl Ipv4 {
         "dscp_ecn" => { kind: Unsigned, derived: false, required: false, description: "DSCP and ECN octet", reflect: dscp_ecn, layout: (1, 2) },
         "total_length" => { kind: Unsigned, derived: true, required: false, description: "IPv4 total length", reflect: total_length, layout: (2, 4) },

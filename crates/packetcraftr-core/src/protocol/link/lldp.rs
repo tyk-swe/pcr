@@ -9,12 +9,11 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field,
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
 };
 
 use crate::protocol::common::{
-    ensure_encode_budget, invalid, make_layer, protocol, strict_or_diagnostic, truncated,
-    typed_layer,
+    ensure_encode_budget, invalid, make_layer, strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -60,7 +59,7 @@ impl Default for Lldp {
 }
 
 reflective_layer! {
-    fn lldp_schema() => { protocol: protocol(NAME), name: "LLDP" }
+    fn lldp_schema() => { protocol: Id::new(NAME), name: "LLDP" }
     impl Lldp {
         "tlvs" => { kind: Bytes, derived: false, required: true, description: "Verbatim TLV chain including the End of LLDPDU TLV when present", reflect: tlvs, layout: (0, tlvs_end) },
         "trailing" => { kind: Bytes, derived: false, required: false, description: "Bytes after the End of LLDPDU TLV", reflect: trailing, layout: (tlvs_end, trailing_end) },

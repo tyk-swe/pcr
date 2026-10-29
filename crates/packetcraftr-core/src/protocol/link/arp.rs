@@ -9,11 +9,11 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
 };
 
 use crate::protocol::common::{
-    ValueExpectation, make_layer, protocol, resolve_u8, truncated, typed_layer, unsupported,
+    ValueExpectation, make_layer, resolve_u8, truncated, typed_layer, unsupported,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -67,7 +67,7 @@ impl Default for Arp {
 }
 
 reflective_layer! {
-    fn arp_schema() => { protocol: protocol(NAME), name: "ARP" }
+    fn arp_schema() => { protocol: Id::new(NAME), name: "ARP" }
     impl Arp {
         "hardware_type" => { kind: Unsigned, derived: false, required: true, description: "Hardware address family", reflect: hardware_type, layout: (0, 2) },
         "protocol_type" => { kind: Unsigned, derived: false, required: true, description: "Protocol address family", reflect: protocol_type, layout: (2, 4) },

@@ -9,12 +9,12 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, IGMP_CHECKSUM},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
 };
 
 use crate::protocol::common::{
     ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
-    payload_without_padding, protocol, resolve_u16, truncated, typed_layer,
+    payload_without_padding, resolve_u16, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -44,7 +44,7 @@ impl Default for Igmp {
 }
 
 reflective_layer! {
-    fn igmp_schema() => { protocol: protocol(NAME), name: "IGMP" }
+    fn igmp_schema() => { protocol: Id::new(NAME), name: "IGMP" }
     impl Igmp {
         "type" => {
             kind: Unsigned, derived: false, required: true,

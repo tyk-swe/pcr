@@ -9,14 +9,14 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use super::VNI_MAX;
 
 use crate::protocol::common::{
-    ensure_encode_budget, expected_discriminator, invalid, make_layer, protocol, resolve_u16,
+    ensure_encode_budget, expected_discriminator, invalid, make_layer, resolve_u16,
     strict_or_diagnostic, truncated, typed_layer, unsupported, validate_auto_raw_discriminator,
     validate_raw_child_discriminator,
 };
@@ -60,7 +60,7 @@ impl Default for Geneve {
 }
 
 reflective_layer! {
-    fn geneve_schema() => { protocol: protocol(NAME), name: "GENEVE" }
+    fn geneve_schema() => { protocol: Id::new(NAME), name: "GENEVE" }
     impl Geneve {
         "version" => { kind: Unsigned, derived: false, required: false, description: "2-bit GENEVE version; only version 0 is defined", reflect_bounded: version, 3_u64, layout: (0, 1) },
         "control" => { kind: Bool, derived: false, required: false, description: "Control-packet O bit", reflect: control, layout: (1, 2) },

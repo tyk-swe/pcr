@@ -9,12 +9,12 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field::{self, WireValue},
-    layer::{Layer, Malformed, reflective_layer},
+    layer::{Id, Layer, Malformed, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, ensure_encode_budget, invalid, make_layer, payload_without_padding, protocol,
+    ValueExpectation, ensure_encode_budget, invalid, make_layer, payload_without_padding,
     resolve_u16, resolve_u16_discriminator, strict_or_diagnostic, truncated, typed_layer,
 };
 
@@ -53,7 +53,7 @@ impl Default for Pppoe {
 }
 
 reflective_layer! {
-    fn pppoe_schema() => { protocol: protocol(PPPOE_NAME), name: "PPPoE" }
+    fn pppoe_schema() => { protocol: Id::new(PPPOE_NAME), name: "PPPoE" }
     impl Pppoe {
         "version" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE version; only version 1 is defined", reflect_bounded: version, 0xf_u64, layout: (0, 1) },
         "type" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE type; only type 1 is defined", reflect_bounded: type_code, 0xf_u64, layout: (0, 1) },
@@ -291,7 +291,7 @@ impl Default for Ppp {
 }
 
 reflective_layer! {
-    fn ppp_schema() => { protocol: protocol(PPP_NAME), name: "PPP" }
+    fn ppp_schema() => { protocol: Id::new(PPP_NAME), name: "PPP" }
     impl Ppp {
         "protocol" => { kind: Unsigned, derived: true, required: false, description: "PPP protocol number selecting the payload", reflect: protocol, layout: (0, 2) },
     }

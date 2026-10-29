@@ -9,13 +9,13 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field,
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ensure_encode_budget, invalid, make_layer, protocol, strict_or_diagnostic, truncated,
-    typed_layer, validate_raw_child_discriminator,
+    ensure_encode_budget, invalid, make_layer, strict_or_diagnostic, truncated, typed_layer,
+    validate_raw_child_discriminator,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -45,7 +45,7 @@ impl Default for Etherip {
 }
 
 reflective_layer! {
-    fn etherip_schema() => { protocol: protocol(NAME), name: "EtherIP" }
+    fn etherip_schema() => { protocol: Id::new(NAME), name: "EtherIP" }
     impl Etherip {
         "version" => { kind: Unsigned, derived: false, required: false, description: "4-bit EtherIP version; RFC 3378 defines only version 3", reflect_bounded: version, VERSION_MAX, layout: (0, 1) },
         "reserved" => { kind: Unsigned, derived: false, required: false, description: "12 reserved bits after the version, zero on transmission", reflect_bounded: reserved, RESERVED_MAX, layout: (0, 2) }

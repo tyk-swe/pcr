@@ -9,12 +9,12 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, SCTP_CHECKSUM},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, invalid, make_layer, payload_without_padding, protocol, resolve_fixed,
+    ValueExpectation, invalid, make_layer, payload_without_padding, resolve_fixed,
     strict_or_diagnostic, truncated, typed_layer,
 };
 
@@ -47,7 +47,7 @@ impl Default for Sctp {
 }
 
 reflective_layer! {
-    fn sctp_schema() => { protocol: protocol(NAME), name: "SCTP" }
+    fn sctp_schema() => { protocol: Id::new(NAME), name: "SCTP" }
     impl Sctp {
         "source_port" | "sport" => {
             kind: Unsigned, derived: false, required: true, description: "SCTP source port",

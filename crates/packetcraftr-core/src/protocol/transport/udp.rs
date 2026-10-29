@@ -10,14 +10,14 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, UDP_CHECKSUM},
     field::{self, WireValue},
-    layer::{Layer, Malformed, Padding, reflective_layer},
+    layer::{Id, Layer, Malformed, Padding, reflective_layer},
     protocol::BuiltinProtocol,
     registry::Discriminator,
 };
 
 use super::ports::child_discriminators;
 use crate::protocol::common::{
-    ValueExpectation, invalid, make_layer, payload_without_padding, protocol, resolve_u16,
+    ValueExpectation, invalid, make_layer, payload_without_padding, resolve_u16,
     strict_or_diagnostic, transport_checksum, transport_checksum_parts, truncated, typed_layer,
 };
 use crate::protocol::network::{ip_protocol, resolve_envelope};
@@ -77,7 +77,7 @@ impl Default for Udp {
 }
 
 reflective_layer! {
-    fn udp_schema() => { protocol: protocol(NAME), name: "UDP" }
+    fn udp_schema() => { protocol: Id::new(NAME), name: "UDP" }
     impl Udp {
         "source_port" | "sport" => {
             kind: Unsigned, derived: false, required: true,

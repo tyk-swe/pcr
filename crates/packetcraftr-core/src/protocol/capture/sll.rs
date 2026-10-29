@@ -8,12 +8,12 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    invalid, make_layer, protocol, resolve_u16_discriminator, truncated, typed_layer,
+    invalid, make_layer, resolve_u16_discriminator, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -68,7 +68,7 @@ impl Default for LinuxSll2 {
 }
 
 reflective_layer! {
-    fn linux_sll_schema() => { protocol: protocol(SLL_NAME), name: "Linux cooked capture v1" }
+    fn linux_sll_schema() => { protocol: Id::new(SLL_NAME), name: "Linux cooked capture v1" }
     impl LinuxSll {
         "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", reflect: protocol, layout: (14, 16) },
         "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", reflect: packet_type, layout: (0, 2) },
@@ -80,7 +80,7 @@ reflective_layer! {
 }
 
 reflective_layer! {
-    fn linux_sll2_schema() => { protocol: protocol(SLL2_NAME), name: "Linux cooked capture v2" }
+    fn linux_sll2_schema() => { protocol: Id::new(SLL2_NAME), name: "Linux cooked capture v2" }
     impl LinuxSll2 {
         "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", reflect: protocol, layout: (0, 2) },
         "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", reflect: packet_type, layout: (10, 11) },

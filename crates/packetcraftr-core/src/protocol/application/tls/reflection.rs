@@ -7,9 +7,9 @@ use super::codec::NAME;
 use super::{Extension, Hello, HelloKind, MAX_ALPN, MAX_CIPHER_SUITES, MAX_EXTENSIONS, Tls, hex};
 use crate::{
     field,
-    layer::{FieldSchema, reflective_layer},
+    layer::{FieldSchema, Id, reflective_layer},
     protocol::common::{
-        out_of_range, protocol, read_only,
+        out_of_range, read_only,
         structured::{Object, list, member, object},
         text_list, unsigned_list,
     },
@@ -144,7 +144,7 @@ fn optional_codes(values: &[u16]) -> Option<field::Value> {
 }
 
 reflective_layer! {
-    pub(super) fn tls_schema() => { protocol: protocol(NAME), name: "TLS" }
+    pub(super) fn tls_schema() => { protocol: Id::new(NAME), name: "TLS" }
     impl Tls {
         "hello" => { kind: Object, derived: false, required: false, description: "Complete hello fixture; extension type/data retain exact unknown bodies", children: HELLO_FIELDS, get |layer| layer.hello.as_ref().map(Hello::value), set |layer, value, _name| layer.set_hello(value) },
         "wire" => { kind: Bytes, derived: false, required: false, description: "Retained TLS record bytes", get |layer| Some(layer.wire.clone().into()), set |_layer, _value, name| read_only(tls_schema(), name) },

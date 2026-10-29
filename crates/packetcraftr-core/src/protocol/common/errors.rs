@@ -2,12 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::field;
-use crate::layer::{Layer, Malformed};
+use crate::layer::{Id, Layer, Malformed};
 use crate::protocol::BuiltinProtocol;
-
-pub(crate) const fn protocol(name: &'static str) -> crate::layer::Id {
-    crate::layer::Id::new(name)
-}
 
 pub(crate) fn binding_protocol(layer: &dyn Layer) -> &str {
     layer
@@ -37,7 +33,7 @@ pub(crate) fn typed_layer<'a, L: Layer + 'static>(
 ) -> Result<&'a L, crate::codec::Error> {
     layer
         .downcast_ref::<L>()
-        .ok_or_else(|| crate::codec::Error::wrong_layer(protocol(name), layer))
+        .ok_or_else(|| crate::codec::Error::wrong_layer(Id::new(name), layer))
 }
 
 pub(crate) fn truncated(
@@ -46,25 +42,25 @@ pub(crate) fn truncated(
     available: usize,
 ) -> crate::codec::Error {
     crate::codec::Error::Truncated {
-        protocol: protocol(name),
+        protocol: Id::new(name),
         needed,
         available,
     }
 }
 
 pub(crate) fn invalid(name: &'static str, message: impl Into<String>) -> crate::codec::Error {
-    crate::codec::Error::invalid(protocol(name), message)
+    crate::codec::Error::invalid(Id::new(name), message)
 }
 
 pub(crate) fn unsupported(name: &'static str, message: impl Into<String>) -> crate::codec::Error {
-    crate::codec::Error::unsupported(protocol(name), message)
+    crate::codec::Error::unsupported(Id::new(name), message)
 }
 
 pub(crate) fn rejected(
     name: &'static str,
     source: impl std::error::Error + Send + Sync + 'static,
 ) -> crate::codec::Error {
-    crate::codec::Error::rejected(protocol(name), source)
+    crate::codec::Error::rejected(Id::new(name), source)
 }
 
 pub(crate) fn wrong_type(

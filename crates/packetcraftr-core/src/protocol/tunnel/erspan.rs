@@ -9,13 +9,13 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field,
-    layer::{Layer, reflect_get, reflect_set_bounded, reflective_layer},
+    layer::{Id, Layer, reflect_get, reflect_set_bounded, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ensure_encode_budget, invalid, make_layer, out_of_range, protocol, strict_or_diagnostic,
-    truncated, typed_layer, unsupported, validate_raw_child_discriminator, wrong_type,
+    ensure_encode_budget, invalid, make_layer, out_of_range, strict_or_diagnostic, truncated,
+    typed_layer, unsupported, validate_raw_child_discriminator, wrong_type,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -68,7 +68,7 @@ impl Default for Erspan {
 }
 
 reflective_layer! {
-    fn erspan_schema() => { protocol: protocol(NAME), name: "ERSPAN" }
+    fn erspan_schema() => { protocol: Id::new(NAME), name: "ERSPAN" }
     impl Erspan {
         "version" => { kind: Unsigned, derived: false, required: true, description: "Header version: 1 is Type II, 2 is Type III", get |layer| Some(reflect_get(&layer.version)), set |layer, value, name| { reflect_set_bounded(&mut layer.version, erspan_schema(), name, value, 0xf_u64)?; if layer.version == 2 && layer.type3.is_none() { layer.type3 = Some(ErspanType3::default()); } Ok(()) }, layout: (0, 2) },
         "vlan" => { kind: Unsigned, derived: false, required: false, description: "VLAN of the mirrored frame", reflect_bounded: vlan, 0xfff_u64, layout: (0, 2) },

@@ -9,13 +9,13 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field,
-    layer::{Layer, Raw, reflective_layer},
+    layer::{Id, Layer, Raw, reflective_layer},
     layout::{ByteRange, FieldLayout},
     protocol::{
         application::byte_string_field,
         common::{
-            ensure_encode_budget, invalid, make_layer, out_of_range, protocol,
-            strict_or_diagnostic, structured::Encoder, typed_layer, wrong_type,
+            ensure_encode_budget, invalid, make_layer, out_of_range, strict_or_diagnostic,
+            structured::Encoder, typed_layer, wrong_type,
         },
     },
 };
@@ -188,7 +188,7 @@ fn byte_string(value: field::Value, name: &str) -> Result<Bytes, field::Error> {
 }
 
 reflective_layer! {
-    fn syslog_schema() => { protocol: protocol(NAME), name: "Syslog" }
+    fn syslog_schema() => { protocol: Id::new(NAME), name: "Syslog" }
     impl Syslog {
         "facility" => { kind: Unsigned, derived: false, required: true, description: "Facility, the priority divided by eight; 0 to 23 are defined", reflect_bounded: facility, FACILITY_MAX },
         "severity" => { kind: Unsigned, derived: false, required: true, description: "Severity, the priority modulo eight", reflect_bounded: severity, SEVERITY_MAX },

@@ -9,14 +9,14 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
     child_is_opaque, expected_discriminator, invalid, make_layer, payload_without_padding,
-    protocol, resolve_u8, strict_or_diagnostic, truncated, typed_layer,
-    validate_auto_raw_discriminator, validate_ipv6_routing_child, validate_raw_child_discriminator,
+    resolve_u8, strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
+    validate_ipv6_routing_child, validate_raw_child_discriminator,
 };
 
 use crate::protocol::{BuiltinProtocol, network::ip_protocol};
@@ -50,7 +50,7 @@ impl Default for Fragment {
 }
 
 reflective_layer! {
-    fn fragment_schema() => { protocol: protocol(NAME), name: "IPv6 Fragment" }
+    fn fragment_schema() => { protocol: Id::new(NAME), name: "IPv6 Fragment" }
     impl Fragment {
         "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", reflect: next_header, layout: (0, 1) },
         "reserved" => { kind: Unsigned, derived: false, required: false, description: "Reserved byte after the next header", reflect: reserved, layout: (1, 2) },

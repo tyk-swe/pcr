@@ -8,10 +8,10 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     field,
-    layer::Layer,
+    layer::{Id, Layer},
 };
 
-use crate::protocol::common::{invalid, protocol, truncated, unsupported};
+use crate::protocol::common::{invalid, truncated, unsupported};
 
 use super::{Ipv4Codec, Ipv6Codec};
 
@@ -24,7 +24,7 @@ pub(crate) struct RawIpCodec;
 
 impl Codec for RawIpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
-        const PROTOCOL: &crate::layer::Id = &protocol(NAME);
+        const PROTOCOL: &crate::layer::Id = &Id::new(NAME);
         PROTOCOL
     }
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {

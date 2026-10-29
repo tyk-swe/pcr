@@ -9,13 +9,12 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field,
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     layout::FieldLayout,
 };
 
 use crate::protocol::common::{
-    ensure_encode_budget, invalid, make_layer, protocol, strict_or_diagnostic, truncated,
-    typed_layer,
+    ensure_encode_budget, invalid, make_layer, strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -98,7 +97,7 @@ impl Default for Stp {
 }
 
 reflective_layer! {
-    fn stp_schema() => { protocol: protocol(NAME), name: "STP" }
+    fn stp_schema() => { protocol: Id::new(NAME), name: "STP" }
     impl Stp {
         "protocol_id" => { kind: Unsigned, derived: false, required: false, description: "Protocol identifier; the spanning tree protocol is 0", reflect: protocol_id, layout: (0, 2) },
         "version" => { kind: Unsigned, derived: false, required: false, description: "Protocol version: 0 for STP, 2 for RSTP", reflect: version, layout: (2, 3) },

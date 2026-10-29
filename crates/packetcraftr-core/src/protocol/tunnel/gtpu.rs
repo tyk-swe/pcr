@@ -9,14 +9,14 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     layout::{ByteRange, FieldLayout},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
     ValueExpectation, child_is_opaque, ensure_encode_budget, invalid, make_layer,
-    payload_without_padding, protocol, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
+    payload_without_padding, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -94,7 +94,7 @@ impl Gtpu {
 }
 
 reflective_layer! {
-    fn gtpu_schema() => { protocol: protocol(NAME), name: "GTP-U" }
+    fn gtpu_schema() => { protocol: Id::new(NAME), name: "GTP-U" }
     impl Gtpu {
         "version" => { kind: Unsigned, derived: false, required: false, description: "3-bit GTP version; GTP-U is version 1", reflect_bounded: version, VERSION_MAX, layout: (0, 1) },
         "protocol_type" => { kind: Bool, derived: false, required: false, description: "PT flag: set for GTP, clear for GTP'", reflect: protocol_type, layout: (0, 1) },

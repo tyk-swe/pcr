@@ -8,11 +8,11 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
 };
 
 use super::ether_type::{link_payload_selection, resolve_ether_type};
-use crate::protocol::common::{make_layer, protocol, truncated, typed_layer};
+use crate::protocol::common::{make_layer, truncated, typed_layer};
 
 use crate::protocol::BuiltinProtocol;
 
@@ -46,7 +46,7 @@ impl Default for Ethernet {
 }
 
 reflective_layer! {
-    fn ethernet_schema() => { protocol: protocol(NAME), name: "Ethernet II" }
+    fn ethernet_schema() => { protocol: Id::new(NAME), name: "Ethernet II" }
     impl Ethernet {
         "destination" | "dst" => { kind: Mac, derived: false, required: true, description: "Destination MAC address", reflect: destination, layout: (0, 6) },
         "source" | "src" => { kind: Mac, derived: false, required: true, description: "Source MAC address", reflect: source, layout: (6, 12) },

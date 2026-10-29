@@ -12,10 +12,10 @@ use crate::{
     diagnostic::Diagnostic,
     error::{Classified, Kind},
     field,
-    layer::Layer,
+    layer::{Id, Layer},
     protocol::{
         BuiltinProtocol,
-        common::{ensure_encode_budget, invalid, protocol, rejected, truncated, typed_layer},
+        common::{ensure_encode_budget, invalid, rejected, truncated, typed_layer},
     },
 };
 
@@ -174,7 +174,7 @@ impl Codec for DnsCodec {
         input: Bytes,
         context: &DecodeContext<'_>,
     ) -> Result<Decoded, crate::codec::Error> {
-        if context.parent == Some(protocol("tcp")) {
+        if context.parent == Some(Id::new("tcp")) {
             let mut failure = None;
             let parsed = input
                 .get(..2)

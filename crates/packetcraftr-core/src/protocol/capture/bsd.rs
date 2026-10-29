@@ -9,13 +9,13 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
     field,
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    binding_protocol, make_layer, out_of_range, protocol, strict_or_diagnostic, truncated,
-    typed_layer, validate_raw_child_discriminator, wrong_type,
+    binding_protocol, make_layer, out_of_range, strict_or_diagnostic, truncated, typed_layer,
+    validate_raw_child_discriminator, wrong_type,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -57,7 +57,7 @@ impl Default for BsdLoop {
 }
 
 reflective_layer! {
-    fn loop_schema() => { protocol: protocol(LOOP_NAME), name: "BSD LOOP" }
+    fn loop_schema() => { protocol: Id::new(LOOP_NAME), name: "BSD LOOP" }
     impl BsdLoop {
         "family" => { kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", reflect: family, layout: (0, 4) }
     }
@@ -65,7 +65,7 @@ reflective_layer! {
 }
 
 reflective_layer! {
-    fn null_schema() => { protocol: protocol(NULL_NAME), name: "BSD NULL" }
+    fn null_schema() => { protocol: Id::new(NULL_NAME), name: "BSD NULL" }
     impl BsdNull {
         "family" => { kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", reflect: family, layout: (0, 4) },
         "byte_order" => { kind: Text, derived: false, required: true, description: "Host byte order used by the captured NULL header", get |layer| Some(field::Value::Text(match layer.byte_order { ByteOrder::Little => "little", ByteOrder::Big => "big" }.to_owned())), set |layer, value, name| match value { field::Value::Text(value) if value.eq_ignore_ascii_case("little") => { layer.byte_order = ByteOrder::Little; Ok(()) }, field::Value::Text(value) if value.eq_ignore_ascii_case("big") => { layer.byte_order = ByteOrder::Big; Ok(()) }, field::Value::Text(_) => Err(out_of_range(null_schema(), name)), _ => Err(wrong_type(null_schema(), name, "text")) }, layout: (0, 4) }

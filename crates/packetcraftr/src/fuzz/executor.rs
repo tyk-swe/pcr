@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr_core::diagnostic::Diagnostic;
@@ -78,7 +79,7 @@ impl<P: PacketProviders, K: Clock> Executor<CaseStep> for WorkflowExecutor<'_, P
             stats,
         } = exchange.aggregate;
         let sent = match <[_; 1]>::try_from(sent) {
-            Ok([sent]) => crate::exchange::into_sent_packet(sent),
+            Ok([sent]) => Arc::unwrap_or_clone(sent),
             Err(sent) => {
                 return Err(EXECUTOR_FAULT.internal(format!(
                     "expected one sent receipt, received {}",

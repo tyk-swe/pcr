@@ -9,19 +9,22 @@
 //!
 //! | Layer | Modules |
 //! | --- | --- |
-//! | 1. Foundation | `clock`, `deadline`, `engine::stats`, `engine::correlation` |
-//! | 2. Environment | `error`, `policy`, `target` (model, resolver, and selection), `route`, `neighbor`, `providers`, `runtime`, `client::{admission, planning}` |
-//! | 3. Engine | `engine::{mtu, operation, preparation, execution}`, `evidence` |
+//! | 1. Foundation | `clock`, `deadline`, `engine::stats`, `engine::correlation`, `probe::model` |
+//! | 2. Environment | `error`, `policy`, `target` (model, resolver, and selection), `route`, `neighbor`, `providers`, `runtime`, `client::{admission, planning}`, `evidence::error` |
+//! | 3. Engine | `engine::{mtu, operation, preparation, execution}`, `evidence`, `send::options` |
 //! | 4. Primitives | `send`, `exchange`, `capture`, `probe` |
 //! | 5. Workflows | `dns`, `traceroute`, `os`, `identify`, `replay`, `fuzz`, `audit`, `target::plan` |
 //! | 6. Composite | `scan`, which follows up with traces and reverse DNS |
 //!
 //! `client` owns target admission and route planning. `engine` retains private
-//! operation state, packet preparation, and execution plumbing. Public
-//! workflow evidence and identity types live with their workflows, including
-//! `send::Options`, `exchange::Response`, `probe::Transport`, and the DNS
-//! identity functions. Hand-offs from scan results to later workflows live
-//! with `scan`, for example `scan::Aggregate::trace_observations`.
+//! operation state, packet preparation, and execution plumbing. Workflow
+//! evidence and identity types live with their workflows, including
+//! `exchange::Response` and the DNS identity functions; the value types the
+//! engine and error layers consume directly (`probe::model`,
+//! `evidence::error`, `send::options`) sit below their consumers and are
+//! re-exported at the public workflow paths. Hand-offs from scan results to
+//! later workflows live with `scan`, for example
+//! `scan::Aggregate::trace_observations`.
 //!
 //! `policy` owns target resolution and authorization, returning a
 //! `policy::ResolutionError` that keeps target and policy failures distinct.

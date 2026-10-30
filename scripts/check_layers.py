@@ -24,9 +24,11 @@ LAYERS = {
     "packetcraftr": {
         ("clock",): 1, ("deadline",): 1,
         ("engine", "stats"): 1, ("engine", "correlation"): 1,
+        ("probe", "model"): 1,
         ("error",): 2, ("policy",): 2, ("target",): 2, ("route",): 2,
         ("neighbor",): 2, ("providers",): 2, ("runtime",): 2, ("client",): 2,
-        ("engine",): 3, ("evidence",): 3,
+        ("evidence", "error"): 2,
+        ("engine",): 3, ("evidence",): 3, ("send", "options"): 3,
         ("send",): 4, ("exchange",): 4, ("capture",): 4, ("probe",): 4,
         ("dns",): 5, ("traceroute",): 5, ("os",): 5, ("identify",): 5,
         ("replay",): 5, ("fuzz",): 5, ("audit",): 5, ("target", "plan"): 5,
@@ -52,12 +54,6 @@ LAYERS = {
 }
 
 ALLOWLIST = (
-    ("packetcraftr", ("engine", "correlation"), ("probe", "Transport"),
-     "identity type documented as living with probe in packetcraftr lib.rs"),
-    ("packetcraftr", ("engine", "preparation"), ("send", "Options"),
-     "options type documented as living with send in packetcraftr lib.rs"),
-    ("packetcraftr", ("error",), ("evidence", "Error"),
-     "error wrapping documented by the InvalidEvidence variant"),
     ("packetcraftr-netio", ("capture",), ("platform",),
      "system provider dispatch documented in packetcraftr-netio lib.rs"),
     ("packetcraftr-netio", ("route",), ("platform",),

@@ -19,6 +19,6 @@ pub(crate) enum Failure {
     Interrupted(Interrupted),
     Clock(Box<dyn std::error::Error + Send + Sync>),
     Execution(BoundaryError),
-    InvalidEvidence(crate::evidence::Error),
+    InvalidEvidence(crate::evidence::error::Error),
     StatsOverflow(crate::StatsOverflow),
 }

@@ -63,10 +63,8 @@ crate::reflective_layer! {
     "collector_delay" => { kind: Unsigned, derived: false, required: false, description: "collector delay", reflect: collector_delay },
     "reserved" => { kind: Bytes, derived: false, required: false, description: "Actor, partner, collector and trailing reserved bytes", reflect: reserved },
  }
- layout fn lacp_layout();
 }
 fn lacp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = lacp_layout();
     let mut fields = Vec::new();
     if 6 <= b.len() {
         fields.push(crate::layout::FieldLayout {

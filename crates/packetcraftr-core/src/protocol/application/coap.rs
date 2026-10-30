@@ -48,10 +48,8 @@ crate::reflective_layer! {
     "options" => { kind: List, derived: false, required: false, description: "Ordered option numbers and raw values", children: OPTIONS, reflect: options },
     "payload" => { kind: Bytes, derived: false, required: false, description: "payload", reflect: payload },
  }
- layout fn coap_layout();
 }
 fn coap_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = coap_layout();
     let mut fields = Vec::new();
     if !b.is_empty() {
         fields.push(crate::layout::FieldLayout {

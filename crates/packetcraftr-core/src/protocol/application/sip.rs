@@ -34,10 +34,8 @@ crate::reflective_layer! {
     "headers" => { kind: List, derived: false, required: false, description: "Ordered header fields retaining spaces and case", children: HEADERS, reflect: headers },
     "body" => { kind: Bytes, derived: false, required: false, description: "body", reflect: body },
  }
- layout fn sip_layout();
 }
 fn sip_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = sip_layout();
     let mut fields = Vec::new();
     if let Some(first) = b.windows(2).position(|p| p == b"\r\n") {
         fields.push(crate::layout::FieldLayout {

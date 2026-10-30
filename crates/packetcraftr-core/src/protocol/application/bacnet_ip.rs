@@ -54,10 +54,8 @@ crate::reflective_layer! {
     "vendor_id" => { kind: Unsigned, derived: false, required: false, description: "vendor id", reflect: vendor_id },
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
- layout fn bacnetip_layout();
 }
 fn bacnetip_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = bacnetip_layout();
     let mut fields = Vec::new();
     if 2 <= b.len() {
         fields.push(crate::layout::FieldLayout {

@@ -41,10 +41,8 @@ crate::reflective_layer! {
     "observation_domain" => { kind: Unsigned, derived: false, required: false, description: "observation domain", reflect: observation_domain },
     "sets" => { kind: List, derived: false, required: false, description: "Template records or opaque data sets", children: SETS, reflect: sets },
  }
- layout fn ipfix_layout();
 }
 fn ipfix_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = ipfix_layout();
     let mut fields = Vec::new();
     if 8 <= b.len() {
         fields.push(crate::layout::FieldLayout {

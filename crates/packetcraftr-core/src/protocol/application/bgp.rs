@@ -72,10 +72,8 @@ crate::reflective_layer! {
     "error_subcode" => { kind: Unsigned, derived: false, required: false, description: "error subcode", reflect: error_subcode },
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
- layout fn bgp_layout();
 }
 fn bgp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = bgp_layout();
     let mut fields = Vec::new();
     if 19 <= b.len() {
         fields.push(crate::layout::FieldLayout {

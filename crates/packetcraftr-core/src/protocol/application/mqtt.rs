@@ -72,10 +72,8 @@ crate::reflective_layer! {
     "payload" => { kind: Bytes, derived: false, required: false, description: "PUBLISH data or SUBACK return codes", reflect: payload },
     "subscriptions" => { kind: List, derived: false, required: false, description: "Ordered SUBSCRIBE or UNSUBSCRIBE topics", children: SUBS, reflect: subscriptions },
  }
- layout fn mqtt_layout();
 }
 fn mqtt_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = mqtt_layout();
     let mut fields = Vec::new();
     if !b.is_empty() {
         fields.push(crate::layout::FieldLayout {

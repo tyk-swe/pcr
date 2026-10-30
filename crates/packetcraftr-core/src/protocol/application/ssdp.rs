@@ -28,10 +28,8 @@ crate::reflective_layer! {
     "start_line" => { kind: Bytes, derived: false, required: false, description: "Verbatim request or response start line", reflect: start_line },
     "headers" => { kind: List, derived: false, required: false, description: "Ordered header names and values", children: HEADERS, reflect: headers },
  }
- layout fn ssdp_layout();
 }
 fn ssdp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = ssdp_layout();
     let mut fields = Vec::new();
     if let Some(first) = b.windows(2).position(|p| p == b"\r\n") {
         fields.push(crate::layout::FieldLayout {

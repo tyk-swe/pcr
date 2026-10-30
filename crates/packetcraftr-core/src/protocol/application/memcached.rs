@@ -48,10 +48,8 @@ crate::reflective_layer! {
     "key" => { kind: Bytes, derived: false, required: false, description: "key", reflect: key },
     "value" => { kind: Bytes, derived: false, required: false, description: "value", reflect: value },
  }
- layout fn memcached_layout();
 }
 fn memcached_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = memcached_layout();
     let mut fields = Vec::new();
     if !b.is_empty() {
         fields.push(crate::layout::FieldLayout {

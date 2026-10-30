@@ -48,10 +48,8 @@ crate::reflective_layer! {
     "exception_code" => { kind: Unsigned, derived: false, required: false, description: "exception code", reflect: exception_code },
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
- layout fn modbustcp_layout();
 }
 fn modbustcp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = modbustcp_layout();
     let mut fields = Vec::new();
     if 2 <= b.len() {
         fields.push(crate::layout::FieldLayout {

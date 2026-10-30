@@ -48,10 +48,8 @@ crate::reflective_layer! {
     "common_address" => { kind: Unsigned, derived: false, required: false, description: "common address", reflect: common_address },
     "objects" => { kind: Bytes, derived: false, required: false, description: "objects", reflect: objects },
  }
- layout fn iec104_layout();
 }
 fn iec104_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = iec104_layout();
     let fields = Vec::new();
     let _ = b;
     fields

@@ -85,10 +85,8 @@ crate::reflective_layer! {
     "lsas" => { kind: List, derived: false, required: false, description: "LSA header and opaque body", children: LSAS, reflect: lsas },
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
- layout fn ospfv3_layout();
 }
 fn ospfv3_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = ospfv3_layout();
     let mut fields = Vec::new();
     if 2 <= b.len() {
         fields.push(crate::layout::FieldLayout {

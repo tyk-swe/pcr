@@ -63,10 +63,8 @@ crate::reflective_layer! {
     "uptime" => { kind: Unsigned, derived: false, required: false, description: "uptime", reflect: uptime },
     "samples" => { kind: List, derived: false, required: false, description: "Flow/counter sample records; unknown sample formats remain opaque", children: SAMPLES, reflect: samples },
  }
- layout fn sflow_layout();
 }
 fn sflow_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = sflow_layout();
     let mut fields = Vec::new();
     if 8 <= b.len() {
         fields.push(crate::layout::FieldLayout {

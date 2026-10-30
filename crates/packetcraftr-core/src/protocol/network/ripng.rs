@@ -35,10 +35,8 @@ crate::reflective_layer! {
     "command" => { kind: Unsigned, derived: false, required: false, description: "command", reflect: command },
     "routes" => { kind: List, derived: false, required: false, description: "Ordered route entries", children: ROUTES, reflect: routes },
  }
- layout fn ripng_layout();
 }
 fn ripng_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = ripng_layout();
     let mut fields = Vec::new();
     if !b.is_empty() {
         fields.push(crate::layout::FieldLayout {

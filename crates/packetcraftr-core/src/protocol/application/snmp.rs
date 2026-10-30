@@ -65,10 +65,8 @@ crate::reflective_layer! {
     "timestamp" => { kind: Unsigned, derived: false, required: false, description: "timestamp", reflect: timestamp },
     "varbinds" => { kind: List, derived: false, required: false, description: "BER object identifier content and typed value envelopes", children: VARBINDS, reflect: varbinds },
  }
- layout fn snmp_layout();
 }
 fn snmp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = snmp_layout();
     let fields = Vec::new();
     let _ = b;
     fields

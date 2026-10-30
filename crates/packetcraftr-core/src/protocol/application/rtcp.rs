@@ -25,10 +25,8 @@ crate::reflective_layer! {
  impl Rtcp {
     "packets" => { kind: List, derived: false, required: false, description: "Ordered compound RTCP packets", children: PACKETS, reflect: packets },
  }
- layout fn rtcp_layout();
 }
 fn rtcp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = rtcp_layout();
     let mut fields = Vec::new();
     if b.len() <= b.len() {
         fields.push(crate::layout::FieldLayout {

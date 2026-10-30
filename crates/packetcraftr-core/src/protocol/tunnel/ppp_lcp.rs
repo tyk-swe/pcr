@@ -39,10 +39,8 @@ crate::reflective_layer! {
     "options" => { kind: List, derived: false, required: false, description: "Ordered control protocol options", children: OPTIONS, reflect: options },
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
- layout fn ppplcp_layout();
 }
 fn ppplcp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = ppplcp_layout();
     let mut fields = Vec::new();
     if !b.is_empty() {
         fields.push(crate::layout::FieldLayout {

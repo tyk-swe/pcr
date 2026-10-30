@@ -7,7 +7,8 @@ use super::Schema;
 use crate::field::{self, WireValue, parse_mac};
 
 /// Declares a layer's reflective schema, its [`Layer`](crate::layer::Layer)
-/// implementation, and a function returning its static field layout. The
+/// implementation, and, when the `layout fn` clause is present, a function
+/// returning its static field layout. The
 /// schema is a `static`, so the `protocol` expression must be a constant
 /// expression (`Id::new("name")`, a `const` item, or a `const fn` call). Field
 /// metadata, including each `children` value, is constant as well.
@@ -68,7 +69,7 @@ macro_rules! reflective_layer {
                 }
             ),* $(,)?
         }
-        layout $vis:vis fn $layout:ident($($layout_arg:ident: $layout_ty:ty),* $(,)?) ;
+        $(layout $vis:vis fn $layout:ident($($layout_arg:ident: $layout_ty:ty),* $(,)?) ;)?
     ) => {
         $schema_vis fn $schema() -> &'static $crate::layer::Schema {
             static SCHEMA: $crate::layer::Schema = $crate::layer::Schema {
@@ -137,6 +138,16 @@ macro_rules! reflective_layer {
 
         }
 
+        $crate::reflective_layer!(@fields_layout
+            [$(($field $(, $start, $end)?)),*]
+            $(layout $vis fn $layout($($layout_arg: $layout_ty),*);)?
+        );
+    };
+    (@fields_layout [$($entry:tt),* $(,)?]) => {};
+    (@fields_layout
+        [$(($field:literal $(, $start:expr_2021, $end:expr_2021)?)),* $(,)?]
+        layout $vis:vis fn $layout:ident($($layout_arg:ident: $layout_ty:ty),* $(,)?) ;
+    ) => {
         $vis fn $layout($($layout_arg: $layout_ty),*)
             -> Vec<$crate::layout::FieldLayout>
         {

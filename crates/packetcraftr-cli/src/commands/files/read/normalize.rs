@@ -10,14 +10,14 @@ use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
 
 use super::selection::{Selection, account_frame};
-use crate::command_options::OfflineCaptureLimitsArgs;
+use crate::command_options::OfflineCaptureLimits;
 use crate::errors::CliError;
 use crate::rendering::SourceCaptureWriter;
 
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     reader: &mut Reader<impl Read>,
-    limits: OfflineCaptureLimitsArgs,
+    limits: OfflineCaptureLimits,
     selection: Selection<'_>,
     format: capture::Format,
     destination: impl Write,
@@ -58,15 +58,15 @@ fn next_selected(
 fn normalize_to_pcapng(
     invocation: &crate::invocation::Invocation,
     reader: &mut Reader<impl Read>,
-    limits: OfflineCaptureLimitsArgs,
+    limits: OfflineCaptureLimits,
     selection: Selection<'_>,
     destination: impl Write,
 ) -> Result<(), CliError> {
     let writer = capture::Writer::pcapng_with_options(
         destination,
         capture::PcapNgOptions {
-            max_size: limits.reader.max_frame_bytes,
-            max_interfaces: limits.reader.max_interfaces,
+            max_size: limits.reader_bounds().max_frame_bytes,
+            max_interfaces: limits.reader_bounds().max_interfaces,
             stream_limits: limits.stream_limits(),
             ..capture::PcapNgOptions::default()
         },
@@ -102,7 +102,7 @@ fn source_description<R: Read>(reader: &Reader<R>, source_interface: u32) -> &ca
 fn normalize_to_pcap<W: Write>(
     invocation: &crate::invocation::Invocation,
     reader: &mut Reader<impl Read>,
-    limits: OfflineCaptureLimitsArgs,
+    limits: OfflineCaptureLimits,
     selection: Selection<'_>,
     destination: W,
 ) -> Result<(), CliError> {
@@ -161,7 +161,7 @@ fn normalize_to_pcap<W: Write>(
 fn open_classic_writer<W: Write>(
     destination: W,
     description: &capture::Interface,
-    limits: OfflineCaptureLimitsArgs,
+    limits: OfflineCaptureLimits,
 ) -> Result<capture::Writer<W>, CliError> {
     let timestamp_resolution = match description.timestamp_resolution {
         resolution @ (capture::TimestampResolution::Decimal(6)
@@ -175,7 +175,7 @@ fn open_classic_writer<W: Write>(
     };
     // PCAPNG marks an unlimited snapshot with zero; classic PCAP needs a finite header value.
     let snap_len = match description.snap_len {
-        0 => limits.reader.max_frame_bytes,
+        0 => limits.reader_bounds().max_frame_bytes,
         snap_len => usize::try_from(snap_len).unwrap_or(usize::MAX),
     };
     capture::Writer::pcap_with_options(
@@ -184,7 +184,7 @@ fn open_classic_writer<W: Write>(
         capture::PcapOptions {
             timestamp_resolution,
             snap_len,
-            max_size: limits.reader.max_frame_bytes,
+            max_size: limits.reader_bounds().max_frame_bytes,
             stream_limits: limits.stream_limits(),
             ..capture::PcapOptions::default()
         },

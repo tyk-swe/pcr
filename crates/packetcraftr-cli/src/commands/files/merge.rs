@@ -46,7 +46,7 @@ pub(crate) fn run(
     format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    args.limits.validate()?;
+    let limits = args.limits.limits()?;
     let reorder = args.max_reorder_frames > 0;
     if reorder && args.order == OrderArg::Append {
         return Err(CliError::new(
@@ -90,10 +90,10 @@ pub(crate) fn run(
                 staged.as_file_mut(),
             ))?,
         capture_file::PcapNgOptions {
-            max_size: args.limits.reader.max_frame_bytes,
+            max_size: limits.reader_bounds().max_frame_bytes,
             // --max-interfaces bounds each input section, not the one output section.
             max_interfaces: capture_file::DEFAULT_MAX_TOTAL_INTERFACES,
-            stream_limits: args.limits.stream_limits(),
+            stream_limits: limits.stream_limits(),
             ..Default::default()
         },
     )
@@ -102,7 +102,7 @@ pub(crate) fn run(
         &mut sources,
         &mut writer,
         capture_file::MergeLimits {
-            streams: args.limits.stream_limits(),
+            streams: limits.stream_limits(),
             order: args.order.into(),
             max_reorder_frames: usize::try_from(args.max_reorder_frames).unwrap_or(usize::MAX),
             ..Default::default()

@@ -59,6 +59,7 @@ pub(crate) fn run(
         .map(crate::command_options::Selector::get)
         .collect::<Result<Vec<_>, _>>()?;
     let setup = crate::commands::offline_analysis::prepare(
+        args.limits.capture.limits()?,
         args.limits,
         args.filter.as_deref(),
         &args.decode,
@@ -71,13 +72,16 @@ pub(crate) fn run(
     };
     selection.validate().map_err(CliError::classified)?;
     let mut staged = crate::staged_output::StagedFile::stage(invocation, &args.write)?;
-    let limits = args.limits.capture.stream_limits();
-    let mut source =
-        crate::input::open_capture(invocation, &args.path, args.limits.capture.reader)?;
+    let limits = args.limits.capture.limits()?.stream_limits();
+    let mut source = crate::input::open_capture(
+        invocation,
+        &args.path,
+        args.limits.capture.limits()?.reader_bounds(),
+    )?;
     let mut reader = crate::input::snapshot_capture(
         invocation,
         &mut source,
-        args.limits.capture.reader,
+        args.limits.capture.limits()?.reader_bounds(),
         limits,
     )?;
     let plan = analysis::export::plan(

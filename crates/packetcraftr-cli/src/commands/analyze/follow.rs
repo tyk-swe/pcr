@@ -69,8 +69,10 @@ pub(super) fn run(
              choose --direction client or --direction server",
         ));
     }
-    let prepared = prepare(arguments.limits, None, &arguments.decode)?;
-    crate::command_options::validate_output_bytes(arguments.max_application_output_bytes)?;
+    let capture_limits = arguments.limits.capture.limits()?;
+    let prepared = prepare(capture_limits, arguments.limits, None, &arguments.decode)?;
+    let max_output_bytes =
+        crate::command_options::OutputBytes::try_from(arguments.max_application_output_bytes)?;
     let mut files = arguments
         .write
         .as_deref()
@@ -80,11 +82,11 @@ pub(super) fn run(
                 directory,
                 selector,
                 arguments.direction,
-                arguments.max_application_output_bytes,
+                max_output_bytes.get(),
             )
         })
         .transpose()?;
-    let mut reader = open_capture(invocation, &arguments.path, arguments.limits.capture.reader)?;
+    let mut reader = open_capture(invocation, &arguments.path, capture_limits.reader_bounds())?;
 
     // Indices stay capture-global, so the index stats reports is the index extracted here.
     let session = analysis::Session::new(
@@ -96,7 +98,7 @@ pub(super) fn run(
         Collector::new(selector),
     );
     let direction = arguments.direction;
-    let mut state = State::new(arguments.limits.capture.retention_ceiling());
+    let mut state = State::new(capture_limits.retention_ceiling());
     let mut sink = |chunk: Chunk| -> Result<(), packetcraftr_core::error::BoundaryError> {
         if direction_matches(direction, &chunk) {
             if let Some(files) = files.as_mut() {

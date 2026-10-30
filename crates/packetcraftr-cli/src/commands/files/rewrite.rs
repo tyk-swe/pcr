@@ -62,7 +62,7 @@ pub(crate) fn run(
     format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    args.limits.validate()?;
+    let capture_limits = args.limits.limits()?;
     let checksum_mode = args
         .checksum_mode
         .map(ChecksumMode::from)
@@ -134,7 +134,11 @@ pub(crate) fn run(
         ));
     }
     let rules = rules.try_map_filters(|filter| {
-        filtering::frame_selector(&filter, &registry, args.limits.reader.max_frame_bytes)
+        filtering::frame_selector(
+            &filter,
+            &registry,
+            capture_limits.reader_bounds().max_frame_bytes,
+        )
     })?;
     let growth = rules.maximum_growth();
     let mut staged = if args.dry_run {
@@ -147,10 +151,11 @@ pub(crate) fn run(
     };
     let deadline = Deadline::new(args.duration.max_duration())
         .with_cancellation(Some(invocation.cancellation.clone()));
-    let mut reader = crate::input::open_capture(invocation, &args.path, args.limits.reader)?;
+    let mut reader =
+        crate::input::open_capture(invocation, &args.path, capture_limits.reader_bounds())?;
     let limits = capture_file::Limits {
-        max_frames: args.limits.max_frames,
-        max_bytes: args.limits.max_bytes,
+        max_frames: capture_limits.max_frames(),
+        max_bytes: capture_limits.max_bytes(),
     };
     let inner: Box<dyn std::io::Write> = match staged.as_mut() {
         Some(staged) => Box::new(std::io::BufWriter::with_capacity(
@@ -162,7 +167,7 @@ pub(crate) fn run(
     let mut writer = capture_file::Writer::pcapng_with_options(
         args.compression.for_file().writer(inner)?,
         capture_file::PcapNgOptions {
-            max_size: args.limits.reader.max_frame_bytes,
+            max_size: capture_limits.reader_bounds().max_frame_bytes,
             // --max-interfaces bounds each input section, not the one output section.
             max_interfaces: capture_file::DEFAULT_MAX_TOTAL_INTERFACES,
             stream_limits: limits,
@@ -180,7 +185,7 @@ pub(crate) fn run(
                 frame,
                 &dissector,
                 transform::RewriteLimits {
-                    max_output_bytes: args.limits.reader.max_frame_bytes,
+                    max_output_bytes: capture_limits.reader_bounds().max_frame_bytes,
                 },
                 |filter| {
                     filter.keep(number, frame).map_err(|error| {

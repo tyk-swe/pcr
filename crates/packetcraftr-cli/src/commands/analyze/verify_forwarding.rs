@@ -82,7 +82,12 @@ pub(super) fn run(
             Vec::new(),
         ));
     }
-    let prepared = offline_analysis::prepare(arguments.limits, None, &arguments.decode)?;
+    let prepared = offline_analysis::prepare(
+        arguments.limits.capture.limits()?,
+        arguments.limits,
+        None,
+        &arguments.decode,
+    )?;
     let rules = forwarding::Rules::compile_declarations(
         forwarding::Declarations {
             identity: &arguments.identity,

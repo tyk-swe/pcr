@@ -92,10 +92,11 @@ impl Capture {
         source: Option<security::Source>,
     ) -> Result<CommandExit, CliError> {
         let limits = self.bounds.core()?;
-        self.application.validate_output()?;
-        let collector = security::capture::Collector::new(mode, limits, self.application.core())
+        let application = self.application.limits()?;
+        let collector = security::capture::Collector::new(mode, limits, application.core())
             .map_err(CliError::classified)?;
         let prepared = crate::commands::offline_analysis::prepare(
+            self.limits.capture.limits()?,
             self.limits,
             self.filter.as_deref(),
             &self.decode,
@@ -105,8 +106,11 @@ impl Capture {
             prepared.options(invocation),
             collector,
         );
-        let mut reader =
-            crate::input::open_capture(invocation, &self.path, self.limits.capture.reader)?;
+        let mut reader = crate::input::open_capture(
+            invocation,
+            &self.path,
+            self.limits.capture.limits()?.reader_bounds(),
+        )?;
         let mut report = session
             .run(&mut reader, |_| Ok(()), |_| Ok(()))
             .map_err(CliError::classified)?
@@ -128,9 +132,7 @@ impl Capture {
             .measurements
             .insert("capture".into(), serde_json::json!(self.path));
         let mut bounds = self.bounds;
-        bounds.max_result_bytes = bounds
-            .max_result_bytes
-            .min(self.application.max_application_output_bytes);
+        bounds.max_result_bytes = bounds.max_result_bytes.min(application.max_output_bytes());
         publish(invocation, command, report, bounds)
     }
 }

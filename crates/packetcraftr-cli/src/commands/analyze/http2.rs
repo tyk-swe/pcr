@@ -60,10 +60,10 @@ impl crate::commands::Spec for Args {
 
 fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
     let stream = &invocation.output;
-    args.application.validate_output()?;
+    let application = args.application.limits()?;
     let mut ports = args.http2_ports.clone();
     ports.extend([80, 8080]);
-    let mut collector = Collector::new(args.application.core(), ports, args.http2_limits())
+    let mut collector = Collector::new(application.core(), ports, args.http2_limits())
         .map_err(CliError::classified)?;
     if let Some(deadline) = invocation.deadline.clone() {
         collector = collector.with_deadline(deadline);
@@ -77,7 +77,7 @@ fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), Cli
             path: &args.path,
             limits: args.limits,
             decode: &args.decode,
-            application: args.application,
+            application,
             selector,
         },
         collector,

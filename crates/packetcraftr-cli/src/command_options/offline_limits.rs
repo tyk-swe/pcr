@@ -94,20 +94,52 @@ impl CaptureReaderBoundsArgs {
     }
 }
 
+/// Validated capture-reader bounds; construct through
+/// [`OfflineCaptureLimitsArgs::limits`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OfflineCaptureLimits {
+    max_frames: u64,
+    max_bytes: u64,
+    reader: CaptureReaderBoundsArgs,
+}
+
+impl OfflineCaptureLimits {
+    pub(crate) const fn stream_limits(&self) -> capture::Limits {
+        capture::Limits {
+            max_frames: self.max_frames,
+            max_bytes: self.max_bytes,
+        }
+    }
+
+    pub(crate) fn retention_ceiling(&self) -> usize {
+        usize::try_from(self.max_frames).unwrap_or(usize::MAX)
+    }
+
+    pub(crate) const fn reader_bounds(&self) -> CaptureReaderBoundsArgs {
+        self.reader
+    }
+
+    pub(crate) const fn max_frames(&self) -> u64 {
+        self.max_frames
+    }
+
+    pub(crate) const fn max_bytes(&self) -> u64 {
+        self.max_bytes
+    }
+}
+
 impl OfflineCaptureLimitsArgs {
-    pub(crate) fn validate(self) -> Result<(), CliError> {
+    pub(crate) fn limits(self) -> Result<OfflineCaptureLimits, CliError> {
         let Self {
             max_frames,
             max_bytes,
-            reader:
-                CaptureReaderBoundsArgs {
-                    max_decoded_bytes: _,
-                    max_encoded_bytes: _,
-                    max_frame_bytes,
-                    max_interfaces,
-                },
+            reader,
         } = self;
-        if max_frames == 0 || max_bytes == 0 || max_frame_bytes == 0 || max_interfaces == 0 {
+        if max_frames == 0
+            || max_bytes == 0
+            || reader.max_frame_bytes == 0
+            || reader.max_interfaces == 0
+        {
             return Err(CliError::from_classification(
                 Classification::new(
                     "cli.capture_limit",
@@ -118,18 +150,25 @@ impl OfflineCaptureLimitsArgs {
                 Vec::new(),
             ));
         }
-        if u64::try_from(max_frame_bytes).unwrap_or(u64::MAX) > max_bytes {
+        if u64::try_from(reader.max_frame_bytes).unwrap_or(u64::MAX) > max_bytes {
             return Err(CliError::from_classification(
                 Classification::new(
                     "cli.capture_limit",
                     Kind::Usage,
                     Some("set max-frame-bytes no higher than the aggregate max-bytes budget"),
                 ),
-                format!("max-frame-bytes {max_frame_bytes} exceeds max-bytes {max_bytes}"),
+                format!(
+                    "max-frame-bytes {} exceeds max-bytes {max_bytes}",
+                    reader.max_frame_bytes
+                ),
                 Vec::new(),
             ));
         }
-        Ok(())
+        Ok(OfflineCaptureLimits {
+            max_frames,
+            max_bytes,
+            reader,
+        })
     }
 
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
@@ -138,17 +177,6 @@ impl OfflineCaptureLimitsArgs {
             max_bytes: Bytes @ PhysicalInput preset(16777216, 268435456),
         ]);
         self.reader.resources(settings);
-    }
-
-    pub(crate) fn retention_ceiling(self) -> usize {
-        usize::try_from(self.max_frames).unwrap_or(usize::MAX)
-    }
-
-    pub(crate) const fn stream_limits(self) -> capture::Limits {
-        capture::Limits {
-            max_frames: self.max_frames,
-            max_bytes: self.max_bytes,
-        }
     }
 }
 

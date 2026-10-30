@@ -43,26 +43,59 @@ impl ApplicationLimitsArgs {
         ]);
     }
 
-    pub(crate) fn core(self) -> Limits {
-        Limits {
-            max_messages: self.max_application_messages,
-            max_streams: self.max_application_streams,
-            max_buffer_bytes: self.max_application_buffer_bytes,
-            max_retained_bytes: self.max_application_retained_bytes,
-            max_source_spans: self.max_application_source_spans,
-        }
-    }
-    pub(crate) fn validate_output(self) -> Result<(), CliError> {
-        validate_output_bytes(self.max_application_output_bytes)
+    pub(crate) fn limits(self) -> Result<ApplicationLimits, CliError> {
+        Ok(ApplicationLimits {
+            core: Limits {
+                max_messages: self.max_application_messages,
+                max_streams: self.max_application_streams,
+                max_buffer_bytes: self.max_application_buffer_bytes,
+                max_retained_bytes: self.max_application_retained_bytes,
+                max_source_spans: self.max_application_source_spans,
+            },
+            max_output_bytes: OutputBytes::try_from(self.max_application_output_bytes)?,
+        })
     }
 }
 
-pub(crate) fn validate_output_bytes(value: usize) -> Result<(), CliError> {
-    if value == 0 || value > 256 * 1024 * 1024 {
-        return Err(CliError::new(
-            packetcraftr_core::error::Kind::Usage,
-            "--max-application-output-bytes must be in 1..=268435456",
-        ));
+/// `--max-application-output-bytes` after the `1..=268435456` check; only
+/// `TryFrom` can build one.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OutputBytes(usize);
+
+impl OutputBytes {
+    pub(crate) const fn get(self) -> usize {
+        self.0
     }
-    Ok(())
+}
+
+impl TryFrom<usize> for OutputBytes {
+    type Error = CliError;
+
+    fn try_from(value: usize) -> Result<Self, CliError> {
+        if value == 0 || value > 256 * 1024 * 1024 {
+            return Err(CliError::new(
+                packetcraftr_core::error::Kind::Usage,
+                "--max-application-output-bytes must be in 1..=268435456",
+            ));
+        }
+        Ok(Self(value))
+    }
+}
+
+/// Validated `ApplicationLimitsArgs`: the analysis limits plus the bounded
+/// output byte ceiling.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ApplicationLimits {
+    core: Limits,
+    max_output_bytes: OutputBytes,
+}
+
+impl ApplicationLimits {
+    pub(crate) const fn core(self) -> Limits {
+        self.core
+    }
+
+    pub(crate) const fn max_output_bytes(self) -> usize {
+        self.max_output_bytes.get()
+    }
 }

@@ -87,7 +87,12 @@ pub(super) fn run(
     }
     let collector = Collector::new(tls_limits).map_err(CliError::classified)?;
 
-    let prepared = prepare(arguments.limits, None, &arguments.decode)?;
+    let prepared = prepare(
+        arguments.limits.capture.limits()?,
+        arguments.limits,
+        None,
+        &arguments.decode,
+    )?;
     let session = analysis::Session::new(
         prepared.registry.clone(),
         analysis::Options {
@@ -99,7 +104,11 @@ pub(super) fn run(
         },
         collector,
     );
-    let mut reader = open_capture(invocation, &arguments.path, arguments.limits.capture.reader)?;
+    let mut reader = open_capture(
+        invocation,
+        &arguments.path,
+        arguments.limits.capture.limits()?.reader_bounds(),
+    )?;
 
     let mut state = State::new(arguments.max_output_sessions);
     let outcome = session

@@ -80,7 +80,7 @@ pub(super) fn run(
         tree,
         decode,
     } = arguments;
-    limits.validate()?;
+    let limits = limits.limits()?;
     let bounds = epoch.resolve()?;
     let selection = selection.resolve()?;
     validate_dissect_format(dissect, format)?;
@@ -102,12 +102,12 @@ pub(super) fn run(
         filter.as_deref(),
         dissect,
         &registry,
-        limits.reader.max_frame_bytes,
+        limits.reader_bounds().max_frame_bytes,
     )?;
     let mut tree = tree
         .tree
         .then(|| FieldTree::new(Arc::clone(&registry), tree.max_tree_bytes));
-    let mut reader = open_capture(invocation, &path, limits.reader)?;
+    let mut reader = open_capture(invocation, &path, limits.reader_bounds())?;
     let selection = Selection {
         bounds,
         frames: &selection,

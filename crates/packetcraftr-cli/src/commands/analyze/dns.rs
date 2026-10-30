@@ -42,10 +42,10 @@ impl crate::commands::Spec for Args {
 
 fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
     let stream = &invocation.output;
-    args.application.validate_output()?;
+    let application = args.application.limits()?;
     let mut ports = args.dns_ports;
     ports.push(53);
-    let collector = Collector::new(args.application.core(), ports).map_err(CliError::classified)?;
+    let collector = Collector::new(application.core(), ports).map_err(CliError::classified)?;
     let (mut messages, mut transactions, mut issues) = (Vec::new(), Vec::new(), Vec::new());
     let outcome = inspect(
         invocation,
@@ -53,7 +53,7 @@ fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), Cli
             path: &args.path,
             limits: args.limits,
             decode: &args.decode,
-            application: args.application,
+            application,
             selector: args
                 .stream
                 .as_ref()

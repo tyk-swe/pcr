@@ -7,7 +7,8 @@ pub(crate) use decode::DecodeArgs;
 pub(crate) use epoch_bounds::EpochBoundsArgs;
 pub(crate) use frame_ranges::{FrameSelection, FrameSelectionArgs};
 pub(crate) use offline_limits::{
-    AnalysisStages, CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs, OfflineLimitsArgs,
+    AnalysisStages, CaptureReaderBoundsArgs, OfflineCaptureLimits, OfflineCaptureLimitsArgs,
+    OfflineLimitsArgs,
 };
 pub(crate) use packet_budget::PacketBudgetArgs;
 pub(crate) use policy::{
@@ -50,7 +51,7 @@ mod timestamp;
 pub(crate) use timestamp::parse_timestamp;
 
 mod application;
-pub(crate) use application::{ApplicationLimitsArgs, validate_output_bytes};
+pub(crate) use application::{ApplicationLimits, ApplicationLimitsArgs, OutputBytes};
 
 pub(crate) fn parse_target(
     target: String,

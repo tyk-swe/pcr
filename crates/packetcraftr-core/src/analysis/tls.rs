@@ -589,3 +589,230 @@ impl SessionCollector for Collector {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::build::Builder;
+    use crate::capture_file::{Format, Reader, Writer};
+    use crate::frame::{Frame, LinkType};
+    use crate::layer::Raw;
+    use crate::packet::Packet;
+    use crate::protocol::application::tls::{CONTENT_TYPE_ALERT, CONTENT_TYPE_HANDSHAKE};
+    use crate::protocol::builtin;
+    use crate::protocol::network::Ipv4;
+    use live::Side;
+    use std::io::Cursor;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    const FATAL: Alert = Alert {
+        level: ALERT_LEVEL_FATAL,
+        description: 40,
+    };
+    const WARNING: Alert = Alert {
+        level: ALERT_LEVEL_WARNING,
+        description: 100,
+    };
+
+    fn record(content_type: u8, body: &[u8]) -> Vec<u8> {
+        [
+            &[content_type, 3, 3],
+            u16::try_from(body.len()).unwrap().to_be_bytes().as_slice(),
+            body,
+        ]
+        .concat()
+    }
+
+    fn capture(deliveries: &[(Side, &[u8])]) -> Vec<u8> {
+        let body = [&[3, 3][..], &[0; 32], &[0, 0, 2, 0, 0x2f, 1, 0]].concat();
+        let hello = record(
+            CONTENT_TYPE_HANDSHAKE,
+            &[&[1, 0, 0, 41], body.as_slice()].concat(),
+        );
+        let segments = std::iter::once((Side::First, hello.as_slice(), Tcp::ACK))
+            .chain(
+                deliveries
+                    .iter()
+                    .map(|(side, bytes)| (*side, *bytes, Tcp::ACK)),
+            )
+            .chain(std::iter::once((Side::First, &[][..], Tcp::FIN | Tcp::ACK)));
+        let builder = Builder::new(builtin::registry());
+        let mut writer = Writer::new(Vec::new(), Format::Pcap, LinkType::IPV4).unwrap();
+        let mut sequences = [1, 1];
+        for (index, (side, payload, flags)) in segments.enumerate() {
+            let (source, destination, source_port, destination_port, direction) = match side {
+                Side::First => ("192.0.2.1", "192.0.2.2", 50000, 443, 0),
+                Side::Reverse => ("192.0.2.2", "192.0.2.1", 443, 50000, 1),
+            };
+            let mut packet = Packet::default();
+            packet
+                .push(Ipv4 {
+                    source: source.parse().unwrap(),
+                    destination: destination.parse().unwrap(),
+                    ..Default::default()
+                })
+                .push(Tcp {
+                    source_port,
+                    destination_port,
+                    sequence: sequences[direction],
+                    flags,
+                    ..Default::default()
+                })
+                .push(Raw::new(payload.to_vec()));
+            sequences[direction] += u32::try_from(payload.len()).unwrap();
+            let built = builder
+                .build(packet, Default::default(), Default::default())
+                .unwrap();
+            writer
+                .write_frame(
+                    &Frame::new(
+                        Some(UNIX_EPOCH + Duration::from_secs(index as u64 + 1)),
+                        LinkType::IPV4,
+                        built.bytes,
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+        }
+        writer.into_inner()
+    }
+
+    fn analyze(bytes: &[u8], limits: Limits) -> (Vec<SessionEvent>, Summary) {
+        let mut reader = Reader::with_limits(Cursor::new(bytes), Default::default()).unwrap();
+        let collector = Collector::new(limits).unwrap();
+        let session =
+            crate::analysis::Session::new(builtin::registry(), Default::default(), collector);
+        let mut events = Vec::new();
+        let outcome = session
+            .run(
+                &mut reader,
+                |_| Ok(()),
+                |event| {
+                    events.push(event);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        (events, outcome.summary)
+    }
+
+    #[test]
+    fn fragmented_fatal_alert_is_reported_and_selected() {
+        let (events, summary) = analyze(
+            include_bytes!("../../../../examples/captures/tls-fragmented-alert.pcap"),
+            Limits::default(),
+        );
+        assert_eq!(events.len(), 1);
+        let session = &events[0].session;
+        assert_eq!(session.status, Status::Alert);
+        assert_eq!(session.alerts, [FATAL]);
+        assert_eq!(summary.by_status.get(&Status::Alert), Some(&1));
+        assert!(
+            Selector {
+                statuses: vec![Status::Alert],
+                ..Default::default()
+            }
+            .matches(session)
+        );
+    }
+
+    #[test]
+    fn alert_record_layout_and_tcp_chunking_preserve_messages() {
+        for bodies in [
+            vec![vec![
+                WARNING.level,
+                WARNING.description,
+                FATAL.level,
+                FATAL.description,
+            ]],
+            vec![
+                vec![WARNING.level],
+                vec![WARNING.description, FATAL.level],
+                vec![FATAL.description],
+            ],
+        ] {
+            let wire: Vec<_> = bodies
+                .iter()
+                .flat_map(|body| record(CONTENT_TYPE_ALERT, body))
+                .collect();
+            for side in [Side::First, Side::Reverse] {
+                for chunk_size in 1..=wire.len() {
+                    let deliveries: Vec<_> =
+                        wire.chunks(chunk_size).map(|bytes| (side, bytes)).collect();
+                    let (events, _) = analyze(&capture(&deliveries), Limits::default());
+                    assert_eq!(events.len(), 1);
+                    assert_eq!(events[0].session.status, Status::Alert);
+                    assert_eq!(events[0].session.alerts, [WARNING, FATAL]);
+                    assert_eq!(events[0].session.alerts_dropped, 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn partial_alerts_are_kept_in_their_own_direction() {
+        let level = record(CONTENT_TYPE_ALERT, &[FATAL.level]);
+        let description = record(CONTENT_TYPE_ALERT, &[FATAL.description]);
+        let warning = record(CONTENT_TYPE_ALERT, &[WARNING.level, WARNING.description]);
+        let (events, _) = analyze(
+            &capture(&[
+                (Side::Reverse, &level),
+                (Side::First, &warning),
+                (Side::Reverse, &description),
+            ]),
+            Limits::default(),
+        );
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].session.status, Status::Alert);
+        assert_eq!(events[0].session.alerts, [WARNING, FATAL]);
+    }
+
+    #[test]
+    fn coalesced_alerts_keep_the_fatal_alert_when_retention_is_full() {
+        let warning_count = MAX_ALERTS + 2;
+        let body = [
+            [WARNING.level, WARNING.description].repeat(warning_count),
+            vec![FATAL.level, FATAL.description],
+        ]
+        .concat();
+        let wire = record(CONTENT_TYPE_ALERT, &body);
+        let (events, _) = analyze(&capture(&[(Side::Reverse, &wire)]), Limits::default());
+        assert_eq!(events.len(), 1);
+        let session = &events[0].session;
+        assert_eq!(session.status, Status::Alert);
+        assert_eq!(
+            session.alerts,
+            [vec![WARNING; MAX_ALERTS - 1], vec![FATAL]].concat()
+        );
+        assert_eq!(
+            usize::try_from(session.alerts_dropped).unwrap() + session.alerts.len(),
+            warning_count + 1
+        );
+    }
+
+    #[test]
+    fn partial_alert_bytes_count_toward_the_aggregate_limit() {
+        let warning_bytes = [WARNING.level, WARNING.description].repeat(MAX_ALERTS);
+        let warnings = record(CONTENT_TYPE_ALERT, &warning_bytes);
+        let level = record(CONTENT_TYPE_ALERT, &[FATAL.level]);
+        let description = record(CONTENT_TYPE_ALERT, &[FATAL.description]);
+        let bytes = capture(&[
+            (Side::Reverse, &warnings),
+            (Side::Reverse, &level),
+            (Side::Reverse, &description),
+        ]);
+        let budget = warning_bytes.len() + level.len();
+        for (extra, status) in [(0, Status::Gap), (1, Status::Alert)] {
+            let (events, summary) = analyze(
+                &bytes,
+                Limits {
+                    max_buffered_bytes: budget + extra,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].session.status, status);
+            assert_eq!(summary.evicted_sessions, u64::from(extra == 0));
+        }
+    }
+}

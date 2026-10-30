@@ -51,6 +51,7 @@ struct DirectionState {
     /// Concatenated handshake record bodies not yet consumed by a complete
     /// handshake message.
     messages: BytesMut,
+    alert_level: Option<u8>,
     /// Whether a `change_cipher_spec` record has already been skipped. TLS
     /// 1.3 middlebox-compatibility mode sends exactly one in each direction
     /// mid-handshake; a second one ends the handshake this collector can see.
@@ -61,13 +62,17 @@ struct DirectionState {
 
 impl DirectionState {
     fn charged(&self) -> usize {
-        self.partial.len().saturating_add(self.messages.len())
+        self.partial
+            .len()
+            .saturating_add(self.messages.len())
+            .saturating_add(usize::from(self.alert_level.is_some()))
     }
 
     fn finish(&mut self) {
         self.done = true;
         self.partial = BytesMut::new();
         self.messages = BytesMut::new();
+        self.alert_level = None;
     }
 }
 
@@ -390,36 +395,47 @@ impl Live {
                 Verdict::Open
             }
             CONTENT_TYPE_ALERT => {
-                let (Some(level), Some(description)) = (record.body.first(), record.body.get(1))
-                else {
-                    return Verdict::Open;
-                };
-                let alert = Alert {
-                    level: *level,
-                    description: *description,
-                };
-                if self.alerts.len() < MAX_ALERTS {
-                    self.alerts.push(alert);
-                } else if alert.level == ALERT_LEVEL_FATAL {
-                    // The alert that ends the session is always in the record,
-                    // so a status of `alert` names the alert it reports; the
-                    // warning it displaces is counted instead.
-                    self.alerts.pop();
-                    self.alerts.push(alert);
-                    self.alerts_dropped = self.alerts_dropped.saturating_add(1);
-                } else {
-                    // A peer can warn as often as it likes, so the ceiling is
-                    // what keeps the record finite; the rest are counted.
-                    self.alerts_dropped = self.alerts_dropped.saturating_add(1);
-                }
-                if alert.level == ALERT_LEVEL_FATAL {
-                    self.first_direction.finish();
-                    self.reverse_direction.finish();
-                    return Verdict::Finished {
-                        status: Status::Alert,
-                        reason: None,
+                let mut level = self.side_mut(direction).alert_level.take();
+                for &byte in &record.body {
+                    let Some(alert_level) = level.take() else {
+                        level = Some(byte);
+                        continue;
                     };
+                    let alert = Alert {
+                        level: alert_level,
+                        description: byte,
+                    };
+                    if self.alerts.len() < MAX_ALERTS {
+                        self.alerts.push(alert);
+                    } else if alert.level == ALERT_LEVEL_FATAL {
+                        // The terminal alert displaces a warning when retention is full.
+                        self.alerts.pop();
+                        self.alerts.push(alert);
+                        self.alerts_dropped = self.alerts_dropped.saturating_add(1);
+                    } else {
+                        self.alerts_dropped = self.alerts_dropped.saturating_add(1);
+                    }
+                    if alert.level == ALERT_LEVEL_FATAL {
+                        self.first_direction.finish();
+                        self.reverse_direction.finish();
+                        return Verdict::Finished {
+                            status: Status::Alert,
+                            reason: None,
+                        };
+                    }
                 }
+                if level.is_some()
+                    && let Some(verdict) = self.refuse_past_ceiling(
+                        direction,
+                        1,
+                        ceiling,
+                        limit_hits,
+                        REASON_RECORD_CEILING,
+                    )
+                {
+                    return verdict;
+                }
+                self.side_mut(direction).alert_level = level;
                 Verdict::Open
             }
             CONTENT_TYPE_APPLICATION_DATA => {

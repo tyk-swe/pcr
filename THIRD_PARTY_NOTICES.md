@@ -656,7 +656,7 @@ DEALINGS IN THE SOFTWARE.
 
 ## WebPKI bundled Mozilla trust anchors
 
-webpki-roots 1.0.10 (https://github.com/rustls/webpki-roots) supplies the
+webpki-roots 1.0.11 (https://github.com/rustls/webpki-roots) supplies the
 bundled CA trust store used by TLS audits. Its data license follows.
 
 # Community Data License Agreement - Permissive - Version 2.0

@@ -3,6 +3,7 @@
 
 //! Scan and follow-up events in the versioned streaming output contract.
 
+use crate::output::envelope::Published;
 use packetcraftr::scan::followup;
 
 use crate::{errors::CliError, invocation::StreamEncoder, output};
@@ -24,7 +25,7 @@ pub(super) fn emit_event(event: followup::Event, stream: &StreamEncoder) -> Resu
             let record = output::traceroute::hosts::Event::publish(event)
                 .map_err(CliError::classified)?
                 .expect("only diagnostics have no trace record");
-            Ok(stream.emit_data(record, Vec::new())?)
+            Ok(stream.emit_published(Published::new(record, Vec::new()))?)
         }
     }
 }
@@ -63,7 +64,7 @@ pub(super) fn emit_hosts(
     for host in hosts {
         let host = output::scan::host::Host::summarize(host, reverse_dns.next().flatten())
             .map_err(CliError::classified)?;
-        stream.emit_data(host, Vec::new())?;
+        stream.emit_published(Published::new(host, Vec::new()))?;
     }
     Ok(())
 }

@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field::{self, WireValue},
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
@@ -179,7 +179,8 @@ impl Codec for FragmentCodec {
         let reserved_bits = (header[3] >> 1) & 3;
         let diagnostics = nonzero_reserved_fields(header[1], reserved_bits)
             .map(|field| {
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.ipv6_fragment_reserved",
                     "IPv6 Fragment reserved bits are non-zero",
                 )

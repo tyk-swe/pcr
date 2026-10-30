@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::envelope::Published;
 use packetcraftr::scan::{connect, followup};
 
 use crate::output::{self, contract::Format};
@@ -104,18 +105,18 @@ fn emit_streamed(streamed: Streamed, stream: &StreamEncoder) -> Result<(), CliEr
         reverse_dns_stats,
     } = streamed;
     for endpoint in endpoints {
-        stream.emit_data(
+        stream.emit_published(Published::new(
             output::scan::connect::EndpointEvent::from(endpoint),
             Vec::new(),
-        )?;
+        ))?;
     }
     super::streaming::emit_hosts(std::mem::take(&mut report.hosts), reverse_dns, stream)?;
     let diagnostics = std::mem::take(&mut report.diagnostics);
     stream
-        .complete(
+        .complete_published(Published::new(
             output::scan::connect::Summary::new(report, plan, reverse_dns_stats),
             diagnostics,
-        )
+        ))
         .map_err(CliError::from)
 }
 
@@ -130,5 +131,5 @@ struct Streamed {
 fn emit_event(event: connect::Event, stream: &StreamEncoder) -> Result<(), CliError> {
     let connect::Event::Probe(probe) = event;
     let event = output::scan::connect::ProbeEvent::try_from(probe).map_err(CliError::classified)?;
-    Ok(stream.emit_data(event, Vec::new())?)
+    Ok(stream.emit_published(Published::new(event, Vec::new()))?)
 }

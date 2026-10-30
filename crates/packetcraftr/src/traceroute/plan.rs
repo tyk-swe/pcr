@@ -6,8 +6,6 @@ pub(super) mod packet;
 use std::net::IpAddr;
 use std::time::Duration;
 
-use packetcraftr_core::packet::Packet;
-
 use super::Error;
 use super::Request;
 use super::error::probe_error;
@@ -28,13 +26,6 @@ pub struct Probe {
     pub dont_fragment: bool,
     /// Differentiated Services code point, `0..=63`.
     pub dscp: u8,
-}
-
-impl Probe {
-    #[must_use]
-    pub fn packet(&self) -> Packet {
-        packet::probe_packet(self)
-    }
 }
 
 impl crate::probe::runner::Sequenced for Probe {

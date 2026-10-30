@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field::{self, WireValue},
     layer::{Id, Layer, reflective_layer},
     layout::{ByteRange, FieldLayout},
@@ -296,7 +296,8 @@ impl Codec for GtpuCodec {
         let mut diagnostics = Vec::new();
         if layer.version != GTPU_VERSION {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.gtpu_version",
                     "GTP version is not 1; the payload is preserved without typed dissection",
                 )
@@ -305,17 +306,20 @@ impl Codec for GtpuCodec {
         }
         if !layer.protocol_type {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(Severity::Warning,
                     "decode.gtpu_protocol_type",
-                    "the PT flag is clear, so this is GTP' rather than GTP-U; the payload is preserved without typed dissection",
-                )
+                    "the PT flag is clear, so this is GTP' rather than GTP-U; the payload is preserved without typed dissection")
                 .at_field("protocol_type"),
             );
         }
         if layer.reserved {
             diagnostics.push(
-                Diagnostic::warning("decode.gtpu_reserved", "the reserved GTP flag bit is set")
-                    .at_field("reserved"),
+                Diagnostic::new(
+                    Severity::Warning,
+                    "decode.gtpu_reserved",
+                    "the reserved GTP flag bit is set",
+                )
+                .at_field("reserved"),
             );
         }
 
@@ -348,7 +352,8 @@ impl Codec for GtpuCodec {
             ] {
                 if set && !flag {
                     diagnostics.push(
-                        Diagnostic::warning(
+                        Diagnostic::new(
+                            Severity::Warning,
                             "decode.gtpu_flags",
                             format!("{field} is non-zero but its flag is clear"),
                         )

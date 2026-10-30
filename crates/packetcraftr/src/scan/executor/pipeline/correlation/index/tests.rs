@@ -65,7 +65,7 @@ fn request(probe: &Probe) -> Packet {
 }
 
 fn response_base(sent: &Packet) -> Packet {
-    let mut response = Packet::new();
+    let mut response = Packet::default();
     if let Some(ip) = sent.get::<Ipv4>() {
         response.push(Ipv4 {
             source: ip.destination,
@@ -87,7 +87,7 @@ fn response_base(sent: &Packet) -> Packet {
 
 fn decode(packet: Packet) -> decode::DecodedPacket {
     let encoded = built(packet);
-    let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, encoded.bytes).unwrap();
+    let frame = Frame::new(Some(SystemTime::UNIX_EPOCH), LinkType::RAW, encoded.bytes).unwrap();
     decode::Dissector::new(builtin::registry())
         .decode(frame, decode::Options::default())
         .unwrap()
@@ -398,7 +398,7 @@ impl codec::Codec for ProxyCodec {
 
 #[test]
 fn custom_matcher_defaults_to_scoped_conservative_lookup() {
-    let mut builder = Registry::builder();
+    let mut builder = packetcraftr_core::registry::Builder::default();
     builder.register_codec(ProxyCodec("tcp"), &[]).unwrap();
     builder.register_matcher("tcp", Arbitrary).unwrap();
     let registry = builder.build().unwrap();
@@ -629,7 +629,7 @@ fn ipv6_extension_ip_replies_and_truncated_or_bad_integrity_packets_use_the_same
             .frame
             .bytes()
             .slice(..length.min(correct.frame.bytes().len()));
-        let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes).unwrap();
+        let frame = Frame::new(Some(SystemTime::UNIX_EPOCH), LinkType::RAW, bytes).unwrap();
         if let Ok(decoded) =
             decode::Dissector::new(builtin::registry()).decode(frame, decode::Options::default())
         {
@@ -651,7 +651,7 @@ fn ipv6_extension_ip_replies_and_truncated_or_bad_integrity_packets_use_the_same
     }
     let mut corrupt = correct.frame.bytes().to_vec();
     *corrupt.last_mut().unwrap() ^= 1;
-    let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, corrupt).unwrap();
+    let frame = Frame::new(Some(SystemTime::UNIX_EPOCH), LinkType::RAW, corrupt).unwrap();
     let decoded = decode::Dissector::new(builtin::registry())
         .decode(frame, decode::Options::default())
         .unwrap();
@@ -660,7 +660,7 @@ fn ipv6_extension_ip_replies_and_truncated_or_bad_integrity_packets_use_the_same
 
 #[test]
 fn unknown_custom_decoded_identity_and_unrecognized_tunnels_use_conservative_fallback() {
-    let mut builder = Registry::builder();
+    let mut builder = packetcraftr_core::registry::Builder::default();
     builder.register_codec(ProxyCodec("ipv4"), &[]).unwrap();
     builder.register_matcher("ipv4", Arbitrary).unwrap();
     let registry = builder.build().unwrap();
@@ -693,7 +693,7 @@ fn unknown_custom_decoded_identity_and_unrecognized_tunnels_use_conservative_fal
 fn encapsulated_udp_probe_preserves_inner_matching_and_outer_quoted_identity() {
     use packetcraftr_core::protocol::{link::Ethernet, tunnel::Vxlan};
     let mut p = probe(Endpoint::Udp { port: 4789 }, 7, false);
-    let mut payload = Packet::new();
+    let mut payload = Packet::default();
     payload.push(Vxlan {
         vni: 7,
         ..Default::default()

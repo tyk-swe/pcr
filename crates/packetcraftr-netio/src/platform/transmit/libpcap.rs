@@ -12,7 +12,7 @@ use crate::{
 };
 use packetcraftr_core::error::Source;
 
-pub(in crate::platform) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
+pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
     let interface = &frame.route().decision.interface;
     i32::try_from(frame.bytes().len()).map_err(|_| Error::InvalidTransmissionFrame {
         message: format!(

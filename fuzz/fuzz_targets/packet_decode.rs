@@ -22,7 +22,7 @@ fuzz_target!(|data: &[u8]| {
     };
     let roots = LinkType::BUILTIN_ROOTS;
     let link_type = roots[usize::from(*selector) % roots.len()].0;
-    let Ok(frame) = Frame::without_timestamp(link_type, payload.to_vec()) else {
+    let Ok(frame) = Frame::new(None, link_type, payload.to_vec()) else {
         return;
     };
     let dissector = Dissector::new(registry());

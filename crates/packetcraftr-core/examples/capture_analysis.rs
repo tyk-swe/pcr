@@ -33,15 +33,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 BuildOptions::default(),
             )?;
             writer.write_frame(&Frame::new(
-                UNIX_EPOCH + Duration::from_secs(seconds),
+                Some(UNIX_EPOCH + Duration::from_secs(seconds)),
                 LinkType::IPV4,
                 built.bytes,
             )?)?;
         }
     }
 
-    let mut reader = Reader::new(Cursor::new(&capture))?;
-    let mut collector = stats::Collector::new(Duration::from_secs(1))?;
+    let mut reader = Reader::with_limits(Cursor::new(&capture), Default::default())?;
+    let mut collector = stats::Collector::for_table(Duration::from_secs(1), Default::default())?;
     let options = analysis::Options::default();
     let summary = analysis::run(&mut reader, registry, &options, |record| {
         collector.observe(&record);

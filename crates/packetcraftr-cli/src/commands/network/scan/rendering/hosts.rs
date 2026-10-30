@@ -4,7 +4,7 @@
 //! Text rendering for host discovery and reverse-DNS evidence.
 
 use super::listed;
-use crate::rendering::{optional_display, write_stdout_line};
+use crate::rendering::{render_optional, write_stdout_line};
 use crate::{errors::CliError, output};
 
 /// Host records, when discovery or a reverse lookup was requested; the plan
@@ -43,9 +43,9 @@ pub(super) fn render_hosts_text<P>(
                     reason.kind,
                     reason.evidence,
                     reason.basis,
-                    optional_display(reason.probe),
-                    optional_display(reason.link_address),
-                    optional_display(reason.observed_at.as_ref()),
+                    render_optional(reason.probe, |value| value.to_string()),
+                    render_optional(reason.link_address, |value| value.to_string()),
+                    render_optional(reason.observed_at.as_ref(), ToString::to_string),
                 ),
             )?;
         }
@@ -70,9 +70,11 @@ fn neighbor_text(neighbor: &output::scan::host::Neighbor) -> String {
         neighbor.interface.name,
         neighbor.attempts,
         link_text(neighbor.link.as_ref()),
-        optional_display(neighbor.next_hop.as_ref().map(|hop| hop.address)),
+        render_optional(neighbor.next_hop.as_ref().map(|hop| hop.address), |value| {
+            value.to_string()
+        }),
         link_text(neighbor.next_hop.as_ref().and_then(|hop| hop.link.as_ref())),
-        optional_display(neighbor.observed_at.as_ref()),
+        render_optional(neighbor.observed_at.as_ref(), ToString::to_string),
     )
 }
 
@@ -83,7 +85,7 @@ fn reverse_dns_text(lookup: &output::scan::host::ReverseDns) -> String {
         "reverse-dns={} status={} outcome={} names={} names_truncated={}{}",
         lookup.query_name,
         lookup.status,
-        optional_display(lookup.outcome),
+        render_optional(lookup.outcome, |value| value.to_string()),
         listed(&lookup.names),
         lookup.names_truncated,
         lookup
@@ -94,5 +96,8 @@ fn reverse_dns_text(lookup: &output::scan::host::ReverseDns) -> String {
 }
 
 fn link_text(link: Option<&output::scan::host::Link>) -> String {
-    optional_display(link.map(|link| format!("{}/{}", link.address, link.entry.as_str())))
+    render_optional(
+        link.map(|link| format!("{}/{}", link.address, link.entry.as_str())),
+        |value| value.to_string(),
+    )
 }

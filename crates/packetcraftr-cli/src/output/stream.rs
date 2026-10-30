@@ -16,7 +16,7 @@ use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
 use packetcraftr_core::error::{Classification, Kind};
 
 use super::contract::Command;
-use super::envelope::{Envelope, Error, Published, Stats, source_causes};
+use super::envelope::{Envelope, Error, Published, source_causes};
 
 mod error;
 mod record;
@@ -24,7 +24,7 @@ mod record;
 pub use error::EncodeError;
 pub use record::MAX_RECORD_BYTES;
 pub(crate) use record::MeteredError;
-use record::{Counted, ResultMeter, serialize_line, serialize_line_metered};
+use record::{Counted, ResultMeter, serialize_line};
 
 pub trait StreamRecord: Serialize {
     fn event_name(&self) -> &'static str;
@@ -35,7 +35,12 @@ pub fn write_unattributed_error(
     command: Option<Command>,
     error: Error,
 ) -> Result<(), EncodeError> {
-    let line = serialize_line(&Envelope::error_record(command, 0, error), 0)?;
+    let line = serialize_line(
+        &Envelope::error_record(command, 0, error),
+        0,
+        crate::output::stream::MAX_RECORD_BYTES,
+        None,
+    )?;
     writer
         .write_all(&line)
         .and_then(|()| writer.flush())
@@ -188,7 +193,7 @@ impl StreamEncoder {
             return Err(MeteredError::Encode(EncodeError::ReservedEvent));
         }
         let meter = ResultMeter::new(*remaining);
-        let outcome = self.write_success_inner(
+        let outcome = self.write_success(
             event,
             Published::new(result, diagnostics),
             false,
@@ -208,14 +213,6 @@ impl StreamEncoder {
         }
     }
 
-    pub fn emit_data<T: StreamRecord>(
-        &self,
-        result: T,
-        diagnostics: Vec<PacketDiagnostic>,
-    ) -> Result<(), EncodeError> {
-        self.emit_published(Published::new(result, diagnostics))
-    }
-
     pub fn emit_published<T: StreamRecord>(
         &self,
         published: Published<T>,
@@ -224,31 +221,14 @@ impl StreamEncoder {
         if event.is_empty() || matches!(event, "complete" | "error") {
             return Err(EncodeError::ReservedEvent);
         }
-        self.write_success(event, published, false)
-    }
-
-    pub fn complete<T: Serialize>(
-        &self,
-        result: T,
-        diagnostics: Vec<PacketDiagnostic>,
-    ) -> Result<(), EncodeError> {
-        self.complete_published(Published::new(result, diagnostics))
-    }
-
-    pub fn complete_with_stats<T: Serialize>(
-        &self,
-        result: T,
-        diagnostics: Vec<PacketDiagnostic>,
-        stats: Stats,
-    ) -> Result<(), EncodeError> {
-        self.complete_published(Published::new(result, diagnostics).with_stats(stats))
+        self.write_success(event, published, false, None)
     }
 
     pub fn complete_published<T: Serialize>(
         &self,
         published: Published<T>,
     ) -> Result<(), EncodeError> {
-        self.write_success("complete", published, true)
+        self.write_success("complete", published, true, None)
     }
 
     pub fn emit_error(&self, error: Error) -> Result<(), EncodeError> {
@@ -259,7 +239,12 @@ impl StreamEncoder {
         if let Some(observe) = &self.resources {
             record = record.with_resources(observe());
         }
-        let line = serialize_line(&record, sequence)?;
+        let line = serialize_line(
+            &record,
+            sequence,
+            crate::output::stream::MAX_RECORD_BYTES,
+            None,
+        )?;
         check_publication_budget(self.deadline.as_deref(), "serialization")?;
         write_line(
             &mut output,
@@ -289,15 +274,6 @@ impl StreamEncoder {
     }
 
     fn write_success<T: Serialize>(
-        &self,
-        event: &'static str,
-        published: Published<T>,
-        terminal: bool,
-    ) -> Result<(), EncodeError> {
-        self.write_success_inner(event, published, terminal, None)
-    }
-
-    fn write_success_inner<T: Serialize>(
         &self,
         event: &'static str,
         published: Published<T>,
@@ -335,7 +311,7 @@ impl StreamEncoder {
         if let Some(stats) = stats {
             record = record.with_stats(stats);
         }
-        let line = serialize_line_metered(&record, sequence, MAX_RECORD_BYTES, meter)?;
+        let line = serialize_line(&record, sequence, MAX_RECORD_BYTES, meter)?;
         if let Some((meter, remaining)) = budget {
             *remaining -= meter.bytes.get();
         }

@@ -7,4 +7,4 @@
 pub(crate) mod cli;
 mod startup;
 
-pub(crate) use startup::run;
+pub use startup::run;

@@ -110,7 +110,7 @@ pub(super) fn run(
         .then(|| FieldTree::new(Arc::clone(&registry), arguments.tree.max_tree_bytes));
     let decoded = core::decode::Dissector::new(registry)
         .decode(
-            Frame::new(SystemTime::now(), arguments.link_type, bytes)
+            Frame::new(Some(SystemTime::now()), arguments.link_type, bytes)
                 .map_err(CliError::classified)?,
             arguments.budget.decode_options(),
         )

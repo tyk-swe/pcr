@@ -10,7 +10,7 @@ use crate::frame::{Frame, LinkType};
 
 fn frame(seconds: u64, nanoseconds: u32, fill: u8, length: usize) -> Frame {
     Frame::new(
-        UNIX_EPOCH + Duration::new(seconds, nanoseconds),
+        Some(UNIX_EPOCH + Duration::new(seconds, nanoseconds)),
         LinkType::ETHERNET,
         vec![fill; length],
     )
@@ -28,7 +28,8 @@ fn capture(format: Format, frames: &[Frame]) -> Vec<u8> {
 #[test]
 fn empty_captures_read_back_with_zero_frames_in_both_formats() {
     for format in [Format::Pcap, Format::PcapNg] {
-        let mut reader = Reader::new(Cursor::new(capture(format, &[]))).unwrap();
+        let mut reader =
+            Reader::with_limits(Cursor::new(capture(format, &[])), Default::default()).unwrap();
         assert_eq!(reader.format(), format);
         assert_eq!(reader.next_frame().unwrap(), None);
         assert_eq!(reader.next_frame().unwrap(), None);
@@ -44,7 +45,7 @@ fn truncated_packet_data_errors_after_complete_frames_without_yielding_a_partial
     let mut bytes = capture(Format::Pcap, &[complete.clone(), cut_short]);
     bytes.truncate(bytes.len() - 1);
 
-    let mut reader = Reader::new(Cursor::new(bytes)).unwrap();
+    let mut reader = Reader::with_limits(Cursor::new(bytes), Default::default()).unwrap();
     assert_eq!(reader.next_frame().unwrap(), Some(complete));
     assert!(matches!(reader.next_frame(), Err(Error::Truncated { .. })));
     assert_eq!(reader.next_frame().unwrap(), None);
@@ -53,20 +54,20 @@ fn truncated_packet_data_errors_after_complete_frames_without_yielding_a_partial
 #[test]
 fn corrupt_inputs_are_rejected_instead_of_yielding_frames() {
     assert!(matches!(
-        Reader::new(Cursor::new(Vec::new())),
+        Reader::with_limits(Cursor::new(Vec::new()), Default::default()),
         Err(Error::EmptyInput)
     ));
 
     let mut garbage = b"NOPE".to_vec();
     garbage.extend_from_slice(&[0; 20]);
     assert!(matches!(
-        Reader::new(Cursor::new(garbage)),
+        Reader::with_limits(Cursor::new(garbage), Default::default()),
         Err(Error::UnrecognizedFormat { magic }) if magic == *b"NOPE"
     ));
 
     let header = capture(Format::Pcap, &[]);
     assert!(matches!(
-        Reader::new(Cursor::new(header[..10].to_vec())),
+        Reader::with_limits(Cursor::new(header[..10].to_vec()), Default::default()),
         Err(Error::Truncated { .. })
     ));
 
@@ -74,7 +75,7 @@ fn corrupt_inputs_are_rejected_instead_of_yielding_frames() {
     let mut bytes = capture(Format::PcapNg, &[written]);
     let footer = bytes.len() - 4;
     bytes[footer] ^= 0x01;
-    let mut reader = Reader::new(Cursor::new(bytes)).unwrap();
+    let mut reader = Reader::with_limits(Cursor::new(bytes), Default::default()).unwrap();
     assert!(matches!(
         reader.next_frame(),
         Err(Error::BlockLengthMismatch { .. })

@@ -151,11 +151,6 @@ pub struct Interner {
 }
 
 impl Interner {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn with_limits(limits: Limits) -> Result<Self, Error> {
         limits.validate()?;
         Ok(Self {

@@ -20,72 +20,75 @@ use crate::traceroute::MAX_DSCP;
 use super::Probe;
 use crate::probe;
 
-pub(in crate::traceroute) fn probe_packet(probe: &Probe) -> Packet {
-    let mut packet = Packet::new();
-    match probe.address {
-        IpAddr::V4(destination) => {
-            packet.push(Ipv4 {
-                destination,
-                ttl: probe.hop_limit,
-                dscp_ecn: traffic_class(probe.dscp),
-                dont_fragment: probe.dont_fragment,
-                identification: nonzero_ipv4_identification(u64::from(
-                    probe.hop_limit.saturating_sub(1),
-                )),
-                ..Ipv4::default()
-            });
-        }
-        IpAddr::V6(destination) => {
-            packet.push(Ipv6 {
-                destination,
-                hop_limit: probe.hop_limit,
-                traffic_class: traffic_class(probe.dscp),
-                flow_label: u32::from(probe.hop_limit),
-                ..Ipv6::default()
-            });
-        }
-    }
-    match probe.target {
-        probe::Endpoint::Udp { port } => {
-            packet.push(Udp {
-                source_port: probe.source_port,
-                destination_port: port,
-                ..Udp::default()
-            });
-            if probe.payload_size > 0 {
-                packet.push(Raw::new(vec![0_u8; usize::from(probe.payload_size)]));
-            }
-        }
-        probe::Endpoint::Tcp { port } => {
-            packet.push(Tcp {
-                source_port: probe.source_port,
-                destination_port: port,
-                sequence: probe.sequence as u32,
-                flags: Tcp::SYN,
-                ..Tcp::default()
-            });
-        }
-        probe::Endpoint::Icmp => match probe.address {
-            IpAddr::V4(_) => {
-                packet.push(Icmpv4 {
-                    body: icmp_body(probe),
-                    ..Icmpv4::default()
+impl Probe {
+    #[must_use]
+    pub fn packet(&self) -> Packet {
+        let mut packet = Packet::default();
+        match self.address {
+            IpAddr::V4(destination) => {
+                packet.push(Ipv4 {
+                    destination,
+                    ttl: self.hop_limit,
+                    dscp_ecn: traffic_class(self.dscp),
+                    dont_fragment: self.dont_fragment,
+                    identification: nonzero_ipv4_identification(u64::from(
+                        self.hop_limit.saturating_sub(1),
+                    )),
+                    ..Ipv4::default()
                 });
             }
-            IpAddr::V6(_) => {
-                packet.push(Icmpv6 {
-                    body: icmp_body(probe),
-                    ..Icmpv6::default()
+            IpAddr::V6(destination) => {
+                packet.push(Ipv6 {
+                    destination,
+                    hop_limit: self.hop_limit,
+                    traffic_class: traffic_class(self.dscp),
+                    flow_label: u32::from(self.hop_limit),
+                    ..Ipv6::default()
                 });
             }
-        },
-        probe::Endpoint::TcpAck { .. }
-        | probe::Endpoint::Sctp { .. }
-        | probe::Endpoint::IcmpTimestamp
-        | probe::Endpoint::IcmpNetmask
-        | probe::Endpoint::Ip { .. } => {}
+        }
+        match self.target {
+            probe::Endpoint::Udp { port } => {
+                packet.push(Udp {
+                    source_port: self.source_port,
+                    destination_port: port,
+                    ..Udp::default()
+                });
+                if self.payload_size > 0 {
+                    packet.push(Raw::new(vec![0_u8; usize::from(self.payload_size)]));
+                }
+            }
+            probe::Endpoint::Tcp { port } => {
+                packet.push(Tcp {
+                    source_port: self.source_port,
+                    destination_port: port,
+                    sequence: self.sequence as u32,
+                    flags: Tcp::SYN,
+                    ..Tcp::default()
+                });
+            }
+            probe::Endpoint::Icmp => match self.address {
+                IpAddr::V4(_) => {
+                    packet.push(Icmpv4 {
+                        body: icmp_body(self),
+                        ..Icmpv4::default()
+                    });
+                }
+                IpAddr::V6(_) => {
+                    packet.push(Icmpv6 {
+                        body: icmp_body(self),
+                        ..Icmpv6::default()
+                    });
+                }
+            },
+            probe::Endpoint::TcpAck { .. }
+            | probe::Endpoint::Sctp { .. }
+            | probe::Endpoint::IcmpTimestamp
+            | probe::Endpoint::IcmpNetmask
+            | probe::Endpoint::Ip { .. } => {}
+        }
+        packet
     }
-    packet
 }
 
 /// Second byte of every traceroute ICMP echo payload; see [`icmp_identity`].

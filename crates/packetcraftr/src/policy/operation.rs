@@ -57,11 +57,6 @@ impl SocketLimits {
         }
     }
 
-    #[must_use]
-    pub const fn none() -> Self {
-        Self::new(0, 0, 0)
-    }
-
     pub const fn validate(&self) -> Result<(), Error> {
         Ok(())
     }

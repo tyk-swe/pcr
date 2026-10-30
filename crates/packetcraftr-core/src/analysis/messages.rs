@@ -512,7 +512,7 @@ impl Collector {
                         return;
                     }
                 }
-                let mut p = Packet::new();
+                let mut p = Packet::default();
                 p.push_boxed(layer);
                 message.packet = Some(p);
             }

@@ -252,7 +252,7 @@ impl SentPacket {
         report.validate_exact(&built.bytes)?;
         let link_type = route.plan.wire_link_type()?;
         let frame = Frame::new(
-            report.timing().freshness_marker().wall_clock(),
+            Some(report.timing().freshness_marker().wall_clock()),
             link_type,
             report.wire_bytes().clone(),
         )

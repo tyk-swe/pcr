@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
@@ -119,16 +119,16 @@ impl Codec for EtheripCodec {
         let mut diagnostics = Vec::new();
         if layer.version != ETHERIP_VERSION {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(Severity::Warning,
                     "decode.etherip_version",
-                    "EtherIP version is not the RFC 3378 version 3; the payload is still dissected as Ethernet",
-                )
+                    "EtherIP version is not the RFC 3378 version 3; the payload is still dissected as Ethernet")
                 .at_field("version"),
             );
         }
         if layer.reserved != 0 {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.etherip_reserved",
                     "EtherIP reserved bits are non-zero",
                 )

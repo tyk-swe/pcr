@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field::{self, WireValue},
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
@@ -203,7 +203,8 @@ impl Codec for GeneveCodec {
         let mut diagnostics = Vec::new();
         if let Some(field) = nonzero_reserved_field(reserved1, reserved2) {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.geneve_reserved",
                     "GENEVE reserved bits are non-zero",
                 )
@@ -212,7 +213,8 @@ impl Codec for GeneveCodec {
         }
         match parse_option_chain(&options) {
             None => diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.geneve_options",
                     "GENEVE option bytes do not parse as an exact TLV chain; preserved verbatim",
                 )
@@ -221,7 +223,8 @@ impl Codec for GeneveCodec {
             Some(chain) => {
                 if chain.critical != critical {
                     diagnostics.push(
-                        Diagnostic::warning(
+                        Diagnostic::new(
+                            Severity::Warning,
                             "decode.geneve_critical",
                             "the C bit disagrees with the critical options present in the chain",
                         )
@@ -230,7 +233,8 @@ impl Codec for GeneveCodec {
                 }
                 if chain.reserved_bits {
                     diagnostics.push(
-                        Diagnostic::warning(
+                        Diagnostic::new(
+                            Severity::Warning,
                             "decode.geneve_reserved",
                             "GENEVE option-header reserved bits are non-zero",
                         )

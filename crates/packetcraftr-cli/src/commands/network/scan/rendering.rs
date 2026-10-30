@@ -11,8 +11,8 @@ use crate::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, duration_text, optional_display, optional_duration,
-    render_diagnostics_text, render_undecoded, write_stdout_line, write_summary_line,
+    CapturedFrameText, comma_separated, duration_text, render_diagnostics_text, render_optional,
+    render_undecoded, write_stdout_line, write_summary_line,
 };
 
 pub(super) fn render_text(
@@ -46,13 +46,17 @@ pub(super) fn render_text(
                 format!(
                     "{}/{}",
                     endpoint.transport,
-                    optional_display(endpoint.ip_protocol)
+                    render_optional(endpoint.ip_protocol, |value| value.to_string())
                 )
             }
             packetcraftr::probe::Transport::Tcp
             | packetcraftr::probe::Transport::Udp
             | packetcraftr::probe::Transport::Sctp => {
-                format!("{}/{}", endpoint.transport, optional_display(endpoint.port))
+                format!(
+                    "{}/{}",
+                    endpoint.transport,
+                    render_optional(endpoint.port, |value| value.to_string())
+                )
             }
         };
         write_stdout_line(
@@ -82,8 +86,8 @@ pub(super) fn render_text(
             format_args!(
                 "unattributed attribution={} sequence={} frame {}",
                 unattributed.attribution,
-                optional_display(unattributed.sequence),
-                captured_frame_text(&unattributed.frame)
+                render_optional(unattributed.sequence, |value| value.to_string()),
+                CapturedFrameText(&unattributed.frame)
             ),
         )?;
     }
@@ -109,9 +113,9 @@ pub(super) fn render_text(
             rtt.received,
             rtt.lost,
             rtt.unavailable,
-            optional_duration(rtt.min),
-            optional_duration(rtt.avg),
-            optional_duration(rtt.max),
+            render_optional(rtt.min, duration_text),
+            render_optional(rtt.avg, duration_text),
+            render_optional(rtt.max, duration_text),
         ),
     )?;
     render_scheduling_text(invocation, &result.scheduling)?;
@@ -303,9 +307,9 @@ fn render_probe_text(
             evidence.status.as_str(),
             evidence.classification.as_str(),
             evidence.sent_at,
-            optional_display(evidence.received_at),
-            optional_display(evidence.responder),
-            optional_duration(evidence.latency),
+            render_optional(evidence.received_at, |value| value.to_string()),
+            render_optional(evidence.responder, |value| value.to_string()),
+            render_optional(evidence.latency, duration_text),
             evidence.reason,
         ),
     )?;
@@ -317,7 +321,7 @@ fn render_probe_text(
                 "{nested}tcp-scan={} flags={:#05x} tcp-window={}",
                 tcp_scan.mode,
                 tcp_scan.flags,
-                optional_display(evidence.tcp_window),
+                render_optional(evidence.tcp_window, |value| value.to_string()),
             ),
         )?;
     }
@@ -346,7 +350,7 @@ fn render_probe_text(
     {
         write_stdout_line(
             invocation,
-            format_args!("{nested}frame {}", captured_frame_text(frame)),
+            format_args!("{nested}frame {}", CapturedFrameText(frame)),
         )?;
     }
     Ok(())
@@ -367,9 +371,12 @@ fn connect_probe_text(
             probe.outcome,
             probe.classification,
             probe.scheduled_at,
-            optional_display(probe.finished_at.as_ref()),
+            render_optional(probe.finished_at.as_ref(), ToString::to_string),
             duration_text(probe.elapsed),
-            optional_display(probe.error.as_ref().map(|error| &error.kind)),
+            render_optional(
+                probe.error.as_ref().map(|error| &error.kind),
+                ToString::to_string
+            ),
         ),
     )
 }
@@ -470,9 +477,9 @@ pub(super) fn render_connect_text(
             rtt.received,
             rtt.lost,
             rtt.unavailable,
-            optional_duration(rtt.min),
-            optional_duration(rtt.avg),
-            optional_duration(rtt.max),
+            render_optional(rtt.min, duration_text),
+            render_optional(rtt.avg, duration_text),
+            render_optional(rtt.max, duration_text),
         ),
     )?;
     render_scheduling_text(invocation, &report.summary.scheduling)

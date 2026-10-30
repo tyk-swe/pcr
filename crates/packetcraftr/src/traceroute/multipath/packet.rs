@@ -77,7 +77,7 @@ impl Probe {
         let sequence = offset * u64::from(request.flows) + u64::from(flow.id - 1);
         // At most 255 * 32 probes per flow: no identity repeats within a run.
         let token = ((nonce % 65_535 + offset) % 65_535 + 1) as u16;
-        let mut packet = Packet::new();
+        let mut packet = Packet::default();
         match destination {
             IpAddr::V4(destination) => {
                 packet.push(Ipv4 {
@@ -305,7 +305,7 @@ pub(super) fn reset(sent: &Packet, response: &DecodedPacket) -> Option<Packet> {
         return None;
     }
     let tcp = sent.get::<Tcp>()?;
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     if let Some(ip) = sent.get::<Ipv4>() {
         packet.push(Ipv4 {
             source: ip.source,

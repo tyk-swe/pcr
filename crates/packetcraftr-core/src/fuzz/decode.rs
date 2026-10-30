@@ -6,7 +6,7 @@ use crate::frame::{Frame, LinkType};
 use crate::{
     build::BuiltPacket,
     decode::{DecodedPacket, Dissector},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     packet::Packet,
     protocol::BuiltinProtocol,
 };
@@ -18,16 +18,18 @@ pub fn dissect_built(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<DecodedPacket> {
     let Some(link_type) = packet_link_type(&built.packet) else {
-        diagnostics.push(Diagnostic::info(
+        diagnostics.push(Diagnostic::new(
+            Severity::Info,
             "fuzz.decode_unavailable",
             "built root has no registered capture-link representation; exact bytes are retained",
         ));
         return None;
     };
-    let frame = match Frame::new(std::time::UNIX_EPOCH, link_type, built.bytes.clone()) {
+    let frame = match Frame::new(Some(std::time::UNIX_EPOCH), link_type, built.bytes.clone()) {
         Ok(frame) => frame,
         Err(source) => {
-            diagnostics.push(Diagnostic::warning(
+            diagnostics.push(Diagnostic::new(
+                Severity::Warning,
                 "fuzz.decode_frame",
                 format!(
                     "could not form bounded decode evidence: {}",
@@ -51,7 +53,8 @@ pub fn dissect_built(
             Some(decoded)
         }
         Err(source) => {
-            diagnostics.push(Diagnostic::warning(
+            diagnostics.push(Diagnostic::new(
+                Severity::Warning,
                 "fuzz.decode_rejected",
                 format!(
                     "bounded dissection rejected the built case: {}",

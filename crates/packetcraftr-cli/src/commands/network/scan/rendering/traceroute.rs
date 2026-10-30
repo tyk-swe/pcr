@@ -4,7 +4,7 @@
 //! Text rendering for a scan’s traceroute follow-up.
 
 use crate::rendering::{
-    comma_separated, duration_text, optional_display, render_undecoded, write_stdout_line,
+    comma_separated, duration_text, render_optional, render_undecoded, write_stdout_line,
     write_summary_line,
 };
 use crate::{errors::CliError, output};
@@ -106,7 +106,7 @@ pub(super) fn render_traceroute_text(
                         duration_text(hop.age),
                         comma_separated(&hop.probes),
                         comma_separated(&hop.responders),
-                        optional_display(hop.observed_at.as_ref()),
+                        render_optional(hop.observed_at.as_ref(), ToString::to_string),
                     ),
                 )?;
             }

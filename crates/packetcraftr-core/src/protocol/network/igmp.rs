@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::diagnostic::Severity;
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
@@ -13,7 +14,7 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
+    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, make_layer,
     payload_without_padding, resolve_u16, truncated, typed_layer,
 };
 
@@ -133,9 +134,10 @@ impl Codec for IgmpCodec {
             return Err(truncated(NAME, IGMP_MIN_LEN, input.len()));
         };
         let mut diagnostics = Vec::new();
-        if checksum(&input) != 0 {
+        if checksum_parts(&[&input]) != 0 {
             diagnostics.push(
-                Diagnostic::warning(IGMP_CHECKSUM, "IGMP checksum mismatch").at_field("checksum"),
+                Diagnostic::new(Severity::Warning, IGMP_CHECKSUM, "IGMP checksum mismatch")
+                    .at_field("checksum"),
             );
         }
         let body = input

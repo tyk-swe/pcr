@@ -7,7 +7,7 @@ use packetcraftr_core::error::Kind;
 use crate::errors::CliError;
 use crate::output::{self, contract::Format};
 use crate::rendering::{
-    emit_published, render_diagnostics_text, spaced_hex, write_hex_line, write_raw,
+    SpacedHex, emit_published, render_diagnostics_text, write_hex_line, write_raw,
     write_stdout_line, write_summary_line,
 };
 
@@ -23,7 +23,7 @@ pub(super) fn render_packet(
                 invocation,
                 format_args!("built {} bytes", built.bytes.len()),
             )?;
-            write_stdout_line(invocation, format_args!("{}", spaced_hex(&built.bytes)))?;
+            write_stdout_line(invocation, format_args!("{}", SpacedHex(&built.bytes)))?;
             presentation.details(
                 invocation,
                 "Packet fields",

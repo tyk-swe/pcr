@@ -9,7 +9,7 @@ use super::reflection::{dns_layout, dns_schema};
 use super::{Dns, Error, Limits, MAX_MESSAGE_BYTES};
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     error::{Classified, Kind},
     field,
     layer::{Id, Layer},
@@ -216,7 +216,8 @@ impl Codec for DnsCodec {
             let diagnostics = failure
                 .filter(|error| error.classification().kind == Kind::Policy)
                 .map(|error| {
-                    Diagnostic::info(
+                    Diagnostic::new(
+                        Severity::Info,
                         MESSAGE_UNPARSED,
                         format!("a complete DNS message was not parsed: {error}"),
                     )
@@ -228,7 +229,7 @@ impl Codec for DnsCodec {
                 consumed: input.len(),
                 payload_len: 0,
                 next: Vec::new(),
-                fields: crate::layer::Raw::layout(input.len()),
+                fields: crate::layer::raw_layout(input.len()),
                 diagnostics,
                 stop: true,
                 network: None,

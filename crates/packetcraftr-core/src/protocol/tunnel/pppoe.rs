@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field::{self, WireValue},
     layer::{Id, Layer, Malformed, reflective_layer},
     registry::Discriminator,
@@ -134,7 +134,8 @@ impl Codec for PppoeCodec {
         let mut diagnostics = Vec::new();
         if version != 1 || type_code != 1 {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.pppoe_version",
                     "PPPoE version or type deviates from the defined value 1",
                 )
@@ -151,7 +152,8 @@ impl Codec for PppoeCodec {
         };
         if discovery != (code != 0) {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.pppoe_stage",
                     "the stage code disagrees with the enclosing EtherType",
                 )

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::envelope::Published;
 use std::time::Duration;
 
 use crate::command_options::{AddressFamily, HostnamePolicyArgs};
@@ -11,7 +12,7 @@ use crate::output::{self, contract::Format};
 use crate::rendering::{write_stdout_line, write_summary_line};
 use crate::system::{Runtime, client};
 use packetcraftr::target::{Selection, plan};
-use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr_core::diagnostic::{Diagnostic, Severity};
 
 /// A validated `--list` request; execution only resolves targets and renders
 /// the endpoint plan preparation already selected.
@@ -72,21 +73,26 @@ pub(super) fn run(
         Format::Json => {
             let origins = published_origins(&origins);
             let published = output::scan::list::Report::new(report, &origins, ports, ip_protocols);
-            crate::rendering::emit_aggregate(
+            crate::rendering::emit_published(
                 invocation,
                 output::contract::Command::Scan,
-                published,
-                diagnostics,
+                Published::new(published, diagnostics),
             )
         }
         Format::Ndjson => {
             let origins = published_origins(&origins);
             let published = output::scan::list::Report::new(report, &origins, ports, ip_protocols);
             for target in &published.targets {
-                stream.emit_data(output::scan::list::TargetEvent::from(target), Vec::new())?;
+                stream.emit_published(Published::new(
+                    output::scan::list::TargetEvent::from(target),
+                    Vec::new(),
+                ))?;
             }
             stream
-                .complete(output::scan::list::Complete::from(published), diagnostics)
+                .complete_published(Published::new(
+                    output::scan::list::Complete::from(published),
+                    diagnostics,
+                ))
                 .map_err(CliError::from)
         }
         other => other.unreachable(),
@@ -112,13 +118,12 @@ fn duplicate_diagnostics(duplicates: &[u32], origins: &[Declaration]) -> Vec<Dia
         .iter()
         .filter_map(|index| {
             let declaration = origins.get(*index as usize)?;
-            Some(Diagnostic::warning(
+            Some(Diagnostic::new(Severity::Warning,
                 "scan.duplicate_declaration",
                 format!(
                     "target declaration {} ({declaration}) duplicates an earlier declaration and was coalesced",
                     index + 1
-                ),
-            ))
+                )))
         })
         .collect()
 }

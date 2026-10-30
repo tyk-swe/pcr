@@ -6,7 +6,7 @@ use super::{Accumulator, Lease, SourceFrame, Tracker, work};
 use std::time::UNIX_EPOCH;
 
 fn fragment_entry(tracker: &mut Tracker, identification: u16) -> super::DatagramKey {
-    let mut scopes = crate::analysis::scope::Interner::new();
+    let mut scopes = crate::analysis::scope::Interner::default();
     let key = super::DatagramKey::Ipv4(crate::analysis::reassembly::ip::Ipv4DatagramKey {
         scope: scopes.intern(None, Vec::new()).unwrap(),
         source: "192.0.2.1".parse().unwrap(),

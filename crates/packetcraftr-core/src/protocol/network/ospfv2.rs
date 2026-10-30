@@ -225,7 +225,7 @@ impl Ospfv2 {
                 checksum_parts(&[&w.bytes[..16], &w.bytes[24..]])
             }
         } else {
-            transport_checksum(NAME, super::resolve_envelope(NAME, c)?, 89, &w.bytes)?
+            transport_checksum_parts(NAME, super::resolve_envelope(NAME, c)?, 89, &[&w.bytes])?
         };
         let sum = crate::protocol::message::checksum_value(NAME, &self.checksum, expected, c)?;
         w.bytes[12..14].copy_from_slice(&sum.to_be_bytes());
@@ -272,7 +272,7 @@ impl Ospfv2 {
             s.auth_type == 2 || checksum_parts(&[&b[..16], &b[24..len]]) == 0
         } else {
             c.network
-                .map(|net| transport_checksum(NAME, net, 89, &b))
+                .map(|net| transport_checksum_parts(NAME, net, 89, &[&b]))
                 .transpose()?
                 .is_none_or(|sum| sum == 0)
         };

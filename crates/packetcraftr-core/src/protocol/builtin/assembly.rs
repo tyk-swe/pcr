@@ -110,7 +110,7 @@ pub fn registry_with<F>(extra: F) -> Result<crate::registry::Registry, crate::re
 where
     F: FnOnce(&mut crate::registry::Builder) -> Result<(), crate::registry::Error>,
 {
-    let mut builder = crate::registry::Registry::builder();
+    let mut builder = crate::registry::Builder::default();
     register_catalog(&mut builder)?;
     bindings::register(&mut builder)?;
     extra(&mut builder)?;

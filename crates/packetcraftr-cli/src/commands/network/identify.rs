@@ -5,6 +5,7 @@ pub(in crate::commands) mod arguments;
 mod publication;
 mod rendering;
 
+use crate::output::envelope::Published;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -49,7 +50,7 @@ impl crate::commands::Spec for Args {
             probe_max_read_bytes: Bytes @ ResultRetention,
         ]);
         self.tls.resources(settings);
-        self.policy.resources(settings);
+        self.policy.budgets.resources(settings);
     }
 
     fn run(
@@ -147,19 +148,21 @@ impl crate::commands::Spec for Args {
         let report = output::identify::Report::try_from(report).map_err(CliError::classified)?;
         match format {
             Format::Text => rendering::render_text(invocation, &report, stream.presentation())?,
-            Format::Json => crate::rendering::emit_aggregate(
+            Format::Json => crate::rendering::emit_published(
                 invocation,
                 output::contract::Command::Identify,
-                report,
-                Vec::new(),
+                Published::new(report, Vec::new()),
             )?,
             Format::Ndjson => {
                 for record in &report.records {
                     invocation.check()?;
                     invocation.check()?;
-                    stream.emit_data(record, Vec::new())?;
+                    stream.emit_published(Published::new(record, Vec::new()))?;
                 }
-                stream.complete(output::identify::Complete::from(report), Vec::new())?;
+                stream.complete_published(Published::new(
+                    output::identify::Complete::from(report),
+                    Vec::new(),
+                ))?;
             }
             unsupported => unsupported.unreachable(),
         }

@@ -166,10 +166,10 @@ macro_rules! reflective_layer {
         })
     };
     (@get $layer:expr; reflect $member:ident) => {
-        Some($crate::layer::reflect_get(&$layer.$member))
+        Some($crate::layer::ReflectiveField::reflective_value(&$layer.$member))
     };
     (@get $layer:expr; reflect_bounded $member:ident) => {
-        Some($crate::layer::reflect_get(&$layer.$member))
+        Some($crate::layer::ReflectiveField::reflective_value(&$layer.$member))
     };
     (@get $layer:expr; explicit $getter:ident => $get:expr_2021) => {{
         let $getter = $layer;
@@ -220,10 +220,6 @@ impl std::fmt::Display for Refusal {
 pub trait ReflectiveField: Sized {
     fn reflective_value(&self) -> field::Value;
     fn set_reflective_value(&mut self, value: field::Value) -> Result<(), Refusal>;
-}
-
-pub fn reflect_get<T: ReflectiveField>(value: &T) -> field::Value {
-    value.reflective_value()
 }
 
 pub fn reflect_set<T: ReflectiveField>(

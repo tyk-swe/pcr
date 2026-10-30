@@ -23,8 +23,8 @@ pub mod transport;
 pub mod tunnel;
 
 pub use catalog::{BuiltinProtocol, UnknownProtocolName};
-pub use common::{ChecksumAccumulator, checksum, checksum_parts};
-pub(crate) use common::{network_from_addresses, transport_checksum};
+pub use common::{ChecksumAccumulator, checksum_parts};
+pub(crate) use common::{network_from_addresses, transport_checksum_parts};
 
 pub use matcher::{
     IcmpErrorKind, QuotedProbe, QuotedTransport, SctpResponseKind, quoted_icmp_error, quoted_probe,

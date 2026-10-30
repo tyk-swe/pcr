@@ -15,7 +15,7 @@ use crate::{
 
 mod query;
 
-pub(in crate::platform) fn route(
+pub(crate) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
@@ -27,7 +27,7 @@ pub(in crate::platform) fn route(
     })
 }
 
-pub(in crate::platform) fn interface_route(
+pub(crate) fn interface_route(
     requested: &InterfaceId,
     deadline: &Deadline,
 ) -> Result<Decision, route::Error> {

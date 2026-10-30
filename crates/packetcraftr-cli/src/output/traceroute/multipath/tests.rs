@@ -114,7 +114,7 @@ fn aggregate_and_stream_preserve_the_same_multipath_evidence() {
                 },
                 latency: Duration::from_millis(2),
                 frame: Frame::new(
-                    now + Duration::from_millis(2),
+                    Some(now + Duration::from_millis(2)),
                     LinkType::RAW,
                     vec![0xde, 0xad, 0xbe, 0xef],
                 )

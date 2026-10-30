@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::interface::Id as InterfaceId;
 use crate::{Error, transmit::Layer3Frame};
-use packetcraftr_core::protocol::checksum;
+use packetcraftr_core::protocol::checksum_parts;
 
 pub(crate) const IPV4_MINIMUM_HEADER: usize = 20;
 pub(crate) const IPV6_HEADER: usize = 40;
@@ -107,7 +107,7 @@ fn validate_ipv4(bytes: &[u8]) -> Result<(Ipv4Addr, Ipv4Addr), Error> {
             "IPv4 identification is zero and would be replaced by the operating system".to_owned(),
         ));
     }
-    let header_checksum = checksum(&bytes[..header_length]);
+    let header_checksum = checksum_parts(&[&bytes[..header_length]]);
     if header_checksum != 0 {
         return Err(invalid_frame(
             "IPv4 header checksum would be rewritten by the operating system".to_owned(),

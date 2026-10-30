@@ -9,7 +9,7 @@ use packetcraftr_core::analysis;
 use crate::errors::CliError;
 use crate::output::stats::Table;
 use crate::rendering::{
-    duration_text, optional_display, render_diagnostics_text, write_stdout_line, write_summary_line,
+    duration_text, render_diagnostics_text, render_optional, write_stdout_line, write_summary_line,
 };
 
 pub(super) fn render_text(
@@ -148,11 +148,12 @@ pub(super) fn render_text(
                 invocation,
                 format_args!(
                     "bucket origin {}; {} earlier frame(s) clamped to bucket zero",
-                    optional_display(
+                    render_optional(
                         report
                             .io_origin
                             .map(crate::output::frame::Timestamp::try_from)
-                            .transpose()?
+                            .transpose()?,
+                        |value| value.to_string()
                     ),
                     report.io_underflow_frames
                 ),
@@ -175,17 +176,19 @@ pub(super) fn render_text(
                 invocation,
                 format_args!(
                     "timestamps {} to {}; {} interface(s)",
-                    optional_display(
+                    render_optional(
                         report
                             .first_timestamp
                             .map(crate::output::frame::Timestamp::try_from)
-                            .transpose()?
+                            .transpose()?,
+                        |value| value.to_string()
                     ),
-                    optional_display(
+                    render_optional(
                         report
                             .last_timestamp
                             .map(crate::output::frame::Timestamp::try_from)
-                            .transpose()?
+                            .transpose()?,
+                        |value| value.to_string()
                     ),
                     report.interfaces.len(),
                 ),

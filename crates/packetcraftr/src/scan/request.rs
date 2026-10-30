@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+use packetcraftr_core::diagnostic::Severity;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -423,7 +424,8 @@ impl Request {
             .get(index as usize)
             .map(|source| format!(" ({source})"))
             .unwrap_or_default();
-        packetcraftr_core::diagnostic::Diagnostic::warning(
+        packetcraftr_core::diagnostic::Diagnostic::new(
+            Severity::Warning,
             "scan.duplicate_declaration",
             format!(
                 "target declaration {}{source} duplicates an earlier declaration and was coalesced",

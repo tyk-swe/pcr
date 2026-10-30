@@ -7,6 +7,7 @@
 
 mod request;
 
+use crate::command_options::Bounded as _;
 use std::path::Path;
 use std::time::Duration;
 

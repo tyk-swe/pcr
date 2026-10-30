@@ -6,7 +6,7 @@ use crate::{
     invocation::Invocation,
     output,
     rendering::{
-        captured_frame_text, duration_text, optional_display, render_diagnostics_text,
+        CapturedFrameText, duration_text, render_diagnostics_text, render_optional,
         write_stdout_line,
     },
 };
@@ -25,10 +25,10 @@ pub(in crate::commands::network::traceroute) fn render_event(
                 flow.strategy,
                 flow.source,
                 flow.destination,
-                optional_display(flow.source_port),
-                optional_display(flow.destination_port),
-                optional_display(flow.icmp_identifier),
-                optional_display(flow.ipv6_flow_label),
+                render_optional(flow.source_port, |value| value.to_string()),
+                render_optional(flow.destination_port, |value| value.to_string()),
+                render_optional(flow.icmp_identifier, |value| value.to_string()),
+                render_optional(flow.ipv6_flow_label, |value| value.to_string()),
             ),
         ),
         library::Event::Probe(probe) => {
@@ -60,7 +60,7 @@ pub(in crate::commands::network::traceroute) fn render_event(
                         .map_err(CliError::classified)?;
                     write_stdout_line(
                         invocation,
-                        format_args!("    frame {}", captured_frame_text(&frame)),
+                        format_args!("    frame {}", CapturedFrameText(&frame)),
                     )?;
                 }
             }

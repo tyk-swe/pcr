@@ -22,9 +22,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 
-pub(in crate::platform) fn interfaces(
-    _deadline: &Deadline,
-) -> Result<Vec<interface::Info>, interface::Error> {
+pub(crate) fn interfaces(_deadline: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
     snapshot().map_err(interface::Error::native)
 }
 

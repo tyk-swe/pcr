@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::output;
-use crate::rendering::optional_display;
+use crate::rendering::render_optional;
 
 pub(super) fn interface_line(interface: &output::network::Interface) -> String {
     let timestamp_types = interface.timestamp_types.as_deref().map(|types| {
@@ -31,12 +31,12 @@ pub(super) fn interface_line(interface: &output::network::Interface) -> String {
         interface.name,
         interface.index,
         interface.addresses.join(", "),
-        optional_display(interface.mtu),
+        render_optional(interface.mtu, |value| value.to_string()),
         interface.capability,
         interface.link_type,
-        optional_display(interface.mac.as_deref()),
+        render_optional(interface.mac.as_deref(), ToString::to_string),
         interface_flags(&interface.flags),
-        optional_display(interface.description.as_deref()),
+        render_optional(interface.description.as_deref(), ToString::to_string),
         types_field,
     )
 }

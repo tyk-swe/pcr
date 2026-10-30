@@ -57,7 +57,7 @@ impl Connection {
     }
     fn resources(&self, s: &mut Settings<'_>) {
         self.bounds.resources(s);
-        self.policy.resources(s);
+        self.policy.budgets.resources(s);
         crate::resources::declare!(s, self, [ timeout_ms: Milliseconds @ Operation, max_tls_write_bytes: Bytes @ Operation, max_tls_read_bytes: Bytes @ ActiveState ]);
     }
 }

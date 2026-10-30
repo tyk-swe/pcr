@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_core as core;
+use packetcraftr_core::diagnostic::Severity;
 
 pub(crate) struct Retained<T> {
     maximum: usize,
@@ -44,7 +45,8 @@ pub(crate) fn omitted_diagnostic(
     if omitted == 0 {
         return Vec::new();
     }
-    vec![core::diagnostic::Diagnostic::warning(
+    vec![core::diagnostic::Diagnostic::new(
+        Severity::Warning,
         code,
         format!("{omitted} {subject} omitted from this document by the {ceiling} ceiling"),
     )]

@@ -61,7 +61,7 @@ pub(super) fn run(
     let session = analysis::Session::new(
         prepared.registry.clone(),
         prepared.options(invocation),
-        analysis::expert::Collector::new(),
+        analysis::expert::Collector::default(),
     );
     let mut state = rendering::State::new(arguments.limits.capture.retention_ceiling());
     let selector = analysis::expert::Selector {

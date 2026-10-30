@@ -14,7 +14,8 @@ use crate::rendering::{
     report_structured_error, terminal_document, write_unattributed_error,
 };
 
-pub(crate) fn run() -> ExitCode {
+#[must_use]
+pub fn run() -> ExitCode {
     let arguments = std::env::args_os().collect::<Vec<_>>();
     let context = cli::error_context(&arguments);
     context.color.write_global();

@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field,
     layer::{Layer, Raw},
     protocol::{
@@ -89,7 +89,8 @@ impl Tls {
         loop {
             if records.len() == MAX_RECORDS_PER_SEGMENT {
                 if consumed < wire.len() {
-                    diagnostics.push(Diagnostic::info(
+                    diagnostics.push(Diagnostic::new(
+                        Severity::Info,
                         RECORDS_CAPPED,
                         format!(
                             "segment carries more than {MAX_RECORDS_PER_SEGMENT} TLS records; \
@@ -110,7 +111,8 @@ impl Tls {
                 Outcome::NeedMore { .. } => {
                     if consumed < wire.len() {
                         incomplete = true;
-                        diagnostics.push(Diagnostic::info(
+                        diagnostics.push(Diagnostic::new(
+                            Severity::Info,
                             RECORD_CONTINUES,
                             "a TLS record continues past the end of this segment",
                         ));
@@ -119,7 +121,8 @@ impl Tls {
                 }
                 Outcome::Malformed(_) => {
                     if consumed < wire.len() {
-                        diagnostics.push(Diagnostic::info(
+                        diagnostics.push(Diagnostic::new(
+                            Severity::Info,
                             RECORD_UNPARSED,
                             "bytes after the last complete TLS record are not a TLS record",
                         ));
@@ -184,7 +187,8 @@ impl Tls {
                     stream.first(),
                     Some(&(HANDSHAKE_CLIENT_HELLO | HANDSHAKE_SERVER_HELLO))
                 ) {
-                    diagnostics.push(Diagnostic::info(
+                    diagnostics.push(Diagnostic::new(
+                        Severity::Info,
                         HANDSHAKE_UNPARSED,
                         format!("the hello message does not parse: {error}"),
                     ));
@@ -231,7 +235,8 @@ impl Tls {
         self.supported_groups.clone_from(&hello.supported_groups);
         if self.sni.is_none() && self.sni_raw.is_some() {
             diagnostics.push(
-                Diagnostic::info(
+                Diagnostic::new(
+                    Severity::Info,
                     SNI_INVALID,
                     "server name is empty, an IP literal, or not printable ASCII",
                 )

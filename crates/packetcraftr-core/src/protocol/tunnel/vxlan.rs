@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
@@ -138,7 +138,8 @@ impl Codec for VxlanCodec {
         let mut diagnostics = Vec::new();
         if flags != VNI_VALID_FLAG {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.vxlan_flags",
                     "VXLAN flags deviate from the single defined VNI-valid bit",
                 )
@@ -147,8 +148,12 @@ impl Codec for VxlanCodec {
         }
         if let Some(field) = nonzero_reserved_field(reserved1, reserved2) {
             diagnostics.push(
-                Diagnostic::warning("decode.vxlan_reserved", "VXLAN reserved bits are non-zero")
-                    .at_field(field),
+                Diagnostic::new(
+                    Severity::Warning,
+                    "decode.vxlan_reserved",
+                    "VXLAN reserved bits are non-zero",
+                )
+                .at_field(field),
             );
         }
         let layer = Vxlan {

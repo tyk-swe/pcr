@@ -94,9 +94,7 @@ impl Dhcpv4 {
             wire,
         })
     }
-    pub fn to_wire(&self) -> Result<Bytes, Error> {
-        self.to_wire_with_limits(Limits::default())
-    }
+
     pub fn to_wire_with_limits(&self, limits: Limits) -> Result<Bytes, Error> {
         if !self.wire.is_empty()
             && Self::from_wire_with_limits(self.wire.clone(), limits)

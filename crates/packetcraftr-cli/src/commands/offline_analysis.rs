@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::command_options::Bounded as _;
+use crate::output::envelope::Published;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,7 +19,7 @@ use crate::command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArg
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::output::contract::{Command, Format};
-use crate::rendering::{EventOutput, emit_aggregate, ip_event_sink};
+use crate::rendering::{EventOutput, emit_published, ip_event_sink};
 
 pub(super) struct AnalysisSetup {
     pub(super) registry: Arc<Registry>,
@@ -169,10 +171,14 @@ where
     R: serde::Serialize,
 {
     match invocation.format {
-        Format::Json => emit_aggregate(invocation, command, report(complete), Vec::new()),
+        Format::Json => emit_published(
+            invocation,
+            command,
+            Published::new(report(complete), Vec::new()),
+        ),
         Format::Ndjson => invocation
             .output
-            .complete(complete, Vec::new())
+            .complete_published(Published::new(complete, Vec::new()))
             .map_err(Into::into),
         Format::Text => render(invocation, &complete),
         other => other.unreachable(),

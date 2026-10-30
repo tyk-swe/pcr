@@ -3,7 +3,7 @@
 
 use crate::{
     codec::EncodeContext,
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field::WireValue,
     layer::Id,
     protocol::{BuiltinProtocol, network::ip_protocol},
@@ -30,7 +30,12 @@ pub(crate) fn validate_ipv6_routing_child(
         return Err(unsupported(name, message));
     }
     diagnostics.push(
-        Diagnostic::warning("build.untyped_ipv6_routing_header", message).at_field("next_header"),
+        Diagnostic::new(
+            Severity::Warning,
+            "build.untyped_ipv6_routing_header",
+            message,
+        )
+        .at_field("next_header"),
     );
     Ok(())
 }
@@ -163,7 +168,7 @@ pub(crate) fn strict_or_diagnostic(
     if context.mode == crate::codec::Mode::Strict {
         return Err(invalid(name, message));
     }
-    diagnostics.push(Diagnostic::warning(code, message).at_field(field));
+    diagnostics.push(Diagnostic::new(Severity::Warning, code, message).at_field(field));
     Ok(())
 }
 
@@ -178,7 +183,9 @@ pub(crate) fn strict_or_diagnostic_error(
     if context.mode == crate::codec::Mode::Strict {
         return Err(super::rejected(name, error));
     }
-    diagnostics.push(Diagnostic::warning(code, crate::error::render(&error)).at_field(field));
+    diagnostics.push(
+        Diagnostic::new(Severity::Warning, code, crate::error::render(&error)).at_field(field),
+    );
     Ok(())
 }
 
@@ -199,7 +206,8 @@ pub(crate) fn pad_options_to_four_bytes(
     let padding = padded.len().saturating_sub(options.len());
     if padding != 0 {
         diagnostics.push(
-            Diagnostic::warning(
+            Diagnostic::new(
+                Severity::Warning,
                 code,
                 format!("padded {protocol_label} options with {padding} zero byte(s)"),
             )

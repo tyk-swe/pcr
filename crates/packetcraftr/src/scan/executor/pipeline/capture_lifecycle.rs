@@ -5,7 +5,11 @@
 use super::correlation::{CandidateIndex, SeenFrames};
 use super::{Pipeline, check, limit, until};
 use crate::{clock::Clock, providers::PacketProviders, scan::executor::PipelineEvent};
-use packetcraftr_core::{budget::Deadline, diagnostic::Diagnostic, error::BoundaryError};
+use packetcraftr_core::{
+    budget::Deadline,
+    diagnostic::{Diagnostic, Severity},
+    error::BoundaryError,
+};
 use packetcraftr_netio::capture::{self, Group, GroupRequest, Session as _};
 use std::{sync::Arc, time::Duration};
 
@@ -121,7 +125,8 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
                     return Err(BoundaryError::from_error(loss));
                 }
                 self.output
-                    .event(PipelineEvent::Diagnostic(Diagnostic::warning(
+                    .event(PipelineEvent::Diagnostic(Diagnostic::new(
+                        Severity::Warning,
                         "capture.evidence_incomplete",
                         format!(
                             "source {} on interface {} (index {}): {loss}",

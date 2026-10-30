@@ -9,7 +9,7 @@ use crate::analysis::{
 use std::time::UNIX_EPOCH;
 fn flow() -> ScopedFlowKey {
     ScopedFlowKey {
-        scope: Interner::new().intern(None, vec![]).unwrap(),
+        scope: Interner::default().intern(None, vec![]).unwrap(),
         flow: FlowKey {
             source: "192.0.2.1".parse().unwrap(),
             source_port: 40000,
@@ -247,7 +247,8 @@ fn capture_pipeline_reassembles_and_attributes_messages() {
     let collector =
         Collector::new(Limits::default(), registry.clone(), [BuiltinProtocol::Mqtt]).unwrap();
     let capture = include_bytes!("../../../../../examples/captures/protocol-mqtt-stream.pcap");
-    let mut reader = crate::capture_file::Reader::new(&capture[..]).unwrap();
+    let mut reader =
+        crate::capture_file::Reader::with_limits(&capture[..], Default::default()).unwrap();
     let mut events = Vec::new();
     let outcome = crate::analysis::Session::new(registry, Default::default(), collector)
         .run(
@@ -527,7 +528,12 @@ fn capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
     for conflict in [true, false] {
         let registry = builtin::registry();
         let builder = crate::build::Builder::new(registry.clone());
-        let mut writer = crate::capture_file::Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+        let mut writer = crate::capture_file::Writer::pcap_with_options(
+            Vec::new(),
+            LinkType::ETHERNET,
+            Default::default(),
+        )
+        .unwrap();
         let mut segments: Vec<(u64, u32, u16, &[u8])> =
             vec![(0, 100, Tcp::SYN, b""), (1, 103, Tcp::ACK, b"\0\x01ax")];
         if conflict {
@@ -543,7 +549,7 @@ fn capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
             (124, 201, Tcp::ACK, b"\xc0\0" as &[u8]),
         ]);
         for (seconds, sequence, flags, payload) in segments {
-            let mut packet = Packet::new();
+            let mut packet = Packet::default();
             packet.push(Ethernet::default());
             packet.push(Ipv4 {
                 source: "192.0.2.1".parse().unwrap(),
@@ -564,7 +570,7 @@ fn capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
                 .build(packet, Addresses::default(), Default::default())
                 .unwrap();
             let frame = Frame::new(
-                UNIX_EPOCH + Duration::from_secs(seconds),
+                Some(UNIX_EPOCH + Duration::from_secs(seconds)),
                 LinkType::ETHERNET,
                 built.bytes,
             )
@@ -572,7 +578,8 @@ fn capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
             writer.write_frame(&frame).unwrap();
         }
         let capture = writer.into_inner();
-        let mut reader = crate::capture_file::Reader::new(&capture[..]).unwrap();
+        let mut reader =
+            crate::capture_file::Reader::with_limits(&capture[..], Default::default()).unwrap();
         let collector =
             Collector::new(Limits::default(), registry.clone(), [BuiltinProtocol::Mqtt]).unwrap();
         let mut events = Vec::new();
@@ -608,7 +615,12 @@ fn server_first_payload_uses_the_handshake_server_port() {
     };
     let registry = builtin::registry();
     let builder = crate::build::Builder::new(registry.clone());
-    let mut writer = crate::capture_file::Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+    let mut writer = crate::capture_file::Writer::pcap_with_options(
+        Vec::new(),
+        LinkType::ETHERNET,
+        Default::default(),
+    )
+    .unwrap();
     for (server, sequence, acknowledgment, flags, payload) in [
         (false, 100, 0, Tcp::SYN, false),
         (true, 900, 101, Tcp::SYN | Tcp::ACK, false),
@@ -616,7 +628,7 @@ fn server_first_payload_uses_the_handshake_server_port() {
         (true, 901, 101, Tcp::ACK, true),
         (false, 101, 930, Tcp::ACK, true),
     ] {
-        let mut packet = Packet::new();
+        let mut packet = Packet::default();
         packet.push(Ethernet::default());
         packet.push(Ipv4 {
             source: if server { "192.0.2.2" } else { "192.0.2.1" }
@@ -647,13 +659,14 @@ fn server_first_payload_uses_the_handshake_server_port() {
             .build(packet, Addresses::default(), Default::default())
             .unwrap();
         writer
-            .write_frame(&Frame::new(UNIX_EPOCH, LinkType::ETHERNET, built.bytes).unwrap())
+            .write_frame(&Frame::new(Some(UNIX_EPOCH), LinkType::ETHERNET, built.bytes).unwrap())
             .unwrap();
     }
     let capture = writer.into_inner();
     // Also cover captures that begin at the SYN-ACK rather than the initial SYN.
     for skip_syn in [false, true] {
-        let mut reader = crate::capture_file::Reader::new(&capture[..]).unwrap();
+        let mut reader =
+            crate::capture_file::Reader::with_limits(&capture[..], Default::default()).unwrap();
         if skip_syn {
             reader.next_frame().unwrap();
         }
@@ -780,7 +793,12 @@ fn modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
     );
     for handshake in [true, false] {
         let builder = crate::build::Builder::new(registry.clone());
-        let mut writer = crate::capture_file::Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+        let mut writer = crate::capture_file::Writer::pcap_with_options(
+            Vec::new(),
+            LinkType::ETHERNET,
+            Default::default(),
+        )
+        .unwrap();
         for (server, sequence, flags, payload) in [
             (false, 100, Tcp::SYN, false),
             (false, 101, Tcp::ACK, true),
@@ -789,7 +807,7 @@ fn modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
             if !handshake && !payload {
                 continue;
             }
-            let mut packet = Packet::new();
+            let mut packet = Packet::default();
             packet.push(Ethernet::default());
             packet.push(Ipv4 {
                 source: if server { "192.0.2.2" } else { "192.0.2.1" }
@@ -822,11 +840,14 @@ fn modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
                 .build(packet, Addresses::default(), Default::default())
                 .unwrap();
             writer
-                .write_frame(&Frame::new(UNIX_EPOCH, LinkType::ETHERNET, built.bytes).unwrap())
+                .write_frame(
+                    &Frame::new(Some(UNIX_EPOCH), LinkType::ETHERNET, built.bytes).unwrap(),
+                )
                 .unwrap();
         }
         let capture = writer.into_inner();
-        let mut reader = crate::capture_file::Reader::new(&capture[..]).unwrap();
+        let mut reader =
+            crate::capture_file::Reader::with_limits(&capture[..], Default::default()).unwrap();
         let collector = Collector::new(
             Limits::default(),
             registry.clone(),
@@ -884,7 +905,7 @@ fn many_coalesced_messages_preserve_the_layer_budget_and_stream() {
     };
     let registry = builtin::registry();
     let builder = crate::build::Builder::new(registry.clone());
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(Ethernet::default());
     packet.push(Ipv4::default());
     packet.push(Tcp {
@@ -896,7 +917,7 @@ fn many_coalesced_messages_preserve_the_layer_budget_and_stream() {
     let built = builder
         .build(packet, Addresses::default(), Default::default())
         .unwrap();
-    let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, built.bytes.clone()).unwrap();
+    let frame = Frame::new(Some(UNIX_EPOCH), LinkType::ETHERNET, built.bytes.clone()).unwrap();
     for max_layers in [4, 8, 64] {
         let decoded = crate::decode::Dissector::new(registry.clone())
             .decode(
@@ -919,10 +940,16 @@ fn many_coalesced_messages_preserve_the_layer_budget_and_stream() {
             built.bytes
         );
     }
-    let mut writer = crate::capture_file::Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+    let mut writer = crate::capture_file::Writer::pcap_with_options(
+        Vec::new(),
+        LinkType::ETHERNET,
+        Default::default(),
+    )
+    .unwrap();
     writer.write_frame(&frame).unwrap();
     let capture = writer.into_inner();
-    let mut reader = crate::capture_file::Reader::new(&capture[..]).unwrap();
+    let mut reader =
+        crate::capture_file::Reader::with_limits(&capture[..], Default::default()).unwrap();
     let collector =
         Collector::new(Limits::default(), registry.clone(), [BuiltinProtocol::Mqtt]).unwrap();
     let mut events = Vec::new();

@@ -80,7 +80,7 @@ impl Context<'_> {
         Ok(())
     }
 
-    fn charge_live(&mut self, bytes: usize) -> Result<(), Error> {
+    pub(crate) fn reserve_scratch(&mut self, bytes: usize) -> Result<(), Error> {
         let next = self
             .budget
             .live
@@ -94,7 +94,7 @@ impl Context<'_> {
         Ok(())
     }
 
-    fn release_live(&mut self, bytes: usize) -> Result<(), Error> {
+    pub(crate) fn release_scratch(&mut self, bytes: usize) -> Result<(), Error> {
         self.budget.live = self
             .budget
             .live
@@ -121,7 +121,7 @@ impl Context<'_> {
         let frames = set.frames().len();
         let previous = self.budget.spans;
         self.charge_spans(frames)?;
-        if let Err(error) = self.charge_live(SET_OVERHEAD + frames * SPAN_OVERHEAD) {
+        if let Err(error) = self.reserve_scratch(SET_OVERHEAD + frames * SPAN_OVERHEAD) {
             self.budget.spans = previous;
             return Err(error);
         }
@@ -151,16 +151,8 @@ impl Context<'_> {
         Ok(())
     }
 
-    pub(crate) fn reserve_scratch(&mut self, bytes: usize) -> Result<(), Error> {
-        self.charge_live(bytes)
-    }
-
-    pub(crate) fn release_scratch(&mut self, bytes: usize) -> Result<(), Error> {
-        self.release_live(bytes)
-    }
-
     pub(crate) fn charge(&mut self, owner: &mut Charge, bytes: usize) -> Result<(), Error> {
-        self.charge_live(bytes)?;
+        self.reserve_scratch(bytes)?;
         owner.bytes += bytes;
         Ok(())
     }
@@ -170,7 +162,7 @@ impl Context<'_> {
             .bytes
             .checked_sub(bytes)
             .ok_or(Error::Invariant("owner charge underflow"))?;
-        self.release_live(bytes)
+        self.release_scratch(bytes)
     }
 
     pub(crate) fn track(&mut self, owner: &mut Charge, set: &SourceSet) -> Result<(), Error> {
@@ -194,7 +186,7 @@ impl Context<'_> {
     pub(crate) fn release_all(&mut self, owner: &mut Charge) -> Result<(), Error> {
         let Charge { bytes, spans } = std::mem::take(owner);
         self.release_spans(spans)?;
-        self.release_live(bytes)
+        self.release_scratch(bytes)
     }
 
     pub(crate) fn check_frames(&mut self) -> Result<(), Error> {

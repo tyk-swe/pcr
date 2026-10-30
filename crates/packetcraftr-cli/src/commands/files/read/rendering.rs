@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::output::contract::Format;
+use crate::output::envelope::Published;
 
 use crate::output;
 
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
-use crate::rendering::{FieldTree, render_frame_text, render_frame_tree, write_hex_line};
+use crate::rendering::{FieldTree, render_frame, write_hex_line};
 
 pub(super) fn render_record(
     invocation: &crate::invocation::Invocation,
@@ -23,19 +24,28 @@ pub(super) fn render_record(
     } = &record;
     match format {
         Format::Text => match tree {
-            Some(tree) => {
-                render_frame_tree(invocation, *source_frame, frame, decoded.as_ref(), tree)
-            }
-            None => render_frame_text(
+            Some(tree) => render_frame(
                 invocation,
                 *source_frame,
                 frame,
                 decoded.as_ref(),
+                Some(tree),
+                crate::invocation::Presentation { verbose: true },
+            ),
+            None => render_frame(
+                invocation,
+                *source_frame,
+                frame,
+                decoded.as_ref(),
+                None,
                 stream.presentation(),
             ),
         },
         Format::Hex => write_hex_line(frame.bytes()),
-        Format::Ndjson => Ok(stream.emit_data(output::read::Event::from(record), Vec::new())?),
+        Format::Ndjson => Ok(stream.emit_published(Published::new(
+            output::read::Event::from(record),
+            Vec::new(),
+        ))?),
         Format::Json | Format::Pcap | Format::PcapNg => Err(CliError::new(
             packetcraftr_core::error::Kind::Internal,
             "capture-file output returned before frame rendering",

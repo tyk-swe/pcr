@@ -94,9 +94,10 @@ where
     let approved = approve_traceroute(request, authorizer, deadline)?;
     let mut batches = build_batches(request, approved.destination)?;
     enforce_deadline(probe_error, deadline)?;
-    let mut evidence = BatchEvidence::new(
+    let mut evidence = BatchEvidence::new_with_retention_limits(
         WORKFLOW,
         probe_error,
+        request.limits.evidence,
         request.limits.evidence,
         ProbeClassifier {
             registry,

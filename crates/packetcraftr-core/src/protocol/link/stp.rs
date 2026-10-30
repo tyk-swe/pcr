@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field,
     layer::{Id, Layer, reflective_layer},
     layout::FieldLayout,
@@ -432,7 +432,7 @@ impl Codec for StpCodec {
         let diagnostics = problems(&layer)
             .into_iter()
             .map(|problem| {
-                Diagnostic::warning(problem.decode_code(), problem.message())
+                Diagnostic::new(Severity::Warning, problem.decode_code(), problem.message())
                     .at_field(problem.field())
             })
             .collect();

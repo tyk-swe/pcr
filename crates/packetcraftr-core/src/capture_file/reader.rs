@@ -37,10 +37,6 @@ pub struct Reader<R> {
 }
 
 impl<R: Read> Reader<R> {
-    pub fn new(inner: R) -> Result<Self, Error> {
-        Self::with_limits(inner, ReaderLimits::default())
-    }
-
     pub fn with_limits(mut inner: R, limits: ReaderLimits) -> Result<Self, Error> {
         let max_size = limits.max_size;
         let max_total_interfaces = limits.max_total_interfaces;

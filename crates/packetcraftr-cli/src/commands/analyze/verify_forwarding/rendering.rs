@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::output::contract::Format;
+use crate::output::envelope::Published;
 use crate::output::{self, verify_forwarding::Report};
 use packetcraftr_core::analysis::forwarding as analysis;
 use packetcraftr_core::field;
@@ -67,15 +68,15 @@ pub(super) fn render(
                 "--max-details / --max-detail-bytes",
             );
             if format == Format::Json {
-                let envelope = invocation.decorate(output::envelope::Envelope::success(
+                let envelope = invocation.decorate(output::envelope::Envelope::published(
                     output::contract::Command::VerifyForwarding,
-                    document,
-                    diagnostics,
+                    crate::output::envelope::Published::new(document, diagnostics),
                 ));
                 // Measure the complete pretty-printed envelope and reserve the final newline.
-                crate::rendering::bounded_pretty_json_len(
+                crate::rendering::bounded_json_len(
                     &envelope,
                     output::stream::MAX_RECORD_BYTES - 1,
+                    serde_json::ser::PrettyFormatter::new(),
                 )
                 .map_err(|error| error.into_cli_error(report_limit_error))?;
                 invocation.check()?;
@@ -84,10 +85,11 @@ pub(super) fn render(
                 crate::rendering::bounded_json_len(
                     &document,
                     output::stream::MAX_RECORD_BYTES - 1024 * 1024,
+                    serde_json::ser::CompactFormatter,
                 )
                 .map_err(|error| error.into_cli_error(report_limit_error))?;
                 invocation.check()?;
-                Ok(stream.complete(document, diagnostics)?)
+                Ok(stream.complete_published(Published::new(document, diagnostics))?)
             }
         }
         other => other.unreachable(),

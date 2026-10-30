@@ -27,15 +27,11 @@ pub(crate) trait Bounded {
 
 impl Bounded for MaxDurationArgs {
     fn max_duration(&self) -> Duration {
-        Self::max_duration(self)
+        Duration::from_millis(self.max_duration_ms)
     }
 }
 
 impl MaxDurationArgs {
-    pub(crate) const fn max_duration(&self) -> Duration {
-        Duration::from_millis(self.max_duration_ms)
-    }
-
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         declare!(settings, self, [max_duration_ms: Milliseconds @ Operation preset(30000, 300000)]);
     }

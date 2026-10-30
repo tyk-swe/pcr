@@ -7,6 +7,7 @@ mod rendering;
 mod selection;
 
 use crate::output::contract::Format;
+use crate::output::envelope::Published;
 
 use std::time::Duration;
 
@@ -20,7 +21,7 @@ use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::output::stats::Table;
-use crate::rendering::emit_aggregate;
+use crate::rendering::emit_published;
 
 impl crate::commands::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[
@@ -123,11 +124,10 @@ pub(super) fn run(
         Format::Json => {
             let result = output::stats::Report::try_from((table, report, frames_read))
                 .map_err(CliError::classified)?;
-            emit_aggregate(
+            emit_published(
                 invocation,
                 output::contract::Command::Stats,
-                result,
-                diagnostics,
+                Published::new(result, diagnostics),
             )
         }
         Format::Csv => {

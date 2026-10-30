@@ -32,7 +32,7 @@ const MAX_FRAME_SIZE: u16 = 0x5;
 
 fn flow() -> ScopedFlowKey {
     ScopedFlowKey {
-        scope: Interner::new().intern(None, vec![]).unwrap(),
+        scope: Interner::default().intern(None, vec![]).unwrap(),
         flow: FlowKey {
             source: "192.0.2.1".parse().unwrap(),
             source_port: 40000,

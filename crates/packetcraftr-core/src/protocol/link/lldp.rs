@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field,
     layer::{Id, Layer, reflective_layer},
 };
@@ -263,7 +263,8 @@ impl Codec for LldpCodec {
             .problems
             .into_iter()
             .map(|problem| {
-                Diagnostic::warning(problem.decode_code(), problem.message()).at_field("tlvs")
+                Diagnostic::new(Severity::Warning, problem.decode_code(), problem.message())
+                    .at_field("tlvs")
             })
             .collect();
         let consumed = input.len();

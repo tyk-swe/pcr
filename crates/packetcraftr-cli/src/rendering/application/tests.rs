@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::*;
+use crate::output::envelope::Published;
 use crate::{
     invocation::Invocation,
     output::{
@@ -120,7 +121,10 @@ fn ndjson_application_serializes_once_and_charges_exact_result_bytes_with_line_v
     assert_eq!(output.remaining, 0);
     invocation
         .output
-        .complete(serde_json::json!({"messages": 64}), Vec::new())
+        .complete_published(Published::new(
+            serde_json::json!({"messages": 64}),
+            Vec::new(),
+        ))
         .unwrap();
     assert_eq!(tape.writes.load(Ordering::Relaxed), 65);
     assert_eq!(tape.flushes.load(Ordering::Relaxed), 65);
@@ -189,7 +193,12 @@ fn writer_failure_keeps_exact_charge_and_prevents_false_success_or_repair_termin
     assert_eq!(failure.classification.code, "io.stdout");
     assert!(!invocation.output.is_open());
     assert!(!invocation.output.is_complete());
-    assert!(invocation.output.complete((), Vec::new()).is_err());
+    assert!(
+        invocation
+            .output
+            .complete_published(Published::new((), Vec::new()))
+            .is_err()
+    );
     assert!(
         invocation
             .output
@@ -278,13 +287,19 @@ fn diagnostics_observe_live_settings_on_initial_and_replacement_outputs() {
                 let count = Arc::new(AtomicUsize::new(0));
                 invocation
                     .output
-                    .emit_data(record(&count, &serde_json::json!({"index": 0})), Vec::new())
+                    .emit_published(Published::new(
+                        record(&count, &serde_json::json!({"index": 0})),
+                        Vec::new(),
+                    ))
                     .unwrap();
                 diagnostics.stream_index_needed(false);
             }
             invocation
                 .output
-                .complete(serde_json::json!({"done": true}), Vec::new())
+                .complete_published(Published::new(
+                    serde_json::json!({"done": true}),
+                    Vec::new(),
+                ))
                 .unwrap();
             let lines: Vec<serde_json::Value> = tape
                 .bytes
@@ -349,7 +364,10 @@ fn preexisting_encoder_deadline_survives_initial_and_replacement_configuration()
         assert!(
             invocation
                 .output
-                .complete(serde_json::json!({"done": true}), Vec::new())
+                .complete_published(Published::new(
+                    serde_json::json!({"done": true}),
+                    Vec::new()
+                ))
                 .is_err()
         );
         assert!(!invocation.output.is_complete());

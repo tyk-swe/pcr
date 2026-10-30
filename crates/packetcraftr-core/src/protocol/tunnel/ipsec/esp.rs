@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
@@ -123,7 +123,8 @@ impl Codec for EspCodec {
         let mut diagnostics = Vec::new();
         if payload_len < 2 {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.esp_trailer",
                     "the ciphertext is too short for the two-byte ESP trailer",
                 )

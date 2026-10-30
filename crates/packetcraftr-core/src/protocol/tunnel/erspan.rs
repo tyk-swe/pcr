@@ -7,9 +7,9 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field,
-    layer::{Id, Layer, reflect_get, reflect_set_bounded, reflective_layer},
+    layer::{Id, Layer, ReflectiveField, reflect_set_bounded, reflective_layer},
     registry::Discriminator,
 };
 
@@ -70,7 +70,7 @@ impl Default for Erspan {
 reflective_layer! {
     fn erspan_schema() => { protocol: Id::new(NAME), name: "ERSPAN" }
     impl Erspan {
-        "version" => { kind: Unsigned, derived: false, required: true, description: "Header version: 1 is Type II, 2 is Type III", get |layer| Some(reflect_get(&layer.version)), set |layer, value, name| { reflect_set_bounded(&mut layer.version, erspan_schema(), name, value, 0xf_u64)?; if layer.version == 2 && layer.type3.is_none() { layer.type3 = Some(ErspanType3::default()); } Ok(()) }, layout: (0, 2) },
+        "version" => { kind: Unsigned, derived: false, required: true, description: "Header version: 1 is Type II, 2 is Type III", get |layer| Some(ReflectiveField::reflective_value(&layer.version)), set |layer, value, name| { reflect_set_bounded(&mut layer.version, erspan_schema(), name, value, 0xf_u64)?; if layer.version == 2 && layer.type3.is_none() { layer.type3 = Some(ErspanType3::default()); } Ok(()) }, layout: (0, 2) },
         "vlan" => { kind: Unsigned, derived: false, required: false, description: "VLAN of the mirrored frame", reflect_bounded: vlan, 0xfff_u64, layout: (0, 2) },
         "cos" => { kind: Unsigned, derived: false, required: false, description: "Class of service of the mirrored frame", reflect_bounded: cos, 7_u64, layout: (2, 4) },
         "encapsulation" => { kind: Unsigned, derived: false, required: false, description: "Type II trunk encapsulation; Type III bad/short frame bits", reflect_bounded: encapsulation, 3_u64, layout: (2, 4) },
@@ -172,7 +172,8 @@ impl Codec for ErspanCodec {
         };
         if expected_version.is_some_and(|expected| expected != version) {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.erspan_type",
                     "the header version disagrees with the enclosing GRE protocol type",
                 )

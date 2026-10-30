@@ -5,8 +5,6 @@ use packetcraftr_core::error::Kind;
 
 use std::io::{self, Write};
 
-use packetcraftr_core as core;
-
 use super::stdout::stdout_error;
 use crate::output;
 use serde::Serialize;
@@ -33,20 +31,6 @@ pub(crate) fn serialization_error(source: serde_json::Error) -> CliError {
 }
 
 pub(crate) fn bounded_json_len(
-    value: &impl Serialize,
-    limit: usize,
-) -> Result<usize, BoundedJsonError> {
-    bounded_json_len_with_formatter(value, limit, serde_json::ser::CompactFormatter)
-}
-
-pub(crate) fn bounded_pretty_json_len(
-    value: &impl Serialize,
-    limit: usize,
-) -> Result<usize, BoundedJsonError> {
-    bounded_json_len_with_formatter(value, limit, serde_json::ser::PrettyFormatter::new())
-}
-
-fn bounded_json_len_with_formatter(
     value: &impl Serialize,
     limit: usize,
     formatter: impl serde_json::ser::Formatter,
@@ -121,39 +105,6 @@ fn json_error(source: serde_json::Error) -> CliError {
     } else {
         serialization_error(source)
     }
-}
-
-pub(crate) fn emit_aggregate<T: Serialize>(
-    invocation: &crate::invocation::Invocation,
-    command: output::contract::Command,
-    result: T,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-) -> Result<(), CliError> {
-    invocation.check()?;
-    emit_json(
-        invocation,
-        &invocation.decorate(output::envelope::Envelope::success(
-            command,
-            result,
-            diagnostics,
-        )),
-    )
-}
-
-pub(crate) fn emit_aggregate_with_stats<T: Serialize>(
-    invocation: &crate::invocation::Invocation,
-    command: output::contract::Command,
-    result: T,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
-) -> Result<(), CliError> {
-    invocation.check()?;
-    emit_json(
-        invocation,
-        &invocation.decorate(
-            output::envelope::Envelope::success(command, result, diagnostics).with_stats(stats),
-        ),
-    )
 }
 
 pub(crate) fn emit_published<T: Serialize>(

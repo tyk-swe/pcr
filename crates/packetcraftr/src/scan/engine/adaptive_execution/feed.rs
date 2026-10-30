@@ -15,6 +15,7 @@ use crate::{
     },
     target::SelectedAddress,
 };
+use packetcraftr_core::diagnostic::Severity;
 use packetcraftr_core::{budget::Deadline, error::BoundaryError};
 use std::{collections::BTreeMap, time::Instant};
 
@@ -243,7 +244,8 @@ where
                     if execution.responses.is_empty() {
                         self.evidence
                             .record_diagnostics(
-                                vec![packetcraftr_core::diagnostic::Diagnostic::warning(
+                                vec![packetcraftr_core::diagnostic::Diagnostic::new(
+                                    Severity::Warning,
                                     "scan.observation_shortened",
                                     format!(
                                         "probe {} observation ended at its local host ceiling",

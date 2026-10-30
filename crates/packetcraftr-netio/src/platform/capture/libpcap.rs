@@ -51,7 +51,7 @@ unsafe extern "C" {
     fn pcap_geterr(handle: *mut c_void) -> *mut c_char;
 }
 
-pub(in crate::platform) fn open_capture(
+pub(crate) fn open_capture(
     interface: &InterfaceId,
     limits: Limits,
     capture_filter: Option<&str>,
@@ -184,9 +184,7 @@ fn apply_native_settings(
     Ok(())
 }
 
-pub(in crate::platform) fn timestamp_types(
-    interface: &InterfaceId,
-) -> Result<Vec<TimestampType>, Error> {
+pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
     let capture = Capture::from_device(interface.name.as_str())
         .map_err(|error| map_open_error(interface, error))?;
     let handle = capture.as_ptr().cast::<c_void>();

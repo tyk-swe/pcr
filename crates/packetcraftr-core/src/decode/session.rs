@@ -6,7 +6,7 @@ use std::ops::Range;
 use bytes::Bytes;
 
 use crate::codec::{Codec, DecodeContext, Decoded};
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Diagnostic, Severity};
 use crate::frame::Frame;
 use crate::packet::Packet;
 use crate::protocol::network::{Ipv4, Ipv6};
@@ -70,7 +70,7 @@ impl<'registry> DecodeSession<'registry> {
             root,
             frame,
             options,
-            packet: Packet::new(),
+            packet: Packet::default(),
             layouts: Vec::new(),
             diagnostics: Vec::new(),
             trailing: Vec::new(),
@@ -116,7 +116,8 @@ impl<'registry> DecodeSession<'registry> {
                 self.preserve_raw(
                     cursor.bytes.start,
                     cursor.bytes.len(),
-                    Diagnostic::info(
+                    Diagnostic::new(
+                        Severity::Info,
                         "decode.message_limit",
                         "remaining coalesced messages preserved as Raw",
                     ),
@@ -177,7 +178,8 @@ impl<'registry> DecodeSession<'registry> {
                 protocol: cursor.protocol,
             });
         }
-        let diagnostic = Diagnostic::warning(
+        let diagnostic = Diagnostic::new(
+            Severity::Warning,
             "decode.missing_codec",
             format!("no codec registered for {}", cursor.protocol),
         )
@@ -196,8 +198,9 @@ impl<'registry> DecodeSession<'registry> {
             message.clone(),
             cursor.bytes.start,
         );
-        self.diagnostics
-            .push(Diagnostic::error("decode.malformed_layer", message).at_layer(index));
+        self.diagnostics.push(
+            Diagnostic::new(Severity::Error, "decode.malformed_layer", message).at_layer(index),
+        );
     }
 
     fn validate_layer(
@@ -287,9 +290,9 @@ impl<'registry> DecodeSession<'registry> {
             cursor.protocol
         );
         let diagnostic = if allow_link_padding {
-            Diagnostic::info("decode.trailing_padding", message)
+            Diagnostic::new(Severity::Info, "decode.trailing_padding", message)
         } else {
-            Diagnostic::warning("decode.trailing_malformed", message)
+            Diagnostic::new(Severity::Warning, "decode.trailing_malformed", message)
         };
         self.diagnostics
             .push(diagnostic.at_layer(self.packet.len()));
@@ -395,7 +398,8 @@ impl<'registry> DecodeSession<'registry> {
             offset,
         );
         self.diagnostics.push(
-            Diagnostic::error("decode.missing_required_child", message).at_layer(parent_index),
+            Diagnostic::new(Severity::Error, "decode.missing_required_child", message)
+                .at_layer(parent_index),
         );
         Ok(())
     }
@@ -408,12 +412,11 @@ impl<'registry> DecodeSession<'registry> {
         payload_len: usize,
     ) -> Result<(), Error> {
         self.ensure_layer_capacity()?;
-        let diagnostic = Diagnostic::warning(
+        let diagnostic = Diagnostic::new(Severity::Warning,
             "decode.terminal_payload",
             format!(
                 "codec for {protocol} stopped with {payload_len} unconsumed payload byte(s); preserved as Raw"
-            ),
-        )
+            ))
         .at_layer(parent_index);
         self.preserve_raw(offset, payload_len, diagnostic);
         Ok(())
@@ -427,7 +430,8 @@ impl<'registry> DecodeSession<'registry> {
         payload_len: usize,
     ) -> Result<(), Error> {
         self.ensure_layer_capacity()?;
-        let diagnostic = Diagnostic::warning(
+        let diagnostic = Diagnostic::new(
+            Severity::Warning,
             "decode.unknown_binding",
             format!("unknown child discriminator after {parent}"),
         )

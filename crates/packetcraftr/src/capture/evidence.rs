@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{Cause, Report};
-use packetcraftr_core::{diagnostic::Diagnostic, frame::Frame};
+use packetcraftr_core::{
+    diagnostic::{Diagnostic, Severity},
+    frame::Frame,
+};
 use packetcraftr_netio::capture::{self as native, Limits, Metadata};
 use std::time::Duration;
 
@@ -116,7 +119,8 @@ pub(super) fn evidence_loss(report: &mut Report) -> Option<Cause> {
                     error,
                 });
             }
-            report.diagnostics.push(Diagnostic::warning(
+            report.diagnostics.push(Diagnostic::new(
+                Severity::Warning,
                 "capture.evidence_incomplete",
                 format!(
                     "source {} ({}): {error}",

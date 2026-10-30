@@ -33,7 +33,7 @@ pub(super) fn batch_limits(
     mut operations: impl Iterator<Item = DnsOperation>,
 ) -> Result<DnsOperation, Error> {
     operations.try_fold(
-        DnsOperation::new(WireLimits::new(0, 0), SocketLimits::none())?,
+        DnsOperation::new(WireLimits::new(0, 0), SocketLimits::new(0, 0, 0))?,
         |total, operation| {
             let udp = total.udp();
             let tcp = total.tcp();
@@ -85,7 +85,7 @@ pub(super) fn operation_limits(
     let tcp = if request.transport != TransportMode::Udp {
         socket_limits(attempts, query_bytes)?
     } else {
-        SocketLimits::none()
+        SocketLimits::new(0, 0, 0)
     };
     let delay = rate_delay(
         attempt_error,
@@ -163,7 +163,7 @@ impl Probe {
     /// Route-dependent fields remain unspecified for the client to materialize.
     #[must_use]
     pub fn packet(&self) -> Packet {
-        let mut packet = Packet::new();
+        let mut packet = Packet::default();
         match self.server_address {
             IpAddr::V4(destination) => {
                 packet.push(Ipv4 {

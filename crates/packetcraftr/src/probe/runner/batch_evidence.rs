@@ -103,16 +103,6 @@ pub(crate) struct BatchEvidence<K, F, E> {
 }
 
 impl<K, F, E> BatchEvidence<K, F, E> {
-    pub(crate) fn new(
-        workflow: Workflow,
-        errors: fn(u64, crate::error::Failure) -> E,
-        limits: EvidenceLimits,
-        classifier: K,
-        emit: F,
-    ) -> Self {
-        Self::new_with_retention_limits(workflow, errors, limits, limits, classifier, emit)
-    }
-
     /// Valid executor captures keep their per-exchange ceilings even when earlier
     /// preparation has consumed part (or all) of the operation retention budget.
     pub(crate) fn new_with_retention_limits(

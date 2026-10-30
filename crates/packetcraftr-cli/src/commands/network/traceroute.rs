@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::command_options::Bounded as _;
 use crate::output::contract::Format;
 
 pub(in crate::commands) mod arguments;

@@ -57,8 +57,8 @@ pub(super) fn capture_worker(
     while !stop.load(Ordering::Acquire) {
         match source.next_event()? {
             NativeCaptureEvent::Packet(packet) => {
-                let mut frame = Frame::try_with_lengths(
-                    packet.timestamp,
+                let mut frame = Frame::try_with_optional_timestamp(
+                    Some(packet.timestamp),
                     link_type,
                     Lengths {
                         captured: packet.captured_length,
@@ -71,7 +71,7 @@ pub(super) fn capture_worker(
                     source: Some(Source::new(error)),
                 })?;
                 frame.interface = Some(interface_index);
-                shared.enqueue(Captured::with_ingress_time(frame, packet.received_at))?;
+                shared.enqueue(Captured::new(frame, packet.received_at))?;
             }
             NativeCaptureEvent::Timeout => {}
             NativeCaptureEvent::Closed if stop.load(Ordering::Acquire) => break,

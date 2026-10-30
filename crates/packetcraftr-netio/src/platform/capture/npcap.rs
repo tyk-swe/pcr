@@ -31,7 +31,7 @@ use crate::{
 };
 use bytes::Bytes;
 
-pub(in crate::platform) fn open_capture(
+pub(crate) fn open_capture(
     interface: &InterfaceId,
     limits: Limits,
     capture_filter: Option<&str>,
@@ -97,9 +97,7 @@ pub(in crate::platform) fn open_capture(
     })
 }
 
-pub(in crate::platform) fn timestamp_types(
-    interface: &InterfaceId,
-) -> Result<Vec<TimestampType>, Error> {
+pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
     let handle = create_handle(interface)?;
     let Some(list_types) = handle.api.pcap_list_tstamp_types else {
         return Err(Error::UnsupportedCaptureSetting {

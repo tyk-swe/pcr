@@ -5,7 +5,7 @@ use super::{Error, InvalidInput, Limit, Unsupported};
 use crate::frame::{Frame, LinkType};
 use crate::packet::Packet;
 use crate::protocol::{
-    BuiltinProtocol, checksum,
+    BuiltinProtocol, checksum_parts,
     headers::{IpHeader, Ipv4Header, Ipv6Header, LinkHeader},
     network::ip_protocol,
 };
@@ -84,7 +84,7 @@ fn ipv4(
 ) -> Result<Vec<Frame>, Error> {
     let header_len = ipv4.header_length();
     let length = ipv4.total_length();
-    if checksum(&ip[..header_len]) != 0 {
+    if checksum_parts(&[&ip[..header_len]]) != 0 {
         return Err(Error::Invalid(InvalidInput::Ipv4HeaderChecksum));
     }
     if ipv4.reserved_flag() {
@@ -136,7 +136,7 @@ fn ipv4(
         let fragment_flags = (flags & 0x8000) | (u16::from(more) << 13) | (position / 8) as u16;
         header[6..8].copy_from_slice(&fragment_flags.to_be_bytes());
         header[Ipv4Header::CHECKSUM].fill(0);
-        let sum = checksum(&header);
+        let sum = checksum_parts(&[&header]);
         header[Ipv4Header::CHECKSUM].copy_from_slice(&sum.to_be_bytes());
         append(
             frame,
@@ -316,7 +316,7 @@ fn append(
     bytes.extend_from_slice(header);
     bytes.extend_from_slice(payload);
     bytes.resize(length, 0);
-    let mut fragment = Frame::without_timestamp(frame.link_type, bytes)?;
+    let mut fragment = Frame::new(None, frame.link_type, bytes)?;
     fragment.timestamp = frame.timestamp;
     fragment.interface = frame.interface;
     fragment.direction = frame.direction;

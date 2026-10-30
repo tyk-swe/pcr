@@ -1,9 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{emit_aggregate, write_stdout_line};
+use super::{emit_published, write_stdout_line};
 use crate::errors::CliError;
 use crate::output;
+use crate::output::envelope::Published;
 
 pub(crate) fn render_aggregate_rows<T, R: serde::Serialize>(
     invocation: &crate::invocation::Invocation,
@@ -23,7 +24,9 @@ pub(crate) fn render_aggregate_rows<T, R: serde::Serialize>(
                 format_args!("{} {} result(s)", rows.len(), command.as_str()),
             )
         }
-        output::contract::Format::Json => emit_aggregate(invocation, command, result, Vec::new()),
+        output::contract::Format::Json => {
+            emit_published(invocation, command, Published::new(result, Vec::new()))
+        }
         other => other.unreachable(),
     }
 }

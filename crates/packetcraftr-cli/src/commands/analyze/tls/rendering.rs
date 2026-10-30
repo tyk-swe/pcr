@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::envelope::Published;
 use std::fmt::Write as _;
 
 use crate::output::contract::Format;
@@ -14,7 +15,7 @@ use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
 use crate::rendering::Retained;
 use crate::rendering::{
-    comma_separated, duration_text, emit_aggregate, encapsulation_text, optional_display,
+    comma_separated, duration_text, emit_published, encapsulation_text, render_optional,
     write_stdout_line,
 };
 
@@ -61,7 +62,10 @@ pub(super) fn render_session(
             state.retained.push(|| session);
             Ok(())
         }
-        Format::Ndjson => Ok(stream.emit_data(output::tls::Event::from(session), Vec::new())?),
+        Format::Ndjson => Ok(stream.emit_published(Published::new(
+            output::tls::Event::from(session),
+            Vec::new(),
+        ))?),
         other => other.unreachable(),
     }
 }
@@ -95,16 +99,21 @@ pub(super) fn render_aggregate(
     state: State,
     summary: Summary,
 ) -> Result<(), CliError> {
-    emit_aggregate(
+    emit_published(
         invocation,
         output::contract::Command::Tls,
-        output::tls::Report::from((state.retained.into_items(), summary)),
-        Vec::new(),
+        Published::new(
+            output::tls::Report::from((state.retained.into_items(), summary)),
+            Vec::new(),
+        ),
     )
 }
 
 pub(super) fn render_stream(summary: Summary, stream: &StreamEncoder) -> Result<(), CliError> {
-    Ok(stream.complete(output::tls::Event::from(summary), Vec::new())?)
+    Ok(stream.complete_published(Published::new(
+        output::tls::Event::from(summary),
+        Vec::new(),
+    ))?)
 }
 
 fn unmatched_note(summary: &Summary) -> Option<String> {
@@ -172,13 +181,17 @@ fn session_line_with(session: &Session, presentation: crate::invocation::Present
         session.client_endpoint,
         session.server_endpoint,
         session.status,
-        optional_display(
+        render_optional(
             session
                 .client
                 .as_ref()
-                .and_then(|client| client.sni.as_deref())
+                .and_then(|client| client.sni.as_deref()),
+            ToString::to_string
         ),
-        optional_display(session.server.as_ref().map(version_text).as_deref())
+        render_optional(
+            session.server.as_ref().map(version_text).as_deref(),
+            ToString::to_string
+        )
     );
     if !session.alerts.is_empty() {
         let _ = write!(
@@ -207,14 +220,24 @@ fn session_line(session: &Session) -> String {
         session.client_endpoint,
         session.server_endpoint,
         session.status,
-        optional_display(client.and_then(|client| client.sni.as_deref())),
-        optional_display(server.map(version_text).as_deref()),
-        optional_display(server.map(cipher_text).as_deref()),
-        optional_display(server.and_then(group_text).as_deref()),
+        render_optional(client.and_then(|client| client.sni.as_deref()), |value| {
+            value.to_string()
+        }),
+        render_optional(server.map(version_text).as_deref(), ToString::to_string),
+        render_optional(server.map(cipher_text).as_deref(), ToString::to_string),
+        render_optional(server.and_then(group_text).as_deref(), ToString::to_string),
         alpn_text(client),
-        optional_display(server.and_then(|server| server.alpn.as_deref())),
-        optional_display(client.map(|client| client.ja3.as_str())),
-        optional_display(client.map(|client| client.ja4.as_str())),
+        render_optional(server.and_then(|server| server.alpn.as_deref()), |value| {
+            value.to_string()
+        }),
+        render_optional(
+            client.map(|client| client.ja3.as_str()),
+            ToString::to_string
+        ),
+        render_optional(
+            client.map(|client| client.ja4.as_str()),
+            ToString::to_string
+        ),
         session.first_frame,
         session.last_frame,
         session
@@ -225,7 +248,7 @@ fn session_line(session: &Session) -> String {
         line,
         " scope={} interface={} encapsulation={}",
         session.scope.id,
-        optional_display(session.scope.interface),
+        render_optional(session.scope.interface, |value| value.to_string()),
         encapsulation_text(&session.scope.encapsulation)
     );
     if session.hello_retry {

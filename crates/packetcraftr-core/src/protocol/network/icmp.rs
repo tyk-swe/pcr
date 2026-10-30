@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::diagnostic::Severity;
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
@@ -16,9 +17,9 @@ use crate::{
 
 use super::{ip_protocol, resolve_envelope};
 use crate::protocol::common::{
-    ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
-    out_of_range, payload_without_padding, resolve_u16, transport_checksum,
-    transport_checksum_parts, truncated, typed_layer, wrong_type,
+    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, make_layer, out_of_range,
+    payload_without_padding, resolve_u16, transport_checksum_parts, truncated, typed_layer,
+    wrong_type,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -371,10 +372,14 @@ impl Codec for Icmpv4Codec {
         let body = input.slice(ICMP_MIN_LEN..);
         let body_len = body.len();
         let mut diagnostics = Vec::new();
-        if checksum(&input) != 0 {
+        if checksum_parts(&[&input]) != 0 {
             diagnostics.push(
-                Diagnostic::warning(ICMPV4_CHECKSUM, "ICMPv4 checksum mismatch")
-                    .at_field("checksum"),
+                Diagnostic::new(
+                    Severity::Warning,
+                    ICMPV4_CHECKSUM,
+                    "ICMPv4 checksum mismatch",
+                )
+                .at_field("checksum"),
             );
         }
         Ok(Decoded {
@@ -462,11 +467,15 @@ impl Codec for Icmpv6Codec {
         let body_len = body.len();
         let mut diagnostics = Vec::new();
         if let Some(network) = context.network
-            && transport_checksum(V6_NAME, network, ip_protocol::ICMPV6, &input)? != 0
+            && transport_checksum_parts(V6_NAME, network, ip_protocol::ICMPV6, &[&input])? != 0
         {
             diagnostics.push(
-                Diagnostic::warning(ICMPV6_CHECKSUM, "ICMPv6 checksum mismatch")
-                    .at_field("checksum"),
+                Diagnostic::new(
+                    Severity::Warning,
+                    ICMPV6_CHECKSUM,
+                    "ICMPv6 checksum mismatch",
+                )
+                .at_field("checksum"),
             );
         }
         Ok(Decoded {

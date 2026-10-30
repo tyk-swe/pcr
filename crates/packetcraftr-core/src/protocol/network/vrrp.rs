@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::diagnostic::Severity;
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -16,9 +17,9 @@ use crate::{
 
 use super::{ip_protocol, resolve_envelope};
 use crate::protocol::common::{
-    ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
-    out_of_range, payload_without_padding, resolve_u8, resolve_u16, strict_or_diagnostic,
-    transport_checksum, transport_checksum_parts, truncated, typed_layer, wrong_type,
+    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, make_layer, out_of_range,
+    payload_without_padding, resolve_u8, resolve_u16, strict_or_diagnostic,
+    transport_checksum_parts, truncated, typed_layer, wrong_type,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -435,26 +436,28 @@ impl Codec for VrrpCodec {
 
         let mut diagnostics = Vec::new();
         let checksum_failed = if version == 2 {
-            checksum(&input) != 0
+            checksum_parts(&[&input]) != 0
         } else {
             match context.network {
-                Some(network) => transport_checksum(NAME, network, ip_protocol::VRRP, &input)? != 0,
+                Some(network) => {
+                    transport_checksum_parts(NAME, network, ip_protocol::VRRP, &[&input])? != 0
+                }
                 None => false,
             }
         };
         if checksum_failed {
             diagnostics.push(
-                Diagnostic::warning(VRRP_CHECKSUM, "VRRP checksum mismatch").at_field("checksum"),
+                Diagnostic::new(Severity::Warning, VRRP_CHECKSUM, "VRRP checksum mismatch")
+                    .at_field("checksum"),
             );
         }
         if context
             .hop_limit
             .is_some_and(|limit| limit != REQUIRED_HOP_LIMIT)
         {
-            diagnostics.push(Diagnostic::warning(
+            diagnostics.push(Diagnostic::new(Severity::Warning,
                 "decode.vrrp_ttl",
-                format!("VRRP advertisement arrived with TTL or hop limit other than {REQUIRED_HOP_LIMIT}"),
-            ));
+                format!("VRRP advertisement arrived with TTL or hop limit other than {REQUIRED_HOP_LIMIT}")));
         }
         if version == 2
             && context
@@ -462,7 +465,8 @@ impl Codec for VrrpCodec {
                 .is_some_and(|network| network.destination.is_ipv6())
         {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.vrrp_version",
                     "VRRP version 2 is IPv4-only; its addresses are read as IPv4",
                 )
@@ -476,7 +480,8 @@ impl Codec for VrrpCodec {
                 IPV4_GROUP.into()
             };
             if network.destination != expected {
-                diagnostics.push(Diagnostic::warning(
+                diagnostics.push(Diagnostic::new(
+                    Severity::Warning,
                     "decode.vrrp_destination",
                     format!("VRRP advertisement is not addressed to {expected}"),
                 ));
@@ -484,7 +489,8 @@ impl Codec for VrrpCodec {
         }
         if present != count {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.vrrp_count",
                     format!(
                         "count_ip is {count} but the message holds {present} complete addresses"
@@ -496,7 +502,8 @@ impl Codec for VrrpCodec {
         let expected_auth = if version == 2 { V2_AUTH_LEN } else { 0 };
         if auth_data.len() != expected_auth {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.vrrp_length",
                     format!(
                         "{} bytes follow the addresses; version {version} carries {expected_auth}",

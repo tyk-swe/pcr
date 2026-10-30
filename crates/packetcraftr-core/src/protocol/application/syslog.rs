@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field,
     layer::{Id, Layer, Raw, reflective_layer},
     layout::{ByteRange, FieldLayout},
@@ -516,7 +516,8 @@ impl Codec for SyslogCodec {
         if layer.format == SyslogFormat::Rfc5424 {
             for field in layer.header_problems() {
                 diagnostics.push(
-                    Diagnostic::warning(
+                    Diagnostic::new(
+                        Severity::Warning,
                         "decode.syslog_header",
                         format!("RFC 5424 {field} is empty, malformed or over its length limit"),
                     )

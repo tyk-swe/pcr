@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field::{self, WireValue},
     layer::{Id, Layer, reflective_layer},
     protocol::{BuiltinProtocol, network::ip_protocol},
@@ -203,14 +203,19 @@ impl Codec for AhCodec {
         let mut diagnostics = Vec::new();
         if reserved != 0 {
             diagnostics.push(
-                Diagnostic::warning("decode.ah_reserved", "the AH reserved field is non-zero")
-                    .at_field("reserved"),
+                Diagnostic::new(
+                    Severity::Warning,
+                    "decode.ah_reserved",
+                    "the AH reserved field is non-zero",
+                )
+                .at_field("reserved"),
             );
         }
         let under_ipv6 = context.network.map(|network| network.source.is_ipv6());
         if under_ipv6 == Some(true) && !header_len.is_multiple_of(8) {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.ah_alignment",
                     "an IPv6 AH header must be a multiple of 8 octets",
                 )
@@ -225,7 +230,8 @@ impl Codec for AhCodec {
             });
         if cross_family {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.ah_family",
                     "the next header does not belong to the enclosing address family",
                 )

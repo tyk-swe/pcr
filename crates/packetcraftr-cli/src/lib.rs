@@ -41,7 +41,4 @@ mod resources;
 mod staged_output;
 mod system;
 
-#[must_use]
-pub fn main() -> std::process::ExitCode {
-    app::run()
-}
+pub use app::run as main;

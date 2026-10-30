@@ -5,7 +5,7 @@
 
 use crate::{Error, interface::Id as InterfaceId};
 
-pub(in crate::platform) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
+pub(crate) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         if current_index(&expected.name) == Some(expected.index) {

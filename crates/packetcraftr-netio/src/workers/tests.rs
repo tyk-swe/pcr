@@ -183,7 +183,7 @@ fn rejected_connect_dispatch_drops_captures_outside_lock_before_releasing_admiss
 struct NeverConnect;
 
 impl crate::tcp::Provider for NeverConnect {
-    type Stream = crate::tcp::SystemStream;
+    type Stream = std::net::TcpStream;
     fn connect(
         &self,
         _: std::net::SocketAddr,
@@ -254,7 +254,7 @@ fn work_panic_payload_cleanup_stays_charged_after_caller_cancellation() {
 
 struct PanickingConnect(Arc<PanicPayloadGate>);
 impl crate::tcp::Provider for PanickingConnect {
-    type Stream = crate::tcp::SystemStream;
+    type Stream = std::net::TcpStream;
     fn connect(
         &self,
         _: std::net::SocketAddr,

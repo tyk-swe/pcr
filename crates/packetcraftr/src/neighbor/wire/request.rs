@@ -66,7 +66,7 @@ pub(crate) fn build_request_frame(
 }
 
 fn link_header(request: &NeighborRequest, destination: MacAddress) -> Packet {
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(Ethernet {
         destination: destination.0,
         source: request.interface_mac.0,

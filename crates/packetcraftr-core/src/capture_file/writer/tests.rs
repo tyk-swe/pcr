@@ -16,7 +16,7 @@ fn timestamp(seconds: u64, nanoseconds: u32) -> SystemTime {
 
 fn frame(seconds: u64, nanoseconds: u32, fill: u8, length: usize) -> Frame {
     Frame::new(
-        timestamp(seconds, nanoseconds),
+        Some(timestamp(seconds, nanoseconds)),
         LinkType::ETHERNET,
         vec![fill; length],
     )
@@ -25,8 +25,8 @@ fn frame(seconds: u64, nanoseconds: u32, fill: u8, length: usize) -> Frame {
 
 fn truncated_frame(seconds: u64, nanoseconds: u32, fill: u8, captured: usize) -> Frame {
     let captured_length = u32::try_from(captured).unwrap();
-    Frame::try_with_lengths(
-        timestamp(seconds, nanoseconds),
+    Frame::try_with_optional_timestamp(
+        Some(timestamp(seconds, nanoseconds)),
         LinkType::ETHERNET,
         Lengths {
             captured: captured_length,
@@ -38,7 +38,7 @@ fn truncated_frame(seconds: u64, nanoseconds: u32, fill: u8, captured: usize) ->
 }
 
 fn read_frames(bytes: Vec<u8>) -> (Format, Vec<Frame>) {
-    let mut reader = Reader::new(Cursor::new(bytes)).unwrap();
+    let mut reader = Reader::with_limits(Cursor::new(bytes), Default::default()).unwrap();
     let format = reader.format();
     let mut frames = Vec::new();
     while let Some(frame) = reader.next_frame().unwrap() {
@@ -62,7 +62,8 @@ fn pcap_frames_read_back_equal_to_the_frames_written() {
         truncated_frame(1_700_000_001, 987_654_321, 0x22, 14),
         frame(1_700_000_002, 1, 0x33, 0),
     ];
-    let mut writer = Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+    let mut writer =
+        Writer::pcap_with_options(Vec::new(), LinkType::ETHERNET, Default::default()).unwrap();
     for frame in &expected {
         writer.write_frame(frame).unwrap();
     }
@@ -95,7 +96,8 @@ fn pcapng_frames_read_back_with_the_written_bytes_link_type_and_timestamps() {
     assert_eq!(writer.frames_written(), expected.len() as u64);
     assert_eq!(writer.captured_bytes_written(), captured_bytes);
 
-    let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+    let mut reader =
+        Reader::with_limits(Cursor::new(writer.into_inner()), Default::default()).unwrap();
     assert_eq!(reader.format(), Format::PcapNg);
     let mut actual = Vec::new();
     while let Some(frame) = reader.next_frame().unwrap() {

@@ -3,13 +3,14 @@
 
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
+use crate::output::envelope::Published;
 use crate::output::{
     self,
     contract::{Command, Format},
 };
 use crate::rendering::{
-    document_spelling, emit_aggregate_with_stats, render_diagnostics_stderr,
-    render_diagnostics_text, write_stdout_line, write_summary_line,
+    document_spelling, emit_published, render_diagnostics_stderr, render_diagnostics_text,
+    write_stdout_line, write_summary_line,
 };
 
 pub(super) fn render_complete(
@@ -21,15 +22,13 @@ pub(super) fn render_complete(
 ) -> Result<(), CliError> {
     let output::capture::Snapshot { summary, stats } = snapshot;
     match format {
-        Format::Json => emit_aggregate_with_stats(
+        Format::Json => emit_published(
             invocation,
             Command::Capture,
-            summary,
-            diagnostics,
-            stats.clone(),
+            Published::new(summary, diagnostics).with_stats(stats.clone()),
         ),
         Format::Ndjson => stream
-            .complete_with_stats(summary, diagnostics, stats.clone())
+            .complete_published(Published::new(summary, diagnostics).with_stats(stats.clone()))
             .map_err(Into::into),
         Format::Text => {
             write_summary_line(

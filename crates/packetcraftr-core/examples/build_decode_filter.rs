@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     println!("built {} bytes: {:x}", built.bytes.len(), built.bytes);
 
-    let frame = Frame::without_timestamp(LinkType::IPV4, built.bytes.clone())?;
+    let frame = Frame::new(None, LinkType::IPV4, built.bytes.clone())?;
     let decoded = Dissector::new(Arc::clone(&registry)).decode(frame, DecodeOptions::default())?;
     let layers: Vec<&str> = decoded
         .packet

@@ -73,8 +73,11 @@ fn pcapng_output_can_be_read_back() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let reader = packetcraftr_core::capture_file::Reader::new(output.stdout.as_slice())
-        .expect("read generated capture header");
+    let reader = packetcraftr_core::capture_file::Reader::with_limits(
+        output.stdout.as_slice(),
+        Default::default(),
+    )
+    .expect("read generated capture header");
     assert_eq!(
         reader.format(),
         packetcraftr_core::capture_file::Format::PcapNg

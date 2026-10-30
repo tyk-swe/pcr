@@ -93,7 +93,7 @@ pub(in crate::platform) fn route(
     )
 }
 
-pub(in crate::platform) fn interface_route(
+pub(crate) fn interface_route(
     requested: &InterfaceId,
     _deadline: &Deadline,
 ) -> Result<Decision, route::Error> {

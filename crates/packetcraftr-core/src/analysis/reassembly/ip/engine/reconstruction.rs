@@ -223,11 +223,9 @@ fn reconstruct_ipv4(
         .get_mut(10..12)
         .ok_or(Malformed::OffsetOverflow)?
         .fill(0);
-    let checksum = crate::protocol::checksum(
-        datagram
-            .get(..header.len())
-            .ok_or(Malformed::OffsetOverflow)?,
-    );
+    let checksum = crate::protocol::checksum_parts(&[datagram
+        .get(..header.len())
+        .ok_or(Malformed::OffsetOverflow)?]);
     datagram
         .get_mut(10..12)
         .ok_or(Malformed::OffsetOverflow)?

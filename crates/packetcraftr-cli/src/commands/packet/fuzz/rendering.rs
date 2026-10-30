@@ -7,9 +7,7 @@ use packetcraftr_core::error::Kind;
 
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
-use crate::rendering::{
-    captured_frame_text, render_diagnostics_text, spaced_hex, write_stdout_line,
-};
+use crate::rendering::{CapturedFrameText, SpacedHex, render_diagnostics_text, write_stdout_line};
 
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
@@ -60,7 +58,7 @@ pub(super) fn render_text(
         if let Some(frame) = &case.frame {
             write_stdout_line(
                 invocation,
-                format_args!("  frame {}", spaced_hex(frame.bytes())),
+                format_args!("  frame {}", SpacedHex(frame.bytes())),
             )?;
         }
         if let Some(error) = &case.error {
@@ -77,7 +75,7 @@ pub(super) fn render_text(
         if let Some(sent) = &case.sent {
             write_stdout_line(
                 invocation,
-                format_args!("  sent {}", captured_frame_text(sent)),
+                format_args!("  sent {}", CapturedFrameText(sent)),
             )?;
         }
         for (kind, frames) in [
@@ -88,7 +86,7 @@ pub(super) fn render_text(
             for frame in frames {
                 write_stdout_line(
                     invocation,
-                    format_args!("  {kind} {}", captured_frame_text(frame)),
+                    format_args!("  {kind} {}", CapturedFrameText(frame)),
                 )?;
             }
         }

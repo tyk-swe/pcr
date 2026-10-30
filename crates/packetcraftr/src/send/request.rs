@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::packet::Packet;
 use packetcraftr_core::template::{DEFAULT_MAX_TEMPLATE_PACKETS, Template};
 
 use super::Error;
@@ -38,11 +37,6 @@ impl Request {
             rate: None,
             max_template_packets: DEFAULT_MAX_TEMPLATE_PACKETS,
         }
-    }
-
-    #[must_use]
-    pub fn packet(packet: Packet, send: Options) -> Self {
-        Self::new(Template::new(packet), send)
     }
 
     pub fn validate(&self) -> Result<(), Error> {

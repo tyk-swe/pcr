@@ -88,11 +88,7 @@ pub struct Captured {
 }
 
 impl Captured {
-    pub fn new(frame: CaptureFrame, received_at: Instant) -> Self {
-        Self::with_ingress_time(frame, Some(received_at))
-    }
-
-    pub fn with_ingress_time(frame: CaptureFrame, received_at: Option<Instant>) -> Self {
+    pub fn new(frame: CaptureFrame, received_at: Option<Instant>) -> Self {
         let identity = NEXT_RECORD_ID
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
@@ -104,10 +100,6 @@ impl Captured {
             frame,
             received_at,
         }
-    }
-
-    pub fn without_ingress_time(frame: CaptureFrame) -> Self {
-        Self::with_ingress_time(frame, None)
     }
 
     pub fn identity(&self) -> RecordIdentity {

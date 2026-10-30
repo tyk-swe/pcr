@@ -157,10 +157,6 @@ pub struct Envelope<T> {
 }
 
 impl<T> Envelope<T> {
-    pub fn success(command: Command, result: T, diagnostics: Vec<Diagnostic>) -> Self {
-        Self::published(command, Published::new(result, diagnostics))
-    }
-
     pub fn published(command: Command, published: Published<T>) -> Self {
         let Published {
             result,

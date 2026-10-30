@@ -1,7 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::command_options::Bounded as _;
 use crate::output::contract::Format;
+use crate::output::envelope::Published;
 
 pub(in crate::commands) mod arguments;
 mod rendering;
@@ -48,7 +50,7 @@ impl crate::commands::Spec for Args {
         self.timeout.resources(settings);
         self.duration.resources(settings);
         self.limits.resources(settings);
-        self.policy.resources(settings);
+        self.policy.budgets.resources(settings);
     }
 
     fn run(
@@ -136,7 +138,7 @@ fn prepare_live(
         allow_permissive_live: arguments.allow_permissive_live,
         max_evidence_frames: queue_limits.max_frames,
         max_evidence_bytes: queue_limits.max_bytes,
-        ..packetcraftr::fuzz::Request::new(request.clone(), core::packet::Packet::new())
+        ..packetcraftr::fuzz::Request::new(request.clone(), core::packet::Packet::default())
     };
     live.validate().map_err(CliError::classified)?;
     let workflow = prepare_workflow(
@@ -180,7 +182,7 @@ fn execute_offline(
         Format::Ndjson => {
             let emit = crate::commands::execution::emitter(invocation, |case, stream| {
                 let event = output::fuzz::Event::try_from(case).map_err(CliError::classified)?;
-                Ok(stream.emit_data(event, Vec::new())?)
+                Ok(stream.emit_published(Published::new(event, Vec::new()))?)
             });
             let summary = publish_offline(
                 invocation,
@@ -251,7 +253,7 @@ fn execute_live(
         Format::Ndjson => {
             let emit = crate::commands::execution::emitter(invocation, |event, stream| {
                 let event = output::fuzz::Event::try_from(event).map_err(CliError::classified)?;
-                Ok(stream.emit_data(event, Vec::new())?)
+                Ok(stream.emit_published(Published::new(event, Vec::new()))?)
             });
             let summary = client
                 .fuzz(request.clone(), emit)

@@ -14,7 +14,7 @@ use submission::{map_raw_error, send};
 mod preparation;
 mod submission;
 
-pub(in crate::platform) fn send_layer3(frame: Layer3Frame<'_>) -> Result<transmit::Report, Error> {
+pub(crate) fn send_layer3(frame: Layer3Frame<'_>) -> Result<transmit::Report, Error> {
     let packet = prepare(frame)?;
     #[cfg(target_os = "macos")]
     validate_platform_support(&packet)?;

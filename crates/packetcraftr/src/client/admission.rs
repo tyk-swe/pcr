@@ -13,7 +13,7 @@ pub(crate) use selection::{DeclaredTargets, FamilyGate, admit_operation, admit_s
 use packetcraftr_core::error::BoundaryError;
 
 use crate::Client;
-use crate::policy::{self, Authorizer, Operation, Policy};
+use crate::policy::{Authorizer, Operation, Policy};
 use crate::providers::TargetProviders;
 use crate::target::{Authorized, ResolveTarget, Resolver, Target};
 
@@ -26,15 +26,13 @@ impl<'c> Admission<'c> {
     pub(crate) fn new(policy: &'c Policy, resolver: &'c dyn Resolver) -> Self {
         Self { policy, resolver }
     }
-
-    pub(crate) fn authorize(&self, operation: Operation<'_>) -> Result<(), policy::Error> {
-        self.policy.authorize(operation)
-    }
 }
 
 impl Authorizer for Admission<'_> {
     fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError> {
-        self.authorize(request).map_err(BoundaryError::from_error)
+        self.policy
+            .authorize(request)
+            .map_err(BoundaryError::from_error)
     }
 }
 

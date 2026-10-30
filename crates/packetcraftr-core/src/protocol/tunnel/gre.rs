@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::diagnostic::Severity;
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
@@ -9,12 +10,12 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, GRE_CHECKSUM},
     field::{self, WireValue},
-    layer::{Id, Layer, reflect_get, reflect_set, reflective_layer},
+    layer::{Id, Layer, ReflectiveField, reflect_set, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
+    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, make_layer,
     payload_without_padding, resolve_u16, resolve_u16_discriminator, strict_or_diagnostic,
     truncated, typed_layer, unsupported,
 };
@@ -66,7 +67,7 @@ reflective_layer! {
     fn gre_schema() => { protocol: Id::new(NAME), name: "GRE" }
     impl Gre {
         "protocol_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType discriminator", reflect: protocol_type, layout: (2, 4) },
-        "checksum" => { kind: Unsigned, derived: true, required: false, description: "Optional checksum over the GRE header and payload", get |layer| layer.checksum.as_ref().map(reflect_get), set |layer, value, name| { let mut checksum = layer.checksum.clone().unwrap_or_default(); reflect_set(&mut checksum, gre_schema(), name, value)?; layer.checksum = Some(checksum); Ok(()) } },
+        "checksum" => { kind: Unsigned, derived: true, required: false, description: "Optional checksum over the GRE header and payload", get |layer| layer.checksum.as_ref().map(ReflectiveField::reflective_value), set |layer, value, name| { let mut checksum = layer.checksum.clone().unwrap_or_default(); reflect_set(&mut checksum, gre_schema(), name, value)?; layer.checksum = Some(checksum); Ok(()) } },
         "key" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE key", get |layer| layer.key.map(field::Value::from), set |layer, value, name| { let mut key = layer.key.unwrap_or_default(); reflect_set(&mut key, gre_schema(), name, value)?; layer.key = Some(key); Ok(()) } },
         "sequence" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE sequence number", get |layer| layer.sequence.map(field::Value::from), set |layer, value, name| { let mut sequence = layer.sequence.unwrap_or_default(); reflect_set(&mut sequence, gre_schema(), name, value)?; layer.sequence = Some(sequence); Ok(()) } },
         "reserved_bits" => { kind: Unsigned, derived: false, required: false, description: "Receiver-ignored GRE bits 6 through 12", reflect: reserved_bits, layout: (0, 2) },
@@ -184,16 +185,18 @@ impl Codec for GreCodec {
         let reserved_bits = ((flags & IGNORED_RESERVED_FLAGS) >> 3) as u8;
         if reserved_bits != 0 {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.gre_reserved_bits",
                     "receiver-ignored GRE bits 6 through 12 are non-zero",
                 )
                 .at_field("reserved_bits"),
             );
         }
-        if checksum_value.is_some() && checksum(&input) != 0 {
+        if checksum_value.is_some() && checksum_parts(&[&input]) != 0 {
             diagnostics.push(
-                Diagnostic::warning(GRE_CHECKSUM, "GRE checksum mismatch").at_field("checksum"),
+                Diagnostic::new(Severity::Warning, GRE_CHECKSUM, "GRE checksum mismatch")
+                    .at_field("checksum"),
             );
         }
         let layer = Gre {

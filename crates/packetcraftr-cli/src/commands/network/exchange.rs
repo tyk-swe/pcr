@@ -27,7 +27,7 @@ impl crate::commands::Spec for Args {
     const CANCELLATION: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        self.send.resources(settings);
+        self.send.policy.resources(settings);
         self.template.resources(settings);
         crate::resources::declare!(settings, self, [
             max_responses: Count @ ResultRetention,

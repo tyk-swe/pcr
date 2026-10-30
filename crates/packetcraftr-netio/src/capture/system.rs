@@ -33,7 +33,7 @@ pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Ses
 pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Session>, Error> {
     request.validate()?;
     admit(deadline, ARMING)?;
-    Err(crate::platform::unsupported(
+    Err(crate::Unsupported::unbuilt(
         crate::NativeCapability::Capture,
         cfg!(feature = "native-layer2"),
         "native-layer2",
@@ -59,7 +59,7 @@ pub(super) fn timestamp_types(
     deadline: &Deadline,
 ) -> Result<Vec<TimestampType>, Error> {
     admit(deadline, DISCOVERING_TIMESTAMP_TYPES)?;
-    Err(crate::platform::unsupported(
+    Err(crate::Unsupported::unbuilt(
         crate::NativeCapability::Capture,
         cfg!(feature = "native-layer2"),
         "native-layer2",

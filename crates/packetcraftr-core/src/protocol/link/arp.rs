@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::diagnostic::Severity;
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
@@ -107,8 +108,12 @@ impl Codec for ArpCodec {
                 return Err(unsupported(NAME, message));
             }
             diagnostics.push(
-                crate::diagnostic::Diagnostic::warning("build.arp_address_types", message)
-                    .at_field("hardware_type"),
+                crate::diagnostic::Diagnostic::new(
+                    Severity::Warning,
+                    "build.arp_address_types",
+                    message,
+                )
+                .at_field("hardware_type"),
             );
         }
         let (hardware_len, materialized_hardware_len) = resolve_u8(

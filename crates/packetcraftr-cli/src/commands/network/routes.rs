@@ -7,7 +7,7 @@ use crate::output;
 use packetcraftr_netio as net;
 
 use crate::errors::CliError;
-use crate::rendering::optional_display;
+use crate::rendering::render_optional;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr network routes
@@ -76,7 +76,9 @@ fn route_line(route: &output::network::Decision) -> String {
         "{} (index {}): source={} mtu={} capability={} link_type={}",
         route.interface.name,
         route.interface.index,
-        optional_display(route.selected_source.or(route.preferred_source)),
+        render_optional(route.selected_source.or(route.preferred_source), |value| {
+            value.to_string()
+        }),
         route.mtu,
         route.capability,
         route.link_type

@@ -6,7 +6,7 @@ use std::fmt;
 
 use crate::{
     codec::EncodeContext,
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field::{self, WireValue},
     layer::Layer,
     registry::Discriminator,
@@ -125,7 +125,8 @@ where
                 invalid(name, format!("raw {field} must contain exactly {raw_size}"))
             })?;
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "build.raw_dependent_field",
                     format!("emitting raw {field} value"),
                 )
@@ -157,8 +158,14 @@ where
     if mode == crate::codec::Mode::Strict {
         return Err(invalid(name, message));
     }
-    diagnostics
-        .push(Diagnostic::warning("build.inconsistent_dependent_field", message).at_field(field));
+    diagnostics.push(
+        Diagnostic::new(
+            Severity::Warning,
+            "build.inconsistent_dependent_field",
+            message,
+        )
+        .at_field(field),
+    );
     Ok(())
 }
 

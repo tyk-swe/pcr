@@ -23,7 +23,7 @@ use std::ops::Range;
 
 use crate::protocol::headers::IpHeader;
 use crate::protocol::network::ip_protocol;
-use crate::protocol::{network_from_addresses, transport_checksum};
+use crate::protocol::{network_from_addresses, transport_checksum_parts};
 
 fn ensure_checksum_coverage(ip: &[u8], header: &IpHeader) -> Result<(), Error> {
     const LOOSE_SOURCE_ROUTE: u8 = 131;
@@ -71,11 +71,11 @@ fn repair_checksum(
         return Ok(None);
     }
     segment[field.clone()].fill(0);
-    let mut value = transport_checksum(
+    let mut value = transport_checksum_parts(
         name,
         network_from_addresses(source, destination),
         protocol,
-        segment,
+        &[segment],
     )
     .map_err(Error::Checksum)?;
     if udp && value == 0 {

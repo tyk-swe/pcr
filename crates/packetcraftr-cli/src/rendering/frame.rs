@@ -15,42 +15,14 @@ use crate::output;
 
 use super::style::terminal_safe;
 use super::{
-    push_stdout_line, render_diagnostics_text, render_dns_records, spaced_hex, write_stdout_block,
+    SpacedHex, push_stdout_line, render_diagnostics_text, render_dns_records, write_stdout_block,
     write_stdout_line,
 };
 
 /// Registered decoders nest far less; this is the document nesting ceiling.
 const MAX_TREE_DEPTH: usize = document::MAX_DOCUMENT_NESTING;
 
-pub(crate) fn render_frame_text(
-    invocation: &crate::invocation::Invocation,
-    source_frame: output::frame::SourceFrame,
-    frame: &output::frame::Captured,
-    decoded: Option<&output::frame::Stack>,
-    presentation: crate::invocation::Presentation,
-) -> Result<(), CliError> {
-    render_frame(invocation, source_frame, frame, decoded, None, presentation)
-}
-
-/// As [`render_frame_text`], listing each layer's fields in place of the DNS summary lines.
-pub(crate) fn render_frame_tree(
-    invocation: &crate::invocation::Invocation,
-    source_frame: output::frame::SourceFrame,
-    frame: &output::frame::Captured,
-    decoded: Option<&output::frame::Stack>,
-    tree: &mut FieldTree,
-) -> Result<(), CliError> {
-    render_frame(
-        invocation,
-        source_frame,
-        frame,
-        decoded,
-        Some(tree),
-        crate::invocation::Presentation { verbose: true },
-    )
-}
-
-fn render_frame(
+pub(crate) fn render_frame(
     invocation: &crate::invocation::Invocation,
     source_frame: output::frame::SourceFrame,
     frame: &output::frame::Captured,
@@ -79,7 +51,7 @@ fn render_frame(
                         .collect::<Vec<_>>()
                         .join("/"),
                     if presentation.verbose {
-                        format!("{}", spaced_hex(frame.bytes()))
+                        format!("{}", SpacedHex(frame.bytes()))
                     } else {
                         String::new()
                     }
@@ -312,22 +284,18 @@ pub(crate) fn render_undecoded<'a>(
         match label {
             Some(label) => write_stdout_line(
                 invocation,
-                format_args!("undecoded {label} {}", captured_frame_text(frame)),
+                format_args!("undecoded {label} {}", CapturedFrameText(frame)),
             )?,
             None => write_stdout_line(
                 invocation,
-                format_args!("undecoded {}", captured_frame_text(frame)),
+                format_args!("undecoded {}", CapturedFrameText(frame)),
             )?,
         }
     }
     Ok(())
 }
 
-pub(crate) fn captured_frame_text(frame: &output::frame::Captured) -> impl fmt::Display + '_ {
-    CapturedFrameText(frame)
-}
-
-struct CapturedFrameText<'a>(&'a output::frame::Captured);
+pub(crate) struct CapturedFrameText<'a>(pub(crate) &'a output::frame::Captured);
 
 impl fmt::Display for CapturedFrameText<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -338,7 +306,7 @@ impl fmt::Display for CapturedFrameText<'_> {
             frame.link_type,
             frame.captured_length,
             frame.original_length,
-            spaced_hex(frame.bytes())
+            SpacedHex(frame.bytes())
         )
     }
 }
@@ -348,7 +316,7 @@ fn frame_summary(
     presentation: crate::invocation::Presentation,
 ) -> String {
     if presentation.verbose {
-        captured_frame_text(frame).to_string()
+        CapturedFrameText(frame).to_string()
     } else {
         format!(
             "dlt={} caplen={} wirelen={}",

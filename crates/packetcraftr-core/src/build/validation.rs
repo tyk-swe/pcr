@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::{
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field::WireValue,
     layer::{Malformed, Padding, Raw},
     packet::Packet,
@@ -75,7 +75,8 @@ fn validate_adjacent_bindings(
             });
         }
         diagnostics.push(
-            Diagnostic::warning(
+            Diagnostic::new(
+                Severity::Warning,
                 "build.unbound_layers",
                 format!("no registered binding from {parent} to {child}"),
             )
@@ -150,7 +151,8 @@ fn validate_padding(
             return Err(invalid());
         }
         diagnostics.push(
-            Diagnostic::warning(
+            Diagnostic::new(
+                Severity::Warning,
                 "build.unsupported_padding_boundary",
                 format!(
                     "layer {} has no independent wire-length boundary",
@@ -162,7 +164,8 @@ fn validate_padding(
     }
     if is_network_boundary(outside_builtin) {
         diagnostics.push(
-            Diagnostic::warning(
+            Diagnostic::new(
+                Severity::Warning,
                 "build.padding_outside_network_length",
                 "preserving bytes outside a declared network or datagram length",
             )
@@ -190,7 +193,8 @@ fn validate_link_padding(
         return Err(Error::PaddingWithoutLinkLayer { index });
     }
     diagnostics.push(
-        Diagnostic::warning(
+        Diagnostic::new(
+            Severity::Warning,
             "build.padding_without_link_layer",
             "bytes outside all declared protocol lengths require a link-layer envelope",
         )

@@ -37,11 +37,6 @@ pub(in crate::platform) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRaw
     })
 }
 
-#[cfg(target_os = "macos")]
-fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
-    macos_ipv4_submission(bytes)
-}
-
 #[cfg(not(target_os = "macos"))]
 fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
     Ok(bytes.clone())
@@ -49,7 +44,7 @@ fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
 
 /// Rewrites the two header fields the macOS raw IPv4 socket expects in host byte order.
 #[cfg(target_os = "macos")]
-fn macos_ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
+fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
     use crate::transmit::raw_ip::{IPV4_MINIMUM_HEADER, invalid_frame};
 
     let mut submission = bytes.to_vec();

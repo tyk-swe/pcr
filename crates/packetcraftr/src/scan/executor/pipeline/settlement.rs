@@ -13,7 +13,11 @@ use crate::{
     providers::PacketProviders,
     scan::{Attribution, Reply, executor::PipelineEvent},
 };
-use packetcraftr_core::{diagnostic::Diagnostic, error::BoundaryError, frame::Frame};
+use packetcraftr_core::{
+    diagnostic::{Diagnostic, Severity},
+    error::BoundaryError,
+    frame::Frame,
+};
 use packetcraftr_netio::capture;
 
 impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
@@ -65,7 +69,8 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             Err(error) => {
                 if self.diagnostics.insert("decode") {
                     self.output
-                        .event(PipelineEvent::Diagnostic(Diagnostic::warning(
+                        .event(PipelineEvent::Diagnostic(Diagnostic::new(
+                            Severity::Warning,
                             "scan.decode_error",
                             packetcraftr_core::error::render(&error),
                         )))?;
@@ -81,7 +86,8 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         {
             if self.diagnostics.insert("integrity") {
                 self.output
-                    .event(PipelineEvent::Diagnostic(Diagnostic::warning(
+                    .event(PipelineEvent::Diagnostic(Diagnostic::new(
+                        Severity::Warning,
                         "scan.integrity_rejected",
                         "checksum-invalid capture was not correlated",
                     )))?;
@@ -91,7 +97,8 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         let Some(received) = captured.received_at else {
             if self.diagnostics.insert("ingress") {
                 self.output
-                    .event(PipelineEvent::Diagnostic(Diagnostic::warning(
+                    .event(PipelineEvent::Diagnostic(Diagnostic::new(
+                        Severity::Warning,
                         "capture.ingress_time_unavailable",
                         "capture lacks a monotonic ingress marker and was not correlated",
                     )))?;
@@ -136,7 +143,8 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         if candidates.len() > 1 {
             if self.diagnostics.insert("ambiguous") {
                 self.output
-                    .event(PipelineEvent::Diagnostic(Diagnostic::warning(
+                    .event(PipelineEvent::Diagnostic(Diagnostic::new(
+                        Severity::Warning,
                         "scan.ambiguous_response",
                         "capture matched multiple pending probes and was not attributed",
                     )))?;
@@ -152,10 +160,9 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
             )
         {
             if self.diagnostics.insert("ambiguous") {
-                self.output.event(PipelineEvent::Diagnostic(Diagnostic::warning(
+                self.output.event(PipelineEvent::Diagnostic(Diagnostic::new(Severity::Warning,
                     "scan.ambiguous_response",
-                    "identity-less capture also matched a previous transmission and was not attributed",
-                )))?;
+                    "identity-less capture also matched a previous transmission and was not attributed")))?;
             }
             return self.unattributed(raw, Attribution::Ambiguous, None);
         }
@@ -246,7 +253,8 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
     fn evidence_limit(&mut self) -> Result<(), BoundaryError> {
         if self.diagnostics.insert("scan.evidence_limit") {
             self.output
-                .event(PipelineEvent::Diagnostic(Diagnostic::warning(
+                .event(PipelineEvent::Diagnostic(Diagnostic::new(
+                    Severity::Warning,
                     "scan.evidence_limit",
                     "scan evidence retention limit reached; extra replies were omitted",
                 )))?;

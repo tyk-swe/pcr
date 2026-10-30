@@ -9,7 +9,7 @@ use super::reflection::reflective_layer;
 use super::{Id, Layer};
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field,
 };
 
@@ -25,10 +25,6 @@ impl Raw {
         Self {
             bytes: bytes.into(),
         }
-    }
-
-    pub fn layout(length: usize) -> Vec<crate::layout::FieldLayout> {
-        raw_layout(length)
     }
 
     pub(crate) fn decoded(input: Bytes) -> Decoded {
@@ -49,7 +45,7 @@ reflective_layer! {
             layout: (0, length)
         }
     }
-    layout fn raw_layout(length: usize);
+    layout pub fn raw_layout(length: usize);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -266,7 +262,8 @@ impl Codec for MalformedCodec {
         Ok(
             Encoded::header(layer.bytes.to_vec(), Box::new(layer.clone()))
                 .with_fields(malformed_layout(layer.bytes.len()))
-                .with_diagnostics(vec![Diagnostic::warning(
+                .with_diagnostics(vec![Diagnostic::new(
+                    Severity::Warning,
                     "build.malformed_layer",
                     format!("preserving explicitly malformed bytes: {}", layer.reason),
                 )]),

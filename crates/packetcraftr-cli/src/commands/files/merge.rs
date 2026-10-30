@@ -4,11 +4,12 @@
 pub(in crate::commands) mod arguments;
 
 use self::arguments::{Args, OrderArg};
+use crate::output::envelope::Published;
 use crate::output::{self, contract::Format};
 use crate::{
     errors::CliError,
     invocation::StreamEncoder,
-    rendering::{emit_aggregate, write_summary_line},
+    rendering::{emit_published, write_summary_line},
 };
 use packetcraftr_core::{capture_file, error::Kind};
 use std::path::Path;
@@ -114,13 +115,14 @@ pub(crate) fn run(
     staged.persist()?;
     let report = output::merge::Report::from((args.write.display().to_string(), report));
     match format {
-        Format::Json => emit_aggregate(
+        Format::Json => emit_published(
             invocation,
             output::contract::Command::Merge,
-            report,
-            Vec::new(),
+            Published::new(report, Vec::new()),
         ),
-        Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
+        Format::Ndjson => stream
+            .complete_published(Published::new(report, Vec::new()))
+            .map_err(Into::into),
         Format::Text => {
             stream
                 .presentation()

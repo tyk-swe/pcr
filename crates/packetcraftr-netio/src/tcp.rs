@@ -92,49 +92,29 @@ pub trait Provider: Send + Sync {
 pub struct SystemProvider;
 
 impl Provider for SystemProvider {
-    type Stream = SystemStream;
+    type Stream = TcpStream;
 
     fn connect(&self, endpoint: SocketAddr, deadline: &Deadline) -> Result<Self::Stream, Error> {
         let timeout = deadline.live_remaining().map_err(Error::interrupted)?;
         let endpoint = crate::bounded::socket_endpoint(endpoint);
-        Ok(SystemStream(TcpStream::connect_timeout(
-            &endpoint, timeout,
-        )?))
+        Ok(TcpStream::connect_timeout(&endpoint, timeout)?)
     }
 }
 
-pub struct SystemStream(pub(crate) TcpStream);
-
-impl Read for SystemStream {
-    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-        self.0.read(bytes)
-    }
-}
-
-impl Write for SystemStream {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.0.write(bytes)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.0.flush()
-    }
-}
-
-impl Stream for SystemStream {
+impl Stream for TcpStream {
     fn peer_addr(&self) -> io::Result<SocketAddr> {
-        self.0.peer_addr()
+        Self::peer_addr(self)
     }
 
     fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.0.local_addr()
+        Self::local_addr(self)
     }
 
     fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.0.set_read_timeout(timeout)
+        Self::set_read_timeout(self, timeout)
     }
 
     fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.0.set_write_timeout(timeout)
+        Self::set_write_timeout(self, timeout)
     }
 }

@@ -3,6 +3,7 @@
 
 //! The single owner of state after an exchange capture has been armed.
 
+use packetcraftr_core::diagnostic::Severity;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -354,7 +355,7 @@ impl<C: Session> Transaction<C> {
             return Err(loss.into());
         }
         self.captured.diagnostics.push_once(
-            packetcraftr_core::diagnostic::Diagnostic::warning(
+            packetcraftr_core::diagnostic::Diagnostic::new(Severity::Warning,
                 "capture.evidence_incomplete",
                 format!(
                     "capture backend reported {} overflow event(s), {} receiver drop(s), {} total dropped frame(s), and {} dropped byte(s) under {}",
@@ -363,8 +364,7 @@ impl<C: Session> Transaction<C> {
                     statistics.dropped_frames,
                     statistics.dropped_bytes,
                     self.collection.capture.overflow_policy,
-                ),
-            ),
+                )),
         );
         Ok(())
     }

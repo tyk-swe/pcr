@@ -45,7 +45,7 @@
 //! let client = Client::new(registry, Policy::default(), SystemProviders);
 //! let collector = send::Collector::default();
 //! let report = client.send(
-//!     send::Request::packet(packet, send::Options::default()),
+//!     send::Request::new(packetcraftr_core::template::Template::new(packet), send::Options::default()),
 //!     collector.clone(),
 //! )?;
 //! let aggregate = collector.finish(report)?;

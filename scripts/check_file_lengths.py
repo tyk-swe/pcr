@@ -6,61 +6,16 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import re
 import sys
+
+from rust_source import blank_comments_and_strings
 
 CLOSING_ONLY = {"}", ")", "]", "};", ");", "],", "},"}
 SOURCE_GLOBS = ("crates/**/*.rs", "scripts/**/*.py", "examples/**/*.rs", "fuzz/**/*.rs")
 
 
-def blank_rust_comments_and_strings(text: str) -> str:
-    out = []
-    i = 0
-    while i < len(text):
-        pair = text[i:i + 2]
-        if pair == "//":
-            end = text.find("\n", i)
-            i = len(text) if end == -1 else end
-        elif pair == "/*":
-            depth = 1
-            i += 2
-            while i < len(text) and depth:
-                if text[i] == "\n":
-                    out.append("\n")
-                    i += 1
-                elif text[i:i + 2] == "/*":
-                    depth += 1
-                    i += 2
-                elif text[i:i + 2] == "*/":
-                    depth -= 1
-                    i += 2
-                else:
-                    i += 1
-            out.append(" ")
-        elif text[i] in "brc" and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")) \
-                and (opening := re.match(r"(?:br|cr|r)(#+)?\"", text[i:])):
-            closing = '"' + (opening.group(1) or "")
-            end = text.find(closing, i + opening.end())
-            end = len(text) if end == -1 else end + len(closing)
-            out.append("\n" * text[i:end].count("\n") + '""')
-            i = end
-        elif text[i] == '"':
-            i += 1
-            while i < len(text) and text[i] != '"':
-                i += 2 if text[i] == "\\" else 1
-            i += 1
-            out.append('""')
-        elif text[i] == "'" and (literal := re.match(r"'(?:\\.|[^\\'])'", text[i:])):
-            out.append("'x'")
-            i += literal.end()
-        else:
-            out.append(text[i])
-            i += 1
-    return "".join(out)
-
-
 def rust_code_lines(text: str) -> int:
-    text = blank_rust_comments_and_strings(text)
+    text = blank_comments_and_strings(text)
     return sum(
         1
         for line in text.splitlines()

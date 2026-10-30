@@ -80,10 +80,6 @@ pub struct Collector {
 }
 
 impl Collector {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<Finding> {
         let mut findings = finding::from_capture_evidence(record);
         findings.extend(finding::from_diagnostics(record));

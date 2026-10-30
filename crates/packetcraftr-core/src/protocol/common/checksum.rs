@@ -7,10 +7,6 @@ use crate::codec::NetworkEnvelope;
 
 use super::errors::invalid;
 
-pub fn checksum(bytes: &[u8]) -> u16 {
-    checksum_parts(&[bytes])
-}
-
 pub fn checksum_parts(parts: &[&[u8]]) -> u16 {
     let mut accumulator = ChecksumAccumulator::default();
     for part in parts {
@@ -67,15 +63,6 @@ fn fold_checksum(mut sum: u128) -> u16 {
         sum = (sum & 0xffff) + (sum >> 16);
     }
     !(sum as u16)
-}
-
-pub(crate) fn transport_checksum(
-    name: &'static str,
-    network: NetworkEnvelope,
-    protocol_number: u8,
-    segment: &[u8],
-) -> Result<u16, crate::codec::Error> {
-    transport_checksum_parts(name, network, protocol_number, &[segment])
 }
 
 pub(crate) fn transport_checksum_parts(

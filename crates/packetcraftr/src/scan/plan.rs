@@ -8,8 +8,6 @@ pub(super) use reply_identity::{replies_overlap, response_protocol};
 use std::net::IpAddr;
 use std::time::Duration;
 
-use packetcraftr_core::packet::Packet;
-
 use super::Error;
 use super::Request;
 use super::error::probe_error;
@@ -29,13 +27,6 @@ pub struct Probe {
     pub attempt: u32,
     pub udp_payload: bytes::Bytes,
     pub udp_profile: Option<std::sync::Arc<super::profile::UdpProfile>>,
-}
-
-impl Probe {
-    #[must_use]
-    pub fn packet(&self) -> Packet {
-        packet::probe_packet(self)
-    }
 }
 
 impl crate::probe::runner::Sequenced for Probe {

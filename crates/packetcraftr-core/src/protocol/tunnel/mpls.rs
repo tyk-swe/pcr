@@ -8,13 +8,12 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     field,
-    layer::{Layer, Malformed, reflective_layer},
+    layer::{Id, Layer, Malformed, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ensure_encode_budget, invalid, make_layer, protocol, strict_or_diagnostic, truncated,
-    typed_layer,
+    ensure_encode_budget, invalid, make_layer, strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -49,7 +48,7 @@ impl Default for Mpls {
 }
 
 reflective_layer! {
-    fn mpls_schema() => { protocol: protocol(NAME), name: "MPLS" }
+    fn mpls_schema() => { protocol: Id::new(NAME), name: "MPLS" }
     impl Mpls {
         "label" => { kind: Unsigned, derived: false, required: true, description: "20-bit MPLS label", reflect_bounded: label, LABEL_MAX, layout: (0, 3) },
         "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "3-bit traffic class, historically the EXP bits", reflect_bounded: traffic_class, 7_u64, layout: (2, 3) },

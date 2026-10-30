@@ -4,13 +4,13 @@
 use crate::errors::{CANCELLED_EXIT_CODE, CliError};
 use packetcraftr_core::budget::Cancellation;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError, TryLockError};
+use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError, TryLockError};
 
 static STAGED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 pub(crate) fn signal() -> &'static Cancellation {
-    static SIGNAL: OnceLock<Cancellation> = OnceLock::new();
-    SIGNAL.get_or_init(Cancellation::default)
+    static SIGNAL: LazyLock<Cancellation> = LazyLock::new(Cancellation::default);
+    &SIGNAL
 }
 
 /// Lists a staged temporary file for removal by a forced exit, which skips

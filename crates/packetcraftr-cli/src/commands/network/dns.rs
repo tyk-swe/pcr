@@ -4,6 +4,7 @@
 pub(in crate::commands) mod arguments;
 mod rendering;
 
+use crate::command_options::Bounded as _;
 use crate::output::contract::Format;
 
 use packetcraftr_core as core;
@@ -122,7 +123,12 @@ pub(super) fn run(
     };
     match format {
         Format::Ndjson => {
-            let emit = crate::commands::execution::emitter(invocation, rendering::emit_batch_event);
+            let emit = crate::commands::execution::emitter(
+                invocation,
+                |event: packetcraftr::dns::batch::Event, stream| {
+                    rendering::emit_event(event.event, stream)
+                },
+            );
             let summary = client
                 .dns_batch(request.clone(), emit)
                 .map_err(CliError::classified)?;

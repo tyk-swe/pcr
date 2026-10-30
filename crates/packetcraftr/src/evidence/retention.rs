@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr_core::diagnostic::{Diagnostic, Severity};
 use packetcraftr_core::frame::Frame;
 
 use super::Limits as EvidenceLimits;
@@ -162,7 +162,8 @@ impl EvidenceState {
     /// both share the frame and byte budget with responses.
     pub(crate) fn retain_unattributed(&mut self, frame: &Frame) -> Option<Frame> {
         if self.retained_unattributed >= self.limits.max_undecoded {
-            self.diagnostics.push_once(Diagnostic::warning(
+            self.diagnostics.push_once(Diagnostic::new(
+                Severity::Warning,
                 self.descriptor.unattributed_limit_code,
                 format!(
                     "unattributed {} evidence limit {} reached; later frames were omitted",
@@ -186,7 +187,8 @@ impl EvidenceState {
         for frame in frames {
             sink.check()?;
             if self.retained_undecoded >= self.limits.max_undecoded {
-                self.diagnostics.push_once(Diagnostic::warning(
+                self.diagnostics.push_once(Diagnostic::new(
+                    Severity::Warning,
                     self.descriptor.undecoded_limit_code,
                     format!(
                         "undecodable {} evidence limit {} reached; later frames were omitted",
@@ -263,7 +265,8 @@ impl EvidenceState {
                 "{name} evidence exceeded {max_frames} frame(s) or {max_bytes} byte(s); later exact frames were omitted"
             ),
         };
-        self.diagnostics.push_once(Diagnostic::warning(
+        self.diagnostics.push_once(Diagnostic::new(
+            Severity::Warning,
             self.descriptor.evidence_limit_code,
             message,
         ));

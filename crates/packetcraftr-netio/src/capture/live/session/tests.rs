@@ -273,8 +273,8 @@ fn zero_duration_native_poll_preserves_queued_records_and_cancellation_before_de
         .wait_ready(&Deadline::new(Duration::from_secs(5)))
         .unwrap();
     let record = Captured::new(
-        packetcraftr_core::frame::Frame::without_timestamp(LinkType(1), vec![7]).unwrap(),
-        Instant::now(),
+        packetcraftr_core::frame::Frame::new(None, LinkType(1), vec![7]).unwrap(),
+        Some(Instant::now()),
     );
     let identity = record.identity();
     session.shared.enqueue(record).unwrap();

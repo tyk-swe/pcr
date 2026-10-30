@@ -5,7 +5,7 @@ use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use packetcraftr_core::{
     decode::{DecodedPacket, Dissector},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     frame::Frame,
     packet::Packet,
     registry::Registry,
@@ -172,7 +172,7 @@ impl Accumulator {
             ),
         };
         self.diagnostics
-            .push_once(Diagnostic::warning(code, message));
+            .push_once(Diagnostic::new(Severity::Warning, code, message));
         Err(code)
     }
 
@@ -245,7 +245,8 @@ impl Accumulator {
     ) -> Result<(), &'static str> {
         if self.retained_unmatched >= collection.max_unmatched_frames {
             let code = "exchange.unsolicited_limit";
-            self.diagnostics.push_once(Diagnostic::warning(
+            self.diagnostics.push_once(Diagnostic::new(
+                Severity::Warning,
                 code,
                 format!(
                     "unsolicited/undecoded frame limit {} reached; later frames were not retained",

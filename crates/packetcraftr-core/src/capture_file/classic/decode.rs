@@ -174,8 +174,8 @@ pub(in crate::capture_file) fn read_next_pcap_record<R: Read>(
             format: Format::Pcap,
         })?;
 
-    let frame = Frame::try_with_lengths(
-        timestamp,
+    let frame = Frame::try_with_optional_timestamp(
+        Some(timestamp),
         link_type,
         Lengths {
             captured: captured_length,

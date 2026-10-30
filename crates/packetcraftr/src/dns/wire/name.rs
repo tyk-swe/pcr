@@ -4,7 +4,7 @@
 use packetcraftr_core::protocol::application::dns::{MAX_LABEL_LEN, MAX_NAME_LEN};
 
 /// The returned form always has a trailing dot.
-pub fn canonical_query_name(value: &str) -> Result<String, super::Error> {
+pub(crate) fn canonical_query_name(value: &str) -> Result<String, super::Error> {
     if value == "." {
         return Ok(".".to_owned());
     }

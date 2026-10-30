@@ -17,10 +17,6 @@ pub struct Packet {
 }
 
 impl Packet {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             layers: Vec::with_capacity(capacity),

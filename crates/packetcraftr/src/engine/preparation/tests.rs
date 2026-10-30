@@ -160,7 +160,7 @@ fn options() -> Options {
     }
 }
 fn packet(bytes: usize) -> Packet {
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(Ipv4 {
         destination: "10.0.0.1".parse().unwrap(),
         ..Default::default()

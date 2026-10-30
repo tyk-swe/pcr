@@ -94,7 +94,7 @@ impl Invocation {
     }
 
     pub(crate) fn check(&self) -> Result<(), CliError> {
-        self.check_interrupted().map_err(interruption_error)
+        self.check_interrupted().map_err(CliError::classified)
     }
 
     pub(crate) fn json_attempted(&self) -> bool {
@@ -160,10 +160,6 @@ impl Invocation {
             diagnostics.stream_index_needed(needed);
         }
     }
-}
-
-pub(crate) fn interruption_error(error: Interrupted) -> CliError {
-    CliError::classified(error)
 }
 
 impl std::fmt::Debug for Invocation {

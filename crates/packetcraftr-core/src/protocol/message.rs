@@ -282,7 +282,8 @@ macro_rules! message_codec {
                 let materialized = match validated {
                     Ok(layer) => layer,
                     Err(error) if context.mode == crate::codec::Mode::Permissive => {
-                        diagnostics.push(crate::diagnostic::Diagnostic::warning(
+                        diagnostics.push(crate::diagnostic::Diagnostic::new(
+                            $crate::diagnostic::Severity::Warning,
                             "build.message",
                             error.to_string(),
                         ));

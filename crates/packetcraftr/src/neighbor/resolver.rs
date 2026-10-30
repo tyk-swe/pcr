@@ -311,11 +311,6 @@ where
     }
 }
 
-/// The frame that resolving `request` sends on each attempt.
-pub(crate) fn request_frame(request: &Request) -> Result<Bytes, Error> {
-    build_request_frame(request)
-}
-
 impl<T, C> Active<'_, T, C>
 where
     T: transmit::Provider,

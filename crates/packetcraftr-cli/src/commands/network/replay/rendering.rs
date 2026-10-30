@@ -3,7 +3,7 @@
 
 use crate::errors::CliError;
 use crate::output;
-use crate::rendering::{duration_text, spaced_hex, write_summary_line};
+use crate::rendering::{SpacedHex, duration_text, write_summary_line};
 
 pub(super) fn frame_line(
     frame: &output::replay::Frame,
@@ -18,7 +18,7 @@ pub(super) fn frame_line(
         frame.link_mode,
         frame.frame.link_type,
         if presentation.verbose {
-            spaced_hex(frame.frame.bytes()).to_string()
+            SpacedHex(frame.frame.bytes()).to_string()
         } else {
             String::new()
         }

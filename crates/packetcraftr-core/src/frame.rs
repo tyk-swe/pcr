@@ -85,27 +85,6 @@ pub struct Frame {
 
 impl Frame {
     pub fn new(
-        timestamp: SystemTime,
-        link_type: LinkType,
-        bytes: impl Into<Bytes>,
-    ) -> Result<Self, Error> {
-        Self::with_inferred_lengths(Some(timestamp), link_type, bytes)
-    }
-
-    pub fn try_with_lengths(
-        timestamp: SystemTime,
-        link_type: LinkType,
-        lengths: Lengths,
-        bytes: impl Into<Bytes>,
-    ) -> Result<Self, Error> {
-        Self::try_with_optional_timestamp(Some(timestamp), link_type, lengths, bytes)
-    }
-
-    pub fn without_timestamp(link_type: LinkType, bytes: impl Into<Bytes>) -> Result<Self, Error> {
-        Self::with_inferred_lengths(None, link_type, bytes)
-    }
-
-    fn with_inferred_lengths(
         timestamp: Option<SystemTime>,
         link_type: LinkType,
         bytes: impl Into<Bytes>,

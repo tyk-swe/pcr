@@ -8,13 +8,13 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, child_is_opaque, ensure_encode_budget, invalid, make_layer, protocol,
-    resolve_u16, strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
+    ValueExpectation, child_is_opaque, ensure_encode_budget, invalid, make_layer, resolve_u16,
+    strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
     validate_raw_child_discriminator, validate_typed_child_discriminator,
 };
 
@@ -58,7 +58,7 @@ impl Default for Llc {
 }
 
 reflective_layer! {
-    fn llc_schema() => { protocol: protocol(LLC_NAME), name: "LLC" }
+    fn llc_schema() => { protocol: Id::new(LLC_NAME), name: "LLC" }
     impl Llc {
         "dsap" => { kind: Unsigned, derived: false, required: true, description: "Destination service access point", reflect: dsap, layout: (0, 1) },
         "ssap" => { kind: Unsigned, derived: false, required: true, description: "Source service access point", reflect: ssap, layout: (1, 2) },
@@ -199,7 +199,7 @@ impl Default for Snap {
 }
 
 reflective_layer! {
-    fn snap_schema() => { protocol: protocol(SNAP_NAME), name: "SNAP" }
+    fn snap_schema() => { protocol: Id::new(SNAP_NAME), name: "SNAP" }
     impl Snap {
         "oui" => { kind: Unsigned, derived: false, required: true, description: "Organizationally unique identifier; zero selects the EtherType space", reflect_bounded: oui, OUI_MAX, layout: (0, 3) },
         "protocol_id" => { kind: Unsigned, derived: true, required: false, description: "Protocol identifier within the OUI's numbering", reflect: protocol_id, layout: (3, 5) },

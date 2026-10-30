@@ -26,7 +26,7 @@ use crate::{
 };
 use packetcraftr_core::{
     budget::Deadline,
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     error::{BoundaryError, Classification, Kind},
     frame::Frame,
     registry::Registry,
@@ -198,7 +198,8 @@ pub(super) fn run<A: Authorizer + ResolveTarget, R: Runner, C: Clock>(
     context.enforce(0)?;
     if state.summary.omitted_frames > 0 {
         emit(
-            Event::Diagnostic(Diagnostic::warning(
+            Event::Diagnostic(Diagnostic::new(
+                Severity::Warning,
                 "multipath.evidence_limit",
                 "evidence limits omitted frames; topology contains retained observations only",
             )),
@@ -347,7 +348,8 @@ impl RunState {
                 .insert("multipath.capture_quality".to_owned())
         {
             emit(
-                Event::Diagnostic(Diagnostic::warning(
+                Event::Diagnostic(Diagnostic::new(
+                    Severity::Warning,
                     "multipath.capture_quality",
                     "local capture completeness is unavailable or reports loss; silence is not forwarding loss",
                 )),

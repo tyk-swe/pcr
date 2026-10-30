@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 use super::super::{Error, Limit};
 
@@ -306,8 +306,8 @@ pub(super) fn decode<E: From<Error>>(
     max_output: usize,
     check: &mut impl FnMut() -> Result<(), E>,
 ) -> Result<Vec<u8>, E> {
-    static TREE: OnceLock<Vec<[Edge; 2]>> = OnceLock::new();
-    let nodes = TREE.get_or_init(build);
+    static TREE: LazyLock<Vec<[Edge; 2]>> = LazyLock::new(build);
+    let nodes = &*TREE;
     let mut out = Vec::with_capacity(input.len().min(max_output));
     let mut node = 0usize;
     let mut padding = 0u32;

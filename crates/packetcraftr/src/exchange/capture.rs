@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::diagnostic::Severity;
 use packetcraftr_netio::{Error as LiveIoError, capture::Session};
 
 use super::executor::OperationError;
@@ -87,7 +88,8 @@ impl<C: Session> Transaction<C> {
         }
         self.captured
             .diagnostics
-            .push_once(packetcraftr_core::diagnostic::Diagnostic::warning(
+            .push_once(packetcraftr_core::diagnostic::Diagnostic::new(
+                Severity::Warning,
                 "exchange.drain_limit",
                 format!(
                     "zero-time capture drain stopped after the bounded {} frame(s)",

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Diagnostic, Severity};
 use crate::frame::Frame;
 
 use crate::registry::Registry;
@@ -44,7 +44,8 @@ impl Dissector {
             let link_type = frame.link_type.0;
             return Ok(raw_decoded_frame(
                 frame,
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.unsupported_link_type",
                     format!("no root binding for link type {link_type}"),
                 ),

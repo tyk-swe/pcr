@@ -12,9 +12,9 @@ use crate::{
     route::{self, Decision},
 };
 
-pub(in crate::platform) use query::interface_route;
+pub(crate) use query::interface_route;
 
-pub(in crate::platform) fn route(
+pub(crate) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,

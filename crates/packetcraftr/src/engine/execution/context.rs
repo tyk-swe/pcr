@@ -118,13 +118,8 @@ where
             .map_err(|source| (self.errors)(step, crate::error::Failure::Interrupted(source)))
     }
 
-    /// Counts work a step did besides its execution.
-    pub(crate) fn account(&mut self, step: u64, stats: &Stats) -> Result<(), E> {
-        self.merge(step, stats)
-    }
-
     /// On overflow the merged statistics are left untouched.
-    fn merge(&mut self, step: u64, stats: &Stats) -> Result<(), E> {
+    pub(crate) fn account(&mut self, step: u64, stats: &Stats) -> Result<(), E> {
         self.stats
             .checked_add_assign(stats)
             .map_err(|source| (self.errors)(step, crate::error::Failure::StatsOverflow(source)))
@@ -133,7 +128,7 @@ where
     pub(crate) fn pace(&mut self, step: u64, delay: Duration) -> Result<(), E> {
         pause(self.deadline, self.clock, delay)
             .map_err(|paused| paused.into_error(self.errors, step))?;
-        self.merge(
+        self.account(
             step,
             &Stats {
                 elapsed: delay,
@@ -190,7 +185,7 @@ where
             ));
         }
         validate(subject, &execution, grant, &*self.deadline)?;
-        self.merge(step, execution.stats())?;
+        self.account(step, execution.stats())?;
         interrupted?;
         self.deadline
             .account(execution.stats().elapsed)

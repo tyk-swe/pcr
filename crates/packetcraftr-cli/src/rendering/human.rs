@@ -56,17 +56,9 @@ pub(crate) fn render_optional<T>(value: Option<T>, render: impl FnOnce(T) -> Str
     value.map_or_else(|| "none".to_owned(), render)
 }
 
-pub(crate) fn optional_display<T: std::fmt::Display>(value: Option<T>) -> String {
-    render_optional(value, |value| value.to_string())
-}
-
 /// A duration in milliseconds to the microsecond, such as `12.345ms`.
 pub(crate) fn duration_text(duration: std::time::Duration) -> String {
     format!("{:.3}ms", duration.as_secs_f64() * 1_000.0)
-}
-
-pub(crate) fn optional_duration(value: Option<std::time::Duration>) -> String {
-    render_optional(value, duration_text)
 }
 
 pub(crate) fn encapsulation_text(path: &[output::analysis::EncapsulationIdentifier]) -> String {
@@ -97,10 +89,6 @@ where
         .join(",")
 }
 
-pub(crate) fn spaced_hex(bytes: &[u8]) -> impl fmt::Display + '_ {
-    crate::output::hex::SpacedHex(bytes)
-}
-
 pub(crate) fn write_stdout_line(
     invocation: &crate::invocation::Invocation,
     arguments: fmt::Arguments<'_>,
@@ -116,7 +104,7 @@ pub(crate) enum HumanWriteError {
 impl HumanWriteError {
     fn into_cli_error(self) -> CliError {
         match self {
-            Self::Interrupted(interrupted) => crate::invocation::interruption_error(interrupted),
+            Self::Interrupted(interrupted) => CliError::classified(interrupted),
             Self::Write(source) => stdout_error("write stdout failed", source),
         }
     }

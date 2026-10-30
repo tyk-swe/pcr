@@ -3,6 +3,7 @@
 
 //! Turning the scan's grouped arguments into one validated scan request.
 
+use crate::command_options::Bounded as _;
 use packetcraftr::probe::Transport;
 use packetcraftr::scan::{discovery, profile::curated};
 use packetcraftr_core::error::Kind;

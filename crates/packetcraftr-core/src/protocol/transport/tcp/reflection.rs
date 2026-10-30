@@ -9,16 +9,16 @@ use super::model::{
 use super::{SackBlock, Tcp, TcpOption};
 use crate::{
     field,
-    layer::{FieldSchema, Schema, reflective_layer},
+    layer::{FieldSchema, Id, Schema, reflective_layer},
     protocol::common::{
-        out_of_range, protocol,
+        out_of_range,
         structured::{Object, list, member, object},
         wrong_type,
     },
 };
 
 reflective_layer! {
-    pub(super) fn tcp_schema() => { protocol: protocol(NAME), name: "TCP" }
+    pub(super) fn tcp_schema() => { protocol: Id::new(NAME), name: "TCP" }
     impl Tcp {
         "source_port" | "sport" => { kind: Unsigned, derived: false, required: true, description: "TCP source port",
             reflect: source_port, layout: (0, 2) },

@@ -15,7 +15,7 @@ use packetcraftr_core::{
     budget::Deadline,
     build::{Builder, BuiltPacket},
     decode::{DecodedPacket, Dissector},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     error::BoundaryError,
     frame::{Frame, LinkType},
     packet::Packet,
@@ -82,7 +82,7 @@ fn decode(packet: Packet) -> DecodedPacket {
     let built = build(packet);
     Dissector::new(builtin::registry())
         .decode(
-            Frame::new(SystemTime::now(), LinkType::RAW, built.bytes).unwrap(),
+            Frame::new(Some(SystemTime::now()), LinkType::RAW, built.bytes).unwrap(),
             Default::default(),
         )
         .unwrap()
@@ -93,7 +93,7 @@ fn quote(
     terminal: bool,
     transport_bytes: usize,
 ) -> DecodedPacket {
-    let mut reply = Packet::new();
+    let mut reply = Packet::default();
     let v6 = responder.is_ipv6();
     let header = if v6 { 40 } else { 20 };
     let mut body = vec![0; 4];
@@ -214,7 +214,7 @@ fn udp_short_quotes_are_attributed_only_with_an_exact_identity() {
 }
 
 fn direct(sent: &BuiltPacket, strategy: Transport, v6: bool) -> DecodedPacket {
-    let mut reply = Packet::new();
+    let mut reply = Packet::default();
     match (destination(v6), source(v6)) {
         (IpAddr::V4(src), IpAddr::V4(dst)) => {
             reply.push(Ipv4 {
@@ -466,7 +466,8 @@ impl engine::Runner for Lab {
             sent.push(SentPacket::try_new(built, materialized(v6), tx).unwrap());
         }
         if !unsolicited.is_empty() || !undecoded.is_empty() {
-            diagnostics.push(Diagnostic::warning(
+            diagnostics.push(Diagnostic::new(
+                Severity::Warning,
                 "exchange.correlation_deadline",
                 "response correlation stopped at the bounded exchange deadline",
             ));
@@ -719,7 +720,7 @@ fn authoritative_exchange_matching_blocks_a_stale_same_tuple_response() {
             .process(
                 packetcraftr_netio::capture::Captured::new(
                     delayed.frame.clone(),
-                    std::time::Instant::now(),
+                    Some(std::time::Instant::now()),
                 ),
                 crate::exchange::ProcessContext {
                     registry: &registry,
@@ -815,7 +816,7 @@ fn non_echoing_udp_reply_is_not_attributed() {
             1,
         );
         let sent = build(probe.packet);
-        let mut reply = Packet::new();
+        let mut reply = Packet::default();
         if let Some(ip) = sent.packet.get::<Ipv4>() {
             reply.push(Ipv4 {
                 source: ip.destination,

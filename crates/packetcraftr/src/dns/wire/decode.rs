@@ -16,7 +16,7 @@ use crate::dns::{
 };
 
 /// Applies the same transaction, question, bounds, and relevance validation as UDP.
-pub fn decode_tcp_frame(
+pub(crate) fn decode_tcp_frame(
     frame: &[u8],
     query_name: &str,
     query_type: QueryType,
@@ -53,7 +53,7 @@ pub fn decode_tcp_frame(
     Ok(response)
 }
 
-pub fn decode_response(
+pub(crate) fn decode_response(
     message: &[u8],
     query_name: &str,
     query_type: QueryType,

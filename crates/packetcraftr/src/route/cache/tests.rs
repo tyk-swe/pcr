@@ -96,7 +96,7 @@ fn route_deadline_cache_and_identity() {
     };
     assert!(matches!(
         route::plan(
-            &Packet::new(),
+            &Packet::default(),
             Some(address),
             &options,
             &late,
@@ -111,7 +111,7 @@ fn route_deadline_cache_and_identity() {
     };
     assert!(matches!(
         route::plan(
-            &Packet::new(),
+            &Packet::default(),
             Some(address),
             &options,
             &invalid,
@@ -121,7 +121,7 @@ fn route_deadline_cache_and_identity() {
     ));
     assert!(matches!(
         route::plan(
-            &Packet::new(),
+            &Packet::default(),
             Some(address),
             &options,
             &provider,

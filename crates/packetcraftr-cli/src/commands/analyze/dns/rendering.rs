@@ -10,7 +10,7 @@ use crate::output::dns_read::Latency;
 use crate::errors::CliError;
 use crate::output::dns_read as wire;
 use crate::rendering::{
-    comma_separated, optional_display, render_dns_fields, write_stdout_line, write_summary_line,
+    comma_separated, render_dns_fields, render_optional, write_stdout_line, write_summary_line,
 };
 
 pub(super) fn render_message(
@@ -57,8 +57,9 @@ pub(super) fn render_transaction(
             transaction.dns_id,
             transaction.status,
             or_none(comma_separated(&transaction.queries)),
-            optional_display(transaction.response),
-            optional_display(transaction.latest_query_latency.map(latency)),
+            render_optional(transaction.response, |value| value.to_string()),
+            render_optional(transaction.latest_query_latency.map(latency), |value| value
+                .to_string()),
         ),
     )
 }

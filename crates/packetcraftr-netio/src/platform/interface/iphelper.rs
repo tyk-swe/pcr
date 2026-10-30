@@ -20,9 +20,7 @@ use crate::{interface, platform::common::on_worker, route};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Source;
 
-pub(in crate::platform) fn interfaces(
-    deadline: &Deadline,
-) -> Result<Vec<interface::Info>, interface::Error> {
+pub(crate) fn interfaces(deadline: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
     on_worker(deadline, "enumerating Windows interfaces", |_| {
         Ok(adapter_snapshots()?
             .into_iter()
@@ -32,7 +30,7 @@ pub(in crate::platform) fn interfaces(
     .map_err(interface::Error::native)
 }
 
-pub(in crate::platform) fn ipv6_interfaces(
+pub(crate) fn ipv6_interfaces(
     deadline: &Deadline,
 ) -> Result<Vec<interface::Info>, interface::Error> {
     on_worker(deadline, "enumerating Windows IPv6 interfaces", |_| {

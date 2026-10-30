@@ -15,7 +15,7 @@ mod task;
 use std::{
     collections::BTreeMap,
     sync::{
-        Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, Weak,
+        Arc, Condvar, LazyLock, Mutex, MutexGuard, PoisonError, Weak,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -39,10 +39,10 @@ pub(crate) use task::{Task, Waited, discard_panic_payload, unwind_after_cleanup}
 
 pub(crate) const CAPACITY: usize = crate::resources::WORKER_CAPACITY;
 
-static SHARED: OnceLock<Arc<Pool>> = OnceLock::new();
+static SHARED: LazyLock<Arc<Pool>> = LazyLock::new(|| Arc::new(Pool::new(CAPACITY)));
 
 pub(crate) fn shared() -> &'static Arc<Pool> {
-    SHARED.get_or_init(|| Arc::new(Pool::new(CAPACITY)))
+    &SHARED
 }
 
 pub(crate) struct Pool {

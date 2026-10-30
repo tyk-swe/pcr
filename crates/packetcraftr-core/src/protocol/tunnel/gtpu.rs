@@ -7,16 +7,16 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     layout::{ByteRange, FieldLayout},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
     ValueExpectation, child_is_opaque, ensure_encode_budget, invalid, make_layer,
-    payload_without_padding, protocol, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
+    payload_without_padding, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -94,7 +94,7 @@ impl Gtpu {
 }
 
 reflective_layer! {
-    fn gtpu_schema() => { protocol: protocol(NAME), name: "GTP-U" }
+    fn gtpu_schema() => { protocol: Id::new(NAME), name: "GTP-U" }
     impl Gtpu {
         "version" => { kind: Unsigned, derived: false, required: false, description: "3-bit GTP version; GTP-U is version 1", reflect_bounded: version, VERSION_MAX, layout: (0, 1) },
         "protocol_type" => { kind: Bool, derived: false, required: false, description: "PT flag: set for GTP, clear for GTP'", reflect: protocol_type, layout: (0, 1) },
@@ -296,7 +296,8 @@ impl Codec for GtpuCodec {
         let mut diagnostics = Vec::new();
         if layer.version != GTPU_VERSION {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.gtpu_version",
                     "GTP version is not 1; the payload is preserved without typed dissection",
                 )
@@ -305,17 +306,20 @@ impl Codec for GtpuCodec {
         }
         if !layer.protocol_type {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(Severity::Warning,
                     "decode.gtpu_protocol_type",
-                    "the PT flag is clear, so this is GTP' rather than GTP-U; the payload is preserved without typed dissection",
-                )
+                    "the PT flag is clear, so this is GTP' rather than GTP-U; the payload is preserved without typed dissection")
                 .at_field("protocol_type"),
             );
         }
         if layer.reserved {
             diagnostics.push(
-                Diagnostic::warning("decode.gtpu_reserved", "the reserved GTP flag bit is set")
-                    .at_field("reserved"),
+                Diagnostic::new(
+                    Severity::Warning,
+                    "decode.gtpu_reserved",
+                    "the reserved GTP flag bit is set",
+                )
+                .at_field("reserved"),
             );
         }
 
@@ -348,7 +352,8 @@ impl Codec for GtpuCodec {
             ] {
                 if set && !flag {
                     diagnostics.push(
-                        Diagnostic::warning(
+                        Diagnostic::new(
+                            Severity::Warning,
                             "decode.gtpu_flags",
                             format!("{field} is non-zero but its flag is clear"),
                         )

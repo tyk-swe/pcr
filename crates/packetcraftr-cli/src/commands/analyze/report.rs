@@ -70,6 +70,7 @@ impl Spec for Assessment {
             crate::rendering::bounded_json_len(
                 &crate::output::security::Report::from(&report),
                 self.bounds.max_result_bytes,
+                serde_json::ser::CompactFormatter,
             )
             .map_err(|e| e.into_cli_error(|| invalid("report exceeds --max-result-bytes")))?;
         }
@@ -79,6 +80,7 @@ impl Spec for Assessment {
         crate::rendering::bounded_json_len(
             &crate::output::security::Report::from(&report),
             self.bounds.max_result_bytes,
+            serde_json::ser::CompactFormatter,
         )
         .map_err(|e| e.into_cli_error(|| invalid("report exceeds --max-result-bytes")))?;
         let html =

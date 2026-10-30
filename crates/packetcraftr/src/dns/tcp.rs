@@ -52,21 +52,10 @@ pub fn query<P>(request: Request<'_>, provider: Arc<P>) -> Result<Response, Erro
 where
     P: Provider<Stream: 'static> + 'static,
 {
-    query_with_clock(request, provider, Instant::now)
-}
-
-fn query_with_clock<P>(
-    request: Request<'_>,
-    connector: Arc<P>,
-    now: impl Fn() -> Instant,
-) -> Result<Response, Error>
-where
-    P: Provider<Stream: 'static> + 'static,
-{
     query_with_connect_wait(
         request,
-        connector,
-        now,
+        provider,
+        Instant::now,
         Deadline::new,
         tcp::PendingConnect::wait,
     )

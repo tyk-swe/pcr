@@ -4,6 +4,7 @@
 mod rendering;
 
 use crate::output::contract::Format;
+use crate::output::envelope::Published;
 
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
@@ -12,7 +13,7 @@ use packetcraftr_core::protocol::BuiltinProtocol;
 use crate::output;
 
 use crate::errors::CliError;
-use crate::rendering::emit_aggregate;
+use crate::rendering::emit_published;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr reference protocols
@@ -89,11 +90,10 @@ fn describe_protocol(
         .map_err(CliError::classified)?;
     match format {
         Format::Text => rendering::render_detail(invocation, &detail),
-        Format::Json => emit_aggregate(
+        Format::Json => emit_published(
             invocation,
             output::contract::Command::Protocols,
-            output::protocols::DetailResult::from(detail),
-            Vec::new(),
+            Published::new(output::protocols::DetailResult::from(detail), Vec::new()),
         ),
         other => other.unreachable(),
     }

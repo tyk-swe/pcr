@@ -68,7 +68,7 @@ impl crate::commands::Spec for Args {
     const CANCELLATION: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        self.send.resources(settings);
+        self.send.policy.resources(settings);
         self.template.resources(settings);
     }
 
@@ -132,7 +132,7 @@ pub(super) fn run(
                                     invocation,
                                     format_args!(
                                         "bytes: {}",
-                                        crate::rendering::spaced_hex(frame.packet.wire_bytes())
+                                        crate::rendering::SpacedHex(frame.packet.wire_bytes())
                                     ),
                                 )?;
                             }

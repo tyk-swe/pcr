@@ -3,7 +3,7 @@
 
 use crate::errors::CliError;
 use crate::output::http2 as wire;
-use crate::rendering::{comma_separated, optional_display, write_stdout_line, write_summary_line};
+use crate::rendering::{comma_separated, render_optional, write_stdout_line, write_summary_line};
 
 pub(super) fn render_frame(
     invocation: &crate::invocation::Invocation,
@@ -39,7 +39,7 @@ pub(super) fn render_message(
             message.kind,
             message.status,
             message.body_bytes,
-            optional_display(message.request),
+            render_optional(message.request, |value| value.to_string()),
             if frames.is_empty() { "none" } else { &frames },
         ),
     )?;
@@ -82,7 +82,7 @@ pub(super) fn render_issue(
         format_args!(
             "  HTTP2 tcp:{} stream={} issue={} frame={} scope={} certainty={} status={} {}",
             issue.stream,
-            optional_display(issue.http2_stream_id),
+            render_optional(issue.http2_stream_id, |value| value.to_string()),
             escaped(&issue.code),
             issue.number,
             issue.scope,

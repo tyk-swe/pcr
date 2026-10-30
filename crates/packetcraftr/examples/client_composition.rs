@@ -125,7 +125,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let allowed = packet(Ipv4Addr::new(192, 0, 2, 99))?;
     let collector = send::Collector::default();
     let report = client.send(
-        send::Request::packet(allowed, options.clone()),
+        send::Request::new(
+            packetcraftr_core::template::Template::new(allowed),
+            options.clone(),
+        ),
         collector.clone(),
     )?;
     let sent = collector.finish(report)?;
@@ -133,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let outside = packet(Ipv4Addr::new(198, 51, 100, 1))?;
     match client.send(
-        send::Request::packet(outside, options),
+        send::Request::new(packetcraftr_core::template::Template::new(outside), options),
         send::Collector::default(),
     ) {
         Err(error) => println!("denied outside the allowlist: {error}"),

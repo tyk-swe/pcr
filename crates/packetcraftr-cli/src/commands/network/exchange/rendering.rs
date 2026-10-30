@@ -42,7 +42,7 @@ pub(super) fn render_text(
                 invocation,
                 format_args!(
                     "  bytes: {}",
-                    crate::rendering::spaced_hex(response.response.frame.bytes())
+                    crate::rendering::SpacedHex(response.response.frame.bytes())
                 ),
             )?;
         }

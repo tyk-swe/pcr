@@ -75,7 +75,7 @@ pub(crate) struct SendPolicyArgs {
     #[command(flatten)]
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
-    budgets: TrafficBudgetArgs,
+    pub(crate) budgets: TrafficBudgetArgs,
 }
 
 /// `fuzz` and `replay`: packets addressed numerically, so no hostname
@@ -91,7 +91,7 @@ pub(crate) struct NumericPolicyArgs {
     #[command(flatten)]
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
-    budgets: TrafficBudgetArgs,
+    pub(crate) budgets: TrafficBudgetArgs,
 }
 
 /// `scan`, `traceroute`, and `dns`: a named target, packets built by the
@@ -105,7 +105,7 @@ pub(crate) struct HostnamePolicyArgs {
     #[command(flatten)]
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
-    budgets: TrafficBudgetArgs,
+    pub(crate) budgets: TrafficBudgetArgs,
 }
 
 /// Identification uses numeric endpoints and constructs reviewed requests.
@@ -116,14 +116,10 @@ pub(crate) struct IdentificationPolicyArgs {
     #[command(flatten)]
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
-    budgets: TrafficBudgetArgs,
+    pub(crate) budgets: TrafficBudgetArgs,
 }
 
 impl IdentificationPolicyArgs {
-    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
-        self.budgets.resources(settings);
-    }
-
     pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
         let mut policy = packetcraftr::policy::Policy::default();
         self.public_destination.apply_to(&mut policy);
@@ -151,12 +147,6 @@ impl TrafficBudgetArgs {
 impl SendPolicyArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         self.hostname_resolution.resources(settings);
-        self.budgets.resources(settings);
-    }
-}
-
-impl NumericPolicyArgs {
-    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         self.budgets.resources(settings);
     }
 }

@@ -84,7 +84,7 @@ impl<W: Write> SourceCaptureWriter<W> {
         description: Interface,
     ) -> Result<Option<u32>, Error> {
         self.map_interface(source_id, |writer| {
-            writer.add_interface_description(description)
+            writer.add_interface_description_with_options(description, &[])
         })
     }
 

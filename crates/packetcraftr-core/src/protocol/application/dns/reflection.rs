@@ -7,9 +7,9 @@ use super::{
     Record, RecordValue,
 };
 use crate::field;
-use crate::layer::{FieldSchema, reflect_set, reflective_layer};
+use crate::layer::{FieldSchema, Id, reflect_set, reflective_layer};
 use crate::protocol::common::structured::{Object, list, member, object};
-use crate::protocol::common::{out_of_range, protocol, read_only, wrong_type};
+use crate::protocol::common::{out_of_range, read_only, wrong_type};
 use bytes::Bytes;
 
 impl Dns {
@@ -25,23 +25,23 @@ impl Dns {
 }
 
 reflective_layer! {
-    pub(super) fn dns_schema() => { protocol: protocol(NAME), name: "DNS" }
+    pub(super) fn dns_schema() => { protocol: Id::new(NAME), name: "DNS" }
     impl Dns {
-        "id" => { kind: Unsigned, derived: false, required: false, description: "Transaction identifier", get |layer| Some(crate::layer::reflect_get(&layer.id)), set |layer, value, name| layer.assign(name, value), layout: (0, 2) },
-        "response" => { kind: Bool, derived: false, required: false, description: "Query/response flag", get |layer| Some(crate::layer::reflect_get(&layer.response)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
-        "opcode" => { kind: Unsigned, derived: false, required: false, description: "Operation code", get |layer| Some(crate::layer::reflect_get(&layer.opcode)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
-        "authoritative_answer" => { kind: Bool, derived: false, required: false, description: "Authoritative-answer flag", get |layer| Some(crate::layer::reflect_get(&layer.authoritative_answer)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
-        "truncated" => { kind: Bool, derived: false, required: false, description: "Truncated response flag", get |layer| Some(crate::layer::reflect_get(&layer.truncated)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
-        "recursion_desired" => { kind: Bool, derived: false, required: false, description: "Recursion-desired flag", get |layer| Some(crate::layer::reflect_get(&layer.recursion_desired)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
-        "recursion_available" => { kind: Bool, derived: false, required: false, description: "Recursion-available flag", get |layer| Some(crate::layer::reflect_get(&layer.recursion_available)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
-        "reserved" => { kind: Bool, derived: false, required: false, description: "Reserved header bit", get |layer| Some(crate::layer::reflect_get(&layer.reserved)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
-        "authenticated_data" => { kind: Bool, derived: false, required: false, description: "Authenticated-data flag", get |layer| Some(crate::layer::reflect_get(&layer.authenticated_data)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
-        "checking_disabled" => { kind: Bool, derived: false, required: false, description: "Checking-disabled flag", get |layer| Some(crate::layer::reflect_get(&layer.checking_disabled)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
-        "rcode" => { kind: Unsigned, derived: false, required: false, description: "Response code", get |layer| Some(crate::layer::reflect_get(&layer.rcode)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
-        "question_count" => { kind: Unsigned, derived: true, required: false, description: "Question count", get |layer| Some(crate::layer::reflect_get(&layer.question_count)), set |layer, value, name| layer.assign(name, value), layout: (4, 6) },
-        "answer_count" => { kind: Unsigned, derived: true, required: false, description: "Answer count", get |layer| Some(crate::layer::reflect_get(&layer.answer_count)), set |layer, value, name| layer.assign(name, value), layout: (6, 8) },
-        "authority_count" => { kind: Unsigned, derived: true, required: false, description: "Authority-record count", get |layer| Some(crate::layer::reflect_get(&layer.authority_count)), set |layer, value, name| layer.assign(name, value), layout: (8, 10) },
-        "additional_count" => { kind: Unsigned, derived: true, required: false, description: "Additional-record count", get |layer| Some(crate::layer::reflect_get(&layer.additional_count)), set |layer, value, name| layer.assign(name, value), layout: (10, 12) },
+        "id" => { kind: Unsigned, derived: false, required: false, description: "Transaction identifier", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.id)), set |layer, value, name| layer.assign(name, value), layout: (0, 2) },
+        "response" => { kind: Bool, derived: false, required: false, description: "Query/response flag", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.response)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "opcode" => { kind: Unsigned, derived: false, required: false, description: "Operation code", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.opcode)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "authoritative_answer" => { kind: Bool, derived: false, required: false, description: "Authoritative-answer flag", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.authoritative_answer)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "truncated" => { kind: Bool, derived: false, required: false, description: "Truncated response flag", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.truncated)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "recursion_desired" => { kind: Bool, derived: false, required: false, description: "Recursion-desired flag", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.recursion_desired)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "recursion_available" => { kind: Bool, derived: false, required: false, description: "Recursion-available flag", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.recursion_available)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "reserved" => { kind: Bool, derived: false, required: false, description: "Reserved header bit", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.reserved)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "authenticated_data" => { kind: Bool, derived: false, required: false, description: "Authenticated-data flag", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.authenticated_data)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "checking_disabled" => { kind: Bool, derived: false, required: false, description: "Checking-disabled flag", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.checking_disabled)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "rcode" => { kind: Unsigned, derived: false, required: false, description: "Response code", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.rcode)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "question_count" => { kind: Unsigned, derived: true, required: false, description: "Question count", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.question_count)), set |layer, value, name| layer.assign(name, value), layout: (4, 6) },
+        "answer_count" => { kind: Unsigned, derived: true, required: false, description: "Answer count", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.answer_count)), set |layer, value, name| layer.assign(name, value), layout: (6, 8) },
+        "authority_count" => { kind: Unsigned, derived: true, required: false, description: "Authority-record count", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.authority_count)), set |layer, value, name| layer.assign(name, value), layout: (8, 10) },
+        "additional_count" => { kind: Unsigned, derived: true, required: false, description: "Additional-record count", get |layer| Some(crate::layer::ReflectiveField::reflective_value(&layer.additional_count)), set |layer, value, name| layer.assign(name, value), layout: (10, 12) },
         "questions" => { kind: List, derived: false, required: false, description: "Ordered DNS questions", children: QUESTION_FIELDS, get |layer| Some(questions(&layer.questions)), set |layer, value, name| layer.assign(name, value) },
         "answers" => { kind: List, derived: false, required: false, description: "Answer records", children: RECORD_FIELDS, get |layer| Some(records(&layer.answers)), set |layer, value, name| layer.assign(name, value) },
         "authorities" => { kind: List, derived: false, required: false, description: "Authority records", children: RECORD_FIELDS, get |layer| Some(records(&layer.authorities)), set |layer, value, name| layer.assign(name, value) },

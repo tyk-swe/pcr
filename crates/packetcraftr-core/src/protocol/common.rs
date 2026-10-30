@@ -8,11 +8,11 @@ mod payload;
 pub(crate) mod structured;
 mod validation;
 
-pub use checksum::{ChecksumAccumulator, checksum, checksum_parts};
-pub(crate) use checksum::{network_from_addresses, transport_checksum, transport_checksum_parts};
+pub use checksum::{ChecksumAccumulator, checksum_parts};
+pub(crate) use checksum::{network_from_addresses, transport_checksum_parts};
 pub(crate) use errors::{
-    binding_protocol, binds_as, child_is_opaque, invalid, out_of_range, protocol, read_only,
-    rejected, truncated, typed_layer, unsupported, wrong_type,
+    binding_protocol, binds_as, child_is_opaque, invalid, out_of_range, read_only, rejected,
+    truncated, typed_layer, unsupported, wrong_type,
 };
 pub(crate) use fields::{
     ValueExpectation, expected_discriminator, make_layer, reject_aliased_duplicates, resolve_fixed,

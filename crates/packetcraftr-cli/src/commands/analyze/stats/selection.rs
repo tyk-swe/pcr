@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 
 use packetcraftr_core::{
     analysis::stats::{ConversationStat, Report},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
 };
 
 use super::arguments::Sort;
@@ -55,7 +55,8 @@ fn filter_rows<T>(
     if omitted == 0 {
         return Vec::new();
     }
-    vec![Diagnostic::warning(
+    vec![Diagnostic::new(
+        Severity::Warning,
         code,
         format!(
             "{omitted} {subject} omitted from this document by the --min-frames threshold ({minimum})"
@@ -235,13 +236,13 @@ mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
     fn report() -> Report {
-        Collector::new(Duration::from_secs(1))
+        Collector::for_table(Duration::from_secs(1), Default::default())
             .unwrap()
             .finish(&analysis::Summary::default())
     }
 
     fn conversation(stream: u64, duration: u64, frames: u64, bytes: u64) -> ConversationStat {
-        let mut scopes = Interner::new();
+        let mut scopes = Interner::default();
         let scope = scopes.intern(None, vec![]).unwrap();
         ConversationStat {
             transport: StreamTransport::Tcp,

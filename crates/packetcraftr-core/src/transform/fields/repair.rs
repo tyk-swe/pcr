@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use super::{ChangeOrigin, FieldChange, builtin, occurrence_of, read_uint};
 use crate::decode::DecodedPacket;
 use crate::layout::{ByteRange, PacketLayout};
-use crate::protocol::{BuiltinProtocol, checksum, headers::IpHeader};
+use crate::protocol::{BuiltinProtocol, checksum_parts, headers::IpHeader};
 use crate::transform::{Error, InvalidInput, Unsupported};
 
 pub(super) fn collect_repairs(
@@ -159,7 +159,7 @@ fn repair_ipv4(
     }
     let old = read_uint(bytes, checksum_range)?;
     bytes[checksum_range.start..checksum_range.end].fill(0);
-    let value = checksum(&bytes[header.start..header.end]);
+    let value = checksum_parts(&[&bytes[header.start..header.end]]);
     bytes[checksum_range.start..checksum_range.end].copy_from_slice(&value.to_be_bytes());
     Ok((u64::from(value) != old).then(|| FieldChange {
         field: format!("ipv4#{}.checksum", occurrence_of(layout, layer)),
@@ -238,7 +238,7 @@ fn repair_icmp(
     let value = match (builtin(decoded, layer), &header) {
         (Some(BuiltinProtocol::Icmpv4), IpHeader::V4(_)) => {
             bytes[checksum_range.start..checksum_range.end].fill(0);
-            let value = checksum(&bytes[span.start..span.end]);
+            let value = checksum_parts(&[&bytes[span.start..span.end]]);
             bytes[checksum_range.start..checksum_range.end].copy_from_slice(&value.to_be_bytes());
             value
         }

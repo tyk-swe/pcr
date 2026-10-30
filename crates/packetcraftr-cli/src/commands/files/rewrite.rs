@@ -4,6 +4,8 @@
 pub(in crate::commands) mod arguments;
 
 use self::arguments::Args;
+use crate::command_options::Bounded as _;
+use crate::output::envelope::Published;
 use crate::output::{
     self,
     contract::{Command, Format},
@@ -13,7 +15,7 @@ use crate::{
     errors::CliError,
     filtering,
     invocation::StreamEncoder,
-    rendering::{Retained, emit_aggregate, write_summary_line},
+    rendering::{Retained, emit_published, write_summary_line},
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -213,8 +215,14 @@ pub(crate) fn run(
         changes_omitted,
     ));
     match format {
-        Format::Json => emit_aggregate(invocation, Command::Rewrite, report, Vec::new()),
-        Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
+        Format::Json => emit_published(
+            invocation,
+            Command::Rewrite,
+            Published::new(report, Vec::new()),
+        ),
+        Format::Ndjson => stream
+            .complete_published(Published::new(report, Vec::new()))
+            .map_err(Into::into),
         Format::Text => {
             stream
                 .presentation()

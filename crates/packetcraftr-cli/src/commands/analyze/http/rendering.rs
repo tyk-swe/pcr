@@ -3,7 +3,7 @@
 
 use crate::errors::CliError;
 use crate::output::http as wire;
-use crate::rendering::{comma_separated, optional_display, write_stdout_line, write_summary_line};
+use crate::rendering::{comma_separated, render_optional, write_stdout_line, write_summary_line};
 
 pub(super) fn render_message(
     invocation: &crate::invocation::Invocation,
@@ -29,7 +29,7 @@ pub(super) fn render_message(
             message.status,
             start,
             message.body_bytes,
-            optional_display(message.request),
+            render_optional(message.request, |value| value.to_string()),
             if frames.is_empty() { "none" } else { &frames },
         ),
     )?;

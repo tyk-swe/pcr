@@ -139,7 +139,3 @@ fn incoherent(message: &str) -> Error {
         message: message.to_owned(),
     }
 }
-
-pub(crate) fn into_sent_packet(sent: Arc<SentPacket>) -> SentPacket {
-    Arc::unwrap_or_clone(sent)
-}

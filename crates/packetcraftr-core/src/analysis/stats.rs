@@ -82,10 +82,6 @@ pub struct Collector {
 }
 
 impl Collector {
-    pub fn new(interval: Duration) -> Result<Self, Error> {
-        Self::for_table(interval, Table::All)
-    }
-
     pub fn for_table(interval: Duration, table: Table) -> Result<Self, Error> {
         if interval.is_zero() {
             return Err(Error::InvalidLimit {

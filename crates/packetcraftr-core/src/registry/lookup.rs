@@ -61,10 +61,6 @@ impl Registry {
         }
     }
 
-    pub fn builder() -> Builder {
-        Builder::new()
-    }
-
     /// The codec registered under a canonical protocol name.
     pub fn codec(&self, protocol: &str) -> Option<&Arc<dyn Codec>> {
         self.codecs.get(protocol)

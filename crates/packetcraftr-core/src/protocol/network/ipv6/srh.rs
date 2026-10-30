@@ -8,14 +8,14 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded, NetworkEnvelope},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, invalid, make_layer, protocol, resolve_u8, strict_or_diagnostic, truncated,
+    ValueExpectation, invalid, make_layer, resolve_u8, strict_or_diagnostic, truncated,
     typed_layer, unsupported, wrong_type,
 };
 
@@ -52,7 +52,7 @@ impl Default for SegmentRoutingHeader {
 }
 
 reflective_layer! {
-    fn srh_schema() => { protocol: protocol(NAME), name: "IPv6 Segment Routing Header" }
+    fn srh_schema() => { protocol: Id::new(NAME), name: "IPv6 Segment Routing Header" }
     impl SegmentRoutingHeader {
         "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", reflect: next_header, layout: (0, 1) },
         "segments_left" => { kind: Unsigned, derived: true, required: false, description: "Remaining segments", reflect: segments_left, layout: (3, 4) },
@@ -184,7 +184,12 @@ impl Codec for SegmentRoutingHeaderCodec {
         let mut diagnostics = Vec::new();
         if header[5] != 0 {
             diagnostics.push(
-                Diagnostic::warning("decode.srh_flags", "SRH flags are non-zero").at_field("flags"),
+                Diagnostic::new(
+                    Severity::Warning,
+                    "decode.srh_flags",
+                    "SRH flags are non-zero",
+                )
+                .at_field("flags"),
             );
         }
         let segment_bytes = input

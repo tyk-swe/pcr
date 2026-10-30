@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::envelope::Published;
 use std::io::Read;
 
 use packetcraftr_core as core;
@@ -41,10 +42,10 @@ pub(super) fn run(
         frames_matched = increment_counter(frames_matched, "read matched-frame count")?;
     }
     if format == Format::Ndjson {
-        stream.complete(
+        stream.complete_published(Published::new(
             output::read::Event::from(output::read::Totals::from((&budget, frames_matched))),
             Vec::new(),
-        )?;
+        ))?;
     }
     Ok(())
 }

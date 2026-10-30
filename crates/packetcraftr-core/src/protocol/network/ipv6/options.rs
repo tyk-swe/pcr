@@ -8,11 +8,11 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
-use crate::protocol::common::{invalid, make_layer, protocol, truncated, typed_layer};
+use crate::protocol::common::{invalid, make_layer, truncated, typed_layer};
 
 use super::resolve_next_header;
 
@@ -54,7 +54,7 @@ impl Default for DestinationOptions {
 macro_rules! declare_options_layer {
     ($ty:ty, $schema:ident, $protocol:expr, $name:literal, $layout:ident) => {
         reflective_layer! {
-            fn $schema() => { protocol: protocol($protocol), name: $name }
+            fn $schema() => { protocol: Id::new($protocol), name: $name }
             impl $ty {
                 "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", reflect: next_header, layout: (0, 1) },
                 "options" => { kind: Bytes, derived: false, required: false, description: "Option bytes, padded to an eight-byte header boundary", reflect: options, layout: (2, header_len) },

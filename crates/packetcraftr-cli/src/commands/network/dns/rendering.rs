@@ -11,8 +11,8 @@ use crate::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, optional_display, optional_duration,
-    render_diagnostics_text, render_dns_record, render_undecoded, write_stdout_line,
+    CapturedFrameText, comma_separated, duration_text, render_diagnostics_text, render_dns_record,
+    render_optional, render_undecoded, write_stdout_line,
 };
 
 pub(super) fn render_batch_text(
@@ -83,7 +83,7 @@ pub(super) fn render_text(
             packetcraftr::dns::QueryType::new(result.query_type),
             result.transaction_id,
             result.fallback_attempted,
-            optional_display(result.accepted_transport),
+            render_optional(result.accepted_transport, |value| value.to_string()),
             result.outcome.as_str(),
         ),
     )?;
@@ -95,12 +95,12 @@ pub(super) fn render_text(
                 attempt.attempt,
                 attempt.transport,
                 attempt.server_address,
-                optional_display(attempt.source_port),
+                render_optional(attempt.source_port, |value| value.to_string()),
                 attempt.status.as_str(),
-                optional_display(attempt.sent_at),
-                optional_display(attempt.received_at),
-                optional_duration(attempt.latency),
-                optional_display(attempt.response_code),
+                render_optional(attempt.sent_at, |value| value.to_string()),
+                render_optional(attempt.received_at, |value| value.to_string()),
+                render_optional(attempt.latency, duration_text),
+                render_optional(attempt.response_code, |value| value.to_string()),
                 attempt.reason,
             ),
         )?;
@@ -109,7 +109,7 @@ pub(super) fn render_text(
         {
             write_stdout_line(
                 invocation,
-                format_args!("  frame {}", captured_frame_text(frame)),
+                format_args!("  frame {}", CapturedFrameText(frame)),
             )?;
         }
     }
@@ -145,24 +145,27 @@ pub(super) fn render_text(
         format_args!(
             "{}",
             response_summary(ResponseLine {
-                response_code: optional_display(
+                response_code: render_optional(
                     result
                         .response
                         .as_ref()
-                        .map(|response| response.response_code)
+                        .map(|response| response.response_code),
+                    |value| value.to_string()
                 ),
                 response_code_name: result
                     .response
                     .as_ref()
                     .map_or("none", |response| response.response_code_name.as_str()),
-                authoritative: optional_display(
+                authoritative: render_optional(
                     result
                         .response
                         .as_ref()
-                        .map(|response| response.authoritative)
+                        .map(|response| response.authoritative),
+                    |value| value.to_string()
                 ),
-                truncated: optional_display(
-                    result.response.as_ref().map(|response| response.truncated)
+                truncated: render_optional(
+                    result.response.as_ref().map(|response| response.truncated),
+                    |value| value.to_string()
                 ),
                 accepted: result
                     .answers
@@ -246,13 +249,6 @@ pub(super) fn emit_event(
     let published = output::envelope::Published::<output::dns::Event>::try_from(event)
         .map_err(CliError::classified)?;
     Ok(stream.emit_published(published)?)
-}
-
-pub(super) fn emit_batch_event(
-    event: packetcraftr::dns::batch::Event,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    emit_event(event.event, stream)
 }
 
 pub(super) fn emit_complete(

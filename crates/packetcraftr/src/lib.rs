@@ -10,8 +10,8 @@
 //! | Layer | Modules |
 //! | --- | --- |
 //! | 1. Foundation | `clock`, `deadline`, `engine::stats`, `engine::correlation` |
-//! | 2. Environment | `error`, `policy`, `target` (model and selection), `route`, `neighbor`, `providers`, `runtime`, `client::{admission, planning}` |
-//! | 3. Engine | `engine::{operation, preparation, execution}`, `evidence` |
+//! | 2. Environment | `error`, `policy`, `target` (model, resolver, and selection), `route`, `neighbor`, `providers`, `runtime`, `client::{admission, planning}` |
+//! | 3. Engine | `engine::{mtu, operation, preparation, execution}`, `evidence` |
 //! | 4. Primitives | `send`, `exchange`, `capture`, `probe` |
 //! | 5. Workflows | `dns`, `traceroute`, `os`, `identify`, `replay`, `fuzz`, `audit`, `target::plan` |
 //! | 6. Composite | `scan`, which follows up with traces and reverse DNS |
@@ -45,7 +45,7 @@
 //! let client = Client::new(registry, Policy::default(), SystemProviders);
 //! let collector = send::Collector::default();
 //! let report = client.send(
-//!     send::Request::packet(packet, send::Options::default()),
+//!     send::Request::new(packetcraftr_core::template::Template::new(packet), send::Options::default()),
 //!     collector.clone(),
 //! )?;
 //! let aggregate = collector.finish(report)?;

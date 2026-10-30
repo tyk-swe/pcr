@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::diagnostic::Severity;
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
@@ -10,15 +11,15 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM},
     field::{self, WireValue},
-    layer::{Layer, Schema, reflective_layer},
+    layer::{Id, Layer, Schema, reflective_layer},
     layout::{ByteRange, FieldLayout},
 };
 
 use super::{ip_protocol, resolve_envelope};
 use crate::protocol::common::{
-    ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
-    out_of_range, payload_without_padding, protocol, resolve_u16, transport_checksum,
-    transport_checksum_parts, truncated, typed_layer, wrong_type,
+    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, make_layer, out_of_range,
+    payload_without_padding, resolve_u16, transport_checksum_parts, truncated, typed_layer,
+    wrong_type,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -155,7 +156,7 @@ fn finish_layout(mut fields: Vec<FieldLayout>, body_len: usize) -> Vec<FieldLayo
 }
 
 reflective_layer! {
-    fn icmpv4_schema() => { protocol: protocol(V4_NAME), name: "ICMPv4" }
+    fn icmpv4_schema() => { protocol: Id::new(V4_NAME), name: "ICMPv4" }
     impl Icmpv4 {
         "type" => {
             kind: Unsigned, derived: false, required: true,
@@ -248,7 +249,7 @@ impl Icmpv4 {
 }
 
 reflective_layer! {
-    fn icmpv6_schema() => { protocol: protocol(V6_NAME), name: "ICMPv6" }
+    fn icmpv6_schema() => { protocol: Id::new(V6_NAME), name: "ICMPv6" }
     impl Icmpv6 {
         "type" => {
             kind: Unsigned, derived: false, required: true,
@@ -371,10 +372,14 @@ impl Codec for Icmpv4Codec {
         let body = input.slice(ICMP_MIN_LEN..);
         let body_len = body.len();
         let mut diagnostics = Vec::new();
-        if checksum(&input) != 0 {
+        if checksum_parts(&[&input]) != 0 {
             diagnostics.push(
-                Diagnostic::warning(ICMPV4_CHECKSUM, "ICMPv4 checksum mismatch")
-                    .at_field("checksum"),
+                Diagnostic::new(
+                    Severity::Warning,
+                    ICMPV4_CHECKSUM,
+                    "ICMPv4 checksum mismatch",
+                )
+                .at_field("checksum"),
             );
         }
         Ok(Decoded {
@@ -462,11 +467,15 @@ impl Codec for Icmpv6Codec {
         let body_len = body.len();
         let mut diagnostics = Vec::new();
         if let Some(network) = context.network
-            && transport_checksum(V6_NAME, network, ip_protocol::ICMPV6, &input)? != 0
+            && transport_checksum_parts(V6_NAME, network, ip_protocol::ICMPV6, &[&input])? != 0
         {
             diagnostics.push(
-                Diagnostic::warning(ICMPV6_CHECKSUM, "ICMPv6 checksum mismatch")
-                    .at_field("checksum"),
+                Diagnostic::new(
+                    Severity::Warning,
+                    ICMPV6_CHECKSUM,
+                    "ICMPv6 checksum mismatch",
+                )
+                .at_field("checksum"),
             );
         }
         Ok(Decoded {

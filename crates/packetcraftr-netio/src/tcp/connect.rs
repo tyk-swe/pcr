@@ -178,20 +178,7 @@ where
     P: Provider + 'static,
     P::Stream: 'static,
 {
-    start(provider, endpoint, caller, None)
-}
-
-fn start<P>(
-    provider: Arc<P>,
-    endpoint: SocketAddr,
-    caller: &Deadline,
-    lease: Option<Lease>,
-) -> Result<PendingConnect<P::Stream>, Error>
-where
-    P: Provider + 'static,
-    P::Stream: 'static,
-{
-    start_on(workers::shared(), provider, endpoint, caller, lease)
+    start_on(workers::shared(), provider, endpoint, caller, None)
 }
 
 pub(crate) fn start_on<P>(

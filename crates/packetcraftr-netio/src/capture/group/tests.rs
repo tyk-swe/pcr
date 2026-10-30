@@ -57,8 +57,8 @@ impl Provider for Backend {
             expire_ready: self.expire_ready,
             queued: self.queued.then(|| {
                 Captured::new(
-                    Frame::without_timestamp(LinkType(1), vec![7]).unwrap(),
-                    Instant::now(),
+                    Frame::new(None, LinkType(1), vec![7]).unwrap(),
+                    Some(Instant::now()),
                 )
             }),
         })

@@ -8,11 +8,11 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
 };
 
 use super::ether_type::{link_payload_selection, resolve_ether_type};
-use crate::protocol::common::{invalid, make_layer, protocol, truncated, typed_layer};
+use crate::protocol::common::{invalid, make_layer, truncated, typed_layer};
 
 use crate::protocol::BuiltinProtocol;
 
@@ -62,7 +62,7 @@ impl Default for Vlan8021ad {
 macro_rules! declare_vlan_layer {
     ($ty:ty, $schema:ident, $protocol:expr, $name:literal, $layout:ident) => {
         reflective_layer! {
-            fn $schema() => { protocol: protocol($protocol), name: $name }
+            fn $schema() => { protocol: Id::new($protocol), name: $name }
             impl $ty {
                 "priority" | "pcp" => { kind: Unsigned, derived: false, required: false, description: "IEEE 802.1 priority code point", reflect_bounded: priority, 7_u64, layout: (0, 2) },
                 "drop_eligible" | "dei" => { kind: Bool, derived: false, required: false, description: "Drop eligible indicator", reflect: drop_eligible, layout: (0, 2) },

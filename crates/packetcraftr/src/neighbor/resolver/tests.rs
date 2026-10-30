@@ -182,12 +182,12 @@ impl capture::Session for InterruptedSession {
                 }
                 Ok(Some(capture::Captured::new(
                     Frame::new(
-                        std::time::SystemTime::now(),
+                        Some(std::time::SystemTime::now()),
                         self.metadata.link_type,
                         [0_u8; 60].to_vec(),
                     )
                     .unwrap(),
-                    Instant::now(),
+                    Some(Instant::now()),
                 )))
             }
             _ => {

@@ -1,8 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::record::serialize_line_with_limit;
+use super::record::serialize_line;
 use super::*;
+use crate::output::envelope::Published;
 use std::{
     sync::{
         Condvar,
@@ -26,15 +27,15 @@ impl StreamRecord for Data {
 fn complete_record_limit_includes_newline_and_serialization_failure_never_writes() {
     let value = serde_json::json!({"value": "abc"});
     let bytes = serde_json::to_vec(&value).unwrap();
-    let exact = serialize_line_with_limit(&value, 0, bytes.len() + 1).unwrap();
+    let exact = serialize_line(&value, 0, bytes.len() + 1, None).unwrap();
     assert_eq!(&exact[..bytes.len()], bytes);
     assert_eq!(exact.last(), Some(&b'\n'));
     assert!(matches!(
-        serialize_line_with_limit(&value, 0, bytes.len()),
+        serialize_line(&value, 0, bytes.len(), None),
         Err(EncodeError::RecordLimit { sequence: 0, .. })
     ));
     assert!(matches!(
-        serialize_line_with_limit(&value, 0, 0),
+        serialize_line(&value, 0, 0, None),
         Err(EncodeError::RecordLimit { .. })
     ));
 }
@@ -79,14 +80,18 @@ fn failed_partial_write_is_terminally_failed_without_a_false_complete_or_later_f
         Duration::from_secs(5),
     )
     .unwrap();
-    assert!(stream.emit_data(Data { value: 1 }, Vec::new()).is_err());
+    assert!(
+        stream
+            .emit_published(Published::new(Data { value: 1 }, Vec::new()))
+            .is_err()
+    );
     assert_eq!(prefix.lock().unwrap().len(), 3);
     assert_eq!(calls.load(Ordering::Relaxed), 2);
     assert_eq!(flushes.load(Ordering::Relaxed), 0);
     assert!(!stream.is_open());
     assert!(!stream.is_complete());
     assert!(matches!(
-        stream.complete((), Vec::new()),
+        stream.complete_published(Published::new((), Vec::new())),
         Err(EncodeError::Failed)
     ));
     assert_eq!(calls.load(Ordering::Relaxed), 2);
@@ -146,7 +151,11 @@ fn cancelled_bounded_writer_keeps_actual_work_charged_and_never_returns_complete
     let (returned, result) = mpsc::channel();
     let caller = std::thread::spawn(move || {
         returned
-            .send(publishing.emit_data(Data { value: 1 }, Vec::new()).is_err())
+            .send(
+                publishing
+                    .emit_published(Published::new(Data { value: 1 }, Vec::new()))
+                    .is_err(),
+            )
             .unwrap();
     });
     writing.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -155,7 +164,11 @@ fn cancelled_bounded_writer_keeps_actual_work_charged_and_never_returns_complete
     caller.join().unwrap();
     assert!(!stream.is_complete());
     assert!(!stream.is_open());
-    assert!(stream.complete((), Vec::new()).is_err());
+    assert!(
+        stream
+            .complete_published(Published::new((), Vec::new()))
+            .is_err()
+    );
     drop(stream);
     assert_eq!(runtime.snapshot().active, 1);
     assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 1);
@@ -198,7 +211,9 @@ fn a_started_complete_write_can_finish_after_cancellation_without_acknowledging_
     let publishing = stream.clone();
     let (returned, result) = mpsc::channel();
     let caller = std::thread::spawn(move || {
-        returned.send(publishing.complete((), Vec::new())).unwrap();
+        returned
+            .send(publishing.complete_published(Published::new((), Vec::new())))
+            .unwrap();
     });
     writing.recv_timeout(Duration::from_secs(5)).unwrap();
     cancellation.cancel();

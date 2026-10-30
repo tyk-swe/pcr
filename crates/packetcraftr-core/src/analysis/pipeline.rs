@@ -526,7 +526,7 @@ fn decode_derived(
         .frame
         .timestamp
         .ok_or(Error::TimestampUnavailable { number })?;
-    let mut frame = Frame::new(timestamp, link_type, datagram.bytes.clone())
+    let mut frame = Frame::new(Some(timestamp), link_type, datagram.bytes.clone())
         .map_err(|source| Error::DerivedFrame { number, source })?;
     frame.interface = source.frame.interface;
     frame.direction = source.frame.direction;

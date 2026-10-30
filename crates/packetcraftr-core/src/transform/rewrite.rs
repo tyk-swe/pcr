@@ -6,7 +6,7 @@ use crate::{
     frame::{Frame, LinkType},
     packet::{VlanKind, VlanTag},
     protocol::{
-        BuiltinProtocol, checksum,
+        BuiltinProtocol, checksum_parts,
         headers::MAX_VLAN_DEPTH,
         headers::{EthernetHeader, IpHeader, Ipv4Header, Ipv6Header, LinkHeader},
         network::ip_protocol,
@@ -179,7 +179,7 @@ pub fn rewrite(
             return Err(Error::Unsupported(Unsupported::RawIpTrailer));
         }
     }
-    let mut output = Frame::without_timestamp(frame.link_type, bytes)?;
+    let mut output = Frame::new(None, frame.link_type, bytes)?;
     output.timestamp = frame.timestamp;
     output.interface = frame.interface;
     output.direction = frame.direction;
@@ -223,7 +223,7 @@ fn network(ip: &mut [u8], header: &IpHeader, patch: &HeaderRewrite) -> Result<()
     transport(&mut ip[start..end], patch, protocol, addresses)?;
     if let IpHeader::V4(ipv4) = header {
         ip[Ipv4Header::CHECKSUM].fill(0);
-        let value = checksum(&ip[..ipv4.header_length()]);
+        let value = checksum_parts(&[&ip[..ipv4.header_length()]]);
         ip[Ipv4Header::CHECKSUM].copy_from_slice(&value.to_be_bytes());
     }
     Ok(())

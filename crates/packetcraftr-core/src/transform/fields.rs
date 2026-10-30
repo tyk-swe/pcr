@@ -338,7 +338,7 @@ impl FieldEdits {
                 changes.push(change);
             }
         }
-        let mut output = Frame::without_timestamp(frame.link_type, bytes)?;
+        let mut output = Frame::new(None, frame.link_type, bytes)?;
         output.timestamp = frame.timestamp;
         output.interface = frame.interface;
         output.direction = frame.direction;

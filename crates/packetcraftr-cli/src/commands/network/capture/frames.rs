@@ -3,6 +3,7 @@
 
 //! Per-frame selection decoding and delivery to every output destination.
 
+use crate::output::envelope::Published;
 use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -24,7 +25,7 @@ use crate::command_options::Compression;
 use crate::errors::CliError;
 use crate::filtering;
 use crate::output::{self, contract::Format};
-use crate::rendering::{FieldTree, render_frame_text, render_frame_tree, write_hex_line};
+use crate::rendering::{FieldTree, render_frame, write_hex_line};
 
 /// Selection decodes a kept frame once and parks it so emission republishes
 /// the same dissection; decoded state never outlives one frame.
@@ -208,21 +209,31 @@ fn emit_frame(
                     output::frame::Captured::try_from(frame).map_err(CliError::classified)?;
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
                 match tree {
-                    Some(tree) => {
-                        render_frame_tree(invocation, source_frame, &frame, Some(&stack), tree)
-                    }
-                    None => render_frame_text(
+                    Some(tree) => render_frame(
                         invocation,
                         source_frame,
                         &frame,
                         Some(&stack),
+                        Some(tree),
+                        crate::invocation::Presentation { verbose: true },
+                    ),
+                    None => render_frame(
+                        invocation,
+                        source_frame,
+                        &frame,
+                        Some(&stack),
+                        None,
                         stream.presentation(),
                     ),
                 }
             }
             Format::Ndjson => output::read::Frame::try_from((source_frame, frame, &decoded))
                 .map_err(CliError::classified)
-                .and_then(|record| stream.emit_data(record, Vec::new()).map_err(Into::into)),
+                .and_then(|record| {
+                    stream
+                        .emit_published(Published::new(record, Vec::new()))
+                        .map_err(Into::into)
+                }),
             Format::Json | Format::Hex | Format::Pcap | Format::PcapNg => Err(CliError::new(
                 packetcraftr_core::error::Kind::Internal,
                 "decoded output requires text or NDJSON",
@@ -235,10 +246,11 @@ fn emit_frame(
             .map_err(CliError::classified)
             .and_then(|frame| {
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
-                render_frame_text(
+                render_frame(
                     invocation,
                     source_frame,
                     &frame,
+                    None,
                     None,
                     stream.presentation(),
                 )
@@ -248,7 +260,11 @@ fn emit_frame(
             .and_then(|frame| write_hex_line(frame.bytes())),
         Format::Ndjson => output::read::Frame::try_from((source_frame, frame))
             .map_err(CliError::classified)
-            .and_then(|record| stream.emit_data(record, Vec::new()).map_err(Into::into)),
+            .and_then(|record| {
+                stream
+                    .emit_published(Published::new(record, Vec::new()))
+                    .map_err(Into::into)
+            }),
         Format::Json => Ok(()),
         Format::Pcap | Format::PcapNg => writer::write_frame(
             writer.as_mut().expect("writer initialized before frames"),

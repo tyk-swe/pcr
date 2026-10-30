@@ -5,6 +5,8 @@ pub(in crate::commands) mod arguments;
 mod conversion;
 mod rendering;
 
+use crate::command_options::Bounded as _;
+use crate::output::envelope::Published;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -29,7 +31,7 @@ use crate::invocation::StreamEncoder;
 use crate::output::envelope::source_causes;
 use crate::output::{self, contract::Format, stream::EncodeError};
 use crate::rendering::{
-    HumanWriteError, SourceCaptureWriter, emit_aggregate_with_stats, finish_compressed_output,
+    HumanWriteError, SourceCaptureWriter, emit_published, finish_compressed_output,
     stream_capture_error, write_stdout_line_with_interrupt,
 };
 use conversion::{max_gap, timing};
@@ -58,7 +60,7 @@ impl crate::commands::Spec for Args {
         crate::resources::declare!(settings, self, [max_gap_ms: Milliseconds @ Operation]);
         self.duration.resources(settings);
         self.reader.resources(settings);
-        self.policy.resources(settings);
+        self.policy.budgets.resources(settings);
     }
 
     fn run(
@@ -275,12 +277,10 @@ fn replay_aggregate<P: PacketProviders, K: Clock, R: Read>(
     let stats = output::replay::stats(&report, started.elapsed());
     let result = output::replay::Report::try_from((report, requested_interface, link_mode, frames))
         .map_err(CliError::classified)?;
-    emit_aggregate_with_stats(
+    emit_published(
         invocation,
         output::contract::Command::Replay,
-        result,
-        Vec::new(),
-        stats,
+        Published::new(result, Vec::new()).with_stats(stats),
     )
 }
 
@@ -299,7 +299,7 @@ fn replay_stream<P: PacketProviders, K: Clock, R: Read>(
     let stats = output::replay::stats(&report, started.elapsed());
     let result = output::replay::Report::try_from((report, interface, link_mode, Vec::new()))
         .map_err(CliError::classified)?;
-    Ok(stream.complete_with_stats(result, Vec::new(), stats)?)
+    Ok(stream.complete_published(Published::new(result, Vec::new()).with_stats(stats))?)
 }
 
 fn replay_capture<P: PacketProviders, K: Clock, R: Read>(
@@ -442,7 +442,7 @@ fn render_stream_record(
 ) -> Result<(), BoundaryError> {
     let result = output_frame(evidence)?;
     stream
-        .emit_data(result, Vec::new())
+        .emit_published(Published::new(result, Vec::new()))
         .map_err(|error| match error {
             EncodeError::Cancelled(cancelled) => BoundaryError::from_error(cancelled),
             EncodeError::Deadline { source, .. } => BoundaryError::from_error(source),

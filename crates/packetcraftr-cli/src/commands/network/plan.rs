@@ -5,8 +5,9 @@ use crate::command_options::{
     DestinationAllowlistArgs, HostnameResolutionArgs, PublicDestinationArgs, RouteArgs,
 };
 use crate::errors::CliError;
+use crate::output::envelope::Published;
 use crate::output::{self, contract::Format};
-use crate::rendering::{emit_aggregate, optional_display, write_stdout_line};
+use crate::rendering::{emit_published, render_optional, write_stdout_line};
 use crate::resources::Settings;
 use crate::system::prepare_plan;
 
@@ -93,11 +94,10 @@ pub(super) fn run(
             render_text(invocation, &result.plan)?;
             presentation.details(invocation, "Route decision", &result.plan)
         }
-        Format::Json => emit_aggregate(
+        Format::Json => emit_published(
             invocation,
             output::contract::Command::Plan,
-            result,
-            Vec::new(),
+            Published::new(result, Vec::new()),
         ),
         other => other.unreachable(),
     }
@@ -122,10 +122,10 @@ fn render_text(
         invocation,
         format_args!(
             "lookup_destination={} final_destination={} source={} next_hop={} destination_mac={}",
-            optional_display(route.lookup_destination),
-            optional_display(route.final_destination),
-            optional_display(route.packet_source),
-            optional_display(route.decision.next_hop),
+            render_optional(route.lookup_destination, |value| value.to_string()),
+            render_optional(route.final_destination, |value| value.to_string()),
+            render_optional(route.packet_source, |value| value.to_string()),
+            render_optional(route.decision.next_hop, |value| value.to_string()),
             route
                 .destination_mac
                 .map(|value| value.to_string())

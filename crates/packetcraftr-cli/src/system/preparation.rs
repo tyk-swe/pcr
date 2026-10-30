@@ -70,7 +70,7 @@ impl LiveRequest for packetcraftr::exchange::Request {
 }
 
 pub(crate) fn placeholder() -> core::template::Template {
-    core::template::Template::new(core::packet::Packet::new())
+    core::template::Template::new(core::packet::Packet::default())
 }
 
 pub(crate) struct Prepared<R> {

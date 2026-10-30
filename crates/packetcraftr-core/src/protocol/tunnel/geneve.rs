@@ -7,16 +7,16 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use super::VNI_MAX;
 
 use crate::protocol::common::{
-    ensure_encode_budget, expected_discriminator, invalid, make_layer, protocol, resolve_u16,
+    ensure_encode_budget, expected_discriminator, invalid, make_layer, resolve_u16,
     strict_or_diagnostic, truncated, typed_layer, unsupported, validate_auto_raw_discriminator,
     validate_raw_child_discriminator,
 };
@@ -60,7 +60,7 @@ impl Default for Geneve {
 }
 
 reflective_layer! {
-    fn geneve_schema() => { protocol: protocol(NAME), name: "GENEVE" }
+    fn geneve_schema() => { protocol: Id::new(NAME), name: "GENEVE" }
     impl Geneve {
         "version" => { kind: Unsigned, derived: false, required: false, description: "2-bit GENEVE version; only version 0 is defined", reflect_bounded: version, 3_u64, layout: (0, 1) },
         "control" => { kind: Bool, derived: false, required: false, description: "Control-packet O bit", reflect: control, layout: (1, 2) },
@@ -203,7 +203,8 @@ impl Codec for GeneveCodec {
         let mut diagnostics = Vec::new();
         if let Some(field) = nonzero_reserved_field(reserved1, reserved2) {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.geneve_reserved",
                     "GENEVE reserved bits are non-zero",
                 )
@@ -212,7 +213,8 @@ impl Codec for GeneveCodec {
         }
         match parse_option_chain(&options) {
             None => diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.geneve_options",
                     "GENEVE option bytes do not parse as an exact TLV chain; preserved verbatim",
                 )
@@ -221,7 +223,8 @@ impl Codec for GeneveCodec {
             Some(chain) => {
                 if chain.critical != critical {
                     diagnostics.push(
-                        Diagnostic::warning(
+                        Diagnostic::new(
+                            Severity::Warning,
                             "decode.geneve_critical",
                             "the C bit disagrees with the critical options present in the chain",
                         )
@@ -230,7 +233,8 @@ impl Codec for GeneveCodec {
                 }
                 if chain.reserved_bits {
                     diagnostics.push(
-                        Diagnostic::warning(
+                        Diagnostic::new(
+                            Severity::Warning,
                             "decode.geneve_reserved",
                             "GENEVE option-header reserved bits are non-zero",
                         )

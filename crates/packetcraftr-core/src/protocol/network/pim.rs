@@ -94,8 +94,8 @@ impl Pim {
         }
         let network = super::resolve_envelope(NAME, c).ok();
         let sum = match network {
-            Some(n) if n.source.is_ipv6() => transport_checksum(NAME, n, 103, &w.bytes)?,
-            _ => checksum(&w.bytes),
+            Some(n) if n.source.is_ipv6() => transport_checksum_parts(NAME, n, 103, &[&w.bytes])?,
+            _ => checksum_parts(&[&w.bytes]),
         };
         let sum = checksum_value(NAME, &self.checksum, sum, c)?;
         w.bytes[2..4].copy_from_slice(&sum.to_be_bytes());
@@ -117,8 +117,8 @@ impl Pim {
             ..Self::default()
         };
         let sum = match c.network {
-            Some(n) if n.source.is_ipv6() => transport_checksum(NAME, n, 103, &b)?,
-            _ => checksum(&b),
+            Some(n) if n.source.is_ipv6() => transport_checksum_parts(NAME, n, 103, &[&b])?,
+            _ => checksum_parts(&[&b]),
         };
         if sum != 0 {
             return Err(invalid(NAME, "PIM checksum mismatch"));

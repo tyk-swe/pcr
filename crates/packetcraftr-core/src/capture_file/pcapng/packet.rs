@@ -134,8 +134,8 @@ fn parse(
     let global_interface = interface_base
         .checked_add(interface_id)
         .ok_or(Error::InterfaceLimit { limit: usize::MAX })?;
-    let mut frame = Frame::try_with_lengths(
-        timestamp,
+    let mut frame = Frame::try_with_optional_timestamp(
+        Some(timestamp),
         interface.link_type,
         Lengths {
             captured: captured_length,

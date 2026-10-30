@@ -7,7 +7,7 @@ mod reflection;
 pub mod selector;
 
 pub use model::{FieldSchema, Id, Layer, Schema};
-pub use opaque::{Malformed, Padding, Raw, parse_hex};
+pub use opaque::{Malformed, Padding, Raw, parse_hex, raw_layout};
 pub(crate) use opaque::{MalformedCodec, PaddingCodec, RawCodec};
 pub(crate) use reflection::reflective_layer;
-pub use reflection::{ReflectiveField, Refusal, reflect_get, reflect_set, reflect_set_bounded};
+pub use reflection::{ReflectiveField, Refusal, reflect_set, reflect_set_bounded};

@@ -28,10 +28,6 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Registers a codec with its canonical name and caller-owned aliases.
     pub fn register_codec<C>(&mut self, codec: C, aliases: &[&str]) -> Result<&mut Self, Error>
     where

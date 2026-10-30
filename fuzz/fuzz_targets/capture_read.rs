@@ -13,7 +13,7 @@ fuzz_target!(|data: &[u8]| {
     else {
         return;
     };
-    let Ok(mut reader) = Reader::new(input) else {
+    let Ok(mut reader) = Reader::with_limits(input, Default::default()) else {
         return;
     };
     while let Ok(Some(frame)) = reader.next_frame() {

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::diagnostic::Severity;
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
@@ -9,12 +10,12 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, SCTP_CHECKSUM},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, invalid, make_layer, payload_without_padding, protocol, resolve_fixed,
+    ValueExpectation, invalid, make_layer, payload_without_padding, resolve_fixed,
     strict_or_diagnostic, truncated, typed_layer,
 };
 
@@ -47,7 +48,7 @@ impl Default for Sctp {
 }
 
 reflective_layer! {
-    fn sctp_schema() => { protocol: protocol(NAME), name: "SCTP" }
+    fn sctp_schema() => { protocol: Id::new(NAME), name: "SCTP" }
     impl Sctp {
         "source_port" | "sport" => {
             kind: Unsigned, derived: false, required: true, description: "SCTP source port",
@@ -102,7 +103,11 @@ impl Codec for SctpCodec {
             if context.mode == crate::codec::Mode::Strict {
                 return Err(invalid(NAME, message));
             }
-            diagnostics.push(Diagnostic::warning("build.sctp_chunks", message));
+            diagnostics.push(Diagnostic::new(
+                Severity::Warning,
+                "build.sctp_chunks",
+                message,
+            ));
         }
 
         let mut header = [0_u8; SCTP_HEADER_LEN];
@@ -154,7 +159,8 @@ impl Codec for SctpCodec {
         let expected = crc32c_parts(&[before_checksum, &zero_checksum, chunks]);
         if checksum != expected {
             diagnostics.push(
-                Diagnostic::warning(SCTP_CHECKSUM, "SCTP checksum mismatch").at_field("checksum"),
+                Diagnostic::new(Severity::Warning, SCTP_CHECKSUM, "SCTP checksum mismatch")
+                    .at_field("checksum"),
             );
         }
 
@@ -204,7 +210,8 @@ fn validate_port(
 
 fn warn_zero_port(diagnostics: &mut Vec<Diagnostic>, field: &'static str, which: &'static str) {
     diagnostics.push(
-        Diagnostic::warning(
+        Diagnostic::new(
+            Severity::Warning,
             "decode.sctp_zero_port",
             format!("SCTP {which} port is zero"),
         )

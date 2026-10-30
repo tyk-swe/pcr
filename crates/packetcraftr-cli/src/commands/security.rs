@@ -7,6 +7,7 @@ pub(super) mod input;
 mod options;
 
 use super::CommandExit;
+use crate::output::envelope::Published;
 use crate::{
     errors::CliError,
     invocation::Invocation,
@@ -42,16 +43,24 @@ pub(super) fn publish(
     }
     let fail = bounds.fails(&report);
     let report = crate::output::security::Report::from(&report);
-    crate::rendering::bounded_json_len(&report, bounds.max_result_bytes)
-        .map_err(|e| e.into_cli_error(|| invalid("security result exceeds --max-result-bytes")))?;
+    crate::rendering::bounded_json_len(
+        &report,
+        bounds.max_result_bytes,
+        serde_json::ser::CompactFormatter,
+    )
+    .map_err(|e| e.into_cli_error(|| invalid("security result exceeds --max-result-bytes")))?;
     match i.format {
-        Format::Json => crate::rendering::emit_aggregate(i, command, report, Vec::new())?,
+        Format::Json => {
+            crate::rendering::emit_published(i, command, Published::new(report, Vec::new()))?;
+        }
         Format::Ndjson => {
             for finding in &report.findings {
                 i.check()?;
-                i.output.emit_data(FindingRecord(finding), Vec::new())?;
+                i.output
+                    .emit_published(Published::new(FindingRecord(finding), Vec::new()))?;
             }
-            i.output.complete(report, Vec::new())?;
+            i.output
+                .complete_published(Published::new(report, Vec::new()))?;
         }
         Format::Text => crate::rendering::security::text(i, &report)?,
         other => other.unreachable(),

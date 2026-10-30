@@ -4,6 +4,7 @@
 pub(in crate::commands) mod arguments;
 
 use self::arguments::Args;
+use crate::output::envelope::Published;
 use crate::output::{
     self,
     contract::{Command, Format},
@@ -11,7 +12,7 @@ use crate::output::{
 use crate::{
     errors::CliError,
     invocation::StreamEncoder,
-    rendering::{emit_aggregate, write_summary_line},
+    rendering::{emit_published, write_summary_line},
 };
 use packetcraftr_core::{analysis, capture_file};
 
@@ -107,8 +108,14 @@ pub(crate) fn run(
     invocation.check()?;
     staged.persist()?;
     match format {
-        Format::Json => emit_aggregate(invocation, Command::Export, report, Vec::new()),
-        Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
+        Format::Json => emit_published(
+            invocation,
+            Command::Export,
+            Published::new(report, Vec::new()),
+        ),
+        Format::Ndjson => stream
+            .complete_published(Published::new(report, Vec::new()))
+            .map_err(Into::into),
         Format::Text => {
             for selected in &report.matched_streams {
                 crate::rendering::write_stdout_line(

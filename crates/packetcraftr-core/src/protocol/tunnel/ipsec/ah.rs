@@ -7,15 +7,15 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     protocol::{BuiltinProtocol, network::ip_protocol},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, ensure_encode_budget, expected_discriminator, invalid, make_layer, protocol,
+    ValueExpectation, ensure_encode_budget, expected_discriminator, invalid, make_layer,
     resolve_u8, strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
     validate_raw_child_discriminator,
 };
@@ -70,7 +70,7 @@ impl Default for Ah {
 }
 
 reflective_layer! {
-    fn ah_schema() => { protocol: protocol(NAME), name: "AH" }
+    fn ah_schema() => { protocol: Id::new(NAME), name: "AH" }
     impl Ah {
         "next_header" => { kind: Unsigned, derived: true, required: false, description: "Protocol number of the authenticated payload", reflect: next_header, layout: (0, 1) },
         "payload_length" => { kind: Unsigned, derived: true, required: false, description: "Header length in 4-byte units minus two", reflect: payload_length, layout: (1, 2) },
@@ -203,14 +203,19 @@ impl Codec for AhCodec {
         let mut diagnostics = Vec::new();
         if reserved != 0 {
             diagnostics.push(
-                Diagnostic::warning("decode.ah_reserved", "the AH reserved field is non-zero")
-                    .at_field("reserved"),
+                Diagnostic::new(
+                    Severity::Warning,
+                    "decode.ah_reserved",
+                    "the AH reserved field is non-zero",
+                )
+                .at_field("reserved"),
             );
         }
         let under_ipv6 = context.network.map(|network| network.source.is_ipv6());
         if under_ipv6 == Some(true) && !header_len.is_multiple_of(8) {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.ah_alignment",
                     "an IPv6 AH header must be a multiple of 8 octets",
                 )
@@ -225,7 +230,8 @@ impl Codec for AhCodec {
             });
         if cross_family {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.ah_family",
                     "the next header does not belong to the enclosing address family",
                 )

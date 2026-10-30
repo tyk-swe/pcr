@@ -4,7 +4,11 @@
 use std::time::Instant;
 
 use packetcraftr_core::{
-    decode::DecodedPacket, diagnostic::Diagnostic, frame::Frame, matcher::Match, registry::Registry,
+    decode::DecodedPacket,
+    diagnostic::{Diagnostic, Severity},
+    frame::Frame,
+    matcher::Match,
+    registry::Registry,
 };
 use packetcraftr_netio::{
     capture::{Captured, RecordIdentity},
@@ -193,7 +197,8 @@ impl Accumulator {
                     self.retain_undecoded(identity, raw_frame, context.collection);
                     return Err(ProcessOutcome::CorrelationDeadlineExpired);
                 }
-                self.diagnostics.push_once(Diagnostic::warning(
+                self.diagnostics.push_once(Diagnostic::new(
+                    Severity::Warning,
                     "exchange.decode_error",
                     format!(
                         "captured frame could not be decoded: {}",
@@ -222,7 +227,8 @@ impl Accumulator {
             return self.expire_decoded(identity, received_at, decoded, context);
         }
         if integrity_failure {
-            self.diagnostics.push_once(Diagnostic::warning(
+            self.diagnostics.push_once(Diagnostic::new(
+                Severity::Warning,
                 "exchange.integrity_rejected",
                 "a response whose checksum did not verify was not correlated",
             ));
@@ -232,10 +238,9 @@ impl Accumulator {
 
         if received_at.is_none() {
             self.diagnostics.push_once(
-                Diagnostic::warning(
+                Diagnostic::new(Severity::Warning,
                     "capture.ingress_time_unavailable",
-                    "a capture provider returned a frame without an ingress marker; the frame was retained but not correlated",
-                ),
+                    "a capture provider returned a frame without an ingress marker; the frame was retained but not correlated"),
             );
         }
 
@@ -292,10 +297,9 @@ impl Accumulator {
         match attribution {
             Attribution::Ambiguous => {
                 self.diagnostics.push_once(
-                    Diagnostic::warning(
+                    Diagnostic::new(Severity::Warning,
                         "exchange.ambiguous_attribution",
-                        "a captured response matched several requests equally and was retained as unsolicited",
-                    ),
+                        "a captured response matched several requests equally and was retained as unsolicited"),
                 );
                 self.retain_uncorrelated(identity, received_at, decoded, context, matcher);
             }
@@ -336,10 +340,9 @@ impl Accumulator {
             Attribution::None => {
                 if context.sent.len() < context.request_count {
                     self.diagnostics.push_once(
-                        Diagnostic::info(
+                        Diagnostic::new(Severity::Info,
                             "exchange.pre_send_frame",
-                            "a captured frame arrived before one or more requests were sent and was not correlated to those requests",
-                        ),
+                            "a captured frame arrived before one or more requests were sent and was not correlated to those requests"),
                     );
                 }
                 self.retain_uncorrelated(identity, received_at, decoded, context, matcher);
@@ -422,10 +425,9 @@ impl Accumulator {
                 Ok(attribution) => {
                     if attribution == Attribution::Ambiguous {
                         self.diagnostics.push_once(
-                            Diagnostic::warning(
+                            Diagnostic::new(Severity::Warning,
                                 "exchange.ambiguous_attribution",
-                                "a workflow response matched several requests and was retained as unsolicited",
-                            ),
+                                "a workflow response matched several requests and was retained as unsolicited"),
                         );
                     }
                     self.queue_unsolicited(candidate);
@@ -475,12 +477,11 @@ impl Accumulator {
         if self.response_count < max_responses {
             return false;
         }
-        self.diagnostics.push_once(Diagnostic::warning(
+        self.diagnostics.push_once(Diagnostic::new(Severity::Warning,
             "exchange.response_limit",
             format!(
                 "matched response limit {max_responses} reached; later replies are subject to unsolicited evidence limits"
-            ),
-        ));
+            )));
         true
     }
 
@@ -497,7 +498,8 @@ impl Accumulator {
 
     fn mark_correlation_deadline_expired(&mut self) {
         self.correlation_deadline_expired = true;
-        self.diagnostics.push_once(Diagnostic::warning(
+        self.diagnostics.push_once(Diagnostic::new(
+            Severity::Warning,
             "exchange.correlation_deadline",
             "response correlation stopped at the bounded exchange deadline",
         ));

@@ -161,7 +161,7 @@ impl Budget {
 /// use packetcraftr_core::capture_file::{Reader, ReaderLimits, Writer};
 /// use packetcraftr_core::frame::LinkType;
 ///
-/// let bytes = Writer::pcap(Vec::new(), LinkType::ETHERNET)?.into_inner();
+/// let bytes = Writer::pcap_with_options(Vec::new(), LinkType::ETHERNET, Default::default())?.into_inner();
 /// let options = ReaderLimits {
 ///     max_size: 64 * 1024,
 ///     ..ReaderLimits::default()

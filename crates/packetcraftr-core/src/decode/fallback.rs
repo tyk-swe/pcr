@@ -93,7 +93,7 @@ pub(super) fn slice_original(original: &Bytes, offset: usize, length: usize) -> 
 }
 
 pub(super) fn raw_decoded_frame(frame: Frame, diagnostic: Diagnostic) -> DecodedPacket {
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     let mut layouts = Vec::with_capacity(1);
     append_raw(&mut packet, &mut layouts, frame.bytes().clone(), 0);
     packet.set_encoded_payload_lengths(vec![Some(0)]);

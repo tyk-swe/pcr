@@ -117,22 +117,18 @@ impl<W: Write> Writer<W> {
     /// Creates a writer with default settings and, for PCAPNG, interface zero.
     pub fn new(inner: W, format: Format, link_type: LinkType) -> Result<Self, Error> {
         match format {
-            Format::Pcap => Self::pcap(inner, link_type),
+            Format::Pcap => Self::pcap_with_options(inner, link_type, Default::default()),
             Format::PcapNg => {
                 if link_type.0 > u16::MAX as u32 {
                     return Err(Error::LinkTypeOutOfRange {
                         link_type: link_type.0,
                     });
                 }
-                let mut writer = Self::pcapng(inner)?;
+                let mut writer = Self::pcapng_with_options(inner, Default::default())?;
                 writer.add_interface(link_type)?;
                 Ok(writer)
             }
         }
-    }
-
-    pub fn pcap(inner: W, link_type: LinkType) -> Result<Self, Error> {
-        Self::pcap_with_options(inner, link_type, PcapOptions::default())
     }
 
     pub fn pcap_with_options(
@@ -183,10 +179,6 @@ impl<W: Write> Writer<W> {
             DEFAULT_MAX_INTERFACES_PER_SECTION,
             budget,
         ))
-    }
-
-    pub fn pcapng(inner: W) -> Result<Self, Error> {
-        Self::pcapng_with_options(inner, PcapNgOptions::default())
     }
 
     pub fn pcapng_with_options(mut inner: W, options: PcapNgOptions) -> Result<Self, Error> {
@@ -268,16 +260,15 @@ impl<W: Write> Writer<W> {
     pub fn add_interface(&mut self, link_type: LinkType) -> Result<u32, Error> {
         self.ensure_output_available()?;
         let snap_len = usize_to_u32_limit(self.max_size)?;
-        self.add_interface_description(Interface {
-            link_type,
-            snap_len,
-            timestamp_resolution: super::wire::WRITER_TIMESTAMP_RESOLUTION,
-            timestamp_offset: 0,
-        })
-    }
-
-    pub fn add_interface_description(&mut self, description: Interface) -> Result<u32, Error> {
-        self.add_interface_description_with_options(description, &[])
+        self.add_interface_description_with_options(
+            Interface {
+                link_type,
+                snap_len,
+                timestamp_resolution: super::wire::WRITER_TIMESTAMP_RESOLUTION,
+                timestamp_offset: 0,
+            },
+            &[],
+        )
     }
 
     pub fn add_interface_description_with_options(

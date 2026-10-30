@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::diagnostic::Severity;
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
@@ -20,8 +21,8 @@ use crate::{
         BuiltinProtocol,
         common::{
             ValueExpectation, invalid, make_layer, pad_options_to_four_bytes,
-            payload_without_padding, resolve_u16, strict_or_diagnostic, transport_checksum,
-            transport_checksum_parts, truncated, typed_layer,
+            payload_without_padding, resolve_u16, strict_or_diagnostic, transport_checksum_parts,
+            truncated, typed_layer,
         },
         network::{ip_protocol, resolve_envelope},
         transport::ports::child_discriminators,
@@ -142,7 +143,8 @@ impl Codec for TcpCodec {
         let reserved_bits = (header[12] >> 1) & 7;
         if reserved_bits != 0 {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.tcp_reserved_bits",
                     "reserved TCP header bits are non-zero",
                 )
@@ -150,10 +152,11 @@ impl Codec for TcpCodec {
             );
         }
         if let Some(network) = context.network
-            && transport_checksum(NAME, network, ip_protocol::TCP, &input)? != 0
+            && transport_checksum_parts(NAME, network, ip_protocol::TCP, &[&input])? != 0
         {
             diagnostics.push(
-                Diagnostic::warning(TCP_CHECKSUM, "TCP checksum mismatch").at_field("checksum"),
+                Diagnostic::new(Severity::Warning, TCP_CHECKSUM, "TCP checksum mismatch")
+                    .at_field("checksum"),
             );
         }
         let payload_len = input.len().saturating_sub(header_len);

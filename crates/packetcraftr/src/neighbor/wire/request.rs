@@ -20,7 +20,8 @@ const ETHERNET_MINIMUM_WITHOUT_FCS: usize = 60;
 /// Hop limit RFC 4861 requires on every Neighbor Discovery message.
 pub(super) const NDP_HOP_LIMIT: u8 = 255;
 
-pub(in crate::neighbor) fn build_request_frame(
+/// The frame that resolving `request` sends on each attempt.
+pub(crate) fn build_request_frame(
     request: &NeighborRequest,
 ) -> Result<Bytes, crate::neighbor::Error> {
     match (request.interface_source, request.target) {
@@ -65,7 +66,7 @@ pub(in crate::neighbor) fn build_request_frame(
 }
 
 fn link_header(request: &NeighborRequest, destination: MacAddress) -> Packet {
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(Ethernet {
         destination: destination.0,
         source: request.interface_mac.0,

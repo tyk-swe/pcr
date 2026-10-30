@@ -39,7 +39,7 @@ impl<'a> EventOutput<'a> {
                     }
                 });
         }
-        let bytes = bounded_json_len(&value, self.remaining)
+        let bytes = bounded_json_len(&value, self.remaining, serde_json::ser::CompactFormatter)
             .map_err(|error| error.into_cli_error(limit_error))?;
         self.remaining -= bytes;
         match self.format {

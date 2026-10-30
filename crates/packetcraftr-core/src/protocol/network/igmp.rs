@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::diagnostic::Severity;
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
@@ -9,12 +10,12 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, IGMP_CHECKSUM},
     field::{self, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
 };
 
 use crate::protocol::common::{
-    ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
-    payload_without_padding, protocol, resolve_u16, truncated, typed_layer,
+    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, make_layer,
+    payload_without_padding, resolve_u16, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -44,7 +45,7 @@ impl Default for Igmp {
 }
 
 reflective_layer! {
-    fn igmp_schema() => { protocol: protocol(NAME), name: "IGMP" }
+    fn igmp_schema() => { protocol: Id::new(NAME), name: "IGMP" }
     impl Igmp {
         "type" => {
             kind: Unsigned, derived: false, required: true,
@@ -133,9 +134,10 @@ impl Codec for IgmpCodec {
             return Err(truncated(NAME, IGMP_MIN_LEN, input.len()));
         };
         let mut diagnostics = Vec::new();
-        if checksum(&input) != 0 {
+        if checksum_parts(&[&input]) != 0 {
             diagnostics.push(
-                Diagnostic::warning(IGMP_CHECKSUM, "IGMP checksum mismatch").at_field("checksum"),
+                Diagnostic::new(Severity::Warning, IGMP_CHECKSUM, "IGMP checksum mismatch")
+                    .at_field("checksum"),
             );
         }
         let body = input

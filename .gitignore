@@ -3,6 +3,10 @@
 # Local secrets
 .env
 .env.*
+*.key
+*.pem
+credentials.*
+secrets.*
 
 # Editor and tool residue
 .DS_Store

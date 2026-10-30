@@ -47,7 +47,7 @@ fn round_trip_inner(name: &str, wire: &[u8], ipv6: bool) {
         .unwrap();
     assert_eq!(decoded.layer.protocol_id().as_str(), name, "{name}");
     assert_eq!(decoded.consumed, wire.len());
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push_boxed(decoded.layer);
     let addresses = network
         .map(|n| Addresses {
@@ -335,7 +335,7 @@ fn protocol_expansion_reference_vectors() {
 #[test]
 fn ipv6_ospf_survives_authentication_header() {
     let registry = builtin::registry();
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(crate::protocol::link::Ethernet::default());
     packet.push(crate::protocol::network::Ipv6 {
         source: "2001:db8::1".parse().unwrap(),
@@ -348,8 +348,7 @@ fn ipv6_ospf_survives_authentication_header() {
         .build(packet, Addresses::default(), Default::default())
         .unwrap();
     let frame =
-        crate::frame::Frame::without_timestamp(crate::frame::LinkType::ETHERNET, built.bytes)
-            .unwrap();
+        crate::frame::Frame::new(None, crate::frame::LinkType::ETHERNET, built.bytes).unwrap();
     let decoded = crate::decode::Dissector::new(registry)
         .decode(frame, Default::default())
         .unwrap();
@@ -366,7 +365,7 @@ fn ipv6_ospf_survives_authentication_header() {
 #[test]
 fn coalesced_packet_messages_rebuild_without_losing_tail() {
     let registry = builtin::registry();
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(crate::protocol::link::Ethernet::default());
     packet.push(crate::protocol::network::Ipv4::default());
     packet.push(crate::protocol::transport::Tcp {
@@ -379,11 +378,9 @@ fn coalesced_packet_messages_rebuild_without_losing_tail() {
     let built = builder
         .build(packet, Addresses::default(), Default::default())
         .unwrap();
-    let frame = crate::frame::Frame::without_timestamp(
-        crate::frame::LinkType::ETHERNET,
-        built.bytes.clone(),
-    )
-    .unwrap();
+    let frame =
+        crate::frame::Frame::new(None, crate::frame::LinkType::ETHERNET, built.bytes.clone())
+            .unwrap();
     let decoded = crate::decode::Dissector::new(registry)
         .decode(frame, Default::default())
         .unwrap();
@@ -431,7 +428,8 @@ fn captures_convert_to_editable_documents_and_rebuild() {
             .join("../../examples/captures")
             .join(entry["capture"].as_str().unwrap());
         let capture = std::fs::read(path).unwrap();
-        let mut reader = crate::capture_file::Reader::new(&capture[..]).unwrap();
+        let mut reader =
+            crate::capture_file::Reader::with_limits(&capture[..], Default::default()).unwrap();
         let frame = reader.next_frame().unwrap().unwrap();
         let original = frame.bytes().clone();
         let decoded = crate::decode::Dissector::new(registry.clone())
@@ -536,7 +534,7 @@ fn malformed_resp_lines_and_modbus_ranges_are_refused() {
             .decode(Bytes::from_static(b"+a\rb\r\n"), &context)
             .is_err()
     );
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(crate::protocol::application::modbus_tcp::ModbusTcp {
         quantity: 126,
         ..Default::default()
@@ -551,7 +549,7 @@ fn malformed_resp_lines_and_modbus_ranges_are_refused() {
 #[test]
 fn sip_udp_without_content_length_uses_the_datagram() {
     let registry = builtin::registry();
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(Ethernet::default());
     packet.push(Ipv4::default());
     packet.push(Udp {
@@ -569,7 +567,7 @@ fn sip_udp_without_content_length_uses_the_datagram() {
         .unwrap();
     let decoded = crate::decode::Dissector::new(registry)
         .decode(
-            Frame::without_timestamp(LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+            Frame::new(None, LinkType::ETHERNET, built.bytes.clone()).unwrap(),
             Default::default(),
         )
         .unwrap();
@@ -631,7 +629,7 @@ fn ospfv2_preserves_the_separate_authentication_digest() {
         )
         .expect("authenticated OSPF is not a length error");
     assert_eq!(decoded.consumed, wire.len());
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push_boxed(decoded.layer);
     let addresses = Addresses::default();
     let encoded = registry
@@ -663,7 +661,7 @@ fn dtls_document_rejects_oversized_fragment_offsets_without_panicking() {
         ("offset", u64::MAX.into()),
         ("data", Bytes::from_static(b"x").into()),
     ]));
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(Dtls {
         records: Records(vec![record([
             ("content_type", 22_u8.into()),
@@ -722,7 +720,7 @@ fn sflow_sample_members_support_editing_and_projection() {
         .unwrap();
     let decoded = crate::decode::Dissector::new(registry.clone())
         .decode(
-            Frame::without_timestamp(LinkType::ETHERNET, built.bytes).unwrap(),
+            Frame::new(None, LinkType::ETHERNET, built.bytes).unwrap(),
             Default::default(),
         )
         .unwrap();
@@ -758,7 +756,7 @@ fn strict_build_checks_sip_and_rtsp_transport_framing() {
         ),
     ];
     for (port, message) in messages {
-        let mut packet = Packet::new();
+        let mut packet = Packet::default();
         packet.push(Ipv4::default());
         packet.push(Tcp {
             destination_port: port,
@@ -792,7 +790,7 @@ fn strict_build_checks_sip_and_rtsp_transport_framing() {
 
 #[test]
 fn large_cdp_checksum_round_trips_without_overflow() {
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(crate::protocol::link::cdp::Cdp {
         tlvs: Records(
             (0..3)
@@ -830,7 +828,7 @@ fn builder_round_trip(name: &str, wire: &[u8]) {
         .unwrap();
     assert_eq!(decoded.layer.protocol_id().as_str(), name);
     assert_eq!(decoded.consumed, wire.len());
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push_boxed(decoded.layer);
     let built = crate::build::Builder::new(registry)
         .build(packet, Addresses::default(), Default::default())
@@ -861,7 +859,7 @@ fn radius_padding_is_separate_from_attributes() {
     assert_eq!(decoded.layer.protocol_id().as_str(), "radius");
     assert_eq!(decoded.consumed, 20);
     assert_eq!(decoded.payload_len, 4);
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push_boxed(decoded.layer);
     packet.push(crate::layer::Raw::new(Bytes::copy_from_slice(&wire[20..])));
     let built = crate::build::Builder::new(registry)
@@ -969,7 +967,7 @@ fn ipfix_and_dtls_nested_fields_support_editing_and_projection() {
             .unwrap();
         let decoded = crate::decode::Dissector::new(registry.clone())
             .decode(
-                Frame::without_timestamp(LinkType::ETHERNET, built.bytes).unwrap(),
+                Frame::new(None, LinkType::ETHERNET, built.bytes).unwrap(),
                 Default::default(),
             )
             .unwrap();
@@ -988,7 +986,7 @@ fn ipfix_and_dtls_nested_fields_support_editing_and_projection() {
 fn unsupported_stream_tail_survives_strict_rebuild() {
     let registry = builtin::registry();
     let builder = crate::build::Builder::new(registry.clone());
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(Ethernet::default());
     packet.push(Ipv4::default());
     packet.push(Tcp {
@@ -1001,7 +999,7 @@ fn unsupported_stream_tail_survives_strict_rebuild() {
         .unwrap();
     let decoded = crate::decode::Dissector::new(registry)
         .decode(
-            Frame::without_timestamp(LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+            Frame::new(None, LinkType::ETHERNET, built.bytes.clone()).unwrap(),
             Default::default(),
         )
         .unwrap();
@@ -1021,7 +1019,7 @@ fn unsupported_stream_tail_survives_strict_rebuild() {
 
 #[test]
 fn datagram_messages_reject_unframed_opaque_tails() {
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(Ethernet::default());
     packet.push(Ipv4::default());
     packet.push(Udp {
@@ -1095,7 +1093,7 @@ fn folded_sip_and_rtsp_headers_preserve_bytes_and_frame_lengths() {
         ("name", Bytes::from_static(b"Subject").into()),
         ("value", Bytes::from_static(b" a\r\nInjected: value").into()),
     ]));
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(sip);
     assert!(
         crate::build::Builder::new(builtin::registry())
@@ -1127,7 +1125,7 @@ fn amqp_content_headers_require_complete_property_flags() {
             true,
         ),
     ] {
-        let mut packet = Packet::new();
+        let mut packet = Packet::default();
         packet.push(crate::protocol::application::amqp::Amqp {
             frame_type: 2,
             channel: 1,
@@ -1192,7 +1190,7 @@ fn resp_payloads_support_typed_edits_filters_and_projection() {
         let mut resp = Resp { value };
         resp.set_field_path(&path.parse().unwrap(), replacement.clone())
             .unwrap();
-        let mut packet = Packet::new();
+        let mut packet = Packet::default();
         packet.push(Ethernet::default());
         packet.push(Ipv4::default());
         packet.push(Tcp {
@@ -1205,7 +1203,7 @@ fn resp_payloads_support_typed_edits_filters_and_projection() {
             .unwrap();
         let decoded = crate::decode::Dissector::new(registry.clone())
             .decode(
-                Frame::without_timestamp(LinkType::ETHERNET, built.bytes).unwrap(),
+                Frame::new(None, LinkType::ETHERNET, built.bytes).unwrap(),
                 Default::default(),
             )
             .unwrap();
@@ -1244,7 +1242,7 @@ fn bacnet_segment_ack_requires_its_window_size() {
     let ack = b"\x40\x01\x02\x01";
     for len in 0..=ack.len() {
         let registry = builtin::registry();
-        let mut packet = Packet::new();
+        let mut packet = Packet::default();
         packet.push(crate::protocol::application::bacnet_ip::BacnetIp {
             data: Bytes::copy_from_slice(&ack[..len]),
             ..Default::default()
@@ -1281,7 +1279,7 @@ fn bacnet_segment_ack_requires_its_window_size() {
 fn sip_udp_preserves_excess_bytes_after_declared_body() {
     let registry = builtin::registry();
     let builder = crate::build::Builder::new(registry.clone());
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(Ethernet::default());
     packet.push(Ipv4::default());
     packet.push(Udp {
@@ -1295,7 +1293,7 @@ fn sip_udp_preserves_excess_bytes_after_declared_body() {
         .unwrap();
     let decoded = crate::decode::Dissector::new(registry)
         .decode(
-            Frame::without_timestamp(LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+            Frame::new(None, LinkType::ETHERNET, built.bytes.clone()).unwrap(),
             Default::default(),
         )
         .unwrap();
@@ -1323,7 +1321,7 @@ fn sip_udp_preserves_excess_bytes_after_declared_body() {
 fn outer_ethernet_padding_does_not_extend_datagram_framing() {
     let registry = builtin::registry();
     let builder = crate::build::Builder::new(registry.clone());
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(Ethernet::default());
     packet.push(Ipv4::default());
     packet.push(Udp {
@@ -1339,7 +1337,7 @@ fn outer_ethernet_padding_does_not_extend_datagram_framing() {
     padded.resize(60, 0);
     let decoded = crate::decode::Dissector::new(registry)
         .decode(
-            Frame::without_timestamp(LinkType::ETHERNET, Bytes::copy_from_slice(&padded)).unwrap(),
+            Frame::new(None, LinkType::ETHERNET, Bytes::copy_from_slice(&padded)).unwrap(),
             Default::default(),
         )
         .unwrap();
@@ -1364,7 +1362,7 @@ fn outer_ethernet_padding_does_not_extend_datagram_framing() {
 #[test]
 fn interleaved_rtsp_layout_only_contains_binary_fields() {
     let registry = builtin::registry();
-    let mut packet = Packet::new();
+    let mut packet = Packet::default();
     packet.push(crate::protocol::application::rtsp::Rtsp {
         interleaved: true,
         channel: 7,
@@ -1473,7 +1471,7 @@ fn rtcp_explicit_padding_preserves_report_data_boundaries() {
             ])]),
         };
         let expected = rtcp.field("packets");
-        let mut packet = Packet::new();
+        let mut packet = Packet::default();
         packet.push(rtcp);
         let result = crate::build::Builder::new(registry.clone()).build(
             packet,
@@ -1543,7 +1541,7 @@ fn mqtt_persistent_sessions_require_a_client_identifier() {
         (2, b"client"),
     ] {
         let valid = flags & 2 != 0 || !client_id.is_empty();
-        let mut packet = Packet::new();
+        let mut packet = Packet::default();
         packet.push(Mqtt {
             packet_type: 1,
             connect_flags: flags,

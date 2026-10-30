@@ -7,14 +7,14 @@ use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     field,
-    layer::{Layer, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    child_is_opaque, ensure_encode_budget, make_layer, payload_without_padding, protocol,
+    child_is_opaque, ensure_encode_budget, make_layer, payload_without_padding,
     strict_or_diagnostic, truncated, typed_layer,
 };
 
@@ -43,7 +43,7 @@ impl Default for Esp {
 }
 
 reflective_layer! {
-    fn esp_schema() => { protocol: protocol(NAME), name: "ESP" }
+    fn esp_schema() => { protocol: Id::new(NAME), name: "ESP" }
     impl Esp {
         "spi" => { kind: Unsigned, derived: false, required: true, description: "Security parameters index", reflect: spi, layout: (0, 4) },
         "sequence" => { kind: Unsigned, derived: false, required: false, description: "Anti-replay sequence number", reflect: sequence, layout: (4, 8) }
@@ -123,7 +123,8 @@ impl Codec for EspCodec {
         let mut diagnostics = Vec::new();
         if payload_len < 2 {
             diagnostics.push(
-                Diagnostic::warning(
+                Diagnostic::new(
+                    Severity::Warning,
                     "decode.esp_trailer",
                     "the ciphertext is too short for the two-byte ESP trailer",
                 )

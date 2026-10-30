@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::*;
+use crate::output::envelope::Published;
 use crate::output::{
     self,
     contract::{Command, Format},
@@ -48,7 +49,7 @@ impl Write for Writer {
 }
 struct Refused;
 impl packetcraftr_netio::tcp::Provider for Refused {
-    type Stream = packetcraftr_netio::tcp::SystemStream;
+    type Stream = std::net::TcpStream;
     fn connect(
         &self,
         _: std::net::SocketAddr,
@@ -134,13 +135,13 @@ fn bounded_ndjson_followup_sink_uses_no_workflow_handoff_and_flushes_each_record
         let value =
             output::scan::connect::ProbeEvent::try_from(probe).map_err(CliError::classified)?;
         stream
-            .emit_data(
+            .emit_published(Published::new(
                 Counted {
                     value,
                     count: Arc::clone(&counted),
                 },
                 Vec::new(),
-            )
+            ))
             .map_err(CliError::from)
     });
     assert_eq!(sink.delivery(), Delivery::Cooperative);
@@ -189,7 +190,10 @@ fn bounded_ndjson_followup_sink_uses_no_workflow_handoff_and_flushes_each_record
     );
     invocation
         .output
-        .complete(serde_json::json!({"done": true}), Vec::new())
+        .complete_published(Published::new(
+            serde_json::json!({"done": true}),
+            Vec::new(),
+        ))
         .unwrap();
     assert_eq!(writer.writes.load(Ordering::Relaxed), 2);
     assert_eq!(writer.flushes.load(Ordering::Relaxed), 2);
@@ -216,11 +220,11 @@ fn text_and_unisolated_writers_publish_callbacks_on_a_worker_thread() {
                 .push(std::thread::current().id());
             let scan::connect::Event::Probe(probe) = event;
             stream
-                .emit_data(
+                .emit_published(Published::new(
                     output::scan::connect::ProbeEvent::try_from(probe)
                         .map_err(CliError::classified)?,
                     Vec::new(),
-                )
+                ))
                 .map_err(CliError::from)
         });
         let providers = ProviderSet::packet(
@@ -302,11 +306,11 @@ fn cooperative_followup_publication_retains_parent_control_inside_the_writer_wai
         let sink = emitter(&invocation, move |event: scan::connect::Event, stream| {
             let scan::connect::Event::Probe(probe) = event;
             stream
-                .emit_data(
+                .emit_published(Published::new(
                     output::scan::connect::ProbeEvent::try_from(probe)
                         .map_err(CliError::classified)?,
                     Vec::new(),
-                )
+                ))
                 .map_err(CliError::from)
         });
         let cancellation = Cancellation::default();
@@ -409,7 +413,9 @@ fn invocation_without_duration_applies_cancellation_to_initial_and_replacement_o
         let publishing = invocation.output.clone();
         let (returned, result) = mpsc::channel();
         let caller = std::thread::spawn(move || {
-            returned.send(publishing.complete((), Vec::new())).unwrap();
+            returned
+                .send(publishing.complete_published(Published::new((), Vec::new())))
+                .unwrap();
         });
         writing.recv_timeout(Duration::from_secs(5)).unwrap();
         cancellation.cancel();

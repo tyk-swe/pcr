@@ -7,8 +7,8 @@ use crate::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, optional_display, optional_duration,
-    render_diagnostics_text, render_undecoded, write_stdout_line,
+    CapturedFrameText, comma_separated, duration_text, render_diagnostics_text, render_optional,
+    render_undecoded, write_stdout_line,
 };
 
 pub(super) mod multipath;
@@ -32,7 +32,7 @@ pub(super) fn render_text(
             comma_separated(&result.resolved_addresses),
             result.destination,
             result.strategy,
-            optional_display(result.destination_port),
+            render_optional(result.destination_port, |value| value.to_string()),
         ),
     )?;
     for hop in &result.hops {
@@ -97,10 +97,10 @@ pub(in crate::commands) fn render_probe_text(
                 .response_kind
                 .map_or("none", output::traceroute::ResponseKind::as_str),
             probe.sent_at,
-            optional_display(probe.received_at),
-            optional_display(probe.responder),
-            optional_duration(probe.latency),
-            optional_display(probe.destination_port),
+            render_optional(probe.received_at, |value| value.to_string()),
+            render_optional(probe.responder, |value| value.to_string()),
+            render_optional(probe.latency, duration_text),
+            render_optional(probe.destination_port, |value| value.to_string()),
             probe.reason,
         ),
     )?;
@@ -109,7 +109,7 @@ pub(in crate::commands) fn render_probe_text(
     {
         write_stdout_line(
             invocation,
-            format_args!("{lead}  frame {}", captured_frame_text(frame)),
+            format_args!("{lead}  frame {}", CapturedFrameText(frame)),
         )?;
     }
     Ok(())

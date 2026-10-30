@@ -59,19 +59,7 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    pub fn info(code: &'static str, message: impl Into<String>) -> Self {
-        Self::new(Severity::Info, code, message)
-    }
-
-    pub fn warning(code: &'static str, message: impl Into<String>) -> Self {
-        Self::new(Severity::Warning, code, message)
-    }
-
-    pub fn error(code: &'static str, message: impl Into<String>) -> Self {
-        Self::new(Severity::Error, code, message)
-    }
-
-    fn new(severity: Severity, code: &'static str, message: impl Into<String>) -> Self {
+    pub fn new(severity: Severity, code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
             severity,

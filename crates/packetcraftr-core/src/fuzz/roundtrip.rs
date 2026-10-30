@@ -9,7 +9,7 @@ use crate::{
     build::{self, Builder, BuiltPacket},
     codec::Addresses,
     decode::DecodedPacket,
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Severity},
     layout::PacketLayout,
     packet::Packet,
     protocol::BuiltinProtocol,
@@ -57,9 +57,9 @@ pub(super) fn diagnostic(
     let lossy = is_lossy(&built.packet) || is_lossy(&decoded.packet);
     let severity = |code, message: String| {
         if lossy {
-            Diagnostic::info(code, message)
+            Diagnostic::new(Severity::Info, code, message)
         } else {
-            Diagnostic::warning(code, message)
+            Diagnostic::new(Severity::Warning, code, message)
         }
     };
     match builder.build(decoded.packet.clone(), Addresses::default(), options) {
@@ -92,7 +92,11 @@ pub(super) fn diagnostic(
 }
 
 fn skipped(reason: &str) -> Diagnostic {
-    Diagnostic::info(SKIPPED, format!("round-trip check skipped: {reason}"))
+    Diagnostic::new(
+        Severity::Info,
+        SKIPPED,
+        format!("round-trip check skipped: {reason}"),
+    )
 }
 
 /// Layers whose bytes are not an exact function of their reflected fields, so

@@ -248,9 +248,10 @@ where
         }
         emit(event, deadline)
     };
-    let mut evidence = BatchEvidence::new(
+    let mut evidence = BatchEvidence::new_with_retention_limits(
         WORKFLOW,
         probe_error,
+        request.limits.evidence,
         request.limits.evidence,
         ProbeClassifier {
             observation_quality: None,

@@ -22,9 +22,7 @@ use crate::{
     route,
 };
 
-pub(in crate::platform) fn interfaces(
-    deadline: &Deadline,
-) -> Result<Vec<interface::Info>, interface::Error> {
+pub(crate) fn interfaces(deadline: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
     snapshot(deadline).map_err(interface::Error::native)
 }
 

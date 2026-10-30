@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::envelope::Published;
 use crate::output::{
     self,
     contract::{Command, Format},
@@ -9,7 +10,7 @@ use crate::output::{
 use crate::{
     errors::CliError,
     invocation::StreamEncoder,
-    rendering::{bounded_json_len, emit_aggregate, write_raw},
+    rendering::{bounded_json_len, emit_published, write_raw},
 };
 use packetcraftr_core::{self as core, filter::Projection};
 use std::io::{self, Write};
@@ -114,15 +115,15 @@ impl Projector {
             write_raw(&buffer.bytes)?;
         } else if self.format == Format::Ndjson {
             let event = output::projection::RowEvent::from((&self.projection, &row));
-            let bytes = bounded_json_len(&event, self.remaining)
+            let bytes = bounded_json_len(&event, self.remaining, serde_json::ser::CompactFormatter)
                 .map_err(|error| error.into_cli_error(|| self.limit()))?;
             self.charge(bytes)?;
-            stream.emit_data(
+            stream.emit_published(Published::new(
                 output::projection::RowEvent::from((&self.projection, &row)),
                 Vec::new(),
-            )?;
+            ))?;
         } else {
-            let bytes = bounded_json_len(&row, self.remaining)
+            let bytes = bounded_json_len(&row, self.remaining, serde_json::ser::CompactFormatter)
                 .map_err(|error| error.into_cli_error(|| self.limit()))?;
             self.charge(bytes)?;
             self.rows.push(row);
@@ -145,13 +146,17 @@ impl Projector {
             captured_bytes_read,
         ));
         match self.format {
-            Format::Json => emit_aggregate(
+            Format::Json => emit_published(
                 invocation,
                 self.command,
-                output::projection::Report::from((summary, self.rows)),
-                Vec::new(),
+                Published::new(
+                    output::projection::Report::from((summary, self.rows)),
+                    Vec::new(),
+                ),
             ),
-            Format::Ndjson => stream.complete(summary, Vec::new()).map_err(Into::into),
+            Format::Ndjson => stream
+                .complete_published(Published::new(summary, Vec::new()))
+                .map_err(Into::into),
             _ => Ok(()),
         }
     }

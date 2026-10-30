@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::envelope::Published;
 use std::net::SocketAddr;
 
 use crate::output::contract::Format;
@@ -12,7 +13,7 @@ use crate::output;
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
 use crate::rendering::{Retained, omitted_diagnostic};
-use crate::rendering::{emit_aggregate, emit_stderr_message, write_raw, write_stdout_line};
+use crate::rendering::{emit_published, emit_stderr_message, write_raw, write_stdout_line};
 
 use analysis::StreamRef;
 use analysis::follow::{Chunk, Summary};
@@ -66,7 +67,10 @@ pub(super) fn render_record(
             state.retained.push(|| chunk.into());
             Ok(())
         }
-        Format::Ndjson => Ok(stream.emit_data(output::follow::Chunk::from(chunk), Vec::new())?),
+        Format::Ndjson => Ok(stream.emit_published(Published::new(
+            output::follow::Chunk::from(chunk),
+            Vec::new(),
+        ))?),
         other => other.unreachable(),
     }
 }
@@ -143,11 +147,10 @@ pub(super) fn render_aggregate(
             .collect(),
     ))
     .map_err(CliError::classified)?;
-    emit_aggregate(
+    emit_published(
         invocation,
         output::contract::Command::Follow,
-        report,
-        diagnostics,
+        Published::new(report, diagnostics),
     )
 }
 
@@ -169,7 +172,7 @@ pub(super) fn render_stream(
             .collect(),
     ))
     .map_err(CliError::classified)?;
-    Ok(stream.complete(report, Vec::new())?)
+    Ok(stream.complete_published(Published::new(report, Vec::new()))?)
 }
 
 pub(super) fn render_payload_warning(summary: &Summary) -> Result<(), CliError> {

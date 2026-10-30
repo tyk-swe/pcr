@@ -4,11 +4,12 @@
 pub(in crate::commands) mod arguments;
 
 use self::arguments::Args;
+use crate::output::envelope::Published;
 use crate::output::{self, contract::Format};
 use crate::{
     errors::CliError,
     invocation::StreamEncoder,
-    rendering::{emit_aggregate, write_capture_file, write_hex_line, write_stdout_line},
+    rendering::{emit_published, write_capture_file, write_hex_line, write_stdout_line},
 };
 use packetcraftr_core::{self as core, frame::Frame};
 
@@ -59,8 +60,8 @@ pub(crate) fn run(
             args.budget.build_options(core::codec::Mode::Strict),
         )
         .map_err(CliError::classified)?;
-    let frame =
-        Frame::new(std::time::UNIX_EPOCH, link_type, built.bytes).map_err(CliError::classified)?;
+    let frame = Frame::new(Some(std::time::UNIX_EPOCH), link_type, built.bytes)
+        .map_err(CliError::classified)?;
     let frames = core::transform::fragment(
         &frame,
         core::transform::FragmentOptions {
@@ -91,7 +92,7 @@ pub(crate) fn run(
             .map_err(CliError::classified)?;
         match format {
             Format::Json => records.push(record),
-            Format::Ndjson => stream.emit_data(record, Vec::new())?,
+            Format::Ndjson => stream.emit_published(Published::new(record, Vec::new()))?,
             Format::Hex => write_hex_line(record.frame.bytes())?,
             Format::Text => write_stdout_line(
                 invocation,
@@ -112,14 +113,16 @@ pub(crate) fn run(
         }
     }
     match format {
-        Format::Json => emit_aggregate(
+        Format::Json => emit_published(
             invocation,
             output::contract::Command::Fragment,
-            output::fragment::Report::from((summary, records)),
-            built.diagnostics,
+            Published::new(
+                output::fragment::Report::from((summary, records)),
+                built.diagnostics,
+            ),
         ),
         Format::Ndjson => stream
-            .complete(summary, built.diagnostics)
+            .complete_published(Published::new(summary, built.diagnostics))
             .map_err(Into::into),
         Format::Text => {
             crate::rendering::write_summary_line(

@@ -25,22 +25,17 @@ pub(crate) use capture_file::{stream_capture_error, stream_limits, write_capture
 pub(crate) use capture_writer::{LinkCaptureWriter, SourceCaptureWriter, finish_compressed_output};
 
 pub(crate) use dns::{render_dns_fields, render_dns_record, render_dns_records};
-pub(crate) use frame::{
-    FieldTree, captured_frame_text, render_frame_text, render_frame_tree, render_undecoded,
-};
+pub(crate) use frame::{CapturedFrameText, FieldTree, render_frame, render_undecoded};
 
 pub(crate) use human::{
     HumanWriteError, comma_separated, document_spelling, duration_text, emit_stderr_document,
     emit_stderr_error, emit_stderr_message, emit_stdout_document, encapsulation_text,
-    optional_display, optional_duration, push_stdout_line, render_diagnostics_stderr,
-    render_diagnostics_text, report_structured_error, spaced_hex, write_stdout_block,
-    write_stdout_line, write_stdout_line_with_interrupt, write_summary_line,
+    push_stdout_line, render_diagnostics_stderr, render_diagnostics_text, render_optional,
+    report_structured_error, write_stdout_block, write_stdout_line,
+    write_stdout_line_with_interrupt, write_summary_line,
 };
 
-pub(crate) use machine::{
-    bounded_json_len, bounded_pretty_json_len, emit_aggregate, emit_aggregate_with_stats,
-    emit_json, emit_published,
-};
+pub(crate) use machine::{bounded_json_len, emit_json, emit_published};
 
 pub(crate) use ndjson::{stdout_stream, write_unattributed_error};
 
@@ -50,3 +45,5 @@ pub(crate) use stdout::{write_hex_line, write_raw};
 pub(crate) use style::terminal_document;
 
 pub(crate) use presentation::table_row;
+
+pub(crate) use crate::output::hex::SpacedHex;

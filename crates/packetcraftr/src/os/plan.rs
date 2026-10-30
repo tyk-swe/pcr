@@ -34,7 +34,7 @@ impl crate::probe::runner::Sequenced for PlannedProbe {
 
 impl PlannedProbe {
     pub(super) fn packet(&self) -> Packet {
-        let mut packet = Packet::new();
+        let mut packet = Packet::default();
         match self.address {
             IpAddr::V4(destination) => packet.push(Ipv4 {
                 destination,

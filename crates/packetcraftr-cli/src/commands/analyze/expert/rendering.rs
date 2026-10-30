@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::output::contract::Format;
+use crate::output::envelope::Published;
 
 use packetcraftr_core::analysis;
 
@@ -10,7 +11,7 @@ use crate::output;
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
 use crate::rendering::{Retained, omitted_diagnostic};
-use crate::rendering::{emit_aggregate, write_stdout_line};
+use crate::rendering::{emit_published, write_stdout_line};
 
 pub(super) struct State {
     selected: analysis::expert::Summary,
@@ -66,7 +67,7 @@ pub(super) fn render_record(
             state.retained.push(|| finding);
             Ok(())
         }
-        Format::Ndjson => Ok(stream.emit_data(finding, Vec::new())?),
+        Format::Ndjson => Ok(stream.emit_published(Published::new(finding, Vec::new()))?),
         other => other.unreachable(),
     }
 }
@@ -106,11 +107,10 @@ pub(super) fn render_aggregate(
         state.retained.omitted(),
         "--max-frames",
     );
-    emit_aggregate(
+    emit_published(
         invocation,
         output::contract::Command::Expert,
-        result(summary, state),
-        diagnostics,
+        Published::new(result(summary, state), diagnostics),
     )
 }
 
@@ -119,7 +119,7 @@ pub(super) fn render_stream(
     state: State,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    Ok(stream.complete(result(summary, state), Vec::new())?)
+    Ok(stream.complete_published(Published::new(result(summary, state), Vec::new()))?)
 }
 
 fn result(summary: &analysis::Summary, state: State) -> output::expert::Report {

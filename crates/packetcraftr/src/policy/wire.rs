@@ -43,8 +43,8 @@ pub(crate) fn decode_wire(
             link_type.0
         )));
     }
-    let frame = Frame::without_timestamp(link_type, bytes.clone())
-        .map_err(|source| Error::WireFrame { source })?;
+    let frame =
+        Frame::new(None, link_type, bytes.clone()).map_err(|source| Error::WireFrame { source })?;
     Dissector::new(registry)
         .decode(frame, packetcraftr_core::decode::Options::default())
         .map_err(|source| Error::UndecodableWire { source })

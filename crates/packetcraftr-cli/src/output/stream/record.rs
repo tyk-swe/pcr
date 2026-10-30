@@ -62,21 +62,6 @@ pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 pub(super) fn serialize_line(
     record: &impl Serialize,
     sequence: u64,
-) -> Result<Vec<u8>, EncodeError> {
-    serialize_line_with_limit(record, sequence, MAX_RECORD_BYTES)
-}
-
-pub(super) fn serialize_line_with_limit(
-    record: &impl Serialize,
-    sequence: u64,
-    limit: usize,
-) -> Result<Vec<u8>, EncodeError> {
-    serialize_line_metered(record, sequence, limit, None)
-}
-
-pub(super) fn serialize_line_metered(
-    record: &impl Serialize,
-    sequence: u64,
     limit: usize,
     meter: Option<&ResultMeter>,
 ) -> Result<Vec<u8>, EncodeError> {

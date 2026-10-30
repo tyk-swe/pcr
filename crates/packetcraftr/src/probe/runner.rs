@@ -7,6 +7,7 @@ pub(crate) use batch_evidence::validate_batch_evidence;
 pub(crate) use batch_evidence::{BatchEvidence, Classifier, NO_RESPONSE_REASON, Outcome};
 
 use std::borrow::BorrowMut;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use packetcraftr_core::budget::Deadline;
@@ -78,10 +79,7 @@ impl Evidence {
                 correlation_expired: ingress.correlation_expired,
             })
             .collect();
-        let sent = sent
-            .into_iter()
-            .map(crate::exchange::into_sent_packet)
-            .collect();
+        let sent = sent.into_iter().map(Arc::unwrap_or_clone).collect();
         Self {
             observation_quality: Some(result.observation_quality),
             permit,

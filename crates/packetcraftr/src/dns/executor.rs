@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -171,7 +172,7 @@ impl<P: PacketProviders, K: Clock> Executor<Exchange> for WorkflowExecutor<'_, P
         }
         Ok(ExchangeEvidence {
             permit: exchange.permit,
-            sent: crate::exchange::into_sent_packet(sent.pop().expect("validated one sent packet")),
+            sent: Arc::unwrap_or_clone(sent.pop().expect("validated one sent packet")),
             responses,
             unsolicited,
             undecoded,

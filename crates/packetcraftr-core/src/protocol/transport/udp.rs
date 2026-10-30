@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::diagnostic::Severity;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
@@ -10,15 +11,15 @@ use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, UDP_CHECKSUM},
     field::{self, WireValue},
-    layer::{Layer, Malformed, Padding, reflective_layer},
+    layer::{Id, Layer, Malformed, Padding, reflective_layer},
     protocol::BuiltinProtocol,
     registry::Discriminator,
 };
 
 use super::ports::child_discriminators;
 use crate::protocol::common::{
-    ValueExpectation, invalid, make_layer, payload_without_padding, protocol, resolve_u16,
-    strict_or_diagnostic, transport_checksum, transport_checksum_parts, truncated, typed_layer,
+    ValueExpectation, invalid, make_layer, payload_without_padding, resolve_u16,
+    strict_or_diagnostic, transport_checksum_parts, truncated, typed_layer,
 };
 use crate::protocol::network::{ip_protocol, resolve_envelope};
 
@@ -77,7 +78,7 @@ impl Default for Udp {
 }
 
 reflective_layer! {
-    fn udp_schema() => { protocol: protocol(NAME), name: "UDP" }
+    fn udp_schema() => { protocol: Id::new(NAME), name: "UDP" }
     impl Udp {
         "source_port" | "sport" => {
             kind: Unsigned, derived: false, required: true,
@@ -191,13 +192,18 @@ impl Codec for UdpCodec {
             if checksum_value == 0 {
                 if matches!(network.source, IpAddr::V6(_)) {
                     diagnostics.push(
-                        Diagnostic::warning(UDP_CHECKSUM, "zero UDP checksum is invalid for IPv6")
-                            .at_field("checksum"),
+                        Diagnostic::new(
+                            Severity::Warning,
+                            UDP_CHECKSUM,
+                            "zero UDP checksum is invalid for IPv6",
+                        )
+                        .at_field("checksum"),
                     );
                 }
-            } else if transport_checksum(NAME, network, ip_protocol::UDP, datagram)? != 0 {
+            } else if transport_checksum_parts(NAME, network, ip_protocol::UDP, &[datagram])? != 0 {
                 diagnostics.push(
-                    Diagnostic::warning(UDP_CHECKSUM, "UDP checksum mismatch").at_field("checksum"),
+                    Diagnostic::new(Severity::Warning, UDP_CHECKSUM, "UDP checksum mismatch")
+                        .at_field("checksum"),
                 );
             }
         }

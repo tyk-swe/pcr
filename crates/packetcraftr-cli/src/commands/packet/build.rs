@@ -6,6 +6,7 @@ mod capture_output;
 mod rendering;
 mod session;
 
+use crate::output::envelope::Published;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -112,9 +113,12 @@ pub(super) fn run(
                         capture.validate_wire(&built)?;
                         let timestamp =
                             session::frame_timestamp(capture.timestamp, step, ordinal as u64)?;
-                        let frame =
-                            core::frame::Frame::new(timestamp, capture.link_type, built.bytes)
-                                .map_err(CliError::classified)?;
+                        let frame = core::frame::Frame::new(
+                            Some(timestamp),
+                            capture.link_type,
+                            built.bytes,
+                        )
+                        .map_err(CliError::classified)?;
                         writer.write_frame(&frame).map_err(|source| {
                             stream_capture_error("write capture output failed", source)
                         })?;
@@ -169,8 +173,9 @@ pub(super) fn run(
                 }
                 let timestamp =
                     session::frame_timestamp(capture.timestamp, step, summary.packets_built)?;
-                let frame = core::frame::Frame::new(timestamp, capture.link_type, built.bytes)
-                    .map_err(CliError::classified)?;
+                let frame =
+                    core::frame::Frame::new(Some(timestamp), capture.link_type, built.bytes)
+                        .map_err(CliError::classified)?;
                 writer.write_frame(&frame).map_err(|source| {
                     stream_capture_error("write capture output failed", source)
                 })?;
@@ -208,7 +213,7 @@ pub(super) fn run(
         invocation.check()?;
     }
     if format == Format::Ndjson {
-        stream.complete(summary, Vec::new())?;
+        stream.complete_published(Published::new(summary, Vec::new()))?;
     }
     Ok(())
 }

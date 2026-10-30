@@ -181,6 +181,15 @@ pub struct Sent {
     pub route: crate::output::send::MaterializedRoute,
 }
 
+/// The ICMP request kind an endpoint variant publishes; echo stays implicit.
+pub(crate) fn icmp_request(endpoint: probe::Endpoint) -> Option<&'static str> {
+    match endpoint {
+        probe::Endpoint::IcmpTimestamp => Some("timestamp"),
+        probe::Endpoint::IcmpNetmask => Some("netmask"),
+        _ => None,
+    }
+}
+
 impl TryFrom<library::SentProbe> for Sent {
     type Error = Error;
 
@@ -199,10 +208,7 @@ impl TryFrom<library::SentProbe> for Sent {
             scope: probe.scope.as_ref().map(Scope::from),
             destination_port: probe.endpoint.port(),
             ip_protocol: probe.endpoint.ip_protocol(),
-            icmp_request: probe
-                .endpoint
-                .icmp_request_kind()
-                .filter(|kind| *kind != "echo"),
+            icmp_request: icmp_request(probe.endpoint),
             tcp_scan: (probe.endpoint.transport() == Transport::Tcp)
                 .then(|| TcpScan::from(probe.tcp_scan)),
             sctp_scan: (probe.endpoint.transport() == Transport::Sctp)
@@ -223,12 +229,12 @@ impl TryFrom<library::ProbeEvidence> for Probe {
             measurement: evidence.measurement.into(),
             sequence: evidence.sequence,
             stage: evidence.stage.into(),
-            protocol: (evidence.transport, evidence.address).into(),
+            protocol: (evidence.endpoint.transport(), evidence.address).into(),
             destination: evidence.address,
             scope: evidence.scope.as_ref().map(Scope::from),
-            destination_port: evidence.port,
-            ip_protocol: evidence.ip_protocol,
-            icmp_request: evidence.icmp_request.filter(|kind| *kind != "echo"),
+            destination_port: evidence.endpoint.port(),
+            ip_protocol: evidence.endpoint.ip_protocol(),
+            icmp_request: icmp_request(evidence.endpoint),
             tcp_scan: evidence.tcp_scan.map(TcpScan::from),
             sctp_scan: evidence.sctp_scan.map(SctpScan::from),
             attempt: evidence.attempt,
@@ -245,3 +251,6 @@ impl TryFrom<library::ProbeEvidence> for Probe {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;

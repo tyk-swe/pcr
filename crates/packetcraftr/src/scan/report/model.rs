@@ -10,7 +10,7 @@ use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
 use crate::Stats;
-use crate::probe::{self, Reply, Transport};
+use crate::probe::{self, Reply};
 use crate::scan::{
     self, Inference, Measurement, Probe, Qualification, Scheduling, SctpScan, Stage, TcpScan,
 };
@@ -70,14 +70,7 @@ pub struct ProbeEvidence {
     pub stage: Stage,
     pub address: IpAddr,
     pub scope: Option<crate::target::ResolvedZone>,
-    pub transport: Transport,
-    pub port: Option<u16>,
-    /// Selected IP protocol number (`0..=255`) for IP-protocol probes; `None`
-    /// for other transports.
-    pub ip_protocol: Option<u8>,
-    /// ICMP request kind (`"echo"`, `"timestamp"`, or `"netmask"`) for ICMP
-    /// probes; `None` for other transports.
-    pub icmp_request: Option<&'static str>,
+    pub endpoint: probe::Endpoint,
     /// The TCP segment mode a raw TCP probe carried; `None` for other
     /// transports.
     pub tcp_scan: Option<TcpScan>,
@@ -105,9 +98,7 @@ pub struct ProbeEvidence {
 pub struct Endpoint {
     pub address: IpAddr,
     pub scope: Option<crate::target::ResolvedZone>,
-    pub transport: Transport,
-    pub port: Option<u16>,
-    pub ip_protocol: Option<u8>,
+    pub endpoint: probe::Endpoint,
     /// The highest-ranked attempt observation.
     pub classification: Classification,
     /// The bundled catalog's name for this transport and port: a hint about

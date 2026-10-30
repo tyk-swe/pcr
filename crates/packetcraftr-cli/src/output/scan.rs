@@ -341,9 +341,9 @@ impl TryFrom<library::Endpoint> for Endpoint {
         Ok(Self {
             address: endpoint.address,
             scope: endpoint.scope.as_ref().map(Scope::from),
-            transport: endpoint.transport,
-            port: endpoint.port,
-            ip_protocol: endpoint.ip_protocol,
+            transport: endpoint.endpoint.transport(),
+            port: endpoint.endpoint.port(),
+            ip_protocol: endpoint.endpoint.ip_protocol(),
             classification: endpoint.classification.into(),
             port_hint: endpoint.port_hint,
             inference: endpoint.inference.map(plan::Inference::from),

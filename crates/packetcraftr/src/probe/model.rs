@@ -88,16 +88,6 @@ impl Endpoint {
             _ => None,
         }
     }
-
-    #[must_use]
-    pub const fn icmp_request_kind(self) -> Option<&'static str> {
-        match self {
-            Self::Icmp => Some("echo"),
-            Self::IcmpTimestamp => Some("timestamp"),
-            Self::IcmpNetmask => Some("netmask"),
-            _ => None,
-        }
-    }
 }
 
 /// Renders `tcp/80`, `tcp-ack/80`, `udp/53`, `sctp/80`, `ip/47`, or `icmp*`.

@@ -185,7 +185,7 @@ pub(super) struct ProbeClassifier<'a> {
     pub(super) observation_quality: Option<packetcraftr_netio::capture::ObservationQuality>,
     pub(super) registry: &'a Registry,
     pub(super) target: Arc<str>,
-    pub(super) winners: HashMap<super::report::EndpointKey, Classification>,
+    pub(super) winners: HashMap<super::report::WinnerKey, Classification>,
     pub(super) rtt: RttAccumulator,
     /// Discovery outcomes not yet composed into host records.
     pub(super) discovery: Vec<super::discovery::Observation>,
@@ -251,10 +251,7 @@ impl Classifier for ProbeClassifier<'_> {
             stage: probe.stage,
             address: probe.address,
             scope: probe.scope.clone(),
-            transport: probe.endpoint.transport(),
-            port: probe.endpoint.port(),
-            ip_protocol: probe.endpoint.ip_protocol(),
-            icmp_request: probe.endpoint.icmp_request_kind(),
+            endpoint: probe.endpoint,
             tcp_scan: (probe.endpoint.transport() == Transport::Tcp).then_some(probe.tcp_scan),
             sctp_scan: (probe.endpoint.transport() == Transport::Sctp).then_some(probe.sctp_scan),
             tcp_window: None,
@@ -308,9 +305,9 @@ impl Classifier for ProbeClassifier<'_> {
                 .winners
                 .entry((
                     evidence.address,
-                    evidence.transport,
-                    evidence.port,
-                    evidence.ip_protocol,
+                    evidence.endpoint.transport(),
+                    evidence.endpoint.port(),
+                    evidence.endpoint.ip_protocol(),
                     evidence.scope.as_ref().map(|scope| scope.interface.clone()),
                 ))
                 .or_insert(Classification::Timeout)

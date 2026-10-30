@@ -167,7 +167,7 @@ impl Classified for Error {
     }
 }
 
-pub(crate) fn probe_error(step: u64, failure: crate::error::Failure) -> Error {
+pub(crate) fn probe_error(sequence: u64, failure: crate::error::Failure) -> Error {
     match failure {
         crate::error::Failure::InvalidLimit {
             field,
@@ -179,38 +179,14 @@ pub(crate) fn probe_error(step: u64, failure: crate::error::Failure) -> Error {
             reason,
         },
         crate::error::Failure::Authorization(source) => Error::Authorization(source),
-        crate::error::Failure::DurationLimit(source) => {
-            let _sequence = step;
-
-            source.into()
-        }
-        crate::error::Failure::Interrupted(source) => {
-            let _sequence = step;
-
-            source.into()
-        }
-        crate::error::Failure::Clock(source) => {
-            let sequence = step;
-
-            Error::Clock { sequence, source }
-        }
-        crate::error::Failure::Execution(source) => {
-            let sequence = step;
-
-            Error::Execution { sequence, source }
-        }
-        crate::error::Failure::InvalidEvidence(source) => {
-            let sequence = step;
-
-            Error::InvalidEvidence {
-                sequence,
-                message: WORKFLOW.describe_evidence(&source),
-            }
-        }
-        crate::error::Failure::StatsOverflow(_source) => {
-            let sequence = step;
-
-            Error::StatisticsOverflow { sequence }
-        }
+        crate::error::Failure::DurationLimit(source) => source.into(),
+        crate::error::Failure::Interrupted(source) => source.into(),
+        crate::error::Failure::Clock(source) => Error::Clock { sequence, source },
+        crate::error::Failure::Execution(source) => Error::Execution { sequence, source },
+        crate::error::Failure::InvalidEvidence(source) => Error::InvalidEvidence {
+            sequence,
+            message: WORKFLOW.describe_evidence(&source),
+        },
+        crate::error::Failure::StatsOverflow(_source) => Error::StatisticsOverflow { sequence },
     }
 }

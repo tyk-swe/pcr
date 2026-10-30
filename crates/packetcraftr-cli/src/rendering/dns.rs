@@ -4,6 +4,8 @@
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
+use packetcraftr_core::protocol::BuiltinProtocol;
+
 use packetcraftr_core::{document::Packet, field};
 
 use super::write_stdout_line;
@@ -41,7 +43,7 @@ pub(crate) fn render_dns_records(
     packet: &Packet,
 ) -> Result<(), CliError> {
     for layer in &packet.layers {
-        if layer.protocol.as_str() == "dns" {
+        if layer.protocol == BuiltinProtocol::Dns.as_str() {
             render_dns_fields(invocation, &layer.fields)?;
         }
     }

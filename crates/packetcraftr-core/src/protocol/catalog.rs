@@ -127,6 +127,10 @@ macro_rules! define_builtin_protocol {
                 match self { $(Self::$variant => $canonical),* }
             }
 
+            pub const fn id(self) -> crate::layer::Id {
+                crate::layer::Id::new(self.as_str())
+            }
+
             pub const fn is_constructible(self) -> bool {
                 match self { $(Self::$variant => $constructible),* }
             }

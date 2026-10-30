@@ -151,7 +151,7 @@ fn message_type(layer: &mut Dhcpv4, value: field::Value, field: &str) -> Result<
     Ok(())
 }
 reflective_layer! {
-    pub(super) fn schema() => {protocol:crate::layer::Id::new(BuiltinProtocol::Dhcpv4.as_str()),name:"DHCPv4"}
+    pub(super) fn schema() => {protocol:BuiltinProtocol::Dhcpv4.id(),name:"DHCPv4"}
     impl Dhcpv4 {
         "operation" | "op" => {kind:Unsigned,derived:false,required:false,description:"BOOTP message operation",reflect:operation,layout:(0,1)},
         "hardware_type" => {kind:Unsigned,derived:false,required:false,description:"Hardware address type",reflect:hardware_type,layout:(1,2)},

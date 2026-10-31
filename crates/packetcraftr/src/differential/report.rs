@@ -215,41 +215,34 @@ impl ResponderCollector {
 /// reception source matches the spoofed source tuple that was sent from.
 #[must_use]
 pub fn join_receptions(mut aggregate: Aggregate, records: &[ReceptionRecord]) -> Aggregate {
-    let spoof_source = aggregate.spoof_source;
-    let source_port = aggregate.source_port;
-    let mut by_attempt: std::collections::HashMap<(u16, u32), Vec<&ReceptionRecord>> =
-        std::collections::HashMap::new();
-    for record in records {
-        by_attempt
-            .entry((record.variant_index, record.attempt_seq))
-            .or_default()
-            .push(record);
-    }
+    let expected_source = aggregate
+        .spoof_source
+        .map(|source| SocketAddr::from((source, aggregate.source_port)));
+    let identities: std::collections::HashSet<(u16, u32, String, Option<SocketAddr>)> = records
+        .iter()
+        .map(|record| {
+            (
+                record.variant_index,
+                record.attempt_seq,
+                record.payload_sha256.clone(),
+                expected_source.map(|_| record.source),
+            )
+        })
+        .collect();
     for attempt in &mut aggregate.attempts {
         if attempt.answered {
             continue;
         }
-        let key = (
-            u16::try_from(attempt.variant_index).unwrap_or(u16::MAX),
-            attempt.attempt_seq,
-        );
-        let Some(candidates) = by_attempt.get(&key) else {
+        let Ok(variant_index) = u16::try_from(attempt.variant_index) else {
             continue;
         };
-        let expected = hex(&attempt.payload_sha256);
-        attempt.answered = candidates.iter().any(|record| {
-            let source_matches = match spoof_source {
-                Some(source) => {
-                    record.source.ip() == std::net::IpAddr::V4(source)
-                        && record.source.port() == source_port
-                }
-                None => true,
-            };
-            source_matches
-                && usize::from(record.variant_index) == attempt.variant_index
-                && record.attempt_seq == attempt.attempt_seq
-                && record.payload_sha256 == expected
-        });
+        let key = (
+            variant_index,
+            attempt.attempt_seq,
+            hex(&attempt.payload_sha256),
+            expected_source,
+        );
+        attempt.answered = identities.contains(&key);
     }
     aggregate.rows = rows_for(&aggregate.attempts);
     aggregate.valid = aggregate

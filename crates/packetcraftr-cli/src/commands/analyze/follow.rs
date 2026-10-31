@@ -86,7 +86,7 @@ pub(super) fn run(
             )
         })
         .transpose()?;
-    let mut reader = open_capture(invocation, &arguments.path, capture_limits.reader_bounds())?;
+    let mut reader = open_capture(invocation, &arguments.path, capture_limits)?;
 
     // Indices stay capture-global, so the index stats reports is the index extracted here.
     let session = analysis::Session::new(

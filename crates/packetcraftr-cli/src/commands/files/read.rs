@@ -107,7 +107,7 @@ pub(super) fn run(
     let mut tree = tree
         .tree
         .then(|| FieldTree::new(Arc::clone(&registry), tree.max_tree_bytes));
-    let mut reader = open_capture(invocation, &path, limits.reader_bounds())?;
+    let mut reader = open_capture(invocation, &path, limits)?;
     let selection = Selection {
         bounds,
         frames: &selection,

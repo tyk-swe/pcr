@@ -151,8 +151,7 @@ pub(crate) fn run(
     };
     let deadline = Deadline::new(args.duration.max_duration())
         .with_cancellation(Some(invocation.cancellation.clone()));
-    let mut reader =
-        crate::input::open_capture(invocation, &args.path, capture_limits.reader_bounds())?;
+    let mut reader = crate::input::open_capture(invocation, &args.path, capture_limits)?;
     let limits = capture_file::Limits {
         max_frames: capture_limits.max_frames(),
         max_bytes: capture_limits.max_bytes(),

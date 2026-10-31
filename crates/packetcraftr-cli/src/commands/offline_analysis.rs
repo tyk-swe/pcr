@@ -130,7 +130,7 @@ pub(super) fn inspect<C: analysis::Collector>(
         },
         collector,
     );
-    let mut reader = crate::input::open_capture(invocation, path, capture_limits.reader_bounds())?;
+    let mut reader = crate::input::open_capture(invocation, path, capture_limits)?;
     let mut output = EventOutput::new(invocation, application.max_output_bytes());
     let outcome = session
         .run(

@@ -78,7 +78,7 @@ pub(crate) fn run(
         .map(|path| {
             Ok(capture_file::MergeSource {
                 name: path.display().to_string(),
-                reader: crate::input::open_capture(invocation, path, args.limits.reader)?,
+                reader: crate::input::open_capture(invocation, path, limits)?,
             })
         })
         .collect::<Result<Vec<_>, CliError>>()?;

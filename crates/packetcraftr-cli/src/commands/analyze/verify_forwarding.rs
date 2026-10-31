@@ -12,7 +12,7 @@ use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::filter::Filter;
 
 use self::arguments::Args;
-use crate::command_options::CaptureReaderBoundsArgs;
+use crate::command_options::OfflineCaptureLimits;
 use crate::commands::CommandExit;
 use crate::commands::offline_analysis::{self, AnalysisSetup};
 use crate::errors::CliError;
@@ -82,12 +82,9 @@ pub(super) fn run(
             Vec::new(),
         ));
     }
-    let prepared = offline_analysis::prepare(
-        arguments.limits.capture.limits()?,
-        arguments.limits,
-        None,
-        &arguments.decode,
-    )?;
+    let capture_limits = arguments.limits.capture.limits()?;
+    let prepared =
+        offline_analysis::prepare(capture_limits, arguments.limits, None, &arguments.decode)?;
     let rules = forwarding::Rules::compile_declarations(
         forwarding::Declarations {
             identity: &arguments.identity,
@@ -114,7 +111,7 @@ pub(super) fn run(
         invocation,
         prepared: &prepared,
         rules: &rules,
-        bounds: arguments.limits.capture.reader,
+        limits: capture_limits,
         max_evidence_bytes: arguments.max_evidence_bytes,
     };
     let (ingress, ingress_source) = collection.collect(
@@ -178,7 +175,7 @@ struct Collection<'a> {
     invocation: &'a crate::invocation::Invocation,
     prepared: &'a AnalysisSetup,
     rules: &'a forwarding::Rules,
-    bounds: CaptureReaderBoundsArgs,
+    limits: OfflineCaptureLimits,
     max_evidence_bytes: usize,
 }
 
@@ -195,10 +192,10 @@ impl Collection<'_> {
             invocation,
             prepared,
             rules,
-            bounds,
+            limits,
             max_evidence_bytes,
         } = *self;
-        let (mut reader, fingerprint) = open_capture_hashed(invocation, path, bounds)?;
+        let (mut reader, fingerprint) = open_capture_hashed(invocation, path, limits)?;
         // Select physical packets in the callback: pipeline filters also see
         // reconstructed datagrams, whose provenance this report cannot represent.
         let mut options = prepared.options(invocation);

@@ -94,7 +94,7 @@ pub(super) fn run(
     )
     .map_err(CliError::classified)?;
 
-    let mut reader = open_capture(invocation, &arguments.path, capture_limits.reader_bounds())?;
+    let mut reader = open_capture(invocation, &arguments.path, capture_limits)?;
 
     let options = prepared.options(invocation);
     let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {

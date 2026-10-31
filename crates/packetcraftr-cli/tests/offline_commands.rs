@@ -3,7 +3,7 @@
 
 #![forbid(unsafe_code)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn run(args: &[&str]) -> Output {
@@ -42,6 +42,31 @@ fn assert_success(output: &Output, args: &[&str]) -> String {
         "packetcraftr {args:?} should write non-empty stdout"
     );
     text
+}
+
+fn assert_error(output: &Output, expected_code: &str) {
+    assert!(
+        !output.status.success(),
+        "expected {expected_code}, got success:\n{}",
+        stdout(output)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "expected JSON error: {error}\nstdout:\n{}\nstderr:\n{}",
+                stdout(output),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
+    assert_eq!(report["error"]["code"], expected_code, "{report}");
+}
+
+fn capture_frames(path: &Path) -> Vec<Vec<u8>> {
+    let source = std::fs::File::open(path).expect("open capture");
+    packetcraftr_core::capture_file::Reader::with_limits(source, Default::default())
+        .expect("read capture header")
+        .map(|frame| frame.expect("read capture frame").bytes().to_vec())
+        .collect()
 }
 
 #[test]
@@ -211,6 +236,157 @@ fn files_read_missing_capture_exits_nonzero() {
         !output.stderr.is_empty(),
         "packetcraftr {args:?} should explain the failure on stderr"
     );
+}
+
+#[test]
+fn files_merge_honors_capture_limits() {
+    let source = capture_path("dns-response.pcap");
+    let source_frames = capture_frames(&source);
+    assert!(!source_frames.is_empty());
+    let source_size = std::fs::metadata(&source).unwrap().len().to_string();
+    let source = source.to_str().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let merged = dir.path().join("merged.pcapng");
+    let command = [
+        "--output", "json", "files", "merge", source, source, "--order", "append",
+    ];
+    let args = [
+        &command[..],
+        &[
+            "--write",
+            merged.to_str().unwrap(),
+            "--max-frame-bytes",
+            "65536",
+            "--max-bytes",
+            "65536",
+            "--max-encoded-bytes",
+            &source_size,
+            "--max-decoded-bytes",
+            &source_size,
+            "--max-interfaces",
+            "1",
+        ],
+    ]
+    .concat();
+    assert_success(&run(&args), &args);
+    let expected: Vec<_> = source_frames
+        .iter()
+        .chain(&source_frames)
+        .cloned()
+        .collect();
+    assert_eq!(capture_frames(&merged), expected);
+
+    let failures: [(&[&str], &str); 2] = [
+        (
+            &["--max-encoded-bytes", "0"],
+            "packet.capture_compression_limit",
+        ),
+        (
+            &["--max-frame-bytes", "2", "--max-bytes", "1"],
+            "cli.capture_limit",
+        ),
+    ];
+    for (index, (limits, code)) in failures.iter().enumerate() {
+        let destination = dir.path().join(format!("rejected-merge-{index}.pcapng"));
+        let args = [
+            &command[..],
+            &["--write", destination.to_str().unwrap()],
+            limits,
+        ]
+        .concat();
+        assert_error(&run(&args), code);
+        assert!(!destination.exists());
+    }
+}
+
+#[test]
+fn files_export_honors_capture_limits() {
+    let source = capture_path("dns-response.pcap");
+    let source_frames = capture_frames(&source);
+    assert!(!source_frames.is_empty());
+    let source_size = std::fs::metadata(&source).unwrap().len().to_string();
+    let source = source.to_str().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let exported = dir.path().join("exported.pcap");
+    let command = [
+        "--output", "json", "files", "export", source, "--filter", "dns",
+    ];
+    let args = [
+        &command[..],
+        &[
+            "--write",
+            exported.to_str().unwrap(),
+            "--max-frame-bytes",
+            "65536",
+            "--max-bytes",
+            "65536",
+            "--max-encoded-bytes",
+            &source_size,
+            "--max-decoded-bytes",
+            &source_size,
+            "--max-interfaces",
+            "1",
+        ],
+    ]
+    .concat();
+    assert_success(&run(&args), &args);
+    assert_eq!(capture_frames(&exported), source_frames);
+
+    let failures: [(&[&str], &str); 2] = [
+        (
+            &["--max-decoded-bytes", "0"],
+            "packet.capture_compression_limit",
+        ),
+        (&["--max-interfaces", "0"], "cli.capture_limit"),
+    ];
+    for (index, (limits, code)) in failures.iter().enumerate() {
+        let destination = dir.path().join(format!("rejected-export-{index}.pcap"));
+        let args = [
+            &command[..],
+            &["--write", destination.to_str().unwrap()],
+            limits,
+        ]
+        .concat();
+        assert_error(&run(&args), code);
+        assert!(!destination.exists());
+    }
+}
+
+#[test]
+fn verify_forwarding_applies_capture_limits_to_both_inputs() {
+    let ingress = capture_path("dns-response.pcap");
+    let egress = capture_path("http-stream.pcap");
+    let ingress_size = std::fs::metadata(&ingress).unwrap().len();
+    assert!(std::fs::metadata(&egress).unwrap().len() > ingress_size);
+    let limit = ingress_size.to_string();
+    let ingress = ingress.to_str().unwrap();
+    let egress = egress.to_str().unwrap();
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "verify-forwarding",
+        ingress,
+        ingress,
+        "--identity",
+        "ipv4.identification",
+        "--max-encoded-bytes",
+        &limit,
+    ];
+    assert_success(&run(&args), &args);
+    let args = [
+        "--output",
+        "json",
+        "analyze",
+        "verify-forwarding",
+        ingress,
+        egress,
+        "--identity",
+        "ipv4.identification",
+        "--max-encoded-bytes",
+        &limit,
+    ];
+    assert_error(&run(&args), "packet.capture_compression_limit");
 }
 
 fn analyze_http2_json(capture_name: &str) -> serde_json::Value {

@@ -10,7 +10,7 @@ use packetcraftr_core::capture_file::{Reader, ReaderLimits};
 
 use super::bounded::{InputKind, open_file, require_redirected_stdin};
 use super::fingerprint::{self, Fingerprint};
-use crate::command_options::CaptureReaderBoundsArgs;
+use crate::command_options::OfflineCaptureLimits;
 use crate::errors::CliError;
 
 fn capture_source(
@@ -30,32 +30,32 @@ fn capture_source(
 pub(crate) fn open_capture(
     invocation: &crate::invocation::Invocation,
     path: &Path,
-    bounds: CaptureReaderBoundsArgs,
+    limits: OfflineCaptureLimits,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
-    capture_reader(invocation, capture_source(invocation, path)?, bounds)
+    capture_reader(invocation, capture_source(invocation, path)?, limits)
 }
 
 pub(crate) fn open_capture_hashed(
     invocation: &crate::invocation::Invocation,
     path: &Path,
-    bounds: CaptureReaderBoundsArgs,
+    limits: OfflineCaptureLimits,
 ) -> Result<(Reader<Box<dyn Read>>, Fingerprint), CliError> {
     let (source, fingerprint) = fingerprint::Hashed::new(capture_source(invocation, path)?);
-    Ok((capture_reader(invocation, source, bounds)?, fingerprint))
+    Ok((capture_reader(invocation, source, limits)?, fingerprint))
 }
 
 pub(crate) fn open_capture_file(
     invocation: &crate::invocation::Invocation,
     path: &Path,
-    bounds: CaptureReaderBoundsArgs,
+    limits: OfflineCaptureLimits,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
-    capture_reader(invocation, open_file(path)?, bounds)
+    capture_reader(invocation, open_file(path)?, limits)
 }
 
 pub(crate) fn snapshot_capture<R: Read>(
     invocation: &crate::invocation::Invocation,
     input: &mut Reader<R>,
-    bounds: CaptureReaderBoundsArgs,
+    capture_limits: OfflineCaptureLimits,
     limits: core::capture_file::Limits,
 ) -> Result<Reader<File>, CliError> {
     use core::capture_file;
@@ -76,15 +76,16 @@ pub(crate) fn snapshot_capture<R: Read>(
         .map_err(capture_file::Error::from)
         .map_err(CliError::classified)?;
     invocation.check()?;
-    bounded_reader(invocation, snapshot, bounds)
+    bounded_reader(invocation, snapshot, capture_limits)
 }
 
 fn capture_reader<R: Read + 'static>(
     invocation: &crate::invocation::Invocation,
     source: R,
-    bounds: CaptureReaderBoundsArgs,
+    limits: OfflineCaptureLimits,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
     invocation.check()?;
+    let bounds = limits.reader_bounds();
     let source: Box<dyn Read> = Box::new(
         core::capture_file::compression::Input::new(
             source,
@@ -96,7 +97,7 @@ fn capture_reader<R: Read + 'static>(
         )
         .map_err(CliError::classified)?,
     );
-    let reader = bounded_reader(invocation, source, bounds)?;
+    let reader = bounded_reader(invocation, source, limits)?;
     invocation.check()?;
     Ok(reader)
 }
@@ -104,8 +105,9 @@ fn capture_reader<R: Read + 'static>(
 fn bounded_reader<R: Read>(
     invocation: &crate::invocation::Invocation,
     source: R,
-    bounds: CaptureReaderBoundsArgs,
+    limits: OfflineCaptureLimits,
 ) -> Result<Reader<R>, CliError> {
+    let bounds = limits.reader_bounds();
     Reader::with_limits(
         source,
         ReaderLimits {

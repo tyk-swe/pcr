@@ -38,7 +38,7 @@ pub(super) fn run(
             )
         })
         .transpose()?;
-    let mut reader = crate::input::open_capture(invocation, &args.path, limits.reader_bounds())?;
+    let mut reader = crate::input::open_capture(invocation, &args.path, limits)?;
     let mut frames = 0u64;
     let mut bytes = 0u64;
     if projector.projection.requirements().stream_index

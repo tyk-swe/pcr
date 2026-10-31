@@ -174,11 +174,11 @@ fn prepare(
         allow_permissive_live: arguments.allow_permissive_live,
     };
     options.validate().map_err(CliError::classified)?;
-    let mut input = open_capture_file(invocation, &arguments.path, capture_limits.reader_bounds())?;
+    let mut input = open_capture_file(invocation, &arguments.path, capture_limits)?;
     let reader = crate::input::snapshot_capture(
         invocation,
         &mut input,
-        capture_limits.reader_bounds(),
+        capture_limits,
         capture::Limits {
             max_frames: limits.max_source_frames,
             max_bytes: capture_limits.reader_bounds().max_decoded_bytes,

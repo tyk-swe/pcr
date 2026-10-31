@@ -58,7 +58,7 @@ pub(super) fn run(
         arguments.filter.as_deref(),
         &arguments.decode,
     )?;
-    let mut reader = open_capture(invocation, &arguments.path, capture_limits.reader_bounds())?;
+    let mut reader = open_capture(invocation, &arguments.path, capture_limits)?;
 
     let session = analysis::Session::new(
         prepared.registry.clone(),

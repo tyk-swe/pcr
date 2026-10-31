@@ -95,8 +95,9 @@ impl Capture {
         let application = self.application.limits()?;
         let collector = security::capture::Collector::new(mode, limits, application.core())
             .map_err(CliError::classified)?;
+        let capture_limits = self.limits.capture.limits()?;
         let prepared = crate::commands::offline_analysis::prepare(
-            self.limits.capture.limits()?,
+            capture_limits,
             self.limits,
             self.filter.as_deref(),
             &self.decode,
@@ -106,11 +107,7 @@ impl Capture {
             prepared.options(invocation),
             collector,
         );
-        let mut reader = crate::input::open_capture(
-            invocation,
-            &self.path,
-            self.limits.capture.limits()?.reader_bounds(),
-        )?;
+        let mut reader = crate::input::open_capture(invocation, &self.path, capture_limits)?;
         let mut report = session
             .run(&mut reader, |_| Ok(()), |_| Ok(()))
             .map_err(CliError::classified)?

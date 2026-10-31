@@ -1,0 +1,86 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "differential",
+  "mode": "stream",
+  "sequence": 18,
+  "event": "complete",
+  "status": "success",
+  "result": {
+    "valid": true,
+    "provisional": false,
+    "plan_digest": "d5216c34d561684d7194142001e3ea916fa19790db45ca504af3f03f95e456e4",
+    "rows": [
+      {
+        "variant": "baseline",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ttl-255",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ttl-1",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "dscp-ecn",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ecn-ce",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ip-id-max",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "df-set",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ip-options-router-alert",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "udp-checksum-zero",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      }
+    ]
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 9,
+    "packets_completed": 9,
+    "bytes": 832,
+    "elapsed": {
+      "secs": 9,
+      "nanos": 134651846
+    },
+    "capture": {
+      "received_frames": 82,
+      "received_bytes": 666219,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

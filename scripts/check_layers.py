@@ -31,7 +31,8 @@ LAYERS = {
         ("engine",): 3, ("evidence",): 3, ("send", "options"): 3,
         ("send",): 4, ("exchange",): 4, ("capture",): 4, ("probe",): 4,
         ("dns",): 5, ("traceroute",): 5, ("os",): 5, ("identify",): 5,
-        ("replay",): 5, ("fuzz",): 5, ("audit",): 5, ("target", "plan"): 5,
+        ("replay",): 5, ("fuzz",): 5, ("audit",): 5, ("differential",): 5,
+        ("target", "plan"): 5,
         ("scan",): 6,
     },
     "packetcraftr-netio": {

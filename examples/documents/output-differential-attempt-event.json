@@ -1,0 +1,27 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "differential",
+  "mode": "stream",
+  "sequence": 1,
+  "event": "attempt",
+  "status": "success",
+  "result": {
+    "variant": "baseline",
+    "attempt_seq": 0,
+    "answered": true,
+    "packets_sent": 1,
+    "payload_sha256": "15e509379becbbdd0e4bbc3e71f8755e732e8563697597c9b312f34d1b107312",
+    "reply": {
+      "timestamp": {
+        "unix_seconds": 1793431012,
+        "nanoseconds": 808719000
+      },
+      "captured_length": 102,
+      "original_length": 102,
+      "link_type": 1,
+      "interface": 1,
+      "bytes_hex": "000000000000000000000000080045000058940740004011a88b7f0000017f0000019ca5cfda0044fe575043523101024242424242424242424242424242424200000000000015e509379becbbdd0e4bbc3e71f8755e732e8563697597c9b312f34d1b107312"
+    }
+  },
+  "diagnostics": []
+}

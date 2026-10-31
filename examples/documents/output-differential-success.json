@@ -1,0 +1,294 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "differential",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "valid": true,
+    "provisional": false,
+    "plan_digest": "d5216c34d561684d7194142001e3ea916fa19790db45ca504af3f03f95e456e4",
+    "rows": [
+      {
+        "variant": "baseline",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ttl-255",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ttl-1",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "dscp-ecn",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ecn-ce",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ip-id-max",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "df-set",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ip-options-router-alert",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "udp-checksum-zero",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      }
+    ],
+    "attempts": [
+      {
+        "variant": "baseline",
+        "attempt_seq": 0,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "15e509379becbbdd0e4bbc3e71f8755e732e8563697597c9b312f34d1b107312",
+        "reply": {
+          "timestamp": {
+            "unix_seconds": 1793431058,
+            "nanoseconds": 141744000
+          },
+          "captured_length": 102,
+          "original_length": 102,
+          "link_type": 1,
+          "interface": 1,
+          "bytes_hex": "000000000000000000000000080045000058f5604000401147327f0000017f0000019ca5cfda0044fe575043523101024242424242424242424242424242424200000000000015e509379becbbdd0e4bbc3e71f8755e732e8563697597c9b312f34d1b107312"
+        }
+      },
+      {
+        "variant": "ttl-255",
+        "attempt_seq": 1,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "9ecece1629e21e557eb641d71f9fb1d8b1bad8e0ff08be6aed57de4af5519473",
+        "reply": {
+          "timestamp": {
+            "unix_seconds": 1793431059,
+            "nanoseconds": 160137000
+          },
+          "captured_length": 102,
+          "original_length": 102,
+          "link_type": 1,
+          "interface": 1,
+          "bytes_hex": "000000000000000000000000080045000058f81a4000401144787f0000017f0000019ca5cfda0044fe57504352310102424242424242424242424242424242420001000000019ecece1629e21e557eb641d71f9fb1d8b1bad8e0ff08be6aed57de4af5519473"
+        }
+      },
+      {
+        "variant": "ttl-1",
+        "attempt_seq": 2,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "6594eb7c50ba6c6b21666ad548d6c38a1b3acc37e171e3266077cca17f76e47a",
+        "reply": {
+          "timestamp": {
+            "unix_seconds": 1793431060,
+            "nanoseconds": 176122000
+          },
+          "captured_length": 102,
+          "original_length": 102,
+          "link_type": 1,
+          "interface": 1,
+          "bytes_hex": "000000000000000000000000080045000058f8324000401144607f0000017f0000019ca5cfda0044fe57504352310102424242424242424242424242424242420002000000026594eb7c50ba6c6b21666ad548d6c38a1b3acc37e171e3266077cca17f76e47a"
+        }
+      },
+      {
+        "variant": "dscp-ecn",
+        "attempt_seq": 3,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "c7a01e099a5115a922154c46b34cfb9d10181c67ce0afd2ddcf8d64847008126",
+        "reply": {
+          "timestamp": {
+            "unix_seconds": 1793431061,
+            "nanoseconds": 188102000
+          },
+          "captured_length": 102,
+          "original_length": 102,
+          "link_type": 1,
+          "interface": 1,
+          "bytes_hex": "000000000000000000000000080045000058f8614000401144317f0000017f0000019ca5cfda0044fe5750435231010242424242424242424242424242424242000300000003c7a01e099a5115a922154c46b34cfb9d10181c67ce0afd2ddcf8d64847008126"
+        }
+      },
+      {
+        "variant": "ecn-ce",
+        "attempt_seq": 4,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "12eb54447dd9dfbc7919fbf1a32c19265ffcb243a6a7ac411d897cf04755cbba",
+        "reply": {
+          "timestamp": {
+            "unix_seconds": 1793431062,
+            "nanoseconds": 201159000
+          },
+          "captured_length": 102,
+          "original_length": 102,
+          "link_type": 1,
+          "interface": 1,
+          "bytes_hex": "000000000000000000000000080045000058fb3740004011415b7f0000017f0000019ca5cfda0044fe575043523101024242424242424242424242424242424200040000000412eb54447dd9dfbc7919fbf1a32c19265ffcb243a6a7ac411d897cf04755cbba"
+        }
+      },
+      {
+        "variant": "ip-id-max",
+        "attempt_seq": 5,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "23ed1c669e8f16fcb3b9dc9a557e844d23ff2357402778dba967d62e5caa256b",
+        "reply": {
+          "timestamp": {
+            "unix_seconds": 1793431063,
+            "nanoseconds": 230167000
+          },
+          "captured_length": 102,
+          "original_length": 102,
+          "link_type": 1,
+          "interface": 1,
+          "bytes_hex": "000000000000000000000000080045000058fbc74000401140cb7f0000017f0000019ca5cfda0044fe575043523101024242424242424242424242424242424200050000000523ed1c669e8f16fcb3b9dc9a557e844d23ff2357402778dba967d62e5caa256b"
+        }
+      },
+      {
+        "variant": "df-set",
+        "attempt_seq": 6,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "7ac1136dc17e1bbafe93e5f3bf1f6574f5caa8913069ac65c402d483af29f8ac",
+        "reply": {
+          "timestamp": {
+            "unix_seconds": 1793431064,
+            "nanoseconds": 225137000
+          },
+          "captured_length": 102,
+          "original_length": 102,
+          "link_type": 1,
+          "interface": 1,
+          "bytes_hex": "000000000000000000000000080045000058ff35400040113d5d7f0000017f0000019ca5cfda0044fe57504352310102424242424242424242424242424242420006000000067ac1136dc17e1bbafe93e5f3bf1f6574f5caa8913069ac65c402d483af29f8ac"
+        }
+      },
+      {
+        "variant": "ip-options-router-alert",
+        "attempt_seq": 7,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "12c050f7f72eadd2cf3784c1c07df7e5b0c71ef7f2106c080f820c0e5cfaf1f8",
+        "reply": {
+          "timestamp": {
+            "unix_seconds": 1793431065,
+            "nanoseconds": 237131000
+          },
+          "captured_length": 102,
+          "original_length": 102,
+          "link_type": 1,
+          "interface": 1,
+          "bytes_hex": "000000000000000000000000080045000058005b400040113c387f0000017f0000019ca5cfda0044fe575043523101024242424242424242424242424242424200070000000712c050f7f72eadd2cf3784c1c07df7e5b0c71ef7f2106c080f820c0e5cfaf1f8"
+        }
+      },
+      {
+        "variant": "udp-checksum-zero",
+        "attempt_seq": 8,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "b4bf77c379436453e0392993552ce27c78ef636abe099e2a134a437e80f52787",
+        "reply": {
+          "timestamp": {
+            "unix_seconds": 1793431066,
+            "nanoseconds": 257130000
+          },
+          "captured_length": 102,
+          "original_length": 102,
+          "link_type": 1,
+          "interface": 1,
+          "bytes_hex": "00000000000000000000000008004500005803834000401139107f0000017f0000019ca5cfda0044fe5750435231010242424242424242424242424242424242000800000008b4bf77c379436453e0392993552ce27c78ef636abe099e2a134a437e80f52787"
+        }
+      }
+    ]
+  },
+  "diagnostics": [
+    {
+      "code": "exchange.integrity_rejected",
+      "severity": "warning",
+      "message": "a response whose checksum did not verify was not correlated"
+    },
+    {
+      "code": "exchange.integrity_rejected",
+      "severity": "warning",
+      "message": "a response whose checksum did not verify was not correlated"
+    },
+    {
+      "code": "exchange.integrity_rejected",
+      "severity": "warning",
+      "message": "a response whose checksum did not verify was not correlated"
+    },
+    {
+      "code": "exchange.integrity_rejected",
+      "severity": "warning",
+      "message": "a response whose checksum did not verify was not correlated"
+    },
+    {
+      "code": "exchange.integrity_rejected",
+      "severity": "warning",
+      "message": "a response whose checksum did not verify was not correlated"
+    },
+    {
+      "code": "exchange.integrity_rejected",
+      "severity": "warning",
+      "message": "a response whose checksum did not verify was not correlated"
+    },
+    {
+      "code": "exchange.integrity_rejected",
+      "severity": "warning",
+      "message": "a response whose checksum did not verify was not correlated"
+    },
+    {
+      "code": "exchange.integrity_rejected",
+      "severity": "warning",
+      "message": "a response whose checksum did not verify was not correlated"
+    },
+    {
+      "code": "exchange.integrity_rejected",
+      "severity": "warning",
+      "message": "a response whose checksum did not verify was not correlated"
+    }
+  ],
+  "stats": {
+    "packets_attempted": 9,
+    "packets_completed": 9,
+    "bytes": 832,
+    "elapsed": {
+      "secs": 9,
+      "nanos": 122969080
+    },
+    "capture": {
+      "received_frames": 34,
+      "received_bytes": 3720,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

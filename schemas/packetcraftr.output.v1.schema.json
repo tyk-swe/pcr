@@ -75,7 +75,10 @@
             "audit-http",
             "scan-diff",
             "report",
-            "messages"
+            "messages",
+            "differential",
+            "differential-responder",
+            "differential-join"
           ]
         },
         "mode": {
@@ -185,6 +188,15 @@
             },
             {
               "$ref": "#/$defs/exchangeSuccess"
+            },
+            {
+              "$ref": "#/$defs/differentialSuccess"
+            },
+            {
+              "$ref": "#/$defs/differentialResponderSuccess"
+            },
+            {
+              "$ref": "#/$defs/differentialJoinSuccess"
             },
             {
               "$ref": "#/$defs/expertSuccess"
@@ -320,6 +332,12 @@
             },
             {
               "$ref": "#/$defs/exchangeStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/differentialStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/differentialResponderStreamSuccess"
             },
             {
               "$ref": "#/$defs/replayFrameSuccess"
@@ -2745,6 +2763,193 @@
       "required": [
         "command",
         "result"
+      ]
+    },
+    "differentialSuccess": {
+      "type": "object",
+      "properties": {
+        "command": { "const": "differential" },
+        "result": {
+          "oneOf": [
+            { "$ref": "#/$defs/differentialPlanResult" },
+            { "$ref": "#/$defs/differentialResult" }
+          ]
+        }
+      },
+      "required": ["command", "result"]
+    },
+    "differentialResponderSuccess": {
+      "type": "object",
+      "properties": {
+        "command": { "const": "differential-responder" },
+        "result": { "$ref": "#/$defs/differentialResponderResult" }
+      },
+      "required": ["command", "result"]
+    },
+    "differentialJoinSuccess": {
+      "type": "object",
+      "properties": {
+        "command": { "const": "differential-join" },
+        "result": { "$ref": "#/$defs/differentialResult" }
+      },
+      "required": ["command", "result"]
+    },
+    "differentialPlanResult": {
+      "type": "object",
+      "required": ["plan_digest", "token", "repeats", "rows", "total_packets", "total_wire_bytes"],
+      "properties": {
+        "plan_digest": { "type": "string" },
+        "token": { "type": "string" },
+        "repeats": { "$ref": "#/$defs/uint64" },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["variant", "hypothesis", "packets_per_attempt"],
+            "properties": {
+              "variant": { "type": "string" },
+              "hypothesis": { "type": "string" },
+              "packets_per_attempt": { "$ref": "#/$defs/uint64" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "total_packets": { "$ref": "#/$defs/uint64" },
+        "total_wire_bytes": { "$ref": "#/$defs/uint64" }
+      },
+      "additionalProperties": false
+    },
+    "differentialVerdict": {
+      "type": "string",
+      "enum": ["accepted", "unanswered", "flaky", "not_run"]
+    },
+    "differentialRow": {
+      "type": "object",
+      "required": ["variant", "verdict", "answered", "attempts"],
+      "properties": {
+        "variant": { "type": "string" },
+        "verdict": { "$ref": "#/$defs/differentialVerdict" },
+        "answered": { "$ref": "#/$defs/uint64" },
+        "attempts": { "$ref": "#/$defs/uint64" }
+      },
+      "additionalProperties": false
+    },
+    "differentialAttempt": {
+      "type": "object",
+      "required": ["variant", "attempt_seq", "answered", "packets_sent", "payload_sha256", "reply"],
+      "properties": {
+        "variant": { "type": "string" },
+        "attempt_seq": { "$ref": "#/$defs/uint64" },
+        "answered": { "type": "boolean" },
+        "packets_sent": { "$ref": "#/$defs/uint64" },
+        "payload_sha256": { "type": "string" },
+        "reply": { "anyOf": [{ "$ref": "#/$defs/frame" }, { "type": "null" }] }
+      },
+      "additionalProperties": false
+    },
+    "differentialResult": {
+      "type": "object",
+      "required": ["valid", "provisional", "plan_digest", "rows", "attempts"],
+      "properties": {
+        "valid": { "type": "boolean" },
+        "provisional": { "type": "boolean" },
+        "plan_digest": { "type": "string" },
+        "rows": { "type": "array", "items": { "$ref": "#/$defs/differentialRow" } },
+        "attempts": { "type": "array", "items": { "$ref": "#/$defs/differentialAttempt" } }
+      },
+      "additionalProperties": false
+    },
+    "differentialReception": {
+      "type": "object",
+      "required": ["variant", "attempt_seq", "source", "payload_sha256"],
+      "properties": {
+        "variant": { "type": "string" },
+        "attempt_seq": { "$ref": "#/$defs/uint64" },
+        "source": { "type": "string" },
+        "payload_sha256": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "differentialResponderResult": {
+      "type": "object",
+      "required": ["received", "ignored", "replies_sent", "records"],
+      "properties": {
+        "received": { "$ref": "#/$defs/uint64" },
+        "ignored": { "$ref": "#/$defs/uint64" },
+        "replies_sent": { "$ref": "#/$defs/uint64" },
+        "records": { "type": "array", "items": { "$ref": "#/$defs/differentialReception" } }
+      },
+      "additionalProperties": false
+    },
+    "differentialStreamSuccess": {
+      "description": "One progressive differential attempt event, a diagnostic, or the terminal complete event carrying the verdict rows.",
+      "type": "object",
+      "properties": { "command": { "const": "differential" } },
+      "required": ["command", "result"],
+      "allOf": [{ "$ref": "#/$defs/terminalWithStats" }],
+      "oneOf": [
+        {
+          "properties": {
+            "event": { "const": "attempt" },
+            "result": { "$ref": "#/$defs/differentialAttempt" }
+          },
+          "required": ["event", "result"]
+        },
+        {
+          "properties": {
+            "event": { "const": "diagnostic" },
+            "result": { "type": "object", "additionalProperties": false }
+          },
+          "required": ["event", "result"]
+        },
+        {
+          "properties": {
+            "event": { "const": "complete" },
+            "result": {
+              "type": "object",
+              "required": ["valid", "provisional", "plan_digest", "rows"],
+              "properties": {
+                "valid": { "type": "boolean" },
+                "provisional": { "type": "boolean" },
+                "plan_digest": { "type": "string" },
+                "rows": { "type": "array", "items": { "$ref": "#/$defs/differentialRow" } }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": ["event", "result"]
+        }
+      ]
+    },
+    "differentialResponderStreamSuccess": {
+      "description": "One Responder reception event or the terminal complete event with reception counters.",
+      "type": "object",
+      "properties": { "command": { "const": "differential-responder" } },
+      "required": ["command", "result"],
+      "oneOf": [
+        {
+          "properties": {
+            "event": { "const": "received" },
+            "result": { "$ref": "#/$defs/differentialReception" }
+          },
+          "required": ["event", "result"]
+        },
+        {
+          "properties": {
+            "event": { "const": "complete" },
+            "result": {
+              "type": "object",
+              "required": ["received", "ignored", "replies_sent"],
+              "properties": {
+                "received": { "$ref": "#/$defs/uint64" },
+                "ignored": { "$ref": "#/$defs/uint64" },
+                "replies_sent": { "$ref": "#/$defs/uint64" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": ["event", "result"]
+        }
       ]
     },
     "exchangeSuccess": {

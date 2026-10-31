@@ -281,6 +281,15 @@ commands! {
     /// Decode protocol messages over reassembled TCP streams.
     #[command(after_long_help = analyze::messages::AFTER_LONG_HELP)]
     Messages(analyze::messages::Args) = "messages" => ("analyze", "messages", 38),
+    /// Run a differential Campaign against a cooperating Responder.
+    #[command(after_long_help = network::differential::arguments::AFTER_LONG_HELP)]
+    Differential(network::differential::arguments::Args) = "differential" => ("network", "differential", 39),
+    /// Run the cooperating Responder for a differential Campaign.
+    #[command(after_long_help = network::differential::responder::AFTER_LONG_HELP)]
+    DifferentialResponder(network::differential::responder::Args) = "differential-responder" => ("network", "differential-responder", 40),
+    /// Finalize a provisional Campaign from a Responder reception log.
+    #[command(after_long_help = network::differential::join::AFTER_LONG_HELP)]
+    DifferentialJoin(network::differential::join::Args) = "differential-join" => ("network", "differential-join", 41),
     /// Generate shell completions and man pages under a directory.
     #[command(after_long_help = "Writes completions for Bash, Elvish, Fish, PowerShell, and Zsh, and man pages for all grouped paths. Requires a writable directory.\n\nExample:\n  packetcraftr reference documentation --directory ./cli-docs")]
     Documentation(reference::documentation::Args) => ("reference", "documentation", 30),

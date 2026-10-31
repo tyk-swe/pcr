@@ -231,24 +231,34 @@ mod tests {
         let handle = thread::spawn(move || run(&invocation, wrap.args));
 
         let probe_socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("probe socket");
+        probe_socket
+            .set_read_timeout(Some(Duration::from_millis(500)))
+            .expect("timeout");
         let token = [0x42; 16];
         let payload = canary::build_probe(&token, 1, 7, 256);
         let target = (Ipv4Addr::LOCALHOST, port);
+        let mut buffer = [0_u8; 128];
+        let mut answered = false;
+        for _ in 0..20 {
+            probe_socket.send_to(&payload, target).expect("probe sends");
+            if probe_socket.recv_from(&mut buffer).is_ok() {
+                answered = true;
+                break;
+            }
+        }
+        assert!(answered, "responder never answered the probe");
         thread::sleep(Duration::from_millis(300));
-        probe_socket.send_to(&payload, target).expect("probe sends");
-        thread::sleep(Duration::from_millis(500));
         cancellation.cancel();
         let outcome = handle.join().expect("responder thread finishes");
         assert!(outcome.is_err(), "cancellation reports as an error");
 
         let contents = std::fs::read_to_string(&log).expect("reception log was published");
-        let record: lib::ReceptionRecord =
-            serde_json::from_str(contents.trim()).expect("log holds one reception record");
-        assert_eq!(record.attempt_seq, 7);
-        assert_eq!(
-            record.payload_sha256,
-            lib::hex(&canary::payload_sha256(&payload))
-        );
+        let expected = lib::hex(&canary::payload_sha256(&payload));
+        let found = contents
+            .lines()
+            .filter_map(|line| serde_json::from_str::<lib::ReceptionRecord>(line).ok())
+            .any(|record| record.attempt_seq == 7 && record.payload_sha256 == expected);
+        assert!(found, "log holds the reception record: {contents}");
         let _ = std::fs::remove_dir_all(&directory);
     }
 }

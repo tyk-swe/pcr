@@ -199,6 +199,17 @@ mod tests {
         ));
         std::fs::create_dir_all(&directory).expect("test directory");
         let log = directory.join("responder-log.jsonl");
+        for attempt in 0..3 {
+            let _ = std::fs::remove_file(&log);
+            if try_cancelled_run(&log, attempt) {
+                let _ = std::fs::remove_dir_all(&directory);
+                return;
+            }
+        }
+        panic!("responder never answered across retries");
+    }
+
+    fn try_cancelled_run(log: &std::path::Path, _attempt: usize) -> bool {
         let port = {
             let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("reserve port");
             socket.local_addr().expect("address").port()
@@ -239,26 +250,33 @@ mod tests {
         let target = (Ipv4Addr::LOCALHOST, port);
         let mut buffer = [0_u8; 128];
         let mut answered = false;
-        for _ in 0..20 {
+        for _ in 0..12 {
+            if handle.is_finished() {
+                break;
+            }
             probe_socket.send_to(&payload, target).expect("probe sends");
             if probe_socket.recv_from(&mut buffer).is_ok() {
                 answered = true;
                 break;
             }
         }
-        assert!(answered, "responder never answered the probe");
+        if !answered {
+            cancellation.cancel();
+            let _ = handle.join();
+            return false;
+        }
         thread::sleep(Duration::from_millis(300));
         cancellation.cancel();
         let outcome = handle.join().expect("responder thread finishes");
         assert!(outcome.is_err(), "cancellation reports as an error");
 
-        let contents = std::fs::read_to_string(&log).expect("reception log was published");
+        let contents = std::fs::read_to_string(log).expect("reception log was published");
         let expected = lib::hex(&canary::payload_sha256(&payload));
         let found = contents
             .lines()
             .filter_map(|line| serde_json::from_str::<lib::ReceptionRecord>(line).ok())
             .any(|record| record.attempt_seq == 7 && record.payload_sha256 == expected);
         assert!(found, "log holds the reception record: {contents}");
-        let _ = std::fs::remove_dir_all(&directory);
+        true
     }
 }

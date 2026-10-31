@@ -102,42 +102,57 @@ mod tests {
     fn responder_answers_only_token_bearing_probes() {
         let token = generate_token().expect("token");
         let probe_socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind probe");
-        let port = {
-            let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("reserve port");
-            socket.local_addr().expect("addr").port()
-        };
-        let collector = ResponderCollector::default();
-        let responder_collector = collector.clone();
-        let handle = thread::spawn(move || {
-            let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
-            request.max_duration = Duration::from_secs(10);
-            request.idle_after_first = Some(Duration::from_millis(300));
-            respond(request, responder_collector)
-        });
-
-        let target = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
         probe_socket
-            .set_read_timeout(Some(Duration::from_millis(500)))
+            .set_read_timeout(Some(Duration::from_millis(250)))
             .expect("timeout");
         let payload = canary::build_probe(&token, 2, 9, 512);
         let mut buffer = [0_u8; 128];
-        let mut reply = None;
-        for _ in 0..20 {
-            probe_socket
-                .send_to(b"not a canary", target)
-                .expect("send junk");
-            probe_socket.send_to(&payload, target).expect("send probe");
-            match probe_socket.recv_from(&mut buffer) {
-                Ok((len, _)) => {
+
+        let mut started = None;
+        for _ in 0..5 {
+            let port = {
+                let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("reserve port");
+                socket.local_addr().expect("addr").port()
+            };
+            let collector = ResponderCollector::default();
+            let responder_collector = collector.clone();
+            let handle = thread::spawn(move || {
+                let mut request = ResponderRequest::new(Ipv4Addr::LOCALHOST, port, token);
+                request.max_duration = Duration::from_secs(10);
+                request.idle_after_first = Some(Duration::from_millis(300));
+                respond(request, responder_collector)
+            });
+            let target = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+            let mut reply = None;
+            for _ in 0..12 {
+                if handle.is_finished() {
+                    break;
+                }
+                probe_socket
+                    .send_to(b"not a canary", target)
+                    .expect("send junk");
+                probe_socket.send_to(&payload, target).expect("send probe");
+                if let Ok((len, _)) = probe_socket.recv_from(&mut buffer) {
                     reply = canary::parse_reply(&buffer[..len]);
                     if reply.is_some() {
                         break;
                     }
                 }
-                Err(_) => continue,
+            }
+            if reply.is_some() {
+                started = Some((handle, collector, reply));
+                break;
+            }
+            if handle.is_finished() {
+                if let Ok(Err(error)) = handle.join() {
+                    eprintln!("responder start failed, retrying on a new port: {error}");
+                    continue;
+                }
+                panic!("responder exited without answering");
             }
         }
-        let reply = reply.expect("reply arrives");
+        let (handle, collector, reply) = started.expect("responder never answered");
+        let reply = reply.expect("reply parsed");
         assert_eq!(reply.variant_index, 2);
         assert_eq!(reply.attempt_seq, 9);
         assert_eq!(

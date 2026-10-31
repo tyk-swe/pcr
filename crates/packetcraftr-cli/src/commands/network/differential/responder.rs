@@ -96,7 +96,7 @@ fn write_log(staged: &mut StagedFile, records: &[lib::ReceptionRecord]) -> Resul
 fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<(), CliError> {
     let token = parse_token(&arguments.token)?;
     let mut staged = match &arguments.log_file {
-        Some(path) => Some(StagedFile::stage(invocation, path)?),
+        Some(path) => Some(StagedFile::stage(&invocation.terminal(), path)?),
         None => None,
     };
     let mut request = lib::ResponderRequest::new(arguments.bind, arguments.port, token);

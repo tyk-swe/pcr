@@ -14,7 +14,7 @@ use crate::{exchange, route, send};
 
 pub const DEFAULT_SOURCE_PORT: u16 = 53210;
 pub const DEFAULT_PAYLOAD_LEN: usize = 1024;
-pub const MAX_PAYLOAD_LEN: usize = 1472;
+pub const MAX_PAYLOAD_LEN: usize = 1468;
 pub const DEFAULT_REPEATS: u32 = 3;
 pub const MAX_REPEATS: u32 = 10;
 

@@ -37,6 +37,8 @@ pub enum Error {
         #[source]
         source: packetcraftr_core::error::BoundaryError,
     },
+    #[error("differential capture evidence at attempt {attempt} is incomplete")]
+    IncompleteEvidence { attempt: u64 },
     #[error("differential statistic accounting overflowed")]
     StatisticsOverflow,
     #[error("differential token generation failed: {message}")]
@@ -73,6 +75,11 @@ impl Classified for Error {
             ),
             Self::Authorization(error) | Self::Build(error) => error.classification(),
             Self::Execution { source, .. } | Self::Output { source } => source.classification(),
+            Self::IncompleteEvidence { .. } => Classification::new(
+                "capture.differential_incomplete",
+                Kind::Io,
+                Some("rerun with higher capture retention so a matched reply cannot be lost"),
+            ),
             Self::StatisticsOverflow => Classification::new(
                 "internal.differential_evidence",
                 Kind::Internal,

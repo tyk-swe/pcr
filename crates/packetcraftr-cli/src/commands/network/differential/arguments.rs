@@ -44,7 +44,7 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = lib::DEFAULT_REPEATS, value_parser = clap::value_parser!(u32).range(1..=10))]
     pub(crate) repeats: u32,
     /// Canary payload length in bytes.
-    #[arg(long, default_value_t = lib::DEFAULT_PAYLOAD_LEN as u64, value_parser = clap::value_parser!(u64).range(62..=1472))]
+    #[arg(long, default_value_t = lib::DEFAULT_PAYLOAD_LEN as u64, value_parser = clap::value_parser!(u64).range(62..=1468))]
     pub(crate) payload_len: u64,
     #[command(flatten)]
     pub(crate) timeout: LongTimeoutArgs,

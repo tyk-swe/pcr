@@ -217,12 +217,27 @@ impl ResponderCollector {
 pub fn join_receptions(mut aggregate: Aggregate, records: &[ReceptionRecord]) -> Aggregate {
     let spoof_source = aggregate.spoof_source;
     let source_port = aggregate.source_port;
+    let mut by_attempt: std::collections::HashMap<(u16, u32), Vec<&ReceptionRecord>> =
+        std::collections::HashMap::new();
+    for record in records {
+        by_attempt
+            .entry((record.variant_index, record.attempt_seq))
+            .or_default()
+            .push(record);
+    }
     for attempt in &mut aggregate.attempts {
         if attempt.answered {
             continue;
         }
+        let key = (
+            u16::try_from(attempt.variant_index).unwrap_or(u16::MAX),
+            attempt.attempt_seq,
+        );
+        let Some(candidates) = by_attempt.get(&key) else {
+            continue;
+        };
         let expected = hex(&attempt.payload_sha256);
-        attempt.answered = records.iter().any(|record| {
+        attempt.answered = candidates.iter().any(|record| {
             let source_matches = match spoof_source {
                 Some(source) => {
                     record.source.ip() == std::net::IpAddr::V4(source)

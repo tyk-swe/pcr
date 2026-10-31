@@ -129,9 +129,6 @@ mod tests {
                 if handle.is_finished() {
                     break;
                 }
-                probe_socket
-                    .send_to(b"not a canary", target)
-                    .expect("send junk");
                 probe_socket.send_to(&payload, target).expect("send probe");
                 match probe_socket.recv_from(&mut buffer) {
                     Ok((len, _)) => {
@@ -141,6 +138,26 @@ mod tests {
                         }
                     }
                     Err(_) => thread::sleep(Duration::from_millis(50)),
+                }
+            }
+            if reply.is_some() {
+                let second = canary::build_probe(&token, 2, 10, 512);
+                let junk_deadline = std::time::Instant::now() + Duration::from_secs(3);
+                let mut second_answered = false;
+                while std::time::Instant::now() < junk_deadline && !second_answered {
+                    probe_socket
+                        .send_to(b"not a canary", target)
+                        .expect("send junk");
+                    probe_socket
+                        .send_to(&second, target)
+                        .expect("send second probe");
+                    match probe_socket.recv_from(&mut buffer) {
+                        Ok((len, _)) => {
+                            second_answered = canary::parse_reply(&buffer[..len])
+                                .is_some_and(|parsed| parsed.attempt_seq == 10);
+                        }
+                        Err(_) => thread::sleep(Duration::from_millis(50)),
+                    }
                 }
             }
             if reply.is_some() {

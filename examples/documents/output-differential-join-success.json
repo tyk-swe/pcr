@@ -1,0 +1,160 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "differential-join",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "valid": true,
+    "provisional": false,
+    "plan_digest": "d5216c34d561684d7194142001e3ea916fa19790db45ca504af3f03f95e456e4",
+    "source_port": 53210,
+    "spoof_source": null,
+    "rows": [
+      {
+        "variant": "baseline",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ttl-255",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ttl-1",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "dscp-ecn",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ecn-ce",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ip-id-max",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "df-set",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "ip-options-router-alert",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      },
+      {
+        "variant": "udp-checksum-zero",
+        "verdict": "accepted",
+        "answered": 1,
+        "attempts": 1
+      }
+    ],
+    "attempts": [
+      {
+        "variant": "baseline",
+        "attempt_seq": 0,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "15e509379becbbdd0e4bbc3e71f8755e732e8563697597c9b312f34d1b107312",
+        "reply": null
+      },
+      {
+        "variant": "ttl-255",
+        "attempt_seq": 1,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "9ecece1629e21e557eb641d71f9fb1d8b1bad8e0ff08be6aed57de4af5519473",
+        "reply": null
+      },
+      {
+        "variant": "ttl-1",
+        "attempt_seq": 2,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "6594eb7c50ba6c6b21666ad548d6c38a1b3acc37e171e3266077cca17f76e47a",
+        "reply": null
+      },
+      {
+        "variant": "dscp-ecn",
+        "attempt_seq": 3,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "c7a01e099a5115a922154c46b34cfb9d10181c67ce0afd2ddcf8d64847008126",
+        "reply": null
+      },
+      {
+        "variant": "ecn-ce",
+        "attempt_seq": 4,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "12eb54447dd9dfbc7919fbf1a32c19265ffcb243a6a7ac411d897cf04755cbba",
+        "reply": null
+      },
+      {
+        "variant": "ip-id-max",
+        "attempt_seq": 5,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "23ed1c669e8f16fcb3b9dc9a557e844d23ff2357402778dba967d62e5caa256b",
+        "reply": null
+      },
+      {
+        "variant": "df-set",
+        "attempt_seq": 6,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "7ac1136dc17e1bbafe93e5f3bf1f6574f5caa8913069ac65c402d483af29f8ac",
+        "reply": null
+      },
+      {
+        "variant": "ip-options-router-alert",
+        "attempt_seq": 7,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "12c050f7f72eadd2cf3784c1c07df7e5b0c71ef7f2106c080f820c0e5cfaf1f8",
+        "reply": null
+      },
+      {
+        "variant": "udp-checksum-zero",
+        "attempt_seq": 8,
+        "answered": true,
+        "packets_sent": 1,
+        "payload_sha256": "b4bf77c379436453e0392993552ce27c78ef636abe099e2a134a437e80f52787",
+        "reply": null
+      }
+    ]
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 0,
+    "packets_completed": 0,
+    "bytes": 0,
+    "elapsed": {
+      "secs": 0,
+      "nanos": 0
+    },
+    "capture": {
+      "received_frames": 0,
+      "received_bytes": 0,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

@@ -113,6 +113,8 @@ pub struct Report {
     pub valid: bool,
     pub provisional: bool,
     pub plan_digest: String,
+    pub source_port: u64,
+    pub spoof_source: Option<String>,
     pub rows: Vec<Row>,
     pub attempts: Vec<Attempt>,
 }
@@ -131,6 +133,8 @@ impl TryFrom<lib::Aggregate> for Published<Report> {
                 valid: aggregate.valid,
                 provisional: aggregate.provisional,
                 plan_digest: aggregate.plan_digest,
+                source_port: u64::from(aggregate.source_port),
+                spoof_source: aggregate.spoof_source.map(|source| source.to_string()),
                 rows: aggregate.rows.into_iter().map(Row::from).collect(),
                 attempts,
             },

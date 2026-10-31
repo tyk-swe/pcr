@@ -174,3 +174,81 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         other => other.unreachable(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::invocation::{Invocation, StreamEncoder};
+    use crate::output::contract::Command;
+    use clap::Parser as _;
+    use lib::canary;
+    use std::net::UdpSocket;
+    use std::thread;
+
+    #[derive(clap::Parser)]
+    struct Wrap {
+        #[command(flatten)]
+        args: Args,
+    }
+
+    #[test]
+    fn cancelled_responder_still_publishes_its_reception_log() {
+        let directory = std::env::temp_dir().join(format!(
+            "packetcraftr-responder-cancel-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("test directory");
+        let log = directory.join("responder-log.jsonl");
+        let port = {
+            let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("reserve port");
+            socket.local_addr().expect("address").port()
+        };
+        let token_hex = "42".repeat(16);
+        let wrap = Wrap::try_parse_from([
+            "test",
+            "--bind",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+            "--token",
+            &token_hex,
+            "--idle-ms",
+            "0",
+            "--max-duration-ms",
+            "30000",
+            "--log-file",
+            log.to_str().expect("log path is UTF-8"),
+        ])
+        .expect("arguments parse");
+        let invocation = Invocation::new(
+            Format::Text,
+            StreamEncoder::new(Command::DifferentialResponder, Vec::<u8>::new()),
+            None,
+            Default::default(),
+            None,
+        );
+        let cancellation = invocation.cancellation.clone();
+        let handle = thread::spawn(move || run(&invocation, wrap.args));
+
+        let probe_socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("probe socket");
+        let token = [0x42; 16];
+        let payload = canary::build_probe(&token, 1, 7, 256);
+        let target = (Ipv4Addr::LOCALHOST, port);
+        thread::sleep(Duration::from_millis(300));
+        probe_socket.send_to(&payload, target).expect("probe sends");
+        thread::sleep(Duration::from_millis(500));
+        cancellation.cancel();
+        let outcome = handle.join().expect("responder thread finishes");
+        assert!(outcome.is_err(), "cancellation reports as an error");
+
+        let contents = std::fs::read_to_string(&log).expect("reception log was published");
+        let record: lib::ReceptionRecord =
+            serde_json::from_str(contents.trim()).expect("log holds one reception record");
+        assert_eq!(record.attempt_seq, 7);
+        assert_eq!(
+            record.payload_sha256,
+            lib::hex(&canary::payload_sha256(&payload))
+        );
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+}

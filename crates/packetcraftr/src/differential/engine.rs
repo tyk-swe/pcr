@@ -208,6 +208,8 @@ pub(super) fn run_campaign<R: Runner>(
         valid,
         provisional: request.spoof_source.is_some(),
         plan_digest: prepared.summary.digest.clone(),
+        source_port: request.source_port,
+        spoof_source: request.spoof_source,
         rows,
         stats: spent,
     })

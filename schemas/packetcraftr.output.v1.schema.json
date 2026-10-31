@@ -2849,11 +2849,13 @@
     },
     "differentialResult": {
       "type": "object",
-      "required": ["valid", "provisional", "plan_digest", "rows", "attempts"],
+      "required": ["valid", "provisional", "plan_digest", "source_port", "spoof_source", "rows", "attempts"],
       "properties": {
         "valid": { "type": "boolean" },
         "provisional": { "type": "boolean" },
         "plan_digest": { "type": "string" },
+        "source_port": { "$ref": "#/$defs/uint64" },
+        "spoof_source": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
         "rows": { "type": "array", "items": { "$ref": "#/$defs/differentialRow" } },
         "attempts": { "type": "array", "items": { "$ref": "#/$defs/differentialAttempt" } }
       },

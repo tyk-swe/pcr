@@ -39,6 +39,10 @@ struct Envelope {
 struct CampaignResult {
     provisional: bool,
     plan_digest: String,
+    #[serde(default)]
+    source_port: u16,
+    #[serde(default)]
+    spoof_source: Option<std::net::Ipv4Addr>,
     attempts: Vec<AttemptInput>,
 }
 
@@ -142,6 +146,8 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         valid: false,
         provisional: envelope.result.provisional,
         plan_digest: envelope.result.plan_digest,
+        source_port: envelope.result.source_port,
+        spoof_source: envelope.result.spoof_source,
         rows: lib::rows_for(&attempts),
         attempts,
         diagnostics: Vec::new(),

@@ -75,6 +75,8 @@ pub struct Report {
     pub valid: bool,
     pub provisional: bool,
     pub plan_digest: String,
+    pub source_port: u16,
+    pub spoof_source: Option<std::net::Ipv4Addr>,
     pub rows: Vec<Row>,
     pub stats: Stats,
 }
@@ -84,6 +86,8 @@ pub struct Aggregate {
     pub valid: bool,
     pub provisional: bool,
     pub plan_digest: String,
+    pub source_port: u16,
+    pub spoof_source: Option<std::net::Ipv4Addr>,
     pub attempts: Vec<AttemptEvidence>,
     pub diagnostics: Vec<Diagnostic>,
     pub rows: Vec<Row>,
@@ -141,6 +145,8 @@ impl Collector {
             valid: report.valid,
             provisional: report.provisional,
             plan_digest: report.plan_digest,
+            source_port: report.source_port,
+            spoof_source: report.spoof_source,
             attempts,
             diagnostics,
             rows: report.rows,
@@ -205,16 +211,27 @@ impl ResponderCollector {
 
 /// Finalizes provisional attempts from Responder reception records. A record
 /// only answers an attempt when the variant, attempt sequence, and received
-/// payload digest all match what was sent.
+/// payload digest all match what was sent, and, for spoofed Campaigns, the
+/// reception source matches the spoofed source tuple that was sent from.
 #[must_use]
 pub fn join_receptions(mut aggregate: Aggregate, records: &[ReceptionRecord]) -> Aggregate {
+    let spoof_source = aggregate.spoof_source;
+    let source_port = aggregate.source_port;
     for attempt in &mut aggregate.attempts {
         if attempt.answered {
             continue;
         }
         let expected = hex(&attempt.payload_sha256);
         attempt.answered = records.iter().any(|record| {
-            usize::from(record.variant_index) == attempt.variant_index
+            let source_matches = match spoof_source {
+                Some(source) => {
+                    record.source.ip() == std::net::IpAddr::V4(source)
+                        && record.source.port() == source_port
+                }
+                None => true,
+            };
+            source_matches
+                && usize::from(record.variant_index) == attempt.variant_index
                 && record.attempt_seq == attempt.attempt_seq
                 && record.payload_sha256 == expected
         });
@@ -262,6 +279,8 @@ mod tests {
             valid: false,
             provisional: true,
             plan_digest: "digest".to_owned(),
+            source_port: 53210,
+            spoof_source: None,
             attempts: vec![
                 attempt(0, 0, true),
                 attempt(1, 1, false),
@@ -290,5 +309,38 @@ mod tests {
         assert!(!joined.attempts[2].answered);
         assert!(!joined.provisional);
         assert!(joined.valid);
+    }
+
+    #[test]
+    fn spoofed_join_requires_the_spoofed_source_tuple() {
+        let spoofed = std::net::Ipv4Addr::new(192, 0, 2, 99);
+        let aggregate = Aggregate {
+            valid: false,
+            provisional: true,
+            plan_digest: "digest".to_owned(),
+            source_port: 53210,
+            spoof_source: Some(spoofed),
+            attempts: vec![attempt(0, 0, false), attempt(1, 1, false)],
+            diagnostics: Vec::new(),
+            rows: Vec::new(),
+            stats: Stats::default(),
+        };
+        let records = vec![
+            ReceptionRecord {
+                variant_index: 0,
+                attempt_seq: 0,
+                source: "192.0.2.99:53210".parse().expect("addr"),
+                payload_sha256: hex(&[0x11; 32]),
+            },
+            ReceptionRecord {
+                variant_index: 1,
+                attempt_seq: 1,
+                source: "198.51.100.7:53210".parse().expect("addr"),
+                payload_sha256: hex(&[0x11; 32]),
+            },
+        ];
+        let joined = join_receptions(aggregate, &records);
+        assert!(joined.attempts[0].answered);
+        assert!(!joined.attempts[1].answered);
     }
 }

@@ -6,61 +6,63 @@
   "result": {
     "valid": true,
     "provisional": false,
-    "plan_digest": "0e87d43bcfac57fa2663790ffa9f55afdf736e170b6bbe9389654bda6ad9f170",
+    "plan_digest": "d5216c34d561684d7194142001e3ea916fa19790db45ca504af3f03f95e456e4",
+    "source_port": 53210,
+    "spoof_source": null,
     "rows": [
       {
         "variant": "baseline",
         "verdict": "accepted",
-        "answered": 3,
-        "attempts": 3
+        "answered": 1,
+        "attempts": 1
       },
       {
         "variant": "ttl-255",
         "verdict": "accepted",
-        "answered": 3,
-        "attempts": 3
+        "answered": 1,
+        "attempts": 1
       },
       {
         "variant": "ttl-1",
         "verdict": "accepted",
-        "answered": 3,
-        "attempts": 3
+        "answered": 1,
+        "attempts": 1
       },
       {
         "variant": "dscp-ecn",
         "verdict": "accepted",
-        "answered": 3,
-        "attempts": 3
+        "answered": 1,
+        "attempts": 1
       },
       {
         "variant": "ecn-ce",
         "verdict": "accepted",
-        "answered": 3,
-        "attempts": 3
+        "answered": 1,
+        "attempts": 1
       },
       {
         "variant": "ip-id-max",
         "verdict": "accepted",
-        "answered": 3,
-        "attempts": 3
+        "answered": 1,
+        "attempts": 1
       },
       {
         "variant": "df-set",
         "verdict": "accepted",
-        "answered": 3,
-        "attempts": 3
+        "answered": 1,
+        "attempts": 1
       },
       {
         "variant": "ip-options-router-alert",
         "verdict": "accepted",
-        "answered": 3,
-        "attempts": 3
+        "answered": 1,
+        "attempts": 1
       },
       {
         "variant": "udp-checksum-zero",
         "verdict": "accepted",
-        "answered": 3,
-        "attempts": 3
+        "answered": 1,
+        "attempts": 1
       }
     ],
     "attempts": [
@@ -69,215 +71,71 @@
         "attempt_seq": 0,
         "answered": true,
         "packets_sent": 1,
-        "payload_sha256": "c754f8c7403400b1bc683683da5f05ad4136a7d056f7ff8fa1ed02e5c7a4ed7c",
+        "payload_sha256": "15e509379becbbdd0e4bbc3e71f8755e732e8563697597c9b312f34d1b107312",
         "reply": null
       },
       {
-        "variant": "baseline",
+        "variant": "ttl-255",
         "attempt_seq": 1,
         "answered": true,
         "packets_sent": 1,
-        "payload_sha256": "8b7f4c009db0f7fdef22135b31f90b96bb18167c013d21698a3e8331465aca16",
+        "payload_sha256": "9ecece1629e21e557eb641d71f9fb1d8b1bad8e0ff08be6aed57de4af5519473",
         "reply": null
       },
       {
-        "variant": "baseline",
+        "variant": "ttl-1",
         "attempt_seq": 2,
         "answered": true,
         "packets_sent": 1,
-        "payload_sha256": "6f51dda29295a21d2698d7310e34ceb1b406255c5d8c5d860be3750aa7bf0289",
+        "payload_sha256": "6594eb7c50ba6c6b21666ad548d6c38a1b3acc37e171e3266077cca17f76e47a",
         "reply": null
       },
       {
-        "variant": "ttl-255",
+        "variant": "dscp-ecn",
         "attempt_seq": 3,
         "answered": true,
         "packets_sent": 1,
-        "payload_sha256": "4776a0edeb5550bfd814e4dc1c801a80cc6c2ce82a8dc50cf34ca4746f64b669",
+        "payload_sha256": "c7a01e099a5115a922154c46b34cfb9d10181c67ce0afd2ddcf8d64847008126",
         "reply": null
       },
       {
-        "variant": "ttl-255",
+        "variant": "ecn-ce",
         "attempt_seq": 4,
         "answered": true,
         "packets_sent": 1,
-        "payload_sha256": "5e37f93690fffbe703c342db8cc508aa9eec7225eb0d223d333c8070cd0eb3a7",
+        "payload_sha256": "12eb54447dd9dfbc7919fbf1a32c19265ffcb243a6a7ac411d897cf04755cbba",
         "reply": null
       },
       {
-        "variant": "ttl-255",
+        "variant": "ip-id-max",
         "attempt_seq": 5,
         "answered": true,
         "packets_sent": 1,
-        "payload_sha256": "107184ee5fcf9a0c69a5f700f19e2d81099579f455f6c857e92d5edaf389200b",
+        "payload_sha256": "23ed1c669e8f16fcb3b9dc9a557e844d23ff2357402778dba967d62e5caa256b",
         "reply": null
       },
       {
-        "variant": "ttl-1",
+        "variant": "df-set",
         "attempt_seq": 6,
         "answered": true,
         "packets_sent": 1,
-        "payload_sha256": "63ca172de54c01d424f2cb25959694f82719c637fd89736302b98ace2bc6ef57",
+        "payload_sha256": "7ac1136dc17e1bbafe93e5f3bf1f6574f5caa8913069ac65c402d483af29f8ac",
         "reply": null
       },
       {
-        "variant": "ttl-1",
+        "variant": "ip-options-router-alert",
         "attempt_seq": 7,
         "answered": true,
         "packets_sent": 1,
-        "payload_sha256": "878a55105ee73de2e88df8b61e710920775072e4d29ca5109aac09791a40c398",
+        "payload_sha256": "12c050f7f72eadd2cf3784c1c07df7e5b0c71ef7f2106c080f820c0e5cfaf1f8",
         "reply": null
       },
       {
-        "variant": "ttl-1",
+        "variant": "udp-checksum-zero",
         "attempt_seq": 8,
         "answered": true,
         "packets_sent": 1,
-        "payload_sha256": "1efed20decfd560eba1803f69205af875207ea007c095dbf51a81df823db2c24",
-        "reply": null
-      },
-      {
-        "variant": "dscp-ecn",
-        "attempt_seq": 9,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "95e3d029037089aebb21e6502c74d8d68125155cd1db1e3dea676d8351ad8bd3",
-        "reply": null
-      },
-      {
-        "variant": "dscp-ecn",
-        "attempt_seq": 10,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "f889d137a12ba3dd8e5191e7415c4b92116d0aa2b54d84dc7135ecf9763bf525",
-        "reply": null
-      },
-      {
-        "variant": "dscp-ecn",
-        "attempt_seq": 11,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "10657425bdad35ef32d345820183da22decdb7529beb23afa5ba6eef32758ec7",
-        "reply": null
-      },
-      {
-        "variant": "ecn-ce",
-        "attempt_seq": 12,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "cb3574afbac40b86d3aeff40006bab3576807f4300950a7f898948a731d2952a",
-        "reply": null
-      },
-      {
-        "variant": "ecn-ce",
-        "attempt_seq": 13,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "a2da71f270a6d42be933086b7a7a3b5e216e01f5fc4b7ceeeb4e07f0cb94d403",
-        "reply": null
-      },
-      {
-        "variant": "ecn-ce",
-        "attempt_seq": 14,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "cd00d06af1e018fcb6e5218a4617c9c327f299c58d76299da204f42432f4ae39",
-        "reply": null
-      },
-      {
-        "variant": "ip-id-max",
-        "attempt_seq": 15,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "7c44a18b706e1558ec9b4a2318ee35445436e775b1362d48eeaff3569c607a04",
-        "reply": null
-      },
-      {
-        "variant": "ip-id-max",
-        "attempt_seq": 16,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "5a510d1ff9e9491c79be669c7ae0976f2e13f537399428065433e5f879ab488d",
-        "reply": null
-      },
-      {
-        "variant": "ip-id-max",
-        "attempt_seq": 17,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "ba787a9d7bd42b11308770bfc26358ba3b8ec8be388a3f36889bcd9237e035f9",
-        "reply": null
-      },
-      {
-        "variant": "df-set",
-        "attempt_seq": 18,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "3f6f428a2c6300d1efb65b99c624fa23675fa1141f84a7b69d4dd21df40ad154",
-        "reply": null
-      },
-      {
-        "variant": "df-set",
-        "attempt_seq": 19,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "fdd556c68f26c43da5dd451a4d4c8d76e777f6e4c3dd2b7c3c84c53a161dac0e",
-        "reply": null
-      },
-      {
-        "variant": "df-set",
-        "attempt_seq": 20,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "11407f7d55f110c24be0b2be0bb66fc9ca4aac182c73fc29e8a24f529762ef0f",
-        "reply": null
-      },
-      {
-        "variant": "ip-options-router-alert",
-        "attempt_seq": 21,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "744a78313fb1985a6bbb960b8ac4038aaa4dfb685456b3d9799476487cd15dc5",
-        "reply": null
-      },
-      {
-        "variant": "ip-options-router-alert",
-        "attempt_seq": 22,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "d94cc5650173300c69c483b1ef79a470993d92f4ef9f99babdb14033c78b99e9",
-        "reply": null
-      },
-      {
-        "variant": "ip-options-router-alert",
-        "attempt_seq": 23,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "771960106d1c46b9b03beed9cacfece596d2d32499b7ff809cf8aaa00dbde408",
-        "reply": null
-      },
-      {
-        "variant": "udp-checksum-zero",
-        "attempt_seq": 24,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "fc40107064831667c11c05e91f1e89e14dcbe903e95c6a75e7314044df249f8b",
-        "reply": null
-      },
-      {
-        "variant": "udp-checksum-zero",
-        "attempt_seq": 25,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "19e4b0911fad343b2c408579ee3621f70ba7e3cf990471ace19806198bec2bf2",
-        "reply": null
-      },
-      {
-        "variant": "udp-checksum-zero",
-        "attempt_seq": 26,
-        "answered": true,
-        "packets_sent": 1,
-        "payload_sha256": "6020660b9800ff5f13cb22cebff3d34ca89826e93d9727017feb29a8f22a96de",
+        "payload_sha256": "b4bf77c379436453e0392993552ce27c78ef636abe099e2a134a437e80f52787",
         "reply": null
       }
     ]

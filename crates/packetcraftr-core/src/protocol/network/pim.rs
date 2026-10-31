@@ -42,10 +42,8 @@ crate::reflective_layer! {
     "options" => { kind: List, derived: false, required: false, description: "Ordered Hello options", children: OPTIONS, reflect: options },
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
- layout fn pim_layout();
 }
 fn pim_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = pim_layout();
     let mut fields = Vec::new();
     if !b.is_empty() {
         fields.push(crate::layout::FieldLayout {

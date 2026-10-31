@@ -410,7 +410,7 @@ const VALUE_8: &[FieldSchema] = &value_fields(OPTIONS_7, MESSAGE_7);
 const OPTIONS_8: &[FieldSchema] = &options_fields(VALUE_8);
 
 reflective_layer! {
-    pub(super) fn schema() => {protocol:crate::layer::Id::new(BuiltinProtocol::Dhcpv6.as_str()),name:"DHCPv6"}
+    pub(super) fn schema() => {protocol:BuiltinProtocol::Dhcpv6.id(),name:"DHCPv6"}
     impl Dhcpv6 {
         "message_type" => {kind:Unsigned,derived:false,required:false,description:"DHCPv6 message type",reflect:message_type,layout:(0,1)},
         "transaction_id" | "xid" => {kind:Unsigned,derived:false,required:false,description:"24-bit identity in ordinary messages",get |layer| (!layer.is_relay()).then(||layer.transaction_id.into()),set |layer,value,name| reflect_set(&mut layer.transaction_id,schema(),name,value)},

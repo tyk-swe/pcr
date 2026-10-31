@@ -9,7 +9,7 @@ use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
 
 use super::selection::Selection;
-use crate::command_options::OfflineCaptureLimitsArgs;
+use crate::command_options::OfflineCaptureLimits;
 use crate::errors::CliError;
 use crate::output::contract::Format;
 
@@ -55,7 +55,7 @@ impl CaptureOutput {
         self,
         invocation: &crate::invocation::Invocation,
         reader: &mut Reader<impl Read>,
-        limits: OfflineCaptureLimitsArgs,
+        limits: OfflineCaptureLimits,
         selection: Selection<'_>,
         destination: &mut impl Write,
     ) -> Result<(), CliError> {

@@ -39,7 +39,7 @@ use crate::engine::operation::Operation as Execution;
 use crate::policy::Policy;
 use crate::providers::{PacketProviders, TransmitProviders};
 pub(crate) use crate::route;
-use crate::send::Options;
+use crate::send::options::Options;
 use crate::{Client, Error};
 
 struct Stages<'c, P, K> {

@@ -5,6 +5,7 @@ use crate::scan::Request;
 use packetcraftr_core::{
     error::BoundaryError,
     layer::Id,
+    protocol::BuiltinProtocol,
     registry::{Discriminator, Registry},
 };
 use std::sync::Arc;
@@ -21,7 +22,11 @@ pub(super) fn bindings(request: &Request) -> Vec<(u16, Id)> {
         .map(|(port, profile)| {
             (
                 *port,
-                Id::new(if profile.raw_payload() { "raw" } else { "dns" }),
+                if profile.raw_payload() {
+                    BuiltinProtocol::Raw.id()
+                } else {
+                    BuiltinProtocol::Dns.id()
+                },
             )
         })
         .collect()
@@ -34,7 +39,10 @@ pub(super) fn configured(
     let overrides: Vec<_> = bindings
         .iter()
         .filter(|(port, child)| {
-            base.child_for("udp", Discriminator(u64::from(*port))) != Some(*child)
+            base.child_for(
+                BuiltinProtocol::Udp.as_str(),
+                Discriminator(u64::from(*port)),
+            ) != Some(*child)
         })
         .collect();
     if overrides.is_empty() {
@@ -43,7 +51,12 @@ pub(super) fn configured(
     let mut builder = base.to_builder();
     for (port, child) in overrides {
         builder
-            .bind("udp", u64::from(*port), *child, i32::MAX)
+            .bind(
+                BuiltinProtocol::Udp.id(),
+                u64::from(*port),
+                *child,
+                i32::MAX,
+            )
             .map_err(profile_error)?;
     }
     builder.build().map(Arc::new).map_err(profile_error)

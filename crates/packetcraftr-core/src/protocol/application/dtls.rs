@@ -33,10 +33,8 @@ crate::reflective_layer! {
  impl Dtls {
     "records" => { kind: List, derived: false, required: false, description: "DTLS records and plaintext handshake fragment envelopes", children: RECORDS, reflect: records },
  }
- layout fn dtls_layout();
 }
 fn dtls_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = dtls_layout();
     let mut fields = Vec::new();
     if b.len() <= b.len() {
         fields.push(crate::layout::FieldLayout {

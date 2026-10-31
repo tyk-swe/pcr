@@ -8,7 +8,7 @@ use clap::Args;
 use packetcraftr_core::{
     error::{Classification, Kind},
     layer::Id,
-    protocol::builtin,
+    protocol::{BuiltinProtocol, builtin},
     registry::{Discriminator, Registry},
 };
 
@@ -52,7 +52,12 @@ impl DecodeArgs {
         }
         let mut bindings = BTreeMap::new();
         for &port in &self.ports {
-            insert(&mut bindings, "tcp", port, Id::new("tls"))?;
+            insert(
+                &mut bindings,
+                BuiltinProtocol::Tcp.as_str(),
+                port,
+                BuiltinProtocol::Tls.id(),
+            )?;
         }
         for source in &self.bindings {
             let invalid = || {

@@ -81,7 +81,9 @@ pub(super) fn run(
     }
     let top = arguments.effective_top();
     let aggregation = analysis::stats::Table::from(arguments.table);
+    let capture_limits = arguments.limits.capture.limits()?;
     let prepared = prepare(
+        capture_limits,
         arguments.limits,
         arguments.filter.as_deref(),
         &arguments.decode,
@@ -92,7 +94,7 @@ pub(super) fn run(
     )
     .map_err(CliError::classified)?;
 
-    let mut reader = open_capture(invocation, &arguments.path, arguments.limits.capture.reader)?;
+    let mut reader = open_capture(invocation, &arguments.path, capture_limits.reader_bounds())?;
 
     let options = prepared.options(invocation);
     let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {

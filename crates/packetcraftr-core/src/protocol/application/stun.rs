@@ -37,10 +37,8 @@ crate::reflective_layer! {
     "transaction_id" => { kind: Bytes, derived: false, required: false, description: "transaction id", reflect: transaction_id },
     "attributes" => { kind: List, derived: false, required: false, description: "Ordered attributes and alignment padding", children: ATTRIBUTES, reflect: attributes },
  }
- layout fn stun_layout();
 }
 fn stun_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = stun_layout();
     let mut fields = Vec::new();
     if 2 <= b.len() {
         fields.push(crate::layout::FieldLayout {

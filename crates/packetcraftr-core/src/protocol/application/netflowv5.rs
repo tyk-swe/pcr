@@ -55,10 +55,8 @@ crate::reflective_layer! {
     "sampling" => { kind: Unsigned, derived: false, required: false, description: "sampling", reflect: sampling },
     "records" => { kind: List, derived: false, required: false, description: "Fixed-width NetFlow v5 flow records", children: FLOW_FIELDS, reflect: records },
  }
- layout fn netflowv5_layout();
 }
 fn netflowv5_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = netflowv5_layout();
     let mut fields = Vec::new();
     if 8 <= b.len() {
         fields.push(crate::layout::FieldLayout {

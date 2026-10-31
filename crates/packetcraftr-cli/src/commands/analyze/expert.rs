@@ -51,19 +51,21 @@ pub(super) fn run(
     format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let capture_limits = arguments.limits.capture.limits()?;
     let prepared = prepare(
+        capture_limits,
         arguments.limits,
         arguments.filter.as_deref(),
         &arguments.decode,
     )?;
-    let mut reader = open_capture(invocation, &arguments.path, arguments.limits.capture.reader)?;
+    let mut reader = open_capture(invocation, &arguments.path, capture_limits.reader_bounds())?;
 
     let session = analysis::Session::new(
         prepared.registry.clone(),
         prepared.options(invocation),
         analysis::expert::Collector::default(),
     );
-    let mut state = rendering::State::new(arguments.limits.capture.retention_ceiling());
+    let mut state = rendering::State::new(capture_limits.retention_ceiling());
     let selector = analysis::expert::Selector {
         min_severity: arguments.min_severity.into(),
         codes: arguments.codes,

@@ -57,10 +57,8 @@ crate::reflective_layer! {
     "payload" => { kind: Bytes, derived: false, required: false, description: "payload", reflect: payload },
     "padding" => { kind: Bytes, derived: false, required: false, description: "padding", reflect: padding },
  }
- layout fn rtp_layout();
 }
 fn rtp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = rtp_layout();
     let mut fields = Vec::new();
     if 2 <= b.len() {
         fields.push(crate::layout::FieldLayout {

@@ -36,13 +36,11 @@ crate::reflective_layer! {
     "method_id" => { kind: Unsigned, derived: false, required: false, description: "method id", reflect: method_id },
     "payload" => { kind: Bytes, derived: false, required: false, description: "payload", reflect: payload },
  }
- layout fn amqp_layout();
 }
 fn amqp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
     if b.starts_with(b"AMQP") {
         return Vec::new();
     }
-    let _ = amqp_layout();
     let mut fields = Vec::new();
     if !b.is_empty() {
         fields.push(crate::layout::FieldLayout {

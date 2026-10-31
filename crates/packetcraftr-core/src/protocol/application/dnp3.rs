@@ -51,10 +51,8 @@ crate::reflective_layer! {
     "indications" => { kind: Unsigned, derived: false, required: false, description: "indications", reflect: indications },
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
- layout fn dnp3_layout();
 }
 fn dnp3_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = dnp3_layout();
     let mut fields = Vec::new();
     if 4 <= b.len() {
         fields.push(crate::layout::FieldLayout {

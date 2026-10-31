@@ -33,10 +33,8 @@ crate::reflective_layer! {
     "method" => { kind: Unsigned, derived: false, required: false, description: "method", reflect: method },
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
- layout fn eap_layout();
 }
 fn eap_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = eap_layout();
     let mut fields = Vec::new();
     if !b.is_empty() {
         fields.push(crate::layout::FieldLayout {

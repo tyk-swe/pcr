@@ -60,10 +60,8 @@ crate::reflective_layer! {
     "items" => { kind: List, derived: false, required: false, description: "Common Packet Format items", children: ITEMS, reflect: items },
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
- layout fn ethernetip_layout();
 }
 fn ethernetip_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = ethernetip_layout();
     let mut fields = Vec::new();
     if 2 <= b.len() {
         fields.push(crate::layout::FieldLayout {

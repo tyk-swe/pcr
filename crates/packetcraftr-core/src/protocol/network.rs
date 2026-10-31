@@ -50,6 +50,8 @@ pub(crate) use raw_ip::RawIpCodec;
 pub use vrrp::Vrrp;
 pub(crate) use vrrp::VrrpCodec;
 
+mod ospf;
+
 pub mod ospfv2;
 pub(crate) use ospfv2::Ospfv2Codec;
 

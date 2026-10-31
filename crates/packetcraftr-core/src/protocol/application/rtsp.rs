@@ -40,10 +40,8 @@ crate::reflective_layer! {
     "interleaved" => { kind: Bool, derived: false, required: false, description: "interleaved", reflect: interleaved },
     "channel" => { kind: Unsigned, derived: false, required: false, description: "channel", reflect: channel },
  }
- layout fn rtsp_layout();
 }
 fn rtsp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = rtsp_layout();
     let mut fields = Vec::new();
     if b.first() == Some(&b'$') {
         fields.push(crate::layout::FieldLayout {

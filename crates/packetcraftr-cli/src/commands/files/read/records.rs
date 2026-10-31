@@ -10,7 +10,7 @@ use packetcraftr_core::capture_file::Reader;
 
 use super::rendering::render_record;
 use super::selection::{Decoding, Selection, account_frame};
-use crate::command_options::OfflineCaptureLimitsArgs;
+use crate::command_options::OfflineCaptureLimits;
 use crate::commands::increment_counter;
 use crate::errors::CliError;
 use crate::filtering;
@@ -22,7 +22,7 @@ use crate::rendering::FieldTree;
 pub(super) fn run(
     invocation: &crate::invocation::Invocation,
     reader: &mut Reader<impl Read>,
-    limits: OfflineCaptureLimitsArgs,
+    limits: OfflineCaptureLimits,
     selection: Selection<'_>,
     format: Format,
     stream: &StreamEncoder,

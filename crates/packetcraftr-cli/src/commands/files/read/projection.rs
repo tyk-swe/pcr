@@ -15,7 +15,7 @@ pub(super) fn run(
     format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    args.limits.validate()?;
+    let limits = args.limits.limits()?;
     let bounds = args.epoch.resolve()?;
     let selection = args.selection.resolve()?;
     let registry = args.decode.registry()?;
@@ -38,7 +38,7 @@ pub(super) fn run(
             )
         })
         .transpose()?;
-    let mut reader = crate::input::open_capture(invocation, &args.path, args.limits.reader)?;
+    let mut reader = crate::input::open_capture(invocation, &args.path, limits.reader_bounds())?;
     let mut frames = 0u64;
     let mut bytes = 0u64;
     if projector.projection.requirements().stream_index
@@ -53,9 +53,9 @@ pub(super) fn run(
                 time_bounds: bounds,
                 cancellation: Some(invocation.cancellation.clone()),
                 limits: core::analysis::Limits {
-                    max_frames: args.limits.max_frames,
-                    max_bytes: args.limits.max_bytes,
-                    max_frame_bytes: args.limits.reader.max_frame_bytes,
+                    max_frames: limits.max_frames(),
+                    max_bytes: limits.max_bytes(),
+                    max_frame_bytes: limits.reader_bounds().max_frame_bytes,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -88,12 +88,15 @@ pub(super) fn run(
         frames = summary.frames_read;
         bytes = summary.bytes_read;
     } else {
-        let decoder =
-            core::filter::FrameDecoder::new(registry, filter, args.limits.reader.max_frame_bytes)
-                .map_err(CliError::classified)?;
+        let decoder = core::filter::FrameDecoder::new(
+            registry,
+            filter,
+            limits.reader_bounds().max_frame_bytes,
+        )
+        .map_err(CliError::classified)?;
         let mut budget = core::capture_file::Budget::new(core::capture_file::Limits {
-            max_frames: args.limits.max_frames,
-            max_bytes: args.limits.max_bytes,
+            max_frames: limits.max_frames(),
+            max_bytes: limits.max_bytes(),
         })
         .map_err(CliError::classified)?;
         while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {

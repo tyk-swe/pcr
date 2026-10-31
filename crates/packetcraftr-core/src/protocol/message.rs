@@ -202,7 +202,7 @@ impl Writer {
 
 /// Implement the common complete-message codec contract while retaining each protocol's parser.
 macro_rules! message_codec {
-    ($codec:ident, $ty:ident, $schema:ident, $layout:ident) => {
+    ($codec:ident, $ty:ident, $schema:ident, $layout:path) => {
         #[derive(Clone, Copy, Debug, Default)]
         pub(crate) struct $codec;
         impl crate::codec::Codec for $codec {

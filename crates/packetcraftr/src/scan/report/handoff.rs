@@ -39,13 +39,13 @@ impl Aggregate {
             {
                 continue;
             }
-            let (rank, transport, destination_port) = match (reply, probe.transport) {
-                (Reply::TcpSynAck, Transport::Tcp) => (3, Transport::Tcp, probe.port),
-                (Reply::TcpReset, Transport::Tcp) => (2, Transport::Tcp, probe.port),
+            let (rank, transport, destination_port) = match (reply, probe.endpoint.transport()) {
+                (Reply::TcpSynAck, Transport::Tcp) => (3, Transport::Tcp, probe.endpoint.port()),
+                (Reply::TcpReset, Transport::Tcp) => (2, Transport::Tcp, probe.endpoint.port()),
                 (Reply::IcmpEchoReply, Transport::Icmp) => (1, Transport::Icmp, None),
                 _ => continue,
             };
-            if transport == Transport::Tcp && probe.port.is_none_or(|port| port == 0) {
+            if transport == Transport::Tcp && probe.endpoint.port().is_none_or(|port| port == 0) {
                 continue;
             }
             let candidate = Observed {
@@ -76,14 +76,14 @@ impl Endpoint {
     /// nothing; the caller must invoke identify.
     pub fn identify_endpoint(&self) -> Option<identify::Endpoint> {
         let state = self.inference.as_ref()?.state?;
-        let transport = match self.transport {
+        let transport = match self.endpoint.transport() {
             probe::Transport::Tcp if state == State::Open => identify::Transport::Tcp,
             probe::Transport::Udp if matches!(state, State::Open | State::OpenOrFiltered) => {
                 identify::Transport::Udp
             }
             _ => return None,
         };
-        let port = self.port?;
+        let port = self.endpoint.port()?;
         let address = match self.address {
             IpAddr::V4(address) => SocketAddr::new(address.into(), port),
             IpAddr::V6(address) => SocketAddr::V6(SocketAddrV6::new(

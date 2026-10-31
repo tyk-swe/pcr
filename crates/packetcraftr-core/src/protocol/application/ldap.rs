@@ -40,10 +40,8 @@ crate::reflective_layer! {
     "fields" => { kind: List, derived: false, required: false, description: "Ordered operation BER fields", children: FIELDS, reflect: fields },
     "controls" => { kind: Bytes, derived: false, required: false, description: "controls", reflect: controls },
  }
- layout fn ldap_layout();
 }
 fn ldap_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = ldap_layout();
     let mut fields = Vec::new();
     // Reader offsets include definite BER length headers; content ranges exclude them.
     let ranges = (|| -> Result<_, Error> {

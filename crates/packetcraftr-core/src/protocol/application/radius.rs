@@ -39,10 +39,8 @@ crate::reflective_layer! {
     "authenticator" => { kind: Bytes, derived: false, required: false, description: "authenticator", reflect: authenticator },
     "attributes" => { kind: List, derived: false, required: false, description: "Ordered attributes including unknown and duplicate types", children: ATTRIBUTES, reflect: attributes },
  }
- layout fn radius_layout();
 }
 fn radius_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = radius_layout();
     let mut fields = Vec::new();
     if !b.is_empty() {
         fields.push(crate::layout::FieldLayout {

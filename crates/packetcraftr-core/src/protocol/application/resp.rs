@@ -30,10 +30,8 @@ crate::reflective_layer! {
  impl Resp {
     "value" => { kind: Object, derived: false, required: false, description: "RESP2 value with kind and typed content", children: RESP_FIELDS, reflect: value },
  }
- layout fn resp_layout();
 }
 fn resp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = resp_layout();
     let mut fields = Vec::new();
     if b.len() <= b.len() {
         fields.push(crate::layout::FieldLayout {

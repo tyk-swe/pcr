@@ -137,14 +137,6 @@
           "type": "unsigned",
           "value": 10
         },
-        "instance_id": {
-          "type": "unsigned",
-          "value": 0
-        },
-        "interface_id": {
-          "type": "unsigned",
-          "value": 0
-        },
         "lsas": {
           "type": "list",
           "value": []
@@ -168,10 +160,6 @@
         "priority": {
           "type": "unsigned",
           "value": 1
-        },
-        "reserved": {
-          "type": "unsigned",
-          "value": 0
         },
         "router_id": {
           "type": "unsigned",

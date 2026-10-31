@@ -125,10 +125,10 @@ fn prepare(
         max_bytes: policy.max_bytes_per_operation,
         reader: arguments.reader,
     };
-    capture_limits.validate()?;
+    let capture_limits = capture_limits.limits()?;
     let timing = timing(arguments)?;
     let registry = packetcraftr_core::protocol::builtin::registry();
-    let max_frame_bytes = arguments.reader.max_frame_bytes;
+    let max_frame_bytes = capture_limits.reader_bounds().max_frame_bytes;
     let filter = filtering::optional_frame_selector(
         arguments.filter.as_deref(),
         &registry,
@@ -160,7 +160,7 @@ fn prepare(
     policy.validate().map_err(CliError::classified)?;
     let limits = packetcraftr::replay::Limits::from_policy(
         &policy,
-        arguments.reader.max_frame_bytes,
+        capture_limits.reader_bounds().max_frame_bytes,
         arguments.duration.max_duration(),
     );
     limits.validate().map_err(CliError::classified)?;
@@ -174,14 +174,14 @@ fn prepare(
         allow_permissive_live: arguments.allow_permissive_live,
     };
     options.validate().map_err(CliError::classified)?;
-    let mut input = open_capture_file(invocation, &arguments.path, arguments.reader)?;
+    let mut input = open_capture_file(invocation, &arguments.path, capture_limits.reader_bounds())?;
     let reader = crate::input::snapshot_capture(
         invocation,
         &mut input,
-        arguments.reader,
+        capture_limits.reader_bounds(),
         capture::Limits {
             max_frames: limits.max_source_frames,
-            max_bytes: arguments.reader.max_decoded_bytes,
+            max_bytes: capture_limits.reader_bounds().max_decoded_bytes,
         },
     )?;
     let filtered = filter.is_some();

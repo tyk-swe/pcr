@@ -77,9 +77,9 @@ fn selected(names: &[String]) -> Result<Vec<BuiltinProtocol>, CliError> {
     names.iter().map(|name|BuiltinProtocol::from_name_or_alias(&name.to_ascii_lowercase()).filter(|p|p.stream_decode()).ok_or_else(||CliError::new(packetcraftr_core::error::Kind::Usage,format!("{name:?} is not a supported TCP message protocol; see reference protocols")))).collect()
 }
 fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
-    args.application.validate_output()?;
+    let application = args.application.limits()?;
     let collector = Collector::new(
-        args.application.core(),
+        application.core(),
         args.decode.registry()?,
         selected(&args.protocols)?,
     )
@@ -92,7 +92,7 @@ fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), Cli
             path: &args.path,
             limits: args.limits,
             decode: &args.decode,
-            application: args.application,
+            application,
             selector,
         },
         collector,

@@ -67,9 +67,9 @@ macro_rules! builtin_protocol_catalog {
             Padding { canonical: "padding", aliases: ["pad"], constructible: true, exact_round_trip: true, matcher: none, layer: [crate::layer::Padding], codec: PaddingCodec }
             Pim { canonical: "pim", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [network::pim::Pim], codec: PimCodec }
             Ppp { canonical: "ppp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Ppp], codec: PppCodec }
-            PppIpcp { canonical: "ppp_ipcp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::ppp_ipcp::PppIpcp], codec: PppIpcpCodec }
-            PppIpv6cp { canonical: "ppp_ipv6cp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::ppp_ipv6cp::PppIpv6cp], codec: PppIpv6cpCodec }
-            PppLcp { canonical: "ppp_lcp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::ppp_lcp::PppLcp], codec: PppLcpCodec }
+            PppIpcp { canonical: "ppp_ipcp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::PppIpcp], codec: PppIpcpCodec }
+            PppIpv6cp { canonical: "ppp_ipv6cp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::PppIpv6cp], codec: PppIpv6cpCodec }
+            PppLcp { canonical: "ppp_lcp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::PppLcp], codec: PppLcpCodec }
             Pppoe { canonical: "pppoe", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Pppoe], codec: PppoeCodec }
             Radius { canonical: "radius", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::radius::Radius], codec: RadiusCodec }
             Raw { canonical: "raw", aliases: ["payload", "bytes"], constructible: true, exact_round_trip: true, matcher: none, layer: [crate::layer::Raw], codec: RawCodec }
@@ -125,6 +125,10 @@ macro_rules! define_builtin_protocol {
 
             pub const fn as_str(self) -> &'static str {
                 match self { $(Self::$variant => $canonical),* }
+            }
+
+            pub const fn id(self) -> crate::layer::Id {
+                crate::layer::Id::new(self.as_str())
             }
 
             pub const fn is_constructible(self) -> bool {

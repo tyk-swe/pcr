@@ -47,10 +47,10 @@ impl crate::commands::Spec for Args {
 
 fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
     let stream = &invocation.output;
-    args.application.validate_output()?;
+    let application = args.application.limits()?;
     let mut ports = args.http_ports;
     ports.extend([80, 8080]);
-    let collector = Collector::new(args.application.core(), ports, args.max_http_body_bytes)
+    let collector = Collector::new(application.core(), ports, args.max_http_body_bytes)
         .map_err(CliError::classified)?;
     let selector = require_tcp_stream(args.stream.as_ref(), "HTTP/1")?;
     let (mut messages, mut issues) = (Vec::new(), Vec::new());
@@ -60,7 +60,7 @@ fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), Cli
             path: &args.path,
             limits: args.limits,
             decode: &args.decode,
-            application: args.application,
+            application,
             selector,
         },
         collector,

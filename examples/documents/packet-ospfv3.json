@@ -72,23 +72,6 @@
           "type": "unsigned",
           "value": 0
         },
-        "auth_data": {
-          "type": "bytes",
-          "value": [
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0
-          ]
-        },
-        "auth_type": {
-          "type": "unsigned",
-          "value": 0
-        },
         "backup_router": {
           "type": "unsigned",
           "value": 0
@@ -128,10 +111,6 @@
         "neighbors": {
           "type": "list",
           "value": []
-        },
-        "network_mask": {
-          "type": "unsigned",
-          "value": 0
         },
         "options": {
           "type": "unsigned",

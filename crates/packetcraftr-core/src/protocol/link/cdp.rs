@@ -39,10 +39,8 @@ crate::reflective_layer! {
     "checksum" => { kind: Unsigned, derived: true, required: false, description: "checksum", reflect: checksum },
     "tlvs" => { kind: List, derived: false, required: false, description: "Ordered CDP TLVs including unknown types", children: TLVS, reflect: tlvs },
  }
- layout fn cdp_layout();
 }
 fn cdp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = cdp_layout();
     let mut fields = Vec::new();
     if !b.is_empty() {
         fields.push(crate::layout::FieldLayout {

@@ -9,6 +9,8 @@ from pathlib import Path
 import re
 import sys
 
+from rust_source import blank_comments_and_strings
+
 LAYERS = {
     "packetcraftr-core": {
         ("error",): 1, ("diagnostic",): 1, ("budget",): 1, ("field",): 1,
@@ -22,9 +24,11 @@ LAYERS = {
     "packetcraftr": {
         ("clock",): 1, ("deadline",): 1,
         ("engine", "stats"): 1, ("engine", "correlation"): 1,
+        ("probe", "model"): 1,
         ("error",): 2, ("policy",): 2, ("target",): 2, ("route",): 2,
         ("neighbor",): 2, ("providers",): 2, ("runtime",): 2, ("client",): 2,
-        ("engine",): 3, ("evidence",): 3,
+        ("evidence", "error"): 2,
+        ("engine",): 3, ("evidence",): 3, ("send", "options"): 3,
         ("send",): 4, ("exchange",): 4, ("capture",): 4, ("probe",): 4,
         ("dns",): 5, ("traceroute",): 5, ("os",): 5, ("identify",): 5,
         ("replay",): 5, ("fuzz",): 5, ("audit",): 5, ("target", "plan"): 5,
@@ -50,12 +54,6 @@ LAYERS = {
 }
 
 ALLOWLIST = (
-    ("packetcraftr", ("engine", "correlation"), ("probe", "Transport"),
-     "identity type documented as living with probe in packetcraftr lib.rs"),
-    ("packetcraftr", ("engine", "preparation"), ("send", "Options"),
-     "options type documented as living with send in packetcraftr lib.rs"),
-    ("packetcraftr", ("error",), ("evidence", "Error"),
-     "error wrapping documented by the InvalidEvidence variant"),
     ("packetcraftr-netio", ("capture",), ("platform",),
      "system provider dispatch documented in packetcraftr-netio lib.rs"),
     ("packetcraftr-netio", ("route",), ("platform",),
@@ -75,56 +73,6 @@ ALLOWLIST = (
 SEGMENT = r"[A-Za-z_][A-Za-z0-9_]*"
 PATH_START = re.compile(rf"\b(crate|super|self)((?:::{SEGMENT})*)(::\{{)?")
 CFG_TEST = re.compile(r"#\[cfg\(test\)\]")
-CHAR_LITERAL = re.compile(r"'(?:\\.|[^\\'])'")
-
-
-def strip_comments_and_strings(text: str) -> str:
-    out = []
-    i = 0
-    while i < len(text):
-        pair = text[i:i + 2]
-        if pair == "//":
-            end = text.find("\n", i)
-            i = len(text) if end == -1 else end
-        elif pair == "/*":
-            depth = 1
-            i += 2
-            while i < len(text) and depth:
-                if text[i:i + 2] == "/*":
-                    depth += 1
-                    i += 2
-                elif text[i:i + 2] == "*/":
-                    depth -= 1
-                    i += 2
-                else:
-                    i += 1
-            out.append(" ")
-        elif text[i] in "brc" and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")) \
-                and re.match(r"(?:br|cr|r)(#+)?\"", text[i:]):
-            opening = re.match(r"(?:br|cr|r)(#+)?\"", text[i:])
-            hashes = opening.group(1) or ""
-            closing = '"' + hashes
-            end = text.find(closing, i + opening.end())
-            i = len(text) if end == -1 else end + len(closing)
-            out.append('""')
-        elif text[i] == '"':
-            i += 1
-            while i < len(text) and text[i] != '"':
-                i += 2 if text[i] == "\\" else 1
-            i += 1
-            out.append('""')
-        elif text[i] == "'":
-            literal = CHAR_LITERAL.match(text, i)
-            if literal:
-                out.append("'x'")
-                i = literal.end()
-            else:
-                out.append(text[i])
-                i += 1
-        else:
-            out.append(text[i])
-            i += 1
-    return "".join(out)
 
 
 def balanced_end(text: str, opening: int) -> int:
@@ -332,7 +280,7 @@ def scoped_paths(
 def crate_paths(
     text: str, owner: tuple[str, ...] = ()
 ) -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
-    text = VISIBILITY.sub("pub", strip_test_items(strip_comments_and_strings(text)))
+    text = VISIBILITY.sub("pub", strip_test_items(blank_comments_and_strings(text)))
     return scoped_paths(text, owner)
 
 

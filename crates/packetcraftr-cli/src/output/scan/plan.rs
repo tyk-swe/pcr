@@ -131,7 +131,7 @@ impl Discovery {
                     transport: probe.transport(),
                     port: probe.port(),
                     ip_protocol: probe.ip_protocol(),
-                    icmp_request: probe.icmp_request_kind().filter(|kind| *kind != "echo"),
+                    icmp_request: super::probe::icmp_request(*probe),
                     tcp_scan: matches!(probe, packetcraftr::probe::Endpoint::TcpAck { .. })
                         .then(|| TcpScan::from(library::TcpScan::Ack)),
                 })

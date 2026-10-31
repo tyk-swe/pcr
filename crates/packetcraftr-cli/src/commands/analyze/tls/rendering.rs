@@ -8,6 +8,7 @@ use crate::output::contract::Format;
 
 use packetcraftr_core as core;
 use packetcraftr_core::analysis;
+use packetcraftr_core::protocol::BuiltinProtocol;
 
 use crate::output;
 
@@ -138,9 +139,9 @@ fn render_empty(
         ),
     )?;
     let mut ports: Vec<u16> = registry
-        .parent_bindings("tls")
+        .parent_bindings(BuiltinProtocol::Tls.as_str())
         .into_iter()
-        .filter(|(parent, _)| parent.as_str() == "tcp")
+        .filter(|(parent, _)| *parent == BuiltinProtocol::Tcp.id())
         .filter_map(|(_, port)| u16::try_from(port.0).ok())
         .collect();
     ports.sort_unstable();

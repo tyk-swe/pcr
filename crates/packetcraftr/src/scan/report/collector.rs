@@ -19,8 +19,15 @@ use super::model::{
 #[derive(Clone, Default)]
 pub struct Collector(Shared<Collected>);
 
-/// Endpoint identity: TCP, UDP, SCTP, and IP protocol numbers on one address never merge.
+/// Endpoint identity: the probed endpoint and interface on one address never merge.
 pub(in crate::scan) type EndpointKey = (
+    IpAddr,
+    crate::probe::Endpoint,
+    Option<packetcraftr_netio::interface::Id>,
+);
+
+/// Classification winners stay keyed by the flattened endpoint parts.
+pub(in crate::scan) type WinnerKey = (
     IpAddr,
     Transport,
     Option<u16>,
@@ -107,28 +114,26 @@ impl Collected {
             return;
         }
         let address = evidence.address;
-        let transport = evidence.transport;
-        let port = evidence.port;
-        let ip_protocol = evidence.ip_protocol;
+        let endpoint_kind = evidence.endpoint;
         let scope = evidence.scope.clone();
         let interface = scope.as_ref().map(|scope| scope.interface.clone());
         let endpoint_index = self
             .endpoint_indices
-            .get(&(address, transport, port, ip_protocol, interface.clone()))
+            .get(&(address, endpoint_kind, interface.clone()))
             .copied()
             .unwrap_or(self.endpoints.len());
         let endpoint = index_or_push(
             &mut self.endpoints,
             &mut self.endpoint_indices,
-            (address, transport, port, ip_protocol, interface),
+            (address, endpoint_kind, interface),
             || Endpoint {
                 address,
                 scope,
-                transport,
-                port,
-                ip_protocol,
+                endpoint: endpoint_kind,
                 classification: Classification::Timeout,
-                port_hint: port.and_then(|port| scan::catalog::hint(transport, port)),
+                port_hint: endpoint_kind
+                    .port()
+                    .and_then(|port| scan::catalog::hint(endpoint_kind.transport(), port)),
                 inference: None,
                 probes: Vec::new(),
             },
@@ -169,7 +174,7 @@ impl Collector {
         for endpoint in &mut endpoints {
             endpoint.probes.sort_by_key(|probe| probe.sequence);
             endpoint.inference = inference::raw(
-                endpoint.transport,
+                endpoint.endpoint.transport(),
                 endpoint.probes.iter().map(|probe| inference::Attempt {
                     sequence: probe.sequence,
                     measurement: probe.measurement,

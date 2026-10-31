@@ -162,7 +162,9 @@ pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {
         }
         Some(BuiltinProtocol::Malformed) if registered_dns => payload
             .downcast_ref::<packetcraftr_core::layer::Malformed>()
-            .filter(|layer| layer.intended_protocol.as_deref() == Some("dns"))
+            .filter(|layer| {
+                layer.intended_protocol.as_deref() == Some(BuiltinProtocol::Dns.as_str())
+            })
             .map(|layer| layer.bytes.clone()),
         Some(BuiltinProtocol::Raw) => payload.downcast_ref::<Raw>().map(|raw| raw.bytes.clone()),
         _ => None,

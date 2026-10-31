@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 mod limits;
-mod model;
+pub(crate) mod model;
 mod reply;
 pub(crate) mod runner;
 

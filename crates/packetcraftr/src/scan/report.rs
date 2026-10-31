@@ -7,7 +7,7 @@ mod model;
 mod rtt;
 
 pub use collector::Collector;
-pub(in crate::scan) use collector::EndpointKey;
+pub(in crate::scan) use collector::WinnerKey;
 pub use model::{
     Aggregate, Attribution, Classification, ClassificationCounts, Endpoint, Event, PendingEvidence,
     ProbeEvidence, Report, Rtt, SentProbe, Unattributed,

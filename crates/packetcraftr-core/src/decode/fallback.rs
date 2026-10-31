@@ -61,7 +61,7 @@ pub(super) fn append_malformed(
     ));
     layouts.push(LayerLayout {
         index,
-        protocol: crate::layer::Id::new(BuiltinProtocol::Malformed.as_str()),
+        protocol: BuiltinProtocol::Malformed.id(),
         range: ByteRange::new(absolute_offset, end),
         fields: Vec::new(),
     });

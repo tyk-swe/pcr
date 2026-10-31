@@ -69,10 +69,8 @@ crate::reflective_layer! {
     "secure_channel" => { kind: Unsigned, derived: false, required: false, description: "secure channel", reflect: secure_channel },
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
- layout fn opcuatcp_layout();
 }
 fn opcuatcp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let _ = opcuatcp_layout();
     let mut fields = Vec::new();
     if 3 <= b.len() {
         fields.push(crate::layout::FieldLayout {

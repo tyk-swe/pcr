@@ -4,17 +4,7 @@
 use packetcraftr_core::template::{DEFAULT_MAX_TEMPLATE_PACKETS, Template};
 
 use super::Error;
-use crate::route;
-
-/// How every packet of one send is routed, built, and authorized on its way to the wire.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Options {
-    pub destination: Option<std::net::IpAddr>,
-    pub plan: route::Options,
-    pub build: packetcraftr_core::build::Options,
-    /// Second explicit opt-in required in addition to policy approval.
-    pub allow_permissive_live: bool,
-}
+use super::options::Options;
 
 #[derive(Clone, Debug)]
 pub struct Request {

@@ -15,7 +15,7 @@ use std::path::Path;
 use analysis::{StreamRef, StreamTransport};
 use packetcraftr_core::error::Kind;
 
-use crate::command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, Selector};
+use crate::command_options::{DecodeArgs, OfflineLimitsArgs, Selector};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::output::contract::{Command, Format};
@@ -50,24 +50,23 @@ impl AnalysisSetup {
 }
 
 pub(super) fn prepare(
+    capture_limits: crate::command_options::OfflineCaptureLimits,
     limits: OfflineLimitsArgs,
     filter_source: Option<&str>,
     decode: &DecodeArgs,
 ) -> Result<AnalysisSetup, CliError> {
-    let capture = limits.capture;
     let duration = limits.duration;
     let ip_overlap = limits.ip_overlap.into();
     let time_bounds = limits.epoch.resolve()?;
-    capture.validate()?;
     let registry = decode.registry()?;
     let filter = filter_source
         .map(|source| filtering::compile(source, &registry, Capabilities::stream_capable()))
         .transpose()?;
     let limits = analysis::Limits {
         max_provenance_bytes: limits.max_provenance_bytes,
-        max_frames: capture.max_frames,
-        max_bytes: capture.max_bytes,
-        max_frame_bytes: capture.reader.max_frame_bytes,
+        max_frames: capture_limits.max_frames(),
+        max_bytes: capture_limits.max_bytes(),
+        max_frame_bytes: capture_limits.reader_bounds().max_frame_bytes,
         max_flows: limits.max_flows,
         max_scope_bytes: limits.max_scope_bytes,
         // Each conversation occupies one TCP reassembly flow per direction.
@@ -103,7 +102,7 @@ pub(super) struct Inspection<'a> {
     pub(super) path: &'a Path,
     pub(super) limits: OfflineLimitsArgs,
     pub(super) decode: &'a DecodeArgs,
-    pub(super) application: ApplicationLimitsArgs,
+    pub(super) application: crate::command_options::ApplicationLimits,
     pub(super) selector: Option<StreamRef>,
 }
 
@@ -120,7 +119,8 @@ pub(super) fn inspect<C: analysis::Collector>(
         application,
         selector,
     } = inspection;
-    let setup = prepare(limits, None, decode)?;
+    let capture_limits = limits.capture.limits()?;
+    let setup = prepare(capture_limits, limits, None, decode)?;
     // The session raises the TCP/source-tracking flags from the collector's declared needs.
     let session = analysis::Session::new(
         setup.registry.clone(),
@@ -130,8 +130,8 @@ pub(super) fn inspect<C: analysis::Collector>(
         },
         collector,
     );
-    let mut reader = crate::input::open_capture(invocation, path, limits.capture.reader)?;
-    let mut output = EventOutput::new(invocation, application.max_application_output_bytes);
+    let mut reader = crate::input::open_capture(invocation, path, capture_limits.reader_bounds())?;
+    let mut output = EventOutput::new(invocation, application.max_output_bytes());
     let outcome = session
         .run(
             &mut reader,

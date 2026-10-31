@@ -124,7 +124,8 @@ mod tests {
             });
             let target = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
             let mut reply = None;
-            for _ in 0..12 {
+            let probe_deadline = std::time::Instant::now() + Duration::from_secs(3);
+            while std::time::Instant::now() < probe_deadline {
                 if handle.is_finished() {
                     break;
                 }
@@ -132,11 +133,14 @@ mod tests {
                     .send_to(b"not a canary", target)
                     .expect("send junk");
                 probe_socket.send_to(&payload, target).expect("send probe");
-                if let Ok((len, _)) = probe_socket.recv_from(&mut buffer) {
-                    reply = canary::parse_reply(&buffer[..len]);
-                    if reply.is_some() {
-                        break;
+                match probe_socket.recv_from(&mut buffer) {
+                    Ok((len, _)) => {
+                        reply = canary::parse_reply(&buffer[..len]);
+                        if reply.is_some() {
+                            break;
+                        }
                     }
+                    Err(_) => thread::sleep(Duration::from_millis(50)),
                 }
             }
             if reply.is_some() {

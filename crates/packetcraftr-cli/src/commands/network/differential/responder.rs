@@ -250,14 +250,18 @@ mod tests {
         let target = (Ipv4Addr::LOCALHOST, port);
         let mut buffer = [0_u8; 128];
         let mut answered = false;
-        for _ in 0..12 {
+        let probe_deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while std::time::Instant::now() < probe_deadline {
             if handle.is_finished() {
                 break;
             }
             probe_socket.send_to(&payload, target).expect("probe sends");
-            if probe_socket.recv_from(&mut buffer).is_ok() {
-                answered = true;
-                break;
+            match probe_socket.recv_from(&mut buffer) {
+                Ok(_) => {
+                    answered = true;
+                    break;
+                }
+                Err(_) => thread::sleep(Duration::from_millis(50)),
             }
         }
         if !answered {

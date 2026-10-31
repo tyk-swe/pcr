@@ -133,24 +133,31 @@ impl<P: PacketProviders, K: Clock> Runner for ClientRunner<'_, P, K> {
                 attempt: u64::from(attempt_seq),
                 source: BoundaryError::from_error(source),
             })?;
-        if evidence.observation_quality == ObservationQuality::Incomplete {
-            return Err(Error::IncompleteEvidence {
-                attempt: u64::from(attempt_seq),
-            });
-        }
-        let aggregate = evidence.aggregate;
-        let reply = aggregate
-            .responses
-            .first()
-            .map(|response| response.response.frame.clone());
-        Ok(AttemptOutcome {
-            answered: !aggregate.responses.is_empty(),
-            packets_sent: aggregate.sent.len(),
-            reply,
-            diagnostics: aggregate.diagnostics,
-            stats: aggregate.stats,
-        })
+        outcome_from_evidence(evidence, attempt_seq)
     }
+}
+
+fn outcome_from_evidence(
+    evidence: crate::exchange::WorkflowEvidence,
+    attempt_seq: u32,
+) -> Result<AttemptOutcome, Error> {
+    if evidence.observation_quality == ObservationQuality::Incomplete {
+        return Err(Error::IncompleteEvidence {
+            attempt: u64::from(attempt_seq),
+        });
+    }
+    let aggregate = evidence.aggregate;
+    let reply = aggregate
+        .responses
+        .first()
+        .map(|response| response.response.frame.clone());
+    Ok(AttemptOutcome {
+        answered: !aggregate.responses.is_empty(),
+        packets_sent: aggregate.sent.len(),
+        reply,
+        diagnostics: aggregate.diagnostics,
+        stats: aggregate.stats,
+    })
 }
 
 pub(super) fn run_campaign<R: Runner>(
@@ -460,6 +467,36 @@ mod tests {
             &sent,
             &reply_from(target, 9999),
         ));
+    }
+
+    fn workflow_evidence(quality: ObservationQuality) -> crate::exchange::WorkflowEvidence {
+        crate::exchange::WorkflowEvidence {
+            observation_quality: quality,
+            aggregate: crate::exchange::Aggregate {
+                sent: Vec::new(),
+                responses: Vec::new(),
+                unanswered: Vec::new(),
+                unsolicited: Vec::new(),
+                undecoded: Vec::new(),
+                diagnostics: Vec::new(),
+                stats: Stats::default(),
+            },
+            unsolicited_ingress: Vec::new(),
+            response_deadline: std::time::Instant::now(),
+        }
+    }
+
+    #[test]
+    fn incomplete_capture_evidence_fails_instead_of_reading_as_unanswered() {
+        let outcome = outcome_from_evidence(workflow_evidence(ObservationQuality::Incomplete), 7);
+        assert!(matches!(
+            outcome,
+            Err(Error::IncompleteEvidence { attempt: 7 })
+        ));
+        let answered =
+            outcome_from_evidence(workflow_evidence(ObservationQuality::NoReportedLoss), 7)
+                .expect("complete evidence converts");
+        assert!(!answered.answered);
     }
 
     #[test]

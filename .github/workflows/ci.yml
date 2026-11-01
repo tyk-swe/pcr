@@ -295,8 +295,8 @@ jobs:
       - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-llvm-cov
-      - name: Enforce packetcraftr line coverage floor (measured 25.67%)
-        run: cargo llvm-cov --locked -p packetcraftr --all-features --fail-under-lines 25 --summary-only
+      - name: Enforce packetcraftr line coverage floor (measured 30.08%)
+        run: cargo llvm-cov --locked -p packetcraftr --all-features --fail-under-lines 30 --summary-only
       - name: Install cargo-mutants
         run: cargo install --locked cargo-mutants
       # The excluded decode_response mutant swaps | for ^ on disjoint bit
@@ -316,11 +316,90 @@ jobs:
           rm -rf target/*/incremental
           find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
 
-  fuzz:
-    name: Parser fuzzing
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+  # Mutation gates on repaired security boundaries. A timeout means the
+  # mutant hung the tests (for example an infinite read loop), so it is
+  # accepted only when missed.txt is empty; cargo-mutants reports timeouts
+  # ahead of misses in its exit code.
+  test-quality-boundaries:
+    name: Mutation gates (security boundaries)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install native development library
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: Restore Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
+      - name: Install cargo-mutants
+        run: cargo install --locked cargo-mutants
+      - name: Enforce mutation gates (all viable mutants caught when measured)
+        shell: bash
+        run: |
+          gate() {
+            local name="$1"; shift
+            local status=0
+            cargo mutants -o "mutants/$name" "$@" || status=$?
+            if [ "$status" -ne 0 ] && [ "$status" -ne 3 ]; then
+              return "$status"
+            fi
+            if [ -s "mutants/$name/mutants.out/missed.txt" ]; then
+              cat "mutants/$name/mutants.out/missed.txt"
+              return 2
+            fi
+          }
+          # audit and policy declarations: 57 caught, 26 unviable.
+          gate audit -p packetcraftr \
+            -f crates/packetcraftr/src/audit.rs \
+            -f crates/packetcraftr/src/policy/operation.rs
+          # CSP, X-Frame-Options, and HSTS parsing: 75 caught, 2 timeouts, 7 unviable.
+          gate http-policy -p packetcraftr-core \
+            -f crates/packetcraftr-core/src/security/http/policy.rs
+          # MQTT fields a packet type does not carry: 46 caught, 3 unviable.
+          gate mqtt -p packetcraftr-core \
+            -f crates/packetcraftr-core/src/protocol/application/mqtt.rs -F uncarried
+          # Staged output and cancellable input: 52 caught, 7 timeouts, 20 unviable.
+          # Exclusions: `|` to `^` on disjoint open flags is equivalent; the
+          # cfg(not(unix)) bodies are not compiled on Linux; CLOEXEC and
+          # NOFOLLOW on an unpredictable 64-bit staging name, the renameat2
+          # fallback errno set, a WouldBlock after a ready poll, and the
+          # forced-exit staging removal cannot be reached deterministically.
+          gate staged-input -p packetcraftr-cli \
+            -f crates/packetcraftr-cli/src/staged_output.rs \
+            -f crates/packetcraftr-cli/src/staged_output/unix.rs \
+            -f crates/packetcraftr-cli/src/input/source.rs \
+            -E 'replace \| with \^ in (Directory::open|Directory::stage|anchored)' \
+            -E 'unix.rs:65:76: replace \| with & in Directory::stage' \
+            -E 'source.rs:(83|88):5: replace (open|stdin) -> io::Result<Source>' \
+            -E 'source.rs:144:24: replace match guard .* with false' \
+            -E 'match guard \[Errno::INVAL, Errno::NOSYS, Errno::OPNOTSUPP, Errno::NOTSUP\]' \
+            -E 'replace <impl StagedEntry for StagingName>::remove with \(\)'
+      - name: Upload mutation results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutation-results
+          path: mutants
+          if-no-files-found: ignore
+      - name: Drop workspace artifacts from the Cargo cache
+        shell: bash
+        run: |
+          rm -rf target/*/incremental
+          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+
+  fuzz-smoke:
+    name: Fuzz smoke run
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the nightly toolchain and cargo-fuzz
@@ -335,19 +414,71 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             fuzz/target
-          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fuzz/Cargo.toml', 'fuzz/Cargo.lock', '**/Cargo.toml', 'Cargo.lock') }}
+          key: ci-v1-fuzz-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fuzz/Cargo.toml', 'fuzz/Cargo.lock', '**/Cargo.toml', 'Cargo.lock') }}
+      # Pull requests only read the evolved corpus; the scheduled job owns updates.
+      - name: Restore the evolved fuzz corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-v1-${{ github.run_id }}
+          restore-keys: fuzz-corpus-v1-
       - name: Seed corpora from checked-in examples
+        run: scripts/fuzz_seed_corpora.sh
+      - name: Fuzz every target briefly
         shell: bash
         run: |
-          mkdir -p fuzz/corpus/capture_read fuzz/corpus/packet_decode fuzz/corpus/document_parse fuzz/corpus/dns_message
-          cp examples/captures/*.pcap examples/captures/*.pcapng fuzz/corpus/capture_read/
-          python3 scripts/fuzz_seeds.py --packet-dir fuzz/corpus/packet_decode --dns-dir fuzz/corpus/dns_message examples/captures/*.pcap
-          cp examples/documents/*.json fuzz/corpus/document_parse/
+          for target in $(cargo +nightly fuzz list --fuzz-dir fuzz); do
+            cargo +nightly fuzz run --fuzz-dir fuzz "$target" -- -max_total_time=20 -rss_limit_mb=2048
+          done
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-smoke-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore
+
+  fuzz:
+    name: Parser fuzzing
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the nightly toolchain and cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install --locked cargo-fuzz
+      - name: Restore Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            fuzz/target
+          key: ci-v1-fuzz-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fuzz/Cargo.toml', 'fuzz/Cargo.lock', '**/Cargo.toml', 'Cargo.lock') }}
+      # A per-run key with a prefix restore lets every scheduled run save its
+      # minimized corpus while the next run starts from the latest one.
+      - name: Restore and save the evolved fuzz corpus
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-v1-${{ github.run_id }}
+          restore-keys: fuzz-corpus-v1-
+      - name: Seed corpora from checked-in examples
+        run: scripts/fuzz_seed_corpora.sh
       - name: Fuzz every target
         shell: bash
         run: |
-          for target in capture_read packet_decode document_parse dns_message; do
-            cargo +nightly fuzz run "$target" -- -max_total_time=120 -rss_limit_mb=2048
+          for target in $(cargo +nightly fuzz list --fuzz-dir fuzz); do
+            cargo +nightly fuzz run --fuzz-dir fuzz "$target" -- -max_total_time=120 -rss_limit_mb=2048
+          done
+      - name: Minimize every corpus
+        shell: bash
+        run: |
+          for target in $(cargo +nightly fuzz list --fuzz-dir fuzz); do
+            cargo +nightly fuzz cmin --fuzz-dir fuzz "$target"
           done
       - name: Upload crash artifacts
         if: failure()
@@ -355,4 +486,12 @@ jobs:
         with:
           name: fuzz-artifacts
           path: fuzz/artifacts
+          if-no-files-found: ignore
+      - name: Upload the minimized corpus
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-corpus
+          path: fuzz/corpus
+          retention-days: 14
           if-no-files-found: ignore

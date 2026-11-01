@@ -20,10 +20,10 @@ pub fn audit(head: &Head, subject: &str, https: bool) -> Report {
             .collect::<Vec<_>>()
     };
     let csp = values("content-security-policy");
-    let framing = csp.iter().any(|value| policy::framing_csp(value))
-        || values("x-frame-options")
-            .iter()
-            .any(|v| ["deny", "sameorigin"].contains(&v.trim().to_ascii_lowercase().as_str()));
+    let framing = policy::framing_protected(
+        head.values("content-security-policy"),
+        head.values("x-frame-options"),
+    );
     let checks = [
         (
             "http.csp",
@@ -200,6 +200,161 @@ mod tests {
         .unwrap()
         .unwrap();
         audit(&head, "example.test", true)
+    }
+
+    fn framed(extra: &[u8]) -> bool {
+        let (head, _) = crate::protocol::application::http::parse_head(&bytes::Bytes::from(
+            [b"HTTP/1.1 200 OK\r\n", extra, b"\r\n"].concat(),
+        ))
+        .unwrap()
+        .unwrap();
+        audit(&head, "example.test", true)
+            .findings
+            .iter()
+            .any(|finding| finding.rule_id == "http.framing")
+    }
+
+    fn assert_framing(expected: bool, cases: &[&str]) {
+        for case in cases {
+            assert_eq!(framed(case.as_bytes()), expected, "{case:?}");
+        }
+    }
+
+    #[test]
+    fn wildcard_frame_ancestors_overrides_x_frame_options_deny() {
+        assert!(framed(
+            b"Content-Security-Policy: frame-ancestors *\r\nX-Frame-Options: DENY\r\n"
+        ));
+    }
+
+    #[test]
+    fn unconfirmed_frame_ancestors_overrides_x_frame_options() {
+        assert_framing(
+            true,
+            &[
+                "Content-Security-Policy: frame-ancestors https:\r\nX-Frame-Options: DENY\r\n",
+                "Content-Security-Policy: frame-ancestors https://*\r\nX-Frame-Options: DENY\r\n",
+                "Content-Security-Policy: frame-ancestors\r\nX-Frame-Options: DENY\r\n",
+                "Content-Security-Policy: frame-ancestors 'unsafe-inline'\r\nX-Frame-Options: DENY\r\n",
+                "Content-Security-Policy: default-src 'self'; frame-ancestors *\r\nX-Frame-Options: SAMEORIGIN\r\n",
+            ],
+        );
+    }
+
+    #[test]
+    fn x_frame_options_applies_when_no_policy_has_frame_ancestors() {
+        assert_framing(
+            false,
+            &[
+                "X-Frame-Options: DENY\r\n",
+                "X-Frame-Options: sameorigin\r\n",
+                "X-Frame-Options: DENY\r\nX-Frame-Options: deny\r\n",
+                "X-Frame-Options: DENY, SAMEORIGIN\r\n",
+                "X-Frame-Options: \"x\",deny\r\n",
+                "X-Frame-Options: ALLOWALL\r\nX-Frame-Options: garbage\r\n",
+                "Content-Security-Policy: default-src 'self'\r\nX-Frame-Options: DENY\r\n",
+                "Content-Security-Policy-Report-Only: frame-ancestors *\r\nX-Frame-Options: DENY\r\n",
+            ],
+        );
+        assert_framing(
+            true,
+            &[
+                "",
+                "X-Frame-Options:\r\n",
+                "X-Frame-Options: ALLOWALL\r\n",
+                "X-Frame-Options: garbage\r\n",
+                "X-Frame-Options: ALLOW-FROM https://a.example\r\n",
+                "X-Frame-Options: one, two\r\n",
+                "X-Frame-Options: \"x, deny, y\"\r\n",
+                "X-Frame-Options: \"x\r\nX-Frame-Options: deny\r\n",
+                "X-Frame-Options: \"\\\", deny, \"\r\n",
+                "X-Frame-Options: ALLOWALL\r\nX-Frame-Options: allowall\r\n",
+                "Content-Security-Policy-Report-Only: frame-ancestors 'none'\r\n",
+            ],
+        );
+    }
+
+    #[test]
+    fn restrictive_frame_ancestors_protect() {
+        assert_framing(
+            false,
+            &[
+                "Content-Security-Policy: frame-ancestors 'none'\r\n",
+                "Content-Security-Policy: FrAmE-AnCeStOrS 'NONE'\r\n",
+                "Content-Security-Policy: frame-ancestors 'self'\r\nX-Frame-Options: ALLOWALL\r\n",
+                "Content-Security-Policy: frame-ancestors https://a.example\r\n",
+                "Content-Security-Policy: frame-ancestors *.a.example a.example:443/path https://b.example:*\r\n",
+                "Content-Security-Policy: frame-ancestors 'none' 'self'\r\n",
+                "Content-Security-Policy: frame-ancestors 'self' 'unsafe-inline'\r\n",
+            ],
+        );
+    }
+
+    #[test]
+    fn frame_ancestors_admitting_any_origin_do_not_protect() {
+        assert_framing(
+            true,
+            &[
+                "Content-Security-Policy: frame-ancestors *\r\n",
+                "Content-Security-Policy: frame-ancestors https:\r\n",
+                "Content-Security-Policy: frame-ancestors https://*\r\n",
+                "Content-Security-Policy: frame-ancestors 'self' *:443\r\n",
+                "Content-Security-Policy: frame-ancestors 'self' https://*\r\n",
+                "Content-Security-Policy: frame-ancestors 'self' https:\r\n",
+                "Content-Security-Policy: frame-ancestors 'none' https://*\r\n",
+                "Content-Security-Policy: frame-ancestors 'nonce-abc' 'sha256-abc='\r\n",
+            ],
+        );
+    }
+
+    #[test]
+    fn every_enforced_policy_must_allow_framing() {
+        assert_framing(
+            false,
+            &[
+                "Content-Security-Policy: frame-ancestors *, frame-ancestors 'none'\r\n",
+                "Content-Security-Policy: frame-ancestors *\r\nContent-Security-Policy: frame-ancestors 'self'\r\n",
+            ],
+        );
+        assert_framing(
+            true,
+            &[
+                "Content-Security-Policy: frame-ancestors *, frame-ancestors https:\r\nX-Frame-Options: DENY\r\n",
+                "Content-Security-Policy: frame-ancestors *\r\nContent-Security-Policy: frame-ancestors https:\r\nX-Frame-Options: DENY\r\n",
+                "Content-Security-Policy: default-src 'self', frame-ancestors *\r\nX-Frame-Options: DENY\r\n",
+            ],
+        );
+    }
+
+    #[test]
+    fn only_the_first_frame_ancestors_directive_in_a_policy_counts() {
+        assert!(framed(
+            b"Content-Security-Policy: frame-ancestors *; frame-ancestors 'none'\r\n"
+        ));
+        assert!(!framed(
+            b"Content-Security-Policy: frame-ancestors 'none'; frame-ancestors *\r\n"
+        ));
+    }
+
+    #[test]
+    fn non_ascii_input_never_becomes_protection() {
+        assert_framing(
+            true,
+            &[
+                "Content-Security-Policy: frame-ancestors\u{a0}'none'\r\n",
+                "Content-Security-Policy: frame-ancestors 'none'\u{a0}\r\n",
+                "Content-Security-Policy: frame-ancestors 'self' \u{a0}\r\n",
+                "X-Frame-Options: DENY\u{a0}\r\n",
+            ],
+        );
+        assert!(framed(
+            b"Content-Security-Policy: frame-ancestors \xff'none'\r\n"
+        ));
+        assert!(framed(b"X-Frame-Options: DENY\xff\r\n"));
+        assert!(!framed(
+            "Content-Security-Policy: frame-ancestors\u{a0}*\r\nX-Frame-Options: DENY\r\n"
+                .as_bytes()
+        ));
     }
 
     #[test]

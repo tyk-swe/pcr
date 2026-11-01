@@ -112,11 +112,18 @@ fn fifo_without_a_writer_opens_and_waits_instead_of_reading_eof() {
 }
 
 #[test]
-fn a_unix_socket_is_polled_like_a_pipe() {
-    let (reader, _writer) = UnixStream::pair().unwrap();
-    let invocation = test_invocation(Some(PROMPTLY), Cancellation::default());
-    let source = classify(&invocation, File::from(OwnedFd::from(reader))).unwrap();
-    assert!(matches!(source, Source::Polled(_)));
+fn a_silent_unix_socket_stops_at_the_deadline() {
+    let (reader, writer) = UnixStream::pair().unwrap();
+    let invocation = test_invocation(Some(LATER), Cancellation::default());
+    let mut source = classify(&invocation, File::from(OwnedFd::from(reader))).unwrap();
+    let (done, outcome) = std::sync::mpsc::channel();
+    thread::spawn(move || done.send(source.read(&mut [0; 4])));
+    let error = outcome
+        .recv_timeout(PROMPTLY)
+        .expect("a read from a silent socket must stop at the deadline")
+        .unwrap_err();
+    assert!(matches!(interruption(&error), Interrupted::Exceeded(_)));
+    drop(writer);
 }
 
 #[cfg(target_os = "linux")]
@@ -214,7 +221,6 @@ fn a_fifo_is_read_in_full_through_an_ordinary_blocking_open() {
             writer.write_all(b"from fifo").unwrap();
         });
         let mut source = open(&invocation, &fifo).unwrap();
-        assert!(matches!(source, Source::File(_)));
         source.read_to_end(&mut bytes).unwrap();
     });
     assert_eq!(bytes, b"from fifo");

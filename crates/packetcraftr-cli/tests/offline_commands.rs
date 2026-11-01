@@ -205,7 +205,7 @@ fn files_read_mqtt_capture_as_json_exits_zero_with_json_envelope() {
         "JSON stdout should be a single object, got:\n{text}"
     );
     assert!(
-        trimmed.contains("\"packetcraftr.output/v1\""),
+        trimmed.contains("\"packetcraftr.output/v19\""),
         "JSON stdout should carry the owned output schema value, got:\n{text}"
     );
     assert!(
@@ -482,14 +482,14 @@ fn analyze_scan_diff_reports_changes_and_input_provenance() {
     let before_path = dir.path().join("before.json");
     let after_path = dir.path().join("after.json");
     let before = json!({
-        "schema":"packetcraftr.output/v1", "command":"scan", "mode":"aggregate", "status":"success",
+        "schema":"packetcraftr.output/v19", "command":"scan", "mode":"aggregate", "status":"success",
         "result":{"method":"tcp_connect", "endpoints":[
             {"address":"192.0.2.1", "port":443, "inference":{"state":"closed", "supporting":[1]}},
             {"address":"192.0.2.2", "port":443, "inference":{"state":"open", "supporting":[2]}}
         ]}
     });
     let after = json!({
-        "schema":"packetcraftr.output/v1", "command":"scan", "mode":"aggregate", "status":"success",
+        "schema":"packetcraftr.output/v19", "command":"scan", "mode":"aggregate", "status":"success",
         "result":{"method":"tcp_connect", "endpoints":[
             {"address":"192.0.2.1", "port":443, "inference":{"state":"open", "supporting":[3]}}
         ]}
@@ -558,7 +558,7 @@ fn analyze_scan_diff_reports_changes_and_input_provenance() {
 fn analyze_scan_diff_rejects_invalid_scan_input() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("invalid.json");
-    std::fs::write(&path, br#"{"schema":"packetcraftr.output/v1","command":"scan","mode":"aggregate","status":"failure"}"#).unwrap();
+    std::fs::write(&path, br#"{"schema":"packetcraftr.output/v19","command":"scan","mode":"aggregate","status":"failure"}"#).unwrap();
     let path = path.to_str().unwrap();
     let args = ["--output", "json", "analyze", "scan-diff", path, path];
     let output = run(&args);

@@ -30,6 +30,19 @@ class ForwardingConsumerTests(unittest.TestCase):
             with self.subTest(name=name):
                 consumer.consume(io.BytesIO(json.dumps(value).encode() + b'\n'), mode, code)
 
+    def test_ambiguous_v1_output_is_rejected_with_regeneration_guidance(self):
+        value = envelope() | {'schema': 'packetcraftr.output/v1'}
+        with self.assertRaisesRegex(consumer.ContractError, 'ambiguous.*regenerate'):
+            consume(value)
+
+    def test_other_output_identities_are_rejected_without_the_v1_explanation(self):
+        for schema in ('packetcraftr.output/v2', 'packetcraftr.output/v18',
+                       'packetcraftr.output/v20', '', None):
+            value = envelope() | {'schema': schema}
+            with self.subTest(schema=schema), self.assertRaises(consumer.ContractError) as caught:
+                consume(value)
+            self.assertNotIn('ambiguous', str(caught.exception))
+
     def test_malformed_retained_evidence_is_rejected(self):
         mutations = {
             'frame zero': lambda r: r['matches'][0]['ingress'].update(frame=0),

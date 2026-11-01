@@ -26,6 +26,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the JSON Schema validator
+        run: sudo apt-get update && sudo apt-get install --yes python3-jsonschema
       - name: Check Python tools and run unit tests
         run: |
           python3 --version
@@ -39,8 +41,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install native development library
-        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - name: Install native development library and the JSON Schema validator
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev python3-jsonschema
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - name: Restore Cargo cache
@@ -72,6 +74,8 @@ jobs:
           cargo test --locked --workspace
           cargo test --locked --workspace --all-features
           cargo test --locked --workspace --no-default-features --features packetcraftr-cli/native-layer2
+      - name: Validate examples and runtime output against the current output schema
+        run: python3 scripts/check_output_schema.py --binary target/debug/packetcraftr
       - name: Documentation for supported feature profiles
         env:
           RUSTDOCFLAGS: -D warnings

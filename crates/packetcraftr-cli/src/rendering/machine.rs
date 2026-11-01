@@ -237,8 +237,26 @@ mod tests {
         );
         emit_json_to(&invocation.terminal(), &envelope, &mut bytes).unwrap();
         let document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(document["schema"], "packetcraftr.output/v1");
+        assert_eq!(document["schema"], output::contract::SCHEMA);
         assert_eq!(document["status"], "error");
         assert_eq!(bytes.last(), Some(&b'\n'));
+    }
+
+    #[test]
+    fn emitted_envelope_identity_matches_the_published_schema() {
+        let published: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../schemas/packetcraftr.output.v19.schema.json"
+        ))
+        .unwrap();
+        let envelope = output::envelope::Envelope::<()>::error(
+            Some(Command::Build),
+            CliError::new(Kind::Usage, "invalid").output_error(),
+        );
+        let mut bytes = Vec::new();
+        emit_json_to(&invocation(), &envelope, &mut bytes).unwrap();
+        let document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let declared = &published["$defs"]["baseEnvelope"]["properties"]["schema"]["const"];
+        assert!(declared.is_string(), "schema const missing: {declared}");
+        assert_eq!(&document["schema"], declared);
     }
 }

@@ -50,7 +50,11 @@ formats. `-h` shows a shorter guide. The protocol fixture manifest at
 [`examples/captures/protocols.manifest.json`](examples/captures/protocols.manifest.json)
 links synthetic captures to their packet documents and optional decode bindings.
 Public JSON contracts are under [`schemas/`](schemas/), with examples under
-[`examples/documents/`](examples/documents/).
+[`examples/documents/`](examples/documents/). Output contract identifiers are
+never reused, and
+[ADR 0003](docs/adr/0003-never-reuse-output-contract-identifiers.md) maps every
+earlier identifier, including the ambiguous `packetcraftr.output/v1`, to its
+schema.
 
 ## Generated references
 

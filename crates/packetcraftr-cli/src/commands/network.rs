@@ -5,6 +5,7 @@
 
 pub(in crate::commands) mod audit;
 pub(in crate::commands) mod capture;
+pub(in crate::commands) mod differential;
 pub(in crate::commands) mod dns;
 pub(in crate::commands) mod exchange;
 pub(in crate::commands) mod identify;

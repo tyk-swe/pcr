@@ -47,6 +47,7 @@ pub mod analysis;
 pub mod build;
 pub mod capture;
 pub mod contract;
+pub mod differential;
 pub mod dissect;
 pub mod dns;
 pub mod dns_read;

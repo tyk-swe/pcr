@@ -1,0 +1,61 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "differential",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "plan_digest": "d5216c34d561684d7194142001e3ea916fa19790db45ca504af3f03f95e456e4",
+    "token": "42424242424242424242424242424242",
+    "repeats": 1,
+    "rows": [
+      {
+        "variant": "baseline",
+        "hypothesis": "Plain reference encoding is accepted on a healthy path",
+        "packets_per_attempt": 1
+      },
+      {
+        "variant": "ttl-255",
+        "hypothesis": "A maximum TTL is forwarded unchanged in effect",
+        "packets_per_attempt": 1
+      },
+      {
+        "variant": "ttl-1",
+        "hypothesis": "A minimum TTL only reaches a directly attached Responder",
+        "packets_per_attempt": 1
+      },
+      {
+        "variant": "dscp-ecn",
+        "hypothesis": "DSCP EF with ECN ECT(0) marking is not dropped",
+        "packets_per_attempt": 1
+      },
+      {
+        "variant": "ecn-ce",
+        "hypothesis": "An ECN CE marking is not dropped",
+        "packets_per_attempt": 1
+      },
+      {
+        "variant": "ip-id-max",
+        "hypothesis": "A maximum IPv4 identification is not dropped",
+        "packets_per_attempt": 1
+      },
+      {
+        "variant": "df-set",
+        "hypothesis": "Setting DF on a datagram that fits the path is accepted",
+        "packets_per_attempt": 1
+      },
+      {
+        "variant": "ip-options-router-alert",
+        "hypothesis": "An IPv4 Router Alert option is not dropped",
+        "packets_per_attempt": 1
+      },
+      {
+        "variant": "udp-checksum-zero",
+        "hypothesis": "A zero UDP checksum, legal over IPv4, is accepted",
+        "packets_per_attempt": 1
+      }
+    ],
+    "total_packets": 9,
+    "total_wire_bytes": 958
+  },
+  "diagnostics": []
+}

@@ -731,6 +731,7 @@ mod stalled_inputs {
         );
     }
 
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
     fn fifo_without_writer_honors_the_deadline() {
         let directory = tempfile::tempdir().unwrap();

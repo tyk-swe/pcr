@@ -365,7 +365,7 @@ mod tests {
         assert!(error.message.contains(&path.display().to_string()));
     }
 
-    #[cfg(unix)]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
     fn stalled_fifo_document_reports_the_invocation_deadline() {
         let directory = tempfile::tempdir().unwrap();

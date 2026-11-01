@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use packetcraftr_core::budget::{Cancellation, Interrupted};
 
-use super::{Polled, Source, classify, duplicate, open, test_invocation};
+use super::{Source, classify, duplicate, open, test_invocation};
 use crate::invocation::Invocation;
 
 const PROMPTLY: Duration = Duration::from_secs(5);
@@ -86,6 +86,7 @@ fn data_that_arrives_later_is_read_and_writer_close_is_eof() {
     assert_eq!(bytes, b"late bytes");
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
 #[test]
 fn fifo_without_a_writer_opens_and_waits_instead_of_reading_eof() {
     let directory = tempfile::tempdir().unwrap();
@@ -131,7 +132,7 @@ fn a_non_retryable_read_error_surfaces_instead_of_retrying_until_the_deadline() 
     .unwrap();
     std::fs::write(directory.path().join("created"), b"").unwrap();
     let invocation = test_invocation(Some(PROMPTLY), Cancellation::default());
-    let mut source = Source::Polled(Polled {
+    let mut source = Source::Polled(super::Polled {
         file: inotify.into(),
         invocation,
     });
@@ -198,4 +199,23 @@ fn repeated_cancellations_leak_no_descriptors_or_threads() {
             thread::sleep(Duration::from_millis(50));
         }
     }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[test]
+fn a_fifo_is_read_in_full_through_an_ordinary_blocking_open() {
+    let directory = tempfile::tempdir().unwrap();
+    let fifo = mkfifo(directory.path());
+    let invocation = test_invocation(Some(PROMPTLY), Cancellation::default());
+    let mut bytes = Vec::new();
+    thread::scope(|scope| {
+        scope.spawn(|| {
+            let mut writer = std::fs::OpenOptions::new().write(true).open(&fifo).unwrap();
+            writer.write_all(b"from fifo").unwrap();
+        });
+        let mut source = open(&invocation, &fifo).unwrap();
+        assert!(matches!(source, Source::File(_)));
+        source.read_to_end(&mut bytes).unwrap();
+    });
+    assert_eq!(bytes, b"from fifo");
 }

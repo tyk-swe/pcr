@@ -215,3 +215,53 @@ pub(super) fn udp_dissects_as_dns(source_port: u16, destination_port: u16) -> bo
 pub(super) fn rotated_source_port(base: u16, attempt: u32) -> u16 {
     crate::engine::correlation::ephemeral_source_port(base, u64::from(attempt.saturating_sub(1)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::policy::{Error as PolicyError, Operation, Policy};
+
+    #[test]
+    fn batch_aggregation_sums_tcp_socket_limits_for_policy_authorization() {
+        let udp = WireLimits::new(1, 10);
+        let tcp = SocketLimits::new(2, 3, 40);
+        let batched = batch_limits(
+            [udp, udp]
+                .into_iter()
+                .map(|udp| DnsOperation::new(udp, tcp).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(batched.limits(), WireLimits::new(12, 100));
+
+        let exact = Policy {
+            max_packets_per_operation: 12,
+            max_bytes_per_operation: 100,
+            ..Policy::default()
+        };
+        assert!(exact.authorize(Operation::Dns(batched)).is_ok());
+        let under_units = Policy {
+            max_packets_per_operation: 11,
+            max_bytes_per_operation: 100,
+            ..Policy::default()
+        };
+        assert!(matches!(
+            under_units.authorize(Operation::Dns(batched)),
+            Err(PolicyError::TrafficUnitLimit {
+                actual: 12,
+                limit: 11
+            })
+        ));
+        let under_bytes = Policy {
+            max_packets_per_operation: 12,
+            max_bytes_per_operation: 99,
+            ..Policy::default()
+        };
+        assert!(matches!(
+            under_bytes.authorize(Operation::Dns(batched)),
+            Err(PolicyError::TrafficByteLimit {
+                actual: 100,
+                limit: 99
+            })
+        ));
+    }
+}

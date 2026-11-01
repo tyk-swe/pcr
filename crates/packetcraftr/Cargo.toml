@@ -27,3 +27,6 @@ packetcraftr-core.workspace = true
 packetcraftr-netio.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+rustls.workspace = true

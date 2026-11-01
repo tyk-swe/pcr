@@ -10,6 +10,10 @@ use packetcraftr_core::packet::Packet;
 
 use super::{Error, Policy, authorize_permissive_live};
 
+/// Declared packet and wire-byte maxima. Every pair, including zero for no
+/// traffic, is a legal declaration. [`DnsOperation::new`] rejects an aggregate
+/// that overflows with [`LimitOverflow`], and [`Policy::authorize`] enforces
+/// the policy ceilings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WireLimits {
     packets: u64,
@@ -25,10 +29,6 @@ impl WireLimits {
         }
     }
 
-    pub const fn validate(&self) -> Result<(), Error> {
-        Ok(())
-    }
-
     #[must_use]
     pub const fn packets(&self) -> u64 {
         self.packets
@@ -40,6 +40,11 @@ impl WireLimits {
     }
 }
 
+/// Declared connection, message, and application-byte maxima. Every value,
+/// including zero for no traffic, is a legal declaration.
+/// [`SocketOperation::new`] and [`DnsOperation::new`] reject an aggregate that
+/// overflows with [`LimitOverflow`], and [`Policy::authorize`] enforces the
+/// policy ceilings and destinations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SocketLimits {
     connections: u64,
@@ -55,10 +60,6 @@ impl SocketLimits {
             messages,
             application_bytes,
         }
-    }
-
-    pub const fn validate(&self) -> Result<(), Error> {
-        Ok(())
     }
 
     #[must_use]
@@ -301,5 +302,185 @@ impl Policy {
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use packetcraftr_core::error::{Classified, Kind};
+
+    fn ceilings(units: u64, bytes: u64) -> Policy {
+        Policy {
+            max_packets_per_operation: units,
+            max_bytes_per_operation: bytes,
+            ..Policy::default()
+        }
+    }
+
+    fn socket(limits: SocketLimits) -> Result<(), Error> {
+        ceilings(10, 100).authorize(Operation::Socket(
+            SocketOperation::new(&[], limits).unwrap(),
+        ))
+    }
+
+    fn dns(udp: WireLimits, tcp: SocketLimits) -> Result<(), Error> {
+        ceilings(10, 100).authorize(Operation::Dns(DnsOperation::new(udp, tcp).unwrap()))
+    }
+
+    #[test]
+    fn aggregate_overflow_is_a_classified_budget_error() {
+        assert_eq!(
+            SocketOperation::new(&[], SocketLimits::new(u64::MAX, 1, 0)).err(),
+            Some(LimitOverflow)
+        );
+        assert_eq!(
+            SocketOperation::new(&[], SocketLimits::new(u64::MAX - 1, 1, u64::MAX))
+                .map(|operation| operation.limits()),
+            Ok(WireLimits::new(u64::MAX, u64::MAX))
+        );
+        for (udp, tcp) in [
+            (WireLimits::new(u64::MAX, 0), SocketLimits::new(1, 0, 0)),
+            (WireLimits::new(u64::MAX - 1, 0), SocketLimits::new(1, 1, 0)),
+            (WireLimits::new(0, u64::MAX), SocketLimits::new(0, 0, 1)),
+        ] {
+            assert_eq!(DnsOperation::new(udp, tcp), Err(LimitOverflow));
+        }
+        assert_eq!(
+            DnsOperation::new(WireLimits::new(u64::MAX - 2, 1), SocketLimits::new(1, 1, 2))
+                .map(|operation| operation.limits()),
+            Ok(WireLimits::new(u64::MAX, 3))
+        );
+        let classification = LimitOverflow.classification();
+        assert_eq!(classification.code, "policy.budget_overflow");
+        assert_eq!(classification.kind, Kind::Policy);
+    }
+
+    #[test]
+    fn no_traffic_declarations_are_authorized_even_under_zero_ceilings() {
+        let policy = ceilings(0, 0);
+        let zero = SocketLimits::new(0, 0, 0);
+        assert!(
+            policy
+                .authorize(Operation::Socket(SocketOperation::new(&[], zero).unwrap()))
+                .is_ok()
+        );
+        assert!(
+            policy
+                .authorize(Operation::Dns(
+                    DnsOperation::new(WireLimits::new(0, 0), zero).unwrap()
+                ))
+                .is_ok()
+        );
+        assert!(
+            policy
+                .authorize(Operation::Wire(WireLimits::new(0, 0)))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn socket_ceilings_admit_the_exact_total_and_reject_one_more() {
+        assert!(socket(SocketLimits::new(4, 6, 100)).is_ok());
+        assert!(matches!(
+            socket(SocketLimits::new(4, 7, 100)),
+            Err(Error::TrafficUnitLimit {
+                actual: 11,
+                limit: 10
+            })
+        ));
+        assert!(matches!(
+            socket(SocketLimits::new(4, 6, 101)),
+            Err(Error::TrafficByteLimit {
+                actual: 101,
+                limit: 100
+            })
+        ));
+    }
+
+    #[test]
+    fn dns_ceilings_admit_the_exact_udp_and_tcp_total_and_reject_one_more() {
+        let tcp = SocketLimits::new(2, 3, 40);
+        assert!(dns(WireLimits::new(5, 60), tcp).is_ok());
+        assert!(matches!(
+            dns(WireLimits::new(6, 60), tcp),
+            Err(Error::TrafficUnitLimit {
+                actual: 11,
+                limit: 10
+            })
+        ));
+        assert!(matches!(
+            dns(WireLimits::new(5, 61), tcp),
+            Err(Error::TrafficByteLimit {
+                actual: 101,
+                limit: 100
+            })
+        ));
+    }
+
+    #[test]
+    fn wire_ceilings_admit_the_exact_total_and_reject_one_more() {
+        let policy = ceilings(10, 100);
+        assert!(
+            policy
+                .authorize(Operation::Wire(WireLimits::new(10, 100)))
+                .is_ok()
+        );
+        assert!(matches!(
+            policy.authorize(Operation::Wire(WireLimits::new(11, 100))),
+            Err(Error::PacketLimit {
+                actual: 11,
+                limit: 10
+            })
+        ));
+        assert!(matches!(
+            policy.authorize(Operation::Wire(WireLimits::new(10, 101))),
+            Err(Error::ByteLimit {
+                actual: 101,
+                limit: 100
+            })
+        ));
+    }
+
+    #[test]
+    fn a_declared_destination_is_checked_against_the_allowlist() {
+        let packets: [&Packet; 0] = [];
+        let declared = |destination: Option<IpAddr>| {
+            Operation::Declared(DeclaredPackets::new(
+                WireLimits::new(1, 1),
+                &packets,
+                destination,
+                PermissiveLive::NotRequired,
+            ))
+        };
+        let policy = Policy {
+            allowed_destinations: vec!["10.0.0.1".parse().unwrap()],
+            ..ceilings(10, 100)
+        };
+        assert!(matches!(
+            policy.authorize(declared(Some("192.0.2.1".parse().unwrap()))),
+            Err(Error::DestinationNotAllowed { .. })
+        ));
+        assert!(
+            policy
+                .authorize(declared(Some("10.0.0.1".parse().unwrap())))
+                .is_ok()
+        );
+        assert!(policy.authorize(declared(None)).is_ok());
+    }
+
+    #[test]
+    fn the_shared_policy_authorizer_propagates_denials() {
+        let policy = ceilings(10, 100);
+        let mut authorizer: &Policy = &policy;
+        let error = authorizer
+            .authorize_operation(Operation::Wire(WireLimits::new(11, 100)))
+            .unwrap_err();
+        assert_eq!(error.classification().code, "policy.packet_limit");
+        assert!(
+            authorizer
+                .authorize_operation(Operation::Wire(WireLimits::new(10, 100)))
+                .is_ok()
+        );
     }
 }

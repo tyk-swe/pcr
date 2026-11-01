@@ -29,8 +29,13 @@ pub use error::{Direction, Error};
 /// Lifetime ceilings, including the handshake and subsequent application I/O.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
+    /// Cumulative ciphertext written, including application data.
     pub max_wire_bytes_sent: usize,
     pub max_wire_bytes_read: usize,
+    /// Each native read, write, or flush attempt consumes one step before it
+    /// reaches the wrapped stream, including retries and attempts that fail.
+    /// Once all steps are used, further attempts fail without native I/O, so
+    /// a connection performs at most `max_steps` native writes.
     pub max_steps: usize,
     pub max_certificates: usize,
     pub max_certificate_bytes: usize,
@@ -145,8 +150,10 @@ pub struct Stream<S, A> {
 /// Starts TLS over an already connected and authorized numeric peer.
 ///
 /// `authorize_write` sees exactly the ciphertext slice offered to each native
-/// write, including retries. It must reauthorize the final peer and bytes;
-/// refusal prevents that write. Cancellation is checked again after the hook.
+/// write, including retries. It must reauthorize the final peer; refusal
+/// prevents that write. Callers that reserve the whole session's writes up
+/// front from [`Limits`] need no further per-write budget check.
+/// Cancellation is checked again after the hook.
 /// Argument errors are returned directly. Every started handshake returns
 /// evidence, even when it fails, times out, or is cancelled.
 pub fn connect<S, A>(

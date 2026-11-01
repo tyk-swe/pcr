@@ -118,6 +118,7 @@ fn a_unix_socket_is_polled_like_a_pipe() {
     assert!(matches!(source, Source::Polled(_)));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn a_non_retryable_read_error_surfaces_instead_of_retrying_until_the_deadline() {
     let inotify = rustix::fs::inotify::init(rustix::fs::inotify::CreateFlags::CLOEXEC).unwrap();

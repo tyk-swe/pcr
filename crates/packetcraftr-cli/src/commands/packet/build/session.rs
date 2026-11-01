@@ -125,6 +125,7 @@ impl SessionArgs {
     /// budget the conversation's frame count and byte total stay within.
     pub(crate) fn resolve(
         self,
+        invocation: &crate::invocation::Invocation,
         registry: &Arc<Registry>,
         budget: PacketBudgetArgs,
         mode: packetcraftr_core::codec::Mode,
@@ -169,7 +170,12 @@ impl SessionArgs {
                     // looser IPv6 ceiling; `expand` applies the recipe's own.
                     SessionProtocol::Udp => MAX_UDP_RESPONSE_IPV6.min(byte_budget),
                 };
-                let bytes = read_bounded_file_allow_empty(path, limit, InputKind::SessionResponse)?;
+                let bytes = read_bounded_file_allow_empty(
+                    invocation,
+                    path,
+                    limit,
+                    InputKind::SessionResponse,
+                )?;
                 if bytes.is_empty() {
                     return Err(CliError::new(
                         Kind::Usage,

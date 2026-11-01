@@ -181,7 +181,11 @@ impl Spec for Hunt {
     }
     fn run(self, i: &Invocation) -> Result<CommandExit, CliError> {
         input::validate_stdin_sources([self.capture.path.as_path(), self.indicators.as_path()])?;
-        let bytes = read(&self.indicators, security::indicators::MAX_DOCUMENT_BYTES)?;
+        let bytes = read(
+            i,
+            &self.indicators,
+            security::indicators::MAX_DOCUMENT_BYTES,
+        )?;
         let doc = security::indicators::Document::parse(&bytes).map_err(CliError::classified)?;
         let source = source(&self.indicators, &bytes);
         self.capture.run(

@@ -567,3 +567,250 @@ fn analyze_scan_diff_rejects_invalid_scan_input() {
     assert_eq!(report["status"], "error");
     assert_eq!(report["error"]["code"], "cli.security_input");
 }
+
+#[cfg(unix)]
+mod stalled_inputs {
+    use std::io::Write;
+    use std::process::{Child, ChildStdin, Command, Output, Stdio};
+    use std::time::{Duration, Instant};
+
+    const DEADLINE_MS: &str = "1500";
+    const EXIT_WITHIN: Duration = Duration::from_secs(10);
+
+    fn spawn(args: &[&str], stdin: Stdio) -> Child {
+        Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+            .args(args)
+            .stdin(stdin)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap_or_else(|error| panic!("failed to spawn packetcraftr {args:?}: {error}"))
+    }
+
+    fn spawn_with_open_stdin(args: &[&str]) -> (Child, ChildStdin) {
+        let mut child = spawn(args, Stdio::piped());
+        let stdin = child.stdin.take().expect("piped stdin");
+        (child, stdin)
+    }
+
+    fn kill_after_timeout(mut child: Child, args: &[&str], waiting_for: &str) -> ! {
+        let _ = child.kill();
+        let output = child.wait_with_output().expect("reap killed child");
+        panic!(
+            "packetcraftr {args:?} was still running after {EXIT_WITHIN:?} waiting for {waiting_for}; killed it\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn wait_bounded(mut child: Child, args: &[&str]) -> Output {
+        let started = Instant::now();
+        while child.try_wait().expect("poll child status").is_none() {
+            if started.elapsed() > EXIT_WITHIN {
+                kill_after_timeout(child, args, "exit");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        child.wait_with_output().expect("collect child output")
+    }
+
+    fn assert_interrupted(output: &Output, exit_code: i32, error_code: &str, message: &str) {
+        assert_eq!(
+            output.status.code(),
+            Some(exit_code),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        super::assert_error(output, error_code);
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            report["error"]["message"]
+                .as_str()
+                .is_some_and(|text| text.contains(message)),
+            "{report}"
+        );
+    }
+
+    fn assert_deadline(output: &Output) {
+        assert_interrupted(output, 6, "policy.duration_limit", "budget");
+    }
+
+    #[test]
+    fn capture_stdin_without_bytes_honors_the_deadline() {
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "stats",
+            "-",
+            "--max-duration-ms",
+            DEADLINE_MS,
+        ];
+        let (child, stdin) = spawn_with_open_stdin(&args);
+        let output = wait_bounded(child, &args);
+        drop(stdin);
+        assert_deadline(&output);
+    }
+
+    #[test]
+    fn document_stdin_without_bytes_honors_the_deadline() {
+        let capture = super::capture_path("dns-response.pcap");
+        let capture = capture.to_str().unwrap();
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "hunt",
+            capture,
+            "--indicators",
+            "-",
+            "--max-duration-ms",
+            DEADLINE_MS,
+        ];
+        let (child, stdin) = spawn_with_open_stdin(&args);
+        let output = wait_bounded(child, &args);
+        drop(stdin);
+        assert_deadline(&output);
+    }
+
+    #[test]
+    fn partial_capture_header_then_stall_honors_the_deadline() {
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "stats",
+            "-",
+            "--max-duration-ms",
+            DEADLINE_MS,
+        ];
+        let (child, mut stdin) = spawn_with_open_stdin(&args);
+        stdin
+            .write_all(&[0xd4, 0xc3, 0xb2, 0xa1, 0x02, 0x00, 0x04, 0x00, 0, 0])
+            .expect("write partial PCAP header");
+        stdin.flush().expect("flush partial header");
+        let output = wait_bounded(child, &args);
+        drop(stdin);
+        assert_deadline(&output);
+    }
+
+    #[test]
+    fn record_stall_after_a_complete_header_honors_the_deadline() {
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "stats",
+            "-",
+            "--max-duration-ms",
+            DEADLINE_MS,
+        ];
+        let (child, mut stdin) = spawn_with_open_stdin(&args);
+        let header = [
+            [0xd4, 0xc3, 0xb2, 0xa1, 0x02, 0x00, 0x04, 0x00],
+            [0; 8],
+            [0xff, 0xff, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00],
+        ]
+        .concat();
+        stdin
+            .write_all(&[header.as_slice(), &[0; 4]].concat())
+            .expect("write PCAP header and a partial record");
+        stdin.flush().expect("flush capture prefix");
+        let output = wait_bounded(child, &args);
+        drop(stdin);
+        assert_eq!(output.status.code(), Some(6));
+        super::assert_error(&output, "policy.duration_limit");
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            report["error"]["causes"][0]
+                .as_str()
+                .and_then(|cause| cause.split(':').next()),
+            Some("capture operation exceeded its duration budget"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn fifo_without_writer_honors_the_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let fifo = directory.path().join("capture.fifo");
+        let status = Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success(), "mkfifo failed: {status:?}");
+        let fifo = fifo.to_str().unwrap();
+        let args = [
+            "--output",
+            "json",
+            "analyze",
+            "stats",
+            fifo,
+            "--max-duration-ms",
+            DEADLINE_MS,
+        ];
+        let output = wait_bounded(spawn(&args, Stdio::null()), &args);
+        assert_deadline(&output);
+    }
+
+    fn sigint_handler_installed(pid: u32) -> bool {
+        const SIGINT: u32 = 2;
+        std::fs::read_to_string(format!("/proc/{pid}/status"))
+            .ok()
+            .and_then(|status| {
+                status
+                    .lines()
+                    .find_map(|line| line.strip_prefix("SigCgt:"))
+                    .and_then(|mask| u64::from_str_radix(mask.trim(), 16).ok())
+            })
+            .is_some_and(|mask| mask & (1 << (SIGINT - 1)) != 0)
+    }
+
+    fn open_fds() -> usize {
+        std::fs::read_dir("/proc/self/fd")
+            .expect("list /proc/self/fd")
+            .count()
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "needs /proc/<pid>/status SigCgt to know when the child's SIGINT handler is installed"
+    )]
+    fn first_sigint_cancels_a_stalled_stdin_capture_gracefully() {
+        let args = ["--output", "ndjson", "files", "read", "-"];
+        let fds_before = open_fds();
+        for _ in 0..5 {
+            let (mut child, stdin) = spawn_with_open_stdin(&args);
+            let started = Instant::now();
+            while !sigint_handler_installed(child.id()) {
+                assert!(
+                    child.try_wait().expect("poll child status").is_none(),
+                    "packetcraftr {args:?} exited before installing its SIGINT handler"
+                );
+                if started.elapsed() > EXIT_WITHIN {
+                    kill_after_timeout(child, &args, "its SIGINT handler");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let status = Command::new("kill")
+                .args(["-INT", &child.id().to_string()])
+                .status()
+                .expect("run kill");
+            assert!(status.success(), "kill -INT failed: {status:?}");
+            let output = wait_bounded(child, &args);
+            drop(stdin);
+            assert_interrupted(&output, 130, "io.cancelled", "cancelled");
+        }
+        let settled = Instant::now();
+        while open_fds() > fds_before {
+            assert!(
+                settled.elapsed() < EXIT_WITHIN,
+                "test process holds {} descriptors, {fds_before} before the children ran",
+                open_fds()
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}

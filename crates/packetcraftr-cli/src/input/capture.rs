@@ -2,28 +2,27 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::fs::File;
-use std::io::{self, IsTerminal, Read};
+use std::io::{self, Read};
 use std::path::Path;
 
 use packetcraftr_core as core;
 use packetcraftr_core::capture_file::{Reader, ReaderLimits};
 
-use super::bounded::{InputKind, open_file, require_redirected_stdin};
+use super::bounded::{InputKind, open_file, redirected_stdin};
 use super::fingerprint::{self, Fingerprint};
+use super::source::{Source, interrupted_or};
 use crate::command_options::OfflineCaptureLimits;
 use crate::errors::CliError;
 
 fn capture_source(
     invocation: &crate::invocation::Invocation,
     path: &Path,
-) -> Result<Box<dyn Read>, CliError> {
+) -> Result<Source, CliError> {
     invocation.check()?;
     if path == Path::new("-") {
-        let stdin = io::stdin();
-        require_redirected_stdin(InputKind::Capture, stdin.is_terminal())?;
-        Ok(Box::new(stdin.lock()))
+        redirected_stdin(invocation, InputKind::Capture)
     } else {
-        Ok(Box::new(open_file(path)?))
+        open_file(invocation, path)
     }
 }
 
@@ -49,7 +48,7 @@ pub(crate) fn open_capture_file(
     path: &Path,
     limits: OfflineCaptureLimits,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
-    capture_reader(invocation, open_file(path)?, limits)
+    capture_reader(invocation, open_file(invocation, path)?, limits)
 }
 
 pub(crate) fn snapshot_capture<R: Read>(
@@ -68,7 +67,7 @@ pub(crate) fn snapshot_capture<R: Read>(
         io::BufWriter::with_capacity(64 * 1024, snapshot),
         limits,
     )
-    .map_err(CliError::classified)?;
+    .map_err(|error| interrupted_or(invocation, CliError::classified(error)))?;
     let mut snapshot = snapshot
         .into_inner()
         .map_err(|error| CliError::classified(capture_file::Error::from(error.into_error())))?;
@@ -95,7 +94,7 @@ fn capture_reader<R: Read + 'static>(
                 ..Default::default()
             },
         )
-        .map_err(CliError::classified)?,
+        .map_err(|error| interrupted_or(invocation, CliError::classified(error)))?,
     );
     let reader = bounded_reader(invocation, source, limits)?;
     invocation.check()?;
@@ -117,5 +116,5 @@ fn bounded_reader<R: Read>(
         },
     )
     .map(|reader| invocation.reader(reader.with_cancellation(invocation.cancellation.clone())))
-    .map_err(CliError::classified)
+    .map_err(|error| interrupted_or(invocation, CliError::classified(error)))
 }

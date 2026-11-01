@@ -40,7 +40,10 @@ impl Bounded for Connection {
     }
 }
 impl Connection {
-    fn request(&self) -> Result<packetcraftr::audit::TlsRequest, CliError> {
+    fn request(
+        &self,
+        invocation: &Invocation,
+    ) -> Result<packetcraftr::audit::TlsRequest, CliError> {
         self.bounds.core()?;
         let mut request = packetcraftr::audit::TlsRequest::new(self.endpoint);
         request.server_name = self.server_name.clone();
@@ -49,9 +52,12 @@ impl Connection {
         request.limits.max_wire_bytes_read = self.max_tls_read_bytes;
         request.limits.handshake_timeout = self.max_duration();
         if let Some(path) = &self.ca_file {
-            request.trust =
-                packetcraftr_netio::tls::TrustStore::from_pem(&read(path, 1024 * 1024)?)
-                    .map_err(invalid)?;
+            request.trust = packetcraftr_netio::tls::TrustStore::from_pem(&read(
+                invocation,
+                path,
+                1024 * 1024,
+            )?)
+            .map_err(invalid)?;
         }
         Ok(request)
     }
@@ -91,7 +97,7 @@ impl Spec for AuditTls {
         self.connection.resources(s);
     }
     fn run(self, i: &Invocation) -> Result<CommandExit, CliError> {
-        let request = self.connection.request()?;
+        let request = self.connection.request(i)?;
         let client = crate::system::client(
             i,
             packetcraftr_core::protocol::builtin::registry(),
@@ -124,7 +130,7 @@ impl Spec for AuditHttp {
             ));
         }
         let mut request = packetcraftr::audit::HttpRequest::new(self.connection.endpoint);
-        request.connection = self.connection.request()?;
+        request.connection = self.connection.request(i)?;
         request.tls = self.tls;
         request.host = self.host.unwrap_or_else(|| {
             self.connection

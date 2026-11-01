@@ -71,7 +71,12 @@ pub(super) fn run(
     let (mut request, selectors) = prepare_request(&arguments)?;
     let mut live = prepare_live(&arguments, &request)?;
     let registry = packetcraftr_core::protocol::builtin::registry();
-    let packet = read_recipe(arguments.recipe, &registry, request.build.limits.max_layers)?;
+    let packet = read_recipe(
+        invocation,
+        arguments.recipe,
+        &registry,
+        request.build.limits.max_layers,
+    )?;
     // Selectors name layers by protocol, so they resolve once the recipe is
     // known; everything after this point sees numeric layer indexes.
     request.targets =

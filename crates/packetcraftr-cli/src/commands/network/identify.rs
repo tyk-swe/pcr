@@ -62,6 +62,7 @@ impl crate::commands::Spec for Args {
         let corpus = match &self.corpus {
             Some(path) => Arc::new(
                 service_probes::parse(&read_bounded_file(
+                    invocation,
                     path,
                     service_probes::MAX_DOCUMENT_BYTES,
                     InputKind::ServiceDocument,
@@ -80,6 +81,7 @@ impl crate::commands::Spec for Args {
         } else if let Some(path) = &self.exclusions {
             Arc::new(
                 service_exclusions::parse(&read_bounded_file(
+                    invocation,
                     path,
                     service_exclusions::MAX_EXCLUSIONS_BYTES,
                     InputKind::ServiceDocument,

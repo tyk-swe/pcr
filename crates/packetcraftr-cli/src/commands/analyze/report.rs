@@ -40,7 +40,7 @@ impl Spec for Assessment {
         let mut seen_sources = BTreeSet::new();
         for path in &self.results {
             i.check()?;
-            let bytes = read(path, self.bounds.max_result_bytes)?;
+            let bytes = read(i, path, self.bounds.max_result_bytes)?;
             let result = input::report(&bytes)?;
             if !result.completeness.complete {
                 if result.completeness.reasons.is_empty() {

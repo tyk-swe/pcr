@@ -63,7 +63,7 @@ pub(super) fn run(
 ) -> Result<(), CliError> {
     let format = invocation.format;
     let stream = &invocation.output;
-    match preparation::prepare(arguments)? {
+    match preparation::prepare(invocation, arguments)? {
         Planned::List(request) => list::run(invocation, request, format, stream),
         Planned::Connect(request) => connect::run(invocation, request, format, stream),
         Planned::Raw(request) => raw::run(invocation, request, format, stream),

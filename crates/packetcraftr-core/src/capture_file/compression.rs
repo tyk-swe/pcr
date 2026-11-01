@@ -72,23 +72,22 @@ impl Classified for Error {
                     Some("choose a finite decoded-byte/window limit adequate for this capture"),
                 )
             }
-            Self::Io { source, .. }
-                if source
-                    .get_ref()
-                    .and_then(|source| source.downcast_ref::<Self>())
-                    .is_some() =>
-            {
-                source
-                    .get_ref()
-                    .and_then(|source| source.downcast_ref::<Self>())
-                    .expect("guarded compression source")
-                    .classification()
+            Self::Io { source, .. } => {
+                let source = source.get_ref();
+                if let Some(nested) = source.and_then(|source| source.downcast_ref::<Self>()) {
+                    return nested.classification();
+                }
+                if let Some(interrupted) =
+                    source.and_then(|source| source.downcast_ref::<crate::budget::Interrupted>())
+                {
+                    return interrupted.classification();
+                }
+                Classification::new(
+                    "io.capture_compression",
+                    Kind::Io,
+                    Some("check the compressed capture and its storage source"),
+                )
             }
-            Self::Io { .. } => Classification::new(
-                "io.capture_compression",
-                Kind::Io,
-                Some("check the compressed capture and its storage source"),
-            ),
         }
     }
 }

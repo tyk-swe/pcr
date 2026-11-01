@@ -7,14 +7,19 @@ use packetcraftr_core::security::{Report, Source};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-pub(in crate::commands) fn read(path: &Path, limit: usize) -> Result<Vec<u8>, CliError> {
+pub(in crate::commands) fn read(
+    invocation: &crate::invocation::Invocation,
+    path: &Path,
+    limit: usize,
+) -> Result<Vec<u8>, CliError> {
     if path == Path::new("-") {
         crate::input::read_stdin_bounded_allow_empty(
+            invocation,
             limit,
             crate::input::InputKind::SecurityDocument,
         )
     } else {
-        crate::input::read_bounded_json_document(path, limit)
+        crate::input::read_bounded_json_document(invocation, path, limit)
     }
 }
 

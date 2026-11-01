@@ -47,7 +47,7 @@ fn ripv2_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
             range: crate::layout::ByteRange::new(0, 1),
         });
     }
-    if b.len() <= b.len() {
+    if 4 <= b.len() {
         fields.push(crate::layout::FieldLayout {
             name: "routes",
             range: crate::layout::ByteRange::new(4, b.len()),

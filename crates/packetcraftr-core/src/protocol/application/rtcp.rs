@@ -27,14 +27,10 @@ crate::reflective_layer! {
  }
 }
 fn rtcp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if b.len() <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "packets",
-            range: crate::layout::ByteRange::new(0, b.len()),
-        });
-    }
-    fields
+    vec![crate::layout::FieldLayout {
+        name: "packets",
+        range: crate::layout::ByteRange::new(0, b.len()),
+    }]
 }
 message_codec!(RtcpCodec, Rtcp, rtcp_schema, rtcp_layout_wire);
 

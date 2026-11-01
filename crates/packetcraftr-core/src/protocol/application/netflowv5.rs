@@ -100,7 +100,7 @@ fn netflowv5_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
             range: crate::layout::ByteRange::new(22, 24),
         });
     }
-    if b.len() <= b.len() {
+    if 24 <= b.len() {
         fields.push(crate::layout::FieldLayout {
             name: "records",
             range: crate::layout::ByteRange::new(24, b.len()),

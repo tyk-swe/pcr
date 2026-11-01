@@ -52,7 +52,7 @@ fn stun_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
             range: crate::layout::ByteRange::new(8, 20),
         });
     }
-    if b.len() <= b.len() {
+    if 20 <= b.len() {
         fields.push(crate::layout::FieldLayout {
             name: "attributes",
             range: crate::layout::ByteRange::new(20, b.len()),

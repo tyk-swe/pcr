@@ -131,8 +131,112 @@ impl Mqtt {
         }
         Ok(())
     }
+    /// Fields the packet type leaves off the wire must keep their defaults, which is also what
+    /// decoding produces, so encoding never silently discards a caller's value.
+    fn reject_uncarried_fields(&self) -> Result<(), Error> {
+        let Self {
+            packet_type,
+            flags,
+            connect_flags,
+            keep_alive,
+            client_id,
+            will_topic,
+            will_payload,
+            user_name,
+            password,
+            topic,
+            packet_id,
+            session_present,
+            return_code,
+            payload,
+            subscriptions,
+        } = self;
+        let default = Self::default();
+        let connect = *packet_type == 1;
+        let will = connect && connect_flags & 4 != 0;
+        let identified = matches!(packet_type, 4..=11) || *packet_type == 3 && flags & 6 != 0;
+        let user_name_flag = connect && connect_flags & 128 != 0;
+        let password_flag = connect && connect_flags & 64 != 0;
+        let fields = [
+            (
+                "connect_flags",
+                connect,
+                *connect_flags == default.connect_flags,
+            ),
+            ("keep_alive", connect, *keep_alive == default.keep_alive),
+            ("client_id", connect, *client_id == default.client_id),
+            ("will_topic", will, *will_topic == default.will_topic),
+            ("will_payload", will, *will_payload == default.will_payload),
+            ("user_name", user_name_flag, *user_name == default.user_name),
+            ("password", password_flag, *password == default.password),
+            ("topic", *packet_type == 3, *topic == default.topic),
+            ("packet_id", identified, *packet_id == default.packet_id),
+            (
+                "session_present",
+                *packet_type == 2,
+                *session_present == default.session_present,
+            ),
+            (
+                "return_code",
+                *packet_type == 2,
+                *return_code == default.return_code,
+            ),
+            (
+                "payload",
+                matches!(packet_type, 3 | 9),
+                *payload == default.payload,
+            ),
+            (
+                "subscriptions",
+                matches!(packet_type, 8 | 10),
+                *subscriptions == default.subscriptions,
+            ),
+        ];
+        if let Some((field, ..)) = fields
+            .iter()
+            .find(|(_, carried, unchanged)| !carried && !unchanged)
+        {
+            return Err(self.uncarried(field));
+        }
+        for (index, subscription) in subscriptions.0.iter().enumerate() {
+            if let Some(key) = subscription
+                .keys()
+                .find(|key| *key != "topic" && (*packet_type != 8 || *key != "qos"))
+            {
+                return Err(self.uncarried(&format!("subscriptions[{index}].{key}")));
+            }
+        }
+        Ok(())
+    }
+    fn uncarried(&self, field: &str) -> Error {
+        const NAMES: [&str; 14] = [
+            "CONNECT",
+            "CONNACK",
+            "PUBLISH",
+            "PUBACK",
+            "PUBREC",
+            "PUBREL",
+            "PUBCOMP",
+            "SUBSCRIBE",
+            "SUBACK",
+            "UNSUBSCRIBE",
+            "UNSUBACK",
+            "PINGREQ",
+            "PINGRESP",
+            "DISCONNECT",
+        ];
+        let name = NAMES[usize::from(self.packet_type - 1)];
+        invalid(
+            NAME,
+            format!(
+                "{name} (packet type {}) does not carry field {field}",
+                self.packet_type
+            ),
+        )
+    }
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         self.validate()?;
+        self.reject_uncarried_fields()?;
         let mut w = Writer::new(NAME, c.remaining_packet_bytes);
         match self.packet_type {
             1 => {
@@ -202,16 +306,6 @@ impl Mqtt {
             }
         }
         head.put(&w.bytes)?;
-        Self::parse_wire(
-            Bytes::copy_from_slice(&head.bytes),
-            &DecodeContext {
-                parent: None,
-                registry: c.registry,
-                network: None,
-                hop_limit: None,
-                discriminator: None,
-            },
-        )?;
         Ok(head.bytes)
     }
     fn parse_wire(b: Bytes, _c: &DecodeContext<'_>) -> Result<Self, Error> {

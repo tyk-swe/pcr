@@ -35,14 +35,10 @@ crate::reflective_layer! {
  }
 }
 fn dtls_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if b.len() <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "records",
-            range: crate::layout::ByteRange::new(0, b.len()),
-        });
-    }
-    fields
+    vec![crate::layout::FieldLayout {
+        name: "records",
+        range: crate::layout::ByteRange::new(0, b.len()),
+    }]
 }
 message_codec!(DtlsCodec, Dtls, dtls_schema, dtls_layout_wire);
 

@@ -84,7 +84,35 @@ message_codec!(RtspCodec, Rtsp, rtsp_schema, rtsp_layout_wire);
 
 const NAME: &str = "rtsp";
 impl Rtsp {
+    /// Fields the framing mode leaves off the wire must keep their defaults, which is also what
+    /// decoding produces, so encoding never silently discards a caller's value.
+    fn reject_uncarried_fields(&self) -> Result<(), Error> {
+        let Self {
+            start_line,
+            headers,
+            body: _,
+            interleaved,
+            channel,
+        } = self;
+        let default = Self::default();
+        let uncarried = if *interleaved {
+            [
+                ("start_line", *start_line != default.start_line),
+                ("headers", *headers != default.headers),
+            ]
+            .into_iter()
+            .find(|(_, changed)| *changed)
+            .map(|(field, _)| ("interleaved RTSP frames", field))
+        } else {
+            (*channel != default.channel).then_some(("text RTSP messages", "channel"))
+        };
+        match uncarried {
+            Some((mode, field)) => Err(invalid(NAME, format!("{mode} do not carry field {field}"))),
+            None => Ok(()),
+        }
+    }
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
+        self.reject_uncarried_fields()?;
         if self.interleaved {
             let mut w = Writer::new(NAME, c.remaining_packet_bytes);
             w.put(&[0x24, self.channel])?;
@@ -101,16 +129,6 @@ impl Rtsp {
             &self.headers,
             &self.body,
             c.remaining_packet_bytes,
-        )?;
-        Self::parse_wire(
-            Bytes::copy_from_slice(&b),
-            &DecodeContext {
-                parent: None,
-                registry: c.registry,
-                network: None,
-                hop_limit: None,
-                discriminator: None,
-            },
         )?;
         Ok(b)
     }

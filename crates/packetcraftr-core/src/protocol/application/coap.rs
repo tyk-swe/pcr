@@ -142,16 +142,6 @@ impl Coap {
             w.u8(255)?;
             w.put(&self.payload)?;
         }
-        Self::parse_wire(
-            Bytes::copy_from_slice(&w.bytes),
-            &DecodeContext {
-                parent: None,
-                registry: c.registry,
-                network: None,
-                hop_limit: None,
-                discriminator: None,
-            },
-        )?;
         Ok(w.bytes)
     }
     fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {

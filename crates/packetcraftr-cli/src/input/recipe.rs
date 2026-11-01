@@ -14,8 +14,10 @@ use packetcraftr_core::packet::Packet;
 use super::{InputKind, read_bounded_file, read_bounded_file_allow_empty, read_stdin_bounded};
 use crate::command_options::{RecipeArgs, bytes_held};
 use crate::errors::CliError;
+use crate::invocation::Invocation;
 
 pub(crate) fn read_recipe(
+    invocation: &Invocation,
     arguments: RecipeArgs,
     registry: &core::registry::Registry,
     max_layers: usize,
@@ -26,14 +28,15 @@ pub(crate) fn read_recipe(
         payload_file,
     } = arguments;
 
-    let mut packet = resolve_recipe(packet, packet_file, registry, max_layers)?;
+    let mut packet = resolve_recipe(invocation, packet, packet_file, registry, max_layers)?;
     if let Some(spec) = payload_file {
-        apply_payload_file(&mut packet, &spec, registry)?;
+        apply_payload_file(invocation, &mut packet, &spec, registry)?;
     }
     Ok(packet)
 }
 
 fn resolve_recipe(
+    invocation: &Invocation,
     packet: Option<String>,
     packet_file: Option<PathBuf>,
     registry: &core::registry::Registry,
@@ -43,6 +46,7 @@ fn resolve_recipe(
         (Some(expression), None) => return parse_expression(&expression, registry, max_layers),
         (None, Some(path)) => {
             let bytes = read_bounded_file(
+                invocation,
                 &path,
                 core::document::DEFAULT_MAX_DOCUMENT_BYTES,
                 InputKind::Recipe,
@@ -59,6 +63,7 @@ fn resolve_recipe(
         }
         (None, None) => {
             let bytes = read_stdin_bounded(
+                invocation,
                 core::document::DEFAULT_MAX_DOCUMENT_BYTES,
                 InputKind::Recipe,
             )?;
@@ -75,6 +80,7 @@ fn resolve_recipe(
 }
 
 fn apply_payload_file(
+    invocation: &Invocation,
     packet: &mut Packet,
     spec: &OsStr,
     registry: &core::registry::Registry,
@@ -91,6 +97,7 @@ fn apply_payload_file(
     let target = core::document::payload::Target::resolve(&selector, packet, registry)?;
     target.inject(packet, || {
         read_bounded_file_allow_empty(
+            invocation,
             Path::new(path),
             core::document::DEFAULT_MAX_DOCUMENT_BYTES,
             InputKind::Recipe,
@@ -220,12 +227,14 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("packet.json");
         let registry = core::protocol::builtin::registry();
+        let invocation = crate::input::source::test_invocation(None, Default::default());
         for (bytes, code) in [
             (b"\xff".as_slice(), "cli.error"),
             (b"{".as_slice(), "cli.document_syntax"),
         ] {
             std::fs::write(&path, bytes).unwrap();
-            let error = resolve_recipe(None, Some(path.clone()), &registry, 16).unwrap_err();
+            let error =
+                resolve_recipe(&invocation, None, Some(path.clone()), &registry, 16).unwrap_err();
             assert_eq!(error.classification.code, code);
             assert_eq!(error.classification.kind, Kind::Usage);
             assert!(error.message.contains(&path.display().to_string()));

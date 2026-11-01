@@ -1808,3 +1808,615 @@ fn mqtt_subscription_and_will_topics() {
         assert_eq!(decode("mqtt", &wire).is_ok(), topic == b"will/topic");
     }
 }
+
+#[test]
+fn layouts_stay_within_every_message_prefix() {
+    use crate::protocol::{
+        application::*,
+        link::{CdpCodec, EapCodec, LacpCodec},
+        network::{Ospfv2Codec, Ospfv3Codec, PimCodec, RipngCodec, Ripv2Codec},
+        tunnel::{PppIpcpCodec, PppIpv6cpCodec, PppLcpCodec},
+    };
+    type Layout = fn(&[u8]) -> Vec<crate::layout::FieldLayout>;
+    let layouts: [(&str, Layout); 36] = [
+        ("amqp", AmqpCodec::layout),
+        ("bacnet_ip", BacnetIpCodec::layout),
+        ("bgp", BgpCodec::layout),
+        ("cdp", CdpCodec::layout),
+        ("coap", CoapCodec::layout),
+        ("dnp3", Dnp3Codec::layout),
+        ("dtls", DtlsCodec::layout),
+        ("eap", EapCodec::layout),
+        ("ethernet_ip", EthernetIpCodec::layout),
+        ("iec104", Iec104Codec::layout),
+        ("ipfix", IpfixCodec::layout),
+        ("lacp", LacpCodec::layout),
+        ("ldap", LdapCodec::layout),
+        ("memcached", MemcachedCodec::layout),
+        ("modbus_tcp", ModbusTcpCodec::layout),
+        ("mqtt", MqttCodec::layout),
+        ("netflowv5", Netflowv5Codec::layout),
+        ("opcua_tcp", OpcuaTcpCodec::layout),
+        ("ospfv2", Ospfv2Codec::layout),
+        ("ospfv3", Ospfv3Codec::layout),
+        ("pim", PimCodec::layout),
+        ("ppp_ipcp", PppIpcpCodec::layout),
+        ("ppp_ipv6cp", PppIpv6cpCodec::layout),
+        ("ppp_lcp", PppLcpCodec::layout),
+        ("radius", RadiusCodec::layout),
+        ("resp", RespCodec::layout),
+        ("ripng", RipngCodec::layout),
+        ("ripv2", Ripv2Codec::layout),
+        ("rtcp", RtcpCodec::layout),
+        ("rtp", RtpCodec::layout),
+        ("rtsp", RtspCodec::layout),
+        ("sflow", SflowCodec::layout),
+        ("sip", SipCodec::layout),
+        ("snmp", SnmpCodec::layout),
+        ("ssdp", SsdpCodec::layout),
+        ("stun", StunCodec::layout),
+    ];
+    let manifest: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../examples/captures/protocols.manifest.json"
+    ))
+    .unwrap();
+    let rows = manifest["protocols"].as_array().unwrap();
+    assert_eq!(rows.len(), layouts.len());
+    let mut violations = std::collections::BTreeSet::new();
+    for row in rows {
+        let name = row["protocol"].as_str().unwrap();
+        let (_, layout) = layouts
+            .iter()
+            .find(|(protocol, _)| *protocol == name)
+            .unwrap_or_else(|| panic!("{name} has no layout under test"));
+        let wire = crate::layer::parse_hex(row["wire_hex"].as_str().unwrap()).unwrap();
+        assert_eq!(decode(name, &wire).unwrap().consumed, wire.len(), "{name}");
+        for len in 0..=wire.len() {
+            for field in layout(&wire[..len]) {
+                if field.range.start > field.range.end || field.range.end > len {
+                    violations.insert(format!("{name}.{}", field.name));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "out-of-bounds layouts: {violations:?}"
+    );
+}
+
+fn mqtt_over_tcp(messages: Vec<Box<dyn Layer>>) -> Packet {
+    let mut packet = Packet::default();
+    packet.push(Ethernet::default());
+    packet.push(Ipv4::default());
+    packet.push(Tcp {
+        destination_port: 1883,
+        ..Default::default()
+    });
+    for message in messages {
+        packet.push_boxed(message);
+    }
+    packet
+}
+
+fn build_in(packet: Packet, mode: Mode) -> Result<crate::build::BuiltPacket, String> {
+    crate::build::Builder::new(builtin::registry())
+        .build(
+            packet,
+            Addresses::default(),
+            crate::build::Options {
+                mode,
+                ..Default::default()
+            },
+        )
+        .map_err(|error| match error {
+            crate::build::Error::Codec { source, .. } => source.to_string(),
+            other => other.to_string(),
+        })
+}
+
+#[test]
+fn mqtt_document_cannot_attach_a_payload_to_pingreq() {
+    let json = r#"{"schema":"packetcraftr.packet/v1","layers":[
+        {"protocol":"ethernet","fields":{}},
+        {"protocol":"ipv4","fields":{}},
+        {"protocol":"tcp","fields":{"destination_port":{"type":"unsigned","value":1883}}},
+        {"protocol":"mqtt","fields":{
+            "packet_type":{"type":"unsigned","value":12},
+            "payload":{"type":"bytes","value":[1,2,3]}}}]}"#;
+    let document = document::Packet::parse(json, document::Format::Json, json.len()).unwrap();
+    for mode in [Mode::Strict, Mode::Permissive] {
+        let packet = document.to_packet(&builtin::registry(), 16).unwrap();
+        let error = build_in(packet, mode).unwrap_err();
+        assert!(
+            error.ends_with("PINGREQ (packet type 12) does not carry field payload"),
+            "{mode:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn mqtt_typed_layers_reject_fields_their_packet_type_does_not_carry() {
+    use crate::protocol::application::mqtt::Mqtt;
+    let subscription = || {
+        Records(vec![record([
+            ("topic", Bytes::from_static(b"a/b").into()),
+            ("qos", 1_u8.into()),
+        ])])
+    };
+    for (mqtt, expected) in [
+        (
+            Mqtt {
+                payload: Bytes::from_static(b"\x01\x02\x03"),
+                ..Default::default()
+            },
+            "PINGREQ (packet type 12) does not carry field payload",
+        ),
+        (
+            Mqtt {
+                packet_type: 2,
+                topic: Bytes::from_static(b"a"),
+                ..Default::default()
+            },
+            "CONNACK (packet type 2) does not carry field topic",
+        ),
+        (
+            Mqtt {
+                packet_type: 3,
+                topic: Bytes::from_static(b"a"),
+                packet_id: 7,
+                ..Default::default()
+            },
+            "PUBLISH (packet type 3) does not carry field packet_id",
+        ),
+        (
+            Mqtt {
+                packet_type: 1,
+                client_id: Bytes::from_static(b"client"),
+                will_topic: Bytes::from_static(b"will"),
+                ..Default::default()
+            },
+            "CONNECT (packet type 1) does not carry field will_topic",
+        ),
+        (
+            Mqtt {
+                packet_type: 1,
+                connect_flags: 0x82,
+                user_name: Bytes::from_static(b"user"),
+                password: Bytes::from_static(b"secret"),
+                ..Default::default()
+            },
+            "CONNECT (packet type 1) does not carry field password",
+        ),
+        (
+            Mqtt {
+                packet_type: 9,
+                payload: Bytes::from_static(b"\x00"),
+                subscriptions: subscription(),
+                ..Default::default()
+            },
+            "SUBACK (packet type 9) does not carry field subscriptions",
+        ),
+        (
+            Mqtt {
+                packet_type: 10,
+                flags: 2,
+                subscriptions: subscription(),
+                ..Default::default()
+            },
+            "UNSUBSCRIBE (packet type 10) does not carry field subscriptions[0].qos",
+        ),
+        (
+            Mqtt {
+                packet_type: 14,
+                keep_alive: 30,
+                ..Default::default()
+            },
+            "DISCONNECT (packet type 14) does not carry field keep_alive",
+        ),
+        (
+            Mqtt {
+                packet_type: 13,
+                connect_flags: 0,
+                ..Default::default()
+            },
+            "PINGRESP (packet type 13) does not carry field connect_flags",
+        ),
+        (
+            Mqtt {
+                packet_type: 4,
+                client_id: Bytes::from_static(b"client"),
+                ..Default::default()
+            },
+            "PUBACK (packet type 4) does not carry field client_id",
+        ),
+        (
+            Mqtt {
+                packet_type: 1,
+                client_id: Bytes::from_static(b"client"),
+                will_payload: Bytes::from_static(b"will"),
+                ..Default::default()
+            },
+            "CONNECT (packet type 1) does not carry field will_payload",
+        ),
+        (
+            Mqtt {
+                packet_type: 1,
+                user_name: Bytes::from_static(b"user"),
+                ..Default::default()
+            },
+            "CONNECT (packet type 1) does not carry field user_name",
+        ),
+        (
+            Mqtt {
+                packet_type: 5,
+                session_present: 1,
+                ..Default::default()
+            },
+            "PUBREC (packet type 5) does not carry field session_present",
+        ),
+        (
+            Mqtt {
+                packet_type: 11,
+                return_code: 1,
+                ..Default::default()
+            },
+            "UNSUBACK (packet type 11) does not carry field return_code",
+        ),
+    ] {
+        for mode in [Mode::Strict, Mode::Permissive] {
+            let error = build_in(mqtt_over_tcp(vec![Box::new(mqtt.clone())]), mode).unwrap_err();
+            assert!(error.ends_with(expected), "{mode:?}: {error}");
+        }
+    }
+}
+
+#[test]
+fn mqtt_carried_fields_survive_document_round_trips() {
+    use crate::protocol::application::mqtt::Mqtt;
+    let registry = builtin::registry();
+    for mqtt in [
+        Mqtt::default(),
+        Mqtt {
+            packet_type: 1,
+            client_id: Bytes::from_static(b"client"),
+            keep_alive: 30,
+            ..Default::default()
+        },
+        Mqtt {
+            packet_type: 1,
+            connect_flags: 0xee,
+            client_id: Bytes::from_static(b"client"),
+            will_topic: Bytes::from_static(b"will/topic"),
+            will_payload: Bytes::from_static(b"gone"),
+            user_name: Bytes::from_static(b"user"),
+            password: Bytes::from_static(b"secret"),
+            ..Default::default()
+        },
+        Mqtt {
+            packet_type: 3,
+            topic: Bytes::from_static(b"a/b"),
+            payload: Bytes::from_static(b"data"),
+            ..Default::default()
+        },
+        Mqtt {
+            packet_type: 3,
+            flags: 2,
+            topic: Bytes::from_static(b"a/b"),
+            packet_id: 7,
+            payload: Bytes::from_static(b"data"),
+            ..Default::default()
+        },
+        Mqtt {
+            packet_type: 2,
+            session_present: 1,
+            ..Default::default()
+        },
+        Mqtt {
+            packet_type: 2,
+            return_code: 5,
+            ..Default::default()
+        },
+        Mqtt {
+            packet_type: 9,
+            packet_id: 7,
+            payload: Bytes::from_static(b"\x01\x80"),
+            ..Default::default()
+        },
+        Mqtt {
+            packet_type: 10,
+            flags: 2,
+            packet_id: 7,
+            subscriptions: Records(vec![record([("topic", Bytes::from_static(b"a/#").into())])]),
+            ..Default::default()
+        },
+        Mqtt {
+            packet_type: 8,
+            flags: 2,
+            packet_id: 7,
+            subscriptions: Records(vec![record([
+                ("topic", Bytes::from_static(b"a/+").into()),
+                ("qos", 1_u8.into()),
+            ])]),
+            ..Default::default()
+        },
+    ] {
+        let built = build_in(mqtt_over_tcp(vec![Box::new(mqtt.clone())]), Mode::Strict).unwrap();
+        let decoded = crate::decode::Dissector::new(registry.clone())
+            .decode(
+                Frame::new(None, LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+                Default::default(),
+            )
+            .unwrap();
+        assert_eq!(decoded.packet.get::<Mqtt>(), Some(&mqtt));
+        let json = serde_json::to_string(&document::Packet::from_packet(&decoded.packet)).unwrap();
+        let document = document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+        let rebuilt = build_in(document.to_packet(&registry, 16).unwrap(), Mode::Strict).unwrap();
+        assert_eq!(rebuilt.bytes, built.bytes, "{mqtt:?}");
+    }
+}
+
+#[test]
+fn mqtt_permissive_build_keeps_malformed_messages_and_raw_tails() {
+    use crate::protocol::application::mqtt::Mqtt;
+    let persistent_without_client = Mqtt {
+        packet_type: 1,
+        connect_flags: 0,
+        ..Default::default()
+    };
+    let packet = mqtt_over_tcp(vec![Box::new(persistent_without_client.clone())]);
+    let error = build_in(packet.clone(), Mode::Strict).unwrap_err();
+    assert!(error.contains("client identifier"), "{error}");
+    let built = build_in(packet, Mode::Permissive).unwrap();
+    assert!(built.diagnostics.iter().any(|d| d.code == "build.message"));
+    assert_eq!(built.packet.get::<Mqtt>(), Some(&persistent_without_client));
+    assert!(built.bytes.ends_with(b"\x10\x0c\0\x04MQTT\x04\0\0\x3c\0\0"));
+
+    let built = build_in(
+        mqtt_over_tcp(vec![
+            Box::new(Mqtt::default()),
+            Box::new(crate::layer::Raw::new(Bytes::from_static(b"\x01\x02\x03"))),
+        ]),
+        Mode::Strict,
+    )
+    .unwrap();
+    assert!(built.bytes.ends_with(b"\xc0\0\x01\x02\x03"));
+}
+
+#[test]
+fn encode_validation_is_strict_once_and_permissive_with_a_warning() {
+    use crate::protocol::application::{coap::Coap, mqtt::Mqtt, rtsp::Rtsp, ssdp::Ssdp};
+    let udp = |port| -> Box<dyn Layer> {
+        Box::new(Udp {
+            destination_port: port,
+            ..Default::default()
+        })
+    };
+    let tcp = |port| -> Box<dyn Layer> {
+        Box::new(Tcp {
+            destination_port: port,
+            ..Default::default()
+        })
+    };
+    let cases: [([Box<dyn Layer>; 3], &str); 5] = [
+        (
+            [
+                udp(5683),
+                Box::new(Coap::default()),
+                Box::new(Coap {
+                    code: 0,
+                    token: Bytes::from_static(b"t"),
+                    ..Default::default()
+                }),
+            ],
+            "empty CoAP message contains data",
+        ),
+        (
+            [
+                udp(5060),
+                Box::new(Sip::default()),
+                Box::new(Sip {
+                    start_line: Bytes::from_static(b"OPTIONS sip:service SIP/3.0"),
+                    ..Default::default()
+                }),
+            ],
+            "unsupported start line or version",
+        ),
+        (
+            [
+                udp(1900),
+                Box::new(Ssdp::default()),
+                Box::new(Ssdp {
+                    start_line: Bytes::from_static(b"SUBSCRIBE * HTTP/1.1"),
+                    ..Default::default()
+                }),
+            ],
+            "unknown SSDP start line",
+        ),
+        (
+            [
+                tcp(554),
+                Box::new(Rtsp::default()),
+                Box::new(Rtsp {
+                    start_line: Bytes::from_static(b"OPTIONS * HTTP/1.1"),
+                    ..Default::default()
+                }),
+            ],
+            "unsupported start line or version",
+        ),
+        (
+            [
+                tcp(1883),
+                Box::new(Mqtt::default()),
+                Box::new(Mqtt {
+                    packet_type: 2,
+                    return_code: 6,
+                    ..Default::default()
+                }),
+            ],
+            "invalid CONNACK",
+        ),
+    ];
+    let fields = |layer: &dyn Layer| {
+        layer
+            .schema()
+            .fields
+            .iter()
+            .map(|field| layer.field(field.name))
+            .collect::<Vec<_>>()
+    };
+    let registry = builtin::registry();
+    let mut refused = Vec::new();
+    for ([transport, valid, invalid], expected) in cases {
+        let stack = |message: Box<dyn Layer>| {
+            let mut packet = Packet::default();
+            packet.push(Ethernet::default());
+            packet.push(Ipv4::default());
+            packet.push_boxed(transport.clone_box());
+            packet.push_boxed(message);
+            packet
+        };
+        let name = valid.protocol_id().as_str().to_owned();
+        let built = build_in(stack(valid.clone_box()), Mode::Strict).unwrap();
+        assert!(
+            built.diagnostics.is_empty(),
+            "{name}: {:?}",
+            built.diagnostics
+        );
+        let decoded = crate::decode::Dissector::new(registry.clone())
+            .decode(
+                Frame::new(None, LinkType::ETHERNET, built.bytes).unwrap(),
+                Default::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            decoded.packet.layer(3).map(fields),
+            Some(fields(valid.as_ref())),
+            "{name}"
+        );
+
+        let error = build_in(stack(invalid.clone_box()), Mode::Strict).unwrap_err();
+        assert!(error.contains(expected), "{name}: {error}");
+        let built = match build_in(stack(invalid.clone_box()), Mode::Permissive) {
+            Ok(built) => built,
+            Err(error) => {
+                refused.push(format!("{name}: {error}"));
+                continue;
+            }
+        };
+        assert!(
+            built
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "build.message" && d.message.contains(expected)),
+            "{name}: {:?}",
+            built.diagnostics
+        );
+        assert_eq!(
+            built.packet.layer(3).map(fields),
+            Some(fields(invalid.as_ref())),
+            "{name}"
+        );
+    }
+    assert!(refused.is_empty(), "permissive builds refused: {refused:?}");
+}
+
+fn rtsp_over_tcp(rtsp: crate::protocol::application::rtsp::Rtsp) -> Packet {
+    let mut packet = Packet::default();
+    packet.push(Ethernet::default());
+    packet.push(Ipv4::default());
+    packet.push(Tcp {
+        destination_port: 554,
+        ..Default::default()
+    });
+    packet.push(rtsp);
+    packet
+}
+
+#[test]
+fn rtsp_framing_modes_reject_fields_they_do_not_carry() {
+    use crate::protocol::application::rtsp::Rtsp;
+    let interleaved = || Rtsp {
+        interleaved: true,
+        channel: 7,
+        body: Bytes::from_static(b"\r\n\r\n"),
+        ..Default::default()
+    };
+    for (rtsp, expected) in [
+        (
+            Rtsp {
+                start_line: Bytes::from_static(b"DESCRIBE * RTSP/1.0"),
+                ..interleaved()
+            },
+            "interleaved RTSP frames do not carry field start_line",
+        ),
+        (
+            Rtsp {
+                headers: Records::default(),
+                ..interleaved()
+            },
+            "interleaved RTSP frames do not carry field headers",
+        ),
+        (
+            Rtsp {
+                channel: 3,
+                ..Default::default()
+            },
+            "text RTSP messages do not carry field channel",
+        ),
+    ] {
+        for mode in [Mode::Strict, Mode::Permissive] {
+            let error = build_in(rtsp_over_tcp(rtsp.clone()), mode).unwrap_err();
+            assert!(error.ends_with(expected), "{mode:?}: {error}");
+        }
+    }
+    let json = r#"{"schema":"packetcraftr.packet/v1","layers":[
+        {"protocol":"ethernet","fields":{}},
+        {"protocol":"ipv4","fields":{}},
+        {"protocol":"tcp","fields":{"destination_port":{"type":"unsigned","value":554}}},
+        {"protocol":"rtsp","fields":{
+            "interleaved":{"type":"bool","value":true},
+            "start_line":{"type":"bytes","value":[68,69,83,67,82,73,66,69]},
+            "body":{"type":"bytes","value":[1,2]}}}]}"#;
+    let document = document::Packet::parse(json, document::Format::Json, json.len()).unwrap();
+    for mode in [Mode::Strict, Mode::Permissive] {
+        let packet = document.to_packet(&builtin::registry(), 16).unwrap();
+        let error = build_in(packet, mode).unwrap_err();
+        assert!(
+            error.ends_with("interleaved RTSP frames do not carry field start_line"),
+            "{mode:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn rtsp_text_and_interleaved_messages_survive_document_round_trips() {
+    use crate::protocol::application::rtsp::Rtsp;
+    let registry = builtin::registry();
+    let json = include_str!("../../../../../examples/documents/packet-rtsp.json");
+    let text = document::Packet::parse(json, document::Format::Json, json.len())
+        .unwrap()
+        .to_packet(&registry, 16)
+        .unwrap();
+    let interleaved = rtsp_over_tcp(Rtsp {
+        interleaved: true,
+        channel: 7,
+        body: Bytes::from_static(b"\r\n\r\n"),
+        ..Default::default()
+    });
+    for packet in [text, interleaved] {
+        let expected = packet.get::<Rtsp>().unwrap().clone();
+        let built = build_in(packet, Mode::Strict).unwrap();
+        let decoded = crate::decode::Dissector::new(registry.clone())
+            .decode(
+                Frame::new(None, LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+                Default::default(),
+            )
+            .unwrap();
+        assert_eq!(decoded.packet.get::<Rtsp>(), Some(&expected));
+        let json = serde_json::to_string(&document::Packet::from_packet(&decoded.packet)).unwrap();
+        let document = document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+        let rebuilt = build_in(document.to_packet(&registry, 16).unwrap(), Mode::Strict).unwrap();
+        assert_eq!(rebuilt.bytes, built.bytes, "{expected:?}");
+    }
+}

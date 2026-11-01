@@ -6,6 +6,7 @@ mod capture;
 mod fingerprint;
 pub(crate) mod manifest;
 mod recipe;
+mod source;
 
 pub(crate) use bounded::{
     InputKind, hex_text_limit, missing_input_error, read_bounded_file,

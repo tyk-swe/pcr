@@ -29,9 +29,9 @@ impl Spec for ScanDiff {
     fn run(self, i: &Invocation) -> Result<CommandExit, CliError> {
         input::validate_stdin_sources([self.before.as_path(), self.after.as_path()])?;
         let limits = self.bounds.core()?;
-        let a = read(&self.before, security::scan::MAX_INPUT_BYTES)?;
+        let a = read(i, &self.before, security::scan::MAX_INPUT_BYTES)?;
         i.check()?;
-        let b = read(&self.after, security::scan::MAX_INPUT_BYTES)?;
+        let b = read(i, &self.after, security::scan::MAX_INPUT_BYTES)?;
         i.check()?;
         let mut result = security::scan::compare(&a, &b, limits).map_err(CliError::classified)?;
         result.sources = vec![source(&self.before, &a), source(&self.after, &b)];

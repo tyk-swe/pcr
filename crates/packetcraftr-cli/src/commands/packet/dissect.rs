@@ -92,16 +92,18 @@ pub(super) fn run(
     let hex_limit = hex_text_limit(max_packet_size);
     let bytes = match (arguments.hex, arguments.hex_file, arguments.file) {
         (Some(value), None, None) if value == "-" => hex_frame_bytes(
-            &read_stdin_bounded(hex_limit, InputKind::FrameHex)?,
+            &read_stdin_bounded(invocation, hex_limit, InputKind::FrameHex)?,
             max_packet_size,
         )?,
         (Some(value), None, None) => hex_frame_bytes(value.as_bytes(), max_packet_size)?,
         (None, Some(path), None) => hex_frame_bytes(
-            &read_bounded_file(&path, hex_limit, InputKind::FrameHex)?,
+            &read_bounded_file(invocation, &path, hex_limit, InputKind::FrameHex)?,
             max_packet_size,
         )?,
-        (None, None, Some(path)) => read_bounded_file(&path, max_packet_size, InputKind::Frame)?,
-        (None, None, None) => read_stdin_bounded(max_packet_size, InputKind::Frame)?,
+        (None, None, Some(path)) => {
+            read_bounded_file(invocation, &path, max_packet_size, InputKind::Frame)?
+        }
+        (None, None, None) => read_stdin_bounded(invocation, max_packet_size, InputKind::Frame)?,
         _ => unreachable!("clap enforces conflicts"),
     };
     let mut tree = arguments

@@ -98,8 +98,11 @@ pub(crate) fn run(
                 "--rules-file conflicts with direct edits, --set, and --filter",
             ));
         }
-        let document =
-            crate::input::read_bounded_json_document(path, rules::MAX_REWRITE_DOCUMENT_BYTES)?;
+        let document = crate::input::read_bounded_json_document(
+            invocation,
+            path,
+            rules::MAX_REWRITE_DOCUMENT_BYTES,
+        )?;
         Rules::parse(&document, checksum_mode, &registry).map_err(CliError::classified)?
     } else {
         if patch.is_empty() && args.sets.is_empty() && map.is_none() {

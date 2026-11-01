@@ -44,4 +44,32 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "ip_tcp_reassembly"
+path = "fuzz_targets/ip_tcp_reassembly.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http2_connection"
+path = "fuzz_targets/http2_connection.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "display_filter"
+path = "fuzz_targets/display_filter.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "input_documents"
+path = "fuzz_targets/input_documents.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

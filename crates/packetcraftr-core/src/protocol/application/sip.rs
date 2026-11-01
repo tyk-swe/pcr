@@ -67,16 +67,6 @@ impl Sip {
             &self.body,
             c.remaining_packet_bytes,
         )?;
-        Self::parse_wire(
-            Bytes::copy_from_slice(&b),
-            &DecodeContext {
-                parent: None,
-                registry: c.registry,
-                network: None,
-                hop_limit: None,
-                discriminator: None,
-            },
-        )?;
         Ok(b)
     }
     fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {

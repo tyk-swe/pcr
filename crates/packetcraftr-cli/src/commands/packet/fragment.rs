@@ -50,7 +50,8 @@ pub(crate) fn run(
 ) -> Result<(), CliError> {
     let compression = args.compression.for_output(format)?;
     let registry = core::protocol::builtin::registry();
-    let packet = crate::input::read_recipe(args.recipe, &registry, args.budget.max_layers)?;
+    let packet =
+        crate::input::read_recipe(invocation, args.recipe, &registry, args.budget.max_layers)?;
     invocation.check()?;
     let link_type = core::transform::fragment_link_type(&packet).map_err(CliError::classified)?;
     let built = core::build::Builder::new(registry)

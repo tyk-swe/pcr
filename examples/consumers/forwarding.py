@@ -4,7 +4,7 @@
 """Bounded reference consumer for the forwarding contract.
 
 This validates the protocol and forwarding invariants it uses, not the complete
-JSON Schema. It accepts the current v1 family. Additive fields
+JSON Schema. It accepts only packetcraftr.output/v19. Additive fields
 are accepted; unknown semantic enums are rejected. An error envelope is an execution failure, not a forwarding verdict.
 """
 from __future__ import annotations
@@ -16,7 +16,10 @@ import math
 import sys
 from typing import BinaryIO, Any
 
-SCHEMA = "packetcraftr.output/v1"
+SCHEMA = "packetcraftr.output/v19"
+# Releases 0.3.0 to 0.5.0-beta.2 and later unreleased builds each emitted this
+# identifier with a different schema, so no single schema can validate it.
+AMBIGUOUS_SCHEMA = "packetcraftr.output/v1"
 
 MAX_RECORD = 16 * 1024 * 1024
 MAX_STREAM = 64 * 1024 * 1024
@@ -135,6 +138,9 @@ def decode(data: bytes) -> dict[str, Any]:
     except (UnicodeError, ValueError, RecursionError) as error:
         raise ContractError(f"invalid JSON: {error}") from error
     require(isinstance(value, dict), "an envelope must be an object")
+    require(value.get("schema") != AMBIGUOUS_SCHEMA,
+            f"{AMBIGUOUS_SCHEMA} is ambiguous across releases; regenerate the output with a "
+            f"release that emits {SCHEMA}")
     require(value.get("schema") == SCHEMA, "unsupported schema; explicit migration required")
     require(value.get("command") == "verify-forwarding", "unexpected command")
     return value

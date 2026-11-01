@@ -1,14 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fs::File;
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
 use packetcraftr_core as core;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
+use super::source::{self, Source, interrupted_or};
 use crate::errors::CliError;
+use crate::invocation::Invocation;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum InputKind {
@@ -125,10 +126,7 @@ pub(crate) fn missing_input_error(kind: InputKind) -> CliError {
     )
 }
 
-pub(super) fn require_redirected_stdin(
-    kind: InputKind,
-    stdin_is_terminal: bool,
-) -> Result<(), CliError> {
+fn require_redirected_stdin(kind: InputKind, stdin_is_terminal: bool) -> Result<(), CliError> {
     if stdin_is_terminal {
         Err(missing_input_error(kind))
     } else {
@@ -137,25 +135,38 @@ pub(super) fn require_redirected_stdin(
 }
 
 pub(crate) fn read_bounded_file(
+    invocation: &Invocation,
     path: &Path,
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    require_non_empty(read_bounded_file_allow_empty(path, max_bytes, kind)?, kind)
-        .map_err(|error| error.with_input(path.display()))
+    require_non_empty(
+        read_bounded_file_allow_empty(invocation, path, max_bytes, kind)?,
+        kind,
+    )
+    .map_err(|error| error.with_input(path.display()))
 }
 
 pub(crate) fn read_bounded_file_allow_empty(
+    invocation: &Invocation,
     path: &Path,
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    let bytes = read_file_capped(path, max_bytes)?;
+    let bytes = read_file_capped(invocation, path, max_bytes)?;
     require_bounded(bytes, max_bytes, kind).map_err(|error| error.with_input(path.display()))
 }
 
-pub(super) fn open_file(path: &Path) -> Result<File, CliError> {
-    File::open(path).map_err(|source| file_io_error("open", path, source))
+pub(super) fn open_file(invocation: &Invocation, path: &Path) -> Result<Source, CliError> {
+    source::open(invocation, path).map_err(|source| file_io_error("open", path, source))
+}
+
+pub(super) fn redirected_stdin(
+    invocation: &Invocation,
+    kind: InputKind,
+) -> Result<Source, CliError> {
+    require_redirected_stdin(kind, io::stdin().is_terminal())?;
+    source::stdin(invocation).map_err(|source| input_read_error(kind, source))
 }
 
 fn file_io_error(operation: &'static str, path: &Path, source: io::Error) -> CliError {
@@ -193,11 +204,11 @@ pub(crate) fn hex_text_limit(max_packet_size: usize) -> usize {
 }
 
 pub(crate) fn read_bounded_json_document(
+    invocation: &Invocation,
     path: &Path,
     max_bytes: usize,
 ) -> Result<Vec<u8>, CliError> {
-    let bytes = read_capped(open_file(path)?, max_bytes)
-        .map_err(|source| file_io_error("read", path, source))?;
+    let bytes = read_file_capped(invocation, path, max_bytes)?;
     if bytes.len() > max_bytes {
         return Err(CliError::new(
             Kind::Usage,
@@ -207,23 +218,27 @@ pub(crate) fn read_bounded_json_document(
     Ok(bytes)
 }
 
-pub(crate) fn read_stdin_bounded(max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {
-    let stdin = io::stdin();
-    require_redirected_stdin(kind, stdin.is_terminal())?;
-    read_bounded(stdin.lock(), max_bytes, kind)
-}
-
-pub(crate) fn read_stdin_bounded_allow_empty(
+pub(crate) fn read_stdin_bounded(
+    invocation: &Invocation,
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    let stdin = io::stdin();
-    require_redirected_stdin(kind, stdin.is_terminal())?;
-    read_bounded_allow_empty(stdin.lock(), max_bytes, kind)
+    require_non_empty(
+        read_stdin_bounded_allow_empty(invocation, max_bytes, kind)?,
+        kind,
+    )
 }
 
-fn read_bounded(reader: impl Read, max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {
-    require_non_empty(read_bounded_allow_empty(reader, max_bytes, kind)?, kind)
+pub(crate) fn read_stdin_bounded_allow_empty(
+    invocation: &Invocation,
+    max_bytes: usize,
+    kind: InputKind,
+) -> Result<Vec<u8>, CliError> {
+    require_bounded(
+        read_stdin_capped(invocation, max_bytes, kind)?,
+        max_bytes,
+        kind,
+    )
 }
 
 fn require_non_empty(bytes: Vec<u8>, kind: InputKind) -> Result<Vec<u8>, CliError> {
@@ -231,15 +246,6 @@ fn require_non_empty(bytes: Vec<u8>, kind: InputKind) -> Result<Vec<u8>, CliErro
         return Err(missing_input_error(kind));
     }
     Ok(bytes)
-}
-
-fn read_bounded_allow_empty(
-    reader: impl Read,
-    max_bytes: usize,
-    kind: InputKind,
-) -> Result<Vec<u8>, CliError> {
-    let bytes = read_capped(reader, max_bytes).map_err(|source| input_read_error(kind, source))?;
-    require_bounded(bytes, max_bytes, kind)
 }
 
 fn require_bounded(bytes: Vec<u8>, max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {
@@ -250,8 +256,13 @@ fn require_bounded(bytes: Vec<u8>, max_bytes: usize, kind: InputKind) -> Result<
 }
 
 /// Reads at most `max_bytes + 1` bytes of `path`, leaving the oversize decision to the caller.
-pub(crate) fn read_file_capped(path: &Path, max_bytes: usize) -> Result<Vec<u8>, CliError> {
-    read_file_reader_capped(open_file(path)?, path, max_bytes)
+pub(crate) fn read_file_capped(
+    invocation: &Invocation,
+    path: &Path,
+    max_bytes: usize,
+) -> Result<Vec<u8>, CliError> {
+    read_file_reader_capped(open_file(invocation, path)?, path, max_bytes)
+        .map_err(|error| interrupted_or(invocation, error))
 }
 
 fn read_file_reader_capped(
@@ -264,10 +275,21 @@ fn read_file_reader_capped(
 
 /// Reads at most `max_bytes + 1` bytes of redirected stdin, leaving the oversize decision to the
 /// caller.
-pub(crate) fn read_stdin_capped(max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {
-    let stdin = io::stdin();
-    require_redirected_stdin(kind, stdin.is_terminal())?;
-    read_capped(stdin.lock(), max_bytes).map_err(|source| input_read_error(kind, source))
+pub(crate) fn read_stdin_capped(
+    invocation: &Invocation,
+    max_bytes: usize,
+    kind: InputKind,
+) -> Result<Vec<u8>, CliError> {
+    read_stdin_reader_capped(redirected_stdin(invocation, kind)?, max_bytes, kind)
+        .map_err(|error| interrupted_or(invocation, error))
+}
+
+fn read_stdin_reader_capped(
+    reader: impl Read,
+    max_bytes: usize,
+    kind: InputKind,
+) -> Result<Vec<u8>, CliError> {
+    read_capped(reader, max_bytes).map_err(|source| input_read_error(kind, source))
 }
 
 fn input_read_error(kind: InputKind, source: io::Error) -> CliError {
@@ -310,22 +332,23 @@ mod tests {
         assert_eq!(error.classification.kind, Kind::Io);
         assert_eq!(error.causes, ["injected read failure"]);
 
-        let error = read_bounded(FailingReader, 16, InputKind::Manifest).unwrap_err();
+        let error = read_stdin_reader_capped(FailingReader, 16, InputKind::Manifest).unwrap_err();
         assert!(error.message.contains("stdin"));
         assert_eq!(error.causes, ["injected read failure"]);
     }
 
     #[test]
     fn error_handling_file_bounds_and_missing_files_retain_paths_and_codes() {
+        let invocation = &source::test_invocation(None, Default::default());
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("frame.bin");
-        let error = read_bounded_file(&path, 1, InputKind::Frame).unwrap_err();
+        let error = read_bounded_file(invocation, &path, 1, InputKind::Frame).unwrap_err();
         assert_eq!(error.classification.kind, Kind::Io);
         assert!(error.message.contains(&path.display().to_string()));
         assert!(!error.causes.is_empty());
 
         std::fs::write(&path, b"ab").unwrap();
-        let error = read_bounded_file(&path, 1, InputKind::Frame).unwrap_err();
+        let error = read_bounded_file(invocation, &path, 1, InputKind::Frame).unwrap_err();
         assert_eq!(
             error.classification,
             core::decode::Error::PacketSizeLimit {
@@ -337,8 +360,36 @@ mod tests {
         assert!(error.message.contains(&path.display().to_string()));
 
         std::fs::write(&path, b"").unwrap();
-        let error = read_bounded_file(&path, 1, InputKind::Frame).unwrap_err();
+        let error = read_bounded_file(invocation, &path, 1, InputKind::Frame).unwrap_err();
         assert_eq!(error.classification.code, "cli.input_source");
         assert!(error.message.contains(&path.display().to_string()));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn stalled_fifo_document_reports_the_invocation_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let fifo = directory.path().join("document.fifo");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(status.success(), "mkfifo failed: {status:?}");
+        let invocation = source::test_invocation(
+            Some(std::time::Duration::from_millis(200)),
+            Default::default(),
+        );
+
+        let error = read_bounded_json_document(&invocation, &fifo, 16).unwrap_err();
+
+        let expected = invocation.check().unwrap_err();
+        assert_eq!(error.classification, expected.classification);
+        assert_eq!(error.exit_code(), expected.exit_code());
+        assert!(
+            error.message.starts_with("operation took "),
+            "{}",
+            error.message
+        );
+        assert!(error.message.ends_with(" budget"), "{}", error.message);
     }
 }

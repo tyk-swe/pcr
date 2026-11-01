@@ -18,8 +18,10 @@ use packetcraftr_core::error::{Classified, Kind};
 
 use crate::errors::CliError;
 use crate::input::{InputKind, manifest, read_bounded_file_allow_empty};
+use crate::invocation::Invocation;
 
 pub(super) fn read_udp_payload(
+    invocation: &Invocation,
     udp: bool,
     hex: Option<&str>,
     path: Option<&Path>,
@@ -54,18 +56,25 @@ pub(super) fn read_udp_payload(
     if let Some(path) = path {
         if manifest::is_stdin(path) {
             return crate::input::read_stdin_bounded_allow_empty(
+                invocation,
                 MAX_UDP_PAYLOAD_BYTES,
                 InputKind::Payload,
             )
             .map(Bytes::from);
         }
-        return read_bounded_file_allow_empty(path, MAX_UDP_PAYLOAD_BYTES, InputKind::Payload)
-            .map(Bytes::from);
+        return read_bounded_file_allow_empty(
+            invocation,
+            path,
+            MAX_UDP_PAYLOAD_BYTES,
+            InputKind::Payload,
+        )
+        .map(Bytes::from);
     }
     Ok(Bytes::new())
 }
 
 pub(super) fn load_udp_profiles(
+    invocation: &Invocation,
     path: Option<&Path>,
     udp: bool,
 ) -> Result<BTreeMap<u16, Arc<UdpProfile>>, CliError> {
@@ -79,9 +88,9 @@ pub(super) fn load_udp_profiles(
         ));
     }
     let document = if manifest::is_stdin(path) {
-        crate::input::read_stdin_bounded(MAX_PROFILE_BYTES, InputKind::UdpProfiles)?
+        crate::input::read_stdin_bounded(invocation, MAX_PROFILE_BYTES, InputKind::UdpProfiles)?
     } else {
-        crate::input::read_bounded_json_document(path, MAX_PROFILE_BYTES)?
+        crate::input::read_bounded_json_document(invocation, path, MAX_PROFILE_BYTES)?
     };
     let assignments = udp_profiles::parse(&document).map_err(CliError::classified)?;
     profile::compile(assignments).map_err(CliError::classified)
@@ -93,6 +102,7 @@ pub(super) struct Ingested {
 }
 
 pub(super) fn ingest_targets(
+    invocation: &Invocation,
     positional: &[String],
     targets_file: &[PathBuf],
     exclusions: &[packetcraftr::target::Network],
@@ -117,6 +127,7 @@ pub(super) fn ingest_targets(
         })
         .collect::<Vec<_>>();
     origins.extend(manifest::read_with_budget(
+        invocation,
         &manifest_sources(targets_file),
         &mut budget,
     )?);
@@ -129,7 +140,7 @@ pub(super) fn ingest_targets(
     }
     let mut exclude = exclusions.to_vec();
     exclude.extend(parse_declarations::<packetcraftr::target::Network>(
-        &manifest::read_with_budget(&manifest_sources(exclude_file), &mut budget)?,
+        &manifest::read_with_budget(invocation, &manifest_sources(exclude_file), &mut budget)?,
     )?);
     Ok(Ingested {
         targets: packetcraftr::target::Selection { include, exclude },

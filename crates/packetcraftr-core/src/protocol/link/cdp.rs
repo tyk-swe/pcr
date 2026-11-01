@@ -60,7 +60,7 @@ fn cdp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
             range: crate::layout::ByteRange::new(2, 4),
         });
     }
-    if b.len() <= b.len() {
+    if 4 <= b.len() {
         fields.push(crate::layout::FieldLayout {
             name: "tlvs",
             range: crate::layout::ByteRange::new(4, b.len()),

@@ -90,6 +90,7 @@ pub(crate) fn prepare_live<R: LiveRequest>(
     request.validate()?;
     let registry = core::protocol::builtin::registry();
     let packet = read_recipe(
+        invocation,
         send.route.recipe,
         &registry,
         core::packet::DEFAULT_MAX_LAYERS,
@@ -144,7 +145,12 @@ pub(crate) fn prepare_plan(
         route,
     } = arguments;
     let registry = core::protocol::builtin::registry();
-    let packet = read_recipe(recipe, &registry, core::packet::DEFAULT_MAX_LAYERS)?;
+    let packet = read_recipe(
+        invocation,
+        recipe,
+        &registry,
+        core::packet::DEFAULT_MAX_LAYERS,
+    )?;
     policy.validate().map_err(CliError::classified)?;
     // This check intentionally precedes interface discovery and route lookup.
     policy

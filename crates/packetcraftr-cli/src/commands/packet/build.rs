@@ -61,10 +61,13 @@ pub(super) fn run(
     let maximum = arguments.template.max_template_packets;
     let axes = arguments.template.parse()?;
     let registry = arguments.decode.registry()?;
-    let session =
-        arguments
-            .session
-            .resolve(&registry, arguments.budget, arguments.mode.into(), maximum)?;
+    let session = arguments.session.resolve(
+        invocation,
+        &registry,
+        arguments.budget,
+        arguments.mode.into(),
+        maximum,
+    )?;
     if session.as_ref().is_some_and(|session| session.step_chosen) && capture.is_none() {
         return Err(CliError::new(
             Kind::Usage,
@@ -72,7 +75,7 @@ pub(super) fn run(
         ));
     }
     // Recipe byte limits bound parsing; the builder owns the requested layer budget.
-    let mut packet = read_recipe(arguments.recipe, &registry, usize::MAX)?;
+    let mut packet = read_recipe(invocation, arguments.recipe, &registry, usize::MAX)?;
     apply_overrides(&mut packet, &registry, &arguments.set)?;
     if let Some(capture) = &capture {
         capture.validate_root(&packet)?;

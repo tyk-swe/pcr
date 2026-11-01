@@ -5,24 +5,79 @@
 //! read.
 //!
 //! A destination is staged as a temporary file inside its parent directory and
-//! published with a no-clobber rename. Documentation regeneration uses a
-//! separate replacement entrypoint for missing destinations or regular files,
-//! keeping the original until atomic rename. Both steps go through an
-//! [`OutputDirectory`] opened at staging time: with procfs, staging and
-//! publication address the directory handle itself, so a parent path retargeted
-//! by another local actor (symlink swap or a renamed and replaced directory)
-//! cannot redirect the output. Elsewhere staging and publication use the
-//! physical directory resolved at staging, its identity is re-verified
-//! immediately before publication, and a change is refused.
+//! published without overwriting. Documentation regeneration uses a separate
+//! replacement entrypoint for missing destinations or regular files, keeping
+//! the original until an atomic rename. Atomic publication is not crash
+//! durability: the staged bytes are synced, the directory entry is not.
+//!
+//! # Threat model
+//!
+//! Other local accounts that can write to the requested parent directory or
+//! any of its ancestors may retarget those paths at any time, by swapping a
+//! symlink or renaming a directory and putting another in its place. On Unix
+//! the parent is opened once when staging starts and every later step
+//! (destination checks, staging, publication, cleanup) is relative to that
+//! handle, so output only ever lands in the directory object selected then.
+//!
+//! The same actors may substitute another file at a staging name. On Linux,
+//! output is staged as an unnamed `O_TMPFILE` and linked into place through
+//! its open descriptor, so there is no staging name to substitute. Elsewhere,
+//! and on Linux filesystems without `O_TMPFILE` or without procfs, the staging
+//! file has a hidden random name: publication is refused when that name no
+//! longer refers to the file this process wrote, and an entry that turns out
+//! not to be the staged file after the atomic publish fails the command
+//! loudly. No-clobber publication then removes that entry, while replacement
+//! reports that the previous content could not be preserved.
+//!
+//! Actors running as the same user are out of scope, since they can already
+//! write the output or the process itself. A filesystem that lacks a required
+//! primitive produces an error rather than a silently weaker publication.
+//!
+//! On Windows the parent directory is held open without delete sharing while
+//! output is staged, so the operating system refuses to rename or delete that
+//! directory, and publication goes through `tempfile`'s path-based rename.
+//! Retargeting an ancestor of the parent and substituting the staging name
+//! are not prevented there, and this path has not been verified natively.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use packetcraftr_core::error::{Classification, Kind};
 
-use crate::cancellation::StagedRegistration;
 use crate::errors::CliError;
 use crate::output::envelope::source_causes;
+
+#[cfg(unix)]
+mod unix;
+#[cfg(unix)]
+use unix as platform;
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as platform;
+
+#[cfg(all(test, unix))]
+mod tests;
+
+#[cfg(test)]
+thread_local! {
+    static BEFORE_PUBLISH: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(all(test, packetcraftr_proc_fd_paths))]
+thread_local! {
+    static FORCE_NAMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs the test hook installed for the current thread, after the
+/// pre-publication checks and immediately before the publishing call.
+fn before_publish() {
+    #[cfg(test)]
+    if let Some(hook) = BEFORE_PUBLISH.take() {
+        hook();
+    }
+}
 
 const CLASSIFICATION: Classification = Classification::new(
     "io.output_file",
@@ -30,155 +85,38 @@ const CLASSIFICATION: Classification = Classification::new(
     Some("choose a destination that does not exist inside a writable directory"),
 );
 
-/// Identity of a directory, compared to detect a retargeted parent.
-#[cfg(unix)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Identity {
-    dev: u64,
-    ino: u64,
+enum Publication {
+    NoClobber,
+    Replace,
 }
 
-/// Identity of a directory, compared to detect a retargeted parent. Handle
-/// identity is unavailable on this platform, so the resolved path stands in.
-#[cfg(not(unix))]
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Identity(PathBuf);
-
-impl Identity {
-    #[cfg(unix)]
-    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
-        use std::os::unix::fs::MetadataExt;
-        Self {
-            dev: metadata.dev(),
-            ino: metadata.ino(),
-        }
-    }
-
-    /// The identity the requested parent path currently resolves to.
-    fn current(requested: &Path) -> std::io::Result<Self> {
-        #[cfg(unix)]
-        {
-            std::fs::metadata(requested).map(|metadata| Self::from_metadata(&metadata))
-        }
-        #[cfg(not(unix))]
-        {
-            std::fs::canonicalize(requested).map(Self)
+impl Publication {
+    fn action(self) -> &'static str {
+        match self {
+            Self::NoClobber => "publish",
+            Self::Replace => "replace",
         }
     }
 }
 
-/// The parent directory selected at staging time.
+/// What the bound directory holds at the destination name.
 #[derive(Debug)]
-struct OutputDirectory {
-    /// The parent path as requested, kept for messages and for platforms
-    /// without handle-relative paths.
-    requested: PathBuf,
-    /// Held for the staged file's lifetime: it keeps the directory inode alive
-    /// so a replacement cannot reuse it, and procfs paths resolve through it.
-    #[cfg(unix)]
-    _handle: std::fs::File,
-    identity: Identity,
-    /// Where staged files are created and published: the handle-relative
-    /// procfs path when available, otherwise the physical directory the
-    /// requested path resolved to at staging.
-    base: PathBuf,
-}
-
-impl OutputDirectory {
-    fn open(requested: &Path, destination: &Path) -> Result<Self, CliError> {
-        let stage = |source| output("stage", destination, source);
-        #[cfg(unix)]
-        {
-            let handle = std::fs::File::open(requested).map_err(stage)?;
-            let metadata = handle.metadata().map_err(stage)?;
-            if !metadata.is_dir() {
-                return Err(stage(std::io::Error::from(
-                    std::io::ErrorKind::NotADirectory,
-                )));
-            }
-            let identity = Identity::from_metadata(&metadata);
-            let base = match proc_fd_base(&handle, identity) {
-                Some(base) => base,
-                // Without handle-relative paths, stage and publish at the
-                // physical directory resolved now, so a later change to an
-                // alias in the requested path cannot move the staged file.
-                None => std::fs::canonicalize(requested).map_err(stage)?,
-            };
-            Ok(Self {
-                requested: requested.to_owned(),
-                _handle: handle,
-                identity,
-                base,
-            })
-        }
-        #[cfg(not(unix))]
-        {
-            let identity = Identity::current(requested).map_err(stage)?;
-            if !std::fs::metadata(requested).map_err(stage)?.is_dir() {
-                return Err(stage(std::io::Error::from(
-                    std::io::ErrorKind::NotADirectory,
-                )));
-            }
-            let base = identity.0.clone();
-            Ok(Self {
-                requested: requested.to_owned(),
-                identity,
-                base,
-            })
-        }
-    }
-
-    fn join(&self, name: &OsStr) -> PathBuf {
-        self.base.join(name)
-    }
-
-    /// Refuses publication when the requested parent no longer resolves to the
-    /// directory selected at staging.
-    fn verify_unchanged(&self, destination: &Path) -> Result<(), CliError> {
-        let causes = match Identity::current(&self.requested) {
-            Ok(identity) if identity == self.identity => return Ok(()),
-            Ok(_) => Vec::new(),
-            Err(source) => source_causes(&source),
-        };
-        Err(CliError::from_classification(
-            CLASSIFICATION,
-            format!(
-                "output parent for {} changed since staging",
-                destination.display()
-            ),
-            causes,
-        ))
-    }
-}
-
-/// The handle-relative path of `handle` when procfs serves it for this process.
-#[cfg(packetcraftr_proc_fd_paths)]
-fn proc_fd_base(handle: &std::fs::File, identity: Identity) -> Option<PathBuf> {
-    use std::os::fd::AsRawFd;
-    let base = PathBuf::from(format!("/proc/self/fd/{}", handle.as_raw_fd()));
-    let metadata = std::fs::metadata(&base).ok()?;
-    (metadata.is_dir() && Identity::from_metadata(&metadata) == identity).then_some(base)
-}
-
-#[cfg(all(unix, not(packetcraftr_proc_fd_paths)))]
-fn proc_fd_base(_handle: &std::fs::File, _identity: Identity) -> Option<PathBuf> {
-    None
+enum Existing {
+    Missing,
+    Regular(platform::Permissions),
+    Other,
 }
 
 #[derive(Debug)]
 pub(crate) struct StagedFile {
-    /// Declared first so the temporary file is unlinked while the directory
-    /// handle is still open.
-    file: tempfile::NamedTempFile,
-    parent: OutputDirectory,
-    file_name: OsString,
+    staged: platform::Staged,
+    file_name: std::ffi::OsString,
     /// The requested path, for messages and reports.
     destination: PathBuf,
     invocation: crate::invocation::Invocation,
-    replace: bool,
-    permissions: Option<std::fs::Permissions>,
-    /// Declared last so the file is unlinked before its path is deregistered.
-    _registration: StagedRegistration,
+    publication: Publication,
+    permissions: Option<platform::Permissions>,
 }
 
 impl StagedFile {
@@ -189,7 +127,7 @@ impl StagedFile {
         invocation: &crate::invocation::Invocation,
         destination: &Path,
     ) -> Result<Self, CliError> {
-        Self::stage_mode(invocation, destination, false)
+        Self::stage_mode(invocation, destination, Publication::NoClobber)
     }
 
     /// Stage regeneration of a missing or regular file. Other output remains
@@ -198,13 +136,13 @@ impl StagedFile {
         invocation: &crate::invocation::Invocation,
         destination: &Path,
     ) -> Result<Self, CliError> {
-        Self::stage_mode(invocation, destination, true)
+        Self::stage_mode(invocation, destination, Publication::Replace)
     }
 
     fn stage_mode(
         invocation: &crate::invocation::Invocation,
         destination: &Path,
-        replace: bool,
+        publication: Publication,
     ) -> Result<Self, CliError> {
         invocation.check()?;
         let Some(file_name) = file_name(destination) else {
@@ -217,9 +155,19 @@ impl StagedFile {
                 Vec::new(),
             ));
         };
-        match std::fs::symlink_metadata(destination) {
-            Ok(metadata) if replace && metadata.is_file() => {}
-            Ok(_) => {
+        let requested = destination
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let directory = platform::Directory::open(requested)
+            .map_err(|source| output("stage", destination, source))?;
+        let existing = directory
+            .existing(file_name)
+            .map_err(|source| output("inspect", destination, source))?;
+        let permissions = match (publication, existing) {
+            (_, Existing::Missing) => None,
+            (Publication::Replace, Existing::Regular(permissions)) => Some(permissions),
+            (_, Existing::Regular(_) | Existing::Other) => {
                 return Err(CliError::from_classification(
                     CLASSIFICATION,
                     format!(
@@ -229,49 +177,25 @@ impl StagedFile {
                     Vec::new(),
                 ));
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(source) => return Err(output("inspect", destination, source)),
-        }
-        let requested = destination
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        let parent = OutputDirectory::open(requested, destination)?;
-        let permissions = if replace {
-            replacement_permissions(&parent.join(file_name), destination)?
-        } else {
-            None
         };
-        let builder = tempfile::Builder::new();
-        #[cfg(unix)]
-        let builder = {
-            use std::os::unix::fs::PermissionsExt;
-            let mut builder = builder;
-            // Match ordinary file creation (0666 filtered by the process umask)
-            // for new documentation, while other staged output stays private.
-            if replace && permissions.is_none() {
-                builder.permissions(std::fs::Permissions::from_mode(0o666));
-            }
-            builder
-        };
-        let file = builder
-            .tempfile_in(&parent.base)
+        // Match ordinary file creation (0666 filtered by the process umask)
+        // for new documentation, while other staged output stays private.
+        let ordinary = publication == Publication::Replace && permissions.is_none();
+        let staged = directory
+            .stage(ordinary)
             .map_err(|source| output("stage", destination, source))?;
-        let registration = StagedRegistration::new(file.path());
         Ok(Self {
-            file,
-            parent,
+            staged,
             file_name: file_name.to_owned(),
             destination: destination.to_owned(),
             invocation: invocation.clone(),
-            replace,
+            publication,
             permissions,
-            _registration: registration,
         })
     }
 
     pub(crate) fn as_file_mut(&mut self) -> &mut std::fs::File {
-        self.file.as_file_mut()
+        self.staged.file_mut()
     }
 
     /// Durably flushes the staged bytes. Callers check cancellation and deadlines
@@ -282,69 +206,48 @@ impl StagedFile {
         // Apply the original mode after writing: Unix writes can clear set-ID
         // bits. Sync both bytes and permissions before publication.
         if let Some(permissions) = &self.permissions {
-            self.file
-                .as_file()
-                .set_permissions(permissions.clone())
+            self.staged
+                .set_permissions(permissions)
                 .map_err(|source| output("set permissions for", &self.destination, source))?;
         }
-        self.file
-            .as_file()
+        self.staged
+            .file()
             .sync_all()
             .map_err(|source| output("sync", &self.destination, source))?;
         self.invocation.check()
     }
 
-    /// Publishes into the directory bound at staging without overwriting.
+    /// Publishes into the directory bound at staging, without overwriting
+    /// unless staged as a replacement.
     pub(crate) fn persist(self) -> Result<Published, CliError> {
-        // This is the commit boundary. Expiry after a successful rename must
-        // not claim that the already-published artifact was unpublished.
+        // This is the commit boundary. Expiry after a successful publication
+        // must not claim that the already-published artifact was unpublished.
         self.invocation.check()?;
-        self.parent.verify_unchanged(&self.destination)?;
-        if self.replace {
-            replacement_permissions(&self.parent.join(&self.file_name), &self.destination)?;
+        if self.publication == Publication::Replace {
+            self.check_replaceable()?;
         }
-        // `parent` is bound before `file` so it drops after it: a failed
-        // rename unlinks the staged file through the still-open handle.
         let Self {
-            parent,
-            file,
+            staged,
             file_name,
             destination,
-            _registration,
-            replace,
+            publication,
             ..
         } = self;
-        if replace {
-            file.persist(parent.join(&file_name))
-                .map_err(|error| output("replace", &destination, error.error))?;
-        } else {
-            file.persist_noclobber(parent.join(&file_name))
-                .map_err(|error| output("publish", &destination, error.error))?;
-        }
+        staged
+            .publish(&file_name, publication)
+            .map_err(|source| output(publication.action(), &destination, source))?;
         Ok(Published { destination })
     }
-}
 
-fn replacement_permissions(
-    path: &Path,
-    destination: &Path,
-) -> Result<Option<std::fs::Permissions>, CliError> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_file() => Ok(Some(metadata.permissions())),
-        Ok(_) => Err(output(
-            "inspect replacement destination",
-            destination,
-            std::io::Error::new(
+    fn check_replaceable(&self) -> Result<(), CliError> {
+        let inspect = |source| output("inspect replacement destination", &self.destination, source);
+        match self.staged.existing(&self.file_name).map_err(inspect)? {
+            Existing::Missing | Existing::Regular(_) => Ok(()),
+            Existing::Other => Err(inspect(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "replacement requires a regular file or missing destination",
-            ),
-        )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(source) => Err(output(
-            "inspect replacement destination",
-            destination,
-            source,
-        )),
+            ))),
+        }
     }
 }
 

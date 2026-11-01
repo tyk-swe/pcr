@@ -7,8 +7,8 @@ use serde::Serialize;
 
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
-/// Current output contract, including qualified scan measurements.
-pub const SCHEMA_V1: &str = "packetcraftr.output/v1";
+/// Current output contract identifier.
+pub const SCHEMA: &str = packetcraftr_core::security::OUTPUT_SCHEMA;
 
 pub use crate::commands::Command;
 

@@ -83,7 +83,10 @@ pub(super) struct Built {
 }
 
 /// Builds and validates the scan request the grouped arguments describe.
-pub(super) fn build_request(inputs: RequestInputs) -> Result<Built, CliError> {
+pub(super) fn build_request(
+    invocation: &crate::invocation::Invocation,
+    inputs: RequestInputs,
+) -> Result<Built, CliError> {
     let RequestInputs {
         endpoints,
         discovery,
@@ -146,11 +149,12 @@ pub(super) fn build_request(inputs: RequestInputs) -> Result<Built, CliError> {
             .iter()
             .any(|probe| probe.transport() == Transport::Udp);
     let udp_payload = read_udp_payload(
+        invocation,
         udp_required,
         udp.payload_hex.as_deref(),
         udp.payload_file.as_deref(),
     )?;
-    let operator_profiles = load_udp_profiles(udp.profiles.as_deref(), udp_required)?;
+    let operator_profiles = load_udp_profiles(invocation, udp.profiles.as_deref(), udp_required)?;
     if udp.curated && !udp_required {
         return Err(CliError::new(
             Kind::Usage,

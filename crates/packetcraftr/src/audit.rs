@@ -133,21 +133,44 @@ impl Classified for Error {
         }
     }
 }
-fn authorize(
+fn admit(
     policy: &crate::policy::Policy,
     endpoint: SocketAddr,
-    connections: u64,
-    bytes: usize,
+    limits: SocketLimits,
 ) -> Result<(), Error> {
     let endpoints = [endpoint];
-    let operation = SocketOperation::new(
-        &endpoints,
-        SocketLimits::new(connections, u64::from(bytes > 0), bytes as u64),
-    )
-    .map_err(|e| Error::Invalid(e.to_string()))?;
+    let operation =
+        SocketOperation::new(&endpoints, limits).map_err(|e| Error::Invalid(e.to_string()))?;
     policy.authorize(Operation::Socket(operation))?;
     Ok(())
 }
+/// A saturated count fails policy ceilings closed.
+fn count(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+/// One connection whose native writes are bounded by [`tls::Limits::max_steps`]
+/// and whose ciphertext, including any application data, is bounded by
+/// [`tls::Limits::max_wire_bytes_sent`].
+fn tls_reservation(limits: tls::Limits) -> SocketLimits {
+    SocketLimits::new(
+        1,
+        count(limits.max_steps),
+        count(limits.max_wire_bytes_sent),
+    )
+}
+/// Admission already reserved every write, so each one only rechecks the peer.
+fn reauthorize_peer(
+    policy: &Arc<crate::policy::Policy>,
+    peer: SocketAddr,
+) -> impl FnMut(&[u8]) -> std::io::Result<()> + Send + use<> {
+    let policy = Arc::clone(policy);
+    move |_| {
+        policy
+            .authorize_destination(peer.ip())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))
+    }
+}
+type Connection<P> = tcp::Connection<<<P as TcpProviders>::Tcp as tcp::Provider>::Stream>;
 struct Authorized<P> {
     providers: Arc<P>,
     policy: Arc<crate::policy::Policy>,
@@ -241,12 +264,12 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
     fn audit_connection(
         &self,
         request: &TlsRequest,
-        bytes: usize,
+        limits: SocketLimits,
         deadline: &Deadline,
-    ) -> Result<tcp::Connection<<P::Tcp as tcp::Provider>::Stream>, Error> {
+    ) -> Result<(Connection<P>, SocketAddr), Error> {
         request.validate()?;
         self.policy.validate()?;
-        authorize(&self.policy, request.endpoint, 1, bytes)?;
+        admit(&self.policy, request.endpoint, limits)?;
         deadline.enforce()?;
         let provider = Arc::new(Authorized {
             providers: Arc::clone(&self.providers),
@@ -265,49 +288,44 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
             )));
         }
         self.policy.authorize_destination(peer.ip())?;
-        Ok(stream)
+        Ok((stream, peer))
     }
     pub fn audit_tls(&self, request: &TlsRequest) -> Result<Report, Error> {
         let deadline = self.deadline(request.timeout);
-        let stream =
-            self.audit_connection(request, request.limits.max_wire_bytes_sent, &deadline)?;
-        let policy = Arc::clone(&self.policy);
-        let endpoint = request.endpoint;
+        let (stream, peer) =
+            self.audit_connection(request, tls_reservation(request.limits), &deadline)?;
         let handshake = tls::connect(
             stream,
             request.name(),
             request.limits,
             &deadline,
-            move |bytes| {
-                authorize(&policy, endpoint, 0, bytes.len()).map_err(std::io::Error::other)
-            },
+            reauthorize_peer(&self.policy, peer),
         )?;
         handshake.result?;
         deadline.enforce()?;
         Ok(tls_report(request, &handshake.evidence))
     }
+    /// Plain HTTP reserves one connection and the one request message that
+    /// [`tcp::exchange`] writes, however many native writes that takes. HTTPS
+    /// reserves the TLS connection, which carries the request as ciphertext.
     pub fn audit_http(&self, request: &HttpRequest) -> Result<Report, Error> {
         let bytes = request.request()?;
         let connection = &request.connection;
         let deadline = self.deadline(connection.timeout);
-        let write_budget = if request.tls {
-            connection.limits.max_wire_bytes_sent
+        let limits = if request.tls {
+            tls_reservation(connection.limits)
         } else {
-            bytes.len()
+            SocketLimits::new(1, 1, count(bytes.len()))
         };
-        let mut stream = self.audit_connection(connection, write_budget, &deadline)?;
+        let (mut stream, peer) = self.audit_connection(connection, limits, &deadline)?;
         let mut tls_observation = None;
         let exchange = if request.tls {
-            let policy = Arc::clone(&self.policy);
-            let endpoint = connection.endpoint;
             let handshake = tls::connect(
                 stream,
                 connection.name(),
                 connection.limits,
                 &deadline,
-                move |bytes| {
-                    authorize(&policy, endpoint, 0, bytes.len()).map_err(std::io::Error::other)
-                },
+                reauthorize_peer(&self.policy, peer),
             )?;
             let mut secure = handshake.result?;
             let verification =
@@ -320,7 +338,6 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
                     .note("HTTP request withheld because TLS certificate verification failed");
                 return Ok(report);
             }
-            authorize(&self.policy, connection.endpoint, 0, bytes.len())?;
             let exchange = tcp::exchange(
                 &mut secure,
                 &bytes,
@@ -334,7 +351,6 @@ impl<P: TcpProviders, K: Clock> Client<P, K> {
             tls_observation = Some(tls_report(connection, &secure.evidence()));
             exchange
         } else {
-            authorize(&self.policy, connection.endpoint, 0, bytes.len())?;
             tcp::exchange(
                 &mut stream,
                 &bytes,
@@ -397,3 +413,6 @@ fn final_head(
 fn response_complete(bytes: &[u8]) -> bool {
     !matches!(final_head(bytes), Ok(None))
 }
+
+#[cfg(test)]
+mod tests;

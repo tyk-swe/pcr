@@ -205,7 +205,8 @@ impl<R: Read> Reader<R> {
                 &self.limits,
                 &mut self.scratch,
             ),
-        }?;
+        }
+        .map_err(|error| self.check_interrupted().err().unwrap_or(error))?;
         self.check_interrupted()?;
         if let Some(CaptureRecord {
             kind: RecordKind::Metadata(MetadataBlockKind::InterfaceDescription { options, .. }),

@@ -33,7 +33,10 @@ pub(super) enum Planned {
     Raw(raw::Request),
 }
 
-pub(super) fn prepare(arguments: Args) -> Result<Planned, CliError> {
+pub(super) fn prepare(
+    invocation: &crate::invocation::Invocation,
+    arguments: Args,
+) -> Result<Planned, CliError> {
     let Args {
         connect,
         method,
@@ -104,6 +107,7 @@ pub(super) fn prepare(arguments: Args) -> Result<Planned, CliError> {
         udp_profiles.as_deref(),
     )?;
     let ingested = ingest_targets(
+        invocation,
         &targets,
         &targets_file,
         &exclusions,
@@ -188,7 +192,7 @@ pub(super) fn prepare(arguments: Args) -> Result<Planned, CliError> {
         }));
     }
 
-    let built = build_request(RequestInputs {
+    let inputs = RequestInputs {
         endpoints: EndpointInputs {
             transports,
             tcp_scan,
@@ -234,7 +238,8 @@ pub(super) fn prepare(arguments: Args) -> Result<Planned, CliError> {
             link_mode: route.link_mode.into(),
             ..Default::default()
         },
-    })?;
+    };
+    let built = build_request(invocation, inputs)?;
     let trace_stage = traceroute
         .then(|| -> Result<_, CliError> {
             traceroute::Stage::new(

@@ -92,6 +92,7 @@ impl crate::commands::Spec for Args {
         let corpus = match &self.corpus {
             Some(path) => Arc::new(
                 os_fingerprints::parse(&read_bounded_file(
+                    invocation,
                     path,
                     os_fingerprints::MAX_DOCUMENT_BYTES,
                     InputKind::OsDocument,

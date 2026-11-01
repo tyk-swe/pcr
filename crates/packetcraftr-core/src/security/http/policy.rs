@@ -105,28 +105,169 @@ fn directive_value(input: &mut &[u8]) -> Option<Vec<u8>> {
     None
 }
 
-/// CSP directive names are ASCII-insensitive; the first duplicate wins.
-/// Multiple comma-separated policies are each enforced independently.
-pub(super) fn framing_csp(value: &str) -> bool {
-    value.split(',').any(|policy| {
-        for directive in policy.split(';').filter(|directive| directive.is_ascii()) {
-            let mut words = directive.split_ascii_whitespace();
-            if words
+/// Whether framing is restricted, given the raw `Content-Security-Policy` and
+/// `X-Frame-Options` field values. Report-only policies never protect, and an
+/// enforced `frame-ancestors` directive makes browsers ignore X-Frame-Options
+/// (CSP3 "Relation to X-Frame-Options").
+pub(super) fn framing_protected<'a>(
+    csp: impl IntoIterator<Item = &'a [u8]>,
+    x_frame_options: impl IntoIterator<Item = &'a [u8]>,
+) -> bool {
+    match frame_ancestors(csp) {
+        FrameAncestors::Restricted => true,
+        FrameAncestors::Unconfirmed => false,
+        FrameAncestors::Absent => x_frame_options_protect(x_frame_options),
+    }
+}
+
+/// Variants are ordered so the effective state of several enforced policies is
+/// their maximum: one restrictive policy blocks framing for all of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum FrameAncestors {
+    Absent,
+    /// The directive is enforced but admits arbitrary origins (`*`, a
+    /// scheme-source, or host `*`), or it is empty or has no recognized
+    /// ancestor-source, so we cannot confirm a restriction.
+    Unconfirmed,
+    Restricted,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AncestorSource {
+    Specific,
+    AnyOrigin,
+}
+
+fn frame_ancestors<'a>(fields: impl IntoIterator<Item = &'a [u8]>) -> FrameAncestors {
+    fields
+        .into_iter()
+        .flat_map(|field| field.split(|byte| *byte == b','))
+        .map(policy_frame_ancestors)
+        .max()
+        .unwrap_or(FrameAncestors::Absent)
+}
+
+/// CSP3 "Parse a serialized CSP": the first directive with a given name wins.
+fn policy_frame_ancestors(policy: &[u8]) -> FrameAncestors {
+    let Some(sources) = policy
+        .split(|byte| *byte == b';')
+        .filter(|token| token.is_ascii())
+        .filter_map(|token| str::from_utf8(token).ok())
+        .map(str::split_ascii_whitespace)
+        .find_map(|mut words| {
+            words
                 .next()
                 .is_some_and(|name| name.eq_ignore_ascii_case("frame-ancestors"))
-            {
-                let mut found = false;
-                for source in words {
-                    if source == "*" {
-                        return false;
-                    }
-                    found = true;
-                }
-                return found;
-            }
+                .then(|| words.collect::<Vec<_>>())
+        })
+    else {
+        return FrameAncestors::Absent;
+    };
+    if let [only] = sources.as_slice()
+        && only.eq_ignore_ascii_case("'none'")
+    {
+        return FrameAncestors::Restricted;
+    }
+    let mut recognized = sources
+        .iter()
+        .filter_map(|source| ancestor_source(source))
+        .peekable();
+    if recognized.peek().is_some() && recognized.all(|source| source == AncestorSource::Specific) {
+        FrameAncestors::Restricted
+    } else {
+        FrameAncestors::Unconfirmed
+    }
+}
+
+/// CSP3 ancestor-source grammar. `None` is any other expression, which
+/// matches nothing.
+fn ancestor_source(expression: &str) -> Option<AncestorSource> {
+    if expression.eq_ignore_ascii_case("'self'") {
+        return Some(AncestorSource::Specific);
+    }
+    if expression.strip_suffix(':').is_some_and(scheme) {
+        return Some(AncestorSource::AnyOrigin);
+    }
+    let rest = match expression.split_once("://") {
+        Some((name, rest)) if scheme(name) => rest,
+        Some(_) => return None,
+        None => expression,
+    };
+    let (host, rest) = rest.split_at(rest.find([':', '/']).unwrap_or(rest.len()));
+    if let Some(port) = rest.strip_prefix(':') {
+        let port = &port[..port.find('/').unwrap_or(port.len())];
+        if port != "*" && (port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit())) {
+            return None;
+        }
+    }
+    if host == "*" {
+        return Some(AncestorSource::AnyOrigin);
+    }
+    host_part(host).then_some(AncestorSource::Specific)
+}
+
+fn scheme(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
+}
+
+fn host_part(host: &str) -> bool {
+    let host = host.strip_prefix("*.").unwrap_or(host);
+    let host = host.strip_suffix('.').unwrap_or(host);
+    !host.is_empty()
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+}
+
+/// HTML "check a navigation response's adherence to X-Frame-Options", with the
+/// field values combined and split per Fetch "get, decode, and split".
+fn x_frame_options_protect<'a>(fields: impl IntoIterator<Item = &'a [u8]>) -> bool {
+    let combined = fields.into_iter().collect::<Vec<_>>().join(&b", "[..]);
+    let values: BTreeSet<Vec<u8>> = split_list(&combined)
+        .map(|value| trim_tab_or_space(value).to_ascii_lowercase())
+        .collect();
+    let blocking: &[&[u8]] = if values.len() > 1 {
+        &[b"deny", b"allowall", b"sameorigin"]
+    } else {
+        &[b"deny", b"sameorigin"]
+    };
+    values
+        .iter()
+        .any(|value| blocking.contains(&value.as_slice()))
+}
+
+/// Splits on commas outside HTTP quoted strings, keeping the quotes.
+fn split_list(value: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let mut quoted = false;
+    let mut escaped = false;
+    value.split(move |&byte| {
+        if escaped {
+            escaped = false;
+        } else if quoted {
+            escaped = byte == b'\\';
+            quoted = byte != b'"';
+        } else if byte == b'"' {
+            quoted = true;
+        } else {
+            return byte == b',';
         }
         false
     })
+}
+
+fn trim_tab_or_space(input: &[u8]) -> &[u8] {
+    let content = |byte: &u8| !matches!(byte, b' ' | b'\t');
+    let start = input.iter().position(content).unwrap_or(input.len());
+    let end = input
+        .iter()
+        .rposition(content)
+        .map_or(start, |last| last + 1);
+    &input[start..end]
 }
 
 #[cfg(test)]
@@ -187,19 +328,60 @@ mod tests {
     }
 
     #[test]
+    fn hsts_quoted_pairs_reject_unescapable_characters() {
+        assert!(positive_hsts(b"max-age=1; x=\"a\\\tb\""));
+        assert!(!positive_hsts(b"max-age=1; x=\"a\\\x01b\""));
+        assert!(!positive_hsts(b"max-age=1; x=\"a\\\x7fb\""));
+        assert!(!positive_hsts(b"max-age=1; x=\"a\\\""));
+    }
+
+    fn policy(value: &str) -> FrameAncestors {
+        frame_ancestors([value.as_bytes()])
+    }
+
+    #[test]
     fn csp_directive_names_are_ascii_case_insensitive() {
-        assert!(framing_csp("FrAmE-AnCeStOrS 'none'"));
+        assert_eq!(policy("FrAmE-AnCeStOrS 'none'"), FrameAncestors::Restricted);
     }
 
     #[test]
     fn csp_uses_the_first_directive_in_each_policy() {
-        assert!(!framing_csp("frame-ancestors *; frame-ancestors 'none'"));
-        assert!(framing_csp("frame-ancestors 'none'; frame-ancestors *"));
-        assert!(framing_csp("frame-ancestors *, frame-ancestors 'none'"));
+        assert_eq!(
+            policy("frame-ancestors *; frame-ancestors 'none'"),
+            FrameAncestors::Unconfirmed
+        );
+        assert_eq!(
+            policy("frame-ancestors 'none'; frame-ancestors *"),
+            FrameAncestors::Restricted
+        );
+        assert_eq!(
+            policy("frame-ancestors *, frame-ancestors 'none'"),
+            FrameAncestors::Restricted
+        );
     }
 
     #[test]
     fn csp_does_not_treat_unicode_whitespace_as_a_separator() {
-        assert!(!framing_csp("frame-ancestors\u{a0}'none'"));
+        assert_eq!(
+            policy("frame-ancestors\u{a0}'none'"),
+            FrameAncestors::Absent
+        );
+    }
+
+    #[test]
+    fn present_but_unconfirmed_frame_ancestors_is_distinct_from_absent() {
+        assert_eq!(policy("default-src 'self'"), FrameAncestors::Absent);
+        for value in [
+            "frame-ancestors",
+            "frame-ancestors 'unsafe-inline'",
+            "frame-ancestors data:",
+            "frame-ancestors https://*:*/path",
+            "frame-ancestors 'none' *.",
+            "frame-ancestors a.example:bad",
+            "frame-ancestors 1a://a.example",
+            "frame-ancestors -://a.example",
+        ] {
+            assert_eq!(policy(value), FrameAncestors::Unconfirmed, "{value}");
+        }
     }
 }

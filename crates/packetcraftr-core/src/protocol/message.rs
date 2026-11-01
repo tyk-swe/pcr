@@ -205,6 +205,12 @@ macro_rules! message_codec {
     ($codec:ident, $ty:ident, $schema:ident, $layout:path) => {
         #[derive(Clone, Copy, Debug, Default)]
         pub(crate) struct $codec;
+        #[cfg(test)]
+        impl $codec {
+            pub(crate) fn layout(bytes: &[u8]) -> Vec<crate::layout::FieldLayout> {
+                $layout(bytes)
+            }
+        }
         impl crate::codec::Codec for $codec {
             fn protocol_id(&self) -> &'static crate::layer::Id {
                 &$schema().protocol

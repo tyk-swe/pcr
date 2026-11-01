@@ -402,8 +402,10 @@ jobs:
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |
-          rm -rf target/*/incremental
-          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          if [ -d target ]; then
+            rm -rf target/*/incremental
+            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          fi
 
   fuzz-smoke:
     name: Fuzz smoke run

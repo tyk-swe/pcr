@@ -321,9 +321,13 @@ jobs:
   # accepted only when missed.txt is empty; cargo-mutants reports timeouts
   # ahead of misses in its exit code.
   test-quality-boundaries:
-    name: Mutation gates (security boundaries)
+    name: Mutation gate (${{ matrix.gate }})
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [audit, http-policy, mqtt, staged-input]
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install native development library
@@ -338,56 +342,61 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: ci-v1-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
+          key: ci-v1-${{ github.job }}-${{ matrix.gate }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.toml', 'Cargo.lock') }}
       - name: Install cargo-mutants
         run: cargo install --locked cargo-mutants
       - name: Enforce mutation gates (all viable mutants caught when measured)
         shell: bash
         run: |
           gate() {
-            local name="$1"; shift
             local status=0
-            mkdir -p "mutants/$name"
-            cargo mutants -o "mutants/$name" "$@" || status=$?
+            mkdir -p mutants
+            cargo mutants -o mutants "$@" || status=$?
             if [ "$status" -ne 0 ] && [ "$status" -ne 3 ]; then
               return "$status"
             fi
-            if [ -s "mutants/$name/mutants.out/missed.txt" ]; then
-              cat "mutants/$name/mutants.out/missed.txt"
+            if [ -s mutants/mutants.out/missed.txt ]; then
+              cat mutants/mutants.out/missed.txt
               return 2
             fi
           }
-          # audit and policy declarations: 57 caught, 26 unviable.
-          gate audit -p packetcraftr \
-            -f crates/packetcraftr/src/audit.rs \
-            -f crates/packetcraftr/src/policy/operation.rs
-          # CSP, X-Frame-Options, and HSTS parsing: 75 caught, 2 timeouts, 7 unviable.
-          gate http-policy -p packetcraftr-core \
-            -f crates/packetcraftr-core/src/security/http/policy.rs
-          # MQTT fields a packet type does not carry: 46 caught, 3 unviable.
-          gate mqtt -p packetcraftr-core \
-            -f crates/packetcraftr-core/src/protocol/application/mqtt.rs -F uncarried
-          # Staged output and cancellable input: 52 caught, 7 timeouts, 20 unviable.
-          # Exclusions: `|` to `^` on disjoint open flags is equivalent; the
-          # cfg(not(unix)) bodies are not compiled on Linux; CLOEXEC and
-          # NOFOLLOW on an unpredictable 64-bit staging name, the renameat2
-          # fallback errno set, a WouldBlock after a ready poll, and the
-          # forced-exit staging removal cannot be reached deterministically.
-          gate staged-input -p packetcraftr-cli \
-            -f crates/packetcraftr-cli/src/staged_output.rs \
-            -f crates/packetcraftr-cli/src/staged_output/unix.rs \
-            -f crates/packetcraftr-cli/src/input/source.rs \
-            -E 'replace \| with \^ in (Directory::open|Directory::stage|anchored)' \
-            -E 'unix.rs:65:76: replace \| with & in Directory::stage' \
-            -E 'source.rs:(83|88):5: replace (open|stdin) -> io::Result<Source>' \
-            -E 'source.rs:144:24: replace match guard .* with false' \
-            -E 'match guard \[Errno::INVAL, Errno::NOSYS, Errno::OPNOTSUPP, Errno::NOTSUP\]' \
-            -E 'replace <impl StagedEntry for StagingName>::remove with \(\)'
+          case "${{ matrix.gate }}" in
+            # audit and policy declarations: 57 caught, 26 unviable.
+            audit)
+              gate -p packetcraftr \
+                -f crates/packetcraftr/src/audit.rs \
+                -f crates/packetcraftr/src/policy/operation.rs ;;
+            # CSP, X-Frame-Options, and HSTS parsing: 75 caught, 2 timeouts, 7 unviable.
+            http-policy)
+              gate -p packetcraftr-core \
+                -f crates/packetcraftr-core/src/security/http/policy.rs ;;
+            # MQTT fields a packet type does not carry: 46 caught, 3 unviable.
+            mqtt)
+              gate -p packetcraftr-core \
+                -f crates/packetcraftr-core/src/protocol/application/mqtt.rs -F uncarried ;;
+            # Staged output and cancellable input: 52 caught, 7 timeouts, 20 unviable.
+            # Exclusions: `|` to `^` on disjoint open flags is equivalent; the
+            # cfg(not(unix)) bodies are not compiled on Linux; CLOEXEC and
+            # NOFOLLOW on an unpredictable 64-bit staging name, the renameat2
+            # fallback errno set, a WouldBlock after a ready poll, and the
+            # forced-exit staging removal cannot be reached deterministically.
+            staged-input)
+              gate -p packetcraftr-cli \
+                -f crates/packetcraftr-cli/src/staged_output.rs \
+                -f crates/packetcraftr-cli/src/staged_output/unix.rs \
+                -f crates/packetcraftr-cli/src/input/source.rs \
+                -E 'replace \| with \^ in (Directory::open|Directory::stage|anchored)' \
+                -E 'unix.rs:65:76: replace \| with & in Directory::stage' \
+                -E 'source.rs:(83|88):5: replace (open|stdin) -> io::Result<Source>' \
+                -E 'source.rs:144:24: replace match guard .* with false' \
+                -E 'match guard \[Errno::INVAL, Errno::NOSYS, Errno::OPNOTSUPP, Errno::NOTSUP\]' \
+                -E 'replace <impl StagedEntry for StagingName>::remove with \(\)' ;;
+          esac
       - name: Upload mutation results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mutation-results
+          name: mutation-results-${{ matrix.gate }}
           path: mutants
           if-no-files-found: ignore
       - name: Drop workspace artifacts from the Cargo cache

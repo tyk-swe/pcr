@@ -26,10 +26,8 @@ impl ConnectionState {
             Err(error) => {
                 let flow = dir.flow.clone();
                 let take = dir.buffer.len();
-                let sets = dir.buffer.contributors(take);
-                let (wire, dropped) = dir.buffer.take(take);
+                let (wire, sets) = dir.buffer.take(take, context)?;
                 let sources = union_balanced(sets)?;
-                dir.release_consumed(take, dropped, context)?;
                 self.reject(
                     context,
                     Fault::new(
@@ -46,10 +44,10 @@ impl ConnectionState {
         };
         if !matches!(head.start, StartLine::Request { .. }) {
             let flow = dir.flow.clone();
-            let sets = dir.buffer.contributors(consumed.min(dir.buffer.len()));
-            let (_, dropped) = dir.buffer.take(consumed.min(dir.buffer.len()));
+            let sets = dir
+                .buffer
+                .consume(consumed.min(dir.buffer.len()), context)?;
             let sources = union_balanced(sets)?;
-            dir.release_consumed(consumed, dropped, context)?;
             self.reject(
                 context,
                 Fault::new(
@@ -63,9 +61,7 @@ impl ConnectionState {
             )?;
             return Ok(true);
         }
-        let sets = dir.buffer.contributors(consumed);
-        let (head_wire_bytes, dropped) = dir.buffer.take(consumed);
-        dir.release_consumed(consumed, dropped, context)?;
+        let (head_wire_bytes, sets) = dir.buffer.take(consumed, context)?;
         let (head, _) = http::parse_head(&head_wire_bytes)?
             .ok_or(Error::Invariant("previously parsed complete HTTP/1 head"))?;
         let head_wire = head_wire_bytes.len();

@@ -48,7 +48,7 @@ pub(crate) struct DirectionState {
     pub saw_frame: bool,
     pub received: bool,
     pub garbage: bool,
-    pub charge: Charge,
+    pub origins_charge: Charge,
 }
 impl DirectionState {
     pub(crate) fn new(flow: ScopedFlowKey) -> Self {
@@ -65,24 +65,13 @@ impl DirectionState {
             saw_frame: false,
             received: false,
             garbage: false,
-            charge: Charge::default(),
+            origins_charge: Charge::default(),
         }
     }
 
-    pub(crate) fn release_consumed(
-        &mut self,
-        bytes: usize,
-        dropped: Vec<SourceSet>,
-        context: &mut Context<'_>,
-    ) -> Result<(), Error> {
-        context.release(&mut self.charge, bytes)?;
-        dropped
-            .iter()
-            .try_for_each(|set| context.untrack(&mut self.charge, set))
-    }
-
     pub(crate) fn release_all(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
-        context.release_all(&mut self.charge)?;
+        self.buffer.clear(context)?;
+        context.release_all(&mut self.origins_charge)?;
         context.release_all(&mut self.decoder_charge)?;
         self.chain
             .as_mut()

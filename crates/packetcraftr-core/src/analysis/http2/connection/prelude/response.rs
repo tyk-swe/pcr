@@ -58,9 +58,7 @@ impl ConnectionState {
             if !matches!(head.start, StartLine::Response { .. }) {
                 return Ok(());
             }
-            let sets = dir.buffer.contributors(consumed);
-            let (wire, dropped) = dir.buffer.take(consumed);
-            dir.release_consumed(consumed, dropped, context)?;
+            let (wire, sets) = dir.buffer.take(consumed, context)?;
             self.issue(
                 context,
                 Fault::new(
@@ -114,10 +112,8 @@ impl ConnectionState {
             Err(error) => {
                 let flow = dir.flow.clone();
                 let take = dir.buffer.len();
-                let sets = dir.buffer.contributors(take);
-                let (wire, dropped) = dir.buffer.take(take);
+                let (wire, sets) = dir.buffer.take(take, context)?;
                 let sources = union_balanced(sets)?;
-                dir.release_consumed(take, dropped, context)?;
                 self.reject(
                     context,
                     Fault::new(
@@ -135,10 +131,8 @@ impl ConnectionState {
         if !matches!(head.start, StartLine::Response { .. }) {
             let flow = dir.flow.clone();
             let release_len = consumed.min(dir.buffer.len());
-            let sets = dir.buffer.contributors(release_len);
-            let (_, dropped) = dir.buffer.take(release_len);
+            let sets = dir.buffer.consume(release_len, context)?;
             let sources = union_balanced(sets)?;
-            dir.release_consumed(release_len, dropped, context)?;
             self.reject(
                 context,
                 Fault::new(
@@ -152,9 +146,7 @@ impl ConnectionState {
             )?;
             return Ok(true);
         }
-        let sets = dir.buffer.contributors(consumed);
-        let (head_wire_bytes, dropped) = dir.buffer.take(consumed);
-        dir.release_consumed(consumed, dropped, context)?;
+        let (head_wire_bytes, sets) = dir.buffer.take(consumed, context)?;
         let (head, _) = http::parse_head(&head_wire_bytes)?
             .ok_or(Error::Invariant("previously parsed complete HTTP/1 head"))?;
         let head_wire = head_wire_bytes.len();

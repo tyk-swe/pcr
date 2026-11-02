@@ -131,10 +131,8 @@ impl ConnectionState {
             if let Some(dir) = self.directions.get_mut(side) {
                 if !dir.buffer.is_empty() && !matches!(self.phase, Phase::Dead) {
                     let partial = dir.buffer.len();
-                    let sets = dir.buffer.contributors(partial);
-                    let (wire, dropped) = dir.buffer.take(partial);
+                    let (wire, sets) = dir.buffer.take(partial, context)?;
                     let sources = union_balanced(sets)?;
-                    dir.release_consumed(partial, dropped, context)?;
                     let flow = dir.flow.clone();
                     self.issue(
                         context,

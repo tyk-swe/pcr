@@ -3,8 +3,7 @@
 
 use super::invalid;
 use crate::errors::CliError;
-use crate::output::contract::SCHEMA;
-use packetcraftr_core::security::{AMBIGUOUS_OUTPUT_SCHEMA, Report, Source};
+use packetcraftr_core::security::{Report, Source, input};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
@@ -52,37 +51,22 @@ pub(in crate::commands) fn source(path: &Path, bytes: &[u8]) -> Source {
 
 /// Validate the published envelope before admitting an assessment's input report.
 pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
-    let envelope: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|e| invalid(e.to_string()))?;
-    if envelope["schema"] == AMBIGUOUS_OUTPUT_SCHEMA {
-        return Err(invalid(format!(
-            "{AMBIGUOUS_OUTPUT_SCHEMA} is ambiguous across releases; regenerate the report input with this release, which emits {SCHEMA}"
-        )));
-    }
-    let command = envelope["command"].as_str().unwrap_or("");
-    if envelope["schema"] != SCHEMA
-        || envelope["status"] != "success"
-        || envelope["mode"] != "aggregate"
-        || ![
+    let envelope = input::aggregate::<Report>(
+        bytes,
+        &[
             "hunt",
             "dns-anomalies",
             "beacons",
             "audit-tls",
             "audit-http",
             "scan-diff",
-        ]
-        .contains(&command)
-    {
-        return Err(invalid(format!(
-            "report inputs must be successful aggregate {SCHEMA} JSON from one of the six security commands"
-        )));
-    }
-    let result: Report =
-        serde_json::from_value(envelope["result"].clone()).map_err(|e| invalid(e.to_string()))?;
-    if result.kind != command {
+        ],
+    )
+    .map_err(|error| invalid(error.to_string()))?;
+    if envelope.result.kind != envelope.command {
         return Err(invalid("report kind does not match command"));
     }
-    Ok(result)
+    Ok(envelope.result)
 }
 
 #[cfg(test)]

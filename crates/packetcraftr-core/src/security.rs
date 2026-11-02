@@ -6,6 +6,7 @@
 pub mod capture;
 pub mod http;
 pub mod indicators;
+pub mod input;
 pub mod scan;
 
 /// Output contract identifier that PacketcraftR emits and that security inputs

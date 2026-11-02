@@ -4,7 +4,7 @@
 //! Compatibility decoder for the historical byte API. New callers can supply snapshots.
 
 use super::{Endpoint, Error, Limits, MAX_INPUT_BYTES, Snapshot, State};
-use crate::security::{AMBIGUOUS_OUTPUT_SCHEMA, OUTPUT_SCHEMA};
+use crate::security::input;
 use serde_json::Value;
 use std::{collections::BTreeMap, net::IpAddr};
 
@@ -15,22 +15,9 @@ pub(super) fn parse(bytes: &[u8], limits: Limits) -> Result<Snapshot, Error> {
             limit: MAX_INPUT_BYTES,
         });
     }
-    let value: Value = serde_json::from_slice(bytes).map_err(|e| Error::Invalid(e.to_string()))?;
-    if value["schema"] == AMBIGUOUS_OUTPUT_SCHEMA {
-        return Err(Error::Invalid(format!(
-            "{AMBIGUOUS_OUTPUT_SCHEMA} is ambiguous across releases; regenerate the scan with this release, which emits {OUTPUT_SCHEMA}"
-        )));
-    }
-    if value["schema"] != OUTPUT_SCHEMA
-        || value["command"] != "scan"
-        || value["mode"] != "aggregate"
-        || value["status"] != "success"
-    {
-        return Err(Error::Invalid(format!(
-            "scan-diff requires successful native aggregate scan JSON ({OUTPUT_SCHEMA})"
-        )));
-    }
-    let result = &value["result"];
+    let envelope = input::aggregate::<Value>(bytes, &["scan"])
+        .map_err(|error| Error::Invalid(error.to_string()))?;
+    let result = &envelope.result;
     let method = result["method"]
         .as_str()
         .unwrap_or_else(|| result["plan"]["method"]["selected"].as_str().unwrap_or(""));

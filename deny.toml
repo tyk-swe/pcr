@@ -69,6 +69,9 @@ skip = [
     { name = "errno", version = "=0.2.8" },
     { name = "libloading", version = "=0.8.9" },
     { name = "windows-sys", version = "=0.36.1" },
+    # rustix 1.1.6 pins windows-sys 0.52; tokio and socket2 use 0.61.
+    { name = "windows-sys", version = "=0.52.0" },
+    { name = "windows_x86_64_msvc", version = "=0.52.6" },
     # Current proc-macro dependencies still span syn 2 and syn 3.
     { name = "syn", version = "=2.0.119" },
 ]

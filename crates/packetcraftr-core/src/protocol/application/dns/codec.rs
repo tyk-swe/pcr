@@ -135,14 +135,17 @@ impl Codec for DnsCodec {
             .field_index("wire")
             .expect("DNS schema declares a wire field");
         let Some((_, value)) = fields.iter().find(|(index, _)| *index == wire) else {
-            return Ok(None);
+            return Ok(Some(SeededLayer {
+                layer: Box::new(Dns::default()),
+                consumed: None,
+            }));
         };
         let field::Value::Bytes(bytes) = value else {
             return Err(invalid(NAME, "wire must be bytes"));
         };
         Ok(Some(SeededLayer {
             layer: Box::new(layer_from_wire(bytes.clone(), false)?),
-            consumed: wire,
+            consumed: Some(wire),
         }))
     }
 

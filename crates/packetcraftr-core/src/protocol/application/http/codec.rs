@@ -368,7 +368,7 @@ impl Codec for HttpCodec {
         let layer = Http::try_from(bytes.as_ref()).map_err(|error| rejected(NAME, error))?;
         Ok(Some(crate::codec::SeededLayer {
             layer: Box::new(layer),
-            consumed: wire,
+            consumed: Some(wire),
         }))
     }
     fn encode(

@@ -161,7 +161,7 @@ fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
         return;
     }
     let registry = builtin::registry();
-    if BuiltinProtocol::Dns.udp_ports().contains(&port)
+    if port == crate::dns::DEFAULT_SERVER_PORT
         && let Ok(dns) = Dns::try_from(payload.clone())
     {
         packet.push(dns);
@@ -447,5 +447,57 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
                 .get::<Ipv6>()
                 .is_some_and(|ipv6| ipv6.next_header == WireValue::Exact(protocol)),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    fn dns_query() -> Bytes {
+        let mut wire = vec![0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0];
+        for label in ["example", "test"] {
+            wire.push(u8::try_from(label.len()).unwrap());
+            wire.extend(label.bytes());
+        }
+        wire.extend([0, 0, 1, 0, 1]);
+        Bytes::from(wire)
+    }
+
+    fn udp_probe(port: u16) -> Probe {
+        Probe {
+            sequence: 1,
+            stage: probe::Stage::Scan,
+            address: Ipv4Addr::new(192, 0, 2, 1).into(),
+            scope: None,
+            endpoint: probe::Endpoint::Udp { port },
+            tcp_scan: Default::default(),
+            sctp_scan: Default::default(),
+            attempt: 1,
+            udp_payload: dns_query(),
+            udp_profile: None,
+        }
+    }
+
+    fn payload_protocol(probe: &Probe) -> Option<BuiltinProtocol> {
+        let packet = probe.packet();
+        packet.layer(packet.len() - 1).and_then(BuiltinProtocol::of)
+    }
+
+    #[test]
+    fn a_dns_payload_to_the_dns_port_materializes_as_dns_without_a_profile() {
+        assert_eq!(
+            payload_protocol(&udp_probe(crate::dns::DEFAULT_SERVER_PORT)),
+            Some(BuiltinProtocol::Dns)
+        );
+    }
+
+    #[test]
+    fn a_dns_payload_to_another_port_stays_raw() {
+        assert_eq!(
+            payload_protocol(&udp_probe(9_999)),
+            Some(BuiltinProtocol::Raw)
+        );
     }
 }

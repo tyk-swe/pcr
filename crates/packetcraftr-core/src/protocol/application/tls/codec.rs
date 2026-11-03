@@ -330,14 +330,17 @@ impl Codec for TlsCodec {
             .field_index("wire")
             .expect("TLS schema declares a wire field");
         let Some((_, value)) = fields.iter().find(|(index, _)| *index == wire) else {
-            return Ok(None);
+            return Ok(Some(crate::codec::SeededLayer {
+                layer: Box::new(Tls::try_from(Hello::default())?),
+                consumed: None,
+            }));
         };
         let field::Value::Bytes(bytes) = value else {
             return Err(invalid(NAME, "wire must be bytes"));
         };
         Ok(Some(crate::codec::SeededLayer {
             layer: Box::new(Tls::try_from(bytes.as_ref())?),
-            consumed: wire,
+            consumed: Some(wire),
         }))
     }
 
@@ -403,5 +406,26 @@ impl Codec for TlsCodec {
             stop: false,
             network: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn fields(ech: bool) -> BTreeMap<String, field::Value> {
+        BTreeMap::from([("ech".to_owned(), field::Value::Bool(ech))])
+    }
+
+    #[test]
+    fn construction_accepts_a_read_only_field_left_at_its_default() {
+        let layer = TlsCodec.construct(&fields(false)).unwrap();
+        assert_eq!(layer.field("ech"), Some(field::Value::Bool(false)),);
+    }
+
+    #[test]
+    fn construction_rejects_a_read_only_field_changed_from_its_default() {
+        assert!(TlsCodec.construct(&fields(true)).is_err());
     }
 }

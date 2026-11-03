@@ -56,7 +56,10 @@ pub(super) fn seed_layer<M: Message>(
         .field_index("wire")
         .expect("DHCP schema declares a wire field");
     let Some((_, value)) = fields.iter().find(|(index, _)| *index == wire) else {
-        return Ok(None);
+        return Ok(Some(SeededLayer {
+            layer: Box::new(M::default()),
+            consumed: None,
+        }));
     };
     let field::Value::Bytes(bytes) = value else {
         return Err(invalid(M::NAME, "wire must be retained bytes"));
@@ -64,7 +67,7 @@ pub(super) fn seed_layer<M: Message>(
     let layer = M::decode_wire(bytes.clone()).map_err(|error| rejected(M::NAME, error))?;
     Ok(Some(SeededLayer {
         layer: Box::new(layer),
-        consumed: wire,
+        consumed: Some(wire),
     }))
 }
 

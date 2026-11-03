@@ -305,7 +305,7 @@ pub enum Framing {
 
 pub struct SeededLayer {
     pub layer: Box<dyn Layer>,
-    pub consumed: usize,
+    pub consumed: Option<usize>,
 }
 
 pub trait Codec: Send + Sync + fmt::Debug {
@@ -373,9 +373,9 @@ pub trait Codec: Send + Sync + fmt::Debug {
             .map(|field| (field.root, field.value))
             .collect();
         let seeded = self.seed_layer(&root_fields)?;
-        let (mut layer, consumed) = match seeded {
-            Some(seeded) => (seeded.layer, Some(seeded.consumed)),
-            None => (self.new_layer()?, None),
+        let (mut layer, seeded, consumed) = match seeded {
+            Some(seeded) => (seeded.layer, true, seeded.consumed),
+            None => (self.new_layer()?, false, None),
         };
         for field in &resolved {
             if field.path.is_nested() {
@@ -385,8 +385,7 @@ pub trait Codec: Send + Sync + fmt::Debug {
             if consumed == Some(field.root) {
                 continue;
             }
-            if consumed.is_some() && layer.field_by_index(field.root).as_ref() == Some(field.value)
-            {
+            if seeded && layer.field_by_index(field.root).as_ref() == Some(field.value) {
                 continue;
             }
             if let Some(result) =

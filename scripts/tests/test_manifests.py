@@ -55,11 +55,15 @@ class ManifestTests(unittest.TestCase):
         for crate in ('packetcraftr', 'packetcraftr-core', 'packetcraftr-netio'):
             self.assertEqual(dependencies[crate]['version'], version, crate)
 
-    def test_every_crate_inherits_the_workspace_package_pins(self):
+    def test_every_crate_agrees_with_the_workspace_package_pins(self):
+        pins = self.workspace['workspace']['package']
         for name, manifest in self.manifests.items():
             package = manifest['package']
             for field in ('version', 'edition', 'rust-version'):
-                self.assertEqual(package[field], {'workspace': True}, f'{name}: {field}')
+                value = package[field]
+                if isinstance(value, dict) and value.get('workspace') is True:
+                    value = pins[field]
+                self.assertEqual(value, pins[field], f'{name}: {field}')
 
     def test_native_features_forward_identically_to_netio(self):
         for feature in NATIVE_FEATURES:

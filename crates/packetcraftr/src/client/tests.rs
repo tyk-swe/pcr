@@ -78,14 +78,20 @@ fn check_cancelled_follows_the_composed_signal() {
 
 #[test]
 fn a_deadline_ceiling_cannot_be_extended_by_a_later_deadline() {
+    let now = Instant::now();
+    let clock = FixedClock {
+        now,
+        wall: SystemTime::UNIX_EPOCH,
+    };
+    let at = move |limit: Duration| Deadline::with_time_source(limit, move || now);
     let client = composed()
-        .with_deadline(Deadline::new(Duration::from_millis(50)))
-        .with_deadline(Deadline::new(Duration::from_secs(60)));
-    let remaining = client
-        .deadline(Duration::from_secs(60))
-        .remaining()
-        .unwrap();
-    assert!(remaining <= Duration::from_millis(50), "{remaining:?}");
+        .with_clock(clock)
+        .with_deadline(at(Duration::from_millis(50)))
+        .with_deadline(at(Duration::from_secs(60)));
+    assert_eq!(
+        client.deadline(Duration::from_secs(60)).remaining(),
+        Ok(Duration::from_millis(50))
+    );
 }
 
 #[test]

@@ -6,45 +6,23 @@
     reason = "the socket address must be checked as a Linux sockaddr_ll"
 )]
 
-use std::os::unix::fs::MetadataExt;
-use std::{fs::File, mem::size_of};
-
-use packetcraftr_core::error::Source;
+use std::mem::size_of;
 
 use crate::Error;
 use crate::interface::Id;
+use crate::platform::transmit::namespace::ExecutionContext;
 use crate::transmit::session::Backend as SessionBackend;
 use crate::transmit::{Outbound, Provider, Report, SystemProvider};
 
 pub(crate) struct Backend {
-    namespace: Result<Namespace, Error>,
-}
-
-struct Namespace {
-    _file: File,
-    device: u64,
-    inode: u64,
+    context: Result<ExecutionContext, Error>,
 }
 
 impl Backend {
     pub(crate) fn new() -> Self {
-        let namespace = (|| {
-            let file = File::open("/proc/thread-self/ns/net").map_err(namespace_error)?;
-            let metadata = file.metadata().map_err(namespace_error)?;
-            Ok(Namespace {
-                _file: file,
-                device: metadata.dev(),
-                inode: metadata.ino(),
-            })
-        })();
-        Self { namespace }
-    }
-}
-
-fn namespace_error(source: std::io::Error) -> Error {
-    Error::Send {
-        message: "cannot verify the transmission session network namespace".to_owned(),
-        source: Some(Source::new(source)),
+        Self {
+            context: ExecutionContext::capture(),
+        }
     }
 }
 
@@ -53,14 +31,7 @@ impl SessionBackend for Backend {
     type Resource = pcap::Capture<pcap::Active>;
 
     fn key(&self, outbound: Outbound<'_>) -> Result<Option<Id>, Error> {
-        let namespace = self.namespace.as_ref().map_err(Clone::clone)?;
-        let current = std::fs::metadata("/proc/thread-self/ns/net").map_err(namespace_error)?;
-        if current.dev() != namespace.device || current.ino() != namespace.inode {
-            return Err(Error::Send {
-                message: "transmission session network namespace changed".to_owned(),
-                source: None,
-            });
-        }
+        self.context.as_ref().map_err(Clone::clone)?.verify()?;
         let Outbound::Layer2(frame) = outbound else {
             return Ok(None);
         };

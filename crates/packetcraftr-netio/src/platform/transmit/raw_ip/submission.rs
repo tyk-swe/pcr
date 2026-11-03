@@ -1,9 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![cfg_attr(target_os = "windows", allow(unsafe_code))]
+#![cfg_attr(
+    target_os = "windows",
+    allow(unsafe_code, reason = "Windows interface options require setsockopt")
+)]
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::num::NonZeroU32;
 #[cfg(target_os = "windows")]
 use std::os::windows::io::AsRawSocket;
@@ -67,9 +70,7 @@ fn configure_socket_options(
     Ok(())
 }
 
-pub(in crate::platform) fn send(
-    packet: &PreparedRawIp,
-) -> Result<(usize, Submission), RawSocketError> {
+fn configured_socket(packet: &PreparedRawIp) -> Result<Socket, RawSocketError> {
     let domain = match packet.destination {
         IpAddr::V4(_) => Domain::IPV4,
         IpAddr::V6(_) => Domain::IPV6,
@@ -82,7 +83,36 @@ pub(in crate::platform) fn send(
         RawSocketOption::Ipv6HeaderIncluded => socket.set_header_included_v6(true),
     })?;
 
+    Ok(socket)
+}
+
+pub(in crate::platform) fn open(packet: &PreparedRawIp) -> Result<Socket, RawSocketError> {
+    let socket = configured_socket(packet)?;
     bind_interface(&socket, packet)?;
+    Ok(socket)
+}
+
+#[cfg(target_os = "linux")]
+pub(in crate::platform) fn open_loopback(
+    packet: &PreparedRawIp,
+) -> Result<Option<Socket>, RawSocketError> {
+    let socket = configured_socket(packet)?;
+    let index = NonZeroU32::new(packet.interface.index).expect("loopback index is nonzero");
+    let result = match packet.destination {
+        IpAddr::V4(_) => socket.bind_device_by_index_v4(Some(index)),
+        IpAddr::V6(_) => socket.bind_device_by_index_v6(Some(index)),
+    };
+    match result {
+        Ok(()) => Ok(Some(socket)),
+        Err(error) if error.raw_os_error() == Some(libc::ENOPROTOOPT) => Ok(None),
+        Err(error) => Err(raw_error("binding the selected Linux interface", error)),
+    }
+}
+
+pub(in crate::platform) fn send(
+    socket: &Socket,
+    packet: &PreparedRawIp,
+) -> Result<(usize, Submission), RawSocketError> {
     let destination = socket_address(packet.destination, packet.interface.index);
     // Setup cannot transmit. Sample eligibility only at the native submission
     // boundary so queued traffic during socket preparation stays pre-send.

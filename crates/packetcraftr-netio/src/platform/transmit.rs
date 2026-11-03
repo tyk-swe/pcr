@@ -3,6 +3,8 @@
 
 #[cfg(pcap_backend)]
 pub(in crate::platform) mod libpcap;
+#[cfg(target_os = "linux")]
+mod namespace;
 #[cfg(npcap_backend)]
 pub(in crate::platform) mod npcap;
 #[cfg(native_layer3)]

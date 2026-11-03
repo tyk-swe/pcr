@@ -3,7 +3,7 @@
 
 #[cfg(native_layer3)]
 pub(crate) mod raw_ip;
-#[cfg(any(test, all(target_os = "linux", pcap_backend)))]
+#[cfg(any(test, all(target_os = "linux", native_send)))]
 pub(crate) mod session;
 
 use bytes::Bytes;
@@ -300,11 +300,13 @@ impl<P: Provider + ?Sized> Provider for DirectProvider<'_, P> {
 
 /// The native one-shot transmission provider.
 ///
-/// On Linux with libpcap, a session can retain one compatible handle. Concurrent
-/// session sends are rejected, and incompatible interfaces use one-shot dispatch.
-/// Sends are rejected if the session's network namespace changes or cannot be
-/// verified. A failed native submission invalidates the handle and its error is
-/// returned for later compatible sends. Dropping the session closes the handle.
+/// On Linux a session can retain one compatible libpcap handle and one raw IP
+/// socket for the namespace's built-in loopback interface. Concurrent sends are
+/// rejected, and incompatible traffic uses one-shot dispatch. Sends are rejected
+/// if the session's network namespace, user namespace or credentials change or
+/// cannot be verified. A failed native submission invalidates its handle and its
+/// error is returned for later compatible sends. Dropping the session closes its
+/// handles.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemProvider;
 
@@ -325,9 +327,18 @@ impl Provider for SystemProvider {
         }
     }
 
-    #[cfg(all(target_os = "linux", pcap_backend))]
+    #[cfg(all(target_os = "linux", pcap_backend, not(native_layer3)))]
     fn session(&self) -> Box<dyn Provider + '_> {
         Box::new(session::Bounded::new(super::platform::transmit_backend()))
+    }
+
+    #[cfg(all(target_os = "linux", native_layer3))]
+    fn session(&self) -> Box<dyn Provider + '_> {
+        #[cfg(pcap_backend)]
+        let fallback = session::Bounded::new(super::platform::transmit_backend());
+        #[cfg(not(pcap_backend))]
+        let fallback = SystemProvider;
+        super::platform::wrap_raw_transmit_session(fallback)
     }
 }
 

@@ -405,8 +405,8 @@ jobs:
                 -f crates/packetcraftr-cli/src/input/source.rs \
                 -E 'replace \| with \^ in (Directory::open|Directory::stage|anchored)' \
                 -E 'unix.rs:65:76: replace \| with & in Directory::stage' \
-                -E 'source.rs:(83|88):5: replace (open|stdin) -> io::Result<Source>' \
-                -E 'source.rs:144:24: replace match guard .* with false' \
+                -E 'source.rs:(91|96):5: replace (open|stdin) -> io::Result<Source>' \
+                -E 'source.rs:152:24: replace match guard .* with false' \
                 -E 'match guard \[Errno::INVAL, Errno::NOSYS, Errno::OPNOTSUPP, Errno::NOTSUP\]' \
                 -E 'replace <impl StagedEntry for StagingName>::remove with \(\)' ;;
           esac

@@ -90,8 +90,10 @@ jobs:
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |
-          rm -rf target/*/incremental
-          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          if [ -d target ]; then
+            rm -rf target/*/incremental
+            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          fi
 
   msrv:
     name: Linux minimum supported Rust
@@ -123,8 +125,10 @@ jobs:
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |
-          rm -rf target/*/incremental
-          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          if [ -d target ]; then
+            rm -rf target/*/incremental
+            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          fi
 
   portable:
     name: Portable and pcap-free
@@ -157,8 +161,10 @@ jobs:
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |
-          rm -rf target/*/incremental
-          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          if [ -d target ]; then
+            rm -rf target/*/incremental
+            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          fi
 
   platforms-clippy:
     name: Native clippy (${{ matrix.os }})
@@ -193,8 +199,10 @@ jobs:
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |
-          rm -rf target/*/incremental
-          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          if [ -d target ]; then
+            rm -rf target/*/incremental
+            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          fi
 
   platforms-test:
     name: Native tests (${{ matrix.os }})
@@ -227,8 +235,10 @@ jobs:
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |
-          rm -rf target/*/incremental
-          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          if [ -d target ]; then
+            rm -rf target/*/incremental
+            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          fi
 
   # Ratchet ledger: packetcraftr has blocking coverage and mutation gates in
   # test-quality-gate below. Other crates move to blocking gates one at a
@@ -272,8 +282,10 @@ jobs:
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |
-          rm -rf target/*/incremental
-          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          if [ -d target ]; then
+            rm -rf target/*/incremental
+            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          fi
 
   test-quality-gate:
     name: Test quality gate (packetcraftr)
@@ -317,8 +329,10 @@ jobs:
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |
-          rm -rf target/*/incremental
-          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          if [ -d target ]; then
+            rm -rf target/*/incremental
+            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          fi
 
   # Mutation gates on repaired security boundaries. A timeout means the
   # mutant hung the tests (for example an infinite read loop), so it is
@@ -406,8 +420,10 @@ jobs:
       - name: Drop workspace artifacts from the Cargo cache
         shell: bash
         run: |
-          rm -rf target/*/incremental
-          find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          if [ -d target ]; then
+            rm -rf target/*/incremental
+            find target -maxdepth 3 -name '*packetcraftr*' -prune -exec rm -rf {} +
+          fi
 
   fuzz-smoke:
     name: Fuzz smoke run

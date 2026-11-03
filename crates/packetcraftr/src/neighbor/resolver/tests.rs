@@ -583,3 +583,82 @@ fn cache_samples_expiration_after_waiting_for_the_lock() {
         (0, 0, 0)
     );
 }
+
+#[test]
+fn cache_insertion_ttl_starts_before_waiting_for_the_lock() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::mpsc;
+
+    let cache = Arc::new(NeighborCache::default());
+    let start = Instant::now();
+    let mac = MacAddress([2, 0, 0, 0, 0, 1]);
+    let held_key = cache_key(1);
+    let inserted_key = cache_key(2);
+    let options = cache_options(2, 5);
+    cache
+        .insert_at(mac, held_key.clone(), &options, start)
+        .unwrap();
+    let (held_tx, held_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let holder = {
+        let cache = Arc::clone(&cache);
+        std::thread::spawn(move || {
+            cache
+                .get_with_clock(&held_key, || {
+                    held_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    start
+                })
+                .unwrap()
+        })
+    };
+    held_rx.recv().unwrap();
+    let clock = Arc::new(AtomicU64::new(0));
+    let (sampled_tx, sampled_rx) = mpsc::channel();
+    let writer = {
+        let cache = Arc::clone(&cache);
+        let clock = Arc::clone(&clock);
+        let key = inserted_key.clone();
+        std::thread::spawn(move || {
+            cache
+                .insert_with_clock(mac, key, &options, || {
+                    let elapsed = clock.load(Ordering::SeqCst);
+                    sampled_tx.send(()).unwrap();
+                    start + Duration::from_secs(elapsed)
+                })
+                .unwrap();
+        })
+    };
+    let sampled = sampled_rx.recv_timeout(Duration::from_secs(5));
+    let overflow = if start.checked_add(Duration::MAX).is_none() {
+        let cache = Arc::clone(&cache);
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let options = Options {
+                cache_ttl: Duration::MAX,
+                ..cache_options(2, 5)
+            };
+            done_tx
+                .send(cache.insert_at(mac, cache_key(3), &options, start).is_err())
+                .unwrap();
+        });
+        Some((done_rx.recv_timeout(Duration::from_secs(5)), worker))
+    } else {
+        None
+    };
+    clock.store(5, Ordering::SeqCst);
+    release_tx.send(()).unwrap();
+    assert_eq!(holder.join().unwrap(), Some(mac));
+    writer.join().unwrap();
+    assert!(sampled.is_ok());
+    if let Some((result, worker)) = overflow {
+        worker.join().unwrap();
+        assert!(result.unwrap());
+    }
+    assert_eq!(
+        cache
+            .get_at(&inserted_key, start + Duration::from_secs(5))
+            .unwrap(),
+        None
+    );
+}

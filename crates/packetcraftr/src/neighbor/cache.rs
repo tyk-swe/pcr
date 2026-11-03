@@ -153,23 +153,23 @@ impl NeighborCache {
         self.insert_with_clock(mac_address, key, options, || now)
     }
 
-    fn insert_with_clock(
+    pub(super) fn insert_with_clock(
         &self,
         mac_address: MacAddress,
         key: NeighborCacheKey,
         options: &Options,
         now: impl FnOnce() -> Instant,
     ) -> Result<(), crate::neighbor::Error> {
+        let now = now();
+        let expires_at = now
+            .checked_add(options.cache_ttl)
+            .ok_or_else(|| invalid_options("cache deadline overflowed".to_owned()))?;
         let mut cache = self
             .entries
             .lock()
             .map_err(|_| crate::neighbor::Error::State {
                 message: "neighbor cache mutex was poisoned".to_owned(),
             })?;
-        let now = now();
-        let expires_at = now
-            .checked_add(options.cache_ttl)
-            .ok_or_else(|| invalid_options("cache deadline overflowed".to_owned()))?;
         cache.expire(now);
         if !cache.entries.contains_key(&key)
             && cache.entries.len() >= options.max_cache_entries

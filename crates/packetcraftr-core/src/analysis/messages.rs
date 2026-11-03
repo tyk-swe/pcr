@@ -341,104 +341,131 @@ impl Collector {
             .directions
             .remove(&data.flow)
             .unwrap_or_else(|| Direction::new(data.stream, data.generation, protocol));
-        if d.generation != data.generation {
-            self.flush(&data.flow, &mut d, Status::Evicted, None, out)?;
-            d = Direction::new(data.stream, data.generation, protocol);
-        }
-        if !d.disabled {
-            self.limits
-                .check_buffer(self.buffered.saturating_add(data.bytes.len()))?;
-            self.reserve_buffer(&mut d, data.bytes.len())?;
-            d.buffer.extend_from_slice(&data.bytes);
-            self.buffered += data.bytes.len();
-            if let Some(sources) = d.sources.as_mut() {
-                sources.insert(&data.sources)?;
-            } else {
-                d.sources = Some(Accumulator::new(&data.sources)?);
+        let result = (|| {
+            if d.generation != data.generation {
+                self.flush(&data.flow, &mut d, Status::Evicted, None, out)?;
+                d = Direction::new(data.stream, data.generation, protocol);
             }
-            self.limits
-                .check_source_spans(d.sources.as_ref().unwrap().len())?;
-            let mut offset = d.offset;
-            while offset < d.buffer.len() && !d.disabled && !self.opaque(&d) {
-                // Stream-level SIP keepalives are not messages. A lone CR waits for
-                // the next delivery, so split CRLFs retain the same framing behavior.
-                if d.protocol == BuiltinProtocol::Sip && d.buffer[offset..].starts_with(b"\r\n") {
-                    offset += 2;
-                    self.buffered -= 2;
-                    d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
-                    d.sources = if offset < d.buffer.len() {
-                        Some(Accumulator::new(&data.sources)?)
-                    } else {
-                        None
-                    };
-                    continue;
+            if !d.disabled {
+                self.limits
+                    .check_buffer(self.buffered.saturating_add(data.bytes.len()))?;
+                self.reserve_buffer(&mut d, data.bytes.len())?;
+                if let Some(sources) = d.sources.as_mut() {
+                    self.limits
+                        .check_source_spans(sources.len_with(&data.sources)?)?;
+                    sources.insert(&data.sources)?;
+                } else {
+                    self.limits.check_source_spans(data.sources.len())?;
+                    d.sources = Some(Accumulator::new(&data.sources)?);
                 }
-                match d
-                    .framer
-                    .progress(&d.buffer[offset..], self.limits.max_buffer_bytes)
-                {
-                    Ok(Some(len)) => {
-                        if len == 0 {
+                d.buffer.extend_from_slice(&data.bytes);
+                self.buffered += data.bytes.len();
+                while d.offset < d.buffer.len() && !d.disabled && !self.opaque(&d) {
+                    // Stream-level SIP keepalives are not messages. A lone CR waits for
+                    // the next delivery, so split CRLFs retain the same framing behavior.
+                    if d.protocol == BuiltinProtocol::Sip
+                        && d.buffer[d.offset..].starts_with(b"\r\n")
+                    {
+                        let next_offset = d.offset + 2;
+                        let sources = if next_offset < d.buffer.len() {
+                            Some(Accumulator::new(&data.sources)?)
+                        } else {
+                            None
+                        };
+                        d.offset = next_offset;
+                        self.buffered -= 2;
+                        d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
+                        d.sources = sources;
+                        continue;
+                    }
+                    match d
+                        .framer
+                        .progress(&d.buffer[d.offset..], self.limits.max_buffer_bytes)
+                    {
+                        Ok(Some(len)) => {
+                            if len == 0 {
+                                d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
+                                return Err(Error::Limit {
+                                    field: "zero_length_message",
+                                    limit: 0,
+                                });
+                            }
+                            let next_offset = d.offset + len;
+                            let emission = (|| {
+                                let remaining_sources = if next_offset < d.buffer.len() {
+                                    Some(Accumulator::new(&data.sources)?)
+                                } else {
+                                    None
+                                };
+                                let wire = Bytes::copy_from_slice(&d.buffer[d.offset..next_offset]);
+                                let sources = d
+                                    .sources
+                                    .as_ref()
+                                    .expect("buffered message has sources")
+                                    .snapshot()?;
+                                let mut message = Message {
+                                    index: 0,
+                                    protocol: d.protocol,
+                                    stream: d.stream,
+                                    generation: d.generation,
+                                    flow: data.flow.clone(),
+                                    status: Status::Complete,
+                                    wire,
+                                    packet: None,
+                                    error: None,
+                                    sources,
+                                };
+                                self.decode(&mut message);
+                                self.emit(message, out)?;
+                                Ok::<_, Error>(remaining_sources)
+                            })();
+                            let remaining_sources = match emission {
+                                Ok(sources) => sources,
+                                Err(error) => {
+                                    d.framer =
+                                        Framer::new(d.protocol.framing(), d.protocol.as_str());
+                                    return Err(error);
+                                }
+                            };
+                            d.offset = next_offset;
+                            self.buffered -= len;
+                            d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
+                            d.sources = remaining_sources;
+                        }
+                        Ok(None) => break,
+                        Err(crate::protocol::framing::Error::BufferLimit { limit }) => {
+                            d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
                             return Err(Error::Limit {
-                                field: "zero_length_message",
-                                limit: 0,
+                                field: "max_buffer_bytes",
+                                limit,
                             });
                         }
-                        let wire = Bytes::copy_from_slice(&d.buffer[offset..offset + len]);
-                        let sources = d
-                            .sources
-                            .take()
-                            .expect("buffered message has sources")
-                            .freeze()?;
-                        let mut message = Message {
-                            index: 0,
-                            protocol: d.protocol,
-                            stream: d.stream,
-                            generation: d.generation,
-                            flow: data.flow.clone(),
-                            status: Status::Complete,
-                            wire,
-                            packet: None,
-                            error: None,
-                            sources,
-                        };
-                        self.decode(&mut message);
-                        self.emit(message, out)?;
-                        offset += len;
-                        self.buffered -= len;
-                        d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
-                        if offset < d.buffer.len() {
-                            d.sources = Some(Accumulator::new(&data.sources)?);
+                        Err(crate::protocol::framing::Error::Codec(error)) => {
+                            let status = if matches!(error, crate::codec::Error::Unsupported { .. })
+                            {
+                                Status::Unsupported
+                            } else {
+                                Status::Malformed
+                            };
+                            if let Err(error) =
+                                self.flush(&data.flow, &mut d, status, Some(error.to_string()), out)
+                            {
+                                d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
+                                return Err(error);
+                            }
+                            d.disabled = true;
                         }
                     }
-                    Ok(None) => break,
-                    Err(crate::protocol::framing::Error::BufferLimit { limit }) => {
-                        return Err(Error::Limit {
-                            field: "max_buffer_bytes",
-                            limit,
-                        });
-                    }
-                    Err(crate::protocol::framing::Error::Codec(error)) => {
-                        let status = if matches!(error, crate::codec::Error::Unsupported { .. }) {
-                            Status::Unsupported
-                        } else {
-                            Status::Malformed
-                        };
-                        d.offset = offset;
-                        self.flush(&data.flow, &mut d, status, Some(error.to_string()), out)?;
-                        offset = 0;
-                        d.disabled = true;
-                    }
+                }
+                if d.offset == d.buffer.len() {
+                    d.buffer.clear();
+                    d.offset = 0;
                 }
             }
-            d.offset = offset;
-            if offset == d.buffer.len() {
-                d.buffer.clear();
-                d.offset = 0;
-            }
-        }
+            Ok(())
+        })();
         self.directions.insert(data.flow, d);
-        Ok(())
+        result
     }
     fn reserve_buffer(
         &mut self,
@@ -575,10 +602,11 @@ impl Collector {
     }
     fn emit(&mut self, mut message: Message, out: &mut Vec<Event>) -> Result<(), Error> {
         self.limits.check_messages(self.summary.messages as usize)?;
-        self.retained = self
+        let retained = self
             .retained
             .saturating_add(Limits::decoded_charge(message.wire.len()));
-        self.limits.check_retained(self.retained)?;
+        self.limits.check_retained(retained)?;
+        self.retained = retained;
         self.summary.messages += 1;
         message.index = self.summary.messages;
         *self
@@ -614,15 +642,11 @@ impl Collector {
             error = Some("AMQP connection uses an unsupported protocol version".into());
         }
         let wire = Bytes::copy_from_slice(&d.buffer[d.offset..]);
-        self.buffered -= wire.len();
-        self.buffer_capacity -= d.buffer.capacity();
-        d.buffer = Vec::new();
-        d.offset = 0;
         let sources = d
             .sources
-            .take()
+            .as_ref()
             .expect("buffered bytes have sources")
-            .freeze()?;
+            .snapshot()?;
         self.emit(
             Message {
                 index: 0,
@@ -637,7 +661,13 @@ impl Collector {
                 sources,
             },
             out,
-        )
+        )?;
+        self.buffered -= d.buffer.len() - d.offset;
+        self.buffer_capacity -= d.buffer.capacity();
+        d.buffer = Vec::new();
+        d.offset = 0;
+        d.sources = None;
+        Ok(())
     }
     fn stop(
         &mut self,
@@ -649,11 +679,15 @@ impl Collector {
     ) -> Result<(), Error> {
         self.stopped.insert(flow.clone(), (stream, generation));
         if let Some(mut d) = self.directions.remove(flow) {
-            if d.stream == stream && d.generation == generation {
-                self.flush(flow, &mut d, status, None, out)?;
-                d.disabled = true;
-            }
+            let result = if d.stream == stream && d.generation == generation {
+                self.flush(flow, &mut d, status, None, out).map(|()| {
+                    d.disabled = true;
+                })
+            } else {
+                Ok(())
+            };
             self.directions.insert(flow.clone(), d);
+            result?;
         }
         Ok(())
     }

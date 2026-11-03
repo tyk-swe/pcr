@@ -27,22 +27,183 @@ fn deliver(
     out: &mut Vec<Event>,
 ) {
     collector
-        .data(
-            application::Delivery {
-                flow: flow(),
-                stream: 0,
-                generation,
-                bytes: Bytes::copy_from_slice(bytes),
-                sources: tracker
-                    .single(SourceFrame {
-                        number,
-                        timestamp: UNIX_EPOCH,
-                    })
-                    .unwrap(),
-            },
-            out,
-        )
+        .data(delivery(tracker, number, bytes, generation), out)
         .unwrap();
+}
+
+fn delivery(
+    tracker: &Tracker,
+    number: u64,
+    bytes: &[u8],
+    generation: u64,
+) -> application::Delivery {
+    application::Delivery {
+        flow: flow(),
+        stream: 0,
+        generation,
+        bytes: Bytes::copy_from_slice(bytes),
+        sources: tracker
+            .single(SourceFrame {
+                number,
+                timestamp: UNIX_EPOCH,
+            })
+            .unwrap(),
+    }
+}
+
+#[test]
+fn rejected_admission_preserves_previous_bytes_and_sources() {
+    for source_limit in [false, true] {
+        for resume in [false, true] {
+            let limits = Limits {
+                max_buffer_bytes: 8,
+                max_source_spans: if source_limit { 1 } else { 8 },
+                ..Limits::default()
+            };
+            let mut collector = Collector::new(
+                limits,
+                crate::protocol::builtin::registry(),
+                [BuiltinProtocol::Mqtt],
+            )
+            .unwrap();
+            let tracker = Tracker::new(1 << 20, 32).unwrap();
+            let mut events = Vec::new();
+            deliver(&mut collector, &tracker, 1, &[0x30, 4], 0, &mut events);
+            let rejected = if source_limit {
+                &[0u8][..]
+            } else {
+                &[0u8; 7][..]
+            };
+            let error = collector
+                .data(delivery(&tracker, 2, rejected, 0), &mut events)
+                .unwrap_err();
+            let field = if source_limit {
+                "max_source_spans"
+            } else {
+                "max_buffer_bytes"
+            };
+            assert!(matches!(error, Error::Limit { field: actual, .. } if actual == field));
+
+            if resume {
+                deliver(
+                    &mut collector,
+                    &tracker,
+                    1,
+                    &[0, 1, b'a', b'x'],
+                    0,
+                    &mut events,
+                );
+            }
+            let (tail, _) = collector.finish(&RunSummary::default()).unwrap();
+            events.extend(tail);
+            let [Event::Message(message)] = events.as_slice() else {
+                panic!("expected one message");
+            };
+            assert_eq!(
+                message.wire.as_ref(),
+                if resume {
+                    &[0x30, 4, 0, 1, b'a', b'x'][..]
+                } else {
+                    &[0x30, 4][..]
+                }
+            );
+            assert_eq!(
+                message.status,
+                if resume {
+                    Status::Complete
+                } else {
+                    Status::Incomplete
+                }
+            );
+            assert_eq!(
+                message
+                    .sources
+                    .iter()
+                    .map(|source| source.number)
+                    .collect::<Vec<_>>(),
+                [1]
+            );
+        }
+    }
+}
+
+#[test]
+fn framing_limit_error_keeps_received_bytes_for_finalization() {
+    let mut collector = Collector::new(
+        Limits {
+            max_buffer_bytes: 8,
+            ..Limits::default()
+        },
+        crate::protocol::builtin::registry(),
+        [BuiltinProtocol::Mqtt],
+    )
+    .unwrap();
+    let tracker = Tracker::new(1 << 20, 32).unwrap();
+    let mut events = Vec::new();
+    deliver(&mut collector, &tracker, 1, &[0x30], 0, &mut events);
+    let error = collector
+        .data(delivery(&tracker, 2, &[0x10], 0), &mut events)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::Limit {
+            field: "max_buffer_bytes",
+            ..
+        }
+    ));
+    let (tail, _) = collector.finish(&RunSummary::default()).unwrap();
+    let [Event::Message(message)] = tail.as_slice() else {
+        panic!("expected one message")
+    };
+    assert_eq!(message.wire.as_ref(), &[0x30, 0x10]);
+    assert_eq!(message.status, Status::Incomplete);
+    assert_eq!(
+        message
+            .sources
+            .iter()
+            .map(|source| source.number)
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+}
+
+#[test]
+fn provenance_allocation_error_keeps_received_bytes_for_finalization() {
+    let source_charge = 256 + std::mem::size_of::<SourceFrame>();
+    let tracker = Tracker::new(2048 + 512 + 3 * source_charge - 1, 32).unwrap();
+    let data = delivery(&tracker, 1, &[0xc0, 0], 0);
+    let blocker = tracker
+        .single(SourceFrame {
+            number: 2,
+            timestamp: UNIX_EPOCH,
+        })
+        .unwrap();
+    let mut collector = Collector::new(
+        Limits::default(),
+        crate::protocol::builtin::registry(),
+        [BuiltinProtocol::Mqtt],
+    )
+    .unwrap();
+    let error = collector.data(data, &mut Vec::new()).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::Provenance(crate::analysis::provenance::Error::Limit { .. })
+    ));
+    drop(blocker);
+    let (tail, _) = collector.finish(&RunSummary::default()).unwrap();
+    let [Event::Message(message)] = tail.as_slice() else {
+        panic!("expected one message")
+    };
+    assert_eq!(message.wire.as_ref(), &[0xc0, 0]);
+    assert_eq!(message.status, Status::Incomplete);
+    assert_eq!(
+        message
+            .sources
+            .iter()
+            .map(|source| source.number)
+            .collect::<Vec<_>>(),
+        [1]
+    );
 }
 #[test]
 fn split_mqtt_and_coalesced_messages_keep_sources() {

@@ -217,17 +217,22 @@ impl Accumulator {
         self.frames.first_key_value().map(|(_, frame)| frame)
     }
 
-    pub(crate) fn insert(&mut self, sources: &SourceSet) -> Result<(), Error> {
+    pub(crate) fn len_with(&self, sources: &SourceSet) -> Result<usize, Error> {
         if !Arc::ptr_eq(&self.lease.budget, &sources.0.lease.budget) {
             return Err(Error::DifferentCapture);
         }
-        // Reserve every new entry before changing the tree. A refused merge
-        // leaves both the contributor set and its charge unchanged.
         let added = sources
             .frames()
             .iter()
             .filter(|frame| !self.frames.contains_key(&SourceNumber(frame.number)))
             .count();
+        self.frames.len().checked_add(added).ok_or(Error::Limit {
+            limit: self.lease.budget.limit,
+        })
+    }
+
+    pub(crate) fn insert(&mut self, sources: &SourceSet) -> Result<(), Error> {
+        let added = self.len_with(sources)? - self.frames.len();
         let bytes = added.checked_mul(256).ok_or(Error::Limit {
             limit: self.lease.budget.limit,
         })?;
@@ -247,6 +252,10 @@ impl Accumulator {
     }
 
     pub(crate) fn freeze(self) -> Result<SourceSet, Error> {
+        self.snapshot()
+    }
+
+    pub(crate) fn snapshot(&self) -> Result<SourceSet, Error> {
         let capacity = self.frames.len();
         let charge = capacity
             .checked_mul(std::mem::size_of::<SourceFrame>())

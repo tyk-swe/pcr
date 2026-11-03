@@ -349,6 +349,40 @@ fn cache_options(capacity: usize, ttl: u64) -> Options {
 }
 
 #[test]
+fn cache_insert_and_get_round_trip() {
+    use crate::neighbor::cache::TEST_CACHE_CLOCK;
+    use std::cell::Cell;
+
+    struct RestoreClock<'a> {
+        clock: &'a Cell<Option<Instant>>,
+        previous: Option<Instant>,
+    }
+
+    impl Drop for RestoreClock<'_> {
+        fn drop(&mut self) {
+            self.clock.set(self.previous);
+        }
+    }
+
+    TEST_CACHE_CLOCK.with(|clock| {
+        let _restore = RestoreClock {
+            clock,
+            previous: clock.replace(Some(Instant::now())),
+        };
+        let cache = NeighborCache::default();
+        let options = cache_options(2, 3600);
+        let key = cache_key(1);
+        let mac = MacAddress([2, 0, 0, 0, 0, 7]);
+        options.validate().unwrap();
+
+        assert_eq!(cache.get(&key).unwrap(), None);
+        cache.insert(mac, key.clone(), &options).unwrap();
+        assert_eq!(cache.get(&key).unwrap(), Some(mac));
+        assert_eq!(cache.get(&cache_key(2)).unwrap(), None);
+    });
+}
+
+#[test]
 fn cache_refresh_expiry_and_oldest_insertion_follow_per_entry_ttls() {
     let cache = NeighborCache::default();
     let other = NeighborCache::default();

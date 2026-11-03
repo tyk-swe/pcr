@@ -14,6 +14,19 @@ use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::{MacAddress, VlanTag};
 use packetcraftr_netio::interface::Id as InterfaceId;
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static TEST_CACHE_CLOCK: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
+}
+
+fn cache_now() -> Instant {
+    #[cfg(test)]
+    if let Some(now) = TEST_CACHE_CLOCK.with(std::cell::Cell::get) {
+        return now;
+    }
+    SystemClock.now()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct NeighborCacheKey {
     interface: InterfaceId,
@@ -89,7 +102,7 @@ impl NeighborCache {
         &self,
         key: &NeighborCacheKey,
     ) -> Result<Option<MacAddress>, crate::neighbor::Error> {
-        self.get_with_clock(key, || SystemClock.now())
+        self.get_with_clock(key, cache_now)
     }
 
     #[cfg(test)]
@@ -139,7 +152,7 @@ impl NeighborCache {
         key: NeighborCacheKey,
         options: &Options,
     ) -> Result<(), crate::neighbor::Error> {
-        self.insert_with_clock(mac_address, key, options, || SystemClock.now())
+        self.insert_with_clock(mac_address, key, options, cache_now)
     }
 
     #[cfg(test)]

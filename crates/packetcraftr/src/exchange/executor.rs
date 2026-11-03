@@ -149,7 +149,13 @@ impl<C: Session> Transaction<C> {
         T: transmit::Provider + ?Sized,
         F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
-        let operation = self.run(transmit, &mut workflow_matcher, &mut stop_predicate, emit);
+        let transmitter = transmit.session();
+        let operation = self.run(
+            transmitter.as_ref(),
+            &mut workflow_matcher,
+            &mut stop_predicate,
+            emit,
+        );
         if let Err(operation) = operation {
             return Err(self.fail_after_shutdown(operation));
         }

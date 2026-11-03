@@ -591,6 +591,68 @@ fn sip_udp_without_content_length_uses_the_datagram() {
 }
 
 #[test]
+fn udp_build_uses_the_selected_registry_bindings() {
+    let original = builtin::registry();
+    let mut changed = original.to_builder();
+    changed
+        .replace_binding("udp", 5060, "coap", crate::registry::Priority::Primary)
+        .unwrap();
+    let changed = std::sync::Arc::new(changed.build().unwrap());
+    let mut packet = Packet::default();
+    packet.push(Ethernet::default());
+    packet.push(Ipv4::default());
+    packet.push(Udp {
+        destination_port: 5060,
+        ..Default::default()
+    });
+    packet.push(Sip::default());
+    let original_builder = crate::build::Builder::new(original);
+    let changed_builder = crate::build::Builder::new(changed);
+    let bytes = original_builder
+        .build(packet.clone(), Addresses::default(), Default::default())
+        .unwrap()
+        .bytes;
+    assert!(
+        changed_builder
+            .build(packet.clone(), Addresses::default(), Default::default())
+            .is_err()
+    );
+    assert_eq!(
+        original_builder
+            .build(packet, Addresses::default(), Default::default())
+            .unwrap()
+            .bytes,
+        bytes
+    );
+
+    let mut malformed = Packet::default();
+    malformed.push(Ethernet::default());
+    malformed.push(Ipv4::default());
+    malformed.push(Udp {
+        destination_port: 5060,
+        ..Default::default()
+    });
+    malformed.push(crate::layer::Malformed::new(
+        Some("sip".to_owned()),
+        Bytes::from_static(b"malformed SIP"),
+        "invalid message",
+    ));
+    let permissive = crate::build::Options {
+        mode: Mode::Permissive,
+        ..Default::default()
+    };
+    let original_bytes = original_builder
+        .build(malformed.clone(), Addresses::default(), permissive.clone())
+        .unwrap()
+        .bytes;
+    let changed_bytes = changed_builder
+        .build(malformed, Addresses::default(), permissive)
+        .unwrap()
+        .bytes;
+    assert_eq!(changed_bytes, original_bytes);
+}
+
+#[test]
 fn sip_tcp_still_requires_content_length() {
     let mut framer = crate::protocol::framing::Framer::new(crate::codec::Framing::Sip, "sip");
     assert!(

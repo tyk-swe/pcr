@@ -101,11 +101,25 @@ impl capture::Session for NoCaptureSession {
 }
 
 #[derive(Clone, Default)]
-struct Transmit(Arc<Mutex<Vec<Bytes>>>);
+struct Transmit(Arc<Mutex<Vec<Bytes>>>, Arc<AtomicUsize>, Arc<AtomicUsize>);
 impl transmit::Provider for Transmit {
     fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
         self.0.lock().unwrap().push(frame.bytes().clone());
         Ok(transmit::Submission::start().complete(frame.bytes().len(), frame.bytes().clone()))
+    }
+
+    fn session(&self) -> Box<dyn transmit::Provider + '_> {
+        self.1.fetch_add(1, Ordering::Relaxed);
+        Box::new(TestSession(self))
+    }
+}
+
+struct TestSession<'a>(&'a Transmit);
+
+impl transmit::Provider for TestSession<'_> {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
+        self.0.2.fetch_add(1, Ordering::Relaxed);
+        self.0.send(frame)
     }
 }
 
@@ -172,6 +186,36 @@ fn packet(bytes: usize) -> Packet {
     });
     packet.push(Raw::new(vec![7; bytes]));
     packet
+}
+
+#[test]
+fn streaming_uses_one_session_without_bypassing_policy_or_cancellation() {
+    let (client, _, _, tx) = fixture();
+    let cancellation = Cancellation::default();
+    let client = client.with_cancellation(cancellation.clone());
+    let operation = Execution::new(&client, Duration::from_secs(10));
+    let options = options();
+    let mut stream = client.streaming_in(&options, 10, &operation).unwrap();
+    for size in [8, 16] {
+        let prepared = stream.prepare_layer3(packet(size)).unwrap();
+        let expected = prepared.built().bytes.clone();
+        let sent = stream.transmit(prepared).unwrap();
+        assert_eq!(sent.built().bytes, expected);
+        assert_eq!(sent.bytes_sent(), expected.len());
+    }
+    let mut denied = Packet::default();
+    denied.push(Ipv4 {
+        destination: "10.0.0.9".parse().unwrap(),
+        ..Default::default()
+    });
+    denied.push(Udp::default());
+    assert!(stream.prepare_layer3(denied).is_err());
+    let prepared = stream.prepare_layer3(packet(4)).unwrap();
+    cancellation.cancel();
+    assert!(stream.transmit(prepared).is_err());
+    assert_eq!(tx.1.load(Ordering::Relaxed), 1);
+    assert_eq!(tx.2.load(Ordering::Relaxed), 2);
+    assert_eq!(tx.0.lock().unwrap().len(), 2);
 }
 
 #[test]

@@ -35,6 +35,7 @@ use packetcraftr_netio::{
     capture::{self, Group, GroupRequest, Session as _},
     deadline::MAX_WAIT,
     interface,
+    transmit::Provider as _,
 };
 use prepare::{AdmittedProbe, Plan};
 use std::{
@@ -253,6 +254,7 @@ struct InitialState<'a, P, K> {
 struct Pipeline<'a, P: PacketProviders, K> {
     history: &'a mut super::reply_history::ReplyHistory,
     executor: &'a WorkflowExecutor<'a, P, K>,
+    transmitter: Box<dyn packetcraftr_netio::transmit::Provider + 'a>,
     descriptions: BTreeMap<usize, Descriptor<'a>>,
     ready: BTreeMap<usize, AdmittedProbe>,
     armed_ready: BTreeSet<usize>,
@@ -392,6 +394,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         Ok(Self {
             history,
             executor,
+            transmitter: executor.client.providers.transmit().session(),
             descriptions,
             ready,
             armed_ready,

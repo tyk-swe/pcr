@@ -59,6 +59,7 @@ pub(super) fn map_route_error<E: Classified + Send + Sync + 'static>(source: E) 
 
 pub(super) struct ProviderExecutor<'c, P> {
     providers: &'c P,
+    transmitter: Box<dyn TransmitProvider + 'c>,
     validated_interface: Option<InterfaceInfo>,
 }
 
@@ -66,6 +67,7 @@ impl<'c, P: PacketProviders> ProviderExecutor<'c, P> {
     pub(super) fn new(providers: &'c P) -> Self {
         Self {
             providers,
+            transmitter: providers.transmit().session(),
             validated_interface: None,
         }
     }
@@ -272,8 +274,7 @@ impl<P: PacketProviders> Executor for ProviderExecutor<'_, P> {
                 source: None,
             });
         }
-        self.providers
-            .transmit()
+        self.transmitter
             .send(Outbound::try_new(frame.bytes(), route.transmit_route())?)
     }
 }

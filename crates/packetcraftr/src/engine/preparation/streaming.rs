@@ -11,6 +11,7 @@ use crate::evidence::SentPacket;
 pub(crate) struct Streaming<'c, P, K> {
     pub(super) stages: Stages<'c, P, K>,
     pub(super) budget: Budget,
+    pub(super) transmitter: Box<dyn packetcraftr_netio::transmit::Provider + 'c>,
 }
 
 impl<P: TransmitProviders, K: Clock> Streaming<'_, P, K> {
@@ -38,9 +39,7 @@ impl<P: TransmitProviders, K: Clock> Streaming<'_, P, K> {
     }
 
     pub(crate) fn transmit(&self, packet: PreparedPacket) -> Result<SentPacket, Error> {
-        packet.transmit(self.stages.client.providers.transmit_provider(), || {
-            self.stages.check()
-        })
+        packet.transmit(self.transmitter.as_ref(), || self.stages.check())
     }
 }
 

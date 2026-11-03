@@ -32,6 +32,7 @@ use std::sync::Arc;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::build::Builder;
 use packetcraftr_core::packet::Packet;
+use packetcraftr_netio::transmit::Provider as _;
 
 use crate::clock::Clock;
 use crate::deadline::ensure_preparation_deadline;
@@ -167,7 +168,12 @@ impl<P: TransmitProviders, K: Clock> Client<P, K> {
         operation: &Execution,
     ) -> Result<Streaming<'c, P, K>, Error> {
         let (stages, budget) = self.open_stages(options, packets, None, operation)?;
-        Ok(Streaming { stages, budget })
+        let transmitter = self.providers.transmit_provider().session();
+        Ok(Streaming {
+            stages,
+            budget,
+            transmitter,
+        })
     }
 
     fn open_stages<'c>(

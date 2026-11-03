@@ -75,6 +75,19 @@ impl super::builder::Builder {
                 });
             }
         }
+        let child_bindings = self
+            .bindings
+            .iter()
+            .map(|(parent, children)| {
+                let entries = children
+                    .iter()
+                    .filter_map(|(discriminator, entries)| {
+                        entries.first().map(|entry| (*discriminator, entry.child))
+                    })
+                    .collect();
+                (*parent, entries)
+            })
+            .collect();
         for protocol in self.matchers.keys().chain(&self.trailing_padding) {
             if !self.codecs.contains_key(protocol) {
                 return Err(Error::UnknownProtocol {
@@ -103,6 +116,7 @@ impl super::builder::Builder {
             aliases: self.aliases,
             roots: self.roots,
             bindings: self.bindings,
+            child_bindings,
             reverse_bindings,
             matchers: self.matchers,
             trailing_padding: self.trailing_padding,

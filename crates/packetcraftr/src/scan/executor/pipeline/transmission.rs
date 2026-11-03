@@ -144,7 +144,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         self.stats.packets_attempted += 1;
         let sent = Arc::new(
             prepared
-                .transmit(client.providers.transmit(), || Ok::<(), LiveIoError>(()))
+                .transmit(self.transmitter.as_ref(), || Ok::<(), LiveIoError>(()))
                 .map_err(BoundaryError::from_error)?,
         );
         self.stats.packets_completed += 1;

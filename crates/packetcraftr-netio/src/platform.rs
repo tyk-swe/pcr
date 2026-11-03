@@ -25,3 +25,5 @@ pub(crate) use dispatch::{
 };
 #[cfg(native_layer2)]
 pub(crate) use dispatch::{open_capture, timestamp_types};
+#[cfg(all(target_os = "linux", pcap_backend))]
+pub(crate) use transmit::libpcap::session_backend as transmit_backend;

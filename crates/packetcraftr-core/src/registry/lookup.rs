@@ -26,6 +26,8 @@ pub struct Registry {
         HashMap<Discriminator, Vec<ChildBinding>, FixedState>,
         FixedState,
     >,
+    pub(super) child_bindings:
+        HashMap<crate::layer::Id, Box<[(Discriminator, crate::layer::Id)]>, FixedState>,
     pub(super) reverse_bindings: HashMap<
         crate::layer::Id,
         HashMap<crate::layer::Id, Vec<ReverseBinding>, FixedState>,
@@ -111,18 +113,8 @@ impl Registry {
         })
     }
 
-    pub(crate) fn child_bindings(&self, parent: &str) -> Vec<(Discriminator, crate::layer::Id)> {
-        self.bindings
-            .get(parent)
-            .map(|children| {
-                children
-                    .iter()
-                    .filter_map(|(discriminator, entries)| {
-                        entries.first().map(|entry| (*discriminator, entry.child))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+    pub(crate) fn child_bindings(&self, parent: &str) -> &[(Discriminator, crate::layer::Id)] {
+        self.child_bindings.get(parent).map_or(&[], Box::as_ref)
     }
 
     pub fn discriminator_for(&self, parent: &str, child: &str) -> Option<Discriminator> {

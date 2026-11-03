@@ -14,25 +14,50 @@ use crate::{
 use packetcraftr_core::error::Source;
 
 pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
-    let interface = &frame.route().decision.interface;
+    validate_length(frame)?;
+    let mut capture = open(frame)?;
+    submit(&mut capture, frame)
+}
+
+fn validate_length(frame: Layer2Frame<'_>) -> Result<(), Error> {
     i32::try_from(frame.bytes().len()).map_err(|_| Error::InvalidTransmissionFrame {
         message: format!(
             "Layer 2 frame length {} exceeds the libpcap signed-length limit",
             frame.bytes().len()
         ),
     })?;
-    let mut capture = Capture::from_device(interface.name.as_str())
+    Ok(())
+}
+
+fn open(frame: Layer2Frame<'_>) -> Result<Capture<pcap::Active>, Error> {
+    let interface = &frame.route().decision.interface;
+    Capture::from_device(interface.name.as_str())
         .map_err(|error| map_open_error(interface, error))?
         .promisc(false)
         .timeout(READ_TIMEOUT_MILLIS)
         .immediate_mode(true)
         .open()
-        .map_err(|error| map_open_error(interface, error))?;
+        .map_err(|error| map_open_error(interface, error))
+}
+
+fn submit(
+    capture: &mut Capture<pcap::Active>,
+    frame: Layer2Frame<'_>,
+) -> Result<transmit::Report, Error> {
+    let interface = &frame.route().decision.interface;
     let submission = Submission::start();
     capture
         .sendpacket(frame.bytes().as_ref())
         .map_err(|error| map_send_error(interface, error))?;
     Ok(submission.complete(frame.bytes().len(), frame.bytes().clone()))
+}
+
+#[cfg(target_os = "linux")]
+mod session;
+
+#[cfg(target_os = "linux")]
+pub(crate) fn session_backend() -> session::Backend {
+    session::Backend::new()
 }
 
 fn map_send_error(interface: &InterfaceId, error: PcapError) -> Error {

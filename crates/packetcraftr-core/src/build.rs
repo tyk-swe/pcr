@@ -35,7 +35,7 @@ struct EncodedLayer {
     payload_length: Option<usize>,
 }
 
-struct LayerFacts {
+struct LayerFacts<'a> {
     child: Option<ChildInfo>,
     parent: Option<ParentInfo>,
     network: Result<NetworkEnvelope, crate::codec::Error>,
@@ -44,7 +44,7 @@ struct LayerFacts {
     srh_reduced: bool,
     under_ipv6: Option<bool>,
     trailing_padding: Option<usize>,
-    child_bindings: Vec<(Discriminator, crate::layer::Id)>,
+    child_bindings: &'a [(Discriminator, crate::layer::Id)],
 }
 
 fn binding_protocol(layer: &dyn Layer) -> &str {
@@ -80,12 +80,12 @@ fn parent_discriminator_value(parent: &dyn Layer) -> Option<field::Value> {
         })
 }
 
-fn layer_facts(
-    registry: &Registry,
+fn layer_facts<'a>(
+    registry: &'a Registry,
     packet: &Packet,
     addresses: &Addresses,
     mode: Mode,
-) -> Vec<LayerFacts> {
+) -> Vec<LayerFacts<'a>> {
     (0..packet.len())
         .map(|index| {
             let protocol = *packet
@@ -253,7 +253,7 @@ impl Builder {
                         srh_reduced: facts.srh_reduced,
                         under_ipv6: facts.under_ipv6,
                         trailing_padding: facts.trailing_padding,
-                        child_bindings: &facts.child_bindings,
+                        child_bindings: facts.child_bindings,
                         remaining_packet_bytes,
                     },
                 )

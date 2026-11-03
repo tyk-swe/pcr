@@ -337,7 +337,7 @@ impl Provider for SystemProvider {
         #[cfg(pcap_backend)]
         let fallback = session::Bounded::new(super::platform::transmit_backend());
         #[cfg(not(pcap_backend))]
-        let fallback = SystemProvider;
+        let fallback = Self;
         super::platform::wrap_raw_transmit_session(fallback)
     }
 }

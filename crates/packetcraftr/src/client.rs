@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 pub(crate) mod admission;
 pub(crate) mod planning;
+#[cfg(test)]
+mod tests;
 
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::registry::Registry;

@@ -8,7 +8,6 @@ use std::{
     ffi::{CStr, CString, c_int},
     ptr::{NonNull, null_mut},
     sync::Arc,
-    time::{Instant, SystemTime},
 };
 
 use crate::platform::common::npcap::{

@@ -18,3 +18,30 @@ pub(crate) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
         / rate;
     Some(Duration::from_nanos(u64::try_from(nanos).ok()?))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_delay_without_a_rate_never_waits() {
+        assert_eq!(rate_delay(10, None), Some(Duration::ZERO));
+    }
+
+    #[test]
+    fn rate_delay_spaces_items_evenly_and_rounds_up() {
+        assert_eq!(rate_delay(1, Some(1_000)), Some(Duration::from_millis(1)));
+        assert_eq!(rate_delay(2, Some(2)), Some(Duration::from_secs(1)));
+        assert_eq!(
+            rate_delay(1, Some(3)),
+            Some(Duration::from_nanos(333_333_334))
+        );
+        assert_eq!(rate_delay(0, Some(5)), Some(Duration::ZERO));
+    }
+
+    #[test]
+    fn rate_delay_rejects_a_zero_rate_and_unrepresentable_delays() {
+        assert_eq!(rate_delay(1, Some(0)), None);
+        assert_eq!(rate_delay(usize::MAX, Some(1)), None);
+    }
+}

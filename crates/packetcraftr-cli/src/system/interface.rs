@@ -4,6 +4,7 @@
 use packetcraftr_core::error::Kind;
 use packetcraftr_netio as net;
 use packetcraftr_netio::capture::Provider as _;
+#[cfg(not(all(target_os = "linux", feature = "native-route")))]
 use packetcraftr_netio::route::Provider as _;
 
 use crate::command_options::InterfaceSelector;
@@ -36,13 +37,30 @@ pub(crate) fn timestamp_types(
         .map_err(CliError::classified)
 }
 
-pub(crate) fn interface_route(
+pub(crate) fn interface_routes(
     invocation: &crate::invocation::Invocation,
-    interface: &net::interface::Id,
-) -> Result<Option<net::route::Decision>, CliError> {
-    net::route::SystemProvider
-        .lookup_interface(interface, &invocation.passive_lookup())
-        .map_err(CliError::classified)
+    interfaces: Vec<net::interface::Info>,
+) -> Result<Vec<net::route::Decision>, CliError> {
+    #[cfg(all(target_os = "linux", feature = "native-route"))]
+    {
+        net::route::SystemProvider
+            .lookup_interface_snapshot(interfaces, &invocation.passive_lookup())
+            .map_err(CliError::classified)
+    }
+    #[cfg(not(all(target_os = "linux", feature = "native-route")))]
+    {
+        interfaces
+            .into_iter()
+            .try_fold(Vec::new(), |mut routes, interface| {
+                if let Some(route) = net::route::SystemProvider
+                    .lookup_interface(&interface.id, &invocation.passive_lookup())
+                    .map_err(CliError::classified)?
+                {
+                    routes.push(route);
+                }
+                Ok(routes)
+            })
+    }
 }
 
 fn select_interfaces<I: net::interface::Provider>(

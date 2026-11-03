@@ -43,6 +43,24 @@ pub trait Provider: Send + Sync {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemProvider;
 
+impl SystemProvider {
+    /// Derives interface-only decisions from one Linux interface survey.
+    #[cfg(all(native_route, target_os = "linux"))]
+    pub fn lookup_interface_snapshot(
+        &self,
+        interfaces: Vec<crate::interface::Info>,
+        deadline: &Deadline,
+    ) -> Result<Vec<Decision>, Error> {
+        admit(deadline, "looking up an interface route")?;
+        let result = interfaces
+            .into_iter()
+            .map(normalize::interface_decision)
+            .collect();
+        admit(deadline, "looking up an interface route")?;
+        result
+    }
+}
+
 impl Provider for SystemProvider {
     type Error = Error;
 

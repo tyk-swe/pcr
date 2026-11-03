@@ -121,3 +121,92 @@ fn reader_limits_accept_input_at_the_limit_and_reject_input_past_it() {
     };
     assert!(Reader::with_limits(Cursor::new(capture(Format::Pcap, &[])), one_interface).is_ok());
 }
+
+#[test]
+fn buffered_readback_preserves_frames_errors_rewind_and_cancellation_with_fewer_reads() {
+    use std::cell::Cell;
+    use std::io::{BufReader, Read, Seek, SeekFrom};
+    use std::rc::Rc;
+
+    struct Counted {
+        input: Cursor<Vec<u8>>,
+        reads: Rc<Cell<usize>>,
+    }
+
+    impl Read for Counted {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            self.reads.set(self.reads.get() + 1);
+            self.input.read(buffer)
+        }
+    }
+
+    impl Seek for Counted {
+        fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+            self.input.seek(position)
+        }
+    }
+
+    for format in [Format::Pcap, Format::PcapNg] {
+        let frames = (0..1000)
+            .map(|index| frame(index, 0, u8::try_from(index % 256).unwrap(), 64))
+            .collect::<Vec<_>>();
+        let bytes = capture(format, &frames);
+        let direct_reads = Rc::new(Cell::new(0));
+        let buffered_reads = Rc::new(Cell::new(0));
+        let counted = |reads: Rc<Cell<usize>>, input: Vec<u8>| Counted {
+            input: Cursor::new(input),
+            reads,
+        };
+        let mut direct = Reader::with_limits(
+            counted(Rc::clone(&direct_reads), bytes.clone()),
+            Default::default(),
+        )
+        .unwrap();
+        let mut buffered = Reader::with_limits(
+            BufReader::with_capacity(
+                64 * 1024,
+                counted(Rc::clone(&buffered_reads), bytes.clone()),
+            ),
+            Default::default(),
+        )
+        .unwrap();
+        for expected in &frames {
+            let direct_frame = direct.next_frame().unwrap().unwrap();
+            assert_eq!(direct_frame.bytes(), expected.bytes());
+            assert_eq!(buffered.next_frame().unwrap(), Some(direct_frame));
+        }
+        assert_eq!(direct.next_frame().unwrap(), None);
+        assert_eq!(buffered.next_frame().unwrap(), None);
+        assert!(buffered_reads.get() * 10 < direct_reads.get());
+        direct.rewind().unwrap();
+        buffered.rewind().unwrap();
+        assert_eq!(buffered.next_frame().unwrap(), direct.next_frame().unwrap());
+
+        let mut truncated = bytes;
+        truncated.truncate(truncated.len() - 1);
+        let mut direct =
+            Reader::with_limits(Cursor::new(truncated.clone()), Default::default()).unwrap();
+        let mut buffered =
+            Reader::with_limits(BufReader::new(Cursor::new(truncated)), Default::default())
+                .unwrap();
+        for _ in 0..frames.len() - 1 {
+            assert_eq!(direct.next_frame().unwrap(), buffered.next_frame().unwrap());
+        }
+        assert_eq!(
+            direct.next_frame().unwrap_err().to_string(),
+            buffered.next_frame().unwrap_err().to_string()
+        );
+
+        let cancellation = crate::budget::Cancellation::default();
+        let mut reader = Reader::with_limits(
+            BufReader::new(Cursor::new(capture(format, &frames))),
+            Default::default(),
+        )
+        .unwrap()
+        .with_cancellation(cancellation.clone());
+        assert!(reader.next_frame().unwrap().is_some());
+        cancellation.cancel();
+        assert!(matches!(reader.next_frame(), Err(Error::Cancelled(_))));
+        assert!(matches!(reader.rewind(), Err(Error::Cancelled(_))));
+    }
+}

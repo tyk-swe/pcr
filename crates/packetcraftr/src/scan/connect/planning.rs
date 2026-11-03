@@ -114,8 +114,7 @@ pub(super) fn planned<A: Authorizer + ResolveTarget>(
             )?;
             // Discovery may leave any target to the scan stage, so the
             // operation covers every target on every port of either stage.
-            let mut every_port = discovery.clone();
-            every_port.extend(ports.iter().filter(|port| !discovery.contains(port)));
+            let every_port = authorization_ports(&discovery, &ports);
             let effective = request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS);
             let charge = request
                 .adaptive
@@ -186,6 +185,20 @@ pub(super) fn planned<A: Authorizer + ResolveTarget>(
     Ok((selected.targets, planned))
 }
 
+fn authorization_ports(discovery: &[u16], ports: &[u16]) -> Vec<u16> {
+    let mut discovery_membership = [0_u64; 1024];
+    for &port in discovery {
+        discovery_membership[usize::from(port) / 64] |= 1 << (port % 64);
+    }
+    let mut every_port = discovery.to_vec();
+    every_port.extend(
+        ports.iter().filter(|&&port| {
+            discovery_membership[usize::from(port) / 64] & (1 << (port % 64)) == 0
+        }),
+    );
+    every_port
+}
+
 pub(super) struct StagePlan<'a> {
     pub(super) stage: Stage,
     pub(super) targets: &'a [SelectedAddress],
@@ -244,5 +257,125 @@ fn socket_endpoint(selected: &crate::target::SelectedAddress, port: u16) -> Sock
             scope.interface.index,
         )),
         (address, _) => SocketAddr::new(address, port),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::target::{Authorized, Target};
+    use packetcraftr_core::error::BoundaryError;
+
+    #[derive(Default)]
+    struct RecordingAuthorizer {
+        endpoints: Vec<SocketAddr>,
+        connections: u64,
+    }
+
+    impl Authorizer for RecordingAuthorizer {
+        fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError> {
+            if let Operation::Socket(socket) = request {
+                self.endpoints = socket.endpoints().to_vec();
+                self.connections = socket.sockets().connections();
+            }
+            Ok(())
+        }
+    }
+
+    impl ResolveTarget for RecordingAuthorizer {
+        fn resolve_and_authorize(
+            &mut self,
+            target: &Target,
+            _: &Deadline,
+        ) -> Result<Authorized, BoundaryError> {
+            let Target::Address(address) = target else {
+                unreachable!()
+            };
+            Ok(Authorized {
+                declared: target.clone(),
+                selected: vec![SelectedAddress::new(*address)],
+            })
+        }
+    }
+
+    fn request() -> Request {
+        Request {
+            tcp_scan: Default::default(),
+            sctp_scan: Default::default(),
+            target_sources: Vec::new(),
+            max_in_flight: 1,
+            targets: "192.0.2.1".parse::<Target>().unwrap().into(),
+            udp_payload: Default::default(),
+            udp_profiles: Default::default(),
+            address_family: crate::target::Family::Any,
+            endpoints: [1, 443, 65, u16::MAX]
+                .into_iter()
+                .map(|port| probe::Endpoint::Tcp { port })
+                .collect(),
+            discovery: super::super::super::discovery::Options {
+                mode: super::super::super::discovery::Mode::Before,
+                probes: [u16::MAX, 443, 64]
+                    .into_iter()
+                    .map(|port| probe::Endpoint::Tcp { port })
+                    .collect(),
+                ..Default::default()
+            },
+            attempts: 2,
+            adaptive: None,
+            timeout: Duration::from_millis(1),
+            probes_per_second: None,
+            limits: Default::default(),
+            route: Default::default(),
+            collection: Default::default(),
+        }
+    }
+
+    #[test]
+    fn plans_discovery_first_and_respects_probe_and_memory_limits() {
+        let request = request();
+        let deadline = Deadline::new(Duration::from_secs(5));
+        let mut authorizer = RecordingAuthorizer::default();
+        let (targets, plan) = planned(&request, &mut authorizer, &deadline, 0).unwrap();
+        assert_eq!(
+            authorizer
+                .endpoints
+                .iter()
+                .map(SocketAddr::port)
+                .collect::<Vec<_>>(),
+            [u16::MAX, 443, 64, 1, 65]
+        );
+        assert_eq!(authorizer.connections, 14);
+        assert_eq!(plan.discovery, [u16::MAX, 443, 64]);
+        assert_eq!(plan.ports, [1, 443, 65, u16::MAX]);
+        assert_eq!(targets.len(), 1);
+        for limits in [
+            super::super::super::Limits {
+                max_probes: 13,
+                ..request.limits
+            },
+            super::super::super::Limits {
+                max_prepared_bytes: 1,
+                ..request.limits
+            },
+        ] {
+            let mut authorizer = RecordingAuthorizer::default();
+            let limited = Request {
+                limits,
+                ..request.clone()
+            };
+            assert!(planned(&limited, &mut authorizer, &deadline, 0).is_err());
+            assert!(authorizer.endpoints.is_empty());
+        }
+    }
+
+    #[test]
+    fn overlapping_port_membership_preserves_input_duplicates_and_order() {
+        let discovery = [u16::MAX, 64, 64, 1];
+        let ports = [65, u16::MAX, 65, 63, 64, 1, 63];
+        assert_eq!(
+            authorization_ports(&discovery, &ports),
+            [u16::MAX, 64, 64, 1, 65, 65, 63, 63]
+        );
+        assert_eq!(authorization_ports(&[], &ports), ports);
     }
 }

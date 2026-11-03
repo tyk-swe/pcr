@@ -48,18 +48,11 @@ pub(super) fn run(
     arguments: Args,
     format: Format,
 ) -> Result<(), CliError> {
-    let interfaces = crate::system::interfaces(invocation, None)?;
-    let mut routes = Vec::new();
-    for interface in interfaces
-        .into_iter()
-        .filter(|interface| arguments.includes(interface))
-    {
-        if let Some(route) = crate::system::interface_route(invocation, &interface.id)? {
-            routes.push(route);
-        }
-    }
-    routes.sort_by_key(|route| (route.interface.index, route.interface.name.clone()));
-    routes.dedup_by(|left, right| left.interface == right.interface);
+    let routes = collect_routes(
+        &arguments,
+        || crate::system::interfaces(invocation, None),
+        |interfaces| crate::system::interface_routes(invocation, interfaces),
+    )?;
     let result = output::routes::Report::from(routes);
     crate::rendering::render_aggregate_rows(
         invocation,
@@ -69,6 +62,24 @@ pub(super) fn run(
         &result.routes,
         route_line,
     )
+}
+
+fn collect_routes(
+    arguments: &Args,
+    survey: impl FnOnce() -> Result<Vec<net::interface::Info>, CliError>,
+    route: impl FnOnce(Vec<net::interface::Info>) -> Result<Vec<net::route::Decision>, CliError>,
+) -> Result<Vec<net::route::Decision>, CliError> {
+    let interfaces = survey()?
+        .into_iter()
+        .filter(|interface| arguments.includes(interface))
+        .collect();
+    let mut routes = route(interfaces)?;
+    routes.sort_by(|left, right| {
+        (left.interface.index, &left.interface.name)
+            .cmp(&(right.interface.index, &right.interface.name))
+    });
+    routes.dedup_by(|left, right| left.interface == right.interface);
+    Ok(routes)
 }
 
 fn route_line(route: &output::network::Decision) -> String {
@@ -83,4 +94,76 @@ fn route_line(route: &output::network::Decision) -> String {
         route.capability,
         route.link_type
     )
+}
+
+#[cfg(all(test, target_os = "linux", feature = "native-route"))]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    fn interface(index: u32, up: bool) -> net::interface::Info {
+        net::interface::Info {
+            id: net::interface::Id {
+                name: format!("if{index}"),
+                index,
+            },
+            description: None,
+            mac_address: None,
+            addresses: Vec::new(),
+            flags: net::interface::Flags {
+                up,
+                ..Default::default()
+            },
+            mtu: Some(1500),
+            capability: net::link::Capability::Layer3,
+            link_type: packetcraftr_core::frame::LinkType::RAW,
+        }
+    }
+
+    #[test]
+    fn listing_uses_one_survey_and_returns_filtered_ordered_routes() {
+        for size in [1, 1000] {
+            for all in [false, true] {
+                let surveys = Cell::new(0);
+                let conversions = Cell::new(0);
+                let interfaces = (1..=size)
+                    .rev()
+                    .map(|index| interface(index, index % 2 == 1))
+                    .collect::<Vec<_>>();
+                let routes = collect_routes(
+                    &Args { all },
+                    || {
+                        surveys.set(surveys.get() + 1);
+                        Ok(interfaces)
+                    },
+                    |interfaces| {
+                        conversions.set(conversions.get() + 1);
+                        net::route::SystemProvider
+                            .lookup_interface_snapshot(
+                                interfaces,
+                                &packetcraftr_core::budget::Deadline::new(Duration::from_secs(5)),
+                            )
+                            .map_err(CliError::classified)
+                    },
+                )
+                .unwrap();
+                let expected = (1..=size)
+                    .filter(|index| all || index % 2 == 1)
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    routes
+                        .iter()
+                        .map(|route| route.interface.index)
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                assert!(routes.iter().all(
+                    |route| route.selected_source.is_none() && route.preferred_source.is_none()
+                ));
+                assert_eq!(surveys.get(), 1);
+                assert_eq!(conversions.get(), 1);
+            }
+        }
+    }
 }

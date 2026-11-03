@@ -39,7 +39,7 @@ use conversion::{max_gap, timing};
 
 struct ReplayRun {
     client: crate::system::Client,
-    request: Request<std::fs::File>,
+    request: Request<io::BufReader<std::fs::File>>,
     filtered: bool,
 }
 

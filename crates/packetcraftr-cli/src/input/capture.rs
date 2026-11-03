@@ -56,7 +56,7 @@ pub(crate) fn snapshot_capture<R: Read>(
     input: &mut Reader<R>,
     capture_limits: OfflineCaptureLimits,
     limits: core::capture_file::Limits,
-) -> Result<Reader<File>, CliError> {
+) -> Result<Reader<io::BufReader<File>>, CliError> {
     use core::capture_file;
     invocation.check()?;
     let snapshot = tempfile::tempfile()
@@ -75,7 +75,11 @@ pub(crate) fn snapshot_capture<R: Read>(
         .map_err(capture_file::Error::from)
         .map_err(CliError::classified)?;
     invocation.check()?;
-    bounded_reader(invocation, snapshot, capture_limits)
+    bounded_reader(
+        invocation,
+        io::BufReader::with_capacity(64 * 1024, snapshot),
+        capture_limits,
+    )
 }
 
 fn capture_reader<R: Read + 'static>(
@@ -117,4 +121,92 @@ fn bounded_reader<R: Read>(
     )
     .map(|reader| invocation.reader(reader.with_cancellation(invocation.cancellation.clone())))
     .map_err(|error| interrupted_or(invocation, CliError::classified(error)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command_options::{CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs};
+    use packetcraftr_core::capture_file::{Format, Writer};
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use std::io::Cursor;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    fn limits() -> OfflineCaptureLimits {
+        OfflineCaptureLimitsArgs {
+            max_frames: 500,
+            max_bytes: 1_000_000,
+            reader: CaptureReaderBoundsArgs {
+                max_encoded_bytes: 1_000_000,
+                max_decoded_bytes: 1_000_000,
+                max_frame_bytes: 100_000,
+                max_interfaces: 16,
+            },
+        }
+        .limits()
+        .unwrap()
+    }
+
+    fn capture(format: Format) -> Vec<u8> {
+        let mut writer = Writer::new(Vec::new(), format, LinkType::ETHERNET).unwrap();
+        for index in 0..128 {
+            let frame = Frame::new(
+                Some(UNIX_EPOCH + Duration::from_secs(index)),
+                LinkType::ETHERNET,
+                vec![u8::try_from(index).unwrap(); 64],
+            )
+            .unwrap();
+            writer.write_frame(&frame).unwrap();
+        }
+        writer.into_inner()
+    }
+
+    #[test]
+    fn staged_capture_readback_rewinds_and_retains_limits_errors_and_cancellation() {
+        for format in [Format::Pcap, Format::PcapNg] {
+            let bytes = capture(format);
+            let cancellation = packetcraftr_core::budget::Cancellation::default();
+            let invocation = super::super::source::test_invocation(None, cancellation.clone());
+            let mut source =
+                Reader::with_limits(Cursor::new(bytes.clone()), Default::default()).unwrap();
+            let mut snapshot =
+                snapshot_capture(&invocation, &mut source, limits(), limits().stream_limits())
+                    .unwrap();
+            let frames = snapshot.by_ref().collect::<Result<Vec<_>, _>>().unwrap();
+            assert_eq!(frames.len(), 128);
+            assert_eq!(frames[127].bytes().as_ref(), &[127; 64]);
+            snapshot.rewind().unwrap();
+            assert_eq!(snapshot.next_frame().unwrap().as_ref(), frames.first());
+            cancellation.cancel();
+            assert!(matches!(
+                snapshot.next_frame(),
+                Err(packetcraftr_core::capture_file::Error::Cancelled(_))
+            ));
+            assert!(snapshot.rewind().is_err());
+
+            let invocation = super::super::source::test_invocation(None, Default::default());
+            let mut source =
+                Reader::with_limits(Cursor::new(bytes.clone()), Default::default()).unwrap();
+            assert!(
+                snapshot_capture(
+                    &invocation,
+                    &mut source,
+                    limits(),
+                    packetcraftr_core::capture_file::Limits {
+                        max_frames: 1,
+                        max_bytes: 1_000_000
+                    }
+                )
+                .is_err()
+            );
+            let mut truncated = bytes;
+            truncated.truncate(truncated.len() - 1);
+            let mut source =
+                Reader::with_limits(Cursor::new(truncated), Default::default()).unwrap();
+            assert!(
+                snapshot_capture(&invocation, &mut source, limits(), limits().stream_limits())
+                    .is_err()
+            );
+        }
+    }
 }

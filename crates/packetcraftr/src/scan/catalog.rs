@@ -16,7 +16,7 @@ use super::DataSet;
 use crate::probe::Transport;
 
 static BUNDLED: LazyLock<Catalog> = LazyLock::new(|| {
-    port_catalog::parse(crate::data::PORT_CATALOG.bytes)
+    port_catalog::parse(crate::data::PORT_CATALOG)
         .expect("the bundled port catalog is validated by its unit tests")
 });
 

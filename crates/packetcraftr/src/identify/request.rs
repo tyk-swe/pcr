@@ -191,12 +191,12 @@ impl Request {
 
 pub fn builtin_corpus() -> Result<Arc<service_probes::Corpus>, Error> {
     Ok(Arc::new(service_probes::parse(
-        crate::data::SERVICE_PROBES.bytes,
+        crate::data::SERVICE_PROBES,
     )?))
 }
 
 pub fn builtin_exclusions() -> Result<Arc<service_exclusions::Exclusions>, Error> {
     Ok(Arc::new(service_exclusions::parse(
-        crate::data::SERVICE_EXCLUSIONS.bytes,
+        crate::data::SERVICE_EXCLUSIONS,
     )?))
 }

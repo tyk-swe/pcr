@@ -130,3 +130,7 @@ Single-context, with one `GLOSSARY.md` and `docs/adr/` at the repo root. See `do
 ### Updating skills
 
 Skills live in `.agents/skills/` as the canonical copy, with `.claude/skills/` and `.devin/skills/` symlinking to it, and Codex, OpenCode and Muse Code reading `.agents/skills/` directly. Update with `npx skills@latest update`, and re-run `npx skills@latest add mattpocock/skills` to pick up new skills. sol-loop is a local fork of t3dotgg/tstack with a Codex app-server route and no lockfile entry, so refresh it by hand from upstream and keep the fork changes. Do not also install the Claude Code or Codex plugin for these skills, or every skill will appear twice in that harness.
+
+After adding or removing skills, update the tracked discovery links with `python3 scripts/agent_skills.py --write-links` and verify them with `python3 scripts/agent_skills.py --check`. The generator refuses unexpected entries in either discovery directory, so remove obsolete entries intentionally first.
+
+When the checkout cannot create symlinks, run `python3 scripts/agent_skills.py --write-copies` to replace materialized link files with local copies. Rerun it after editing canonical skills. It replaces copies under `.claude/skills/` and `.devin/skills/`, so edit `.agents/skills/` only. These local copies are not tracked replacements for the links and should not be committed.

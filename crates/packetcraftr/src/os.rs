@@ -36,5 +36,5 @@ pub(crate) const MAX_WIRE_BYTES: u64 = 256;
 /// The default corpus contains only signatures backed by the adjacent original
 /// capture/provenance record. Empty coverage produces `unknown`, not a guess.
 pub fn builtin_corpus() -> Result<Arc<core::Corpus>, core::Error> {
-    core::parse(crate::data::OS_FINGERPRINTS.bytes).map(Arc::new)
+    core::parse(crate::data::OS_FINGERPRINTS).map(Arc::new)
 }

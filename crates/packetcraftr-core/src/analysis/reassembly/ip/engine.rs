@@ -16,6 +16,8 @@ use super::{
 
 mod merge;
 mod reconstruction;
+#[cfg(test)]
+mod tests;
 mod validation;
 use merge::{MergePlan, RangeUpdate, UpdateKind, apply_range_update, merge_affected, plan_merge};
 use reconstruction::{
@@ -44,6 +46,12 @@ struct Charges {
     deadline: Option<Instant>,
 }
 
+#[derive(Clone, Copy)]
+struct StoragePlan {
+    retained_payload: usize,
+    allocation: usize,
+}
+
 impl Reassembler {
     pub(crate) fn contains_datagram(&self, key: &DatagramKey) -> bool {
         self.datagrams.contains_key(key)
@@ -58,7 +66,7 @@ impl Reassembler {
     fn replacement_allocation_charge(
         &self,
         merge: &MergePlan,
-        incoming_bytes: usize,
+        storage: StoragePlan,
         reconstruction: usize,
         new_slot_charge: usize,
     ) -> Result<usize, Error> {
@@ -66,19 +74,53 @@ impl Reassembler {
             .result_range_count
             .checked_mul(super::RANGE_METADATA_CHARGE)
             .ok_or_else(|| self.aggregate_limit())?;
-        let merged_payload = match merge.kind {
-            UpdateKind::Unchanged => 0,
-            UpdateKind::Append => incoming_bytes,
-            UpdateKind::Replace => merge
-                .union_end
-                .checked_sub(merge.union_start)
-                .ok_or(Malformed::OffsetOverflow)?,
-        };
         range_metadata
-            .checked_add(merged_payload)
+            .checked_add(storage.allocation)
             .and_then(|charge| charge.checked_add(reconstruction))
             .and_then(|charge| charge.checked_add(new_slot_charge))
             .ok_or_else(|| self.aggregate_limit())
+    }
+
+    fn storage_plan(
+        &self,
+        ranges: &[RetainedRange],
+        merge: &MergePlan,
+        capacity: usize,
+    ) -> Result<StoragePlan, Error> {
+        let retained = ranges
+            .iter()
+            .try_fold(0usize, |total, range| {
+                total.checked_add(range.bytes.capacity())
+            })
+            .ok_or_else(|| self.aggregate_limit())?;
+        if merge.kind == UpdateKind::Unchanged {
+            return Ok(StoragePlan {
+                retained_payload: retained,
+                allocation: 0,
+            });
+        }
+        let affected = ranges[merge.first_affected..merge.first_affected + merge.affected_count]
+            .iter()
+            .try_fold(0usize, |total, range| {
+                total.checked_add(range.bytes.capacity())
+            })
+            .ok_or_else(|| self.aggregate_limit())?;
+        let required = merge.union_end - merge.union_start;
+        if matches!(merge.kind, UpdateKind::Append | UpdateKind::Prepend) && affected >= required {
+            return Ok(StoragePlan {
+                retained_payload: retained,
+                allocation: 0,
+            });
+        }
+        let allocation = capacity.max(required);
+        let retained_payload = retained
+            .checked_sub(affected)
+            .and_then(|total| total.checked_add(allocation))
+            .ok_or_else(|| self.aggregate_limit())?;
+        Ok(StoragePlan {
+            retained_payload,
+            allocation,
+        })
     }
 
     fn admit_charges(
@@ -86,6 +128,7 @@ impl Reassembler {
         existing: Option<&DatagramState>,
         incoming: &Incoming,
         merge: &MergePlan,
+        storage: StoragePlan,
         now: Instant,
         external_charge: usize,
     ) -> Result<Charges, Error> {
@@ -121,7 +164,7 @@ impl Reassembler {
         let prospective_charge = merge
             .result_range_count
             .checked_mul(super::RANGE_METADATA_CHARGE)
-            .and_then(|charge| charge.checked_add(unique_bytes))
+            .and_then(|charge| charge.checked_add(storage.retained_payload))
             .and_then(|charge| charge.checked_add(reconstruction_bytes))
             .ok_or_else(|| self.aggregate_limit())?;
         let old_charge = existing.map_or(0, |state| state.memory_charge);
@@ -140,7 +183,7 @@ impl Reassembler {
         // Old and new storage coexist until every replacement allocation succeeds.
         let replacement_allocation = self.replacement_allocation_charge(
             merge,
-            incoming.payload.len(),
+            storage,
             reconstruction_allocation,
             new_slot_charge,
         )?;
@@ -151,6 +194,15 @@ impl Reassembler {
             .and_then(|charge| charge.checked_add(external_charge))
             .filter(|charge| *charge <= self.limits.max_aggregate_bytes)
             .ok_or_else(|| self.aggregate_limit())?;
+        if plan_final_length(existing, incoming)?.is_some_and(|length| {
+            merge.result_range_count == 1 && merge.union_start == 0 && merge.union_end == length
+        }) {
+            replacement_peak_charge
+                .checked_add(reconstruction_bytes)
+                .and_then(|charge| charge.checked_add(merge.union_end))
+                .filter(|charge| *charge <= self.limits.max_aggregate_bytes)
+                .ok_or_else(|| self.aggregate_limit())?;
+        }
         let aggregate_payload_bytes = self
             .retained
             .payload_bytes
@@ -228,6 +280,80 @@ impl Reassembler {
             .into());
         }
 
+        let required = merge.union_end - merge.union_start;
+        let preferred = if matches!(merge.kind, UpdateKind::Append | UpdateKind::Prepend) {
+            ranges[merge.first_affected]
+                .bytes
+                .capacity()
+                .saturating_mul(2)
+                .max(required)
+                .min(self.limits.max_bytes_per_datagram)
+        } else {
+            required
+        };
+        let mut storage = self.storage_plan(ranges, &merge, preferred)?;
+        let mut charges =
+            self.admit_charges(existing, &incoming, &merge, storage, now, external_charge);
+        if matches!(
+            charges,
+            Err(Error::Resource(Resource::AggregateMemoryLimit { .. }))
+        ) && preferred > required
+        {
+            storage = self.storage_plan(ranges, &merge, required)?;
+            let mut accepted =
+                self.admit_charges(existing, &incoming, &merge, storage, now, external_charge)?;
+            let mut lower = required;
+            let mut upper = preferred - 1;
+            while lower < upper {
+                let candidate = lower + (upper - lower).div_ceil(2);
+                let candidate_storage = self.storage_plan(ranges, &merge, candidate)?;
+                match self.admit_charges(
+                    existing,
+                    &incoming,
+                    &merge,
+                    candidate_storage,
+                    now,
+                    external_charge,
+                ) {
+                    Ok(candidate_charges) => {
+                        lower = candidate;
+                        storage = candidate_storage;
+                        accepted = candidate_charges;
+                    }
+                    Err(Error::Resource(Resource::AggregateMemoryLimit { .. })) => {
+                        upper = candidate - 1;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            charges = Ok(accepted);
+        }
+        let mut charges = charges?;
+
+        let reconstruction = materialize_reconstruction(existing, &incoming, ecn)?;
+        let update = if storage.allocation != 0 {
+            let range = merge_affected(
+                ranges,
+                &incoming,
+                &merge,
+                self.overlap_policy,
+                storage.allocation,
+            )?;
+            if range.bytes.capacity() != storage.allocation {
+                storage = self.storage_plan(ranges, &merge, range.bytes.capacity())?;
+                charges =
+                    self.admit_charges(existing, &incoming, &merge, storage, now, external_charge)?;
+            }
+            RangeUpdate::Replace(range)
+        } else {
+            match merge.kind {
+                UpdateKind::Unchanged => RangeUpdate::Unchanged,
+                UpdateKind::Append => RangeUpdate::Append,
+                UpdateKind::Prepend => RangeUpdate::Prepend,
+                UpdateKind::Replace => return Err(INCOMPLETE_RECONSTRUCTION),
+            }
+        };
+
         let Charges {
             unique_bytes,
             duplicate_fragments,
@@ -239,19 +365,7 @@ impl Reassembler {
             aggregate_payload_bytes,
             last_update,
             deadline,
-        } = self.admit_charges(existing, &incoming, &merge, now, external_charge)?;
-
-        let reconstruction = materialize_reconstruction(existing, &incoming, ecn)?;
-        let update = match merge.kind {
-            UpdateKind::Unchanged => RangeUpdate::Unchanged,
-            UpdateKind::Append => RangeUpdate::Append,
-            UpdateKind::Replace => RangeUpdate::Replace(merge_affected(
-                ranges,
-                &incoming,
-                &merge,
-                self.overlap_policy,
-            )?),
-        };
+        } = charges;
         let max_non_final_end = if incoming.more_fragments {
             Some(
                 existing
@@ -295,14 +409,26 @@ impl Reassembler {
                 .filter(|charge| *charge <= self.limits.max_aggregate_bytes)
                 .ok_or_else(|| self.aggregate_limit())?;
             // Read without storing, so no retained state changes before the datagram is removed.
-            let retained = ranges.first().map(|range| range.bytes.as_slice());
-            let payload: [&[u8]; 2] = match &update {
-                RangeUpdate::Unchanged => [retained.ok_or(INCOMPLETE_RECONSTRUCTION)?, &[]],
+            let retained = ranges.first().map(|range| range.bytes.as_slices());
+            let payload: [&[u8]; 3] = match &update {
+                RangeUpdate::Unchanged => {
+                    let (first, second) = retained.ok_or(INCOMPLETE_RECONSTRUCTION)?;
+                    [first, second, &[]]
+                }
                 RangeUpdate::Append => [
-                    retained.ok_or(INCOMPLETE_RECONSTRUCTION)?,
+                    retained.ok_or(INCOMPLETE_RECONSTRUCTION)?.0,
+                    retained.ok_or(INCOMPLETE_RECONSTRUCTION)?.1,
                     incoming.payload.as_ref(),
                 ],
-                RangeUpdate::Replace(range) => [range.bytes.as_slice(), &[]],
+                RangeUpdate::Prepend => [
+                    incoming.payload.as_ref(),
+                    retained.ok_or(INCOMPLETE_RECONSTRUCTION)?.0,
+                    retained.ok_or(INCOMPLETE_RECONSTRUCTION)?.1,
+                ],
+                RangeUpdate::Replace(range) => {
+                    let (first, second) = range.bytes.as_slices();
+                    [first, second, &[]]
+                }
             };
             let bytes = reconstruct_bytes(&reconstruction, payload)?;
             let datagram = CompletedDatagram {

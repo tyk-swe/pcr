@@ -5,6 +5,17 @@
 
 use super::super::RANGE_METADATA_CHARGE;
 use super::{Error, Incoming, Malformed, OverlapPolicy, Resource, RetainedRange};
+use std::collections::VecDeque;
+
+#[cfg(test)]
+std::thread_local! {
+    pub(super) static PAYLOAD_COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn record_copy(length: usize) {
+    PAYLOAD_COPIED.with(|total| total.set(total.get() + length));
+}
 
 pub(super) struct MergePlan {
     pub(super) first_affected: usize,
@@ -21,12 +32,14 @@ pub(super) struct MergePlan {
 pub(super) enum UpdateKind {
     Unchanged,
     Append,
+    Prepend,
     Replace,
 }
 
 pub(super) enum RangeUpdate {
     Unchanged,
     Append,
+    Prepend,
     Replace(RetainedRange),
 }
 
@@ -92,6 +105,13 @@ pub(super) fn plan_merge(
             .is_some_and(|end| end == incoming.offset)
     {
         UpdateKind::Append
+    } else if affected_count == 1
+        && added_bytes == incoming.payload.len()
+        && ranges
+            .get(first_affected)
+            .is_some_and(|range| range.start == incoming.end)
+    {
+        UpdateKind::Prepend
     } else {
         UpdateKind::Replace
     };
@@ -124,29 +144,21 @@ fn measure_overlap(
     let incoming_start = overlap_start
         .checked_sub(incoming.offset)
         .ok_or(Malformed::OffsetOverflow)?;
-    let retained_stop = retained_start
-        .checked_add(length)
-        .ok_or(Malformed::OffsetOverflow)?;
     let incoming_stop = incoming_start
         .checked_add(length)
-        .ok_or(Malformed::OffsetOverflow)?;
-    let retained_overlap = retained
-        .bytes
-        .get(retained_start..retained_stop)
         .ok_or(Malformed::OffsetOverflow)?;
     let incoming_overlap = incoming
         .payload
         .get(incoming_start..incoming_stop)
         .ok_or(Malformed::OffsetOverflow)?;
-    let conflicting = if retained_overlap == incoming_overlap {
-        0
-    } else {
-        retained_overlap
-            .iter()
-            .zip(incoming_overlap)
-            .filter(|(first, second)| first != second)
-            .count()
-    };
+    let conflicting = retained
+        .bytes
+        .iter()
+        .skip(retained_start)
+        .take(length)
+        .zip(incoming_overlap)
+        .filter(|(first, second)| first != second)
+        .count();
     Ok((length, conflicting))
 }
 
@@ -155,18 +167,22 @@ pub(super) fn merge_affected(
     incoming: &Incoming,
     plan: &MergePlan,
     policy: OverlapPolicy,
+    capacity: usize,
 ) -> Result<RetainedRange, Error> {
     let union_length = plan
         .union_end
         .checked_sub(plan.union_start)
         .ok_or(Malformed::OffsetOverflow)?;
-    let mut merged = Vec::new();
-    merged
-        .try_reserve_exact(union_length)
+    let mut allocation = Vec::new();
+    allocation
+        .try_reserve_exact(capacity)
         .map_err(|_| Resource::AllocationFailed {
-            requested: union_length,
+            requested: capacity,
         })?;
-    merged.resize(union_length, 0);
+    allocation.resize(capacity, 0);
+    let mut merged = VecDeque::from(allocation.into_boxed_slice().into_vec());
+    merged.truncate(union_length);
+    let target = merged.make_contiguous();
 
     let incoming_start = incoming
         .offset
@@ -174,7 +190,7 @@ pub(super) fn merge_affected(
         .ok_or(Malformed::OffsetOverflow)?;
     let incoming_last = policy == OverlapPolicy::Last;
     if !incoming_last {
-        copy_into(&mut merged, incoming_start, &incoming.payload)?;
+        copy_into(target, incoming_start, &incoming.payload)?;
     }
     for retained in ranges
         .iter()
@@ -185,11 +201,17 @@ pub(super) fn merge_affected(
             .start
             .checked_sub(plan.union_start)
             .ok_or(Malformed::OffsetOverflow)?;
-        copy_into(&mut merged, relative, &retained.bytes)?;
+        let (first, second) = retained.bytes.as_slices();
+        copy_into(target, relative, first)?;
+        copy_into(target, relative + first.len(), second)?;
+        #[cfg(test)]
+        record_copy(retained.bytes.len());
     }
     if incoming_last {
-        copy_into(&mut merged, incoming_start, &incoming.payload)?;
+        copy_into(target, incoming_start, &incoming.payload)?;
     }
+    #[cfg(test)]
+    record_copy(incoming.payload.len());
     Ok(RetainedRange {
         start: plan.union_start,
         bytes: merged,
@@ -208,13 +230,21 @@ pub(super) fn apply_range_update(
             let range = ranges
                 .get_mut(plan.first_affected)
                 .ok_or(Malformed::OffsetOverflow)?;
-            range
-                .bytes
-                .try_reserve_exact(incoming.payload.len())
-                .map_err(|_| Resource::AllocationFailed {
-                    requested: incoming.payload.len(),
-                })?;
-            range.bytes.extend_from_slice(&incoming.payload);
+            range.bytes.extend(incoming.payload.iter().copied());
+            #[cfg(test)]
+            record_copy(incoming.payload.len());
+            Ok(())
+        }
+        RangeUpdate::Prepend => {
+            let range = ranges
+                .get_mut(plan.first_affected)
+                .ok_or(Malformed::OffsetOverflow)?;
+            for byte in incoming.payload.iter().rev() {
+                range.bytes.push_front(*byte);
+            }
+            #[cfg(test)]
+            record_copy(incoming.payload.len());
+            range.start = incoming.offset;
             Ok(())
         }
         RangeUpdate::Replace(merged) => {

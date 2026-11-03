@@ -24,10 +24,9 @@ pub(super) fn reconstructed_length(
         .ok_or(Malformed::OffsetOverflow.into())
 }
 
-/// The payload is up to two consecutive slices so a completing append need not be stored first.
 pub(super) fn reconstruct_bytes(
     reconstruction: &Reconstruction,
-    payload: [&[u8]; 2],
+    payload: [&[u8]; 3],
 ) -> Result<Bytes, Error> {
     match reconstruction {
         Reconstruction::Ipv4 { first_header, ecn } => {
@@ -172,7 +171,7 @@ fn copy_bytes(source: &[u8]) -> Result<Bytes, Error> {
     Ok(Bytes::from(copy))
 }
 
-fn payload_length(payload: [&[u8]; 2]) -> Result<usize, Error> {
+fn payload_length(payload: [&[u8]; 3]) -> Result<usize, Error> {
     payload
         .iter()
         .try_fold(0usize, |total, part| total.checked_add(part.len()))
@@ -182,7 +181,7 @@ fn payload_length(payload: [&[u8]; 2]) -> Result<usize, Error> {
 fn reconstruct_ipv4(
     first_header: Option<&Bytes>,
     ecn: Ecn,
-    payload: [&[u8]; 2],
+    payload: [&[u8]; 3],
 ) -> Result<Bytes, Error> {
     let header = first_header.ok_or(MISSING_OFFSET_ZERO_HEADER)?;
     let payload_length = payload_length(payload)?;
@@ -238,7 +237,7 @@ fn reconstruct_ipv6(
     predecessor_next_header_offset: usize,
     next_header: u8,
     ecn: Ecn,
-    payload: [&[u8]; 2],
+    payload: [&[u8]; 3],
 ) -> Result<Bytes, Error> {
     let extension_length = prefix
         .len()

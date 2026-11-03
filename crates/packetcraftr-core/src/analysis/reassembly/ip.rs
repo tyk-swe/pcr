@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 use bytes::Bytes;
@@ -27,7 +27,7 @@ const RANGE_METADATA_CHARGE: usize = 64;
 #[derive(Clone, Debug)]
 struct RetainedRange {
     start: usize,
-    bytes: Vec<u8>,
+    bytes: VecDeque<u8>,
 }
 
 impl RetainedRange {

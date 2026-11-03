@@ -215,7 +215,7 @@ fn command_failure_with(
         );
         error.causes.insert(0, primary);
         error.classification = packetcraftr_core::error::Classification::new(
-            "io.stdout",
+            packetcraftr_core::error::Code::IoStdout,
             Kind::Io,
             Some("treat the structured stream as incomplete"),
         );
@@ -223,7 +223,7 @@ fn command_failure_with(
     let output_failed = incomplete
         || (format == Format::Json
             && invocation.json_attempted()
-            && error.classification.code == "io.stdout");
+            && error.classification.code.as_str() == "io.stdout");
     if output_failed {
         exit_code = error.exit_code();
     }

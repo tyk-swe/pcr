@@ -1,14 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, Severity},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
@@ -16,8 +14,8 @@ use crate::{
 use super::VNI_MAX;
 
 use crate::protocol::common::{
-    ensure_encode_budget, expected_discriminator, invalid, make_layer, resolve_u16,
-    strict_or_diagnostic, truncated, typed_layer, unsupported, validate_auto_raw_discriminator,
+    ensure_encode_budget, expected_discriminator, invalid, resolve_u16, strict_or_diagnostic,
+    truncated, typed_layer, unsupported, validate_auto_raw_discriminator,
     validate_raw_child_discriminator,
 };
 
@@ -267,11 +265,12 @@ impl Codec for GeneveCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Geneve::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(geneve_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Geneve::default()))
     }
 }
 

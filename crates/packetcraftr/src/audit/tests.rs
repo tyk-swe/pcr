@@ -17,8 +17,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 const ENDPOINT: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 443);
-const CA: &[u8] = include_bytes!("test-ca.pem");
-const UNTRUSTED_CA: &[u8] = include_bytes!("test-untrusted-ca.pem");
+const CA: &[u8] = include_bytes!("../../../packetcraftr-netio/src/tls/test-ca.pem");
+const UNTRUSTED_CA: &[u8] =
+    include_bytes!("../../../packetcraftr-netio/src/tls/test-untrusted-ca.pem");
 const MAX_STEPS: usize = 256;
 const MAX_WIRE_BYTES_SENT: usize = 4096;
 const TLS_UNITS: u64 = 1 + MAX_STEPS as u64;
@@ -188,10 +189,15 @@ struct FakeTcp {
 }
 
 fn tls_server() -> rustls::ServerConnection {
-    let chain = CertificateDer::pem_slice_iter(include_bytes!("test-leaf.pem"))
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    let key = PrivateKeyDer::from_pem_slice(include_bytes!("test-leaf-key.pem")).unwrap();
+    let chain = CertificateDer::pem_slice_iter(include_bytes!(
+        "../../../packetcraftr-netio/src/tls/test-leaf.pem"
+    ))
+    .collect::<Result<Vec<_>, _>>()
+    .unwrap();
+    let key = PrivateKeyDer::from_pem_slice(include_bytes!(
+        "../../../packetcraftr-netio/src/tls/test-leaf-key.pem"
+    ))
+    .unwrap();
     let config = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
@@ -285,6 +291,10 @@ impl Clock for JumpClock {
         } else {
             now
         }
+    }
+
+    fn wall_now(&self) -> std::time::SystemTime {
+        std::time::SystemTime::now()
     }
 
     fn sleep(&self, _delay: Duration, _deadline: &Deadline) -> Result<(), Self::Error> {

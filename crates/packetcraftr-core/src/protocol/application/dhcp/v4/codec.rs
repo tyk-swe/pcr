@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 use bytes::Bytes;
@@ -342,8 +341,27 @@ impl Codec for Dhcpv4Codec {
         &schema().protocol
     }
 
-    fn published_schema(&self) -> Option<&'static Schema> {
+    fn schema(&self) -> Option<&'static Schema> {
         Some(schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Dhcpv4::default()))
+    }
+
+    fn seed_layer(
+        &self,
+        fields: &[(usize, &field::Value)],
+    ) -> Result<Option<crate::codec::SeededLayer>, crate::codec::Error> {
+        shared::seed_layer::<Dhcpv4>(fields)
+    }
+
+    fn finish_constructed(
+        &self,
+        layer: &mut dyn Layer,
+        fields: &[(usize, &field::Value)],
+    ) -> Result<(), crate::codec::Error> {
+        shared::finish_constructed::<Dhcpv4>(layer, fields)
     }
 
     fn accepts_decoded_protocol(&self, protocol: &Id) -> bool {
@@ -368,12 +386,5 @@ impl Codec for Dhcpv4Codec {
             return Ok(Raw::decoded(input));
         }
         shared::decode::<Dhcpv4>(input)
-    }
-
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        shared::make_layer::<Dhcpv4>(fields)
     }
 }

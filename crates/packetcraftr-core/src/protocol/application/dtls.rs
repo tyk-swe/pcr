@@ -3,10 +3,12 @@
 
 //! DTLS 1.2 (RFC 6347) records and epoch-zero handshake fragments. Encrypted epochs remain opaque.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -29,18 +31,12 @@ pub struct Dtls {
     pub records: Records,
 }
 crate::reflective_layer! {
- fn dtls_schema() => { protocol: crate::layer::Id::new("dtls"), name: "Dtls" }
+ fn dtls_schema() => { protocol: crate::protocol::BuiltinProtocol::Dtls.id(), name: "Dtls" }
  impl Dtls {
     "records" => { kind: List, derived: false, required: false, description: "DTLS records and plaintext handshake fragment envelopes", children: RECORDS, reflect: records },
  }
 }
-fn dtls_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    vec![crate::layout::FieldLayout {
-        name: "records",
-        range: crate::layout::ByteRange::new(0, b.len()),
-    }]
-}
-message_codec!(DtlsCodec, Dtls, dtls_schema, dtls_layout_wire);
+message_codec!(DtlsCodec, Dtls, dtls_schema);
 
 const NAME: &str = "dtls";
 fn u24(r: &mut Reader<'_>) -> Result<u32, Error> {
@@ -112,11 +108,15 @@ impl Dtls {
         }
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         if b.is_empty() {
             return Err(invalid(NAME, "empty datagram"));
         }
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..b.len());
         let mut records = Records::default();
         let mut nodes = 0;
         while r.left() > 0 {
@@ -173,6 +173,6 @@ impl Dtls {
             }
             records.0.push(item);
         }
-        Ok(Self { records })
+        Ok((Self { records }, r.take_layouts()))
     }
 }

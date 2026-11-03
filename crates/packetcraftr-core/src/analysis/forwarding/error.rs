@@ -68,12 +68,12 @@ impl Classified for Error {
             Self::Cancelled(source) => source.classification(),
             Self::Interrupted(source) => source.classification(),
             Self::ObservationContract { .. } => Classification::new(
-                "analysis.verify_observation_contract",
+                crate::error::Code::AnalysisVerifyObservationContract,
                 Kind::Usage,
                 Some("collect both sides, in capture order, with the same compiled Rules instance"),
             ),
             Self::ScratchBudget { .. } => Classification::new(
-                "policy.verify_scratch_limit",
+                crate::error::Code::PolicyVerifyScratchLimit,
                 Kind::Policy,
                 Some("reduce input or raise the finite comparison scratch budget"),
             ),
@@ -81,12 +81,12 @@ impl Classified for Error {
             | Self::ExpectationSeparator { .. }
             | Self::ExpectationEmptySide { .. }
             | Self::RuleBudget => Classification::new(
-                "cli.verify_rule",
+                crate::error::Code::CliVerifyRule,
                 Kind::Usage,
                 Some("declare identity, preservation, and expectation rules over packet fields"),
             ),
             Self::EvidenceBudget { .. } => Classification::new(
-                "policy.verify_evidence_limit",
+                crate::error::Code::PolicyVerifyEvidenceLimit,
                 Kind::Policy,
                 Some("reduce the selected frames or raise the finite --max-evidence-bytes budget"),
             ),

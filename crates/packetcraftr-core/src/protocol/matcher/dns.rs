@@ -4,7 +4,8 @@
 use crate::{
     matcher::{Match, ResponseMatcher},
     packet::Packet,
-    protocol::{BuiltinProtocol, application::dns::Dns},
+    protocol::BuiltinProtocol,
+    protocol::identity::{self, DnsIdentity},
 };
 
 use super::{ReversedProtocolLayers, response_source, reversed_protocol_layers};
@@ -13,10 +14,6 @@ use super::{ReversedProtocolLayers, response_source, reversed_protocol_layers};
 pub(crate) struct DnsMatcher;
 
 impl ResponseMatcher for DnsMatcher {
-    fn uses_builtin_response_identity(&self) -> bool {
-        true
-    }
-
     fn matches(&self, request: &Packet, response: &Packet) -> Option<Match> {
         let pairs = reversed_protocol_layers(BuiltinProtocol::Dns, request, response)?;
         pairs.iter().all(answers).then(|| Match::new(250))
@@ -29,8 +26,8 @@ impl ResponseMatcher for DnsMatcher {
 
 fn answers(pair: &ReversedProtocolLayers<'_, '_>) -> bool {
     let (Some(query), Some(reply)) = (
-        pair.request.downcast_ref::<Dns>(),
-        pair.response.downcast_ref::<Dns>(),
+        identity::dns_identity(pair.request),
+        identity::dns_identity(pair.response),
     ) else {
         return false;
     };
@@ -46,7 +43,7 @@ pub(super) fn udp_child(packet: &Packet, index: usize) -> bool {
 
 /// `Name` equality folds ASCII letter case only and operates on decoded
 /// labels, so wire spelling and compression change nothing.
-fn answers_query(query: &Dns, reply: &Dns) -> bool {
+fn answers_query(query: DnsIdentity<'_>, reply: DnsIdentity<'_>) -> bool {
     !query.response
         && reply.response
         && query.id == reply.id

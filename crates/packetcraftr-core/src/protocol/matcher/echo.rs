@@ -1,15 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::protocol::identity;
 use crate::{
     matcher::{Match, ResponseMatcher},
     packet::Packet,
     protocol::BuiltinProtocol,
 };
 
-use super::{
-    IcmpMessage, QuotedTransport, quoted_icmp_error, response_source, reversed_protocol_layers,
-};
+use super::{QuotedTransport, quoted_icmp_error, response_source, reversed_protocol_layers};
 
 #[derive(Clone, Debug)]
 pub(crate) struct EchoMatcher {
@@ -37,18 +36,14 @@ impl EchoMatcher {
 }
 
 impl ResponseMatcher for EchoMatcher {
-    fn uses_builtin_response_identity(&self) -> bool {
-        true
-    }
-
     fn matches(&self, request: &Packet, response: &Packet) -> Option<Match> {
         if quoted_icmp_error(request, response, QuotedTransport::Icmp).is_some() {
             return Some(Match::new(150));
         }
         let layers = reversed_protocol_layers(self.protocol, request, response)?;
         for layers in &layers {
-            let request = IcmpMessage::of(layers.request)?;
-            let response = IcmpMessage::of(layers.response)?;
+            let request = identity::icmp_message(layers.request)?;
+            let response = identity::icmp_message(layers.response)?;
             if request.code != 0 || response.code != 0 {
                 return None;
             }

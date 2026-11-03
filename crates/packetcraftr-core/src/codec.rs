@@ -9,8 +9,6 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::packet::Packet;
-
 use crate::diagnostic::Diagnostic;
 use crate::error::{Classification, Classified, Kind, Source};
 use crate::field;
@@ -98,12 +96,12 @@ impl Classified for Error {
         match self {
             Self::Field(source) => source.classification(),
             Self::WrongLayer { .. } => Classification::new(
-                "internal.codec_contract",
+                crate::error::Code::InternalCodecContract,
                 Kind::Internal,
                 Some("report the codec that was handed a layer of another protocol"),
             ),
             Self::LengthOverflow { .. } => Classification::new(
-                "packet.length_overflow",
+                crate::error::Code::PacketLengthOverflow,
                 Kind::Packet,
                 Some("shrink the packet so its byte offsets stay representable"),
             ),
@@ -111,7 +109,7 @@ impl Classified for Error {
             | Self::Invalid { .. }
             | Self::Rejected { .. }
             | Self::Unsupported { .. } => Classification::new(
-                "packet.codec",
+                crate::error::Code::PacketCodec,
                 Kind::Packet,
                 Some("correct the layer bytes or field values the codec refused"),
             ),
@@ -119,18 +117,81 @@ impl Classified for Error {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChildInfo {
+    pub protocol: Id,
+    pub binding: String,
+    pub builtin: Option<Id>,
+    pub binds_as: Option<Id>,
+    pub opaque: bool,
+    pub discriminator: Option<Discriminator>,
+}
+
+impl ChildInfo {
+    pub fn protocol_id(&self) -> &Id {
+        &self.protocol
+    }
+
+    pub fn binding_protocol(&self) -> &str {
+        &self.binding
+    }
+
+    pub fn is_opaque(&self) -> bool {
+        self.opaque
+    }
+
+    pub fn is_builtin(&self, protocol: Id) -> bool {
+        self.builtin == Some(protocol)
+    }
+
+    pub fn binds_as(&self, protocol: Id) -> bool {
+        self.binds_as == Some(protocol)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParentInfo {
+    pub protocol: Id,
+    pub builtin: Option<Id>,
+    pub discriminator_value: Option<field::Value>,
+    pub protocol_type_value: Option<field::Value>,
+    pub gre_sequence_present: Option<bool>,
+}
+
+impl ParentInfo {
+    pub fn is_builtin(&self, protocol: Id) -> bool {
+        self.builtin == Some(protocol)
+    }
+}
+
 pub struct EncodeContext<'a> {
-    pub packet: &'a Packet,
-    pub index: usize,
-    pub build_context: &'a Addresses,
+    pub addresses: &'a Addresses,
     pub mode: Mode,
-    pub registry: &'a Registry,
-    pub child: Option<&'a dyn Layer>,
+    pub child: Option<&'a ChildInfo>,
+    pub parent: Option<&'a ParentInfo>,
+    pub network: Result<NetworkEnvelope, Error>,
+    pub outer_network: bool,
+    pub srh_active_segment: Option<std::net::Ipv6Addr>,
+    pub srh_reduced: bool,
+    pub under_ipv6: Option<bool>,
+    pub trailing_padding: Option<usize>,
+    pub child_bindings: &'a [(Discriminator, Id)],
     /// External codecs should check this before allocating output buffers.
     pub remaining_packet_bytes: usize,
 }
 
 impl EncodeContext<'_> {
+    pub fn child_for(&self, discriminator: Discriminator) -> Option<Id> {
+        self.child_bindings
+            .iter()
+            .find(|(candidate, _)| *candidate == discriminator)
+            .map(|(_, child)| *child)
+    }
+
+    pub fn network_envelope(&self) -> Result<NetworkEnvelope, Error> {
+        self.network.clone()
+    }
+
     pub(crate) fn ensure_room(&self, protocol: Id, contribution: usize) -> Result<(), Error> {
         if contribution > self.remaining_packet_bytes {
             return Err(Error::invalid(
@@ -218,16 +279,126 @@ impl Decoded {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Framing {
+    #[default]
+    Datagram,
+    Control,
+    Lacp,
+    Mqtt,
+    Amqp,
+    Bgp,
+    Ber,
+    Resp,
+    Sip,
+    Rtsp,
+    Memcached,
+    Ipfix,
+    Radius,
+    Stun,
+    ModbusTcp,
+    Dnp3,
+    EthernetIp,
+    Iec104,
+    OpcuaTcp,
+}
+
+pub struct SeededLayer {
+    pub layer: Box<dyn Layer>,
+    pub consumed: usize,
+}
+
 pub trait Codec: Send + Sync + fmt::Debug {
     fn protocol_id(&self) -> &'static Id;
+
+    fn schema(&self) -> Option<&'static Schema>;
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, Error>;
 
     fn accepts_decoded_protocol(&self, protocol: &Id) -> bool {
         protocol == self.protocol_id()
     }
 
-    fn published_schema(&self) -> Option<&'static Schema> {
-        let fields = BTreeMap::new();
-        self.make_layer(&fields).ok().map(|layer| layer.schema())
+    fn framing(&self) -> Framing {
+        Framing::Datagram
+    }
+
+    fn prepare_fields(
+        &self,
+        fields: BTreeMap<String, field::Value>,
+    ) -> Result<BTreeMap<String, field::Value>, Error> {
+        Ok(fields)
+    }
+
+    fn seed_layer(&self, _fields: &[(usize, &field::Value)]) -> Result<Option<SeededLayer>, Error> {
+        Ok(None)
+    }
+
+    fn apply_constructed_field(
+        &self,
+        _layer: &mut dyn Layer,
+        _index: usize,
+        _value: field::Value,
+    ) -> Option<Result<(), Error>> {
+        None
+    }
+
+    fn finish_constructed(
+        &self,
+        _layer: &mut dyn Layer,
+        _fields: &[(usize, &field::Value)],
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn construct(&self, fields: &BTreeMap<String, field::Value>) -> Result<Box<dyn Layer>, Error> {
+        let Some(schema) = self.schema() else {
+            return self.new_layer();
+        };
+        let fields = self.prepare_fields(fields.clone())?;
+        reject_aliased_duplicates(schema, &fields)?;
+        let mut resolved = Vec::with_capacity(fields.len());
+        for (name, value) in &fields {
+            let unknown = || field::Error::UnknownField {
+                protocol: schema.protocol,
+                field: name.clone(),
+            };
+            let path: field::Path = name.parse().map_err(|_| unknown())?;
+            let root = schema.field_index(path.root()).ok_or_else(unknown)?;
+            resolved.push(ResolvedField { root, path, value });
+        }
+        let root_fields: Vec<(usize, &field::Value)> = resolved
+            .iter()
+            .filter(|field| !field.path.is_nested())
+            .map(|field| (field.root, field.value))
+            .collect();
+        let seeded = self.seed_layer(&root_fields)?;
+        let (mut layer, consumed) = match seeded {
+            Some(seeded) => (seeded.layer, Some(seeded.consumed)),
+            None => (self.new_layer()?, None),
+        };
+        for field in &resolved {
+            if field.path.is_nested() {
+                layer.set_field_path(&field.path, field.value.clone())?;
+                continue;
+            }
+            if consumed == Some(field.root) {
+                continue;
+            }
+            if consumed.is_some() && layer.field_by_index(field.root).as_ref() == Some(field.value)
+            {
+                continue;
+            }
+            if let Some(result) =
+                self.apply_constructed_field(layer.as_mut(), field.root, field.value.clone())
+            {
+                result?;
+            } else {
+                layer.set_field_by_index(field.root, field.value.clone())?;
+            }
+        }
+        self.finish_constructed(layer.as_mut(), &root_fields)?;
+        Ok(layer)
     }
 
     fn encode(
@@ -238,6 +409,29 @@ pub trait Codec: Send + Sync + fmt::Debug {
     ) -> Result<Encoded, Error>;
 
     fn decode(&self, input: Bytes, context: &DecodeContext<'_>) -> Result<Decoded, Error>;
+}
 
-    fn make_layer(&self, fields: &BTreeMap<String, field::Value>) -> Result<Box<dyn Layer>, Error>;
+struct ResolvedField<'a> {
+    root: usize,
+    path: field::Path,
+    value: &'a field::Value,
+}
+
+fn reject_aliased_duplicates(
+    schema: &'static Schema,
+    fields: &BTreeMap<String, field::Value>,
+) -> Result<(), Error> {
+    for declared in schema.fields {
+        let mut supplied = std::iter::once(declared.name)
+            .chain(declared.aliases.iter().copied())
+            .filter(|spelling| fields.contains_key(*spelling));
+        let (Some(first), Some(second)) = (supplied.next(), supplied.next()) else {
+            continue;
+        };
+        return Err(Error::invalid(
+            schema.protocol,
+            format!("both {second} and {first} were supplied"),
+        ));
+    }
+    Ok(())
 }

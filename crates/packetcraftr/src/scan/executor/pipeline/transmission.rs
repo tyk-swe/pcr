@@ -132,7 +132,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
         if !crate::scan::plan::packet::sent_probe_matches(probe, &prepared.built().packet) {
             return Err(BoundaryError::internal_execution(
                 "materialized scan packet differs from its probe",
-                "internal.scan_probe_mismatch",
+                packetcraftr_core::error::Code::InternalScanProbeMismatch,
                 "preserve the planned endpoint and identity",
             ));
         }

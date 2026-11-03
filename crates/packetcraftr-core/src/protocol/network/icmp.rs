@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::diagnostic::Severity;
-use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 use bytes::Bytes;
@@ -15,9 +14,9 @@ use crate::{
     layout::{ByteRange, FieldLayout},
 };
 
-use super::{ip_protocol, resolve_envelope};
+use super::ip_protocol;
 use crate::protocol::common::{
-    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, make_layer, out_of_range,
+    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, out_of_range,
     payload_without_padding, resolve_u16, transport_checksum_parts, truncated, typed_layer,
     wrong_type,
 };
@@ -133,21 +132,16 @@ fn set_rest(
 }
 
 /// `body` starts at message offset four.
-fn view_layout(
-    fields: &mut Vec<FieldLayout>,
-    body_len: usize,
-    name: &'static str,
-    range: ByteRange,
-) {
+fn view_layout(fields: &mut Vec<FieldLayout>, body_len: usize, index: usize, range: ByteRange) {
     if range.end.saturating_sub(4) <= body_len {
-        fields.push(FieldLayout { name, range });
+        fields.push(FieldLayout { index, range });
     }
 }
 
 fn finish_layout(mut fields: Vec<FieldLayout>, body_len: usize) -> Vec<FieldLayout> {
     if body_len >= 4 {
         fields.push(FieldLayout {
-            name: "rest",
+            index: 5,
             range: ByteRange::new(8, 4_usize.saturating_add(body_len)),
         });
     }
@@ -226,11 +220,11 @@ reflective_layer! {
 
 fn icmpv4_layout(body_len: usize) -> Vec<FieldLayout> {
     let mut fields = icmpv4_base_layout(body_len);
-    view_layout(&mut fields, body_len, "pointer", ByteRange::new(4, 5));
-    view_layout(&mut fields, body_len, "identifier", ByteRange::new(4, 6));
-    view_layout(&mut fields, body_len, "gateway", ByteRange::new(4, 8));
-    view_layout(&mut fields, body_len, "sequence", ByteRange::new(6, 8));
-    view_layout(&mut fields, body_len, "mtu", ByteRange::new(6, 8));
+    view_layout(&mut fields, body_len, 8, ByteRange::new(4, 5));
+    view_layout(&mut fields, body_len, 3, ByteRange::new(4, 6));
+    view_layout(&mut fields, body_len, 6, ByteRange::new(4, 8));
+    view_layout(&mut fields, body_len, 4, ByteRange::new(6, 8));
+    view_layout(&mut fields, body_len, 7, ByteRange::new(6, 8));
     finish_layout(fields, body_len)
 }
 
@@ -311,10 +305,10 @@ reflective_layer! {
 
 fn icmpv6_layout(body_len: usize) -> Vec<FieldLayout> {
     let mut fields = icmpv6_base_layout(body_len);
-    view_layout(&mut fields, body_len, "identifier", ByteRange::new(4, 6));
-    view_layout(&mut fields, body_len, "mtu", ByteRange::new(4, 8));
-    view_layout(&mut fields, body_len, "pointer", ByteRange::new(4, 8));
-    view_layout(&mut fields, body_len, "sequence", ByteRange::new(6, 8));
+    view_layout(&mut fields, body_len, 3, ByteRange::new(4, 6));
+    view_layout(&mut fields, body_len, 6, ByteRange::new(4, 8));
+    view_layout(&mut fields, body_len, 7, ByteRange::new(4, 8));
+    view_layout(&mut fields, body_len, 4, ByteRange::new(6, 8));
     finish_layout(fields, body_len)
 }
 
@@ -399,11 +393,12 @@ impl Codec for Icmpv4Codec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Icmpv4::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(icmpv4_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Icmpv4::default()))
     }
 }
 
@@ -432,7 +427,7 @@ impl Codec for Icmpv6Codec {
         prefix.extend_from_slice(&layer.body);
         let expected = transport_checksum_parts(
             V6_NAME,
-            resolve_envelope(V6_NAME, context)?,
+            context.network_envelope()?,
             ip_protocol::ICMPV6,
             &[&prefix, covered_payload],
         )?;
@@ -495,10 +490,11 @@ impl Codec for Icmpv6Codec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Icmpv6::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(icmpv6_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Icmpv6::default()))
     }
 }

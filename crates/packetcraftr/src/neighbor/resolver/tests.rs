@@ -3,6 +3,7 @@
 
 use super::*;
 use packetcraftr_core::budget::Cancellation;
+use std::time::Instant;
 use std::{
     sync::atomic::{AtomicUsize, Ordering},
     time::Duration,

@@ -90,7 +90,7 @@ impl Direction {
             generation,
             protocol,
             buffer: Vec::new(),
-            framer: Framer::new(protocol.as_str()),
+            framer: Framer::new(protocol.framing(), protocol.as_str()),
             sources: None,
             disabled: false,
         }
@@ -366,7 +366,7 @@ impl Collector {
                 if d.protocol == BuiltinProtocol::Sip && d.buffer[offset..].starts_with(b"\r\n") {
                     offset += 2;
                     self.buffered -= 2;
-                    d.framer = Framer::new(d.protocol.as_str());
+                    d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
                     d.sources = if offset < d.buffer.len() {
                         Some(Accumulator::new(&data.sources)?)
                     } else {
@@ -407,7 +407,7 @@ impl Collector {
                         self.emit(message, out)?;
                         offset += len;
                         self.buffered -= len;
-                        d.framer = Framer::new(d.protocol.as_str());
+                        d.framer = Framer::new(d.protocol.framing(), d.protocol.as_str());
                         if offset < d.buffer.len() {
                             d.sources = Some(Accumulator::new(&data.sources)?);
                         }
@@ -478,7 +478,7 @@ impl Collector {
             .codec(message.protocol.as_str())
             .expect("selected built-in codec");
         let context = DecodeContext {
-            parent: Some(crate::layer::Id::new("tcp")),
+            parent: Some(crate::protocol::BuiltinProtocol::Tcp.id()),
             registry: &self.registry,
             network: Some(NetworkEnvelope {
                 source: message.flow.flow.source,
@@ -490,9 +490,7 @@ impl Collector {
         match codec.decode(message.wire.clone(), &context) {
             Ok(decoded) if decoded.layer.protocol_id().as_str() == message.protocol.as_str() => {
                 let mut layer = decoded.layer;
-                if let Some(modbus) =
-                    layer.downcast_mut::<crate::protocol::application::modbus_tcp::ModbusTcp>()
-                {
+                if BuiltinProtocol::ModbusTcp.identifies(&*layer) {
                     let flow = &message.flow.flow;
                     let response = self.connections[&message.stream]
                         .server
@@ -505,7 +503,11 @@ impl Collector {
                             (source != destination).then_some(source)
                         });
                     if let Some(response) = response
-                        && let Err(error) = modbus.interpret(response)
+                        && let Some(Err(error)) =
+                            crate::protocol::application::modbus_tcp::ModbusTcp::interpret_layer(
+                                &mut *layer,
+                                response,
+                            )
                     {
                         message.status = Status::Malformed;
                         message.error = Some(error.to_string());

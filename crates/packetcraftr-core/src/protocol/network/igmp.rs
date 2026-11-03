@@ -2,20 +2,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::diagnostic::Severity;
-use std::collections::BTreeMap;
 
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, IGMP_CHECKSUM},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
 };
 
 use crate::protocol::common::{
-    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, make_layer,
-    payload_without_padding, resolve_u16, truncated, typed_layer,
+    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, payload_without_padding,
+    resolve_u16, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -160,10 +159,11 @@ impl Codec for IgmpCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Igmp::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(igmp_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Igmp::default()))
     }
 }

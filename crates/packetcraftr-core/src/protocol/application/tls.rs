@@ -39,7 +39,7 @@ impl crate::error::Classified for Error {
     fn classification(&self) -> crate::error::Classification {
         match self {
             Self::Invalid { .. } => crate::error::Classification::new(
-                "packet.tls",
+                crate::error::Code::PacketTls,
                 crate::error::Kind::Packet,
                 Some("inspect the TLS record or handshake that breaks a wire rule or bound"),
             ),

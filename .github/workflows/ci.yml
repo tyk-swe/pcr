@@ -59,8 +59,12 @@ jobs:
           cargo fmt --all -- --check
       - name: Check documented crate layers
         run: python3 scripts/check_layers.py
+      - name: Report test layer coupling
+        run: python3 scripts/check_layers.py --report-tests
       - name: Rank file lengths and enforce the non-test limit
         run: python3 scripts/check_file_lengths.py
+      - name: Check implicit-coupling ceilings
+        run: python3 scripts/check_coupling.py
       - name: Clippy for supported feature profiles
         shell: bash
         run: |

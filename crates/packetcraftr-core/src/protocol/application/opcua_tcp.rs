@@ -3,9 +3,9 @@
 
 //! OPC UA TCP connection messages and SecureConversation chunk envelopes (OPC 10000-6). Secure service bodies are opaque.
 
-use crate::codec::*;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Reader, Writer, message_codec};
 use bytes::Bytes;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,7 +50,7 @@ impl Default for OpcuaTcp {
     }
 }
 crate::reflective_layer! {
- fn opcuatcp_schema() => { protocol: crate::layer::Id::new("opcua_tcp"), name: "OpcuaTcp" }
+ fn opcuatcp_schema() => { protocol: crate::protocol::BuiltinProtocol::OpcuaTcp.id(), name: "OpcuaTcp" }
  impl OpcuaTcp {
     "message_type" => { kind: Bytes, derived: false, required: false, description: "message type", reflect: message_type },
     "chunk_type" => { kind: Unsigned, derived: false, required: false, description: "chunk type", reflect: chunk_type },
@@ -70,28 +70,7 @@ crate::reflective_layer! {
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
 }
-fn opcuatcp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if 3 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "message_type",
-            range: crate::layout::ByteRange::new(0, 3),
-        });
-    }
-    if 4 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "chunk_type",
-            range: crate::layout::ByteRange::new(3, 4),
-        });
-    }
-    fields
-}
-message_codec!(
-    OpcuaTcpCodec,
-    OpcuaTcp,
-    opcuatcp_schema,
-    opcuatcp_layout_wire
-);
+message_codec!(OpcuaTcpCodec, OpcuaTcp, opcuatcp_schema);
 
 const NAME: &str = "opcua_tcp";
 impl OpcuaTcp {
@@ -137,8 +116,13 @@ impl OpcuaTcp {
         w.put(&p.bytes)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..3);
+        r.mark(1, 3..4);
         let message_type = Bytes::copy_from_slice(r.take(3)?);
         let chunk_type = r.u8()?;
         if !matches!(chunk_type, b'F' | b'C' | b'A') {
@@ -181,7 +165,7 @@ impl OpcuaTcp {
             return Err(invalid(NAME, "connection message must be final"));
         }
         r.finish()?;
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }
 fn string(w: &mut Writer, b: &[u8], null: bool) -> Result<(), Error> {

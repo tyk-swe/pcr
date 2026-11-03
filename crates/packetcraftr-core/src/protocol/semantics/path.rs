@@ -6,11 +6,13 @@ use std::net::{IpAddr, Ipv6Addr};
 use super::error::{Constraint, Error};
 use super::ipv4_option::parse_ipv4_source_routes;
 use super::segment_routing::{SegmentRoute, validate_segment_route};
+use bytes::Bytes;
+
 use crate::field::WireValue;
-use crate::layer::Layer;
+use crate::layer::{Id, Layer};
 use crate::packet::Packet;
 use crate::protocol::BuiltinProtocol;
-use crate::protocol::network::{Fragment, Ipv4, Ipv6, SegmentRoutingHeader};
+use crate::protocol::identity::{self, NetworkHeader, SegmentRouting};
 
 const SEGMENTS: &str = "segments";
 const SEGMENTS_LEFT: &str = "segments_left";
@@ -25,21 +27,6 @@ pub struct IpPath {
     /// Route destinations still visited on the live path, including the active hop.
     pub visited_destinations: Vec<IpAddr>,
     pub declared_route_destinations: Vec<IpAddr>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(super) enum IpHeader<'a> {
-    V4(&'a Ipv4),
-    V6(&'a Ipv6),
-}
-
-impl<'a> IpHeader<'a> {
-    pub(super) fn of(layer: &'a dyn Layer) -> Option<Self> {
-        layer
-            .downcast_ref::<Ipv4>()
-            .map(Self::V4)
-            .or_else(|| layer.downcast_ref::<Ipv6>().map(Self::V6))
-    }
 }
 
 /// Number of directly transmitted layers through the first encapsulation boundary.
@@ -62,11 +49,11 @@ pub fn outer_ip_path(packet: &Packet) -> Result<Option<IpPath>, Error> {
         .iter()
         .take(scope)
         .enumerate()
-        .find_map(|(index, layer)| Some((index, IpHeader::of(layer)?)))
+        .find_map(|(index, layer)| Some((index, identity::network_header(layer)?)))
     else {
         return Ok(None);
     };
-    ip_path_at(packet, index, scope, header).map(Some)
+    ip_path_at(packet, index, scope, &header).map(Some)
 }
 
 /// Returns the nearest enclosing IP path. A malformed nearest header is an
@@ -80,29 +67,51 @@ pub fn enclosing_ip_path(
         .enumerate()
         .take(upper_layer_index)
         .rev()
-        .find_map(|(index, layer)| Some((index, IpHeader::of(layer)?)))
+        .find_map(|(index, layer)| Some((index, identity::network_header(layer)?)))
     else {
         return Ok(None);
     };
-    ip_path_at(packet, index, upper_layer_index, header).map(Some)
+    ip_path_at(packet, index, upper_layer_index, &header).map(Some)
 }
 
 pub(super) fn ip_path_at(
     packet: &Packet,
     network_index: usize,
     upper_bound: usize,
-    header: IpHeader<'_>,
+    header: &NetworkHeader,
 ) -> Result<IpPath, Error> {
     match header {
-        IpHeader::V4(layer) => ipv4_path(layer),
-        IpHeader::V6(layer) => ipv6_path(packet, network_index, upper_bound, layer),
+        NetworkHeader::V4 {
+            source,
+            destination,
+            fragment_offset,
+            more_fragments,
+            options,
+            ..
+        } => ipv4_path(
+            *source,
+            *destination,
+            *fragment_offset,
+            *more_fragments,
+            options,
+        ),
+        NetworkHeader::V6 {
+            source,
+            destination,
+            ..
+        } => ipv6_path(packet, network_index, upper_bound, *source, *destination),
     }
 }
 
-fn ipv4_path(layer: &Ipv4) -> Result<IpPath, Error> {
-    let header_destination = layer.destination;
-    reject_non_atomic_fragment(layer, layer.fragment_offset, layer.more_fragments)?;
-    let source_route = parse_ipv4_source_routes(&layer.options)?;
+fn ipv4_path(
+    source: std::net::Ipv4Addr,
+    header_destination: std::net::Ipv4Addr,
+    fragment_offset: u16,
+    more_fragments: bool,
+    options: &Bytes,
+) -> Result<IpPath, Error> {
+    reject_non_atomic_fragment(BuiltinProtocol::Ipv4.id(), fragment_offset, more_fragments)?;
+    let source_route = parse_ipv4_source_routes(options)?;
     let final_destination = IpAddr::V4(source_route.final_destination(header_destination));
     let declared_route_destinations = source_route
         .declared
@@ -113,7 +122,7 @@ fn ipv4_path(layer: &Ipv4) -> Result<IpPath, Error> {
     let mut visited_destinations = vec![header_destination];
     visited_destinations.extend(source_route.remaining.into_iter().map(IpAddr::V4));
     Ok(IpPath {
-        source: IpAddr::V4(layer.source),
+        source: IpAddr::V4(source),
         header_destination,
         active_destination: header_destination,
         final_destination,
@@ -126,10 +135,10 @@ fn ipv6_path(
     packet: &Packet,
     network_index: usize,
     upper_bound: usize,
-    layer: &Ipv6,
+    source: Ipv6Addr,
+    header_destination_v6: Ipv6Addr,
 ) -> Result<IpPath, Error> {
-    let source = IpAddr::V6(layer.source);
-    let header_destination_v6 = layer.destination;
+    let source = IpAddr::V6(source);
     let header_destination = IpAddr::V6(header_destination_v6);
     let mut segment_route = None;
     let extension_headers = packet
@@ -142,18 +151,22 @@ fn ipv6_path(
         if !BuiltinProtocol::of(candidate).is_some_and(BuiltinProtocol::is_ipv6_extension) {
             break;
         }
-        if let Some(fragment) = candidate.downcast_ref::<Fragment>() {
+        if let Some(fragment) = identity::fragment_header(candidate) {
             reject_non_atomic_fragment(
-                fragment,
+                *candidate.protocol_id(),
                 fragment.fragment_offset,
                 fragment.more_fragments,
             )?;
         }
-        if let Some(srh) = candidate.downcast_ref::<SegmentRoutingHeader>() {
+        if let Some(srh) = identity::segment_routing(candidate) {
             if segment_route.is_some() {
                 return Err(Error::DuplicateSegmentRoutingHeader);
             }
-            segment_route = Some(typed_segment_route(srh, header_destination_v6)?);
+            segment_route = Some(typed_segment_route(
+                *candidate.protocol_id(),
+                &srh,
+                header_destination_v6,
+            )?);
         }
     }
 
@@ -195,43 +208,41 @@ fn ipv6_path(
 }
 
 fn reject_non_atomic_fragment(
-    layer: &dyn Layer,
+    protocol: Id,
     fragment_offset: u16,
     more_fragments: bool,
 ) -> Result<(), Error> {
     if fragment_offset != 0 || more_fragments {
-        return Err(Error::NonAtomicFragment {
-            protocol: *layer.protocol_id(),
-        });
+        return Err(Error::NonAtomicFragment { protocol });
     }
     Ok(())
 }
 
 fn typed_segment_route(
-    layer: &SegmentRoutingHeader,
+    protocol: Id,
+    srh: &SegmentRouting,
     header_destination: Ipv6Addr,
 ) -> Result<SegmentRoute, Error> {
-    let protocol = layer.protocol_id();
-    let expected_last = layer
+    let expected_last = srh
         .segments
         .len()
         .checked_sub(1)
-        .ok_or_else(|| Error::field(protocol, SEGMENTS, Constraint::NonEmptySegments))?;
+        .ok_or_else(|| Error::field(&protocol, SEGMENTS, Constraint::NonEmptySegments))?;
     let expected_last = u8::try_from(expected_last)
-        .map_err(|_| Error::field(protocol, SEGMENTS, Constraint::AtMost256Segments))?;
-    let segments_left = wire_u8(layer, SEGMENTS_LEFT, &layer.segments_left, expected_last)?;
-    let last_entry = wire_u8(layer, LAST_ENTRY, &layer.last_entry, expected_last)?;
+        .map_err(|_| Error::field(&protocol, SEGMENTS, Constraint::AtMost256Segments))?;
+    let segments_left = wire_u8(&protocol, SEGMENTS_LEFT, &srh.segments_left, expected_last)?;
+    let last_entry = wire_u8(&protocol, LAST_ENTRY, &srh.last_entry, expected_last)?;
     validate_segment_route(
         header_destination,
-        layer.segments.clone(),
+        srh.segments.clone(),
         segments_left,
         last_entry,
-        layer.flags,
+        srh.flags,
     )
 }
 
 fn wire_u8(
-    layer: &dyn Layer,
+    protocol: &Id,
     field: &'static str,
     value: &WireValue<u8>,
     automatic: u8,
@@ -240,10 +251,6 @@ fn wire_u8(
         WireValue::Auto => Ok(automatic),
         WireValue::Exact(value) => Ok(*value),
         WireValue::Raw(value) if value.len() == 1 => Ok(value[0]),
-        WireValue::Raw(_) => Err(Error::field(
-            layer.protocol_id(),
-            field,
-            Constraint::OneByte,
-        )),
+        WireValue::Raw(_) => Err(Error::field(protocol, field, Constraint::OneByte)),
     }
 }

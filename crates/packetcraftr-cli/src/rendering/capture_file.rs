@@ -134,7 +134,7 @@ fn write_error(source: CaptureError) -> CliError {
 fn capture_io_error(operation: &str, source: io::Error) -> CliError {
     CliError::from_classification(
         Classification::new(
-            "io.capture_file",
+            packetcraftr_core::error::Code::IoCaptureFile,
             Kind::Io,
             Some("inspect temporary storage availability and retry the capture output operation"),
         ),

@@ -96,9 +96,16 @@ class DocumentValidationTests(unittest.TestCase):
             (documents / 'packet-ignored.json').write_text('{}')
             (documents / 'output-stream.ndjson').write_text(
                 json.dumps(VALID) + '\n' + json.dumps(dict(VALID, status='bogus')) + '\n')
-            problems = checker.example_problems(Path(directory), self.validator)
+            problems = checker.example_problems(Path(directory), self.validator, set())
         self.assertEqual(len(problems), 1, problems)
         self.assertIn('output-stream.ndjson:2', problems[0])
+
+    def test_unpublished_code_is_rejected(self):
+        document = dict(VALID, error={'code': 'cli.invented', 'message': 'x', 'kind': 'usage'})
+        problems = checker.code_problems('doc', document, {'cli.known'})
+        self.assertEqual(len(problems), 1)
+        self.assertIn('cli.invented', problems[0])
+        self.assertEqual(checker.code_problems('doc', document, {'cli.invented'}), [])
 
     def test_wrong_identity_document_is_rejected(self):
         problems = checker.document_problems(
@@ -137,7 +144,7 @@ class RuntimeValidationTests(unittest.TestCase):
         validator = checker.load_validator(SCHEMA)
         with tempfile.TemporaryDirectory() as directory:
             binary = self.fake_binary(directory, document, stdout)
-            return checker.runtime_problems(binary, Path(directory), validator, self.COMMANDS)
+            return checker.runtime_problems(binary, Path(directory), validator, set(), self.COMMANDS)
 
     def test_conforming_runtime_output_passes(self):
         self.assertEqual(self.problems(), [])
@@ -156,9 +163,92 @@ class RuntimeValidationTests(unittest.TestCase):
         validator = checker.load_validator(SCHEMA)
         with tempfile.TemporaryDirectory() as directory:
             binary = self.fake_binary(directory, VALID)
-            problems = checker.runtime_problems(binary, Path(directory), validator, commands)
+            problems = checker.runtime_problems(binary, Path(directory), validator, set(), commands)
         self.assertEqual(len(problems), 1)
         self.assertIn('exit', problems[0])
+
+
+REGISTRY_SCHEMA = {
+    '$defs': {
+        'aggregateSuccess': {'allOf': [{'$ref': '#/$defs/buildSuccess'}]},
+        'streamSuccess': {'allOf': [{'$ref': '#/$defs/buildStreamSuccess'}]},
+        'buildSuccess': {
+            'type': 'object',
+            'properties': {'command': {'const': 'build'}, 'status': {'const': 'success'}},
+            'required': ['command', 'status'],
+        },
+        'buildStreamSuccess': {
+            'type': 'object',
+            'properties': {
+                'command': {'const': 'build'},
+                'event': {'enum': ['packet', 'complete']},
+                'status': {'const': 'success'},
+            },
+            'required': ['command', 'status'],
+        },
+    },
+}
+
+REGISTRY_SOURCE = '''
+pub const PUBLISHED_TYPES: &[PublishedType] = &[
+    PublishedType {
+        definition: "buildSuccess",
+        command: "build",
+        rust_types: &["crate::output::build::Report"],
+        events: &[],
+        example: "examples/documents/output-build-success.json",
+    },
+    PublishedType {
+        definition: "buildStreamSuccess",
+        command: "build",
+        rust_types: &["crate::output::build::PacketEvent", "crate::output::build::Complete"],
+        events: &["complete", "packet"],
+        example: "examples/documents/output-build-complete.json",
+    },
+];
+'''
+
+
+class RegistryTests(unittest.TestCase):
+    def workspace(self, registry_source):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        files = {
+            checker.REGISTRY: registry_source,
+            'crates/packetcraftr-cli/src/output/build.rs':
+                'pub struct Report {}\npub struct Complete {}\n'
+                'pub struct PacketEvent {}\n'
+                'impl StreamRecord for PacketEvent {\n'
+                '    fn event_name(&self) -> &\'static str { "packet" }\n}\n'
+                'impl StreamRecord for Complete {\n'
+                '    fn event_name(&self) -> &\'static str { "complete" }\n}\n',
+            'examples/documents/output-build-success.json':
+                json.dumps({'command': 'build', 'status': 'success'}),
+            'examples/documents/output-build-complete.json':
+                json.dumps({'command': 'build', 'event': 'complete', 'status': 'success'}),
+        }
+        for relative, text in files.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        return root
+
+    def test_agreeing_registry_passes(self):
+        root = self.workspace(REGISTRY_SOURCE)
+        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA), [])
+
+    def test_stale_definition_and_unclaimed_def_are_reported(self):
+        root = self.workspace(REGISTRY_SOURCE.replace('buildSuccess"', 'goneSuccess"'))
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA)
+        self.assertTrue(any('no such schema definition' in problem for problem in problems))
+        self.assertTrue(any('buildSuccess claims' in problem for problem in problems))
+
+    def test_unregistered_stream_type_is_reported(self):
+        source = REGISTRY_SOURCE.replace('"crate::output::build::PacketEvent", ', '')
+        root = self.workspace(source)
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA)
+        self.assertTrue(any('PacketEvent' in problem for problem in problems))
 
 
 class RepositoryTests(unittest.TestCase):

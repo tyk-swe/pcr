@@ -121,22 +121,22 @@ impl Classified for Error {
         match self {
             Self::Decode(source) => source.classification(),
             Self::StreamIndexUnavailable => Classification::new(
-                "cli.filter_unsupported_field",
+                crate::error::Code::CliFilterUnsupportedField,
                 Kind::Usage,
                 Some("select by conversation with an analysis pass, or filter on header fields"),
             ),
             Self::ProjectionField { .. } => Classification::new(
-                "cli.projection_field",
+                crate::error::Code::CliProjectionField,
                 Kind::Usage,
                 Some("select registered field paths"),
             ),
             Self::ProjectionLimit { .. } => Classification::new(
-                "policy.projection_limit",
+                crate::error::Code::PolicyProjectionLimit,
                 Kind::Policy,
                 Some("select fewer or smaller fields within the finite projection budget"),
             ),
             Self::TimestampUnavailable => Classification::new(
-                "packet.timestamp_unavailable",
+                crate::error::Code::PacketTimestampUnavailable,
                 Kind::Packet,
                 Some(
                     "remove frame.time_epoch and frame.time_nsec from the filter or use timestamped packet blocks",
@@ -179,5 +179,9 @@ impl Classified for Error {
 }
 
 fn cli_filter(remediation: &'static str) -> Classification {
-    Classification::new("cli.filter", Kind::Usage, Some(remediation))
+    Classification::new(
+        crate::error::Code::CliFilter,
+        Kind::Usage,
+        Some(remediation),
+    )
 }

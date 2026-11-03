@@ -6,7 +6,6 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::diagnostic::Severity;
-use crate::protocol::transport::Tcp;
 
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};

@@ -19,7 +19,7 @@ pub use observation::{Observation, TcpFingerprint, extract};
 
 pub const SCHEMA_V1: &str = "packetcraftr.os-fingerprints/v1";
 pub const PROBE_SET_V1: &str = "packetcraftr.os-probes/v1";
-pub const MAX_DOCUMENT_BYTES: usize = 512 * 1024;
+pub const MAX_DOCUMENT_BYTES: usize = super::service_probes::MAX_DOCUMENT_BYTES;
 pub const MAX_SIGNATURES: usize = 512;
 pub const MAX_PREDICATES: usize = 64;
 pub const MAX_OBSERVATIONS: usize = 256;
@@ -129,7 +129,11 @@ pub enum Error {
 
 impl Classified for Error {
     fn classification(&self) -> Classification {
-        Classification::new("document.os_fingerprints", Kind::Usage, None)
+        Classification::new(
+            crate::error::Code::DocumentOsFingerprints,
+            Kind::Usage,
+            None,
+        )
     }
 }
 

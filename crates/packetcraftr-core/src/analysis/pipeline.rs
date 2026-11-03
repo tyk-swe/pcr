@@ -239,7 +239,7 @@ where
         let mut tcp_view = tcp.as_ref().map(|elected| TcpView {
             decoded: elected.decoded,
             layer: elected.transport.index,
-            header: elected.transport.layer,
+            header: elected.transport.header,
             conversation: None,
             payload: &[],
         });

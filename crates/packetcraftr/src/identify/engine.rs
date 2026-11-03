@@ -4,7 +4,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use packetcraftr_core::document::service_probes::{
     self, Confidence, MatchOutcome, Observation, ObservationOutcome, Probe,
@@ -130,7 +129,7 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                     probe_scope.attempt();
                     connection.attempt();
                     let attempt_started = self.now();
-                    let started_at = SystemTime::now();
+                    let started_at = self.wall_now();
                     let reply = super::io::exchange(
                         &self.providers,
                         &self.policy,
@@ -207,7 +206,7 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                         diagnostic,
                         source: reply.source,
                         started_at,
-                        completed_at: SystemTime::now(),
+                        completed_at: self.wall_now(),
                         tls: reply.tls,
                     });
                     if cancelled

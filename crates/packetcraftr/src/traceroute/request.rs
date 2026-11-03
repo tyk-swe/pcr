@@ -24,7 +24,7 @@ use super::error::probe_error;
 use crate::probe::Transport;
 use crate::probe::check_collection_evidence;
 use crate::traceroute::{
-    DEFAULT_MAX_UNDECODED_FRAMES, MAX_DSCP, MAX_PAYLOAD_SIZE, MAX_PROBES, MAX_PROBES_PER_HOP,
+    DEFAULT_MAX_UNDECODED_FRAMES, MAX_DSCP, MAX_PAYLOAD_SIZE, MAX_PROBES_PER_HOP, MAX_TRACE_PROBES,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,7 +51,7 @@ impl Default for Limits {
 impl Limits {
     pub fn validate(&self) -> Result<(), Error> {
         check_limits(
-            &[("max_probes", self.max_probes, MAX_PROBES)],
+            &[("max_probes", self.max_probes, MAX_TRACE_PROBES)],
             &[],
             |field, value, reason| Error::InvalidLimit {
                 field,

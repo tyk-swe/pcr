@@ -1,18 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
+use crate::protocol::common::{invalid, truncated, typed_layer};
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
-
-use crate::protocol::common::{invalid, make_layer, truncated, typed_layer};
 
 use super::resolve_next_header;
 
@@ -119,6 +116,7 @@ fn encode_options(
 
 fn decode_options<L>(
     name: &'static str,
+    protocol: u8,
     input: Bytes,
     make: impl FnOnce(u8, Bytes) -> L,
     layout: fn(usize) -> Vec<crate::layout::FieldLayout>,
@@ -129,9 +127,7 @@ where
     let Some(header) = input.first_chunk::<8>() else {
         return Err(truncated(name, 8, input.len()));
     };
-    let header_len = usize::from(header[1])
-        .saturating_add(1)
-        .checked_mul(8)
+    let header_len = crate::protocol::headers::ipv6_extension_header_length(protocol, header[1])
         .ok_or_else(|| invalid(name, "header length overflow"))?;
     if input.len() < header_len {
         return Err(truncated(name, header_len, input.len()));
@@ -185,6 +181,7 @@ impl Codec for HopByHopCodec {
     ) -> Result<Decoded, crate::codec::Error> {
         decode_options(
             HOP_NAME,
+            crate::protocol::network::ip_protocol::HOP_BY_HOP,
             input,
             |next, options| HopByHop {
                 next_header: WireValue::Exact(next),
@@ -194,11 +191,12 @@ impl Codec for HopByHopCodec {
         )
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(HopByHop::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(hop_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(HopByHop::default()))
     }
 }
 
@@ -236,6 +234,7 @@ impl Codec for DestinationOptionsCodec {
     ) -> Result<Decoded, crate::codec::Error> {
         decode_options(
             DESTINATION_NAME,
+            crate::protocol::network::ip_protocol::DESTINATION_OPTIONS,
             input,
             |next, options| DestinationOptions {
                 next_header: WireValue::Exact(next),
@@ -245,10 +244,11 @@ impl Codec for DestinationOptionsCodec {
         )
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(DestinationOptions::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(destination_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(DestinationOptions::default()))
     }
 }

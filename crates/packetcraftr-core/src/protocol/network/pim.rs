@@ -3,10 +3,12 @@
 
 //! PIMv2 (RFC 7761), Hello options and bounded Join/Prune envelopes. Other bodies retain their bytes.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{checksum_parts, invalid, transport_checksum_parts, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, checksum_value, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -34,7 +36,7 @@ impl Default for Pim {
     }
 }
 crate::reflective_layer! {
- fn pim_schema() => { protocol: crate::layer::Id::new("pim"), name: "Pim" }
+ fn pim_schema() => { protocol: crate::protocol::BuiltinProtocol::Pim.id(), name: "Pim" }
  impl Pim {
     "message_type" => { kind: Unsigned, derived: false, required: false, description: "message type", reflect: message_type },
     "reserved" => { kind: Unsigned, derived: false, required: false, description: "reserved", reflect: reserved },
@@ -43,29 +45,7 @@ crate::reflective_layer! {
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
 }
-fn pim_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if !b.is_empty() {
-        fields.push(crate::layout::FieldLayout {
-            name: "message_type",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-    }
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "reserved",
-            range: crate::layout::ByteRange::new(1, 2),
-        });
-    }
-    if 4 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "checksum",
-            range: crate::layout::ByteRange::new(2, 4),
-        });
-    }
-    fields
-}
-message_codec!(PimCodec, Pim, pim_schema, pim_layout_wire);
+message_codec!(PimCodec, Pim, pim_schema);
 
 const NAME: &str = "pim";
 impl Pim {
@@ -90,7 +70,7 @@ impl Pim {
         } else {
             w.put(&self.data)?;
         }
-        let network = super::resolve_envelope(NAME, c).ok();
+        let network = c.network_envelope().ok();
         let sum = match network {
             Some(n) if n.source.is_ipv6() => transport_checksum_parts(NAME, n, 103, &[&w.bytes])?,
             _ => checksum_parts(&[&w.bytes]),
@@ -99,8 +79,14 @@ impl Pim {
         w.bytes[2..4].copy_from_slice(&sum.to_be_bytes());
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, c: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        c: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..1);
+        r.mark(1, 1..2);
+        r.mark(2, 2..4);
         let h = r.u8()?;
         if h >> 4 != 2 {
             return Err(unsupported(NAME, "only PIMv2"));
@@ -139,7 +125,7 @@ impl Pim {
                 validate_join(&s.data)?;
             }
         }
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }
 fn address(r: &mut Reader<'_>, extra: usize) -> Result<(), Error> {

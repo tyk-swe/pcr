@@ -8,6 +8,7 @@
 //! from the options, so equal inputs produce equal packets, and the frame count
 //! is checked against a finite limit before any packet exists.
 
+use crate::protocol::BuiltinProtocol;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -19,8 +20,7 @@ use crate::error::{Classification, Classified, Kind};
 use crate::field::WireValue;
 use crate::layer::{Id, Layer, Raw};
 use crate::packet::Packet;
-use crate::protocol::link::{Ethernet, Vlan, Vlan8021ad};
-use crate::protocol::network::{Ipv4, Ipv6};
+use crate::protocol::identity;
 use crate::protocol::transport::{Tcp, Udp};
 use crate::registry::Registry;
 
@@ -118,26 +118,26 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::FrameLimit { .. } => Classification::new(
-                "cli.conversation_limit",
+                crate::error::Code::CliConversationLimit,
                 Kind::Usage,
                 Some("shorten the payloads, raise the segment size, or close less often"),
             ),
             Self::SequenceSpace => Classification::new(
-                "cli.conversation_limit",
+                crate::error::Code::CliConversationLimit,
                 Kind::Usage,
                 Some("shorten the payloads"),
             ),
             Self::Payload(source) => source.classification(),
             Self::ZeroMss | Self::ZeroWindow | Self::MssExceedsWindow { .. } => {
                 Classification::new(
-                    "cli.conversation_options",
+                    crate::error::Code::CliConversationOptions,
                     Kind::Usage,
                     Some("choose a segment size from 1 up to the recipe's TCP window"),
                 )
             }
             Self::LinkLayer { .. } | Self::MissingNetwork | Self::Transport { .. } => {
                 Classification::new(
-                    "cli.conversation_recipe",
+                    crate::error::Code::CliConversationRecipe,
                     Kind::Usage,
                     Some(
                         "use an [ethernet/][vlan/]ipv4|ipv6/tcp|udp[/payload] client-to-server recipe",
@@ -187,7 +187,7 @@ impl Conversation {
         match self.options.protocol {
             Protocol::Tcp => {
                 let request = self.request(&endpoints, &shape)?;
-                let base = shape.transport.downcast_ref::<Tcp>().expect("TCP shape");
+                let base = recipe.get::<Tcp>().expect("TCP shape");
                 tcp::expand(&endpoints, base, &self.options, &request, response)
             }
             Protocol::Udp => {
@@ -199,7 +199,9 @@ impl Conversation {
                     length: WireValue::Auto,
                     checksum: WireValue::Auto,
                 };
-                let mut request = endpoints.client.headers(datagram(&endpoints.client));
+                let mut request = endpoints
+                    .client
+                    .headers(Box::new(datagram(&endpoints.client)));
                 for layer in &shape.payload {
                     request.push_boxed(layer.clone_box());
                 }
@@ -208,7 +210,7 @@ impl Conversation {
                     packets.push(
                         endpoints
                             .server
-                            .packet(datagram(&endpoints.server), response),
+                            .packet(Box::new(datagram(&endpoints.server)), response),
                     );
                 }
                 Ok(packets)
@@ -219,21 +221,15 @@ impl Conversation {
     fn request(&self, endpoints: &Endpoints, shape: &Shape<'_>) -> Result<Bytes, Error> {
         match shape.payload.as_slice() {
             [] => Ok(Bytes::new()),
-            [only] if only.is::<Raw>() => {
-                Ok(only.downcast_ref::<Raw>().expect("raw layer").bytes.clone())
+            [only] if BuiltinProtocol::Raw.identifies(*only) => {
+                Ok(Raw::from_layer(*only).expect("raw layer").bytes.clone())
             }
             layers => {
                 // Transport-dependent encodings need their parents: DNS over
                 // TCP is framed by a length prefix its codec only emits beside
                 // a TCP layer. The client's headers lead the build, and only
                 // the bytes past its transport count as the request.
-                let mut packet = endpoints.client.headers(
-                    shape
-                        .transport
-                        .downcast_ref::<Tcp>()
-                        .expect("TCP shape")
-                        .clone(),
-                );
+                let mut packet = endpoints.client.headers(shape.transport.clone_box());
                 for layer in layers {
                     packet.push_boxed(layer.clone_box());
                 }
@@ -272,13 +268,14 @@ impl<'a> Shape<'a> {
     fn parse(recipe: &'a Packet, protocol: Protocol) -> Result<Self, Error> {
         let mut layers = recipe.iter().enumerate().peekable();
         let mut link = Vec::new();
-        while let Some((index, layer)) =
-            layers.next_if(|(_, layer)| !(layer.is::<Ipv4>() || layer.is::<Ipv6>()))
-        {
+        while let Some((index, layer)) = layers.next_if(|(_, layer)| {
+            !(BuiltinProtocol::Ipv4.identifies(*layer) || BuiltinProtocol::Ipv6.identifies(*layer))
+        }) {
             let accepted = if index == 0 {
-                layer.is::<Ethernet>()
+                BuiltinProtocol::Ethernet.identifies(layer)
             } else {
-                layer.is::<Vlan>() || layer.is::<Vlan8021ad>()
+                BuiltinProtocol::Vlan.identifies(layer)
+                    || BuiltinProtocol::Vlan8021ad.identifies(layer)
             };
             if !accepted {
                 return Err(Error::LinkLayer {
@@ -290,8 +287,8 @@ impl<'a> Shape<'a> {
         }
         let (_, network) = layers.next().ok_or(Error::MissingNetwork)?;
         let transport = match (protocol, layers.next()) {
-            (Protocol::Tcp, Some((_, layer))) if layer.is::<Tcp>() => layer,
-            (Protocol::Udp, Some((_, layer))) if layer.is::<Udp>() => layer,
+            (Protocol::Tcp, Some((_, layer))) if BuiltinProtocol::Tcp.identifies(layer) => layer,
+            (Protocol::Udp, Some((_, layer))) if BuiltinProtocol::Udp.identifies(layer) => layer,
             (expected, _) => return Err(Error::Transport { expected }),
         };
         Ok(Self {
@@ -303,12 +300,8 @@ impl<'a> Shape<'a> {
     }
 
     fn ports(&self) -> (u16, u16) {
-        if let Some(tcp) = self.transport.downcast_ref::<Tcp>() {
-            (tcp.source_port, tcp.destination_port)
-        } else {
-            let udp = self.transport.downcast_ref::<Udp>().expect("UDP shape");
-            (udp.source_port, udp.destination_port)
-        }
+        let key = identity::transport_key(self.transport).expect("transport shape");
+        (key.source_port, key.destination_port)
     }
 
     fn endpoints(&self) -> Endpoints {
@@ -346,23 +339,12 @@ impl Flow {
         let (mut source_port, mut destination_port) = shape.ports();
         if reverse {
             for layer in &mut link {
-                if let Some(ethernet) = layer.downcast_mut::<Ethernet>() {
-                    std::mem::swap(&mut ethernet.source, &mut ethernet.destination);
-                }
+                identity::swap_link_addresses(&mut **layer);
             }
-            if let Some(ip) = network.downcast_mut::<Ipv4>() {
-                std::mem::swap(&mut ip.source, &mut ip.destination);
-            } else if let Some(ip) = network.downcast_mut::<Ipv6>() {
-                std::mem::swap(&mut ip.source, &mut ip.destination);
-            }
+            identity::swap_network_addresses(&mut *network);
             std::mem::swap(&mut source_port, &mut destination_port);
         }
-        if let Some(ip) = network.downcast_mut::<Ipv4>() {
-            ip.total_length = WireValue::Auto;
-            ip.checksum = WireValue::Auto;
-        } else if let Some(ip) = network.downcast_mut::<Ipv6>() {
-            ip.payload_length = WireValue::Auto;
-        }
+        identity::reset_network_lengths(&mut *network);
         Self {
             link,
             network,
@@ -372,17 +354,17 @@ impl Flow {
     }
 
     /// The link, network, and transport layers, ready for a payload.
-    fn headers(&self, transport: impl Layer) -> Packet {
+    fn headers(&self, transport: Box<dyn Layer>) -> Packet {
         let mut packet = Packet::with_capacity(self.link.len() + 3);
         for layer in &self.link {
             packet.push_boxed(layer.clone_box());
         }
         packet.push_boxed(self.network.clone_box());
-        packet.push(transport);
+        packet.push_boxed(transport);
         packet
     }
 
-    fn packet(&self, transport: impl Layer, payload: &Bytes) -> Packet {
+    fn packet(&self, transport: Box<dyn Layer>, payload: &Bytes) -> Packet {
         let mut packet = self.headers(transport);
         if !payload.is_empty() {
             packet.push(Raw::new(payload.clone()));

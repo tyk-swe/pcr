@@ -73,11 +73,16 @@ pub(in crate::commands) fn report(bytes: &[u8]) -> Result<Report, CliError> {
 mod tests {
     use super::*;
 
-    const CURRENT_HUNT: &[u8] =
-        include_bytes!("../../../../../examples/documents/output-hunt-success.json");
+    fn current_hunt() -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/documents/output-hunt-success.json"),
+        )
+        .unwrap()
+    }
 
     fn hunt_with_schema(schema: &str) -> Vec<u8> {
-        let mut value: serde_json::Value = serde_json::from_slice(CURRENT_HUNT).unwrap();
+        let mut value: serde_json::Value = serde_json::from_slice(&current_hunt()).unwrap();
         value["schema"] = serde_json::Value::from(schema);
         serde_json::to_vec(&value).unwrap()
     }
@@ -88,7 +93,7 @@ mod tests {
 
     #[test]
     fn current_published_security_output_is_accepted_as_report_input() {
-        assert_eq!(report(CURRENT_HUNT).unwrap().kind, "hunt");
+        assert_eq!(report(&current_hunt()).unwrap().kind, "hunt");
     }
 
     #[test]

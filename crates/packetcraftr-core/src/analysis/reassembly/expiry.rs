@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::clock::{Clock, SystemClock};
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
@@ -8,7 +9,7 @@ use crate::analysis::Constraint;
 
 /// An idle expiry the monotonic clock cannot add to the present, with the value to report.
 pub(super) fn violation(expiry: Duration) -> Option<(u64, Constraint)> {
-    Instant::now().checked_add(expiry).is_none().then(|| {
+    SystemClock.now().checked_add(expiry).is_none().then(|| {
         (
             u64::try_from(expiry.as_millis()).unwrap_or(u64::MAX),
             Constraint::WithinClockRange,

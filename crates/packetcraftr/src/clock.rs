@@ -1,52 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::convert::Infallible;
-use std::error::Error;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use packetcraftr_core::budget::Deadline;
-use packetcraftr_netio::deadline::POLL_INTERVAL;
-
-/// The client's source of monotonic time and pacing delays.
-/// A fake clock must share the real monotonic base with capture timestamps.
-pub trait Clock: Clone + Send + Sync + 'static {
-    type Error: Error + Send + Sync + 'static;
-
-    /// Deterministic clocks must advance this value when sleeping or simulating work.
-    fn now(&self) -> Instant {
-        Instant::now()
-    }
-
-    /// Waits `delay`, returning early once `deadline` expires or is cancelled.
-    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error>;
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SystemClock;
-
-impl Clock for SystemClock {
-    type Error = Infallible;
-
-    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error> {
-        interruptible_sleep(delay, || deadline.live_remaining().is_err());
-        Ok(())
-    }
-}
-
-fn interruptible_sleep(delay: Duration, stop: impl Fn() -> bool) {
-    let start = Instant::now();
-    loop {
-        if stop() {
-            return;
-        }
-        let remaining = delay.saturating_sub(start.elapsed());
-        if remaining.is_zero() {
-            return;
-        }
-        std::thread::sleep(remaining.min(POLL_INTERVAL));
-    }
-}
+pub use packetcraftr_core::clock::{Clock, SystemClock};
 
 pub(crate) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
     let Some(rate) = rate else {
@@ -60,18 +17,4 @@ pub(crate) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
         .checked_add(rate.checked_sub(1)?)?
         / rate;
     Some(Duration::from_nanos(u64::try_from(nanos).ok()?))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn clock_stops_at_spent_deadline() {
-        let start = std::time::Instant::now();
-        SystemClock
-            .sleep(Duration::from_secs(10), &Deadline::immediate(None))
-            .unwrap();
-        assert!(start.elapsed() < Duration::from_secs(1));
-    }
 }

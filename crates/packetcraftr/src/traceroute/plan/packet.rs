@@ -142,7 +142,7 @@ pub(in crate::traceroute) fn sent_probe_matches(probe: &Probe, sent: &Packet) ->
     }
     if udp_payload
         && !sent.iter().last().is_some_and(|layer| {
-            layer.downcast_ref::<Raw>().is_some_and(|raw| {
+            Raw::from_layer(layer).is_some_and(|raw| {
                 raw.bytes.len() == usize::from(probe.payload_size)
                     && raw.bytes.iter().all(|byte| *byte == 0)
             })

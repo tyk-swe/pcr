@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::protocol::transport::{Sctp, Tcp};
+use crate::protocol::identity;
+use crate::protocol::transport::Tcp;
 use crate::{
     layer::{Padding, Raw},
     matcher::{Match, ResponseMatcher},
@@ -31,10 +32,6 @@ impl ReverseFlowMatcher {
 }
 
 impl ResponseMatcher for ReverseFlowMatcher {
-    fn uses_builtin_response_identity(&self) -> bool {
-        true
-    }
-
     fn matches(&self, request: &Packet, response: &Packet) -> Option<Match> {
         let transport = QuotedTransport::of(self.protocol)?;
         if quoted_icmp_error(request, response, transport).is_some() {
@@ -55,8 +52,8 @@ impl ResponseMatcher for ReverseFlowMatcher {
 
 fn match_tcp(request: &Packet, layers: &[ReversedProtocolLayers<'_, '_>]) -> Option<Match> {
     for layers in layers {
-        let request_tcp = layers.request.downcast_ref::<Tcp>()?;
-        let response_tcp = layers.response.downcast_ref::<Tcp>()?;
+        let request_tcp = identity::tcp_header(layers.request)?;
+        let response_tcp = identity::tcp_header(layers.response)?;
         let request_flags = request_tcp.flags;
         let request_sequence = request_tcp.sequence;
         let response_flags = response_tcp.flags;
@@ -91,8 +88,8 @@ fn match_sctp(
     layers: &[ReversedProtocolLayers<'_, '_>],
 ) -> Option<Match> {
     for layers in layers {
-        let request_sctp = layers.request.downcast_ref::<Sctp>()?;
-        let response_sctp = layers.response.downcast_ref::<Sctp>()?;
+        let request_sctp = identity::sctp_header(layers.request)?;
+        let response_sctp = identity::sctp_header(layers.response)?;
         let expected_tag = if request_sctp.verification_tag == 0 {
             let (request_initiate_tag, _) = sctp_initiate_tag(request, layers.request_index, 1)?;
             if request_initiate_tag == 0 {
@@ -119,7 +116,7 @@ fn tcp_payload_length(packet: &Packet, tcp_layer_index: usize) -> Option<u32> {
             .iter()
             .skip(first_child_index)
             .rev()
-            .map_while(|layer| layer.downcast_ref::<Padding>())
+            .map_while(|layer| Padding::from_layer(layer))
             .filter(|padding| {
                 padding
                     .outside_layer
@@ -133,12 +130,12 @@ fn tcp_payload_length(packet: &Packet, tcp_layer_index: usize) -> Option<u32> {
 
     let mut payload_length = 0_u32;
     for layer in packet.iter().skip(first_child_index) {
-        if layer.is::<Padding>() {
+        if BuiltinProtocol::Padding.identifies(layer) {
             break;
         }
         // An unknown child cannot be assigned a sequence-space length from
         // reflective fields without guessing its encoded representation.
-        let raw = layer.downcast_ref::<Raw>()?;
+        let raw = Raw::from_layer(layer)?;
         payload_length = payload_length.checked_add(u32::try_from(raw.bytes.len()).ok()?)?;
     }
     Some(payload_length)

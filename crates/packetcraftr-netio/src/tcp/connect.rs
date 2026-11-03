@@ -6,13 +6,13 @@ use crate::{
     workers::{self, Task},
 };
 use packetcraftr_core::budget::{Cancelled, Deadline};
+use packetcraftr_core::clock::{Clock, SystemClock};
 use std::{
     net::SocketAddr,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Instant, SystemTime},
 };
 
 #[derive(Default)]
@@ -196,8 +196,8 @@ where
     if deadline.limit() > crate::deadline::MAX_WAIT {
         return Err(Error::Timeout);
     }
-    let started = Instant::now();
-    let started_at = SystemTime::now();
+    let started = SystemClock.now();
+    let started_at = SystemClock.wall_now();
     let permit = pool.admit_connect().map_err(|_| Error::Capacity {
         limit: MAX_PENDING_CONNECTIONS,
     })?;
@@ -242,7 +242,7 @@ where
                 ConnectOutcome {
                     attempted,
                     started_at,
-                    completed_at: SystemTime::now(),
+                    completed_at: SystemClock.wall_now(),
                     elapsed: started.elapsed(),
                     result,
                 }

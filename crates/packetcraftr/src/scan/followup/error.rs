@@ -40,7 +40,11 @@ impl Classified for Error {
             Self::Neighbor(source) => source.classification(),
             Self::Target(source) => source.classification(),
             Self::Boundary(source) => source.classification(),
-            Self::StatsOverflow(_) => Classification::new("internal.error", Kind::Internal, None),
+            Self::StatsOverflow(_) => Classification::new(
+                packetcraftr_core::error::Code::InternalError,
+                Kind::Internal,
+                None,
+            ),
         }
     }
 

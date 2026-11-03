@@ -15,7 +15,7 @@ use crate::probe::{Reply, Transport};
 use crate::target::{Family, Selection, Target};
 use crate::traceroute::error::probe_error;
 use crate::traceroute::request::{Bounds, check_collection, check_destination_port, tcp_payload};
-use crate::traceroute::{Error, Limits, MAX_PROBES};
+use crate::traceroute::{Error, Limits, MAX_TRACE_PROBES};
 
 /// A transport and, for TCP and UDP, the destination port to trace with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,7 +125,7 @@ impl Request {
             .checked_add(u64::try_from(self.limits.max_probes).unwrap_or(u64::MAX))
             .ok_or_else(|| overflow("sequence"))?;
         check_limits(
-            &[("max_targets", self.max_targets, MAX_PROBES)],
+            &[("max_targets", self.max_targets, MAX_TRACE_PROBES)],
             &[],
             |field, value, reason| Error::InvalidLimit {
                 field,

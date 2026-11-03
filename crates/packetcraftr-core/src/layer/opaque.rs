@@ -21,6 +21,14 @@ pub struct Raw {
 impl Raw {
     pub(crate) const ID: Id = Id::new("raw");
 
+    pub fn from_layer(layer: &dyn Layer) -> Option<&Self> {
+        layer.downcast_ref()
+    }
+
+    pub fn from_layer_mut(layer: &mut dyn Layer) -> Option<&mut Self> {
+        layer.downcast_mut()
+    }
+
     pub fn new(bytes: impl Into<Bytes>) -> Self {
         Self {
             bytes: bytes.into(),
@@ -57,6 +65,14 @@ pub struct Padding {
 
 impl Padding {
     pub(crate) const ID: Id = Id::new("padding");
+
+    pub fn from_layer(layer: &dyn Layer) -> Option<&Self> {
+        layer.downcast_ref()
+    }
+
+    pub fn from_layer_mut(layer: &mut dyn Layer) -> Option<&mut Self> {
+        layer.downcast_mut()
+    }
 
     pub fn excluded_from(&self, layer_index: usize) -> bool {
         self.outside_layer
@@ -116,6 +132,14 @@ pub struct Malformed {
 
 impl Malformed {
     pub(crate) const ID: Id = Id::new("malformed");
+
+    pub fn from_layer(layer: &dyn Layer) -> Option<&Self> {
+        layer.downcast_ref()
+    }
+
+    pub fn from_layer_mut(layer: &mut dyn Layer) -> Option<&mut Self> {
+        layer.downcast_mut()
+    }
 
     pub fn new(
         intended_protocol: Option<String>,
@@ -212,8 +236,7 @@ impl Codec for RawCodec {
         _payload: &[u8],
         context: &EncodeContext<'_>,
     ) -> Result<Encoded, crate::codec::Error> {
-        let layer = layer
-            .downcast_ref::<Raw>()
+        let layer = Raw::from_layer(layer)
             .ok_or_else(|| crate::codec::Error::wrong_layer(Raw::ID, layer))?;
         context.ensure_room(Raw::ID, layer.bytes.len())?;
         Ok(
@@ -230,11 +253,19 @@ impl Codec for RawCodec {
         Ok(Raw::decoded(input))
     }
 
-    fn make_layer(
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(raw_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Raw::default()))
+    }
+
+    fn prepare_fields(
         &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        with_fields(Raw::default(), raw_fields(fields, Raw::ID)?)
+        fields: BTreeMap<String, field::Value>,
+    ) -> Result<BTreeMap<String, field::Value>, crate::codec::Error> {
+        raw_fields(&fields, Raw::ID)
     }
 }
 
@@ -255,8 +286,7 @@ impl Codec for MalformedCodec {
         _payload: &[u8],
         context: &EncodeContext<'_>,
     ) -> Result<Encoded, crate::codec::Error> {
-        let layer = layer
-            .downcast_ref::<Malformed>()
+        let layer = Malformed::from_layer(layer)
             .ok_or_else(|| crate::codec::Error::wrong_layer(Malformed::ID, layer))?;
         context.ensure_room(Malformed::ID, layer.bytes.len())?;
         Ok(
@@ -287,14 +317,16 @@ impl Codec for MalformedCodec {
         Ok(decoded)
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        with_fields(
-            Malformed::new(None, Bytes::new(), "explicit malformed bytes"),
-            fields.clone(),
-        )
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(malformed_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Malformed::new(
+            None,
+            Bytes::new(),
+            "explicit malformed bytes",
+        )))
     }
 }
 
@@ -309,8 +341,7 @@ impl Codec for PaddingCodec {
         _payload: &[u8],
         context: &EncodeContext<'_>,
     ) -> Result<Encoded, crate::codec::Error> {
-        let layer = layer
-            .downcast_ref::<Padding>()
+        let layer = Padding::from_layer(layer)
             .ok_or_else(|| crate::codec::Error::wrong_layer(Padding::ID, layer))?;
         context.ensure_room(Padding::ID, layer.bytes.len())?;
         Ok(
@@ -329,11 +360,19 @@ impl Codec for PaddingCodec {
         Ok(decoded)
     }
 
-    fn make_layer(
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(padding_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Padding::default()))
+    }
+
+    fn prepare_fields(
         &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        with_fields(Padding::default(), raw_fields(fields, Padding::ID)?)
+        fields: BTreeMap<String, field::Value>,
+    ) -> Result<BTreeMap<String, field::Value>, crate::codec::Error> {
+        raw_fields(&fields, Padding::ID)
     }
 }
 
@@ -374,14 +413,4 @@ fn raw_fields(
         ));
     }
     Ok(normalized)
-}
-
-fn with_fields<L: Layer>(
-    mut layer: L,
-    fields: BTreeMap<String, field::Value>,
-) -> Result<Box<dyn Layer>, crate::codec::Error> {
-    for (name, value) in fields {
-        layer.set_field(&name, value)?;
-    }
-    Ok(Box::new(layer))
 }

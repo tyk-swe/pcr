@@ -51,14 +51,14 @@ impl Classified for Error {
         match self {
             Self::Preparation(error) => error.classification(),
             Self::InvalidRequest { .. } => Classification::new(
-                "cli.exchange_limit",
+                packetcraftr_core::error::Code::CliExchangeLimit,
                 Kind::Usage,
                 Some(
                     "use finite exchange timeout and retention limits no larger than the aggregate capture ceiling",
                 ),
             ),
             Self::HeterogeneousRoute => Classification::new(
-                "cli.heterogeneous_exchange_route",
+                packetcraftr_core::error::Code::CliHeterogeneousExchangeRoute,
                 Kind::Usage,
                 Some("split the exchange so every packet uses the same interface and link mode"),
             ),
@@ -66,7 +66,7 @@ impl Classified for Error {
             Self::Output { source } => source.classification(),
             Self::OutputAndCaptureShutdown { output, .. } => output.classification(),
             Self::IncoherentEvents { .. } => Classification::new(
-                "internal.exchange_event_coherence",
+                packetcraftr_core::error::Code::InternalExchangeEventCoherence,
                 Kind::Internal,
                 Some("collect every exchange event once in publication order"),
             ),

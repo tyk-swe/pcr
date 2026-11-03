@@ -70,7 +70,7 @@ impl Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         Classification::new(
-            "internal.live_io_invariant",
+            packetcraftr_core::error::Code::InternalLiveIoInvariant,
             Kind::Internal,
             Some(
                 "report the inconsistent provider result; do not reinterpret it as a successful operation",

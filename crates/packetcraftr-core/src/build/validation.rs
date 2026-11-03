@@ -7,7 +7,7 @@ use crate::{
     layer::{Malformed, Padding, Raw},
     packet::Packet,
     protocol::BuiltinProtocol,
-    protocol::link::{Ethernet, Vlan, Vlan8021ad},
+    protocol::identity,
     registry::Registry,
 };
 
@@ -21,7 +21,7 @@ pub(super) fn validate_bindings(
 ) -> Result<(), Error> {
     let mut previous_padding: Option<&Padding> = None;
     for (index, layer) in packet.iter().enumerate() {
-        let Some(padding) = layer.downcast_ref::<Padding>() else {
+        let Some(padding) = Padding::from_layer(layer) else {
             previous_padding = None;
             continue;
         };
@@ -105,16 +105,16 @@ fn validate_padding(
         .layer(outside_layer)
         .filter(|_| outside_layer < index)
         .ok_or_else(invalid)?;
-    if outside.is::<Padding>() || outside.is::<Malformed>() {
+    if BuiltinProtocol::Padding.identifies(outside)
+        || BuiltinProtocol::Malformed.identifies(outside)
+    {
         return Err(invalid());
     }
     let outside_builtin = BuiltinProtocol::of(outside);
     let child = packet.layer(outside_layer + 1);
     let child_is = |protocol: BuiltinProtocol| {
         child.is_some_and(|child| {
-            match child
-                .downcast_ref::<Malformed>()
-                .and_then(|child| child.intended_protocol.as_deref())
+            match Malformed::from_layer(child).and_then(|child| child.intended_protocol.as_deref())
             {
                 Some(intended) => BuiltinProtocol::from_name(intended) == Some(protocol),
                 None => protocol.identifies(child),
@@ -122,16 +122,8 @@ fn validate_padding(
         })
     };
     let link_declares_length = || {
-        let ether_type = outside
-            .downcast_ref::<Ethernet>()
-            .map(|link| &link.ether_type)
-            .or_else(|| outside.downcast_ref::<Vlan>().map(|link| &link.ether_type))
-            .or_else(|| {
-                outside
-                    .downcast_ref::<Vlan8021ad>()
-                    .map(|link| &link.ether_type)
-            });
-        match ether_type {
+        let ether_type = identity::ether_type(outside);
+        match &ether_type {
             Some(WireValue::Exact(value)) => *value <= 1500,
             Some(WireValue::Raw(value)) if value.len() == 2 => {
                 u16::from_be_bytes([value[0], value[1]]) <= 1500
@@ -218,11 +210,11 @@ pub(super) fn is_network_boundary(protocol: Option<BuiltinProtocol>) -> bool {
 
 pub(super) fn pass_through_byte_length(packet: &Packet) -> Result<usize, Error> {
     packet.iter().try_fold(0_usize, |total, layer| {
-        let length = if let Some(layer) = layer.downcast_ref::<Raw>() {
+        let length = if let Some(layer) = Raw::from_layer(layer) {
             layer.bytes.len()
-        } else if let Some(layer) = layer.downcast_ref::<Padding>() {
+        } else if let Some(layer) = Padding::from_layer(layer) {
             layer.bytes.len()
-        } else if let Some(layer) = layer.downcast_ref::<Malformed>() {
+        } else if let Some(layer) = Malformed::from_layer(layer) {
             layer.bytes.len()
         } else {
             0

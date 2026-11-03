@@ -79,7 +79,6 @@ pub(super) fn render(
                     serde_json::ser::PrettyFormatter::new(),
                 )
                 .map_err(|error| error.into_cli_error(report_limit_error))?;
-                invocation.check()?;
                 emit_json(invocation, &envelope)
             } else {
                 crate::rendering::bounded_json_len(
@@ -99,7 +98,7 @@ pub(super) fn render(
 fn report_limit_error() -> CliError {
     CliError::from_classification(
         packetcraftr_core::error::Classification::new(
-            "policy.verify_report_limit",
+            packetcraftr_core::error::Code::PolicyVerifyReportLimit,
             packetcraftr_core::error::Kind::Policy,
             Some("reduce the report detail budget"),
         ),

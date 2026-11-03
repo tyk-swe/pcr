@@ -6,8 +6,10 @@ use std::sync::Arc;
 use serde::Serialize;
 
 mod boundary;
+mod code;
 
 pub use boundary::BoundaryError;
+pub use code::Code;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,14 +53,14 @@ display_via_as_str!(Kind);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[non_exhaustive]
 pub struct Classification {
-    pub code: &'static str,
+    pub code: Code,
     pub kind: Kind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remediation: Option<&'static str>,
 }
 
 impl Classification {
-    pub const fn new(code: &'static str, kind: Kind, remediation: Option<&'static str>) -> Self {
+    pub const fn new(code: Code, kind: Kind, remediation: Option<&'static str>) -> Self {
         Self {
             code,
             kind,

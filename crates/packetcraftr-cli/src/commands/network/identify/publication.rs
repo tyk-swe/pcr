@@ -31,7 +31,7 @@ pub(super) fn validate_ndjson(request: &identify::Request) -> Result<(), CliErro
         if bound > MAX_RECORD_BYTES as u64 {
             return Err(CliError::from_classification(
                 Classification::new(
-                    "cli.identify_record_limit",
+                    packetcraftr_core::error::Code::CliIdentifyRecordLimit,
                     Kind::Usage,
                     Some("lower host, operation or probe limits, or use --output json"),
                 ),

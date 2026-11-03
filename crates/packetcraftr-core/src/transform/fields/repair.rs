@@ -51,7 +51,11 @@ pub(super) fn collect_repairs(
 }
 
 fn refuse_unrepairable(layer: &crate::layout::LayerLayout) -> Result<(), Error> {
-    if layer.fields.iter().any(|field| field.name == "checksum") {
+    if layer
+        .fields
+        .iter()
+        .any(|field| field.name(layer.schema) == Some("checksum"))
+    {
         return Err(Error::Unsupported(Unsupported::EditChecksumCoverage));
     }
     Ok(())
@@ -138,10 +142,11 @@ impl Repair {
 }
 
 fn checksum_field_range(layout: &PacketLayout, layer: usize) -> Result<ByteRange, Error> {
-    layout.layers[layer]
+    let layer_layout = &layout.layers[layer];
+    layer_layout
         .fields
         .iter()
-        .find(|field| field.name == "checksum")
+        .find(|field| field.name(layer_layout.schema) == Some("checksum"))
         .map(|field| field.range)
         .filter(|range| range.end - range.start == 2)
         .ok_or(Error::Unsupported(Unsupported::ChecksumLayout))

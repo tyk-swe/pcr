@@ -3,6 +3,7 @@
 
 #![allow(unsafe_code)]
 
+use packetcraftr_core::clock::{Clock, SystemClock};
 use std::{
     ffi::{CStr, CString, c_int},
     ptr::{NonNull, null_mut},
@@ -249,8 +250,8 @@ impl NativeCaptureSource for NpcapCaptureSource {
             (self.handle.api.pcap_next_ex)(self.handle.raw.as_ptr(), &mut header, &mut data)
         };
         // Monotonic first makes the paired-clock sampling skew conservative.
-        let observed_at = Instant::now();
-        let observed_wall = SystemTime::now();
+        let observed_at = SystemClock.now();
+        let observed_wall = SystemClock.wall_now();
         match result {
             1 => {
                 let header = NonNull::new(header).ok_or_else(|| Error::Capture {

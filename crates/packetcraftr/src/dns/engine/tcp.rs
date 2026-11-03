@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
 
 use crate::Stats;
 use crate::client::admission::resolve_selected;
-use crate::clock::Clock;
+use crate::clock::{Clock, SystemClock};
 use crate::dns::tcp::{Category as TcpCategory, Error as TcpError};
 use crate::engine::execution::Executor;
 use crate::engine::execution::Receipt;
@@ -182,7 +182,7 @@ impl TcpAttempt {
         query: &TcpQuery,
         framed_query_bytes: usize,
     ) -> Self {
-        let started = Instant::now();
+        let started = SystemClock.now();
         let result = executor.query(query);
         let boundary_elapsed = started.elapsed();
         let (permit, elapsed, bytes_written) = match &result {

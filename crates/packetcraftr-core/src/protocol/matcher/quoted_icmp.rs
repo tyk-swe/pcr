@@ -4,19 +4,11 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::{
-    codec::NetworkEnvelope,
-    field::WireValue,
-    layer::Layer,
-    packet::Packet,
-    protocol::BuiltinProtocol,
-    protocol::semantics,
-    protocol::transport::{Sctp, Tcp},
+    codec::NetworkEnvelope, field::WireValue, layer::Layer, packet::Packet,
+    protocol::BuiltinProtocol, protocol::identity, protocol::semantics,
 };
 
-use super::{
-    IcmpMessage,
-    sctp::{sctp_cookie_echo, sctp_initiate_tag},
-};
+use super::sctp::{sctp_cookie_echo, sctp_initiate_tag};
 use crate::protocol::headers::{Ipv4Header, Ipv6Header};
 use crate::protocol::network::{Ipv4, Ipv6, ip_protocol};
 
@@ -69,7 +61,7 @@ pub fn quoted_icmp_error(
         return None;
     }
     let (icmp_protocol, layer) = directly_received_icmp(response)?;
-    let icmp = IcmpMessage::of(layer)?;
+    let icmp = identity::icmp_message(layer)?;
     let (icmp_type, code) = (icmp.icmp_type, icmp.code);
     let body = icmp.body;
     let kind = match icmp_protocol {
@@ -117,12 +109,12 @@ pub fn quoted_icmp_error(
 pub(in crate::protocol) fn quoted_identity(
     response: &Packet,
 ) -> Option<(
-    super::super::response_identity::Identity,
-    Option<super::super::response_identity::Identity>,
+    super::super::identity::Identity,
+    Option<super::super::identity::Identity>,
 )> {
-    use super::super::response_identity::Identity;
+    use super::super::identity::Identity;
     let (_, layer) = directly_received_icmp(response)?;
-    let message = IcmpMessage::of(layer)?;
+    let message = identity::icmp_message(layer)?;
     let quote = parse_quoted_probe(message.body.get(4..)?, false)?;
     let protocol = Identity::IpProtocol {
         source: quote.source,
@@ -216,7 +208,7 @@ fn quoted_probe_matches(
     match transport {
         QuotedTransport::Tcp => {
             quoted_l4_layer(request, &quoted, BuiltinProtocol::Tcp, ip_protocol::TCP)
-                .and_then(|(_, layer)| layer.downcast_ref::<Tcp>())
+                .and_then(|(_, layer)| identity::tcp_header(layer))
                 .is_some_and(|tcp| {
                     quoted.payload.get(4..8) == Some(&tcp.sequence.to_be_bytes()[..])
                 })
@@ -230,11 +222,11 @@ fn quoted_probe_matches(
             else {
                 return false;
             };
-            let Some(sctp) = layer.downcast_ref::<Sctp>() else {
+            let Some(sctp) = identity::sctp_header(layer) else {
                 return false;
             };
             quoted.payload.get(4..8) == Some(&sctp.verification_tag.to_be_bytes()[..])
-                && quoted_sctp_matches(sctp, request, index, quoted.payload)
+                && quoted_sctp_matches(&sctp, request, index, quoted.payload)
         }
         QuotedTransport::Icmp => quoted_icmp_matches(request, network, &quoted),
         QuotedTransport::Ip => quoted_ip_matches(request, &quoted),
@@ -254,7 +246,7 @@ fn quoted_l4_layer<'a>(
         .iter()
         .enumerate()
         .find(|(_, layer)| BuiltinProtocol::of(*layer) == Some(protocol))?;
-    let key = semantics::transport_key(layer)?;
+    let key = super::super::identity::transport_key(layer)?;
     let source_port = key.source_port.to_be_bytes();
     let destination_port = key.destination_port.to_be_bytes();
     let ports = [
@@ -285,11 +277,12 @@ fn quoted_icmp_matches(
     else {
         return false;
     };
-    let Some(IcmpMessage {
+    let Some(identity::IcmpMessage {
         icmp_type,
         code,
         body,
-    }) = IcmpMessage::of(layer)
+        ..
+    }) = identity::icmp_message(layer)
     else {
         return false;
     };
@@ -302,7 +295,12 @@ fn quoted_icmp_matches(
     quoted_echo[0] == icmp_type && quoted_echo[1] == code && quoted_echo[4..8] == body_identity[..]
 }
 
-fn quoted_sctp_matches(sctp: &Sctp, request: &Packet, sctp_index: usize, payload: &[u8]) -> bool {
+fn quoted_sctp_matches(
+    sctp: &identity::SctpHeader,
+    request: &Packet,
+    sctp_index: usize,
+    payload: &[u8],
+) -> bool {
     let Some(checksum_bytes) = sctp_checksum_bytes(sctp) else {
         return false;
     };
@@ -332,7 +330,7 @@ fn quoted_sctp_matches(sctp: &Sctp, request: &Packet, sctp_index: usize, payload
     }
 }
 
-fn sctp_checksum_bytes(sctp: &Sctp) -> Option<[u8; 4]> {
+fn sctp_checksum_bytes(sctp: &identity::SctpHeader) -> Option<[u8; 4]> {
     match &sctp.checksum {
         WireValue::Exact(value) => Some(value.to_le_bytes()),
         WireValue::Raw(value) => <[u8; 4]>::try_from(value.as_ref()).ok(),
@@ -372,7 +370,7 @@ pub struct QuotedProbe<'a> {
 /// Reads a directly received ICMP quotation with at least eight transport bytes.
 pub fn quoted_probe(response: &Packet) -> Option<QuotedProbe<'_>> {
     let (_, layer) = directly_received_icmp(response)?;
-    let message = IcmpMessage::of(layer)?;
+    let message = identity::icmp_message(layer)?;
     parse_quoted_probe(message.body.get(4..)?, true)
 }
 

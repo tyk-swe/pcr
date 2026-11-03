@@ -263,7 +263,9 @@ impl Classified for Error {
             | Self::Schema { .. }
             | Self::RuleCount { .. }
             | Self::EmptyAssignments
-            | Self::Assignment(_) => Classification::new("cli.error", Kind::Usage, None),
+            | Self::Assignment(_) => {
+                Classification::new(crate::error::Code::CliError, Kind::Usage, None)
+            }
         }
     }
 

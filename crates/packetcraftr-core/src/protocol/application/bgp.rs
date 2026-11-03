@@ -3,10 +3,12 @@
 
 //! BGP-4 base messages (RFC 4271), with 4096-byte framing and byte-preserving path attributes.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -57,7 +59,7 @@ impl Default for Bgp {
     }
 }
 crate::reflective_layer! {
- fn bgp_schema() => { protocol: crate::layer::Id::new("bgp"), name: "Bgp" }
+ fn bgp_schema() => { protocol: crate::protocol::BuiltinProtocol::Bgp.id(), name: "Bgp" }
  impl Bgp {
     "message_type" => { kind: Unsigned, derived: false, required: false, description: "message type", reflect: message_type },
     "version" => { kind: Unsigned, derived: false, required: false, description: "version", reflect: version },
@@ -73,17 +75,7 @@ crate::reflective_layer! {
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
 }
-fn bgp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if 19 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "message_type",
-            range: crate::layout::ByteRange::new(18, 19),
-        });
-    }
-    fields
-}
-message_codec!(BgpCodec, Bgp, bgp_schema, bgp_layout_wire);
+message_codec!(BgpCodec, Bgp, bgp_schema);
 
 const NAME: &str = "bgp";
 impl Bgp {
@@ -158,8 +150,12 @@ impl Bgp {
         w.put(&p.bytes)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 18..19);
         if r.take(16)? != [255; 16] {
             return Err(invalid(NAME, "invalid marker"));
         }
@@ -227,7 +223,7 @@ impl Bgp {
             _ => return Err(unsupported(NAME, "unsupported message type")),
         }
         r.finish()?;
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }
 fn write_prefixes(records: &Records, w: &mut Writer) -> Result<(), Error> {

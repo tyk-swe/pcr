@@ -114,6 +114,10 @@ impl<P, K: Clock> Client<P, K> {
         self.clock.now()
     }
 
+    pub(crate) fn wall_now(&self) -> std::time::SystemTime {
+        self.clock.wall_now()
+    }
+
     /// Narrows the absolute ceiling shared by this client's future operations.
     /// An existing ceiling stays attached, so this cannot extend its expiry.
     #[must_use]

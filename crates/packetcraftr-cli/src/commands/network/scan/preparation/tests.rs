@@ -11,7 +11,7 @@ use crate::commands::network::scan::arguments::Discovery;
 fn assert_usage_error(error: crate::errors::CliError) {
     assert_eq!(error.exit_code(), 2);
     assert_eq!(error.classification.kind, Kind::Usage);
-    assert_eq!(error.classification.code, "cli.error");
+    assert_eq!(error.classification.code.as_str(), "cli.error");
 }
 
 #[test]

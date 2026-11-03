@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
@@ -14,8 +12,8 @@ use crate::{
     protocol::{
         application::byte_string_field,
         common::{
-            ensure_encode_budget, invalid, make_layer, out_of_range, strict_or_diagnostic,
-            structured::Encoder, typed_layer, wrong_type,
+            ensure_encode_budget, invalid, out_of_range, strict_or_diagnostic, structured::Encoder,
+            typed_layer, wrong_type,
         },
     },
 };
@@ -253,29 +251,29 @@ reflective_layer! {
 fn syslog_layout(layer: &Syslog) -> Vec<FieldLayout> {
     let mut fields = syslog_static_layout();
     let priority_end = format!("<{}>", layer.priority()).len();
-    for name in ["facility", "severity"] {
+    for index in [0, 1] {
         fields.push(FieldLayout {
-            name,
+            index,
             range: ByteRange::new(0, priority_end),
         });
     }
     let mut cursor = priority_end;
-    let mut push = |name: &'static str, length: usize, separator: bool| {
+    let mut push = |index: usize, length: usize, separator: bool| {
         let end = cursor.saturating_add(length);
         fields.push(FieldLayout {
-            name,
+            index,
             range: ByteRange::new(cursor, end),
         });
         cursor = end.saturating_add(usize::from(separator));
     };
     if layer.format == SyslogFormat::Rfc5424 {
-        for (name, value) in layer.header_fields() {
-            push(name, value.len(), true);
+        for (index, (_, value)) in layer.header_fields().into_iter().enumerate() {
+            push(index + 3, value.len(), true);
         }
-        push("structured_data", layer.structured_data.len(), true);
+        push(9, layer.structured_data.len(), true);
     }
     if let Some(message) = &layer.message {
-        push("message", message.len(), false);
+        push(10, message.len(), false);
     }
     fields
 }
@@ -537,11 +535,12 @@ impl Codec for SyslogCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Syslog::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(syslog_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Syslog::default()))
     }
 }
 

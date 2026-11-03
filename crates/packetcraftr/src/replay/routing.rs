@@ -88,7 +88,7 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         Classification::new(
-            "cli.error",
+            packetcraftr_core::error::Code::CliError,
             Kind::Usage,
             Some(match self {
                 Self::TooMany { .. } => "combine rules or replay the capture in parts",

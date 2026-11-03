@@ -1,8 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::clock::{Clock, SystemClock};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+pub const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 /// A blocked provider cannot be interrupted; callers check before and after each provider boundary.
 #[derive(Clone)]
@@ -37,7 +40,7 @@ impl Deadline {
 
     #[must_use]
     pub fn new(limit: Duration) -> Self {
-        Self::with_time_source(limit, Instant::now)
+        Self::with_time_source(limit, || SystemClock.now())
     }
 
     /// A spent deadline that accepts only work already queued, while preserving cancellation.
@@ -49,7 +52,7 @@ impl Deadline {
     /// A deadline for the time remaining before `deadline`, preserving cancellation.
     #[must_use]
     pub fn until(deadline: Instant, cancellation: Option<Cancellation>) -> Self {
-        Self::new(deadline.saturating_duration_since(Instant::now()))
+        Self::new(deadline.saturating_duration_since(SystemClock.now()))
             .with_cancellation(cancellation)
     }
 
@@ -225,7 +228,7 @@ pub struct DeadlineExceeded {
 impl crate::error::Classified for DeadlineExceeded {
     fn classification(&self) -> crate::error::Classification {
         crate::error::Classification::new(
-            "policy.duration_limit",
+            crate::error::Code::PolicyDurationLimit,
             crate::error::Kind::Policy,
             Some("reduce input or raise the finite invocation duration"),
         )
@@ -306,7 +309,7 @@ pub struct Cancelled;
 impl crate::error::Classified for Cancelled {
     fn classification(&self) -> crate::error::Classification {
         crate::error::Classification::new(
-            "io.cancelled",
+            crate::error::Code::IoCancelled,
             crate::error::Kind::Io,
             Some(
                 "account for earlier records and confirmed transmissions; the operation is incomplete",

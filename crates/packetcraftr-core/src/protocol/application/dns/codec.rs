@@ -1,18 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use super::reflection::{dns_layout, dns_schema};
 use super::{Dns, Error, Limits, MAX_MESSAGE_BYTES};
 use crate::{
-    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
+    codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded, SeededLayer},
     diagnostic::{Diagnostic, Severity},
     error::{Classified, Kind},
     field,
-    layer::{Id, Layer},
+    layer::Layer,
     protocol::{
         BuiltinProtocol,
         common::{ensure_encode_budget, invalid, rejected, truncated, typed_layer},
@@ -121,8 +119,31 @@ impl Codec for DnsCodec {
         &dns_schema().protocol
     }
 
-    fn published_schema(&self) -> Option<&'static crate::layer::Schema> {
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
         Some(dns_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Dns::default()))
+    }
+
+    fn seed_layer(
+        &self,
+        fields: &[(usize, &field::Value)],
+    ) -> Result<Option<SeededLayer>, crate::codec::Error> {
+        let wire = dns_schema()
+            .field_index("wire")
+            .expect("DNS schema declares a wire field");
+        let Some((_, value)) = fields.iter().find(|(index, _)| *index == wire) else {
+            return Ok(None);
+        };
+        let field::Value::Bytes(bytes) = value else {
+            return Err(invalid(NAME, "wire must be bytes"));
+        };
+        Ok(Some(SeededLayer {
+            layer: Box::new(layer_from_wire(bytes.clone(), false)?),
+            consumed: wire,
+        }))
     }
 
     fn encode(
@@ -133,15 +154,13 @@ impl Codec for DnsCodec {
     ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Dns>(NAME, layer)?;
         let tcp = context
-            .index
-            .checked_sub(1)
-            .and_then(|index| context.packet.layer(index))
-            .is_some_and(|parent| BuiltinProtocol::Tcp.identifies(parent));
+            .parent
+            .is_some_and(|parent| parent.is_builtin(BuiltinProtocol::Tcp.id()));
         if (!tcp && (context.child.is_some() || !payload.is_empty()))
             || (tcp
                 && context.child.is_some_and(|child| {
-                    !BuiltinProtocol::Raw.identifies(child)
-                        && !BuiltinProtocol::Padding.identifies(child)
+                    !child.is_builtin(BuiltinProtocol::Raw.id())
+                        && !child.is_builtin(BuiltinProtocol::Padding.id())
                 }))
         {
             return Err(invalid(NAME, "DNS permits only a raw TCP framing tail"));
@@ -174,7 +193,7 @@ impl Codec for DnsCodec {
         input: Bytes,
         context: &DecodeContext<'_>,
     ) -> Result<Decoded, crate::codec::Error> {
-        if context.parent == Some(Id::new("tcp")) {
+        if context.parent == Some(crate::protocol::BuiltinProtocol::Tcp.id()) {
             let mut failure = None;
             let parsed = input
                 .get(..2)
@@ -251,29 +270,5 @@ impl Codec for DnsCodec {
             stop: true,
             network: None,
         })
-    }
-
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        let mut layer = if let Some(field::Value::Bytes(wire)) = fields.get("wire") {
-            layer_from_wire(wire.clone(), false)?
-        } else {
-            Dns::default()
-        };
-        for (name, value) in fields {
-            if name == "wire" {
-                if !matches!(value, field::Value::Bytes(_)) {
-                    return Err(invalid(NAME, "wire must be bytes"));
-                }
-                continue;
-            }
-            if layer.field(name).as_ref() == Some(value) {
-                continue;
-            }
-            crate::protocol::common::set_document_field(&mut layer, name, value.clone())?;
-        }
-        Ok(Box::new(layer))
     }
 }

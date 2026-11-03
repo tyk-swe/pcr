@@ -1,0 +1,33 @@
+{
+  "command": "identify",
+  "diagnostics": [],
+  "event": "complete",
+  "mode": "stream",
+  "result": {
+    "cancelled": false,
+    "complete": true,
+    "corpus": "project-service-probes",
+    "corpus_version": "1.1.0",
+    "elapsed": {
+      "nanos": 1062226,
+      "secs": 0
+    },
+    "endpoints": 1,
+    "exclusion_set": "project-sensitive-services",
+    "exclusion_version": "1.0.0",
+    "usage": {
+      "attempts": 5,
+      "read_bytes": 0,
+      "tls": {
+        "certificate_bytes": 0,
+        "read_bytes": 0,
+        "steps": 0,
+        "write_bytes": 0
+      },
+      "write_bytes": 0
+    }
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 1,
+  "status": "success"
+}

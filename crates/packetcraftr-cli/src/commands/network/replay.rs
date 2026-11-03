@@ -7,9 +7,10 @@ mod rendering;
 
 use crate::command_options::Bounded as _;
 use crate::output::envelope::Published;
+use packetcraftr_core::clock::SystemClock;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use packetcraftr::PacketProviders;
 use packetcraftr::clock::Clock;
@@ -260,7 +261,7 @@ fn replay_aggregate<P: PacketProviders, K: Clock, R: Read>(
     client: &packetcraftr::Client<P, K>,
     request: Request<R>,
 ) -> Result<(), CliError> {
-    let started = Instant::now();
+    let started = SystemClock.now();
     let requested_interface = requested_interface(&request);
     let link_mode = request.options.link_mode;
     let frames = Arc::new(Mutex::new(Vec::new()));
@@ -289,7 +290,7 @@ fn replay_stream<P: PacketProviders, K: Clock, R: Read>(
     request: Request<R>,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let started = Instant::now();
+    let started = SystemClock.now();
     let interface = requested_interface(&request);
     let link_mode = request.options.link_mode;
     let records = stream.clone();

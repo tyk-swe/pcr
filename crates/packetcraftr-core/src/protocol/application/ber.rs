@@ -5,7 +5,7 @@ use crate::{
     codec::Error,
     protocol::{
         common::{invalid, unsupported},
-        message::*,
+        message::{MAX_NESTING, MAX_RECORDS, Reader, Writer},
     },
 };
 pub(super) fn take<'a>(r: &mut Reader<'a>) -> Result<(u8, &'a [u8]), Error> {

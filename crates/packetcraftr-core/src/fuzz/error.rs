@@ -73,7 +73,7 @@ impl Classified for Error {
             | Self::CaseIndexOverflow
             | Self::InvalidDuration { .. }
             | Self::InvalidTarget { .. } => Classification::new(
-                "cli.fuzz_limit",
+                crate::error::Code::CliFuzzLimit,
                 Kind::Usage,
                 Some(
                     "use valid layer.field targets and finite non-zero case, byte, field, list, shrink, and duration limits",
@@ -81,7 +81,7 @@ impl Classified for Error {
             ),
             Self::TargetSeparator { .. } | Self::TargetLayer { .. } | Self::TargetField { .. } => {
                 Classification::new(
-                    "cli.fuzz_limit",
+                    crate::error::Code::CliFuzzLimit,
                     Kind::Usage,
                     Some(
                         "use LAYER.FIELD targets naming a layer index and a reflective field path",
@@ -90,20 +90,20 @@ impl Classified for Error {
             }
             Self::Selector(source) => source.classification(),
             Self::InvalidBasePacket { .. } => Classification::new(
-                "packet.fuzz_recipe",
+                crate::error::Code::PacketFuzzRecipe,
                 Kind::Packet,
                 Some(
                     "use a base packet within the configured layer, reflected-value, and target-field limits",
                 ),
             ),
             Self::NoCompatibleTargets => Classification::new(
-                "packet.fuzz_target",
+                crate::error::Code::PacketFuzzTarget,
                 Kind::Packet,
                 Some("select a strategy compatible with at least one reflective packet field"),
             ),
             Self::ByteLimit { .. } | Self::ValueTooLarge { .. } | Self::DurationLimit { .. } => {
                 Classification::new(
-                    "policy.fuzz_resource_limit",
+                    crate::error::Code::PolicyFuzzResourceLimit,
                     Kind::Policy,
                     Some(
                         "reduce cases, packet sizes, timeout, or rate delay, or deliberately raise the finite fuzz limit",
@@ -111,14 +111,14 @@ impl Classified for Error {
                 )
             }
             Self::ValueItems { .. } => Classification::new(
-                "policy.fuzz_resource_limit",
+                crate::error::Code::PolicyFuzzResourceLimit,
                 Kind::Policy,
                 Some(
                     "shrink the lists or objects in the packet, or deliberately raise the finite max_list_items limit",
                 ),
             ),
             Self::ValueNesting { .. } => Classification::new(
-                "policy.fuzz_resource_limit",
+                crate::error::Code::PolicyFuzzResourceLimit,
                 Kind::Policy,
                 Some(
                     "flatten the packet's lists and objects; nesting depth is capped at a fixed limit that cannot be raised",

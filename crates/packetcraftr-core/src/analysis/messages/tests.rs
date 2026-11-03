@@ -119,7 +119,7 @@ fn every_tcp_protocol_accepts_split_and_coalesced_frames() {
             continue;
         }
         let bytes = crate::layer::parse_hex(row["wire_hex"].as_str().unwrap()).unwrap();
-        let port = protocol.message_protocol().unwrap().tcp_ports[0];
+        let port = protocol.tcp_ports()[0];
         let mut collector = Collector::new(
             Limits::default(),
             crate::protocol::builtin::registry(),
@@ -199,16 +199,18 @@ fn every_tcp_protocol_accepts_split_and_coalesced_frames() {
 
 #[test]
 fn declared_length_is_rejected_before_large_allocation() {
-    let mut framer = Framer::new("opcua_tcp");
+    let mut framer = Framer::new(crate::codec::Framing::OpcuaTcp, "opcua_tcp");
     assert!(framer.progress(b"MSGF\xff\xff\xff\x7f", 1024).is_err());
-    let mut framer = Framer::new("resp");
+    let mut framer = Framer::new(crate::codec::Framing::Resp, "resp");
     assert!(framer.progress(b"$2147483647\r\n", 1024).is_err());
 }
 
 #[test]
 fn port_overrides_drive_stream_selection() {
     let registry = crate::protocol::builtin::registry_with(|builder| {
-        builder.bind("tcp", 1884, "mqtt", i32::MAX).map(|_| ())
+        builder
+            .replace_binding("tcp", 1884, "mqtt", crate::registry::Priority::Primary)
+            .map(|_| ())
     })
     .unwrap();
     let mut collector = Collector::new(
@@ -786,7 +788,12 @@ fn modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
     let registry = Arc::new(
         builtin::registry_with(|builder| {
             builder
-                .bind("tcp", 1502, "modbus_tcp", i32::MAX)
+                .replace_binding(
+                    "tcp",
+                    1502,
+                    "modbus_tcp",
+                    crate::registry::Priority::Primary,
+                )
                 .map(|_| ())
         })
         .unwrap(),

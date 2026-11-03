@@ -5,10 +5,12 @@
 
 use std::marker::PhantomData;
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::invalid;
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -80,7 +82,7 @@ macro_rules! ppp_control_layer {
             "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
          }
         }
-        message_codec!($codec, $ty, $schema, ppp_control_layout_wire);
+        message_codec!($codec, $ty, $schema);
     };
 }
 ppp_control_layer!(PppLcp, Lcp, ppplcp_schema, "PppLcp", PppLcpCodec);
@@ -93,22 +95,6 @@ ppp_control_layer!(
     PppIpv6cpCodec
 );
 
-fn ppp_control_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if !b.is_empty() {
-        fields.push(crate::layout::FieldLayout {
-            name: "code",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-    }
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "identifier",
-            range: crate::layout::ByteRange::new(1, 2),
-        });
-    }
-    fields
-}
 impl<P: ControlProtocol> PppControl<P> {
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         if self.code == 0 {
@@ -144,8 +130,13 @@ impl<P: ControlProtocol> PppControl<P> {
         w.put(&p.bytes)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(P::NAME, &b);
+        r.mark(0, 0..1);
+        r.mark(1, 1..2);
         let mut s = Self {
             code: r.u8()?,
             identifier: r.u8()?,
@@ -176,6 +167,6 @@ impl<P: ControlProtocol> PppControl<P> {
         } else {
             s.data = Bytes::copy_from_slice(r.rest());
         }
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }

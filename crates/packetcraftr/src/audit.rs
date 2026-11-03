@@ -121,14 +121,18 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::Invalid(_) => Classification::new("cli.audit_request", Kind::Usage, None),
+            Self::Invalid(_) => Classification::new(
+                packetcraftr_core::error::Code::CliAuditRequest,
+                Kind::Usage,
+                None,
+            ),
             Self::Policy(e) => e.classification(),
             Self::Tcp(e) => e.classification(),
             Self::Tls(e) => e.classification(),
             Self::Interrupted(e) => e.classification(),
             Self::Http(e) => e.classification(),
             Self::IncompleteResponse | Self::Io(_) => {
-                Classification::new("io.audit", Kind::Io, None)
+                Classification::new(packetcraftr_core::error::Code::IoAudit, Kind::Io, None)
             }
         }
     }

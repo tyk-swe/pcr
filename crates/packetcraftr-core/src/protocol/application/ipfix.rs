@@ -3,10 +3,12 @@
 
 //! IPFIX v10 headers, templates and opaque data sets (RFC 7011). Template state and information-element interpretation are outside this codec.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -34,7 +36,7 @@ pub struct Ipfix {
     pub sets: Records,
 }
 crate::reflective_layer! {
- fn ipfix_schema() => { protocol: crate::layer::Id::new("ipfix"), name: "Ipfix" }
+ fn ipfix_schema() => { protocol: crate::protocol::BuiltinProtocol::Ipfix.id(), name: "Ipfix" }
  impl Ipfix {
     "export_time" => { kind: Unsigned, derived: false, required: false, description: "export time", reflect: export_time },
     "sequence" => { kind: Unsigned, derived: false, required: false, description: "sequence", reflect: sequence },
@@ -42,35 +44,7 @@ crate::reflective_layer! {
     "sets" => { kind: List, derived: false, required: false, description: "Template records or opaque data sets", children: SETS, reflect: sets },
  }
 }
-fn ipfix_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if 8 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "export_time",
-            range: crate::layout::ByteRange::new(4, 8),
-        });
-    }
-    if 12 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "sequence",
-            range: crate::layout::ByteRange::new(8, 12),
-        });
-    }
-    if 16 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "observation_domain",
-            range: crate::layout::ByteRange::new(12, 16),
-        });
-    }
-    if 16 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "sets",
-            range: crate::layout::ByteRange::new(16, b.len()),
-        });
-    }
-    fields
-}
-message_codec!(IpfixCodec, Ipfix, ipfix_schema, ipfix_layout_wire);
+message_codec!(IpfixCodec, Ipfix, ipfix_schema);
 
 const NAME: &str = "ipfix";
 impl Ipfix {
@@ -155,8 +129,15 @@ impl Ipfix {
         w.put(&sets.bytes)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 4..8);
+        r.mark(1, 8..12);
+        r.mark(2, 12..16);
+        r.mark(3, 16..b.len());
         if r.u16()? != 10 {
             return Err(unsupported(NAME, "only IPFIX version 10"));
         }
@@ -226,6 +207,6 @@ impl Ipfix {
             }
             s.sets.0.push(set);
         }
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }

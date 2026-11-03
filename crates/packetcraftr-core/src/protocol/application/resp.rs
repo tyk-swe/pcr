@@ -3,10 +3,10 @@
 
 //! RESP2 scalar and recursive array values, bounded to 16 levels and 4096 values.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{MAX_NESTING, MAX_RECORDS, Reader, Writer, message_codec, record};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -26,18 +26,12 @@ impl Default for Resp {
     }
 }
 crate::reflective_layer! {
- fn resp_schema() => { protocol: crate::layer::Id::new("resp"), name: "Resp" }
+ fn resp_schema() => { protocol: crate::protocol::BuiltinProtocol::Resp.id(), name: "Resp" }
  impl Resp {
     "value" => { kind: Object, derived: false, required: false, description: "RESP2 value with kind and typed content", children: RESP_FIELDS, reflect: value },
  }
 }
-fn resp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    vec![crate::layout::FieldLayout {
-        name: "value",
-        range: crate::layout::ByteRange::new(0, b.len()),
-    }]
-}
-message_codec!(RespCodec, Resp, resp_schema, resp_layout_wire);
+message_codec!(RespCodec, Resp, resp_schema);
 
 const NAME: &str = "resp";
 impl Resp {
@@ -47,12 +41,16 @@ impl Resp {
         self.value.encode(&mut w, 0, &mut count)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..b.len());
         let mut count = 0;
         let value = RespValue::parse(&mut r, 0, &mut count)?;
         r.finish()?;
-        Ok(Self { value })
+        Ok((Self { value }, r.take_layouts()))
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]

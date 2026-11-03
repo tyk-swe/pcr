@@ -14,7 +14,7 @@ use crate::{
     layer::{Layer, Malformed, Padding, Raw},
     packet::Packet,
     protocol::BuiltinProtocol,
-    protocol::network::{Icmpv4, Icmpv6},
+    protocol::identity,
     protocol::semantics,
 };
 
@@ -166,7 +166,7 @@ fn reversed_layer_pair(
     if matches!(
         request_protocol,
         BuiltinProtocol::Tcp | BuiltinProtocol::Udp | BuiltinProtocol::Sctp
-    ) && !semantics::transport_keys_are_reversed(request_layer, response_layer)
+    ) && !identity::transport_keys_are_reversed(request_layer, response_layer)
     {
         return None;
     }
@@ -218,40 +218,14 @@ fn network_endpoints_before(packet: &Packet, upper_layer_index: usize) -> Option
     })
 }
 
-struct IcmpMessage<'a> {
-    icmp_type: u8,
-    code: u8,
-    body: &'a Bytes,
-}
-
-impl<'a> IcmpMessage<'a> {
-    fn of(layer: &'a dyn Layer) -> Option<Self> {
-        if let Some(icmp) = layer.downcast_ref::<Icmpv4>() {
-            return Some(Self {
-                icmp_type: icmp.icmp_type,
-                code: icmp.code,
-                body: &icmp.body,
-            });
-        }
-        let icmp = layer.downcast_ref::<Icmpv6>()?;
-        Some(Self {
-            icmp_type: icmp.icmp_type,
-            code: icmp.code,
-            body: &icmp.body,
-        })
-    }
-}
-
 fn opaque_bytes(layer: &dyn Layer) -> Option<&Bytes> {
-    if let Some(raw) = layer.downcast_ref::<Raw>() {
+    if let Some(raw) = Raw::from_layer(layer) {
         return Some(&raw.bytes);
     }
-    if let Some(padding) = layer.downcast_ref::<Padding>() {
+    if let Some(padding) = Padding::from_layer(layer) {
         return Some(&padding.bytes);
     }
-    layer
-        .downcast_ref::<Malformed>()
-        .map(|malformed| &malformed.bytes)
+    Malformed::from_layer(layer).map(|malformed| &malformed.bytes)
 }
 
 fn response_source(response: &Packet, protocol: BuiltinProtocol) -> Option<std::net::IpAddr> {

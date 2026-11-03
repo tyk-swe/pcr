@@ -249,7 +249,7 @@ impl Classified for SelectionError {
         match self {
             Self::Target(source) => source.classification(),
             _ => Classification::new(
-                "cli.target_selection",
+                packetcraftr_core::error::Code::CliTargetSelection,
                 Kind::Usage,
                 Some("supply explicit bounded host/IP/CIDR targets and numeric exclusions"),
             ),

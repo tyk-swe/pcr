@@ -41,11 +41,17 @@ impl std::fmt::Display for Limit {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::Invalid(_) => Classification::new("packet.http2", Kind::Packet, None),
-            Self::Limit(_) => Classification::new("policy.http2_limit", Kind::Policy, None),
-            Self::Compression(_) => {
-                Classification::new("packet.http2_compression", Kind::Packet, None)
+            Self::Invalid(_) => {
+                Classification::new(crate::error::Code::PacketHttp2, Kind::Packet, None)
             }
+            Self::Limit(_) => {
+                Classification::new(crate::error::Code::PolicyHttp2Limit, Kind::Policy, None)
+            }
+            Self::Compression(_) => Classification::new(
+                crate::error::Code::PacketHttp2Compression,
+                Kind::Packet,
+                None,
+            ),
         }
     }
 }

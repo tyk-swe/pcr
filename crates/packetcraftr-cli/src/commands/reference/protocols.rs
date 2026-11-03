@@ -102,7 +102,7 @@ fn describe_protocol(
 fn unknown_protocol(name: &str) -> CliError {
     CliError::from_classification(
         Classification::new(
-            "cli.protocol",
+            packetcraftr_core::error::Code::CliProtocol,
             Kind::Usage,
             Some("run `packetcraftr reference protocols` to list built-in protocols"),
         ),

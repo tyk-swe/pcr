@@ -9,10 +9,9 @@ use std::{
     sync::Arc,
 };
 
+use super::super::READ_TIMEOUT_MILLIS;
 use super::{
-    abi::{
-        PCAP_ERROR_BUFFER_SIZE, PCAP_WARNING_PROMISC_NOTSUP, PcapSetInteger, READ_TIMEOUT_MILLIS,
-    },
+    abi::{PCAP_ERROR_BUFFER_SIZE, PCAP_WARNING_PROMISC_NOTSUP, PcapSetInteger},
     error::{error_buffer_message, map_activation_error, map_open_message},
     loader::{NpcapApi, npcap_api, npcap_device_name},
 };

@@ -87,7 +87,7 @@ pub(super) fn run(
     if tree.tree && !dissect {
         return Err(CliError::from_classification(
             Classification::new(
-                "cli.tree_requires_dissect",
+                packetcraftr_core::error::Code::CliTreeRequiresDissect,
                 Kind::Usage,
                 Some("add --dissect to show each frame's layers as a tree"),
             ),
@@ -135,7 +135,7 @@ fn validate_dissect_format(dissect: bool, format: Format) -> Result<(), CliError
     if dissect && !matches!(format, Format::Text | Format::Ndjson) {
         return Err(CliError::from_classification(
             Classification::new(
-                "cli.dissect_unsupported_format",
+                packetcraftr_core::error::Code::CliDissectUnsupportedFormat,
                 Kind::Usage,
                 Some("use --output text or --output ndjson to show the layer stack"),
             ),

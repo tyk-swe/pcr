@@ -1,0 +1,84 @@
+{
+  "command": "audit-http",
+  "diagnostics": [],
+  "event": "complete",
+  "mode": "stream",
+  "result": {
+    "completeness": {
+      "complete": true,
+      "reasons": []
+    },
+    "findings": [
+      {
+        "complete": true,
+        "evidence": {
+          "request_method": "HEAD",
+          "response_status": 200
+        },
+        "frames": [],
+        "indicator_id": null,
+        "remediation": "Define a Content-Security-Policy suitable for this application.",
+        "rule_id": "http.csp",
+        "severity": "low",
+        "subject": "127.0.0.1:46589",
+        "summary": "Content-Security-Policy is absent or empty"
+      },
+      {
+        "complete": true,
+        "evidence": {
+          "request_method": "HEAD",
+          "response_status": 200
+        },
+        "frames": [],
+        "indicator_id": null,
+        "remediation": "Set CSP frame-ancestors or a supported X-Frame-Options policy.",
+        "rule_id": "http.framing",
+        "severity": "low",
+        "subject": "127.0.0.1:46589",
+        "summary": "No recognized framing protection observed"
+      },
+      {
+        "complete": true,
+        "evidence": {
+          "request_method": "HEAD",
+          "response_status": 200
+        },
+        "frames": [],
+        "indicator_id": null,
+        "remediation": "Send X-Content-Type-Options: nosniff with correct media types.",
+        "rule_id": "http.nosniff",
+        "severity": "low",
+        "subject": "127.0.0.1:46589",
+        "summary": "X-Content-Type-Options: nosniff not observed"
+      },
+      {
+        "complete": true,
+        "evidence": {
+          "request_method": "HEAD",
+          "response_status": 200
+        },
+        "frames": [],
+        "indicator_id": null,
+        "remediation": "Choose an explicit Referrer-Policy appropriate for the application.",
+        "rule_id": "http.referrer_policy",
+        "severity": "low",
+        "subject": "127.0.0.1:46589",
+        "summary": "No recognized restrictive Referrer-Policy observed"
+      }
+    ],
+    "kind": "audit-http",
+    "measurements": {
+      "bytes_read": 156,
+      "bytes_sent": 93,
+      "cookies": [],
+      "host": "127.0.0.1:46589",
+      "https": false,
+      "path": "/",
+      "status": 200
+    },
+    "sources": []
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 4,
+  "status": "success"
+}

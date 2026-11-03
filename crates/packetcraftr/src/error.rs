@@ -104,30 +104,30 @@ impl Classified for Error {
             Self::Policy(error) => error.classification(),
             Self::Io(error) => error.classification(),
             Self::Template { .. } => Classification::new(
-                "packet.template",
+                packetcraftr_core::error::Code::PacketTemplate,
                 Kind::Packet,
                 Some("reduce or correct the bounded packet-template expansion"),
             ),
             Self::PacketMaterialization { .. } => Classification::new(
-                "packet.materialization",
+                packetcraftr_core::error::Code::PacketMaterialization,
                 Kind::Packet,
                 Some(
                     "correct the route-dependent packet fields; post-build shape changes are rejected",
                 ),
             ),
             Self::PacketExceedsMtu { .. } => Classification::new(
-                "packet.mtu",
+                packetcraftr_core::error::Code::PacketMtu,
                 Kind::Packet,
                 Some("reduce the network packet or apply an explicit fragmentation transform"),
             ),
             Self::UnresolvedNeighbor { .. } => Classification::new(
-                "io.route_changed",
+                packetcraftr_core::error::Code::IoRouteChanged,
                 Kind::Io,
                 Some("retry once the route to the target is stable"),
             ),
             Self::NeighborSpent(spent) => spent.error.classification(),
             Self::Clock { .. } => Classification::new(
-                "io.neighbor_clock",
+                packetcraftr_core::error::Code::IoNeighborClock,
                 Kind::Io,
                 Some(
                     "inspect the pacing clock and account for the neighbor requests already transmitted",

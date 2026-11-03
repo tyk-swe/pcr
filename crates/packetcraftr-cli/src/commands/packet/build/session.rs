@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::protocol::BuiltinProtocol;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -205,10 +206,10 @@ impl SessionArgs {
 /// room under IPv4's total length, only the 16-bit payload length under IPv6.
 fn udp_response_limit(recipe: &Packet) -> (usize, &'static str) {
     for layer in recipe.iter() {
-        if layer.is::<packetcraftr_core::protocol::network::Ipv6>() {
+        if BuiltinProtocol::Ipv6.identifies(layer) {
             return (MAX_UDP_RESPONSE_IPV6, "IPv6");
         }
-        if layer.is::<packetcraftr_core::protocol::network::Ipv4>() {
+        if BuiltinProtocol::Ipv4.identifies(layer) {
             return (MAX_UDP_RESPONSE_IPV4, "IPv4");
         }
     }

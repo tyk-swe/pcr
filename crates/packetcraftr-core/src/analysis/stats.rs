@@ -1,11 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::protocol::identity;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
-
-use crate::protocol::network::{Ipv4, Ipv6};
 
 use crate::analysis::StreamTransport;
 use crate::analysis::conversation_index::CanonicalFlow;
@@ -359,10 +358,8 @@ fn duration_from_nanos_saturating(nanoseconds: u128) -> Duration {
 fn innermost_network(record: &FrameRecord<'_>) -> Option<(IpAddr, IpAddr)> {
     let mut network = None;
     for layer in record.decoded.packet.iter() {
-        if let Some(ipv4) = layer.downcast_ref::<Ipv4>() {
-            network = Some((ipv4.source.into(), ipv4.destination.into()));
-        } else if let Some(ipv6) = layer.downcast_ref::<Ipv6>() {
-            network = Some((ipv6.source.into(), ipv6.destination.into()));
+        if let Some(endpoints) = identity::network_endpoints(layer) {
+            network = Some(endpoints);
         }
     }
     network

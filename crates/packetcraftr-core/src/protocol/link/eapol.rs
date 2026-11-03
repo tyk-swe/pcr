@@ -1,20 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, ensure_encode_budget, invalid, make_layer, payload_without_padding,
-    resolve_u16, truncated, typed_layer,
+    ValueExpectation, ensure_encode_budget, invalid, payload_without_padding, resolve_u16,
+    truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -25,6 +23,7 @@ const EAPOL_LEN: usize = 4;
 
 /// Discriminator of the body that follows the header.
 const EAPOL_BODY: u64 = 0;
+pub(crate) const EAP_PACKET_SELECTOR: u64 = 256;
 
 /// EAP over LAN header (IEEE 802.1X).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,7 +79,7 @@ impl Codec for EapolCodec {
         let mut diagnostics = Vec::new();
         if context
             .child
-            .is_some_and(<dyn Layer>::is::<super::eap::Eap>)
+            .is_some_and(|child| child.is_builtin(crate::protocol::BuiltinProtocol::Eap.id()))
             && layer.packet_type != 0
         {
             crate::protocol::common::strict_or_diagnostic(
@@ -142,7 +141,7 @@ impl Codec for EapolCodec {
                 Vec::new()
             } else {
                 vec![
-                    Discriminator(256 + u64::from(header[1])),
+                    Discriminator(EAP_PACKET_SELECTOR + u64::from(header[1])),
                     Discriminator(EAPOL_BODY),
                 ]
             },
@@ -152,10 +151,11 @@ impl Codec for EapolCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Eapol::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(eapol_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Eapol::default()))
     }
 }

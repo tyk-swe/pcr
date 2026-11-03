@@ -76,7 +76,7 @@ where
         )?;
         let timeout = self.deadline.bounded_timeout(self.request.timeout)?;
         let admitted = self.clock.now();
-        let scheduled_at = SystemTime::now();
+        let scheduled_at = self.clock.wall_now();
         let pending = match self.budget.start(
             Arc::clone(self.provider),
             endpoint,

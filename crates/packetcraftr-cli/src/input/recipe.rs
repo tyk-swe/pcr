@@ -235,7 +235,7 @@ mod tests {
             std::fs::write(&path, bytes).unwrap();
             let error =
                 resolve_recipe(&invocation, None, Some(path.clone()), &registry, 16).unwrap_err();
-            assert_eq!(error.classification.code, code);
+            assert_eq!(error.classification.code.as_str(), code);
             assert_eq!(error.classification.kind, Kind::Usage);
             assert!(error.message.contains(&path.display().to_string()));
             assert!(!error.causes.is_empty());

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::clock::{Clock, SystemClock};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Mutex;
@@ -62,7 +63,7 @@ impl NeighborCache {
         let Some(entry) = cache.get(key) else {
             return Ok(None);
         };
-        if entry.expires_at > Instant::now() {
+        if entry.expires_at > SystemClock.now() {
             return Ok(Some(entry.mac_address));
         }
         cache.remove(key);
@@ -75,7 +76,7 @@ impl NeighborCache {
         key: NeighborCacheKey,
         options: &Options,
     ) -> Result<(), crate::neighbor::Error> {
-        let now = Instant::now();
+        let now = SystemClock.now();
         let expires_at = now
             .checked_add(options.cache_ttl)
             .ok_or_else(|| invalid_options("cache deadline overflowed".to_owned()))?;

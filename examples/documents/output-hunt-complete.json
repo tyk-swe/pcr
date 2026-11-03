@@ -1,0 +1,146 @@
+{
+  "command": "hunt",
+  "diagnostics": [],
+  "event": "complete",
+  "mode": "stream",
+  "result": {
+    "completeness": {
+      "complete": true,
+      "reasons": []
+    },
+    "findings": [
+      {
+        "complete": true,
+        "evidence": {
+          "context": {
+            "message": 1,
+            "protocol": "dns",
+            "scope": 0
+          },
+          "value": "example.test."
+        },
+        "frames": [
+          1
+        ],
+        "indicator_id": "lab-domain",
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "example.test.",
+        "summary": "Observed value matches a local indicator"
+      },
+      {
+        "complete": true,
+        "evidence": {
+          "context": {
+            "message": 1,
+            "protocol": "dns",
+            "scope": 0
+          },
+          "value": "example.test."
+        },
+        "frames": [
+          1
+        ],
+        "indicator_id": "lab-domain",
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "example.test.",
+        "summary": "Observed value matches a local indicator"
+      },
+      {
+        "complete": true,
+        "evidence": {
+          "context": {
+            "message": 1,
+            "protocol": "dns",
+            "scope": 0
+          },
+          "value": "example.test."
+        },
+        "frames": [
+          1
+        ],
+        "indicator_id": "lab-domain",
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "example.test.",
+        "summary": "Observed value matches a local indicator"
+      },
+      {
+        "complete": true,
+        "evidence": {
+          "context": {
+            "protocol": "dns_rdata"
+          },
+          "value": "ns.example.test."
+        },
+        "frames": [
+          1
+        ],
+        "indicator_id": "lab-domain",
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "ns.example.test.",
+        "summary": "Observed value matches a local indicator"
+      },
+      {
+        "complete": true,
+        "evidence": {
+          "context": {
+            "message": 1,
+            "protocol": "dns",
+            "scope": 0
+          },
+          "value": "example.test."
+        },
+        "frames": [
+          1
+        ],
+        "indicator_id": "lab-domain",
+        "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+        "rule_id": "ioc.match",
+        "severity": "high",
+        "subject": "example.test.",
+        "summary": "Observed value matches a local indicator"
+      }
+    ],
+    "kind": "hunt",
+    "measurements": {
+      "capture": "examples/captures/dns-response.pcap",
+      "clock": {
+        "max_forward_step": {
+          "nanos": 0,
+          "secs": 0
+        },
+        "max_forward_step_frame": null,
+        "max_regression": {
+          "nanos": 0,
+          "secs": 0
+        },
+        "regressions": 0
+      },
+      "frames_matched": 1,
+      "frames_read": 1,
+      "scopes": [
+        {
+          "encapsulation": [],
+          "id": 0,
+          "interface": null
+        }
+      ]
+    },
+    "sources": [
+      {
+        "path": "examples/documents/indicators.json",
+        "sha256": "ef222c2af32179aef305ccb49411d961d686821496d0b84358a585e77af16dfc"
+      }
+    ]
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 5,
+  "status": "success"
+}

@@ -177,6 +177,7 @@ pub(super) fn selected_list_present(context: &Context<'_>, field: &FieldRef) -> 
     let FieldSource::NestedLayer {
         protocol,
         path,
+        root_index,
         selection,
         occurrence,
     } = &field.source
@@ -188,7 +189,7 @@ pub(super) fn selected_list_present(context: &Context<'_>, field: &FieldRef) -> 
     }
     layers(context, protocol.as_str(), *occurrence).any(|layer| {
         layer
-            .field(path.root())
+            .field_by_index(*root_index)
             .is_some_and(|root| matches!(path.get(&root), Some(field::Value::List(_))))
     })
 }
@@ -201,11 +202,12 @@ where
         FieldSource::NestedLayer {
             protocol,
             path,
+            root_index,
             selection,
             occurrence,
         } => {
             for layer in layers(context, protocol.as_str(), *occurrence) {
-                let Some(root) = layer.field(path.root()) else {
+                let Some(root) = layer.field_by_index(*root_index) else {
                     continue;
                 };
                 let Some(value) = path.get(&root) else {
@@ -244,11 +246,16 @@ where
         }
         FieldSource::Layer {
             binding,
+            indices,
             occurrence,
         } => {
             for layer in layers(context, binding.protocol().as_str(), *occurrence) {
-                for name in binding.fields() {
-                    let Some(value) = layer.field(name) else {
+                for (position, name) in binding.fields().iter().enumerate() {
+                    let value = match indices.get(position) {
+                        Some(index) => layer.field_by_index(*index),
+                        None => layer.field(name),
+                    };
+                    let Some(value) = value else {
                         continue;
                     };
                     let Some(value) = project(value, binding, field.slice) else {

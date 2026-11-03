@@ -262,7 +262,7 @@ impl Classified for Error {
             Self::Resource(source) => source.classification(),
             Self::Malformed(source) => source.classification(),
             Self::Inconsistent { .. } => Classification::new(
-                "internal.ip_reassembly",
+                crate::error::Code::InternalIpReassembly,
                 Kind::Internal,
                 Some("report the capture and command as an internal IP reassembly failure"),
             ),

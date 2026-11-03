@@ -17,6 +17,8 @@ from script_support import read_json, strict_json
 ROOT = Path(__file__).resolve().parent.parent
 CONTRACT = 'crates/packetcraftr-core/src/security.rs'
 RELEASE_ASSETS = 'scripts/release-assets.json'
+REGISTRY = 'crates/packetcraftr-cli/src/output/contract.rs'
+CLI_SRC = 'crates/packetcraftr-cli/src'
 RUNTIME_IDENTIFIER = re.compile(
     r'^pub const OUTPUT_SCHEMA: &str = "(packetcraftr\.output/v([1-9][0-9]*))";$', re.MULTILINE)
 OUTPUT_SCHEMA_ASSET = re.compile(r'^schemas/(?:historical/)?packetcraftr\.output\.')
@@ -132,25 +134,63 @@ def parsed_records(label: str, text: str, ndjson: bool) -> tuple[list[tuple[str,
     return records, problems
 
 
-def validated(validator: Any, label: str, text: str, ndjson: bool) -> list[str]:
+CODE_PATTERN = re.compile(r'^[a-z]+\.[a-z0-9_.]+$')
+CODE_LITERAL = re.compile(r'"((?:[a-z][a-z0-9]*)\.[a-z0-9_.]+)"')
+
+
+def published_codes(root: Path) -> set[str]:
+    """Every machine-readable code the Rust sources can publish.
+
+    Classification codes come from the typed `Code` enum; diagnostic and
+    expert-finding codes are string literals at their construction sites.
+    Output carrying a code outside this closed set is unpublished surface.
+    """
+    codes: set[str] = set()
+    for path in (root / 'crates').rglob('*.rs'):
+        codes.update(CODE_LITERAL.findall(path.read_text(encoding='utf-8', errors='replace')))
+    return codes
+
+
+def code_problems(label: str, record: Any, published: set[str]) -> list[str]:
+    problems: list[str] = []
+
+    def walk(node: Any, trail: str) -> None:
+        if isinstance(node, dict):
+            code = node.get('code')
+            if isinstance(code, str) and CODE_PATTERN.match(code) and code not in published:
+                problems.append(f'{label}: {trail}/code: unpublished code {code!r}')
+            for key, value in node.items():
+                walk(value, f'{trail}/{key}')
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, f'{trail}/{index}')
+
+    walk(record, '')
+    return problems[:MAX_PROBLEMS_PER_DOCUMENT]
+
+
+def validated(validator: Any, label: str, text: str, ndjson: bool,
+              published: set[str] | None = None) -> list[str]:
     records, problems = parsed_records(label, text, ndjson)
     for record_label, record in records:
         problems.extend(document_problems(validator, record_label, record))
+        if published is not None:
+            problems.extend(code_problems(record_label, record, published))
     return problems
 
 
-def example_problems(root: Path, validator: Any) -> list[str]:
+def example_problems(root: Path, validator: Any, published: set[str]) -> list[str]:
     documents = root / 'examples' / 'documents'
     paths = sorted([*documents.glob('output-*.json'), *documents.glob('output-*.ndjson')])
     problems = [] if paths else [f'{documents}: no output examples found']
     for path in paths:
         text = path.read_bytes().decode('utf-8')
         problems.extend(validated(validator, str(path.relative_to(root)), text,
-                                  path.suffix == '.ndjson'))
+                                  path.suffix == '.ndjson', published))
     return problems
 
 
-def runtime_problems(binary: Path, root: Path, validator: Any,
+def runtime_problems(binary: Path, root: Path, validator: Any, published: set[str],
                      commands: Iterable[RuntimeCommand] = RUNTIME_COMMANDS) -> list[str]:
     problems = []
     for command in commands:
@@ -170,7 +210,174 @@ def runtime_problems(binary: Path, root: Path, validator: Any,
         except UnicodeDecodeError as error:
             problems.append(f'{label}: stdout is not UTF-8: {error}')
             continue
-        problems.extend(validated(validator, label, stdout, 'ndjson' in command.args))
+        problems.extend(validated(validator, label, stdout, 'ndjson' in command.args, published))
+    return problems
+
+
+
+
+class PublishedRow(NamedTuple):
+    definition: str
+    command: str
+    rust_types: tuple[str, ...]
+    events: tuple[str, ...]
+    example: str
+
+
+ROW_PATTERN = re.compile(
+    r'PublishedType \{\s*definition: "([^"]+)",\s*command: "([^"]+)",\s*'
+    r'rust_types: &\[([^\]]*)\],\s*events: &\[([^\]]*)\],\s*example: "([^"]+)",\s*\}')
+
+
+def read_registry(source: str) -> list[PublishedRow]:
+    rows = []
+    for definition, command, rust_types, events, example in ROW_PATTERN.findall(source):
+        rows.append(PublishedRow(
+            definition, command,
+            tuple(re.findall(r'"([^"]+)"', rust_types)),
+            tuple(re.findall(r'"([^"]+)"', events)),
+            example))
+    return rows
+
+
+def _refs(node: Any) -> list[str]:
+    if isinstance(node, dict):
+        found = []
+        for key, value in node.items():
+            if key == '$ref':
+                found.append(value.split('/')[-1])
+            else:
+                found += _refs(value)
+        return found
+    if isinstance(node, list):
+        found = []
+        for value in node:
+            found += _refs(value)
+        return found
+    return []
+
+
+def _consts(node: Any, key: str) -> list[str]:
+    if isinstance(node, dict):
+        found = []
+        for name, value in node.items():
+            if name == 'properties' and isinstance(value, dict):
+                target = value.get(key)
+                if isinstance(target, dict):
+                    if 'const' in target:
+                        found.append(target['const'])
+                    found += target.get('enum', [])
+            found += _consts(value, key)
+        return sorted(set(found))
+    if isinstance(node, list):
+        found = []
+        for value in node:
+            found += _consts(value, key)
+        return sorted(set(found))
+    return []
+
+
+def _production_sources(root: Path) -> list[Path]:
+    base = root / CLI_SRC
+    return [path for path in sorted(base.rglob('*.rs'))
+            if 'tests' not in path.parts and path.name != 'tests.rs']
+
+
+def _stream_record_types(root: Path) -> set[str]:
+    types = set()
+    for path in _production_sources(root):
+        lines = path.read_text(encoding='utf-8').splitlines()
+        for index, line in enumerate(lines):
+            if 'fn event_name' not in line:
+                continue
+            for back in range(index - 1, max(-1, index - 8), -1):
+                match = re.search(r'StreamRecord for\s+(&?\w+(?:::\w+)*(?:<[^>]*>)?)', lines[back])
+                if match:
+                    name = match.group(1).lstrip('&').split('<')[0]
+                    relative = str(path.relative_to(root / CLI_SRC)).removesuffix('.rs')
+                    types.add(f'crate::{relative.replace("/", "::")}::{name}'
+                              if '::' not in name else f'crate::{name}')
+                    break
+    return types
+
+
+def _type_defined(root: Path, rust_type: str, sources: dict[Path, str]) -> bool:
+    parts = rust_type.split('::')
+    if len(parts) < 3 or parts[0] != 'crate':
+        return False
+    name, module = parts[-1], parts[1:-1]
+    base = root / CLI_SRC
+    candidates = [base / ('/'.join(module) + '.rs')]
+    candidates += sorted((base / '/'.join(module)).rglob('*.rs')) if (base / '/'.join(module)).is_dir() else []
+    pattern = re.compile(rf'(?:struct|enum|type)\s+{re.escape(name)}\b')
+    return any(pattern.search(sources.get(path, '')) for path in candidates)
+
+
+def registry_problems(root: Path, schema: Any) -> list[str]:
+    """The contract registry must agree with the schema, sources, and examples."""
+    import jsonschema
+
+    problems: list[str] = []
+    rows = read_registry((root / REGISTRY).read_text(encoding='utf-8'))
+    if not rows:
+        return [f'{REGISTRY}: no PublishedType rows found']
+    definitions = schema.get('$defs', {})
+    sources = {path: path.read_text(encoding='utf-8') for path in _production_sources(root)}
+    examples: dict[str, list[Any]] = {}
+
+    def example_records(relative: str) -> list[Any]:
+        if relative not in examples:
+            path = root / relative
+            if not path.is_file():
+                examples[relative] = []
+            else:
+                text = path.read_text(encoding='utf-8')
+                examples[relative] = [strict_json(line) for line in text.splitlines()
+                                       if line.strip()] if relative.endswith('.ndjson') \
+                    else [strict_json(text)]
+        return examples[relative]
+
+    claimed: dict[str, set[str]] = {}
+    seen: set[tuple[str, str]] = set()
+    registered_types: set[str] = set()
+    for row in rows:
+        label = f'{REGISTRY}: {row.definition}/{row.command}'
+        if (row.definition, row.command) in seen:
+            problems.append(f'{label}: duplicate registry row')
+        seen.add((row.definition, row.command))
+        registered_types.update(row.rust_types)
+        definition = definitions.get(row.definition)
+        if definition is None:
+            problems.append(f'{label}: no such schema definition')
+            continue
+        claimed.setdefault(row.definition, set()).add(row.command)
+        if row.command not in _consts(definition, 'command'):
+            problems.append(f'{label}: command is not pinned by the definition')
+        if list(row.events) != _consts(definition, 'event'):
+            problems.append(f'{label}: events disagree with the definition')
+        for rust_type in row.rust_types:
+            if not _type_defined(root, rust_type, sources):
+                problems.append(f'{label}: rust type {rust_type} is not defined')
+        if not (root / row.example).is_file():
+            problems.append(f'{label}: example {row.example} does not exist')
+            continue
+        validator = jsonschema.Draft202012Validator(
+            {'$ref': f'#/$defs/{row.definition}', '$defs': definitions})
+        if not any(validator.is_valid(record) for record in example_records(row.example)
+                   if isinstance(record, dict) and record.get('status') == 'success'):
+            problems.append(f'{label}: no record in {row.example} validates '
+                            f'against {row.definition}')
+
+    for root_name in ('aggregateSuccess', 'streamSuccess'):
+        for name in _refs(definitions.get(root_name, {})):
+            if name == 'baseEnvelope':
+                continue
+            expected = set(_consts(definitions.get(name, {}), 'command'))
+            if claimed.get(name, set()) != expected:
+                problems.append(f'{REGISTRY}: {name} claims '
+                                f'{sorted(claimed.get(name, set()))}, schema pins {sorted(expected)}')
+    for stream_type in sorted(_stream_record_types(root) - registered_types):
+        problems.append(f'{REGISTRY}: stream record type {stream_type} is not registered')
     return problems
 
 
@@ -179,10 +386,12 @@ def check(root: Path, binary: Path | None = None) -> list[str]:
     schema = read_json(root / identity.schema_path)
     problems = check_identity(schema, identity)
     problems.extend(check_release_assets(read_json(root / RELEASE_ASSETS)['source_assets'], identity))
+    problems.extend(registry_problems(root, schema))
     validator = load_validator(schema)
-    problems.extend(example_problems(root, validator))
+    published = published_codes(root)
+    problems.extend(example_problems(root, validator, published))
     if binary is not None:
-        problems.extend(runtime_problems(binary, root, validator))
+        problems.extend(runtime_problems(binary, root, validator, published))
     return problems
 
 

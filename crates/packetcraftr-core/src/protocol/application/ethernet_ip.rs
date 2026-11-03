@@ -3,10 +3,12 @@
 
 //! EtherNet/IP encapsulation and Common Packet Format. CIP services inside items remain opaque.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::invalid;
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -46,7 +48,7 @@ impl Default for EthernetIp {
     }
 }
 crate::reflective_layer! {
- fn ethernetip_schema() => { protocol: crate::layer::Id::new("ethernet_ip"), name: "EthernetIp" }
+ fn ethernetip_schema() => { protocol: crate::protocol::BuiltinProtocol::EthernetIp.id(), name: "EthernetIp" }
  impl EthernetIp {
     "command" => { kind: Unsigned, derived: false, required: false, description: "command", reflect: command },
     "session" => { kind: Unsigned, derived: false, required: false, description: "session", reflect: session },
@@ -61,46 +63,7 @@ crate::reflective_layer! {
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
 }
-fn ethernetip_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "command",
-            range: crate::layout::ByteRange::new(0, 2),
-        });
-    }
-    if 8 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "session",
-            range: crate::layout::ByteRange::new(4, 8),
-        });
-    }
-    if 12 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "status",
-            range: crate::layout::ByteRange::new(8, 12),
-        });
-    }
-    if 20 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "sender_context",
-            range: crate::layout::ByteRange::new(12, 20),
-        });
-    }
-    if 24 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "options",
-            range: crate::layout::ByteRange::new(20, 24),
-        });
-    }
-    fields
-}
-message_codec!(
-    EthernetIpCodec,
-    EthernetIp,
-    ethernetip_schema,
-    ethernetip_layout_wire
-);
+message_codec!(EthernetIpCodec, EthernetIp, ethernetip_schema);
 
 const NAME: &str = "ethernet_ip";
 impl EthernetIp {
@@ -150,8 +113,16 @@ impl EthernetIp {
         w.put(&p.bytes)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..2);
+        r.mark(1, 4..8);
+        r.mark(2, 8..12);
+        r.mark(3, 12..20);
+        r.mark(4, 20..24);
         let command = r.le16()?;
         let n = r.le16()? as usize;
         if n + 24 != b.len() {
@@ -167,7 +138,7 @@ impl EthernetIp {
         };
         if s.status != 0 {
             s.data = Bytes::copy_from_slice(r.rest());
-            return Ok(s);
+            return Ok((s, r.take_layouts()));
         }
         match command {
             0x65 => {
@@ -194,6 +165,6 @@ impl EthernetIp {
             _ => s.data = Bytes::copy_from_slice(r.rest()),
         }
         r.finish()?;
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }

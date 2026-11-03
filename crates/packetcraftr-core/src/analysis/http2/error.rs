@@ -29,12 +29,12 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Failed => Classification::new(
-                "internal.http2_failed",
+                crate::error::Code::InternalHttp2Failed,
                 crate::error::Kind::Internal,
                 Some("resolve the original error and create a new collector"),
             ),
             Self::Invariant(_) => Classification::new(
-                "internal.http2_invariant",
+                crate::error::Code::InternalHttp2Invariant,
                 crate::error::Kind::Internal,
                 Some("report this as a bug"),
             ),

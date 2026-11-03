@@ -1,17 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
-use super::{Error, Limit, Limits, MAX_MESSAGE_BYTES};
+use super::{Error, Limit, Limits, MAX_DHCP_MESSAGE_BYTES};
 use crate::{
-    codec::{Decoded, EncodeContext, Encoded},
+    codec::{Decoded, EncodeContext, Encoded, SeededLayer},
     field,
     layer::Layer,
     layout::FieldLayout,
-    protocol::common::{invalid, reject_aliased_duplicates, rejected, typed_layer},
+    protocol::common::{invalid, rejected, typed_layer},
 };
 
 pub(super) trait Message: Layer + Default + Sized + 'static {
@@ -35,7 +33,7 @@ pub(super) fn encode<M: Message>(
     let layer = typed_layer::<M>(M::NAME, layer)?;
     let wire = layer
         .encode_wire(Limits {
-            max_message_bytes: context.remaining_packet_bytes.min(MAX_MESSAGE_BYTES),
+            max_message_bytes: context.remaining_packet_bytes.min(MAX_DHCP_MESSAGE_BYTES),
             ..Default::default()
         })
         .map_err(|error| rejected(M::NAME, error))?;
@@ -50,33 +48,53 @@ pub(super) fn decode<M: Message>(input: Bytes) -> Result<Decoded, crate::codec::
     Ok(decoded)
 }
 
-pub(super) fn make_layer<M: Message>(
-    fields: &BTreeMap<String, field::Value>,
-) -> Result<Box<dyn Layer>, crate::codec::Error> {
-    let mut layer = match fields.get("wire") {
-        Some(field::Value::Bytes(wire)) => {
-            M::decode_wire(wire.clone()).map_err(|error| rejected(M::NAME, error))?
-        }
-        Some(_) => return Err(invalid(M::NAME, "wire must be retained bytes")),
-        None => M::default(),
+pub(super) fn seed_layer<M: Message>(
+    fields: &[(usize, &field::Value)],
+) -> Result<Option<SeededLayer>, crate::codec::Error> {
+    let wire = M::default()
+        .schema()
+        .field_index("wire")
+        .expect("DHCP schema declares a wire field");
+    let Some((_, value)) = fields.iter().find(|(index, _)| *index == wire) else {
+        return Ok(None);
     };
-    reject_aliased_duplicates(layer.schema(), fields)?;
-    for (name, value) in fields {
-        if name == "wire" || layer.field(name).as_ref() == Some(value) {
-            continue;
-        }
-        crate::protocol::common::set_document_field(&mut layer, name, value.clone())?;
-    }
-    if fields.contains_key("options")
-        && let Some(message_type) = fields.get("message_type")
-        && layer.field("message_type").as_ref() != Some(message_type)
+    let field::Value::Bytes(bytes) = value else {
+        return Err(invalid(M::NAME, "wire must be retained bytes"));
+    };
+    let layer = M::decode_wire(bytes.clone()).map_err(|error| rejected(M::NAME, error))?;
+    Ok(Some(SeededLayer {
+        layer: Box::new(layer),
+        consumed: wire,
+    }))
+}
+
+pub(super) fn finish_constructed<M: Message>(
+    layer: &dyn Layer,
+    fields: &[(usize, &field::Value)],
+) -> Result<(), crate::codec::Error> {
+    let schema = layer.schema();
+    let (Some(options), Some(message_type)) = (
+        schema.field_index("options"),
+        schema.field_index("message_type"),
+    ) else {
+        return Ok(());
+    };
+    let supplied = |wanted: usize| {
+        fields
+            .iter()
+            .find(|(index, _)| *index == wanted)
+            .map(|(_, value)| *value)
+    };
+    if supplied(options).is_some()
+        && let Some(supplied_type) = supplied(message_type)
+        && layer.field_by_index(message_type).as_ref() != Some(supplied_type)
     {
         return Err(invalid(
             M::NAME,
             "message_type conflicts with supplied options",
         ));
     }
-    Ok(Box::new(layer))
+    Ok(())
 }
 
 pub(super) struct Budget {

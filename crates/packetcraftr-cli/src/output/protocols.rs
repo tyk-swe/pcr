@@ -121,7 +121,7 @@ impl From<BuiltinProtocol> for Summary {
                 .map(|parent| parent.as_str().to_owned())
                 .collect(),
             stream_decode: protocol.stream_decode(),
-            coverage: protocol.message_protocol().map(|p| p.coverage.to_owned()),
+            coverage: protocol.coverage().map(str::to_owned),
         }
     }
 }

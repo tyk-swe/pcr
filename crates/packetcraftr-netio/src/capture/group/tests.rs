@@ -8,6 +8,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     mpsc,
 };
+use std::time::Instant;
 
 #[derive(Default)]
 struct Control {

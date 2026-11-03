@@ -217,10 +217,14 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         let code = match self {
-            Self::ExpansionOverflow | Self::ExpansionLimit { .. } => "cli.template_limit",
-            Self::DuplicateAxis { .. } => "cli.template_duplicate_axis",
-            Self::InvalidRangeStep { .. } | Self::ReversedRange { .. } => "cli.template_range",
-            Self::LayerIndex { .. } | Self::Field { .. } => "cli.template_field",
+            Self::ExpansionOverflow | Self::ExpansionLimit { .. } => {
+                crate::error::Code::CliTemplateLimit
+            }
+            Self::DuplicateAxis { .. } => crate::error::Code::CliTemplateDuplicateAxis,
+            Self::InvalidRangeStep { .. } | Self::ReversedRange { .. } => {
+                crate::error::Code::CliTemplateRange
+            }
+            Self::LayerIndex { .. } | Self::Field { .. } => crate::error::Code::CliTemplateField,
         };
         let hint = match self {
             Self::InvalidRangeStep { .. } | Self::ReversedRange { .. } => {

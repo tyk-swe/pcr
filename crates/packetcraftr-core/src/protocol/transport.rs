@@ -6,6 +6,7 @@ mod sctp;
 mod tcp;
 mod udp;
 
+pub(crate) use sctp::CHUNK_HEADER_LEN;
 pub use sctp::Sctp;
 pub(crate) use sctp::SctpCodec;
 pub(crate) use sctp::validate_chunks as validate_sctp_chunks;

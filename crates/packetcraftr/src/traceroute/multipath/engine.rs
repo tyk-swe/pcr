@@ -211,14 +211,20 @@ pub(super) fn run<A: Authorizer + ResolveTarget, R: Runner, C: Clock>(
 
 fn nonce() -> Result<u64, Error> {
     let mut seed = [0; 8];
-    getrandom::fill(&mut seed).map_err(|error| Error::Execution {
-        sequence: 0,
-        source: BoundaryError::new(
-            error.to_string(),
-            Classification::new("io.traceroute_entropy", Kind::Io, None),
-            Vec::new(),
-        ),
-    })?;
+    packetcraftr_netio::entropy::OsEntropy
+        .fill(&mut seed)
+        .map_err(|error| Error::Execution {
+            sequence: 0,
+            source: BoundaryError::new(
+                error.to_string(),
+                Classification::new(
+                    packetcraftr_core::error::Code::IoTracerouteEntropy,
+                    Kind::Io,
+                    None,
+                ),
+                Vec::new(),
+            ),
+        })?;
     Ok(u64::from_be_bytes(seed))
 }
 

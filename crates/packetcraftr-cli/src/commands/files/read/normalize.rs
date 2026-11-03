@@ -148,7 +148,7 @@ fn normalize_to_pcap<W: Write>(
         Some((_, mut writer)) => writer.flush().map_err(CliError::classified),
         None => Err(CliError::from_classification(
             Classification::new(
-                "cli.capture_normalize_pcap",
+                packetcraftr_core::error::Code::CliCaptureNormalizePcap,
                 Kind::Usage,
                 Some("select at least one frame, or use --output pcapng for an empty capture"),
             ),
@@ -195,7 +195,7 @@ fn open_classic_writer<W: Write>(
 fn pcap_metadata_error(message: String) -> CliError {
     CliError::from_classification(
         Classification::new(
-            "packet.capture_transform_metadata",
+            packetcraftr_core::error::Code::PacketCaptureTransformMetadata,
             Kind::Packet,
             Some("use --output pcapng to keep capture metadata classic PCAP cannot carry"),
         ),

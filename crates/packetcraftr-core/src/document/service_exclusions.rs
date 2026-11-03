@@ -43,7 +43,11 @@ pub struct Error(#[from] ValidationError);
 
 impl Classified for Error {
     fn classification(&self) -> Classification {
-        Classification::new("document.service_exclusions", Kind::Usage, None)
+        Classification::new(
+            crate::error::Code::DocumentServiceExclusions,
+            Kind::Usage,
+            None,
+        )
     }
 }
 

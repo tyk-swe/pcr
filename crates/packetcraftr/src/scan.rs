@@ -3,10 +3,10 @@
 
 use crate::probe::Workflow;
 
-pub const DEFAULT_ATTEMPTS: u32 = 1;
+pub const DEFAULT_PROBE_ATTEMPTS: u32 = 1;
 pub const DEFAULT_MAX_PORTS: usize = 1_024;
 pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = crate::evidence::DEFAULT_MAX_UNDECODED_FRAMES;
-pub const MAX_ATTEMPTS: u32 = 32;
+pub const MAX_PROBE_ATTEMPTS: u32 = 32;
 pub const MAX_IN_FLIGHT: usize = 1_024;
 pub const MAX_PROBES: usize = 100_000;
 pub(crate) const MAX_PREPARED_BYTES: usize = 256 * 1024 * 1024;

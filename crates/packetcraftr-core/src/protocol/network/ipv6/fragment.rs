@@ -1,22 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, Severity},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    child_is_opaque, expected_discriminator, invalid, make_layer, payload_without_padding,
-    resolve_u8, strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
-    validate_ipv6_routing_child, validate_raw_child_discriminator,
+    expected_discriminator, invalid, payload_without_padding, resolve_u8, strict_or_diagnostic,
+    truncated, typed_layer, validate_auto_raw_discriminator, validate_ipv6_routing_child,
+    validate_raw_child_discriminator,
 };
 
 use crate::protocol::{BuiltinProtocol, network::ip_protocol};
@@ -129,7 +127,7 @@ impl Codec for FragmentCodec {
             )?;
         }
         if (layer.fragment_offset != 0 || layer.more_fragments)
-            && context.child.is_some_and(|child| !child_is_opaque(child))
+            && context.child.is_some_and(|child| !child.is_opaque())
         {
             strict_or_diagnostic(
                 NAME,
@@ -201,7 +199,7 @@ impl Codec for FragmentCodec {
             next: if fragment_offset == 0 && offset_flags & 1 == 0 {
                 vec![Discriminator(u64::from(header[0]))]
             } else {
-                vec![Discriminator(255)]
+                vec![Discriminator(u64::from(ip_protocol::RESERVED))]
             },
             fields: fragment_layout(),
             diagnostics,
@@ -210,10 +208,11 @@ impl Codec for FragmentCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Fragment::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(fragment_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Fragment::default()))
     }
 }

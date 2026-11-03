@@ -3,7 +3,6 @@
 
 //! The per-frame `tls` layer codec.
 
-use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use bytes::Bytes;
@@ -315,8 +314,51 @@ impl Codec for TlsCodec {
         matches!(protocol.as_str(), NAME | "raw")
     }
 
-    fn published_schema(&self) -> Option<&'static crate::layer::Schema> {
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
         Some(tls_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Tls::try_from(Hello::default())?))
+    }
+
+    fn seed_layer(
+        &self,
+        fields: &[(usize, &field::Value)],
+    ) -> Result<Option<crate::codec::SeededLayer>, crate::codec::Error> {
+        let wire = tls_schema()
+            .field_index("wire")
+            .expect("TLS schema declares a wire field");
+        let Some((_, value)) = fields.iter().find(|(index, _)| *index == wire) else {
+            return Ok(None);
+        };
+        let field::Value::Bytes(bytes) = value else {
+            return Err(invalid(NAME, "wire must be bytes"));
+        };
+        Ok(Some(crate::codec::SeededLayer {
+            layer: Box::new(Tls::try_from(bytes.as_ref())?),
+            consumed: wire,
+        }))
+    }
+
+    fn apply_constructed_field(
+        &self,
+        layer: &mut dyn Layer,
+        index: usize,
+        value: field::Value,
+    ) -> Option<Result<(), crate::codec::Error>> {
+        if tls_schema().field_index("incomplete") != Some(index) {
+            return None;
+        }
+        Some(match value {
+            field::Value::Bool(incomplete) => {
+                if let Some(layer) = layer.downcast_mut::<Tls>() {
+                    layer.incomplete = incomplete;
+                }
+                Ok(())
+            }
+            _ => Err(wrong_type(tls_schema(), "incomplete", "bool").into()),
+        })
     }
 
     fn encode(
@@ -361,30 +403,5 @@ impl Codec for TlsCodec {
             stop: false,
             network: None,
         })
-    }
-
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        let mut layer = match fields.get("wire") {
-            Some(field::Value::Bytes(wire)) => Tls::try_from(wire.as_ref())?,
-            Some(_) => return Err(invalid(NAME, "wire must be bytes")),
-            None => Tls::try_from(Hello::default())?,
-        };
-        for (name, value) in fields {
-            if name == "wire" || layer.field(name).as_ref() == Some(value) {
-                continue;
-            }
-            if name == "incomplete" {
-                let field::Value::Bool(incomplete) = value else {
-                    return Err(wrong_type(tls_schema(), name, "bool").into());
-                };
-                layer.incomplete = *incomplete;
-                continue;
-            }
-            crate::protocol::common::set_document_field(&mut layer, name, value.clone())?;
-        }
-        Ok(Box::new(layer))
     }
 }

@@ -1,0 +1,54 @@
+{
+  "command": "audit-tls",
+  "diagnostics": [],
+  "event": "complete",
+  "mode": "stream",
+  "result": {
+    "completeness": {
+      "complete": true,
+      "reasons": []
+    },
+    "findings": [
+      {
+        "complete": true,
+        "evidence": {
+          "reason": "invalid peer certificate: UnknownIssuer",
+          "valid": false
+        },
+        "frames": [],
+        "indicator_id": null,
+        "remediation": "Install a valid certificate chain issued by a trusted CA.",
+        "rule_id": "tls.chain_invalid",
+        "severity": "high",
+        "subject": "127.0.0.1:46671",
+        "summary": "Certificate chain did not validate"
+      }
+    ],
+    "kind": "audit-tls",
+    "measurements": {
+      "certificate_sha256": [
+        "1e9606ea57e81cc6cd773c92df5e84ab760b5a566bfd876d0ddc4384aad7c790"
+      ],
+      "cipher": "TLS13_AES_256_GCM_SHA384",
+      "endpoint": "127.0.0.1:46671",
+      "protocol": "TLSv1_3",
+      "server_name": null,
+      "verification": {
+        "chain": {
+          "reason": "invalid peer certificate: UnknownIssuer",
+          "valid": false
+        },
+        "name": {
+          "reason": null,
+          "valid": true
+        }
+      },
+      "wire_bytes_read": 843,
+      "wire_bytes_sent": 298
+    },
+    "sources": []
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 1,
+  "status": "success"
+}

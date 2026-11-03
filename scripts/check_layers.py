@@ -14,7 +14,8 @@ from rust_source import blank_comments_and_strings
 LAYERS = {
     "packetcraftr-core": {
         ("error",): 1, ("diagnostic",): 1, ("budget",): 1, ("field",): 1,
-        ("layer",): 1, ("layout",): 1, ("codec",): 1, ("packet",): 1,
+        ("layer",): 1, ("layout",): 1, ("codec",): 1,
+                ("clock",): 1, ("packet",): 1,
         ("registry",): 1, ("matcher",): 1, ("frame",): 1, ("template",): 1,
         ("protocol",): 2, ("build",): 2, ("decode",): 2, ("expression",): 2,
         ("transform",): 2, ("conversation",): 2, ("document",): 2,
@@ -22,7 +23,8 @@ LAYERS = {
         ("analysis",): 4, ("security",): 4, ("fuzz",): 4,
     },
     "packetcraftr": {
-        ("clock",): 1, ("deadline",): 1,
+        ("clock",): 1, ("deadline",): 1, ("data",): 1,
+                ("entropy",): 1,
         ("engine", "stats"): 1, ("engine", "correlation"): 1,
         ("probe", "model"): 1,
         ("error",): 2, ("policy",): 2, ("target",): 2, ("route",): 2,
@@ -36,7 +38,8 @@ LAYERS = {
         ("scan",): 6,
     },
     "packetcraftr-netio": {
-        ("deadline",): 1, ("link",): 1, ("bounded",): 1,
+        ("deadline",): 1,
+                ("entropy",): 1, ("link",): 1, ("bounded",): 1,
         ("unsupported",): 2, ("resources",): 2, ("workers",): 2,
         ("error",): 3, ("interface",): 3, ("route",): 3, ("capture",): 3,
         ("transmit",): 3, ("tcp",): 3, ("udp",): 3, ("tls",): 3,
@@ -285,6 +288,24 @@ def crate_paths(
     return scoped_paths(text, owner)
 
 
+def test_only_paths(
+    text: str, owner: tuple[str, ...], whole_file: bool
+) -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
+    everything = scoped_paths(
+        VISIBILITY.sub("pub", blank_comments_and_strings(text)), owner
+    )
+    if whole_file:
+        return everything
+    production = list(crate_paths(text, owner))
+    test = []
+    for pair in everything:
+        if pair in production:
+            production.remove(pair)
+        else:
+            test.append(pair)
+    return test
+
+
 def layer_of(table: dict[tuple[str, ...], int], path: tuple[str, ...]) -> int | None:
     for length in range(len(path), 0, -1):
         if path[:length] in table:
@@ -319,18 +340,28 @@ def allowlisted(
     return None
 
 
-def check_crate(crate: str, src: Path, table, allowlist, used: set[int]) -> list[str]:
+def check_crate(
+    crate: str, src: Path, table, allowlist, used: set[int], include_tests: bool = False
+) -> list[str]:
     problems = []
     for path in sorted(src.rglob("*.rs")):
         owner = owner_path(src, path)
-        if owner is None or is_test_path(src, path):
+        test_file = owner is not None and is_test_path(src, path)
+        if owner is None or (test_file and not include_tests):
             continue
         owner_layer = layer_of(table, owner)
         shown = "::".join(owner)
         if owner_layer is None:
-            problems.append(f"{crate}: {path} module {shown} is not in the layer table")
+            if not include_tests:
+                problems.append(f"{crate}: {path} module {shown} is not in the layer table")
             continue
-        for scoped_owner, target in crate_paths(path.read_text(errors="replace"), owner):
+        text = path.read_text(errors="replace")
+        pairs = (
+            test_only_paths(text, owner, test_file)
+            if include_tests
+            else crate_paths(text, owner)
+        )
+        for scoped_owner, target in pairs:
             scoped_layer = layer_of(table, scoped_owner)
             if scoped_layer is None:
                 scoped_layer = owner_layer
@@ -348,7 +379,9 @@ def check_crate(crate: str, src: Path, table, allowlist, used: set[int]) -> list
     return problems
 
 
-def check_workspace(root: Path, layers=LAYERS, allowlist=ALLOWLIST) -> list[str]:
+def check_workspace(
+    root: Path, layers=LAYERS, allowlist=ALLOWLIST, include_tests: bool = False
+) -> list[str]:
     problems = []
     used: set[int] = set()
     for crate, table in layers.items():
@@ -356,7 +389,9 @@ def check_workspace(root: Path, layers=LAYERS, allowlist=ALLOWLIST) -> list[str]
         if not src.is_dir():
             problems.append(f"{crate}: missing source directory {src}")
             continue
-        problems.extend(check_crate(crate, src, table, allowlist, used))
+        problems.extend(check_crate(crate, src, table, allowlist, used, include_tests))
+    if include_tests:
+        return problems
     for index, (crate, owner_prefix, target_prefix, _reason) in enumerate(allowlist):
         if index not in used and crate in layers:
             problems.append(
@@ -371,8 +406,22 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--root", type=Path, default=Path(__file__).resolve().parents[1]
     )
+    parser.add_argument(
+        "--report-tests",
+        action="store_true",
+        help="report upward dependencies from test code without failing; "
+        "test code stays exempt from the check itself (ADR 0001)",
+    )
     args = parser.parse_args(argv)
-    problems = check_workspace(args.root.resolve())
+    if args.report_tests:
+        couplings = check_workspace(
+            args.root.resolve(), layers=LAYERS, allowlist=ALLOWLIST, include_tests=True
+        )
+        for coupling in couplings:
+            print(coupling)
+        print(f"{len(couplings)} test layer coupling(s) (report only)")
+        return 0
+    problems = check_workspace(args.root.resolve(), layers=LAYERS, allowlist=ALLOWLIST)
     for problem in problems:
         print(problem, file=sys.stderr)
     if problems:

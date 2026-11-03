@@ -5,6 +5,7 @@ use super::{MAX_INTERFACE_NAME_BYTES, Phase, Source};
 use crate::capture::{Captured, Metadata, Request, Session, Stats};
 use crate::{Error, interface::Id};
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::clock::{Clock, SystemClock};
 use std::time::Instant;
 
 pub(super) struct Owned<C: Session> {
@@ -104,7 +105,7 @@ impl<C: Session> Owned<C> {
         self.capture
             .wait_ready(caller)
             .map_err(|source| self.failure(Phase::Ready, source))?;
-        if Instant::now() > deadline {
+        if SystemClock.now() > deadline {
             return Err(self.failure(
                 Phase::Ready,
                 Error::CaptureReadiness {

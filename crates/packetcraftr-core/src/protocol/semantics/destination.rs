@@ -4,12 +4,11 @@
 use std::net::IpAddr;
 
 use super::error::Error;
-use super::path::{IpHeader, ip_path_at};
+use super::path::ip_path_at;
 use crate::layer::Malformed;
 use crate::packet::Packet;
 use crate::protocol::BuiltinProtocol;
-use crate::protocol::link::Arp;
-use crate::protocol::network::Ipv6;
+use crate::protocol::identity;
 
 const ROUTE_FIELDS: [&str; 3] = ["destination", "segments", "target_protocol"];
 
@@ -20,7 +19,7 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
     for (index, layer) in packet.iter().enumerate() {
         // Registries resolve protocol names trimmed and case-insensitively, so
         // a hand-built "IPv4" must not slip past the check "ipv4" meets.
-        if let Some(malformed) = layer.downcast_ref::<Malformed>()
+        if let Some(malformed) = Malformed::from_layer(layer)
             && let Some(intended) = malformed.intended_protocol.as_deref()
             && BuiltinProtocol::from_name_or_alias(&intended.trim().to_ascii_lowercase())
                 .is_some_and(malformed_protocol_may_hide_destination)
@@ -30,16 +29,16 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
                 reason: malformed.reason.clone(),
             });
         }
-        if let Some(header) = IpHeader::of(layer) {
-            let path = ip_path_at(packet, index, packet.len(), header)?;
+        if let Some(header) = identity::network_header(layer) {
+            let path = ip_path_at(packet, index, packet.len(), &header)?;
             push_if_specified(&mut destinations, path.header_destination);
             for destination in path.declared_route_destinations {
                 push_if_specified(&mut destinations, destination);
             }
             continue;
         }
-        if let Some(arp) = layer.downcast_ref::<Arp>() {
-            push_if_specified(&mut destinations, IpAddr::V4(arp.target_protocol));
+        if let Some(target) = identity::arp_target(layer) {
+            push_if_specified(&mut destinations, IpAddr::V4(target));
             continue;
         }
         match BuiltinProtocol::of(layer) {
@@ -54,7 +53,10 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
                         .fields
                         .iter()
                         .any(|schema| schema.name == **field)
-                        || layer.field(field).is_some()
+                        || layer
+                            .schema()
+                            .field_index(field)
+                            .is_some_and(|index| layer.field_by_index(index).is_some())
                 }) {
                     return Err(Error::UnknownProtocolRouteField {
                         protocol: *layer.protocol_id(),
@@ -166,7 +168,7 @@ fn require_srh_attached_to_ipv6(packet: &Packet, srh_index: usize) -> Result<(),
             !BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ipv6_extension)
         });
     match nearest_non_extension {
-        Some(layer) if layer.is::<Ipv6>() => Ok(()),
+        Some(layer) if BuiltinProtocol::Ipv6.identifies(layer) => Ok(()),
         _ => Err(Error::DetachedSegmentRoutingHeader),
     }
 }

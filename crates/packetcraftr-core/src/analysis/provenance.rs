@@ -37,12 +37,12 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Limit { .. } | Self::Allocation { .. } => Classification::new(
-                "policy.provenance_limit",
+                crate::error::Code::PolicyProvenanceLimit,
                 Kind::Policy,
                 Some("raise the finite provenance budget or retain fewer source sets"),
             ),
             Self::DifferentCapture => Classification::new(
-                "internal.provenance_scope",
+                crate::error::Code::InternalProvenanceScope,
                 Kind::Internal,
                 Some("merge captures before combining their source references"),
             ),

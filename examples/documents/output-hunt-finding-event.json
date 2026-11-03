@@ -1,0 +1,29 @@
+{
+  "command": "hunt",
+  "diagnostics": [],
+  "event": "finding",
+  "mode": "stream",
+  "result": {
+    "complete": true,
+    "evidence": {
+      "context": {
+        "message": 1,
+        "protocol": "dns",
+        "scope": 0
+      },
+      "value": "example.test."
+    },
+    "frames": [
+      1
+    ],
+    "indicator_id": "lab-domain",
+    "remediation": "Validate the indicator and investigate the contributing frames and endpoint.",
+    "rule_id": "ioc.match",
+    "severity": "high",
+    "subject": "example.test.",
+    "summary": "Observed value matches a local indicator"
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 0,
+  "status": "success"
+}

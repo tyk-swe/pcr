@@ -75,14 +75,14 @@ impl Classified for Error {
             | Self::NameTooLong
             | Self::QueryTypeSyntax
             | Self::QueryTypeRange(_) => Classification::new(
-                "packet.dns_query",
+                packetcraftr_core::error::Code::PacketDnsQuery,
                 Kind::Packet,
                 Some(
                     "use a bounded ASCII DNS name, a 16-bit query type, and an EDNS payload size within 512..=65535 when enabled",
                 ),
             ),
             _ => Classification::new(
-                "packet.dns",
+                packetcraftr_core::error::Code::PacketDns,
                 Kind::Packet,
                 Some("inspect the DNS message that breaks a wire rule"),
             ),

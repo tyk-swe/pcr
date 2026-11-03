@@ -1,22 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, Severity},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
     protocol::{BuiltinProtocol, network::ip_protocol},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, ensure_encode_budget, expected_discriminator, invalid, make_layer,
-    resolve_u8, strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
+    ValueExpectation, ensure_encode_budget, expected_discriminator, invalid, resolve_u8,
+    strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
     validate_raw_child_discriminator,
 };
 
@@ -125,7 +123,7 @@ impl Codec for AhCodec {
             &layer.next_header,
             if context
                 .child
-                .is_some_and(<dyn Layer>::is::<crate::protocol::network::ospfv3::Ospfv3>)
+                .is_some_and(|child| child.is_builtin(BuiltinProtocol::Ospfv3.id()))
             {
                 ValueExpectation::Required(89)
             } else {
@@ -140,8 +138,7 @@ impl Codec for AhCodec {
             &mut diagnostics,
         )?;
         let selects_cross_family = context
-            .registry
-            .child_for(NAME, Discriminator(ah_selector(next_header, under_ipv6)))
+            .child_for(Discriminator(ah_selector(next_header, under_ipv6)))
             .is_some_and(|selected| {
                 ah_family_mismatch(under_ipv6, BuiltinProtocol::from_id(selected))
             });
@@ -186,15 +183,15 @@ impl Codec for AhCodec {
             return Err(truncated(NAME, AH_FIXED_LEN, input.len()));
         };
         let payload_length = fixed[1];
-        let header_len = usize::from(payload_length)
-            .saturating_add(2)
-            .saturating_mul(4);
-        if header_len < AH_FIXED_LEN {
+        let Some(header_len) = crate::protocol::headers::ipv6_extension_header_length(
+            crate::protocol::network::ip_protocol::AH,
+            payload_length,
+        ) else {
             return Err(invalid(
                 NAME,
                 format!("payload length {payload_length} is below the fixed header"),
             ));
-        }
+        };
         let Some(icv) = input.get(AH_FIXED_LEN..header_len) else {
             return Err(truncated(NAME, header_len, input.len()));
         };
@@ -262,11 +259,12 @@ impl Codec for AhCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Ah::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(ah_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Ah::default()))
     }
 }
 
@@ -296,17 +294,7 @@ fn validate_context(
             &mut diagnostics,
         )?;
     }
-    let under_ipv6 =
-        context.packet.iter().take(context.index).rev().find_map(
-            |parent| match BuiltinProtocol::of(parent) {
-                Some(BuiltinProtocol::Ipv4) => Some(false),
-                Some(BuiltinProtocol::Ah) => None,
-                Some(parent) if parent == BuiltinProtocol::Ipv6 || parent.is_ipv6_extension() => {
-                    Some(true)
-                }
-                _ => None,
-            },
-        );
+    let under_ipv6 = context.under_ipv6;
     if under_ipv6 == Some(true) && !header_len.is_multiple_of(8) {
         strict_or_diagnostic(
             NAME,
@@ -318,7 +306,7 @@ fn validate_context(
         )?;
     }
     if let Some(child) = context.child
-        && ah_family_mismatch(under_ipv6, BuiltinProtocol::of(child))
+        && ah_family_mismatch(under_ipv6, child.builtin.and_then(BuiltinProtocol::from_id))
     {
         strict_or_diagnostic(
             NAME,

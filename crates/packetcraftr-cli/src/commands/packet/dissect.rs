@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::output::contract::Format;
+use packetcraftr_core::clock::{Clock, SystemClock};
 
 use packetcraftr_core::error::Kind;
 
 pub(in crate::commands) mod arguments;
 
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use packetcraftr_core as core;
 use packetcraftr_core::decode::DecodedPacket;
@@ -112,7 +112,7 @@ pub(super) fn run(
         .then(|| FieldTree::new(Arc::clone(&registry), arguments.tree.max_tree_bytes));
     let decoded = core::decode::Dissector::new(registry)
         .decode(
-            Frame::new(Some(SystemTime::now()), arguments.link_type, bytes)
+            Frame::new(Some(SystemClock.wall_now()), arguments.link_type, bytes)
                 .map_err(CliError::classified)?,
             arguments.budget.decode_options(),
         )

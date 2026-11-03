@@ -1,0 +1,23 @@
+{
+  "command": "audit-tls",
+  "diagnostics": [],
+  "event": "finding",
+  "mode": "stream",
+  "result": {
+    "complete": true,
+    "evidence": {
+      "reason": "invalid peer certificate: UnknownIssuer",
+      "valid": false
+    },
+    "frames": [],
+    "indicator_id": null,
+    "remediation": "Install a valid certificate chain issued by a trusted CA.",
+    "rule_id": "tls.chain_invalid",
+    "severity": "high",
+    "subject": "127.0.0.1:46671",
+    "summary": "Certificate chain did not validate"
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 0,
+  "status": "success"
+}

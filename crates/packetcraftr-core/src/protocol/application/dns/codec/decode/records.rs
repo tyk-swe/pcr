@@ -9,10 +9,8 @@ use super::decode_name;
 use super::primitives::{read_u16, read_u32};
 use crate::protocol::application::dns::Error as WireError;
 use crate::protocol::application::dns::{
-    Edns, EdnsOption, Limits as MessageLimits, Name, Record, RecordValue,
+    Edns, EdnsOption, Limits as MessageLimits, Name, Record, RecordValue, TYPE_OPT,
 };
-
-const TYPE_OPT: u16 = 41;
 
 /// `mdns` is true only when the transport identified the message as multicast
 /// DNS (UDP port 5353), where the top record-class bit is the cache-flush flag.

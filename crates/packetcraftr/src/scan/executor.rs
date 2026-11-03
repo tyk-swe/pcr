@@ -38,10 +38,9 @@ use crate::target::SelectedAddress;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::interface;
 use packetcraftr_netio::link::Mode;
-use std::time::SystemTime;
 
 pub(super) const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
-    "cli.scan_executor",
+    packetcraftr_core::error::Code::CliScanExecutor,
     "use one correlated probe per scan batch and retain at least one response",
 );
 
@@ -411,7 +410,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
                     outcome,
                     interface,
                     attempts: 0,
-                    observed_at: Some(SystemTime::now()),
+                    observed_at: Some(self.client.wall_now()),
                 };
                 return Ok((neighbor, Stats::default()));
             }
@@ -452,7 +451,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
                 // resolver retains the matching reply last whenever it
                 // retains it at all.
                 let observed_at = if resolution.cache_hit {
-                    Some(SystemTime::now())
+                    Some(services.wall_now())
                 } else {
                     resolution.captured.last().and_then(|frame| frame.timestamp)
                 };
@@ -471,7 +470,12 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
                 attempts,
                 capture_statistics,
                 ..
-            }) => (None, attempts, capture_statistics, Some(SystemTime::now())),
+            }) => (
+                None,
+                attempts,
+                capture_statistics,
+                Some(services.wall_now()),
+            ),
             Err(error) => return Err(BoundaryError::from_error(error)),
         };
         if attempts > 0 {

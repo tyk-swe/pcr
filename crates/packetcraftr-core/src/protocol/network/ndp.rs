@@ -97,7 +97,7 @@ pub enum Error {
 impl crate::error::Classified for Error {
     fn classification(&self) -> crate::error::Classification {
         crate::error::Classification::new(
-            "packet.codec",
+            crate::error::Code::PacketCodec,
             crate::error::Kind::Packet,
             Some("correct the layer bytes or field values the codec refused"),
         )

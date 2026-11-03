@@ -38,10 +38,16 @@ impl Classified for Cause {
             Self::Budget(error) => error.classification(),
             Self::Cancelled(error) => error.classification(),
             Self::Consumer(error) => error.classification(),
-            Self::Invalid(_) => Classification::new("cli.capture_options", Kind::Usage, None),
-            Self::Statistics => {
-                Classification::new("internal.capture_statistics", Kind::Internal, None)
-            }
+            Self::Invalid(_) => Classification::new(
+                packetcraftr_core::error::Code::CliCaptureOptions,
+                Kind::Usage,
+                None,
+            ),
+            Self::Statistics => Classification::new(
+                packetcraftr_core::error::Code::InternalCaptureStatistics,
+                Kind::Internal,
+                None,
+            ),
         }
     }
 }

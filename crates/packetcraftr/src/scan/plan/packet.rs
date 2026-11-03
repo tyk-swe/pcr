@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::protocol::identity;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -11,9 +12,7 @@ use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
-use packetcraftr_core::protocol::application::ntp::Ntp;
 use packetcraftr_core::protocol::builtin;
-use packetcraftr_core::protocol::tunnel::Geneve;
 use packetcraftr_core::protocol::{
     network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
     transport::{Sctp, Tcp, Udp},
@@ -148,7 +147,6 @@ fn icmp_probe_fields(endpoint: probe::Endpoint, address: IpAddr, sequence: u64) 
 /// Second byte of every scan ICMP echo payload; see [`icmp_identity`].
 const ICMP_IDENTITY_TAG: u8 = 0x43;
 
-const DNS_PORT: u16 = 53;
 const NTP_PORT: u16 = 123;
 const VXLAN_PORT: u16 = 4789;
 const GENEVE_PORT: u16 = 6081;
@@ -163,7 +161,7 @@ fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
         return;
     }
     let registry = builtin::registry();
-    if port == DNS_PORT
+    if BuiltinProtocol::Dns.udp_ports().contains(&port)
         && let Ok(dns) = Dns::try_from(payload.clone())
     {
         packet.push(dns);
@@ -185,7 +183,7 @@ fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
     }
     if port == NTP_PORT
         && let Some(ntp) = decode_layer(&registry, BuiltinProtocol::Ntp.as_str(), payload)
-        && ntp.layer.is::<Ntp>()
+        && BuiltinProtocol::Ntp.identifies(&*ntp.layer)
         && ntp.consumed == payload.len()
     {
         packet.push_boxed(ntp.layer);
@@ -278,11 +276,11 @@ fn push_geneve_payload(packet: &mut Packet, registry: &Arc<Registry>, payload: &
     let Some(header) = decode_layer(registry, "geneve", payload) else {
         return false;
     };
-    let Some(geneve) = header.layer.downcast_ref::<Geneve>() else {
+    let Some(protocol_type) = identity::geneve_protocol_type(&*header.layer) else {
         return false;
     };
     let inner_bytes = &payload[header.consumed..];
-    let (link_type, expected_root, opaque) = match geneve.protocol_type {
+    let (link_type, expected_root, opaque) = match protocol_type {
         WireValue::Exact(GENEVE_ETHERNET) => (Some(LinkType::ETHERNET), Some("ethernet"), false),
         WireValue::Exact(GENEVE_IPV4) => (Some(LinkType::IPV4), Some("ipv4"), false),
         WireValue::Exact(GENEVE_IPV6) => (Some(LinkType::IPV6), Some("ipv6"), false),

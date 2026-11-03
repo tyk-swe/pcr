@@ -164,7 +164,7 @@ fn exchange_deadline_error(error: packetcraftr_core::budget::DeadlineExceeded) -
             error.limit
         ),
         Classification::new(
-            "policy.exchange_duration_limit",
+            packetcraftr_core::error::Code::PolicyExchangeDurationLimit,
             Kind::Policy,
             Some("reduce exchange output backpressure or raise the finite timeout"),
         ),

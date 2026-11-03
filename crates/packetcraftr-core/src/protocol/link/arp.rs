@@ -2,19 +2,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::diagnostic::Severity;
-use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 use bytes::Bytes;
 
+use crate::protocol::common::{ValueExpectation, resolve_u8, truncated, typed_layer, unsupported};
+
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
-};
-
-use crate::protocol::common::{
-    ValueExpectation, make_layer, resolve_u8, truncated, typed_layer, unsupported,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -207,10 +204,11 @@ impl Codec for ArpCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Arp::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(arp_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Arp::default()))
     }
 }

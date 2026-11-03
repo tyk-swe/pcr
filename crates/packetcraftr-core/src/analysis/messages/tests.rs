@@ -1046,3 +1046,122 @@ fn declared_buffer_limits_are_policy_errors_for_every_segmentation() {
         }
     }
 }
+
+#[test]
+fn receive_buffers_reuse_capacity_and_keep_partial_messages() {
+    let tracker = Tracker::new(1 << 20, 32).unwrap();
+    let mut collector = Collector::new(
+        Limits {
+            max_buffer_bytes: 16,
+            ..Limits::default()
+        },
+        crate::protocol::builtin::registry(),
+        [BuiltinProtocol::Mqtt],
+    )
+    .unwrap();
+    let mut output = Vec::new();
+    BUFFER_STATS.with(|stats| stats.set((0, 0, 0)));
+    deliver(
+        &mut collector,
+        &tracker,
+        1,
+        &[0xc0, 0, 0x30, 4],
+        0,
+        &mut output,
+    );
+    for number in 2..=101 {
+        deliver(
+            &mut collector,
+            &tracker,
+            number,
+            &[0, 1, b'a', b'x', 0xc0, 0, 0x30, 4],
+            0,
+            &mut output,
+        );
+    }
+    let mut direction = collector.directions.remove(&flow()).unwrap();
+    collector
+        .flush(
+            &flow(),
+            &mut direction,
+            Status::Incomplete,
+            None,
+            &mut output,
+        )
+        .unwrap();
+    let messages: Vec<_> = output
+        .iter()
+        .map(|event| match event {
+            Event::Message(message) => message,
+            Event::Issue(_) => panic!("unexpected issue"),
+        })
+        .collect();
+    assert_eq!(messages.len(), 202);
+    assert_eq!(messages[0].wire.as_ref(), &[0xc0, 0]);
+    for (index, pair) in messages[1..201].as_chunks::<2>().0.iter().enumerate() {
+        assert_eq!(pair[0].wire.as_ref(), &[0x30, 4, 0, 1, b'a', b'x']);
+        assert_eq!(pair[0].status, Status::Complete);
+        assert_eq!(
+            pair[0]
+                .sources
+                .iter()
+                .map(|frame| frame.number)
+                .collect::<Vec<_>>(),
+            vec![index as u64 + 1, index as u64 + 2]
+        );
+        assert_eq!(pair[1].wire.as_ref(), &[0xc0, 0]);
+    }
+    assert_eq!(messages[201].wire.as_ref(), &[0x30, 4]);
+    assert_eq!(messages[201].status, Status::Incomplete);
+    let (allocations, copied, peak) = BUFFER_STATS.with(std::cell::Cell::get);
+    assert!(allocations <= 2, "{allocations} receive-buffer allocations");
+    assert!(copied <= 202, "{copied} suffix bytes copied");
+    assert!(
+        peak <= 16,
+        "{peak} allocated bytes exceed the configured limit"
+    );
+}
+
+#[test]
+fn cached_capacity_is_reclaimed_for_other_directions() {
+    let tracker = Tracker::new(1 << 20, 32).unwrap();
+    let mut collector = Collector::new(
+        Limits {
+            max_buffer_bytes: 16,
+            ..Limits::default()
+        },
+        crate::protocol::builtin::registry(),
+        [BuiltinProtocol::Mqtt],
+    )
+    .unwrap();
+    let mut output = Vec::new();
+    BUFFER_STATS.with(|stats| stats.set((0, 0, 0)));
+    for number in 1..=64u64 {
+        let mut direction = flow();
+        direction.flow.source_port += number as u16;
+        collector
+            .data(
+                application::Delivery {
+                    flow: direction,
+                    stream: number,
+                    generation: 0,
+                    bytes: Bytes::from_static(&[0xc0, 0, 0xc0, 0, 0xc0, 0, 0xc0, 0]),
+                    sources: tracker
+                        .single(SourceFrame {
+                            number,
+                            timestamp: UNIX_EPOCH,
+                        })
+                        .unwrap(),
+                },
+                &mut output,
+            )
+            .unwrap();
+    }
+    assert_eq!(output.len(), 256);
+    assert!(output.iter().all(|event| matches!(event, Event::Message(message) if message.status == Status::Complete && message.wire.as_ref() == [0xc0, 0])));
+    let (_, _, peak) = BUFFER_STATS.with(std::cell::Cell::get);
+    assert!(
+        peak <= 16,
+        "{peak} allocated bytes exceed the configured limit"
+    );
+}

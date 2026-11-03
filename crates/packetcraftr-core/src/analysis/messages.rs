@@ -79,6 +79,7 @@ struct Direction {
     generation: u64,
     protocol: BuiltinProtocol,
     buffer: Vec<u8>,
+    offset: usize,
     framer: Framer,
     sources: Option<Accumulator>,
     disabled: bool,
@@ -90,6 +91,7 @@ impl Direction {
             generation,
             protocol,
             buffer: Vec::new(),
+            offset: 0,
             framer: Framer::new(protocol.framing(), protocol.as_str()),
             sources: None,
             disabled: false,
@@ -115,6 +117,7 @@ pub struct Collector {
     directions: BTreeMap<ScopedFlowKey, Direction>,
     stopped: BTreeMap<ScopedFlowKey, (u64, u64)>,
     buffered: usize,
+    buffer_capacity: usize,
     retained: usize,
     summary: Summary,
 }
@@ -159,6 +162,7 @@ impl Collector {
             directions: BTreeMap::new(),
             stopped: BTreeMap::new(),
             buffered: 0,
+            buffer_capacity: 0,
             retained: 0,
             summary: Summary::default(),
         })
@@ -344,12 +348,7 @@ impl Collector {
         if !d.disabled {
             self.limits
                 .check_buffer(self.buffered.saturating_add(data.bytes.len()))?;
-            d.buffer
-                .try_reserve(data.bytes.len())
-                .map_err(|_| Error::Limit {
-                    field: "max_buffer_bytes",
-                    limit: self.limits.max_buffer_bytes,
-                })?;
+            self.reserve_buffer(&mut d, data.bytes.len())?;
             d.buffer.extend_from_slice(&data.bytes);
             self.buffered += data.bytes.len();
             if let Some(sources) = d.sources.as_mut() {
@@ -359,7 +358,7 @@ impl Collector {
             }
             self.limits
                 .check_source_spans(d.sources.as_ref().unwrap().len())?;
-            let mut offset = 0;
+            let mut offset = d.offset;
             while offset < d.buffer.len() && !d.disabled && !self.opaque(&d) {
                 // Stream-level SIP keepalives are not messages. A lone CR waits for
                 // the next delivery, so split CRLFs retain the same framing behavior.
@@ -425,20 +424,66 @@ impl Collector {
                         } else {
                             Status::Malformed
                         };
-                        let tail = d.buffer[offset..].to_vec();
-                        d.buffer = tail;
+                        d.offset = offset;
                         self.flush(&data.flow, &mut d, status, Some(error.to_string()), out)?;
                         offset = 0;
                         d.disabled = true;
                     }
                 }
             }
-            if offset > 0 {
-                d.buffer = d.buffer[offset..].to_vec();
+            d.offset = offset;
+            if offset == d.buffer.len() {
+                d.buffer.clear();
+                d.offset = 0;
             }
         }
         self.directions.insert(data.flow, d);
         Ok(())
+    }
+    fn reserve_buffer(
+        &mut self,
+        direction: &mut Direction,
+        additional: usize,
+    ) -> Result<(), Error> {
+        if direction.buffer.capacity() - direction.buffer.len() >= additional {
+            return Ok(());
+        }
+        compact_buffer(direction);
+        let needed = direction.buffer.len().saturating_add(additional);
+        if needed <= direction.buffer.capacity() {
+            return Ok(());
+        }
+        if self.buffer_capacity - direction.buffer.capacity() + needed
+            > self.limits.max_buffer_bytes
+        {
+            for other in self.directions.values_mut() {
+                let previous = other.buffer.capacity();
+                compact_buffer(other);
+                other.buffer.shrink_to_fit();
+                self.buffer_capacity -= previous - other.buffer.capacity();
+            }
+        }
+        let available =
+            self.limits.max_buffer_bytes - (self.buffer_capacity - direction.buffer.capacity());
+        self.limits.check_buffer(
+            needed.saturating_add(self.buffer_capacity - direction.buffer.capacity()),
+        )?;
+        let target = needed.max(direction.buffer.capacity().saturating_mul(2).min(available));
+        let previous = direction.buffer.capacity();
+        direction
+            .buffer
+            .try_reserve_exact(target - direction.buffer.len())
+            .map_err(|_| Error::Limit {
+                field: "max_buffer_bytes",
+                limit: self.limits.max_buffer_bytes,
+            })?;
+        self.buffer_capacity += direction.buffer.capacity() - previous;
+        #[cfg(test)]
+        BUFFER_STATS.with(|stats| {
+            let (allocations, copied, peak) = stats.get();
+            stats.set((allocations + 1, copied, peak.max(self.buffer_capacity)));
+        });
+        self.limits.check_buffer(self.buffer_capacity)
     }
     fn decode(&mut self, message: &mut Message) {
         if message.protocol == BuiltinProtocol::Amqp
@@ -558,15 +603,21 @@ impl Collector {
         mut error: Option<String>,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
-        if d.buffer.is_empty() {
+        if d.offset == d.buffer.len() {
+            self.buffer_capacity -= d.buffer.capacity();
+            d.buffer = Vec::new();
+            d.offset = 0;
             return Ok(());
         }
         if status == Status::Incomplete && self.opaque(d) {
             status = Status::Unsupported;
             error = Some("AMQP connection uses an unsupported protocol version".into());
         }
-        self.buffered -= d.buffer.len();
-        let wire = Bytes::from(std::mem::take(&mut d.buffer));
+        let wire = Bytes::copy_from_slice(&d.buffer[d.offset..]);
+        self.buffered -= wire.len();
+        self.buffer_capacity -= d.buffer.capacity();
+        d.buffer = Vec::new();
+        d.offset = 0;
         let sources = d
             .sources
             .take()
@@ -613,6 +664,30 @@ impl Collector {
                 connection.generation == direction.generation && connection.unsupported_amqp
             })
     }
+}
+
+fn compact_buffer(direction: &mut Direction) {
+    if direction.offset > 0 {
+        #[cfg(test)]
+        BUFFER_STATS.with(|stats| {
+            let (allocations, copied, peak) = stats.get();
+            stats.set((
+                allocations,
+                copied + direction.buffer.len() - direction.offset,
+                peak,
+            ));
+        });
+        direction.buffer.copy_within(direction.offset.., 0);
+        direction
+            .buffer
+            .truncate(direction.buffer.len() - direction.offset);
+        direction.offset = 0;
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static BUFFER_STATS: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
 }
 impl session::Collector for Collector {
     type Event = Event;

@@ -13,7 +13,7 @@ use crate::{
     protocol::transport::Tcp,
 };
 use bytes::Bytes;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -222,6 +222,47 @@ struct Span {
     number: u64,
     sources: SourceSet,
 }
+
+struct FlowSpans {
+    anchor_sequence: u32,
+    anchor_offset: i128,
+    ranges: BTreeMap<i128, Span>,
+}
+
+impl FlowSpans {
+    fn new(sequence: u32) -> Self {
+        Self {
+            anchor_sequence: sequence,
+            anchor_offset: 0,
+            ranges: BTreeMap::new(),
+        }
+    }
+
+    fn offset(&self, sequence: u32) -> i128 {
+        self.anchor_offset + i128::from(serial_offset(sequence, self.anchor_sequence))
+    }
+
+    fn overlapping(&self, start: i128, end: i128) -> impl Iterator<Item = (&i128, &Span)> {
+        self.ranges
+            .range(..start)
+            .next_back()
+            .inspect(|_| {
+                #[cfg(test)]
+                SPANS_VISITED.with(|count| count.set(count.get() + 1));
+            })
+            .filter(move |(offset, span)| **offset + i128::from(span.length) > start)
+            .into_iter()
+            .chain(self.ranges.range(start..end).inspect(|_| {
+                #[cfg(test)]
+                SPANS_VISITED.with(|count| count.set(count.get() + 1));
+            }))
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static SPANS_VISITED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 /// A payload span awaiting insertion; `after` is the index of the frame's
 /// reassembly event it must follow, or `None` to precede them all.
 struct Incoming {
@@ -230,10 +271,13 @@ struct Incoming {
     after: Option<usize>,
 }
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) struct TcpSources {
     ports: Vec<u16>,
     limits: Limits,
-    spans: HashMap<ScopedFlowKey, Vec<Span>>,
+    spans: HashMap<ScopedFlowKey, FlowSpans>,
     span_count: usize,
     streams: HashMap<ScopedFlowKey, u64>,
     generations: HashMap<u64, u64>,
@@ -414,27 +458,46 @@ impl TcpSources {
     }
     fn forget_spans(&mut self, flow: &ScopedFlowKey) {
         if let Some(spans) = self.spans.remove(flow) {
-            self.span_count -= spans.len();
+            self.span_count -= spans.ranges.len();
         }
     }
     fn insert(&mut self, flow: ScopedFlowKey, span: Span) -> Result<(), Error> {
-        let mut pieces = vec![span];
-        if let Some(previous) = self.spans.get(&flow) {
-            let mut next = Vec::new();
-            for old in previous {
-                if pieces.is_empty() {
-                    break;
+        let previous = self.spans.get(&flow);
+        let start = previous.map_or(0, |spans| spans.offset(span.sequence));
+        let end = start + i128::from(span.length);
+        let mut cursor = start;
+        let mut pieces = Vec::new();
+        if let Some(previous) = previous {
+            for (&old_start, old) in previous.overlapping(start, end) {
+                if cursor < old_start {
+                    pieces.push((cursor, old_start.min(end)));
                 }
-                for piece in pieces.drain(..) {
-                    subtract_into(piece, old.sequence, old.length, &mut next);
-                }
-                std::mem::swap(&mut pieces, &mut next);
+                cursor = cursor.max(old_start + i128::from(old.length));
             }
+        }
+        if cursor < end {
+            pieces.push((cursor, end));
         }
         self.limits
             .check_source_spans(self.span_count.saturating_add(pieces.len()))?;
         self.span_count += pieces.len();
-        self.spans.entry(flow).or_default().extend(pieces);
+        if !pieces.is_empty() {
+            let ranges = &mut self
+                .spans
+                .entry(flow)
+                .or_insert_with(|| FlowSpans::new(span.sequence))
+                .ranges;
+            for (piece_start, piece_end) in pieces {
+                ranges.insert(
+                    piece_start,
+                    Span {
+                        sequence: span.sequence.wrapping_add((piece_start - start) as u32),
+                        length: (piece_end - piece_start) as u32,
+                        ..span.clone()
+                    },
+                );
+            }
+        }
         Ok(())
     }
     fn event(
@@ -463,17 +526,22 @@ impl TcpSources {
                 sequence, bytes, ..
             } => {
                 let length = u32::try_from(bytes.len()).map_err(|_| Error::Sources { number })?;
-                let mut parts = Vec::new();
-                for span in self.spans.get(flow).into_iter().flatten() {
-                    if let Some((lo, hi)) =
-                        intersection(*sequence, length, span.sequence, span.length)
-                    {
-                        parts.push((lo, hi, span.sources.clone()));
-                    }
-                }
-                parts.sort_by_key(|(lo, _, _)| *lo);
+                let parts = self.spans.get(flow).map(|spans| {
+                    let start = spans.offset(*sequence);
+                    let end = start + i128::from(length);
+                    spans
+                        .overlapping(start, end)
+                        .map(|(&offset, span)| {
+                            (
+                                (offset.max(start) - start) as usize,
+                                ((offset + i128::from(span.length)).min(end) - start) as usize,
+                                span.sources.clone(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                });
                 let mut consumed = 0usize;
-                for (lo, hi, sources) in parts {
+                for (lo, hi, sources) in parts.into_iter().flatten() {
                     if lo != consumed {
                         return Err(Error::Sources { number });
                     }
@@ -490,6 +558,10 @@ impl TcpSources {
                     return Err(Error::Sources { number });
                 }
                 self.subtract(flow, *sequence, length, None)?;
+                if let Some(spans) = self.spans.get_mut(flow) {
+                    spans.anchor_offset = spans.offset(*sequence) + i128::from(length);
+                    spans.anchor_sequence = sequence.wrapping_add(length);
+                }
             }
             TcpEvent::Retransmission {
                 ranges,
@@ -547,52 +619,53 @@ impl TcpSources {
         length: u32,
         number: Option<u64>,
     ) -> Result<(), Error> {
-        let Some(previous) = self.spans.remove(flow) else {
+        let Some(previous) = self.spans.get(flow) else {
             return Ok(());
         };
-        self.span_count -= previous.len();
-        let mut remaining = Vec::with_capacity(previous.len());
-        for span in previous {
-            if number.is_none_or(|number| span.number == number) {
-                subtract_into(span, sequence, length, &mut remaining);
-            } else {
-                remaining.push(span);
+        if length == 0 {
+            return Ok(());
+        }
+        let start = previous.offset(sequence);
+        let end = start + i128::from(length);
+        let affected: Vec<_> = previous
+            .overlapping(start, end)
+            .filter(|(_, span)| number.is_none_or(|number| span.number == number))
+            .map(|(&offset, span)| (offset, span.clone()))
+            .collect();
+        let mut remaining = Vec::new();
+        for (offset, span) in &affected {
+            let span_end = *offset + i128::from(span.length);
+            if *offset < start {
+                remaining.push((
+                    *offset,
+                    Span {
+                        length: (start - *offset) as u32,
+                        ..span.clone()
+                    },
+                ));
+            }
+            if span_end > end {
+                remaining.push((
+                    end,
+                    Span {
+                        sequence: span.sequence.wrapping_add((end - *offset) as u32),
+                        length: (span_end - end) as u32,
+                        ..span.clone()
+                    },
+                ));
             }
         }
-        self.limits
-            .check_source_spans(self.span_count.saturating_add(remaining.len()))?;
-        self.span_count += remaining.len();
-        if !remaining.is_empty() {
-            self.spans.insert(flow.clone(), remaining);
+        let count = self.span_count - affected.len() + remaining.len();
+        self.limits.check_source_spans(count)?;
+        self.span_count = count;
+        let previous = self.spans.get_mut(flow).expect("spans were checked above");
+        for (offset, _) in affected {
+            previous.ranges.remove(&offset);
+        }
+        previous.ranges.extend(remaining);
+        if previous.ranges.is_empty() {
+            self.spans.remove(flow);
         }
         Ok(())
-    }
-}
-// TCP windows are smaller than the serial half-space; signed wrapping distance
-// therefore orders any retained span relative to the delivered range.
-fn intersection(base: u32, length: u32, other: u32, other_length: u32) -> Option<(usize, usize)> {
-    let offset = serial_offset(other, base);
-    let lo = offset.max(0);
-    let hi = (offset + i64::from(other_length)).min(i64::from(length));
-    (lo < hi).then_some((lo as usize, hi as usize))
-}
-/// Pushes what remains of `span` outside `sequence..sequence + length`.
-fn subtract_into(span: Span, sequence: u32, length: u32, output: &mut Vec<Span>) {
-    let Some((lo, hi)) = intersection(span.sequence, span.length, sequence, length) else {
-        output.push(span);
-        return;
-    };
-    if lo > 0 {
-        output.push(Span {
-            length: lo as u32,
-            ..span.clone()
-        });
-    }
-    if hi < span.length as usize {
-        output.push(Span {
-            sequence: span.sequence.wrapping_add(hi as u32),
-            length: span.length - hi as u32,
-            ..span
-        });
     }
 }

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::clock::{Clock, SystemClock};
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
@@ -31,7 +32,7 @@ where
         UdpSocket::bind(SocketAddr::from((request.bind, request.port))).map_err(io_error)?;
     socket.set_read_timeout(Some(POLL)).map_err(io_error)?;
 
-    let started = Instant::now();
+    let started = SystemClock.now();
     let mut last_received: Option<Instant> = None;
     let mut report = ResponderReport::default();
     let mut buffer = vec![0_u8; MAX_DATAGRAM];
@@ -73,7 +74,7 @@ where
             report.ignored += 1;
             continue;
         }
-        last_received = Some(Instant::now());
+        last_received = Some(SystemClock.now());
         report.received += 1;
         let record = ReceptionRecord {
             variant_index: probe.variant_index,
@@ -124,8 +125,8 @@ mod tests {
             });
             let target = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
             let mut reply = None;
-            let probe_deadline = std::time::Instant::now() + Duration::from_secs(3);
-            while std::time::Instant::now() < probe_deadline {
+            let probe_deadline = SystemClock.now() + Duration::from_secs(3);
+            while SystemClock.now() < probe_deadline {
                 if handle.is_finished() {
                     break;
                 }
@@ -142,9 +143,9 @@ mod tests {
             }
             if reply.is_some() {
                 let second = canary::build_probe(&token, 2, 10, 512);
-                let junk_deadline = std::time::Instant::now() + Duration::from_secs(3);
+                let junk_deadline = SystemClock.now() + Duration::from_secs(3);
                 let mut second_answered = false;
-                while std::time::Instant::now() < junk_deadline && !second_answered {
+                while SystemClock.now() < junk_deadline && !second_answered {
                     probe_socket
                         .send_to(b"not a canary", target)
                         .expect("send junk");

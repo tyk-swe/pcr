@@ -97,6 +97,7 @@ pub(crate) fn retryable(source: &io::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use packetcraftr_core::clock::{Clock, SystemClock};
     use std::net::{Ipv6Addr, SocketAddrV6};
 
     fn v6(ip: Ipv6Addr, port: u16, scope_id: u32) -> SocketAddr {
@@ -192,7 +193,7 @@ mod tests {
             .is_ok()
         );
         assert_eq!(armed, Some(Some(crate::deadline::POLL_INTERVAL)));
-        let frozen = std::time::Instant::now();
+        let frozen = SystemClock.now();
         let brief =
             Deadline::with_time_source(std::time::Duration::from_millis(10), move || frozen);
         let mut brief_armed = None;
@@ -222,7 +223,7 @@ mod tests {
         assert!(!setter_called);
         let advanced = Arc::new(AtomicU64::new(0));
         let clock = Arc::clone(&advanced);
-        let origin = std::time::Instant::now();
+        let origin = SystemClock.now();
         let parent = Deadline::with_time_source(std::time::Duration::from_secs(30), move || {
             origin + std::time::Duration::from_secs(clock.load(Ordering::SeqCst))
         });

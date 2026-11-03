@@ -66,11 +66,13 @@ pub(super) enum FieldSource {
         protocol: crate::layer::Id,
         /// With a selection, the path to the list it selects from.
         path: Box<crate::field::Path>,
+        root_index: usize,
         selection: Option<Box<ListSelection>>,
         occurrence: Option<Occurrence>,
     },
     Layer {
         binding: FilterFieldBinding,
+        indices: Vec<usize>,
         occurrence: Option<Occurrence>,
     },
     Frame(FrameField),
@@ -335,9 +337,21 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
 
     if let Some(binding) = registry.filter_field(&stripped) {
         let specs = specs_for(registry, binding.protocol(), binding.fields(), path)?;
+        let indices = registry
+            .schema(binding.protocol().as_str())
+            .map(|schema| {
+                binding
+                    .fields()
+                    .iter()
+                    .filter_map(|field| schema.field_index(field))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|indices| indices.len() == binding.fields().len())
+            .unwrap_or_default();
         return Ok(Resolved::Field(FieldRef {
             source: FieldSource::Layer {
                 binding: binding.clone(),
+                indices,
                 occurrence,
             },
             slice: None,
@@ -358,10 +372,12 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
         if let Some((list, selection, declared)) =
             resolve_selection(tail, schema, path, offset, unknown)?
         {
+            let root_index = schema.field_index(list.root()).ok_or_else(unknown)?;
             return Ok(Resolved::Field(FieldRef {
                 source: FieldSource::NestedLayer {
                     protocol,
                     path: Box::new(list),
+                    root_index,
                     selection: Some(Box::new(selection)),
                     occurrence,
                 },
@@ -373,10 +389,12 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
         let nested = tail.parse::<crate::field::Path>().map_err(|_| unknown())?;
         let declared = nested.schema(schema).ok_or_else(unknown)?;
         if nested.is_nested() {
+            let root_index = schema.field_index(nested.root()).ok_or_else(unknown)?;
             return Ok(Resolved::Field(FieldRef {
                 source: FieldSource::NestedLayer {
                     protocol,
                     path: Box::new(nested),
+                    root_index,
                     selection: None,
                     occurrence,
                 },
@@ -391,6 +409,7 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
                     protocol,
                     field: declared.name,
                 },
+                indices: schema.field_index(declared.name).into_iter().collect(),
                 occurrence,
             },
             slice: None,

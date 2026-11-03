@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::diagnostic::Severity;
-use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 use bytes::Bytes;
@@ -10,17 +9,17 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, IPV4_CHECKSUM},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
     protocol::semantics::ipv4_source_route_destination,
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, checksum_parts, child_is_opaque, expected_discriminator, invalid, make_layer,
-    network_from_addresses, pad_options_to_four_bytes, payload_without_padding, rejected,
-    resolve_u8, resolve_u16, strict_or_diagnostic, strict_or_diagnostic_error, truncated,
-    typed_layer, validate_auto_raw_discriminator, validate_raw_child_discriminator,
+    ValueExpectation, checksum_parts, expected_discriminator, invalid, network_from_addresses,
+    pad_options_to_four_bytes, payload_without_padding, rejected, resolve_u8, resolve_u16,
+    strict_or_diagnostic, strict_or_diagnostic_error, truncated, typed_layer,
+    validate_auto_raw_discriminator, validate_raw_child_discriminator,
 };
 
 use super::envelope::ipv4_endpoints;
@@ -103,8 +102,12 @@ impl Codec for Ipv4Codec {
         context: &EncodeContext<'_>,
     ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Ipv4>(NAME, layer)?;
-        let (source, destination) =
-            ipv4_endpoints(layer, context.packet, context.index, context.build_context);
+        let (source, destination) = ipv4_endpoints(
+            layer.source,
+            layer.destination,
+            context.outer_network,
+            context.addresses,
+        );
         let (options, covered_payload_len, mut diagnostics) =
             prepare_payload(layer, payload, context)?;
         let header_len = IPV4_MIN_LEN.saturating_add(options.len());
@@ -140,7 +143,7 @@ impl Codec for Ipv4Codec {
             && matches!(layer.protocol, WireValue::Exact(_))
             && context
                 .child
-                .is_none_or(|child| BuiltinProtocol::Padding.identifies(child));
+                .is_none_or(|child| child.is_builtin(BuiltinProtocol::Padding.id()));
         if layer.fragment_offset == 0 && !layer.more_fragments && !empty_protocol_probe {
             validate_raw_child_discriminator(
                 NAME,
@@ -198,40 +201,21 @@ impl Codec for Ipv4Codec {
         input: Bytes,
         _context: &DecodeContext<'_>,
     ) -> Result<Decoded, crate::codec::Error> {
-        let Some(header) = input.first_chunk::<IPV4_MIN_LEN>() else {
-            return Err(truncated(NAME, IPV4_MIN_LEN, input.len()));
+        let parsed = match crate::protocol::headers::Ipv4Header::walk(&input) {
+            Ok(parsed) => parsed,
+            Err(_) => return Err(ipv4_decode_error(&input)),
         };
-        if header[0] >> 4 != 4 {
-            return Err(invalid(
-                NAME,
-                format!("version is {}, not 4", header[0] >> 4),
-            ));
-        }
-        let ihl = usize::from(header[0] & 0x0f);
-        if ihl < 5 {
-            return Err(invalid(NAME, format!("IHL {ihl} is below 5")));
-        }
-        let header_len = ihl
-            .checked_mul(4)
-            .ok_or_else(|| invalid(NAME, "IHL overflow"))?;
-        let (Some(full_header), Some(options)) =
-            (input.get(..header_len), input.get(IPV4_MIN_LEN..header_len))
-        else {
-            return Err(truncated(NAME, header_len, input.len()));
-        };
-        let total_length_field = u16::from_be_bytes([header[2], header[3]]);
-        let total_length = usize::from(total_length_field);
-        if total_length < header_len {
-            return Err(invalid(
-                NAME,
-                format!("total length {total_length} is smaller than header {header_len}"),
-            ));
-        }
-        if input.len() < total_length {
-            return Err(truncated(NAME, total_length, input.len()));
-        }
-        let flags_offset = u16::from_be_bytes([header[6], header[7]]);
-        let next = header[9];
+        let header = input
+            .first_chunk::<IPV4_MIN_LEN>()
+            .expect("a walked header holds the fixed part");
+        let header_len = parsed.header_length();
+        let total_length = parsed.total_length();
+        let full_header = &input[..header_len];
+        let options = &input[IPV4_MIN_LEN..header_len];
+        let total_length_field =
+            u16::try_from(total_length).expect("a walked total length came from two bytes");
+        let flags_offset = parsed.flags_and_offset();
+        let next = parsed.protocol();
         let source = Ipv4Addr::new(header[12], header[13], header[14], header[15]);
         let destination = Ipv4Addr::new(header[16], header[17], header[18], header[19]);
         let pseudo_header_destination = ipv4_source_route_destination(destination, options)
@@ -248,7 +232,7 @@ impl Codec for Ipv4Codec {
             );
         }
         let fragment_offset = flags_offset & 0x1fff;
-        if flags_offset & 0x8000 != 0 {
+        if parsed.reserved_flag() {
             diagnostics.push(
                 Diagnostic::new(
                     Severity::Warning,
@@ -263,9 +247,9 @@ impl Codec for Ipv4Codec {
             layer: Box::new(Ipv4 {
                 dscp_ecn: header[1],
                 total_length: WireValue::Exact(total_length_field),
-                identification: u16::from_be_bytes([header[4], header[5]]),
-                reserved_flag: (flags_offset & 0x8000) != 0,
-                dont_fragment: (flags_offset & 0x4000) != 0,
+                identification: parsed.identification(),
+                reserved_flag: parsed.reserved_flag(),
+                dont_fragment: parsed.dont_fragment(),
                 more_fragments: (flags_offset & 0x2000) != 0,
                 fragment_offset,
                 ttl: header[8],
@@ -282,7 +266,9 @@ impl Codec for Ipv4Codec {
             } else if fragment_offset == 0 && (flags_offset & 0x2000) == 0 {
                 vec![Discriminator(u64::from(next))]
             } else {
-                vec![Discriminator(255)]
+                vec![Discriminator(u64::from(
+                    crate::protocol::network::ip_protocol::RESERVED,
+                ))]
             },
             fields: ipv4_layout(header_len),
             diagnostics,
@@ -294,11 +280,12 @@ impl Codec for Ipv4Codec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Ipv4::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(ipv4_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Ipv4::default()))
     }
 }
 
@@ -366,7 +353,7 @@ fn prepare_payload(
         )?;
     }
     let typed_fragment = (layer.fragment_offset != 0 || layer.more_fragments)
-        && context.child.is_some_and(|child| !child_is_opaque(child));
+        && context.child.is_some_and(|child| !child.is_opaque());
     if typed_fragment {
         strict_or_diagnostic(
             NAME,
@@ -378,4 +365,29 @@ fn prepare_payload(
         )?;
     }
     Ok((options, covered_payload_len, diagnostics))
+}
+
+fn ipv4_decode_error(input: &[u8]) -> crate::codec::Error {
+    let Some(header) = input.first_chunk::<IPV4_MIN_LEN>() else {
+        return truncated(NAME, IPV4_MIN_LEN, input.len());
+    };
+    if header[0] >> 4 != 4 {
+        return invalid(NAME, format!("version is {}, not 4", header[0] >> 4));
+    }
+    let ihl = usize::from(header[0] & 0x0f);
+    if ihl < 5 {
+        return invalid(NAME, format!("IHL {ihl} is below 5"));
+    }
+    let header_len = ihl.saturating_mul(4);
+    if input.len() < header_len {
+        return truncated(NAME, header_len, input.len());
+    }
+    let total_length = usize::from(u16::from_be_bytes([header[2], header[3]]));
+    if total_length < header_len {
+        return invalid(
+            NAME,
+            format!("total length {total_length} is smaller than header {header_len}"),
+        );
+    }
+    truncated(NAME, total_length, input.len())
 }

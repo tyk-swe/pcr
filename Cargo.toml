@@ -25,6 +25,7 @@ needless_raw_string_hashes = "warn"
 items_after_statements = "warn"
 match_same_arms = "warn"
 mod_module_files = "deny"
+wildcard_imports = "deny"
 
 [workspace.dependencies]
 webpki-roots = "1.0.10"

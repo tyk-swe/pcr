@@ -44,7 +44,13 @@ impl super::builder::Builder {
                         });
                     }
                 }
-                entries.truncate(1);
+                if let Some(conflict) = entries.get(1) {
+                    return Err(Error::BindingConflict {
+                        parent: *parent,
+                        discriminator: discriminator.0,
+                        priority: conflict.priority,
+                    });
+                }
                 let Some(winner) = entries.first() else {
                     continue;
                 };
@@ -78,7 +84,13 @@ impl super::builder::Builder {
         }
         let mut schemas = BTreeMap::new();
         for (protocol, codec) in &self.codecs {
-            if let Some(schema) = codec.published_schema() {
+            if let Some(schema) = codec.schema() {
+                if schema.protocol != *protocol {
+                    return Err(Error::SchemaProtocolMismatch {
+                        protocol: *protocol,
+                        schema_protocol: schema.protocol,
+                    });
+                }
                 schemas.insert(*protocol, schema);
             }
         }
@@ -139,9 +151,13 @@ fn validate_filter_field(
             protocol: *protocol,
         });
     }
-    // A decode-only codec has no default layer and therefore no cached schema.
     let Some(schema) = schemas.get(protocol) else {
-        return Ok(());
+        let field = binding.fields().first().copied().unwrap_or_default();
+        return Err(Error::UnknownFilterField {
+            path: path.to_owned(),
+            protocol: *protocol,
+            field: field.to_owned(),
+        });
     };
     for field in binding.fields() {
         let Some(declared) = schema.fields.iter().find(|entry| entry.name == *field) else {

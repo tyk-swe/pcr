@@ -3,10 +3,12 @@
 
 //! RTCP v2 compound SR/RR/SDES/BYE/APP envelopes and checked report counts. Report data retains original bytes.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -21,18 +23,12 @@ pub struct Rtcp {
     pub packets: Records,
 }
 crate::reflective_layer! {
- fn rtcp_schema() => { protocol: crate::layer::Id::new("rtcp"), name: "Rtcp" }
+ fn rtcp_schema() => { protocol: crate::protocol::BuiltinProtocol::Rtcp.id(), name: "Rtcp" }
  impl Rtcp {
     "packets" => { kind: List, derived: false, required: false, description: "Ordered compound RTCP packets", children: PACKETS, reflect: packets },
  }
 }
-fn rtcp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    vec![crate::layout::FieldLayout {
-        name: "packets",
-        range: crate::layout::ByteRange::new(0, b.len()),
-    }]
-}
-message_codec!(RtcpCodec, Rtcp, rtcp_schema, rtcp_layout_wire);
+message_codec!(RtcpCodec, Rtcp, rtcp_schema);
 
 const NAME: &str = "rtcp";
 impl Rtcp {
@@ -74,9 +70,13 @@ impl Rtcp {
         validate(&w.bytes)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         validate(&b)?;
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..b.len());
         let mut packets = Records::default();
         while r.left() > 0 {
             let h = r.u8()?;
@@ -95,7 +95,7 @@ impl Rtcp {
                 ("padding", Bytes::copy_from_slice(&body[n - pad..]).into()),
             ]));
         }
-        Ok(Self { packets })
+        Ok((Self { packets }, r.take_layouts()))
     }
 }
 fn validate(b: &[u8]) -> Result<(), Error> {

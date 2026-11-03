@@ -3,11 +3,9 @@
 
 use std::net::IpAddr;
 
+use packetcraftr_core::protocol::identity;
 use packetcraftr_core::protocol::link::Ethernet;
-use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
-use packetcraftr_core::{
-    layer::Layer, packet::Packet, protocol::BuiltinProtocol, protocol::semantics,
-};
+use packetcraftr_core::{packet::Packet, protocol::BuiltinProtocol, protocol::semantics};
 
 use crate::Error;
 
@@ -43,40 +41,20 @@ pub(super) fn materialize_network_fields(
     packet: &mut Packet,
     plan: &crate::route::Plan,
 ) -> Result<(), Error> {
-    let Some(index) =
-        semantics::outer_layers(packet).position(|layer| layer.is::<Ipv4>() || layer.is::<Ipv6>())
+    let Some(index) = semantics::outer_layers(packet).position(|layer| {
+        BuiltinProtocol::Ipv4.identifies(layer) || BuiltinProtocol::Ipv6.identifies(layer)
+    }) else {
+        return Ok(());
+    };
+    let Some((source, destination)) = packet.layer(index).and_then(identity::network_endpoints)
     else {
         return Ok(());
     };
-    let Some(layer) = packet.layer_mut(index) else {
-        return Ok(());
-    };
-    if let Some(ipv4) = layer.downcast_mut::<Ipv4>() {
-        let source = IpAddr::V4(ipv4.source);
-        if let Some(IpAddr::V4(value)) =
-            planned_address(source, plan.packet_source, index, "source")?
-        {
-            ipv4.source = value;
-        }
-        let destination = IpAddr::V4(ipv4.destination);
-        if let Some(IpAddr::V4(value)) =
-            planned_address(destination, plan.lookup_destination, index, "destination")?
-        {
-            ipv4.destination = value;
-        }
-    } else if let Some(ipv6) = layer.downcast_mut::<Ipv6>() {
-        let source = IpAddr::V6(ipv6.source);
-        if let Some(IpAddr::V6(value)) =
-            planned_address(source, plan.packet_source, index, "source")?
-        {
-            ipv6.source = value;
-        }
-        let destination = IpAddr::V6(ipv6.destination);
-        if let Some(IpAddr::V6(value)) =
-            planned_address(destination, plan.lookup_destination, index, "destination")?
-        {
-            ipv6.destination = value;
-        }
+    let source = planned_address(source, plan.packet_source, index, "source")?.unwrap_or(source);
+    let destination = planned_address(destination, plan.lookup_destination, index, "destination")?
+        .unwrap_or(destination);
+    if let Some(layer) = packet.layer_mut(index) {
+        identity::set_network_addresses(layer, source, destination);
     }
     Ok(())
 }
@@ -108,17 +86,18 @@ pub(super) fn materialize_link_fields(
     if route.plan.mode != packetcraftr_netio::link::Mode::Layer2 {
         return Ok(false);
     }
-    let Some(index) = semantics::outer_layers(packet).position(<dyn Layer>::is::<Ethernet>) else {
+    let Some(index) = semantics::outer_layers(packet)
+        .position(|layer| BuiltinProtocol::Ethernet.identifies(layer))
+    else {
         return Ok(false);
     };
-    let Some(ethernet) = packet
-        .layer_mut(index)
-        .and_then(|layer| layer.downcast_mut::<Ethernet>())
+    let Some((mut source, mut destination)) =
+        packet.layer(index).and_then(identity::link_addresses)
     else {
         return Ok(false);
     };
     let mut changed = false;
-    if ethernet.source == [0; 6] {
+    if source == [0; 6] {
         let source_mac = route
             .plan
             .source_mac
@@ -128,10 +107,10 @@ pub(super) fn materialize_link_fields(
                 message: "route has no interface-owned source MAC".to_owned(),
                 source: None,
             })?;
-        ethernet.source = source_mac.0;
+        source = source_mac.0;
         changed = true;
     }
-    if ethernet.destination == [0; 6] {
+    if destination == [0; 6] {
         let destination_mac =
             route
                 .plan
@@ -142,8 +121,11 @@ pub(super) fn materialize_link_fields(
                     message: "route has no resolved destination MAC".to_owned(),
                     source: None,
                 })?;
-        ethernet.destination = destination_mac.0;
+        destination = destination_mac.0;
         changed = true;
+    }
+    if changed && let Some(layer) = packet.layer_mut(index) {
+        identity::set_link_addresses(layer, source, destination);
     }
     Ok(changed)
 }

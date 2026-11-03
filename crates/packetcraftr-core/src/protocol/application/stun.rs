@@ -3,10 +3,12 @@
 
 //! STUN Binding messages (RFC 8489), including unknown attributes and alignment bytes. Integrity is not authenticated.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -31,36 +33,14 @@ impl Default for Stun {
     }
 }
 crate::reflective_layer! {
- fn stun_schema() => { protocol: crate::layer::Id::new("stun"), name: "Stun" }
+ fn stun_schema() => { protocol: crate::protocol::BuiltinProtocol::Stun.id(), name: "Stun" }
  impl Stun {
     "message_type" => { kind: Unsigned, derived: false, required: false, description: "message type", reflect: message_type },
     "transaction_id" => { kind: Bytes, derived: false, required: false, description: "transaction id", reflect: transaction_id },
     "attributes" => { kind: List, derived: false, required: false, description: "Ordered attributes and alignment padding", children: ATTRIBUTES, reflect: attributes },
  }
 }
-fn stun_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "message_type",
-            range: crate::layout::ByteRange::new(0, 2),
-        });
-    }
-    if 20 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "transaction_id",
-            range: crate::layout::ByteRange::new(8, 20),
-        });
-    }
-    if 20 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "attributes",
-            range: crate::layout::ByteRange::new(20, b.len()),
-        });
-    }
-    fields
-}
-message_codec!(StunCodec, Stun, stun_schema, stun_layout_wire);
+message_codec!(StunCodec, Stun, stun_schema);
 
 const NAME: &str = "stun";
 impl Stun {
@@ -98,8 +78,14 @@ impl Stun {
         w.put(&body.bytes)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..2);
+        r.mark(1, 8..20);
+        r.mark(2, 20..b.len());
         let message_type = r.u16()?;
         if !matches!(message_type, 1 | 0x11 | 0x101 | 0x111) {
             return Err(unsupported(NAME, "only Binding messages"));
@@ -127,10 +113,13 @@ impl Stun {
                 ("padding", padding.into()),
             ]));
         }
-        Ok(Self {
-            message_type,
-            transaction_id,
-            attributes,
-        })
+        Ok((
+            Self {
+                message_type,
+                transaction_id,
+                attributes,
+            },
+            r.take_layouts(),
+        ))
     }
 }

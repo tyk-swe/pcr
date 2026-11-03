@@ -56,11 +56,17 @@ impl Projection {
                 },
             )
             .map_err(invalid_field)?;
-            let [Op::Leaf(Predicate::Bare { field, .. })] = compiled.program.as_slice() else {
-                return Err(invalid_field(Error::Syntax {
+            let not_one_field = || {
+                invalid_field(Error::Syntax {
                     offset: 0,
                     message: "projection requires one field path per column".to_owned(),
-                }));
+                })
+            };
+            let [Op::Leaf(predicate)] = compiled.program.as_slice() else {
+                return Err(not_one_field());
+            };
+            let Predicate::Bare { field, .. } = &**predicate else {
+                return Err(not_one_field());
             };
             projection.columns.push(field.path.clone());
             projection.fields.push(field.clone());
@@ -92,6 +98,7 @@ impl Projection {
             FieldSource::Layer {
                 binding,
                 occurrence,
+                ..
             } => matches!(occurrence, Some(Occurrence::Nth(_))) && binding.fields().len() == 1,
         })
     }

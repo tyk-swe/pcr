@@ -593,6 +593,6 @@ pub enum Error {
 
 impl Classified for Error {
     fn classification(&self) -> Classification {
-        Classification::new("document.service_probes", Kind::Usage, None)
+        Classification::new(crate::error::Code::DocumentServiceProbes, Kind::Usage, None)
     }
 }

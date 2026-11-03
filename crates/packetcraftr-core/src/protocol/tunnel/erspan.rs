@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
@@ -14,8 +12,8 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    ensure_encode_budget, invalid, make_layer, out_of_range, strict_or_diagnostic, truncated,
-    typed_layer, unsupported, validate_raw_child_discriminator, wrong_type,
+    ensure_encode_budget, invalid, out_of_range, strict_or_diagnostic, truncated, typed_layer,
+    unsupported, validate_raw_child_discriminator, wrong_type,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -26,8 +24,8 @@ const ERSPAN_II_LEN: usize = 8;
 const ERSPAN_III_LEN: usize = 12;
 const SUBHEADER_LEN: usize = 8;
 const SUBHEADER_FLAG: u16 = 0x0001;
-const TYPE_II_PROTOCOL: u64 = 0x88be;
-const TYPE_III_PROTOCOL: u64 = 0x22eb;
+const TYPE_II_PROTOCOL: u64 = crate::protocol::link::ether_type::ERSPAN_TYPE_II as u64;
+const TYPE_III_PROTOCOL: u64 = crate::protocol::link::ether_type::ERSPAN_TYPE_III as u64;
 
 /// ERSPAN mirrored-frame header, Type II (version 1) or Type III (version 2).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -226,11 +224,12 @@ impl Codec for ErspanCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Erspan::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(erspan_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Erspan::default()))
     }
 }
 
@@ -308,13 +307,10 @@ fn validate_parent(
     } else {
         TYPE_III_PROTOCOL
     };
-    let parent = context
-        .index
-        .checked_sub(1)
-        .and_then(|index| context.packet.layer(index));
-    let protocol_type_disagrees = match parent.and_then(|layer| layer.field("protocol_type")) {
+    let parent = context.parent;
+    let protocol_type_disagrees = match parent.and_then(|info| info.protocol_type_value.as_ref()) {
         Some(field::Value::Unsigned(value @ (TYPE_II_PROTOCOL | TYPE_III_PROTOCOL))) => {
-            value != expected_protocol_type
+            *value != expected_protocol_type
         }
         Some(field::Value::Text(_)) => layer.version != 1,
         _ => false,
@@ -332,11 +328,7 @@ fn validate_parent(
             &mut diagnostics,
         )?;
     }
-    if layer.version == 1
-        && parent
-            .and_then(|parent| parent.downcast_ref::<super::Gre>())
-            .is_some_and(|gre| gre.sequence.is_none())
-    {
+    if layer.version == 1 && parent.and_then(|info| info.gre_sequence_present) == Some(false) {
         strict_or_diagnostic(
             NAME,
             "build.erspan_sequence",
@@ -353,16 +345,16 @@ fn validate_parent(
 fn erspan_layout(layer: &Erspan) -> Vec<crate::layout::FieldLayout> {
     let mut fields = erspan_static_layout();
     if let Some(type3) = &layer.type3 {
-        fields.retain(|field| field.name != "index_word");
-        for (name, start, end) in [("timestamp", 4, 8), ("sgt", 8, 10), ("flags", 10, 12)] {
+        fields.retain(|field| field.index != 6);
+        for (index, start, end) in [(7, 4, 8), (8, 8, 10), (9, 10, 12)] {
             fields.push(crate::layout::FieldLayout {
-                name,
+                index,
                 range: crate::layout::ByteRange::new(start, end),
             });
         }
         if type3.subheader.is_some() {
             fields.push(crate::layout::FieldLayout {
-                name: "subheader",
+                index: 10,
                 range: crate::layout::ByteRange::new(
                     ERSPAN_III_LEN,
                     ERSPAN_III_LEN.saturating_add(SUBHEADER_LEN),

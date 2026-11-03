@@ -5,8 +5,8 @@ use super::error::{Constraint, Error};
 use super::path::outer_scope_len;
 use crate::layer::Layer;
 use crate::packet::Packet;
-use crate::packet::{VlanKind, VlanTag};
-use crate::protocol::link::{Vlan, Vlan8021ad};
+use crate::packet::VlanTag;
+use crate::protocol::identity;
 
 /// Outermost-first VLAN tags on the directly transmitted packet.
 pub fn vlan_tags(packet: &Packet) -> Result<Vec<VlanTag>, Error> {
@@ -14,32 +14,8 @@ pub fn vlan_tags(packet: &Packet) -> Result<Vec<VlanTag>, Error> {
         .iter()
         .take(outer_scope_len(packet))
         .filter_map(|layer| {
-            let (kind, priority, drop_eligible, vlan_id) =
-                if let Some(tag) = layer.downcast_ref::<Vlan>() {
-                    (
-                        VlanKind::Ieee8021Q,
-                        tag.priority,
-                        tag.drop_eligible,
-                        tag.vlan_id,
-                    )
-                } else {
-                    let tag = layer.downcast_ref::<Vlan8021ad>()?;
-                    (
-                        VlanKind::Ieee8021Ad,
-                        tag.priority,
-                        tag.drop_eligible,
-                        tag.vlan_id,
-                    )
-                };
-            Some(checked_tag(
-                layer,
-                VlanTag {
-                    kind,
-                    priority,
-                    drop_eligible,
-                    vlan_id,
-                },
-            ))
+            let tag = identity::vlan_tag(layer)?;
+            Some(checked_tag(layer, tag))
         })
         .collect()
 }

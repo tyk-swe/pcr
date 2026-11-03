@@ -1,17 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
+use crate::protocol::common::{invalid, truncated, unsupported};
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    field,
     layer::{Id, Layer},
 };
-
-use crate::protocol::common::{invalid, truncated, unsupported};
 
 use super::{Ipv4Codec, Ipv6Codec};
 
@@ -60,10 +56,11 @@ impl Codec for RawIpCodec {
         }
     }
 
-    fn make_layer(
-        &self,
-        _fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        None
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
         Err(unsupported(NAME, "raw_ip has no constructible layer"))
     }
 }

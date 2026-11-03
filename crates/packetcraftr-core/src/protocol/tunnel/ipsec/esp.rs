@@ -1,21 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, Severity},
-    field,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    child_is_opaque, ensure_encode_budget, make_layer, payload_without_padding,
-    strict_or_diagnostic, truncated, typed_layer,
+    ensure_encode_budget, payload_without_padding, strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -89,7 +85,7 @@ impl Codec for EspCodec {
             )?;
         }
         if let Some(child) = context.child
-            && !child_is_opaque(child)
+            && !child.is_opaque()
         {
             strict_or_diagnostic(
                 NAME,
@@ -146,10 +142,11 @@ impl Codec for EspCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Esp::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(esp_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Esp::default()))
     }
 }

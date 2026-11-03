@@ -5,12 +5,15 @@ use packetcraftr_core::error::BoundaryError;
 
 #[derive(Clone, Copy)]
 pub(crate) struct ExecutorFault {
-    code: &'static str,
+    code: packetcraftr_core::error::Code,
     remediation: &'static str,
 }
 
 impl ExecutorFault {
-    pub(crate) const fn new(code: &'static str, remediation: &'static str) -> Self {
+    pub(crate) const fn new(
+        code: packetcraftr_core::error::Code,
+        remediation: &'static str,
+    ) -> Self {
         Self { code, remediation }
     }
 

@@ -3,10 +3,10 @@
 
 //! LDAPv3 Bind/Search/Unbind BER envelopes (RFC 4511). Operation fields retain their ASN.1 tag and original content.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Reader, Records, Writer, data, message_codec, number, record};
 use bytes::Bytes;
 
 use super::ber;
@@ -33,7 +33,7 @@ impl Default for Ldap {
     }
 }
 crate::reflective_layer! {
- fn ldap_schema() => { protocol: crate::layer::Id::new("ldap"), name: "Ldap" }
+ fn ldap_schema() => { protocol: crate::protocol::BuiltinProtocol::Ldap.id(), name: "Ldap" }
  impl Ldap {
     "message_id" => { kind: Unsigned, derived: false, required: false, description: "message id", reflect: message_id },
     "operation" => { kind: Unsigned, derived: false, required: false, description: "operation", reflect: operation },
@@ -41,42 +41,7 @@ crate::reflective_layer! {
     "controls" => { kind: Bytes, derived: false, required: false, description: "controls", reflect: controls },
  }
 }
-fn ldap_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    // Reader offsets include definite BER length headers; content ranges exclude them.
-    let ranges = (|| -> Result<_, Error> {
-        let mut top = Reader::new(NAME, b);
-        let content = ber::expect(&mut top, 0x30)?;
-        let base = top.pos - content.len();
-        let mut r = Reader::new(NAME, content);
-        let id = ber::expect(&mut r, 2)?;
-        let id_range = crate::layout::ByteRange::new(base + r.pos - id.len(), base + r.pos);
-        let operation_start = base + r.pos;
-        let (_, operation) = ber::take(&mut r)?;
-        let operation_range =
-            crate::layout::ByteRange::new(base + r.pos - operation.len(), base + r.pos);
-        Ok((
-            id_range,
-            operation_start,
-            operation_range,
-            base + r.pos,
-            base + content.len(),
-        ))
-    })();
-    if let Ok((id, tag, content, controls, end)) = ranges {
-        for (name, range) in [
-            ("message_id", id),
-            ("operation", crate::layout::ByteRange::new(tag, tag + 1)),
-            ("fields", content),
-            ("controls", crate::layout::ByteRange::new(controls, end)),
-        ] {
-            fields.push(crate::layout::FieldLayout { name, range });
-        }
-    }
-    fields
-}
-
-message_codec!(LdapCodec, Ldap, ldap_schema, ldap_layout_wire);
+message_codec!(LdapCodec, Ldap, ldap_schema);
 
 const NAME: &str = "ldap";
 impl Ldap {
@@ -104,16 +69,28 @@ impl Ldap {
         ber::put(&mut top, 0x30, &w.bytes)?;
         Ok(top.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         ber::validate(NAME, &b)?;
         let mut top = Reader::new(NAME, &b);
-        let mut r = Reader::new(NAME, ber::expect(&mut top, 0x30)?);
+        let content = ber::expect(&mut top, 0x30)?;
+        let base = top.pos - content.len();
+        let content_end = base + content.len();
+        let mut r = Reader::new(NAME, content);
         top.finish()?;
-        let id = ber::integer(ber::expect(&mut r, 2)?, NAME)?;
+        let id_value = ber::expect(&mut r, 2)?;
+        top.mark(0, base + r.pos - id_value.len()..base + r.pos);
+        let operation_start = base + r.pos;
+        let id = ber::integer(id_value, NAME)?;
         if !(0..=0x7fffffff).contains(&id) {
             return Err(invalid(NAME, "invalid message ID"));
         }
         let (operation, payload) = ber::take(&mut r)?;
+        top.mark(1, operation_start..operation_start + 1);
+        top.mark(2, base + r.pos - payload.len()..base + r.pos);
+        top.mark(3, base + r.pos..content_end);
         if !matches!(operation, 0x60 | 0x61 | 0x42 | 0x63 | 0x64 | 0x65 | 0x73) {
             return Err(unsupported(
                 NAME,
@@ -159,11 +136,14 @@ impl Ldap {
             ber::expect(&mut p, 0x30)?;
             p.finish()?;
         }
-        Ok(Self {
-            message_id: id as u32,
-            operation,
-            fields,
-            controls,
-        })
+        Ok((
+            Self {
+                message_id: id as u32,
+                operation,
+                fields,
+                controls,
+            },
+            top.take_layouts(),
+        ))
     }
 }

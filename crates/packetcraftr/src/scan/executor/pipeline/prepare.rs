@@ -345,8 +345,8 @@ fn charge(packet: &Packet, maximum: usize) -> Result<usize, BoundaryError> {
     let mut bytes = 1024usize;
     for layer in packet.iter() {
         bytes = bytes.saturating_add(256);
-        for field in layer.schema().fields {
-            if let Some(field) = layer.field(field.name) {
+        for index in 0..layer.schema().fields.len() {
+            if let Some(field) = layer.field_by_index(index) {
                 bytes = bytes.saturating_add(value_cost(&field, maximum)?);
             }
         }

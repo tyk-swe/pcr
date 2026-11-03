@@ -25,7 +25,7 @@ const DATA_SET: DataSet = DataSet {
 };
 
 static BUNDLED: LazyLock<BTreeMap<u16, Arc<UdpProfile>>> = LazyLock::new(|| {
-    let assignments = udp_profiles::parse(include_bytes!("../../../data/udp-payloads.json"))
+    let assignments = udp_profiles::parse(crate::data::UDP_PAYLOADS.bytes)
         .expect("bundled UDP payloads are a valid profile document");
     super::compile(assignments).expect("bundled UDP payloads compile")
 });

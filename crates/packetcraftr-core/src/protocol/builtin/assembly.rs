@@ -3,83 +3,15 @@
 
 use std::sync::{Arc, LazyLock};
 
-use crate::protocol::{
-    application, capture as capture_link, link, matcher, network as ip, transport, tunnel,
-};
-
-use crate::layer::{MalformedCodec, PaddingCodec, RawCodec};
-use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
-use ip::{
-    DestinationOptionsCodec, FragmentCodec, HopByHopCodec, Icmpv4Codec, Icmpv6Codec, IgmpCodec,
-    Ipv4Codec, Ipv6Codec, RawIpCodec, SegmentRoutingHeaderCodec, VrrpCodec,
-};
-use link::{
-    ArpCodec, EapolCodec, EthernetCodec, LlcCodec, LldpCodec, SnapCodec, StpCodec, Vlan8021adCodec,
-    VlanCodec,
-};
-use transport::{SctpCodec, TcpCodec, UdpCodec};
-use tunnel::{
-    AhCodec, ErspanCodec, EspCodec, EtheripCodec, GeneveCodec, GreCodec, GtpuCodec, L2tpv3Codec,
-    MplsCodec, PppCodec, PppoeCodec, VxlanCodec,
-};
-
 use crate::protocol::BuiltinProtocol;
-use crate::protocol::catalog::builtin_protocol_catalog;
-
-use application::{
-    Dhcpv4Codec, Dhcpv6Codec, DnsCodec, HttpCodec, NtpCodec, SyslogCodec, TftpCodec, TlsCodec,
-};
 
 use super::bindings;
-use application::{AmqpCodec, CoapCodec, MemcachedCodec, MqttCodec, RespCodec, SsdpCodec};
 
 fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
-    macro_rules! register_matcher {
-        ($variant:ident, none) => {};
-        ($variant:ident, reverse_flow) => {
-            builder.register_matcher(
-                BuiltinProtocol::$variant.as_str(),
-                matcher::ReverseFlowMatcher::new(BuiltinProtocol::$variant),
-            )?;
-        };
-        ($variant:ident, echo_v4) => {
-            builder.register_matcher(
-                BuiltinProtocol::$variant.as_str(),
-                matcher::EchoMatcher::v4(),
-            )?;
-        };
-        ($variant:ident, echo_v6) => {
-            builder.register_matcher(
-                BuiltinProtocol::$variant.as_str(),
-                matcher::EchoMatcher::v6(),
-            )?;
-        };
-        ($variant:ident, dns) => {
-            builder.register_matcher(BuiltinProtocol::$variant.as_str(), matcher::DnsMatcher)?;
-        };
+    for protocol in BuiltinProtocol::ALL {
+        protocol.register(builder)?;
     }
-
-    macro_rules! register_protocols {
-        ($(
-            $variant:ident {
-                canonical: $canonical:literal,
-                aliases: [$($alias:literal),* $(,)?],
-                constructible: $constructible:literal,
-                exact_round_trip: $exact_round_trip:literal,
-                matcher: $matcher:ident,
-                layer: [$($layer:ty)?],
-                codec: $codec:ident
-            }
-        )*) => {{
-            $(
-                builder.register_codec($codec, BuiltinProtocol::$variant.aliases())?;
-                register_matcher!($variant, $matcher);
-            )*
-            Ok(())
-        }};
-    }
-
-    builtin_protocol_catalog!(register_protocols)
+    Ok(())
 }
 
 pub fn registry() -> Arc<crate::registry::Registry> {
@@ -95,7 +27,7 @@ pub fn registry() -> Arc<crate::registry::Registry> {
 /// use packetcraftr_core::protocol::builtin;
 ///
 /// let registry = builtin::registry_with(|builder| {
-///     builder.bind("tcp", 4433, "tls", 100)?;
+///     builder.bind("tcp", 4433, "tls", packetcraftr_core::registry::Priority::Primary)?;
 ///     Ok(())
 /// })
 /// .expect("extra binding is valid");
@@ -134,63 +66,3 @@ pub fn registry_with_tls_ports(
 ) -> Result<crate::registry::Registry, crate::registry::Error> {
     registry_with(|builder| bindings::bind_tls_ports(builder, ports))
 }
-
-use crate::protocol::link::EapCodec;
-
-use crate::protocol::link::LacpCodec;
-
-use crate::protocol::link::CdpCodec;
-
-use crate::protocol::tunnel::PppLcpCodec;
-
-use crate::protocol::tunnel::PppIpcpCodec;
-
-use crate::protocol::tunnel::PppIpv6cpCodec;
-
-use crate::protocol::application::BgpCodec;
-
-use crate::protocol::network::Ospfv2Codec;
-
-use crate::protocol::network::Ospfv3Codec;
-
-use crate::protocol::network::Ripv2Codec;
-
-use crate::protocol::network::RipngCodec;
-
-use crate::protocol::network::PimCodec;
-
-use crate::protocol::application::RadiusCodec;
-
-use crate::protocol::application::SnmpCodec;
-
-use crate::protocol::application::LdapCodec;
-
-use crate::protocol::application::Netflowv5Codec;
-
-use crate::protocol::application::IpfixCodec;
-
-use crate::protocol::application::SflowCodec;
-
-use crate::protocol::application::SipCodec;
-
-use crate::protocol::application::RtspCodec;
-
-use crate::protocol::application::RtpCodec;
-
-use crate::protocol::application::RtcpCodec;
-
-use crate::protocol::application::StunCodec;
-
-use crate::protocol::application::DtlsCodec;
-
-use crate::protocol::application::ModbusTcpCodec;
-
-use crate::protocol::application::BacnetIpCodec;
-
-use crate::protocol::application::Dnp3Codec;
-
-use crate::protocol::application::EthernetIpCodec;
-
-use crate::protocol::application::Iec104Codec;
-
-use crate::protocol::application::OpcuaTcpCodec;

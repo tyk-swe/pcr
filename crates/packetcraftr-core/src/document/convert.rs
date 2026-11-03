@@ -15,9 +15,10 @@ impl Packet {
                     .schema()
                     .fields
                     .iter()
-                    .filter_map(|field| {
+                    .enumerate()
+                    .filter_map(|(index, field)| {
                         layer
-                            .field(field.name)
+                            .field_by_index(index)
                             .map(|value| (field.name.to_owned(), value))
                     })
                     .collect();
@@ -52,7 +53,7 @@ impl Packet {
                         protocol: layer.protocol.clone(),
                     })?;
             let value = codec
-                .make_layer(&layer.fields)
+                .construct(&layer.fields)
                 .map_err(|source| Error::Layer {
                     layer: index,
                     protocol: layer.protocol.clone(),

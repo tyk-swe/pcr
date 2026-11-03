@@ -142,7 +142,7 @@ impl OfflineCaptureLimitsArgs {
         {
             return Err(CliError::from_classification(
                 Classification::new(
-                    "cli.capture_limit",
+                    packetcraftr_core::error::Code::CliCaptureLimit,
                     Kind::Usage,
                     Some("use finite non-zero capture frame, byte, packet, and interface limits"),
                 ),
@@ -153,7 +153,7 @@ impl OfflineCaptureLimitsArgs {
         if u64::try_from(reader.max_frame_bytes).unwrap_or(u64::MAX) > max_bytes {
             return Err(CliError::from_classification(
                 Classification::new(
-                    "cli.capture_limit",
+                    packetcraftr_core::error::Code::CliCaptureLimit,
                     Kind::Usage,
                     Some("set max-frame-bytes no higher than the aggregate max-bytes budget"),
                 ),

@@ -5,6 +5,7 @@
 pub(crate) mod raw_ip;
 
 use bytes::Bytes;
+use packetcraftr_core::clock::{Clock, SystemClock};
 use std::net::IpAddr;
 use std::time::{Instant, SystemTime};
 
@@ -132,8 +133,8 @@ pub struct TimeMarker {
 impl TimeMarker {
     fn now() -> Self {
         Self {
-            monotonic: Instant::now(),
-            wall_clock: SystemTime::now(),
+            monotonic: SystemClock.now(),
+            wall_clock: SystemClock.wall_now(),
         }
     }
 

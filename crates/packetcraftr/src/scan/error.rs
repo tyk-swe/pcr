@@ -130,17 +130,17 @@ impl Classified for Error {
             Self::Cancelled(source) => source.classification(),
             Self::TargetSelection(source) => source.classification(),
             Self::UnsupportedTcpRoute => Classification::new(
-                "capability.scan_tcp_route",
+                packetcraftr_core::error::Code::CapabilityScanTcpRoute,
                 Kind::Capability,
                 Some("omit packet interface/source/link overrides for ordinary TCP"),
             ),
             Self::MethodProbe { .. } => Classification::new(
-                "cli.scan_method",
+                packetcraftr_core::error::Code::CliScanMethod,
                 Kind::Usage,
                 Some("probe UDP and ICMP endpoints and discover neighbors with the raw method"),
             ),
             Self::InvalidDiscovery { .. } => Classification::new(
-                "cli.scan_discovery",
+                packetcraftr_core::error::Code::CliScanDiscovery,
                 Kind::Usage,
                 Some(
                     "select discovery probes only when discovery runs, and no scan ports with discovery only",
@@ -150,7 +150,7 @@ impl Classified for Error {
             | Self::InvalidPort { .. }
             | Self::InvalidTimeout { .. }
             | Self::InvalidDuration { .. } => Classification::new(
-                "cli.scan_limit",
+                packetcraftr_core::error::Code::CliScanLimit,
                 Kind::Usage,
                 Some(
                     "use finite non-zero scan ports, attempts, timeouts, batches, rate, and evidence limits",
@@ -162,29 +162,29 @@ impl Classified for Error {
             | Self::Execution { source, .. }
             | Self::Output { source } => source.classification(),
             Self::Family { .. } => Classification::new(
-                "packet.target_address_family",
+                packetcraftr_core::error::Code::PacketTargetAddressFamily,
                 Kind::Packet,
                 Some("select a scan address family returned by the authorized target resolution"),
             ),
             Self::DurationLimit { .. } => Classification::new(
-                "policy.scan_duration_limit",
+                packetcraftr_core::error::Code::PolicyScanDurationLimit,
                 Kind::Policy,
                 Some(
                     "reduce ports, addresses, attempts, timeout, or rate delay, or deliberately raise the finite duration limit",
                 ),
             ),
             Self::Clock { .. } => Classification::new(
-                "io.scan_clock",
+                packetcraftr_core::error::Code::IoScanClock,
                 Kind::Io,
                 Some("inspect the scan timer and account for probes already transmitted"),
             ),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
-                "internal.scan_evidence",
+                packetcraftr_core::error::Code::InternalScanEvidence,
                 Kind::Internal,
                 Some("treat the scan as incomplete because executor evidence was inconsistent"),
             ),
             Self::IncoherentEvents { .. } => Classification::new(
-                "internal.scan_event_coherence",
+                packetcraftr_core::error::Code::InternalScanEventCoherence,
                 Kind::Internal,
                 Some("collect every scan event once, from one scan, in publication order"),
             ),

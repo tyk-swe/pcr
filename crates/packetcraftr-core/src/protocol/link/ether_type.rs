@@ -8,12 +8,28 @@ use crate::{
 use super::llc::{LLC_FRAME_DISCRIMINATOR, MAX_FRAME_LENGTH};
 use crate::protocol::BuiltinProtocol;
 use crate::protocol::common::{
-    ValueExpectation, binds_as, expected_discriminator, invalid, payload_without_padding,
-    resolve_u16, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
+    ValueExpectation, expected_discriminator, invalid, payload_without_padding, resolve_u16,
+    strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
     validate_raw_child_discriminator,
 };
 
 const LINK_RAW_FALLBACK_DISCRIMINATOR: u16 = MAX_FRAME_LENGTH + 1;
+
+pub(crate) const IPV4: u16 = 0x0800;
+pub(crate) const ARP: u16 = 0x0806;
+pub(crate) const VLAN: u16 = 0x8100;
+pub(crate) const VLAN_8021AD: u16 = 0x88a8;
+pub(crate) const MPLS_UNICAST: u16 = 0x8847;
+pub(crate) const MPLS_MULTICAST: u16 = 0x8848;
+pub(crate) const PPPOE_DISCOVERY_STAGE: u16 = 0x8863;
+pub(crate) const PPPOE_SESSION_STAGE: u16 = 0x8864;
+pub(crate) const EAPOL: u16 = 0x888e;
+pub(crate) const LLDP: u16 = 0x88cc;
+pub(crate) const SLOW_PROTOCOLS: u16 = 0x8809;
+pub(crate) const IPV6: u16 = 0x86dd;
+pub(crate) const TRANSPARENT_ETHERNET_BRIDGING: u16 = 0x6558;
+pub(crate) const ERSPAN_TYPE_II: u16 = 0x88be;
+pub(crate) const ERSPAN_TYPE_III: u16 = 0x22eb;
 
 pub(super) fn link_payload_selection(
     name: &'static str,
@@ -80,7 +96,7 @@ fn link_type_expectation(
 ) -> Result<ValueExpectation<u16>, crate::codec::Error> {
     if context
         .child
-        .is_some_and(|child| binds_as(child, BuiltinProtocol::Llc))
+        .is_some_and(|child| child.binds_as(BuiltinProtocol::Llc.id()))
     {
         let length = u16::try_from(covered_payload_len)
             .ok()
@@ -96,7 +112,7 @@ fn link_type_expectation(
     if matches!(value, WireValue::Auto)
         && context
             .child
-            .is_some_and(|child| BuiltinProtocol::Raw.identifies(child))
+            .is_some_and(|child| child.is_builtin(BuiltinProtocol::Raw.id()))
     {
         return Ok(ValueExpectation::Suggested(LINK_RAW_FALLBACK_DISCRIMINATOR));
     }
@@ -114,7 +130,7 @@ fn validate_link_length_form(
         || (ether_type == 0 && covered_payload_len == 0)
         || context
             .child
-            .is_some_and(|child| binds_as(child, BuiltinProtocol::Llc))
+            .is_some_and(|child| child.binds_as(BuiltinProtocol::Llc.id()))
     {
         return Ok(());
     }

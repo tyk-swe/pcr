@@ -1,8 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::clock::{Clock, SystemClock};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::budget::Deadline;
 use crate::error::{Classification, Kind};
@@ -46,7 +47,7 @@ where
     deadline
         .start_accounting(Duration::ZERO)
         .map_err(Error::from)?;
-    let started = Instant::now();
+    let started = SystemClock.now();
     validate_base_shape(&packet, request.build.limits.max_layers)?;
     packet_reflected_value_bytes(&packet, request.limits)?;
     let fields = resolve_fields(&packet, &request.targets)?;
@@ -223,7 +224,7 @@ fn mutation_failure(source: crate::field::Error) -> CaseFailure {
     CaseFailure::with_source(
         "mutation was rejected",
         Classification::new(
-            "packet.fuzz_mutation",
+            crate::error::Code::PacketFuzzMutation,
             Kind::Packet,
             Some(
                 "select a type/range accepted by the target field or retain the rejected case as fuzz evidence",
@@ -284,7 +285,7 @@ fn build_case(
             case.error = Some(CaseFailure::with_source(
                 "mutated packet was rejected",
                 Classification::new(
-                    "packet.fuzz_build",
+                    crate::error::Code::PacketFuzzBuild,
                     Kind::Packet,
                     Some(
                         "reproduce the case in permissive offline mode when malformed dependent fields are intentional",
@@ -346,8 +347,8 @@ fn retained_case_value_bytes(
 fn packet_reflected_value_bytes(packet: &Packet, limits: Limits) -> Result<u64, Error> {
     let mut total = 0_u64;
     for layer in packet.iter() {
-        for field in layer.schema().fields {
-            let Some(value) = layer.field(field.name) else {
+        for index in 0..layer.schema().fields.len() {
+            let Some(value) = layer.field_by_index(index) else {
                 continue;
             };
             total = charge_value(total, &value, limits)?;
@@ -413,8 +414,8 @@ fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedF
     if requested.is_empty() {
         let mut fields = Vec::new();
         for (layer_index, layer) in packet.iter().enumerate() {
-            for field in layer.schema().fields {
-                if layer.field(field.name).is_none() {
+            for (index, field) in layer.schema().fields.iter().enumerate() {
+                if layer.field_by_index(index).is_none() {
                     continue;
                 }
                 if fields.len() >= MAX_TARGET_FIELDS {

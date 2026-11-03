@@ -1,22 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, Severity},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
     layout::{ByteRange, FieldLayout},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, child_is_opaque, ensure_encode_budget, invalid, make_layer,
-    payload_without_padding, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
+    ValueExpectation, ensure_encode_budget, invalid, payload_without_padding, resolve_u16,
+    strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -118,21 +116,21 @@ fn gtpu_layout(layer: &Gtpu) -> Vec<FieldLayout> {
     if layer.has_optional_fields() {
         fields.extend([
             FieldLayout {
-                name: "sequence_number",
+                index: 9,
                 range: ByteRange::new(8, 10),
             },
             FieldLayout {
-                name: "npdu_number",
+                index: 10,
                 range: ByteRange::new(10, 11),
             },
             FieldLayout {
-                name: "next_extension_type",
+                index: 11,
                 range: ByteRange::new(11, 12),
             },
         ]);
         if !layer.extensions.is_empty() {
             fields.push(FieldLayout {
-                name: "extensions",
+                index: 12,
                 range: ByteRange::new(
                     GTPU_BASE_LEN.saturating_add(GTPU_OPTIONAL_LEN),
                     GTPU_BASE_LEN
@@ -394,11 +392,12 @@ impl Codec for GtpuCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Gtpu::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(gtpu_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Gtpu::default()))
     }
 }
 
@@ -492,12 +491,12 @@ fn validate_child(
     let Some(child) = context.child else {
         return Ok(());
     };
-    if child_is_opaque(child) {
+    if child.is_opaque() {
         return Ok(());
     }
     let carries_ip = layer.message_type == GTPU_G_PDU
         && matches!(
-            BuiltinProtocol::of(child),
+            child.builtin.and_then(BuiltinProtocol::from_id),
             Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6)
         );
     if carries_ip {

@@ -11,7 +11,7 @@ use crate::output::envelope::source_causes;
 pub(super) fn stdout_error(operation: &str, source: io::Error) -> CliError {
     CliError::from_classification(
         Classification::new(
-            "io.stdout",
+            packetcraftr_core::error::Code::IoStdout,
             Kind::Io,
             Some("restore the stdout consumer or choose a writable output destination"),
         ),

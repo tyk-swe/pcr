@@ -1,0 +1,23 @@
+{
+  "command": "read",
+  "diagnostics": [],
+  "mode": "aggregate",
+  "result": {
+    "captured_bytes_read": 125,
+    "columns": [
+      "ipv4.source"
+    ],
+    "frames_read": 1,
+    "rows": [
+      {
+        "source_frame": 1,
+        "values": [
+          "192.0.2.53"
+        ]
+      }
+    ],
+    "rows_written": 1
+  },
+  "schema": "packetcraftr.output/v19",
+  "status": "success"
+}

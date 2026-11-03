@@ -38,14 +38,14 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::PacketSizeLimit { .. } | Self::LayerLimit { .. } => Classification::new(
-                "policy.decode_resource_limit",
+                crate::error::Code::PolicyDecodeResourceLimit,
                 Kind::Policy,
                 Some(
                     "narrow the input or deliberately raise the finite per-frame byte and layer budget",
                 ),
             ),
             Self::MissingRootCodec { .. } => Classification::new(
-                "packet.missing_codec",
+                crate::error::Code::PacketMissingCodec,
                 Kind::Packet,
                 Some("decode with a registry that binds the frame's capture link type"),
             ),
@@ -53,7 +53,7 @@ impl Classified for Error {
             | Self::InvalidCodecLayout { .. }
             | Self::CodecLayerMismatch { .. }
             | Self::InvalidLayer { .. } => Classification::new(
-                "internal.codec_contract",
+                crate::error::Code::InternalCodecContract,
                 Kind::Internal,
                 Some(
                     "report the codec that returned a cursor, layout, or layer its own contract forbids",

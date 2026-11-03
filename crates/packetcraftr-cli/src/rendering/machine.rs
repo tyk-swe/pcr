@@ -112,7 +112,6 @@ pub(crate) fn emit_published<T: Serialize>(
     command: output::contract::Command,
     published: output::envelope::Published<T>,
 ) -> Result<(), CliError> {
-    invocation.check()?;
     emit_json(
         invocation,
         &invocation.decorate(output::envelope::Envelope::published(command, published)),
@@ -213,7 +212,7 @@ mod tests {
             };
             let error = emit_json_to(&invocation, &serde_json::json!({"value": 1}), &mut writer)
                 .unwrap_err();
-            assert_eq!(error.classification.code, "io.stdout");
+            assert_eq!(error.classification.code.as_str(), "io.stdout");
             assert!(!error.causes.is_empty());
             assert_eq!(writer.writes, if fail_flush { 1 } else { 2 });
             assert_eq!(writer.flushes, usize::from(fail_flush));
@@ -244,9 +243,13 @@ mod tests {
 
     #[test]
     fn emitted_envelope_identity_matches_the_published_schema() {
-        let published: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../schemas/packetcraftr.output.v19.schema.json"
-        ))
+        let published: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../schemas/packetcraftr.output.v19.schema.json"),
+            )
+            .unwrap(),
+        )
         .unwrap();
         let envelope = output::envelope::Envelope::<()>::error(
             Some(Command::Build),

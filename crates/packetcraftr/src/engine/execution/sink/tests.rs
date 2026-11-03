@@ -56,7 +56,11 @@ fn cancellation_during_cooperative_callback_prevents_success() {
     let mut publish = publisher(&runtime, sink, BoundaryError::from_error, |error| error).unwrap();
     let deadline = Deadline::new(Duration::from_secs(1)).with_cancellation(Some(signal));
     assert_eq!(
-        publish(0, &deadline).unwrap_err().classification().code,
+        publish(0, &deadline)
+            .unwrap_err()
+            .classification()
+            .code
+            .as_str(),
         "io.cancelled"
     );
 }
@@ -66,7 +70,7 @@ fn cooperative_errors_and_isolated_default_remain_explicit() {
     let sink = Cooperative(|_| {
         Err(BoundaryError::new(
             "refused",
-            Classification::new("io.test", Kind::Io, None),
+            Classification::new(packetcraftr_core::error::Code::IoTest, Kind::Io, None),
             Vec::new(),
         ))
     });
@@ -76,7 +80,8 @@ fn cooperative_errors_and_isolated_default_remain_explicit() {
         publish(0, &Deadline::new(Duration::from_secs(1)))
             .unwrap_err()
             .classification()
-            .code,
+            .code
+            .as_str(),
         "io.test"
     );
     let ordinary = |_: usize| Ok::<_, BoundaryError>(false);

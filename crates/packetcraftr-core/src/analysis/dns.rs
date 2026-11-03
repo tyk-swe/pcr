@@ -11,13 +11,11 @@ use super::{
     scope::Definition,
     session::{self, CollectorNeeds},
 };
+use crate::protocol::identity;
 use crate::{
     error::BoundaryError,
     field::WireValue,
-    protocol::{
-        application::dns::{self, Dns},
-        transport::Udp,
-    },
+    protocol::application::dns::{self, Dns},
 };
 use bytes::Bytes;
 use serde::Serialize;
@@ -162,11 +160,11 @@ impl Collector {
                         .entry(scope.id.get())
                         .or_insert_with(|| scope.clone());
                 }
-                let header = view
+                let length = view
                     .decoded
                     .packet
                     .layer(view.layer)
-                    .and_then(|layer| layer.downcast_ref::<Udp>())
+                    .and_then(identity::udp_length)
                     .ok_or(Error::Sources {
                         number: record.number,
                     })?;
@@ -179,7 +177,7 @@ impl Collector {
                     })?
                     .range
                     .end;
-                let WireValue::Exact(length) = header.length else {
+                let WireValue::Exact(length) = length else {
                     return Err(Error::Sources {
                         number: record.number,
                     });

@@ -9,7 +9,7 @@
 //!
 //! | Layer | Modules |
 //! | --- | --- |
-//! | 1. Foundation | `clock`, `deadline`, `engine::stats`, `engine::correlation`, `probe::model` |
+//! | 1. Foundation | `clock`, `deadline`, `data`, `engine::stats`, `engine::correlation`, `probe::model` |
 //! | 2. Environment | `error`, `policy`, `target` (model, resolver, and selection), `route`, `neighbor`, `providers`, `runtime`, `client::{admission, planning}`, `evidence::error` |
 //! | 3. Engine | `engine::{mtu, operation, preparation, execution}`, `evidence`, `send::options` |
 //! | 4. Primitives | `send`, `exchange`, `capture`, `probe` |
@@ -62,6 +62,7 @@ pub mod audit;
 pub mod capture;
 mod client;
 pub mod clock;
+pub(crate) mod data;
 pub mod deadline;
 pub mod differential;
 pub mod dns;

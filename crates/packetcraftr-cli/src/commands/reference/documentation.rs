@@ -26,7 +26,11 @@ impl crate::commands::Generate for Args {
     fn generate(self, invocation: &Invocation, format: Format) -> Result<(), CliError> {
         if format != Format::Text {
             return Err(CliError::from_classification(
-                Classification::new("cli.output_format", Kind::Usage, Some("choose text output")),
+                Classification::new(
+                    packetcraftr_core::error::Code::CliOutputFormat,
+                    Kind::Usage,
+                    Some("choose text output"),
+                ),
                 format!("reference documentation does not support {format} output; choose text"),
                 Vec::new(),
             ));
@@ -137,7 +141,7 @@ fn render_man_pages(
 fn io_error(operation: &'static str, destination: &Path, error: io::Error) -> CliError {
     CliError::from_classification(
         Classification::new(
-            "io.documentation",
+            packetcraftr_core::error::Code::IoDocumentation,
             Kind::Io,
             Some("choose a writable documentation directory"),
         ),
@@ -151,7 +155,7 @@ fn io_error(operation: &'static str, destination: &Path, error: io::Error) -> Cl
 
 fn contextual_error(mut error: CliError, published: &[PathBuf]) -> CliError {
     error.classification = Classification::new(
-        "io.documentation",
+        packetcraftr_core::error::Code::IoDocumentation,
         error.classification.kind,
         Some("choose a writable documentation directory"),
     );

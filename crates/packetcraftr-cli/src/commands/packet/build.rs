@@ -228,7 +228,7 @@ fn build_error(error: core::build::Error) -> CliError {
             let classification = error.classification();
             CliError::from_classification(
                 Classification::new(
-                    "packet.build_resource_limit",
+                    packetcraftr_core::error::Code::PacketBuildResourceLimit,
                     Kind::Packet,
                     classification.remediation,
                 ),

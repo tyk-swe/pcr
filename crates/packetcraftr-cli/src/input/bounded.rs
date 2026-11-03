@@ -116,7 +116,11 @@ impl InputKind {
 
 pub(crate) fn missing_input_error(kind: InputKind) -> CliError {
     CliError::from_classification(
-        Classification::new("cli.input_source", Kind::Usage, Some(kind.remediation())),
+        Classification::new(
+            packetcraftr_core::error::Code::CliInputSource,
+            Kind::Usage,
+            Some(kind.remediation()),
+        ),
         format!(
             "{} input is required: provide {}",
             kind.label(),
@@ -361,7 +365,7 @@ mod tests {
 
         std::fs::write(&path, b"").unwrap();
         let error = read_bounded_file(invocation, &path, 1, InputKind::Frame).unwrap_err();
-        assert_eq!(error.classification.code, "cli.input_source");
+        assert_eq!(error.classification.code.as_str(), "cli.input_source");
         assert!(error.message.contains(&path.display().to_string()));
     }
 

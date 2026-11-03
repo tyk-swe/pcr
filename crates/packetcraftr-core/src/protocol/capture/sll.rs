@@ -1,19 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
+
+use crate::protocol::common::{invalid, resolve_u16_discriminator, truncated, typed_layer};
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
-};
-
-use crate::protocol::common::{
-    invalid, make_layer, resolve_u16_discriminator, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -161,11 +157,12 @@ impl Codec for LinuxSllCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(LinuxSll::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(linux_sll_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(LinuxSll::default()))
     }
 }
 
@@ -237,10 +234,11 @@ impl Codec for LinuxSll2Codec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(LinuxSll2::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(linux_sll2_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(LinuxSll2::default()))
     }
 }

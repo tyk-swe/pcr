@@ -3,9 +3,9 @@
 
 //! DNP3 link framing with per-block CRCs and transport/application fragment headers. No application-fragment reassembly.
 
-use crate::codec::*;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Reader, Writer, message_codec};
 use bytes::Bytes;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,7 +38,7 @@ impl Default for Dnp3 {
     }
 }
 crate::reflective_layer! {
- fn dnp3_schema() => { protocol: crate::layer::Id::new("dnp3"), name: "Dnp3" }
+ fn dnp3_schema() => { protocol: crate::protocol::BuiltinProtocol::Dnp3.id(), name: "Dnp3" }
  impl Dnp3 {
     "control" => { kind: Unsigned, derived: false, required: false, description: "control", reflect: control },
     "destination" => { kind: Unsigned, derived: false, required: false, description: "destination", reflect: destination },
@@ -52,29 +52,7 @@ crate::reflective_layer! {
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
 }
-fn dnp3_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if 4 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "control",
-            range: crate::layout::ByteRange::new(3, 4),
-        });
-    }
-    if 6 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "destination",
-            range: crate::layout::ByteRange::new(4, 6),
-        });
-    }
-    if 8 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "source",
-            range: crate::layout::ByteRange::new(6, 8),
-        });
-    }
-    fields
-}
-message_codec!(Dnp3Codec, Dnp3, dnp3_schema, dnp3_layout_wire);
+message_codec!(Dnp3Codec, Dnp3, dnp3_schema);
 
 const NAME: &str = "dnp3";
 fn crc(b: &[u8]) -> u16 {
@@ -124,8 +102,14 @@ impl Dnp3 {
         }
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 3..4);
+        r.mark(1, 4..6);
+        r.mark(2, 6..8);
         if r.take(2)? != [5, 100] {
             return Err(unsupported(NAME, "invalid sync"));
         }
@@ -168,6 +152,6 @@ impl Dnp3 {
             }
             s.data = Bytes::copy_from_slice(p.rest());
         }
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }

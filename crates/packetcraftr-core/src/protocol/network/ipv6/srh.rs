@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr};
 
 use bytes::Bytes;
@@ -15,8 +14,8 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    ValueExpectation, invalid, make_layer, resolve_u8, strict_or_diagnostic, truncated,
-    typed_layer, unsupported, wrong_type,
+    ValueExpectation, invalid, resolve_u8, strict_or_diagnostic, truncated, typed_layer,
+    unsupported, wrong_type,
 };
 
 use super::resolve_next_header;
@@ -164,10 +163,11 @@ impl Codec for SegmentRoutingHeaderCodec {
                 format!("unsupported routing type {}", header[2]),
             ));
         }
-        let header_len = usize::from(header[1])
-            .saturating_add(1)
-            .checked_mul(8)
-            .ok_or_else(|| invalid(NAME, "header length overflow"))?;
+        let header_len = crate::protocol::headers::ipv6_extension_header_length(
+            crate::protocol::network::ip_protocol::ROUTING,
+            header[1],
+        )
+        .ok_or_else(|| invalid(NAME, "header length overflow"))?;
         if input.len() < header_len {
             return Err(truncated(NAME, header_len, input.len()));
         }
@@ -231,11 +231,12 @@ impl Codec for SegmentRoutingHeaderCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(SegmentRoutingHeader::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(srh_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(SegmentRoutingHeader::default()))
     }
 }
 

@@ -61,17 +61,17 @@ impl Classified for Error {
             Self::Provenance(source) => source.classification(),
             Self::Output(source) => source.classification(),
             Self::Protocol { .. } => Classification::new(
-                "analysis.message_protocol",
+                crate::error::Code::AnalysisMessageProtocol,
                 Kind::Usage,
                 Some("select a protocol with stream_decode support in reference protocols"),
             ),
             Self::Limit { .. } => Classification::new(
-                "policy.application_limit",
+                crate::error::Code::PolicyApplicationLimit,
                 Kind::Policy,
                 Some("raise a finite application-analysis limit or narrow the capture"),
             ),
             Self::Sources { .. } => Classification::new(
-                "internal.application_sources",
+                crate::error::Code::InternalApplicationSources,
                 Kind::Internal,
                 Some("enable sourced analysis and preserve contributing transport frames"),
             ),

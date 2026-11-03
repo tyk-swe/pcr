@@ -190,7 +190,7 @@ fn writer_failure_keeps_exact_charge_and_prevents_false_success_or_repair_termin
         .unwrap_err();
     assert_eq!(count.load(Ordering::Relaxed), 1);
     assert_eq!(output.remaining, 0);
-    assert_eq!(failure.classification.code, "io.stdout");
+    assert_eq!(failure.classification.code.as_str(), "io.stdout");
     assert!(!invocation.output.is_open());
     assert!(!invocation.output.is_complete());
     assert!(
@@ -233,7 +233,7 @@ fn cancellation_during_serialization_refuses_write_and_terminal_cleanup_remains_
     let error = output
         .emit(CancelValue { cancellation }, &mut Vec::new(), |_, _| Ok(()))
         .unwrap_err();
-    assert_eq!(error.classification.code, "io.cancelled");
+    assert_eq!(error.classification.code.as_str(), "io.cancelled");
     assert_eq!(tape.writes.load(Ordering::Relaxed), 0);
     invocation
         .terminal()

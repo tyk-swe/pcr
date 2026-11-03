@@ -32,6 +32,7 @@ use bytes::Bytes;
 use crate::field::WireValue;
 
 use super::Icmpv6;
+use super::igmpv3::{AUX_UNIT, QUERY_RESERVED_MAX, ROBUSTNESS_MASK, SUPPRESS_FLAG};
 
 pub const QUERY: u8 = 130;
 pub const REPORT_V1: u8 = 131;
@@ -39,9 +40,9 @@ pub const DONE: u8 = 132;
 pub const REPORT_V2: u8 = 143;
 
 /// Most group records one MLDv2 report may carry.
-pub const MAX_RECORDS: usize = 1024;
+pub use super::igmpv3::MAX_RECORDS;
 /// Most sources one MLDv2 query or group record may carry.
-pub const MAX_SOURCES: usize = 1024;
+pub use super::igmpv3::MAX_SOURCES;
 
 const ADDRESS_LENGTH: usize = 16;
 const MLDV1_LENGTH: usize = 20;
@@ -49,10 +50,6 @@ const MLDV2_QUERY_LENGTH: usize = 24;
 const MLDV2_REPORT_LENGTH: usize = 4;
 const RECORD_LENGTH: usize = 20;
 /// Auxiliary data is sized in 32-bit words.
-const AUX_UNIT: usize = 4;
-const SUPPRESS_FLAG: u8 = 0x08;
-const ROBUSTNESS_MASK: u8 = 0x07;
-const QUERY_RESERVED_MAX: u8 = 0x0f;
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -80,7 +77,7 @@ pub enum Error {
 impl crate::error::Classified for Error {
     fn classification(&self) -> crate::error::Classification {
         crate::error::Classification::new(
-            "packet.codec",
+            crate::error::Code::PacketCodec,
             crate::error::Kind::Packet,
             Some("correct the layer bytes or field values the codec refused"),
         )

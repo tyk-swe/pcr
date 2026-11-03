@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 pub(crate) mod admission;
 pub(crate) mod planning;
+#[cfg(test)]
+mod tests;
 
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::registry::Registry;
@@ -112,6 +114,10 @@ impl<P, K: Clock> Client<P, K> {
 
     pub(crate) fn now(&self) -> Instant {
         self.clock.now()
+    }
+
+    pub(crate) fn wall_now(&self) -> std::time::SystemTime {
+        self.clock.wall_now()
     }
 
     /// Narrows the absolute ceiling shared by this client's future operations.

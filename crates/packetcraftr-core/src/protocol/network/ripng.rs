@@ -3,10 +3,12 @@
 
 //! RIP route messages (RFC 2080).
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -30,29 +32,13 @@ impl Default for Ripng {
     }
 }
 crate::reflective_layer! {
- fn ripng_schema() => { protocol: crate::layer::Id::new("ripng"), name: "Ripng" }
+ fn ripng_schema() => { protocol: crate::protocol::BuiltinProtocol::Ripng.id(), name: "Ripng" }
  impl Ripng {
     "command" => { kind: Unsigned, derived: false, required: false, description: "command", reflect: command },
     "routes" => { kind: List, derived: false, required: false, description: "Ordered route entries", children: ROUTES, reflect: routes },
  }
 }
-fn ripng_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if !b.is_empty() {
-        fields.push(crate::layout::FieldLayout {
-            name: "command",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-    }
-    if 4 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "routes",
-            range: crate::layout::ByteRange::new(4, b.len()),
-        });
-    }
-    fields
-}
-message_codec!(RipngCodec, Ripng, ripng_schema, ripng_layout_wire);
+message_codec!(RipngCodec, Ripng, ripng_schema);
 
 const NAME: &str = "ripng";
 impl Ripng {
@@ -82,8 +68,13 @@ impl Ripng {
         }
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..1);
+        r.mark(1, 4..b.len());
         let command = r.u8()?;
         if !matches!(command, 1 | 2) {
             return Err(invalid(NAME, "invalid command"));
@@ -112,6 +103,6 @@ impl Ripng {
                 ("metric", p[19].into()),
             ]));
         }
-        Ok(Self { command, routes })
+        Ok((Self { command, routes }, r.take_layouts()))
     }
 }

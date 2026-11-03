@@ -3,9 +3,9 @@
 
 //! IEC 60870-5-104 I/S/U frames and ASDU headers using two-byte cause/common-address fields. Information objects retain their bytes.
 
-use crate::codec::*;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Reader, Writer, message_codec};
 use bytes::Bytes;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,7 +36,7 @@ impl Default for Iec104 {
     }
 }
 crate::reflective_layer! {
- fn iec104_schema() => { protocol: crate::layer::Id::new("iec104"), name: "Iec104" }
+ fn iec104_schema() => { protocol: crate::protocol::BuiltinProtocol::Iec104.id(), name: "Iec104" }
  impl Iec104 {
     "frame_type" => { kind: Text, derived: false, required: false, description: "i, s or u", reflect: frame_type },
     "send_sequence" => { kind: Unsigned, derived: false, required: false, description: "send sequence", reflect: send_sequence },
@@ -49,12 +49,7 @@ crate::reflective_layer! {
     "objects" => { kind: Bytes, derived: false, required: false, description: "objects", reflect: objects },
  }
 }
-fn iec104_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let fields = Vec::new();
-    let _ = b;
-    fields
-}
-message_codec!(Iec104Codec, Iec104, iec104_schema, iec104_layout_wire);
+message_codec!(Iec104Codec, Iec104, iec104_schema);
 
 const NAME: &str = "iec104";
 impl Iec104 {
@@ -90,7 +85,10 @@ impl Iec104 {
         w.put(&p.bytes)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
         if r.u8()? != 0x68 {
             return Err(unsupported(NAME, "invalid APDU start"));
@@ -126,6 +124,6 @@ impl Iec104 {
             s.u_control = control[0];
         }
         r.finish()?;
-        Ok(s)
+        Ok((s, Vec::new()))
     }
 }

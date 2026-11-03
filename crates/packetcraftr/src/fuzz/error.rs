@@ -63,26 +63,26 @@ impl Classified for Error {
             Self::Cancelled(error) => error.classification(),
             Self::Campaign(error) => error.classification(),
             Self::InvalidLimit { .. } | Self::InvalidTimeout { .. } => Classification::new(
-                "cli.fuzz_limit",
+                packetcraftr_core::error::Code::CliFuzzLimit,
                 Kind::Usage,
                 Some("use finite non-zero rate, timeout, evidence, and duration limits"),
             ),
             Self::DurationLimit { .. } => Classification::new(
-                "policy.fuzz_resource_limit",
+                packetcraftr_core::error::Code::PolicyFuzzResourceLimit,
                 Kind::Policy,
                 Some("reduce cases, packet sizes, timeout, or rate delay"),
             ),
             Self::Authorization(error) => error.classification(),
             Self::Execution { source, .. } | Self::Output { source } => source.classification(),
             Self::Clock { .. } => Classification::new(
-                "io.fuzz_clock",
+                packetcraftr_core::error::Code::IoFuzzClock,
                 Kind::Io,
                 Some("inspect the fuzz rate timer and account for cases already transmitted"),
             ),
             Self::InvalidEvidence { .. }
             | Self::UnverifiableRoute { .. }
             | Self::StatisticsOverflow { .. } => Classification::new(
-                "internal.fuzz_evidence",
+                packetcraftr_core::error::Code::InternalFuzzEvidence,
                 Kind::Internal,
                 Some("treat the fuzz operation as incomplete because evidence was inconsistent"),
             ),

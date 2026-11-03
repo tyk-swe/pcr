@@ -4,7 +4,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
-use super::binding::{ChildBinding, Discriminator, FilterFieldBinding};
+use super::binding::{
+    ChildBinding, Discriminator, FilterFieldBinding, MatcherIdentity, Priority, RegisteredMatcher,
+};
 use super::error::Error;
 use super::hasher::FixedState;
 use crate::codec::Codec;
@@ -22,7 +24,7 @@ pub struct Builder {
         HashMap<Discriminator, Vec<ChildBinding>, FixedState>,
         FixedState,
     >,
-    pub(super) matchers: BTreeMap<crate::layer::Id, Arc<dyn ResponseMatcher>>,
+    pub(super) matchers: BTreeMap<crate::layer::Id, RegisteredMatcher>,
     pub(super) trailing_padding: BTreeSet<crate::layer::Id>,
     pub(super) filter_fields: BTreeMap<String, FilterFieldBinding>,
 }
@@ -77,12 +79,27 @@ impl Builder {
         Ok(self)
     }
 
+    pub fn replace_binding(
+        &mut self,
+        parent: impl Into<crate::layer::Id>,
+        discriminator: impl Into<Discriminator>,
+        child: impl Into<crate::layer::Id>,
+        priority: Priority,
+    ) -> Result<&mut Self, Error> {
+        let parent_id = parent.into();
+        let discriminator = discriminator.into();
+        if let Some(children) = self.bindings.get_mut(&parent_id) {
+            children.remove(&discriminator);
+        }
+        self.bind(parent_id, discriminator, child, priority)
+    }
+
     pub fn bind(
         &mut self,
         parent: impl Into<crate::layer::Id>,
         discriminator: impl Into<Discriminator>,
         child: impl Into<crate::layer::Id>,
-        priority: i32,
+        priority: Priority,
     ) -> Result<&mut Self, Error> {
         let parent = parent.into();
         let child = child.into();
@@ -117,11 +134,40 @@ impl Builder {
     where
         M: ResponseMatcher + 'static,
     {
+        self.register_matcher_with(protocol, matcher, MatcherIdentity::Conservative)
+    }
+
+    pub fn register_builtin_matcher<M>(
+        &mut self,
+        protocol: impl Into<crate::layer::Id>,
+        matcher: M,
+    ) -> Result<&mut Self, Error>
+    where
+        M: ResponseMatcher + 'static,
+    {
+        self.register_matcher_with(protocol, matcher, MatcherIdentity::Builtin)
+    }
+
+    fn register_matcher_with<M>(
+        &mut self,
+        protocol: impl Into<crate::layer::Id>,
+        matcher: M,
+        identity: MatcherIdentity,
+    ) -> Result<&mut Self, Error>
+    where
+        M: ResponseMatcher + 'static,
+    {
         let protocol = protocol.into();
         if self.matchers.contains_key(&protocol) {
             return Err(Error::DuplicateMatcher { protocol });
         }
-        self.matchers.insert(protocol, Arc::new(matcher));
+        self.matchers.insert(
+            protocol,
+            RegisteredMatcher {
+                matcher: Arc::new(matcher),
+                identity,
+            },
+        );
         Ok(self)
     }
 

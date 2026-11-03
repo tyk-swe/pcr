@@ -2,30 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::field;
-use crate::layer::{Id, Layer, Malformed};
-use crate::protocol::BuiltinProtocol;
-
-pub(crate) fn binding_protocol(layer: &dyn Layer) -> &str {
-    layer
-        .downcast_ref::<Malformed>()
-        .and_then(|layer| layer.intended_protocol.as_deref())
-        .unwrap_or_else(|| layer.protocol_id().as_str())
-}
-
-pub(crate) fn binds_as(layer: &dyn Layer, protocol: BuiltinProtocol) -> bool {
-    match layer
-        .downcast_ref::<Malformed>()
-        .and_then(|layer| layer.intended_protocol.as_deref())
-    {
-        Some(intended) => BuiltinProtocol::from_name(intended) == Some(protocol),
-        None => protocol.identifies(layer),
-    }
-}
-
-pub(crate) fn child_is_opaque(child: &dyn Layer) -> bool {
-    crate::protocol::BuiltinProtocol::of(child)
-        .is_some_and(crate::protocol::BuiltinProtocol::preserves_opaque_bytes)
-}
+use crate::layer::{Id, Layer};
 
 pub(crate) fn typed_layer<'a, L: Layer + 'static>(
     name: &'static str,

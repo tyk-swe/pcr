@@ -8,12 +8,12 @@ use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 
 /// Callers needing reproducible experiments supply a fixed identity in `Request` instead.
 pub fn unpredictable_transaction_id() -> Result<u16, BoundaryError> {
-    random_u16(getrandom::fill)
+    random_u16(|bytes| packetcraftr_netio::entropy::OsEntropy.fill(bytes))
 }
 
 /// Retries rotate deterministically from this random base, not with independent entropy.
 pub fn unpredictable_source_port() -> Result<u16, BoundaryError> {
-    random_u16(getrandom::fill).map(|value| {
+    random_u16(|bytes| packetcraftr_netio::entropy::OsEntropy.fill(bytes)).map(|value| {
         crate::engine::correlation::ephemeral_source_port(
             crate::engine::correlation::EPHEMERAL_SOURCE_PORT_BASE,
             u64::from(value),
@@ -22,13 +22,13 @@ pub fn unpredictable_source_port() -> Result<u16, BoundaryError> {
 }
 
 fn random_u16(
-    fill: impl FnOnce(&mut [u8]) -> Result<(), getrandom::Error>,
+    fill: impl FnOnce(&mut [u8]) -> Result<(), packetcraftr_netio::entropy::EntropyError>,
 ) -> Result<u16, BoundaryError> {
     let mut bytes = [0; 2];
     fill(&mut bytes).map_err(|source| {
         BoundaryError::with_source(
             "could not obtain system randomness for DNS identity",
-            Classification::new("io.dns_entropy", Kind::Io, None),
+            Classification::new(packetcraftr_core::error::Code::IoDnsEntropy, Kind::Io, None),
             std::iter::once(source.to_string())
                 .chain(packetcraftr_core::error::source_chain(&source))
                 .collect(),

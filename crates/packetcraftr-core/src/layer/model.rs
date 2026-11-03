@@ -63,11 +63,51 @@ pub struct Schema {
     pub fields: &'static [FieldSchema],
 }
 
+impl Schema {
+    pub fn field_index(&self, name: &str) -> Option<usize> {
+        self.fields
+            .iter()
+            .position(|declared| declared.name == name || declared.aliases.contains(&name))
+    }
+}
+
 pub trait Layer: Any + Send + Sync + fmt::Debug {
     fn schema(&self) -> &'static Schema;
     fn clone_box(&self) -> Box<dyn Layer>;
-    fn field(&self, name: &str) -> Option<field::Value>;
-    fn set_field(&mut self, name: &str, value: field::Value) -> Result<(), field::Error>;
+
+    fn field_by_index(&self, index: usize) -> Option<field::Value> {
+        let declared = self.schema().fields.get(index)?;
+        self.field(declared.name)
+    }
+
+    fn set_field_by_index(
+        &mut self,
+        index: usize,
+        value: field::Value,
+    ) -> Result<(), field::Error> {
+        let Some(declared) = self.schema().fields.get(index) else {
+            return Err(field::Error::UnknownField {
+                protocol: *self.protocol_id(),
+                field: index.to_string(),
+            });
+        };
+        self.set_field(declared.name, value)
+    }
+
+    fn field(&self, name: &str) -> Option<field::Value> {
+        self.field_by_index(self.schema().field_index(name)?)
+    }
+
+    fn set_field(&mut self, name: &str, value: field::Value) -> Result<(), field::Error> {
+        let Some(index) = self.schema().field_index(name) else {
+            return Err(field::Error::UnknownField {
+                protocol: *self.protocol_id(),
+                field: name.to_owned(),
+            });
+        };
+        self.set_field_by_index(index, value)
+            .map_err(|error| error.with_field_name(name))
+    }
 
     fn field_path(&self, path: &Path) -> Option<field::Value> {
         if !path.is_nested() {

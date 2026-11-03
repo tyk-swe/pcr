@@ -190,13 +190,13 @@ impl Request {
 }
 
 pub fn builtin_corpus() -> Result<Arc<service_probes::Corpus>, Error> {
-    Ok(Arc::new(service_probes::parse(include_bytes!(
-        "../../data/service-probes.json"
-    ))?))
+    Ok(Arc::new(service_probes::parse(
+        crate::data::SERVICE_PROBES.bytes,
+    )?))
 }
 
 pub fn builtin_exclusions() -> Result<Arc<service_exclusions::Exclusions>, Error> {
-    Ok(Arc::new(service_exclusions::parse(include_bytes!(
-        "../../data/service-exclusions.json"
-    ))?))
+    Ok(Arc::new(service_exclusions::parse(
+        crate::data::SERVICE_EXCLUSIONS.bytes,
+    )?))
 }

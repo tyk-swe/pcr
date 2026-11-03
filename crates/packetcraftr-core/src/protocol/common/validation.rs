@@ -10,7 +10,7 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::errors::{binding_protocol, child_is_opaque, invalid, unsupported};
+use super::errors::{invalid, unsupported};
 
 pub(crate) fn validate_ipv6_routing_child(
     name: &'static str,
@@ -21,7 +21,7 @@ pub(crate) fn validate_ipv6_routing_child(
     let raw_routing_header = next_header == ip_protocol::ROUTING
         && context
             .child
-            .is_some_and(|child| BuiltinProtocol::Raw.identifies(child));
+            .is_some_and(|child| child.is_builtin(BuiltinProtocol::Raw.id()));
     if !raw_routing_header {
         return Ok(());
     }
@@ -49,10 +49,7 @@ pub(crate) fn validate_raw_child_discriminator(
     context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
-    let Some(bound) = context
-        .registry
-        .child_for(parent, Discriminator(discriminator))
-    else {
+    let Some(bound) = context.child_for(Discriminator(discriminator)) else {
         return Ok(());
     };
     if BuiltinProtocol::from_id(bound) == Some(BuiltinProtocol::Raw) {
@@ -61,17 +58,17 @@ pub(crate) fn validate_raw_child_discriminator(
 
     let actual = context.child.and_then(|child| {
         (!matches!(
-            BuiltinProtocol::of(child),
+            child.builtin.and_then(BuiltinProtocol::from_id),
             Some(BuiltinProtocol::Padding | BuiltinProtocol::Raw)
         ))
-        .then(|| binding_protocol(child))
+        .then(|| child.binding_protocol())
     });
     if actual == Some(bound.as_str()) {
         return Ok(());
     }
     let absent_payload = context
         .child
-        .is_none_or(|child| BuiltinProtocol::Padding.identifies(child));
+        .is_none_or(|child| child.is_builtin(BuiltinProtocol::Padding.id()));
     // A malformed binding also represents a known terminal discriminator
     // (IPv6 No Next Header).
     if BuiltinProtocol::from_id(bound) == Some(BuiltinProtocol::Malformed) && absent_payload {
@@ -88,7 +85,7 @@ pub(crate) fn validate_raw_child_discriminator(
     };
     let code = if context
         .child
-        .is_some_and(|child| BuiltinProtocol::Raw.identifies(child))
+        .is_some_and(|child| child.is_builtin(BuiltinProtocol::Raw.id()))
     {
         "build.raw_typed_discriminator"
     } else {
@@ -106,12 +103,11 @@ pub(crate) fn validate_typed_child_discriminator(
     let Some(child) = context.child else {
         return Ok(());
     };
-    if child_is_opaque(child) {
+    if child.is_opaque() {
         return Ok(());
     }
     if context
-        .registry
-        .child_for(parent, Discriminator(discriminator))
+        .child_for(Discriminator(discriminator))
         .is_some_and(|bound| bound.as_str() != "raw")
     {
         return Ok(());
@@ -122,7 +118,7 @@ pub(crate) fn validate_typed_child_discriminator(
         "discriminator",
         format!(
             "discriminator {discriminator} does not select {}; dissection would fall back to raw bytes",
-            binding_protocol(child)
+            child.binding_protocol()
         ),
         context,
         diagnostics,
@@ -139,7 +135,7 @@ pub(crate) fn validate_auto_raw_discriminator<T>(
     if !matches!(value, WireValue::Auto)
         || context
             .child
-            .is_none_or(|child| !child.is::<crate::layer::Raw>())
+            .is_none_or(|child| !child.is_builtin(BuiltinProtocol::Raw.id()))
     {
         return Ok(());
     }

@@ -59,34 +59,34 @@ impl Classified for Error {
         match self {
             Self::Cancelled(error) => error.classification(),
             Self::InvalidRequest { .. } | Self::InvalidTimeout { .. } => Classification::new(
-                "cli.differential_limit",
+                packetcraftr_core::error::Code::CliDifferentialLimit,
                 Kind::Usage,
                 Some("use finite non-zero repeats, payload length, timeout, and duration limits"),
             ),
             Self::DurationLimit { .. } => Classification::new(
-                "policy.differential_resource_limit",
+                packetcraftr_core::error::Code::PolicyDifferentialResourceLimit,
                 Kind::Policy,
                 Some("reduce repeats or timeout, or raise the campaign duration limit"),
             ),
             Self::PlanDigestMissing | Self::PlanDigestMismatch { .. } => Classification::new(
-                "policy.differential_plan",
+                packetcraftr_core::error::Code::PolicyDifferentialPlan,
                 Kind::Policy,
                 Some("run the plan-only command first and present its digest to the live run"),
             ),
             Self::Authorization(error) | Self::Build(error) => error.classification(),
             Self::Execution { source, .. } | Self::Output { source } => source.classification(),
             Self::IncompleteEvidence { .. } => Classification::new(
-                "capture.differential_incomplete",
+                packetcraftr_core::error::Code::CaptureDifferentialIncomplete,
                 Kind::Io,
                 Some("rerun with higher capture retention so a matched reply cannot be lost"),
             ),
             Self::StatisticsOverflow => Classification::new(
-                "internal.differential_evidence",
+                packetcraftr_core::error::Code::InternalDifferentialEvidence,
                 Kind::Internal,
                 Some("treat the differential operation as incomplete"),
             ),
             Self::TokenGeneration { .. } | Self::ResponderIo { .. } => Classification::new(
-                "io.differential",
+                packetcraftr_core::error::Code::IoDifferential,
                 Kind::Io,
                 Some("inspect the local socket or entropy source and retry"),
             ),

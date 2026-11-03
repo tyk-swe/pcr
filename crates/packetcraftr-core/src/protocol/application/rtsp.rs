@@ -3,9 +3,9 @@
 
 //! RTSP/1.0 requests/responses with byte-preserving ordered headers and Content-Length bodies.
 
-use crate::codec::*;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Reader, Records, Writer, message_codec, record};
 use bytes::Bytes;
 
 use super::text_message::HEADERS;
@@ -32,7 +32,7 @@ impl Default for Rtsp {
     }
 }
 crate::reflective_layer! {
- fn rtsp_schema() => { protocol: crate::layer::Id::new("rtsp"), name: "Rtsp" }
+ fn rtsp_schema() => { protocol: crate::protocol::BuiltinProtocol::Rtsp.id(), name: "Rtsp" }
  impl Rtsp {
     "start_line" => { kind: Bytes, derived: false, required: false, description: "start line", reflect: start_line },
     "headers" => { kind: List, derived: false, required: false, description: "Ordered header fields retaining spaces and case", children: HEADERS, reflect: headers },
@@ -41,46 +41,7 @@ crate::reflective_layer! {
     "channel" => { kind: Unsigned, derived: false, required: false, description: "channel", reflect: channel },
  }
 }
-fn rtsp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if b.first() == Some(&b'$') {
-        fields.push(crate::layout::FieldLayout {
-            name: "interleaved",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-        if b.len() >= 2 {
-            fields.push(crate::layout::FieldLayout {
-                name: "channel",
-                range: crate::layout::ByteRange::new(1, 2),
-            });
-        }
-        if b.len() >= 4 {
-            fields.push(crate::layout::FieldLayout {
-                name: "body",
-                range: crate::layout::ByteRange::new(4, b.len()),
-            });
-        }
-        return fields;
-    }
-    if let Some(first) = b.windows(2).position(|p| p == b"\r\n") {
-        fields.push(crate::layout::FieldLayout {
-            name: "start_line",
-            range: crate::layout::ByteRange::new(0, first),
-        });
-        if let Some(end) = b.windows(4).position(|p| p == b"\r\n\r\n") {
-            fields.push(crate::layout::FieldLayout {
-                name: "headers",
-                range: crate::layout::ByteRange::new(first + 2, end + 2),
-            });
-            fields.push(crate::layout::FieldLayout {
-                name: "body",
-                range: crate::layout::ByteRange::new(end + 4, b.len()),
-            });
-        }
-    }
-    fields
-}
-message_codec!(RtspCodec, Rtsp, rtsp_schema, rtsp_layout_wire);
+message_codec!(RtspCodec, Rtsp, rtsp_schema);
 
 const NAME: &str = "rtsp";
 impl Rtsp {
@@ -132,20 +93,29 @@ impl Rtsp {
         )?;
         Ok(b)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         if b.first() == Some(&0x24) {
             let mut r = Reader::new(NAME, &b);
+            r.mark(3, 0..1);
+            r.mark(4, 1..2);
+            r.mark(2, 4..b.len());
             r.u8()?;
             let channel = r.u8()?;
             let len = r.u16()? as usize;
             let body = Bytes::copy_from_slice(r.take(len)?);
             r.finish()?;
-            return Ok(Self {
-                interleaved: true,
-                channel,
-                body,
-                ..Self::default()
-            });
+            return Ok((
+                Self {
+                    interleaved: true,
+                    channel,
+                    body,
+                    ..Self::default()
+                },
+                r.take_layouts(),
+            ));
         }
         let (start_line, headers, body) = super::text_message::parse(NAME, &b)?;
         let text =
@@ -161,11 +131,29 @@ impl Rtsp {
         {
             return Err(unsupported(NAME, "unsupported start line or version"));
         }
-        Ok(Self {
-            start_line,
-            headers,
-            body,
-            ..Self::default()
-        })
+        let body_start = b.len() - body.len();
+        let fields = vec![
+            crate::layout::FieldLayout {
+                index: 0,
+                range: crate::layout::ByteRange::new(0, start_line.len()),
+            },
+            crate::layout::FieldLayout {
+                index: 1,
+                range: crate::layout::ByteRange::new(start_line.len() + 2, body_start - 2),
+            },
+            crate::layout::FieldLayout {
+                index: 2,
+                range: crate::layout::ByteRange::new(body_start, b.len()),
+            },
+        ];
+        Ok((
+            Self {
+                start_line,
+                headers,
+                body,
+                ..Self::default()
+            },
+            fields,
+        ))
     }
 }

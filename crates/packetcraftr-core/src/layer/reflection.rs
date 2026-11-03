@@ -101,37 +101,42 @@ macro_rules! reflective_layer {
                 Box::new(self.clone())
             }
 
-            fn field(&self, name: &str) -> Option<$crate::field::Value> {
-                match name {
+            fn field_by_index(&self, index: usize) -> Option<$crate::field::Value> {
+                type Getter = fn(&$ty) -> Option<$crate::field::Value>;
+                const GETTERS: &[Getter] = &[
                     $(
-                        $field $(| $alias)* => $crate::reflective_layer!(
-                            @get self;
+                        |layer| $crate::reflective_layer!(
+                            @get layer;
                             $(reflect $member)?
                             $(reflect_bounded $bounded_member)?
                             $(explicit $getter => $get)?
-                        ),
-                    )*
-                    _ => None,
-                }
+                        )
+                    ),*
+                ];
+                GETTERS.get(index).and_then(|get| get(self))
             }
 
-            fn set_field(
+            fn set_field_by_index(
                 &mut self,
-                name: &str,
+                index: usize,
                 value: $crate::field::Value,
             ) -> Result<(), $crate::field::Error> {
-                match name {
+                type Setter = fn(&mut $ty, $crate::field::Value) -> Result<(), $crate::field::Error>;
+                const SETTERS: &[Setter] = &[
                     $(
-                        $field $(| $alias)* => $crate::reflective_layer!(
-                            @set self, value, name, $schema;
+                        |layer, value| $crate::reflective_layer!(
+                            @set layer, value, $field, $schema;
                             $(reflect $member)?
                             $(reflect_bounded $bounded_member, $maximum)?
                             $(explicit $setter, $value, $field_name => $set)?
-                        ),
-                    )*
-                    _ => Err($crate::field::Error::UnknownField {
+                        )
+                    ),*
+                ];
+                match SETTERS.get(index) {
+                    Some(set) => set(self, value),
+                    None => Err($crate::field::Error::UnknownField {
                         protocol: $schema().protocol,
-                        field: name.to_owned(),
+                        field: index.to_string(),
                     }),
                 }
             }
@@ -151,13 +156,17 @@ macro_rules! reflective_layer {
         $vis fn $layout($($layout_arg: $layout_ty),*)
             -> Vec<$crate::layout::FieldLayout>
         {
-            let candidates: [Option<$crate::layout::FieldLayout>; _] = [
+            let candidates: [Option<$crate::layout::ByteRange>; _] = [
                 $(
                     $crate::reflective_layer!(@layout $field $(, $start, $end)?)
                 ),*
             ];
             let mut fields = Vec::with_capacity(candidates.len());
-            fields.extend(candidates.into_iter().flatten());
+            fields.extend(candidates.into_iter().enumerate().filter_map(
+                |(index, range)| {
+                    range.map(|range| $crate::layout::FieldLayout { index, range })
+                },
+            ));
             // Stable sorting preserves the declaration order of fields sharing the same bytes.
             if !fields.is_sorted_by_key(|field| field.range.start) {
                 fields.sort_by_key(|field| field.range.start);
@@ -171,10 +180,7 @@ macro_rules! reflective_layer {
         None
     };
     (@layout $field:literal, $start:expr, $end:expr) => {
-        Some($crate::layout::FieldLayout {
-            name: $field,
-            range: $crate::layout::ByteRange::new($start, $end),
-        })
+        Some($crate::layout::ByteRange::new($start, $end))
     };
     (@get $layer:expr; reflect $member:ident) => {
         Some($crate::layer::ReflectiveField::reflective_value(&$layer.$member))

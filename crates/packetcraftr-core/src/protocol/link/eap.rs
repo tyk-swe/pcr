@@ -3,9 +3,9 @@
 
 //! EAP envelope and identity/notification/Nak data (RFC 3748). Other authentication methods remain byte strings.
 
-use crate::codec::*;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Reader, Writer, message_codec};
 use bytes::Bytes;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,7 +26,7 @@ impl Default for Eap {
     }
 }
 crate::reflective_layer! {
- fn eap_schema() => { protocol: crate::layer::Id::new("eap"), name: "Eap" }
+ fn eap_schema() => { protocol: crate::protocol::BuiltinProtocol::Eap.id(), name: "Eap" }
  impl Eap {
     "code" => { kind: Unsigned, derived: false, required: false, description: "code", reflect: code },
     "identifier" => { kind: Unsigned, derived: false, required: false, description: "identifier", reflect: identifier },
@@ -34,23 +34,7 @@ crate::reflective_layer! {
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
 }
-fn eap_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if !b.is_empty() {
-        fields.push(crate::layout::FieldLayout {
-            name: "code",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-    }
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "identifier",
-            range: crate::layout::ByteRange::new(1, 2),
-        });
-    }
-    fields
-}
-message_codec!(EapCodec, Eap, eap_schema, eap_layout_wire);
+message_codec!(EapCodec, Eap, eap_schema);
 
 const NAME: &str = "eap";
 impl Eap {
@@ -76,8 +60,13 @@ impl Eap {
         }
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..1);
+        r.mark(1, 1..2);
         let code = r.u8()?;
         let identifier = r.u8()?;
         let len = r.u16()? as usize;
@@ -92,11 +81,14 @@ impl Eap {
         if code >= 3 && !data.is_empty() {
             return Err(invalid(NAME, "success/failure cannot contain data"));
         }
-        Ok(Self {
-            code,
-            identifier,
-            method,
-            data,
-        })
+        Ok((
+            Self {
+                code,
+                identifier,
+                method,
+                data,
+            },
+            r.take_layouts(),
+        ))
     }
 }

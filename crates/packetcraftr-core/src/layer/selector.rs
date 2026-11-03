@@ -296,7 +296,7 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         Classification::new(
-            "cli.selector",
+            crate::error::Code::CliSelector,
             Kind::Usage,
             Some(
                 "select a field as <protocol>[#occurrence].<field>, for example ipv4#2.ttl, or as a zero-based LAYER.FIELD",

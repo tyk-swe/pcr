@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::protocol::identity;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -11,9 +12,7 @@ use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
-use packetcraftr_core::protocol::application::ntp::Ntp;
 use packetcraftr_core::protocol::builtin;
-use packetcraftr_core::protocol::tunnel::Geneve;
 use packetcraftr_core::protocol::{
     network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
     transport::{Sctp, Tcp, Udp},
@@ -148,7 +147,6 @@ fn icmp_probe_fields(endpoint: probe::Endpoint, address: IpAddr, sequence: u64) 
 /// Second byte of every scan ICMP echo payload; see [`icmp_identity`].
 const ICMP_IDENTITY_TAG: u8 = 0x43;
 
-const DNS_PORT: u16 = 53;
 const NTP_PORT: u16 = 123;
 const VXLAN_PORT: u16 = 4789;
 const GENEVE_PORT: u16 = 6081;
@@ -163,7 +161,7 @@ fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
         return;
     }
     let registry = builtin::registry();
-    if port == DNS_PORT
+    if port == crate::dns::DEFAULT_SERVER_PORT
         && let Ok(dns) = Dns::try_from(payload.clone())
     {
         packet.push(dns);
@@ -185,7 +183,7 @@ fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
     }
     if port == NTP_PORT
         && let Some(ntp) = decode_layer(&registry, BuiltinProtocol::Ntp.as_str(), payload)
-        && ntp.layer.is::<Ntp>()
+        && BuiltinProtocol::Ntp.identifies(&*ntp.layer)
         && ntp.consumed == payload.len()
     {
         packet.push_boxed(ntp.layer);
@@ -278,11 +276,11 @@ fn push_geneve_payload(packet: &mut Packet, registry: &Arc<Registry>, payload: &
     let Some(header) = decode_layer(registry, "geneve", payload) else {
         return false;
     };
-    let Some(geneve) = header.layer.downcast_ref::<Geneve>() else {
+    let Some(protocol_type) = identity::geneve_protocol_type(&*header.layer) else {
         return false;
     };
     let inner_bytes = &payload[header.consumed..];
-    let (link_type, expected_root, opaque) = match geneve.protocol_type {
+    let (link_type, expected_root, opaque) = match protocol_type {
         WireValue::Exact(GENEVE_ETHERNET) => (Some(LinkType::ETHERNET), Some("ethernet"), false),
         WireValue::Exact(GENEVE_IPV4) => (Some(LinkType::IPV4), Some("ipv4"), false),
         WireValue::Exact(GENEVE_IPV6) => (Some(LinkType::IPV6), Some("ipv6"), false),
@@ -449,5 +447,57 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
                 .get::<Ipv6>()
                 .is_some_and(|ipv6| ipv6.next_header == WireValue::Exact(protocol)),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    fn dns_query() -> Bytes {
+        let mut wire = vec![0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0];
+        for label in ["example", "test"] {
+            wire.push(u8::try_from(label.len()).unwrap());
+            wire.extend(label.bytes());
+        }
+        wire.extend([0, 0, 1, 0, 1]);
+        Bytes::from(wire)
+    }
+
+    fn udp_probe(port: u16) -> Probe {
+        Probe {
+            sequence: 1,
+            stage: probe::Stage::Scan,
+            address: Ipv4Addr::new(192, 0, 2, 1).into(),
+            scope: None,
+            endpoint: probe::Endpoint::Udp { port },
+            tcp_scan: Default::default(),
+            sctp_scan: Default::default(),
+            attempt: 1,
+            udp_payload: dns_query(),
+            udp_profile: None,
+        }
+    }
+
+    fn payload_protocol(probe: &Probe) -> Option<BuiltinProtocol> {
+        let packet = probe.packet();
+        packet.layer(packet.len() - 1).and_then(BuiltinProtocol::of)
+    }
+
+    #[test]
+    fn a_dns_payload_to_the_dns_port_materializes_as_dns_without_a_profile() {
+        assert_eq!(
+            payload_protocol(&udp_probe(crate::dns::DEFAULT_SERVER_PORT)),
+            Some(BuiltinProtocol::Dns)
+        );
+    }
+
+    #[test]
+    fn a_dns_payload_to_another_port_stays_raw() {
+        assert_eq!(
+            payload_protocol(&udp_probe(9_999)),
+            Some(BuiltinProtocol::Raw)
+        );
     }
 }

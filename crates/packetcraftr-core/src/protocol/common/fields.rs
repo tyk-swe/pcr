@@ -1,20 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
     codec::EncodeContext,
     diagnostic::{Diagnostic, Severity},
     field::{self, WireValue},
-    layer::Layer,
     registry::Discriminator,
 };
 
 use crate::protocol::BuiltinProtocol;
 
-use super::errors::{binding_protocol, invalid};
+use super::errors::invalid;
 use super::validation::{validate_auto_raw_discriminator, validate_raw_child_discriminator};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,7 +170,7 @@ where
 /// An explicit `value` that already selects this child is honoured as-is:
 /// several protocols are registered under more than one discriminator.
 pub(crate) fn expected_discriminator<T>(
-    parent: &str,
+    _parent: &str,
     context: &EncodeContext<'_>,
     fallback: T,
     value: &WireValue<T>,
@@ -183,27 +181,24 @@ where
     let Some(child) = context.child else {
         return ValueExpectation::Suggested(fallback);
     };
-    let child_is_raw = BuiltinProtocol::of(child) == Some(BuiltinProtocol::Raw);
+    let child_is_raw = child.is_builtin(BuiltinProtocol::Raw.id());
     if let WireValue::Exact(exact) = value
         && !child_is_raw
         && context
-            .registry
-            .child_for(parent, Discriminator((*exact).into()))
-            .is_some_and(|selected| selected.as_str() == binding_protocol(child))
+            .child_for(Discriminator((*exact).into()))
+            .is_some_and(|selected| selected.as_str() == child.binding_protocol())
     {
         return ValueExpectation::Required(*exact);
     }
     if child_is_raw {
-        let expected = context
-            .registry
-            .discriminator_for(parent, child.protocol_id().as_str())
+        let expected = child
+            .discriminator
             .and_then(|value| T::try_from(value.0).ok())
             .unwrap_or(fallback);
         return ValueExpectation::Suggested(expected);
     }
-    context
-        .registry
-        .discriminator_for(parent, binding_protocol(child))
+    child
+        .discriminator
         .and_then(|value| T::try_from(value.0).ok())
         .map_or(
             ValueExpectation::Suggested(fallback),
@@ -217,54 +212,4 @@ pub(crate) fn text_list(values: &[String]) -> field::Value {
 
 pub(crate) fn unsigned_list(values: &[u16]) -> field::Value {
     field::Value::List(values.iter().copied().map(field::Value::from).collect())
-}
-
-pub(crate) fn make_layer<L>(
-    mut layer: L,
-    fields: &BTreeMap<String, field::Value>,
-) -> Result<Box<dyn Layer>, crate::codec::Error>
-where
-    L: Layer + 'static,
-{
-    reject_aliased_duplicates(layer.schema(), fields)?;
-    for (name, value) in fields {
-        layer.set_field(name, value.clone())?;
-    }
-    Ok(Box::new(layer))
-}
-
-pub(crate) fn set_document_field<L>(
-    layer: &mut L,
-    name: &str,
-    value: field::Value,
-) -> Result<(), field::Error>
-where
-    L: Layer,
-{
-    let path = name
-        .parse::<field::Path>()
-        .map_err(|_| field::Error::UnknownField {
-            protocol: *layer.protocol_id(),
-            field: name.to_owned(),
-        })?;
-    layer.set_field_path(&path, value)
-}
-
-pub(crate) fn reject_aliased_duplicates(
-    schema: &'static crate::layer::Schema,
-    fields: &BTreeMap<String, field::Value>,
-) -> Result<(), crate::codec::Error> {
-    for declared in schema.fields {
-        let mut supplied = std::iter::once(declared.name)
-            .chain(declared.aliases.iter().copied())
-            .filter(|spelling| fields.contains_key(*spelling));
-        let (Some(first), Some(second)) = (supplied.next(), supplied.next()) else {
-            continue;
-        };
-        return Err(invalid(
-            schema.protocol.as_str(),
-            format!("both {second} and {first} were supplied"),
-        ));
-    }
-    Ok(())
 }

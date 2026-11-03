@@ -6,6 +6,7 @@ use std::time::SystemTime;
 
 use bytes::Bytes;
 
+use crate::protocol::identity::TcpHeader;
 use crate::protocol::transport::Tcp;
 
 use crate::analysis::Error;
@@ -40,7 +41,7 @@ impl ReassemblyDispatch {
 
     pub(super) fn dispatch(
         &mut self,
-        tcp_header: Option<&Tcp>,
+        tcp_header: Option<TcpHeader<'_>>,
         segment: Option<&Segment>,
         timestamp: SystemTime,
         number: u64,
@@ -85,7 +86,7 @@ impl ReassemblyDispatch {
     }
 }
 
-fn acknowledgment(tcp_header: Option<&Tcp>) -> Option<u32> {
+fn acknowledgment(tcp_header: Option<TcpHeader<'_>>) -> Option<u32> {
     tcp_header
         .filter(|tcp| tcp.flags & Tcp::ACK != 0)
         .map(|tcp| tcp.acknowledgment)

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::diagnostic::Severity;
-use std::collections::BTreeMap;
 
 use bytes::Bytes;
 
@@ -15,16 +14,15 @@ use super::{SackBlock, Tcp, TcpOption};
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, TCP_CHECKSUM},
-    field::{self, WireValue},
+    field::WireValue,
     layer::Layer,
     protocol::{
         BuiltinProtocol,
         common::{
-            ValueExpectation, invalid, make_layer, pad_options_to_four_bytes,
-            payload_without_padding, resolve_u16, strict_or_diagnostic, transport_checksum_parts,
-            truncated, typed_layer,
+            ValueExpectation, invalid, pad_options_to_four_bytes, payload_without_padding,
+            resolve_u16, strict_or_diagnostic, transport_checksum_parts, truncated, typed_layer,
         },
-        network::{ip_protocol, resolve_envelope},
+        network::ip_protocol,
         transport::ports::child_discriminators,
     },
 };
@@ -94,7 +92,7 @@ impl Codec for TcpCodec {
         prefix.extend_from_slice(&layer.urgent_pointer.to_be_bytes());
         prefix.extend_from_slice(&options);
         let covered_payload = payload_without_padding(NAME, payload, context)?;
-        let network = resolve_envelope(NAME, context)?;
+        let network = context.network_envelope()?;
         let checksum_expected =
             transport_checksum_parts(NAME, network, ip_protocol::TCP, &[&prefix, covered_payload])?;
         let (checksum, materialized_checksum) = resolve_u16(
@@ -189,11 +187,12 @@ impl Codec for TcpCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Tcp::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(tcp_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Tcp::default()))
     }
 }
 

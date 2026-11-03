@@ -131,7 +131,7 @@ pub enum Error {
 
 impl Classified for Error {
     fn classification(&self) -> Classification {
-        Classification::new("cli.error", Kind::Usage, None)
+        Classification::new(crate::error::Code::CliError, Kind::Usage, None)
     }
 }
 

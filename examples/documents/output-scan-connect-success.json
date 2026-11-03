@@ -1,0 +1,131 @@
+{
+  "command": "scan",
+  "diagnostics": [],
+  "mode": "aggregate",
+  "result": {
+    "endpoints": [
+      {
+        "address": "127.0.0.1",
+        "classification": "closed",
+        "inference": {
+          "conflicting": [],
+          "failed": [],
+          "rule": "tcp_connect.refused",
+          "state": "closed",
+          "supporting": [
+            0
+          ],
+          "unanswered": []
+        },
+        "port": 9,
+        "port_hint": "discard",
+        "probes": [
+          {
+            "address": "127.0.0.1",
+            "attempt": 1,
+            "attempted": true,
+            "classification": "closed",
+            "connect_succeeded": false,
+            "elapsed": {
+              "nanos": 175101,
+              "secs": 0
+            },
+            "error": {
+              "kind": "ConnectionRefused",
+              "message": "Connection refused (os error 111)",
+              "os_code": 111
+            },
+            "finished_at": {
+              "nanoseconds": 135615759,
+              "unix_seconds": 1793697375
+            },
+            "local": null,
+            "outcome": "refused",
+            "port": 9,
+            "scheduled_at": {
+              "nanoseconds": 135440755,
+              "unix_seconds": 1793697375
+            },
+            "sequence": 0,
+            "stage": "scan"
+          }
+        ]
+      }
+    ],
+    "hosts": [
+      {
+        "address": "127.0.0.1",
+        "discovery": "not_requested",
+        "probes": [],
+        "reasons": [],
+        "scan": "scanned"
+      }
+    ],
+    "method": "tcp_connect",
+    "plan": {
+      "discovery": {
+        "excluded_endpoints": 0,
+        "mode": "omitted",
+        "neighbor": false,
+        "probes": [],
+        "unresponsive": "skip"
+      },
+      "excluded_endpoints": 0,
+      "method": {
+        "requested": "tcp_connect",
+        "selected": "tcp_connect"
+      },
+      "port_catalog": {
+        "name": "port-catalog",
+        "version": "1.0.0"
+      }
+    },
+    "planned_duration": {
+      "nanos": 0,
+      "secs": 1
+    },
+    "resolved_addresses": [
+      "127.0.0.1"
+    ],
+    "scheduling": {
+      "conditions": [],
+      "incomplete": [],
+      "mode": "fixed",
+      "observed_peak_window": 1,
+      "operation_ceiling": 1,
+      "process_ceiling": 12,
+      "retries_started": 0
+    },
+    "socket_stats": {
+      "connections_attempted": 1,
+      "connections_scheduled": 1,
+      "connections_succeeded": 0,
+      "elapsed": {
+        "nanos": 1311396,
+        "secs": 0
+      },
+      "retained_evidence_bytes": 225,
+      "rtt": {
+        "avg": {
+          "nanos": 175101,
+          "secs": 0
+        },
+        "lost": 0,
+        "max": {
+          "nanos": 175101,
+          "secs": 0
+        },
+        "min": {
+          "nanos": 175101,
+          "secs": 0
+        },
+        "received": 1,
+        "sent": 1,
+        "unavailable": 0
+      }
+    },
+    "target": "127.0.0.1"
+  },
+  "schema": "packetcraftr.output/v19",
+  "status": "success"
+}

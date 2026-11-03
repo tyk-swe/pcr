@@ -1,12 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::protocol::identity;
 use std::net::IpAddr;
 
 use crate::route::Plan;
-use packetcraftr_core::{
-    packet::MacAddress, packet::Packet, protocol::link::Ethernet, protocol::semantics,
-};
+use packetcraftr_core::{packet::MacAddress, packet::Packet, protocol::semantics};
 
 use super::ResolutionError;
 use super::address::is_public;
@@ -131,8 +130,8 @@ impl Policy {
                 }
             });
         let source_mac = semantics::outer_layers(packet)
-            .find_map(|layer| layer.downcast_ref::<Ethernet>())
-            .map(|ethernet| MacAddress(ethernet.source))
+            .find_map(identity::link_addresses)
+            .map(|(source, _)| MacAddress(source))
             .map_or(plan.source_mac, |source| {
                 if source.0 == [0; 6] {
                     plan.source_mac.or(Some(source))
@@ -296,7 +295,10 @@ mod tests {
             panic!("expected target resolver failure, got {error:?}");
         };
         assert_eq!(source.to_string(), "resolver unavailable");
-        assert_eq!(error.classification().code, "io.hostname_resolution");
+        assert_eq!(
+            error.classification().code.as_str(),
+            "io.hostname_resolution"
+        );
         assert_eq!(
             error.classification().kind,
             packetcraftr_core::error::Kind::Io

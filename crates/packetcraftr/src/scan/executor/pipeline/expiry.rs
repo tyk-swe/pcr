@@ -68,12 +68,13 @@ pub(super) fn charge(pending: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::{Clock, SystemClock};
     use std::time::Duration;
 
     #[test]
     fn unrelated_polls_do_not_visit_pending_entries() {
         for count in [32, 128, 512, 4096] {
-            let now = Instant::now();
+            let now = SystemClock.now();
             let end = now + Duration::from_secs(1);
             let mut deadlines = PendingDeadlines::default();
             for index in 0..count {
@@ -96,7 +97,7 @@ mod tests {
 
     #[test]
     fn removal_and_reuse_leave_no_stale_deadlines_or_draining_entries() {
-        let now = Instant::now();
+        let now = SystemClock.now();
         let mut deadlines = PendingDeadlines::default();
         deadlines.insert(now + Duration::from_secs(2), 0);
         deadlines.insert(now + Duration::from_secs(1), 1);

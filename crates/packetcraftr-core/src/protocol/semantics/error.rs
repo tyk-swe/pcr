@@ -58,7 +58,7 @@ pub enum Error {
 impl crate::error::Classified for Error {
     fn classification(&self) -> crate::error::Classification {
         crate::error::Classification::new(
-            "packet.semantics",
+            crate::error::Code::PacketSemantics,
             crate::error::Kind::Packet,
             Some("repair the malformed or ambiguous route-bearing packet fields"),
         )

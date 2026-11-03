@@ -11,13 +11,11 @@ mod validation;
 pub use checksum::{ChecksumAccumulator, checksum_parts};
 pub(crate) use checksum::{network_from_addresses, transport_checksum_parts};
 pub(crate) use errors::{
-    binding_protocol, binds_as, child_is_opaque, invalid, out_of_range, read_only, rejected,
-    truncated, typed_layer, unsupported, wrong_type,
+    invalid, out_of_range, read_only, rejected, truncated, typed_layer, unsupported, wrong_type,
 };
 pub(crate) use fields::{
-    ValueExpectation, expected_discriminator, make_layer, reject_aliased_duplicates, resolve_fixed,
-    resolve_u8, resolve_u16, resolve_u16_discriminator, set_document_field, text_list,
-    unsigned_list,
+    ValueExpectation, expected_discriminator, resolve_fixed, resolve_u8, resolve_u16,
+    resolve_u16_discriminator, text_list, unsigned_list,
 };
 pub(crate) use payload::payload_without_padding;
 pub(crate) use validation::{

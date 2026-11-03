@@ -1,20 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, Severity},
-    field,
     layer::{Id, Layer, reflective_layer},
     layout::FieldLayout,
 };
 
 use crate::protocol::common::{
-    ensure_encode_budget, invalid, make_layer, strict_or_diagnostic, truncated, typed_layer,
+    ensure_encode_budget, invalid, strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -449,10 +446,11 @@ impl Codec for StpCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Stp::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(stp_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Stp::default()))
     }
 }

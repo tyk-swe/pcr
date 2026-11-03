@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::protocol::BuiltinProtocol;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::neighbor::{MAX_VLAN_TAGS, Request as NeighborRequest};
@@ -8,13 +9,11 @@ use packetcraftr_core::decode::{self, DecodedPacket, Dissector};
 use packetcraftr_core::diagnostic::ICMPV6_CHECKSUM;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Layer;
-use packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag};
+use packetcraftr_core::packet::{MacAddress, VlanTag};
 use packetcraftr_core::protocol::builtin;
-use packetcraftr_core::protocol::link::{Arp, Ethernet, Vlan, Vlan8021ad};
-use packetcraftr_core::protocol::network::{
-    DestinationOptions, HopByHop, Icmpv6, Ipv6, SegmentRoutingHeader, ndp,
-};
-use packetcraftr_core::protocol::tunnel::Ah;
+use packetcraftr_core::protocol::identity::{self, NetworkHeader};
+use packetcraftr_core::protocol::link::Arp;
+use packetcraftr_core::protocol::network::ndp;
 
 use super::is_unicast_mac;
 use super::request::NDP_HOP_LIMIT;
@@ -33,20 +32,20 @@ pub(in crate::neighbor) fn match_neighbor_response(
     let decoded = Dissector::new(builtin::registry())
         .decode(frame.clone(), decode::Options::default())
         .ok()?;
-    let ethernet = decoded.packet.layer(0)?.downcast_ref::<Ethernet>()?;
+    let (source, destination) = identity::link_addresses(decoded.packet.layer(0)?)?;
     let vlan_tags = decoded
         .packet
         .iter()
         .skip(1)
-        .map_while(vlan_tag)
+        .map_while(identity::vlan_tag)
         .collect::<Vec<_>>();
     if vlan_tags.len() > MAX_VLAN_TAGS
-        || ethernet.destination != request.interface_mac.0
+        || destination != request.interface_mac.0
         || !same_vlan_link(&vlan_tags, &request.vlan_tags)
     {
         return None;
     }
-    let sender = MacAddress(ethernet.source);
+    let sender = MacAddress(source);
     let network = 1 + vlan_tags.len();
     let responder = match (request.interface_source, request.target) {
         (IpAddr::V4(source), IpAddr::V4(target)) => {
@@ -58,23 +57,6 @@ pub(in crate::neighbor) fn match_neighbor_response(
         _ => return None,
     };
     (responder == sender && is_unicast_mac(responder)).then_some(responder)
-}
-
-fn vlan_tag(layer: &dyn Layer) -> Option<VlanTag> {
-    if let Some(tag) = layer.downcast_ref::<Vlan>() {
-        return Some(VlanTag {
-            kind: VlanKind::Ieee8021Q,
-            priority: tag.priority,
-            drop_eligible: tag.drop_eligible,
-            vlan_id: tag.vlan_id,
-        });
-    }
-    layer.downcast_ref::<Vlan8021ad>().map(|tag| VlanTag {
-        kind: VlanKind::Ieee8021Ad,
-        priority: tag.priority,
-        drop_eligible: tag.drop_eligible,
-        vlan_id: tag.vlan_id,
-    })
 }
 
 /// VLAN kind and ID identify the logical link. Priority and drop eligibility
@@ -92,7 +74,7 @@ fn arp_reply(
     source: Ipv4Addr,
     target: Ipv4Addr,
 ) -> Option<MacAddress> {
-    let arp = layer.downcast_ref::<Arp>()?;
+    let arp = identity::arp_message(layer)?;
     (arp.operation == Arp::OPERATION_REPLY
         && arp.sender_protocol == target
         && arp.target_protocol == source
@@ -108,11 +90,19 @@ fn advertisement(
     interface_source: Ipv6Addr,
     target: Ipv6Addr,
 ) -> Option<MacAddress> {
-    let ipv6 = decoded.packet.layer(network)?.downcast_ref::<Ipv6>()?;
-    if ipv6.hop_limit != NDP_HOP_LIMIT
-        || ipv6.source.is_unspecified()
-        || ipv6.source.is_multicast()
-        || ipv6.destination != interface_source
+    let Some(NetworkHeader::V6 {
+        source,
+        destination,
+        hop_limit,
+        ..
+    }) = identity::network_header(decoded.packet.layer(network)?)
+    else {
+        return None;
+    };
+    if hop_limit != NDP_HOP_LIMIT
+        || source.is_unspecified()
+        || source.is_multicast()
+        || destination != interface_source
     {
         return None;
     }
@@ -122,7 +112,8 @@ fn advertisement(
         .enumerate()
         .skip(network + 1)
         .find(|(_, layer)| !is_unfragmented_extension(*layer))?;
-    let icmp = icmp.downcast_ref::<Icmpv6>()?;
+    let icmp = identity::icmp_message(icmp)
+        .filter(|message| message.protocol == BuiltinProtocol::Icmpv6)?;
     let checksum_failed = decoded
         .diagnostics
         .iter()
@@ -130,7 +121,7 @@ fn advertisement(
     if checksum_failed || icmp.icmp_type != ndp::NEIGHBOR_ADVERTISEMENT || icmp.code != 0 {
         return None;
     }
-    let advertisement = ndp::NeighborAdvertisement::decode(&icmp.body).ok()?;
+    let advertisement = ndp::NeighborAdvertisement::decode(icmp.body).ok()?;
     if !advertisement.solicited
         || advertisement.target != target
         || advertisement.target.is_multicast()
@@ -151,8 +142,8 @@ fn advertisement(
 }
 
 fn is_unfragmented_extension(layer: &dyn Layer) -> bool {
-    layer.is::<HopByHop>()
-        || layer.is::<DestinationOptions>()
-        || layer.is::<SegmentRoutingHeader>()
-        || layer.is::<Ah>()
+    BuiltinProtocol::Ipv6HopByHop.identifies(layer)
+        || BuiltinProtocol::Ipv6DestinationOptions.identifies(layer)
+        || BuiltinProtocol::Ipv6Srh.identifies(layer)
+        || BuiltinProtocol::Ah.identifies(layer)
 }

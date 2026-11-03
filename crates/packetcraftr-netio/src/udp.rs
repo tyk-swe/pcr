@@ -13,7 +13,7 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 use crate::bounded::{Exchange, Outcome, prepare_transfer, retryable};
 
 pub const MAX_PAYLOAD_BYTES: usize = packetcraftr_core::document::udp_profiles::MAX_PAYLOAD_BYTES;
-pub const MAX_RESPONSE_BYTES: usize = 65_535;
+pub const MAX_EXCHANGE_RESPONSE_BYTES: usize = 65_535;
 
 #[derive(Debug)]
 pub struct Reply {
@@ -52,7 +52,7 @@ impl Provider for SystemProvider {
         if endpoint.port() == 0
             || request.len() > MAX_PAYLOAD_BYTES
             || max_response == 0
-            || max_response > MAX_RESPONSE_BYTES
+            || max_response > MAX_EXCHANGE_RESPONSE_BYTES
         {
             return Err(Error::Limit);
         }
@@ -152,10 +152,20 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::Socket(_) => Classification::new("io.udp_exchange", Kind::Io, None),
+            Self::Socket(_) => Classification::new(
+                packetcraftr_core::error::Code::IoUdpExchange,
+                Kind::Io,
+                None,
+            ),
             Self::Interrupted(source) => source.classification(),
-            Self::Limit => Classification::new("cli.udp_exchange_limit", Kind::Usage, None),
-            Self::Peer { .. } => Classification::new("io.udp_peer", Kind::Io, None),
+            Self::Limit => Classification::new(
+                packetcraftr_core::error::Code::CliUdpExchangeLimit,
+                Kind::Usage,
+                None,
+            ),
+            Self::Peer { .. } => {
+                Classification::new(packetcraftr_core::error::Code::IoUdpPeer, Kind::Io, None)
+            }
         }
     }
 }

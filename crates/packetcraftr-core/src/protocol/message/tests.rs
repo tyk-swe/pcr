@@ -56,12 +56,22 @@ fn round_trip_inner(name: &str, wire: &[u8], ipv6: bool) {
         })
         .unwrap_or_default();
     let context = EncodeContext {
-        packet: &packet,
-        index: 0,
-        build_context: &addresses,
+        addresses: &addresses,
         mode: Mode::Strict,
-        registry: &registry,
         child: None,
+        parent: None,
+        network: network.ok_or_else(|| {
+            crate::codec::Error::invalid(
+                *packet.layer(0).unwrap().protocol_id(),
+                "the transport checksum requires matching source and destination IP addresses",
+            )
+        }),
+        outer_network: true,
+        srh_active_segment: None,
+        srh_reduced: false,
+        under_ipv6: None,
+        trailing_padding: Some(0),
+        child_bindings: &[],
         remaining_packet_bytes: 65536,
     };
     let encoded = codec
@@ -411,13 +421,13 @@ fn captures_convert_to_editable_documents_and_rebuild() {
                 if let Some(binding) = entry["decode_as"].as_str() {
                     let (selector, child) = binding.split_once(':').unwrap();
                     let port = selector.split_once('=').unwrap().1.parse::<u64>().unwrap();
-                    builder.bind(
+                    builder.replace_binding(
                         "udp",
                         port,
                         crate::protocol::BuiltinProtocol::from_name(child)
                             .unwrap()
                             .as_str(),
-                        i32::MAX,
+                        crate::registry::Priority::Primary,
                     )?;
                 }
                 Ok(())
@@ -582,7 +592,7 @@ fn sip_udp_without_content_length_uses_the_datagram() {
 
 #[test]
 fn sip_tcp_still_requires_content_length() {
-    let mut framer = crate::protocol::framing::Framer::new("sip");
+    let mut framer = crate::protocol::framing::Framer::new(crate::codec::Framing::Sip, "sip");
     assert!(
         framer
             .progress(b"OPTIONS sip:service SIP/2.0\r\n\r\n", 65536)
@@ -620,7 +630,7 @@ fn ospfv2_preserves_the_separate_authentication_digest() {
         .decode(
             Bytes::copy_from_slice(&wire),
             &DecodeContext {
-                parent: Some(crate::layer::Id::new("ipv4")),
+                parent: Some(crate::protocol::BuiltinProtocol::Ipv4.id()),
                 registry: &registry,
                 network: None,
                 hop_limit: None,
@@ -639,12 +649,20 @@ fn ospfv2_preserves_the_separate_authentication_digest() {
             packet.layer(0).unwrap(),
             &[],
             &EncodeContext {
-                packet: &packet,
-                index: 0,
-                build_context: &addresses,
+                addresses: &addresses,
                 mode: Mode::Strict,
-                registry: &registry,
                 child: None,
+                parent: None,
+                network: Err(crate::codec::Error::invalid(
+                    *packet.layer(0).unwrap().protocol_id(),
+                    "the transport checksum requires matching source and destination IP addresses",
+                )),
+                outer_network: true,
+                srh_active_segment: None,
+                srh_reduced: false,
+                under_ipv6: None,
+                trailing_padding: Some(0),
+                child_bindings: &[],
                 remaining_packet_bytes: 65536,
             },
         )
@@ -848,7 +866,7 @@ fn radius_padding_is_separate_from_attributes() {
         .decode(
             Bytes::copy_from_slice(&wire),
             &DecodeContext {
-                parent: Some(crate::layer::Id::new("udp")),
+                parent: Some(crate::protocol::BuiltinProtocol::Udp.id()),
                 registry: &registry,
                 network: None,
                 hop_limit: None,
@@ -930,7 +948,12 @@ fn ipfix_and_dtls_nested_fields_support_editing_and_projection() {
         let registry = std::sync::Arc::new(
             builtin::registry_with(|builder| {
                 if name == "dtls" {
-                    builder.bind("udp", 5684, "dtls", i32::MAX)?;
+                    builder.replace_binding(
+                        "udp",
+                        5684,
+                        "dtls",
+                        crate::registry::Priority::Primary,
+                    )?;
                 }
                 Ok(())
             })
@@ -1056,7 +1079,14 @@ fn folded_sip_and_rtsp_headers_preserve_bytes_and_frame_lengths() {
         let wire = format!("{start}\r\nSubject: a\r\n b\r\nContent-Length:\r\n\t4\r\n\r\nbody");
         builder_round_trip(name, wire.as_bytes());
         for split in 1..wire.len() {
-            let mut framer = crate::protocol::framing::Framer::new(name);
+            let mut framer = crate::protocol::framing::Framer::new(
+                crate::protocol::BuiltinProtocol::from_name(name)
+                    .unwrap()
+                    .framing(),
+                crate::protocol::BuiltinProtocol::from_name(name)
+                    .unwrap()
+                    .as_str(),
+            );
             assert_eq!(
                 framer.progress(&wire.as_bytes()[..split], 65536).unwrap(),
                 None
@@ -1372,9 +1402,13 @@ fn interleaved_rtsp_layout_only_contains_binary_fields() {
     let built = crate::build::Builder::new(registry.clone())
         .build(packet, Addresses::default(), Default::default())
         .unwrap();
-    let fields = &built.layout.layer(0).unwrap().fields;
+    let layer_layout = built.layout.layer(0).unwrap();
+    let fields = &layer_layout.fields;
     assert_eq!(
-        fields.iter().map(|field| field.name).collect::<Vec<_>>(),
+        fields
+            .iter()
+            .map(|field| field.name(layer_layout.schema).unwrap())
+            .collect::<Vec<_>>(),
         ["interleaved", "channel", "body"]
     );
     assert_eq!(fields[1].range, crate::layout::ByteRange::new(1, 2));
@@ -1406,7 +1440,7 @@ fn other_slow_protocols_remain_opaque_before_lacp_length_checks() {
             .decode(
                 Bytes::copy_from_slice(wire),
                 &DecodeContext {
-                    parent: Some(crate::layer::Id::new("ethernet")),
+                    parent: Some(crate::protocol::BuiltinProtocol::Ethernet.id()),
                     registry: &registry,
                     network: None,
                     hop_limit: None,
@@ -1645,7 +1679,9 @@ fn resp_framing_matches_canonical_decoder_and_depth() {
         for tag in [":", "$", "*"] {
             let wire = format!("{tag}{number}\r\n");
             assert!(
-                Framer::new("resp").progress(wire.as_bytes(), 4096).is_err(),
+                Framer::new(crate::codec::Framing::Resp, "resp")
+                    .progress(wire.as_bytes(), 4096)
+                    .is_err(),
                 "{wire:?}"
             );
             assert!(decode("resp", wire.as_bytes()).is_err());
@@ -1661,16 +1697,23 @@ fn resp_framing_matches_canonical_decoder_and_depth() {
     ] {
         for depth in [15, 16] {
             let wire = format!("{}{leaf}", "*1\r\n".repeat(depth));
-            let framed = Framer::new("resp").progress(wire.as_bytes(), 4096);
+            let framed =
+                Framer::new(crate::codec::Framing::Resp, "resp").progress(wire.as_bytes(), 4096);
             assert_eq!(framed.is_ok(), depth == 15, "{leaf:?} at {depth}");
             assert_eq!(decode("resp", wire.as_bytes()).is_ok(), depth == 15);
         }
     }
     let wire = b"$9223372036854775807\r\n";
-    assert!(Framer::new("resp").progress(wire, 4096).is_err());
+    assert!(
+        Framer::new(crate::codec::Framing::Resp, "resp")
+            .progress(wire, 4096)
+            .is_err()
+    );
     for wire in [b"$0\r\n\r\n".as_slice(), b"$3\r\nabc\r\n"] {
         assert_eq!(
-            Framer::new("resp").progress(wire, 4096).unwrap(),
+            Framer::new(crate::codec::Framing::Resp, "resp")
+                .progress(wire, 4096)
+                .unwrap(),
             Some(wire.len())
         );
     }
@@ -1715,7 +1758,7 @@ fn slice<'a>(name: &str, field: &str, wire: &'a [u8]) -> &'a [u8] {
     let range = decoded
         .fields
         .iter()
-        .find(|f| f.name == field)
+        .find(|f| f.name(decoded.layer.schema()) == Some(field))
         .unwrap()
         .range;
     &wire[range.start..range.end]
@@ -1874,7 +1917,7 @@ fn layouts_stay_within_every_message_prefix() {
         for len in 0..=wire.len() {
             for field in layout(&wire[..len]) {
                 if field.range.start > field.range.end || field.range.end > len {
-                    violations.insert(format!("{name}.{}", field.name));
+                    violations.insert(format!("{name}.field{}", field.index));
                 }
             }
         }

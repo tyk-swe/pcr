@@ -98,12 +98,12 @@ impl Classified for Error {
                 super::error::resource_limit(super::error::GENERAL_RESOURCE_REMEDIATION)
             }
             Self::InvalidLimit { .. } => Classification::new(
-                "cli.analysis_limit",
+                crate::error::Code::CliAnalysisLimit,
                 Kind::Usage,
                 Some("use a scope limit within the 32-bit scope identity space"),
             ),
             Self::Unknown { .. } | Self::ReplayMismatch { .. } => Classification::new(
-                "internal.scope_composition",
+                crate::error::Code::InternalScopeComposition,
                 Kind::Internal,
                 Some("report the capture and command as an internal scope-composition failure"),
             ),

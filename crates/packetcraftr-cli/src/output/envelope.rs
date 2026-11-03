@@ -69,7 +69,7 @@ impl Error {
         causes: Vec<String>,
     ) -> Self {
         Self {
-            code: classification.code.to_owned(),
+            code: classification.code.as_str().to_owned(),
             kind: classification.kind,
             message: message.into(),
             causes,

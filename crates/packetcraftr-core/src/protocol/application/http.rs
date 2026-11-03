@@ -50,8 +50,12 @@ impl std::fmt::Display for Limit {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::Invalid(_) => Classification::new("packet.http", Kind::Packet, None),
-            Self::Limit(_) => Classification::new("policy.http_limit", Kind::Policy, None),
+            Self::Invalid(_) => {
+                Classification::new(crate::error::Code::PacketHttp, Kind::Packet, None)
+            }
+            Self::Limit(_) => {
+                Classification::new(crate::error::Code::PolicyHttpLimit, Kind::Policy, None)
+            }
         }
     }
 }

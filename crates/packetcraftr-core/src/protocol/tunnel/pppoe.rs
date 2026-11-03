@@ -1,21 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, Severity},
     field::{self, WireValue},
-    layer::{Id, Layer, Malformed, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, ensure_encode_budget, invalid, make_layer, payload_without_padding,
-    resolve_u16, resolve_u16_discriminator, strict_or_diagnostic, truncated, typed_layer,
+    ValueExpectation, ensure_encode_budget, invalid, payload_without_padding, resolve_u16,
+    resolve_u16_discriminator, strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -28,6 +26,15 @@ const PPP_LEN: usize = 2;
 
 pub(crate) const PPPOE_SESSION: u64 = 0;
 pub(crate) const PPPOE_DISCOVERY: u64 = 1;
+
+pub(crate) mod ppp_protocol {
+    pub(crate) const IPV4: u16 = 0x0021;
+    pub(crate) const IPV6: u16 = 0x0057;
+    pub(crate) const LCP: u16 = 0xc021;
+    pub(crate) const IPCP: u16 = 0x8021;
+    pub(crate) const IPV6CP: u16 = 0x8057;
+    pub(crate) const EAP: u16 = 0xc227;
+}
 
 /// PPPoE header (RFC 2516), covering both stages.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -185,11 +192,12 @@ impl Codec for PppoeCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Pppoe::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(pppoe_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Pppoe::default()))
     }
 }
 
@@ -209,8 +217,8 @@ fn validate_stage(
         )?;
     }
     let expected_stage = match context.child {
-        Some(child) if child.is::<Ppp>() => Some(0_u8),
-        Some(child) if child.is::<Malformed>() => None,
+        Some(child) if child.is_builtin(crate::protocol::BuiltinProtocol::Ppp.id()) => Some(0_u8),
+        Some(child) if child.is_builtin(crate::protocol::BuiltinProtocol::Malformed.id()) => None,
         _ => Some(1),
     };
     if let Some(expected) = expected_stage
@@ -243,20 +251,8 @@ fn validate_parent_stage(
 ) -> Result<(), crate::codec::Error> {
     let expected_ether_type = if layer.code == 0 { 0x8864 } else { 0x8863 };
     let parent_ether_type = context
-        .index
-        .checked_sub(1)
-        .and_then(|index| context.packet.layer(index))
-        .and_then(|parent| {
-            parent
-                .field("ether_type")
-                .or_else(|| parent.field("protocol"))
-                .or_else(|| parent.field("protocol_type"))
-                .or_else(|| {
-                    (parent.field("oui") == Some(field::Value::Unsigned(0)))
-                        .then(|| parent.field("protocol_id"))
-                        .flatten()
-                })
-        });
+        .parent
+        .and_then(|parent| parent.discriminator_value.clone());
     let disagrees = match &parent_ether_type {
         Some(field::Value::Unsigned(value @ (0x8863 | 0x8864))) => *value != expected_ether_type,
         Some(field::Value::Text(_)) => layer.code != 0,
@@ -365,10 +361,11 @@ impl Codec for PppCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Ppp::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(ppp_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Ppp::default()))
     }
 }

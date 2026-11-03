@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::clock::{Clock, SystemClock};
 use std::sync::Arc;
-use std::time::Instant;
 
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
@@ -345,7 +345,8 @@ where
             else {
                 break;
             };
-            let attempt_deadline = Instant::now()
+            let attempt_deadline = SystemClock
+                .now()
                 .checked_add(attempt_budget)
                 .ok_or_else(|| invalid_options("attempt deadline overflowed".to_owned()))?;
             let frame = Layer2Frame::try_new(request_bytes, route)

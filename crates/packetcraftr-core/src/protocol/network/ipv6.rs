@@ -12,7 +12,6 @@ pub(crate) use options::{DestinationOptionsCodec, HopByHopCodec};
 pub use srh::SegmentRoutingHeader;
 pub(crate) use srh::SegmentRoutingHeaderCodec;
 
-use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 
 use bytes::Bytes;
@@ -20,19 +19,19 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::Diagnostic,
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, expected_discriminator, invalid, make_layer, network_from_addresses,
+    ValueExpectation, expected_discriminator, invalid, network_from_addresses,
     payload_without_padding, resolve_u8, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
     unsupported, validate_auto_raw_discriminator, validate_ipv6_routing_child,
     validate_raw_child_discriminator,
 };
 
-use super::envelope::{ipv6_endpoints, is_ipv6_extension_layer};
+use super::envelope::ipv6_endpoints;
 use super::ip_protocol;
 
 use crate::protocol::BuiltinProtocol;
@@ -195,11 +194,12 @@ impl Codec for Ipv6Codec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Ipv6::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(ipv6_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Ipv6::default()))
     }
 }
 
@@ -251,7 +251,7 @@ fn resolve_next_header(
         && matches!(value, WireValue::Exact(_))
         && context
             .child
-            .is_none_or(|child| BuiltinProtocol::Padding.identifies(child));
+            .is_none_or(|child| child.is_builtin(BuiltinProtocol::Padding.id()));
     if !empty_protocol_probe {
         validate_raw_child_discriminator(name, u64::from(next), context, diagnostics)?;
     }
@@ -263,25 +263,13 @@ fn resolve_addresses(
     layer: &Ipv6,
     context: &EncodeContext<'_>,
 ) -> Result<(Ipv6Addr, Ipv6Addr, Vec<Diagnostic>), crate::codec::Error> {
-    let (source, inherited_destination) =
-        ipv6_endpoints(layer, context.packet, context.index, context.build_context);
-    let routing = context
-        .packet
-        .iter()
-        .skip(context.index.saturating_add(1))
-        .take_while(|candidate| is_ipv6_extension_layer(*candidate))
-        .find_map(|candidate| candidate.downcast_ref::<super::SegmentRoutingHeader>());
-    let active_segment = routing.and_then(|routing| {
-        let last = routing.segments.len().checked_sub(1)?;
-        let segments_left = match routing.segments_left {
-            WireValue::Auto => last,
-            WireValue::Exact(value) => usize::from(value),
-            WireValue::Raw(_) => return None,
-        };
-        last.checked_sub(segments_left)
-            .and_then(|index| routing.segments.get(index))
-            .copied()
-    });
+    let (source, inherited_destination) = ipv6_endpoints(
+        layer.source,
+        layer.destination,
+        context.outer_network,
+        context.addresses,
+    );
+    let active_segment = context.srh_active_segment;
     let mut diagnostics = Vec::new();
     if let Some(active) = active_segment
         && !layer.destination.is_unspecified()
@@ -303,11 +291,15 @@ fn resolve_addresses(
         Some(active) if layer.destination.is_unspecified() => active,
         _ => inherited_destination,
     };
-    if destination.is_unspecified() && routing.is_some_and(|routing|
-        matches!(routing.segments_left, WireValue::Exact(left) if usize::from(left) == routing.segments.len())) {
-        strict_or_diagnostic(NAME, "build.srh_outer_destination", "destination",
+    if destination.is_unspecified() && context.srh_reduced {
+        strict_or_diagnostic(
+            NAME,
+            "build.srh_outer_destination",
+            "destination",
             "reduced SRH requires an explicit outer IPv6 destination".to_owned(),
-            context, &mut diagnostics)?;
+            context,
+            &mut diagnostics,
+        )?;
     }
     Ok((source, destination, diagnostics))
 }

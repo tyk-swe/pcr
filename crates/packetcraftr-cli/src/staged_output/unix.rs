@@ -236,7 +236,11 @@ fn same_object(left: &Stat, right: &Stat) -> bool {
 }
 
 fn hidden_name() -> io::Result<OsString> {
-    Ok(format!(".packetcraftr-{:016x}.tmp", getrandom::u64()?).into())
+    Ok(format!(
+        ".packetcraftr-{:016x}.tmp",
+        packetcraftr_netio::entropy::OsEntropy.u64()?
+    )
+    .into())
 }
 
 /// A staging file's name in the bound directory, removed on every failure,

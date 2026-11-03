@@ -215,7 +215,7 @@ impl FieldEdit {
         let field = layer
             .fields
             .iter()
-            .find(|field| field.name == self.field)
+            .find(|field| field.name(layer.schema) == Some(self.field))
             .ok_or(Error::Unsupported(Unsupported::EditFieldLayout))?;
         let range = field.range;
         if range.end > frame_len

@@ -1,12 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::codec::{Addresses, ChildInfo, EncodeContext, Mode, NetworkEnvelope, ParentInfo};
 use std::sync::Arc;
 
-use crate::codec::{Addresses, EncodeContext, Mode};
+use crate::field;
+use crate::layer::{Layer, Malformed, Padding};
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
 use crate::packet::Packet;
-use crate::registry::Registry;
+use crate::protocol::BuiltinProtocol;
+use crate::protocol::network::{
+    is_outer_network_layer, resolve_envelope, srh_active_segment, srh_reduced,
+};
+use crate::registry::{Discriminator, Registry};
 
 use buffer::PacketBuffer;
 
@@ -23,11 +29,134 @@ pub struct Builder {
     registry: Arc<Registry>,
 }
 
+struct EncodedLayer {
+    layout: LayerLayout,
+    layer: Box<dyn crate::layer::Layer>,
+    payload_length: Option<usize>,
+}
+
+struct LayerFacts {
+    child: Option<ChildInfo>,
+    parent: Option<ParentInfo>,
+    network: Result<NetworkEnvelope, crate::codec::Error>,
+    outer_network: bool,
+    srh_active_segment: Option<std::net::Ipv6Addr>,
+    srh_reduced: bool,
+    under_ipv6: Option<bool>,
+    trailing_padding: Option<usize>,
+    child_bindings: Vec<(Discriminator, crate::layer::Id)>,
+}
+
+fn binding_protocol(layer: &dyn Layer) -> &str {
+    Malformed::from_layer(layer)
+        .and_then(|layer| layer.intended_protocol.as_deref())
+        .unwrap_or_else(|| layer.protocol_id().as_str())
+}
+
+fn child_is_opaque(child: &dyn Layer) -> bool {
+    BuiltinProtocol::of(child).is_some_and(BuiltinProtocol::preserves_opaque_bytes)
+}
+
+fn builtin_id(layer: &dyn Layer) -> Option<crate::layer::Id> {
+    BuiltinProtocol::of(layer).map(BuiltinProtocol::id)
+}
+
+fn binds_as_id(child: &dyn Layer) -> Option<crate::layer::Id> {
+    match Malformed::from_layer(child).and_then(|layer| layer.intended_protocol.as_deref()) {
+        Some(intended) => BuiltinProtocol::from_name(intended).map(BuiltinProtocol::id),
+        None => builtin_id(child),
+    }
+}
+
+fn parent_discriminator_value(parent: &dyn Layer) -> Option<field::Value> {
+    parent
+        .field("ether_type")
+        .or_else(|| parent.field("protocol"))
+        .or_else(|| parent.field("protocol_type"))
+        .or_else(|| {
+            (parent.field("oui") == Some(field::Value::Unsigned(0)))
+                .then(|| parent.field("protocol_id"))
+                .flatten()
+        })
+}
+
+fn layer_facts(
+    registry: &Registry,
+    packet: &Packet,
+    addresses: &Addresses,
+    mode: Mode,
+) -> Vec<LayerFacts> {
+    (0..packet.len())
+        .map(|index| {
+            let protocol = *packet
+                .layer(index)
+                .expect("index inside packet")
+                .protocol_id();
+            let child = packet.layer(index + 1).map(|child| {
+                let binding = binding_protocol(child).to_owned();
+                let discriminator = registry.discriminator_for(protocol.as_str(), &binding);
+                ChildInfo {
+                    protocol: *child.protocol_id(),
+                    binding,
+                    builtin: builtin_id(child),
+                    binds_as: binds_as_id(child),
+                    opaque: child_is_opaque(child),
+                    discriminator,
+                }
+            });
+            let parent = index
+                .checked_sub(1)
+                .and_then(|parent| packet.layer(parent))
+                .map(|parent| ParentInfo {
+                    protocol: *parent.protocol_id(),
+                    builtin: builtin_id(parent),
+                    discriminator_value: parent_discriminator_value(parent),
+                    protocol_type_value: parent.field("protocol_type"),
+                    gre_sequence_present: (BuiltinProtocol::Gre.identifies(parent))
+                        .then(|| parent.field("sequence").is_some()),
+                });
+            let trailing_padding = packet
+                .iter()
+                .skip(index.saturating_add(1))
+                .rev()
+                .take_while(|layer| BuiltinProtocol::Padding.identifies(*layer))
+                .filter(|layer| {
+                    Padding::from_layer(*layer).is_some_and(|padding| padding.excluded_from(index))
+                })
+                .try_fold(0_usize, |total, layer| {
+                    let length =
+                        Padding::from_layer(layer).map_or(0, |padding| padding.bytes.len());
+                    total.checked_add(length)
+                });
+            LayerFacts {
+                child,
+                parent,
+                network: resolve_envelope(protocol.as_str(), packet, index, addresses, mode),
+                outer_network: is_outer_network_layer(packet, index),
+                srh_active_segment: srh_active_segment(packet, index),
+                srh_reduced: srh_reduced(packet, index),
+                under_ipv6: packet.iter().take(index).rev().find_map(|parent| {
+                    match BuiltinProtocol::of(parent) {
+                        Some(BuiltinProtocol::Ipv4) => Some(false),
+                        Some(BuiltinProtocol::Ah) => None,
+                        Some(parent)
+                            if parent == BuiltinProtocol::Ipv6 || parent.is_ipv6_extension() =>
+                        {
+                            Some(true)
+                        }
+                        _ => None,
+                    }
+                }),
+                trailing_padding,
+                child_bindings: registry.child_bindings(protocol.as_str()),
+            }
+        })
+        .collect()
+}
+
 struct Encoding {
     bytes: PacketBuffer,
-    layouts: Vec<LayerLayout>,
-    layers: Vec<Box<dyn crate::layer::Layer>>,
-    payload_lengths: Vec<Option<usize>>,
+    layers: Vec<EncodedLayer>,
     diagnostics: Vec<crate::diagnostic::Diagnostic>,
 }
 
@@ -97,9 +226,8 @@ impl Builder {
         mut bytes: PacketBuffer,
         mut diagnostics: Vec<crate::diagnostic::Diagnostic>,
     ) -> Result<Encoding, Error> {
-        let mut layouts = Vec::with_capacity(packet.len());
         let mut layers = Vec::with_capacity(packet.len());
-        let mut payload_lengths = Vec::with_capacity(packet.len());
+        let facts = layer_facts(&self.registry, packet, context, options.mode);
 
         for (index, layer) in packet.iter().enumerate().rev() {
             let protocol = *layer.protocol_id();
@@ -107,20 +235,25 @@ impl Builder {
                 .registry
                 .codec(protocol.as_str())
                 .ok_or(Error::MissingCodec { index, protocol })?;
-            let child = packet.layer(index + 1);
-            payload_lengths.push(Some(bytes.len()));
+            let facts = &facts[index];
+            let payload_length = Some(bytes.len());
             let remaining_packet_bytes = remaining_packet_bytes(&bytes, options)?;
             let encoded = codec
                 .encode(
                     layer,
                     bytes.as_slice(),
                     &EncodeContext {
-                        packet,
-                        index,
-                        build_context: context,
+                        addresses: context,
                         mode: options.mode,
-                        registry: &self.registry,
-                        child,
+                        child: facts.child.as_ref(),
+                        parent: facts.parent.as_ref(),
+                        network: facts.network.clone(),
+                        outer_network: facts.outer_network,
+                        srh_active_segment: facts.srh_active_segment,
+                        srh_reduced: facts.srh_reduced,
+                        under_ipv6: facts.under_ipv6,
+                        trailing_padding: facts.trailing_padding,
+                        child_bindings: &facts.child_bindings,
                         remaining_packet_bytes,
                     },
                 )
@@ -146,25 +279,33 @@ impl Builder {
                     source,
                 })?;
 
+            let schema = encoded.materialized.schema();
             if encoded.fields.iter().any(|field| {
-                field.range.start > field.range.end || field.range.end > encoded.prefix.len()
+                field.index >= schema.fields.len()
+                    || field.range.start > field.range.end
+                    || field.range.end > encoded.prefix.len()
             }) {
                 return Err(Error::InvalidCodecLayout { protocol });
             }
             let fields = encoded.fields;
-            layouts.push(LayerLayout {
+            let layout = LayerLayout {
                 index,
                 protocol,
+                schema,
                 range: ByteRange::new(0, encoded.prefix.len()),
                 fields,
-            });
+            };
 
             bytes.wrap(
                 &encoded.prefix,
                 &encoded.suffix,
                 options.limits.max_packet_size,
             )?;
-            layers.push(encoded.materialized);
+            layers.push(EncodedLayer {
+                layout,
+                layer: encoded.materialized,
+                payload_length,
+            });
             diagnostics.extend(encoded.diagnostics.into_iter().map(|mut diagnostic| {
                 if diagnostic.layer.is_none() {
                     diagnostic.layer = Some(index);
@@ -174,28 +315,29 @@ impl Builder {
         }
         Ok(Encoding {
             bytes,
-            layouts,
             layers,
-            payload_lengths,
             diagnostics,
         })
     }
 
     fn finalize(mut encoding: Encoding, mode: Mode) -> Result<BuiltPacket, Error> {
-        encoding.layouts.reverse();
+        encoding.layers.reverse();
         let mut layout_offset = 0usize;
-        for layout in &mut encoding.layouts {
-            if !layout.checked_shift(layout_offset) {
+        for encoded in &mut encoding.layers {
+            if !encoded.layout.checked_shift(layout_offset) {
                 return Err(Error::LengthOverflow);
             }
             layout_offset = layout_offset
-                .checked_add(layout.range.len())
+                .checked_add(encoded.layout.range.len())
                 .ok_or(Error::LengthOverflow)?;
         }
-        let layout = PacketLayout::new(encoding.layouts);
-        encoding.layers.reverse();
-        encoding.payload_lengths.reverse();
-        let materialized = Packet::from_encoded_layers(encoding.layers, encoding.payload_lengths);
+        let (layouts, entries): (Vec<_>, Vec<_>) = encoding
+            .layers
+            .into_iter()
+            .map(|encoded| (encoded.layout, (encoded.layer, encoded.payload_length)))
+            .unzip();
+        let layout = PacketLayout::new(layouts);
+        let materialized = Packet::from_encoded_layers(entries);
         Ok(BuiltPacket {
             bytes: encoding.bytes.into_bytes(),
             packet: materialized,

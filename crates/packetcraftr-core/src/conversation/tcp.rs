@@ -169,7 +169,7 @@ impl Exchange<'_> {
             options: options.to_vec(),
             ..self.base.clone()
         };
-        let packet = sender.flow.packet(tcp, payload);
+        let packet = sender.flow.packet(Box::new(tcp), payload);
         // SYN and FIN each occupy one sequence number; the payload fits u32 by `expand`.
         let consumed = u32::try_from(payload.len())
             .unwrap_or(u32::MAX)

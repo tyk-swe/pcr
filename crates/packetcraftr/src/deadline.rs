@@ -23,3 +23,29 @@ pub(crate) fn ensure_preparation_deadline(deadline: &Deadline) -> Result<(), Err
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn a_live_deadline_is_not_expired_and_preparation_proceeds() {
+        let deadline = Deadline::new(Duration::from_secs(60));
+        assert!(!expired(&deadline));
+        assert!(ensure_preparation_deadline(&deadline).is_ok());
+    }
+
+    #[test]
+    fn spent_deadlines_are_expired_and_stop_preparation() {
+        for deadline in [Deadline::new(Duration::ZERO), Deadline::immediate(None)] {
+            assert!(expired(&deadline));
+            assert!(matches!(
+                ensure_preparation_deadline(&deadline),
+                Err(Error::DeadlineExceeded {
+                    operation: "preparing the exchange"
+                })
+            ));
+        }
+    }
+}

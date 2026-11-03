@@ -698,10 +698,12 @@ mod tests {
 
     #[test]
     fn fragmented_fatal_alert_is_reported_and_selected() {
-        let (events, summary) = analyze(
-            include_bytes!("../../../../examples/captures/tls-fragmented-alert.pcap"),
-            Limits::default(),
-        );
+        let capture = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/captures/tls-fragmented-alert.pcap"),
+        )
+        .unwrap();
+        let (events, summary) = analyze(&capture, Limits::default());
         assert_eq!(events.len(), 1);
         let session = &events[0].session;
         assert_eq!(session.status, Status::Alert);

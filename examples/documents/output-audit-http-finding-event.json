@@ -1,0 +1,23 @@
+{
+  "command": "audit-http",
+  "diagnostics": [],
+  "event": "finding",
+  "mode": "stream",
+  "result": {
+    "complete": true,
+    "evidence": {
+      "request_method": "HEAD",
+      "response_status": 200
+    },
+    "frames": [],
+    "indicator_id": null,
+    "remediation": "Define a Content-Security-Policy suitable for this application.",
+    "rule_id": "http.csp",
+    "severity": "low",
+    "subject": "127.0.0.1:46589",
+    "summary": "Content-Security-Policy is absent or empty"
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 0,
+  "status": "success"
+}

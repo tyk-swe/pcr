@@ -387,48 +387,48 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::InvalidHostname { .. } => Classification::new(
-                "cli.live_target",
+                packetcraftr_core::error::Code::CliLiveTarget,
                 Kind::Usage,
                 Some("use a valid IP address or bounded ASCII DNS hostname"),
             ),
             Self::Resolver { .. } | Self::NoAddresses { .. } => Classification::new(
-                "io.hostname_resolution",
+                packetcraftr_core::error::Code::IoHostnameResolution,
                 Kind::Io,
                 Some(
                     "inspect resolver configuration and retry; no route lookup or transmission was attempted",
                 ),
             ),
             Self::AddressLimit { .. } => Classification::new(
-                "io.hostname_address_limit",
+                packetcraftr_core::error::Code::IoHostnameAddressLimit,
                 Kind::Io,
                 Some(
                     "reduce the resolver result set or deliberately raise the bounded address limit",
                 ),
             ),
             Self::AddressFamilyUnavailable { .. } => Classification::new(
-                "packet.target_address_family",
+                packetcraftr_core::error::Code::PacketTargetAddressFamily,
                 Kind::Packet,
                 Some("select a target address whose family matches the packet's IP layer"),
             ),
             Self::InvalidZone { .. } | Self::InvalidScope { .. } => Classification::new(
-                "cli.live_target",
+                packetcraftr_core::error::Code::CliLiveTarget,
                 Kind::Usage,
                 Some(
                     "qualify only unicast fe80::/10 addresses with a non-empty ASCII zone name or nonzero index",
                 ),
             ),
             Self::MissingScope { .. } => Classification::new(
-                "cli.live_target",
+                packetcraftr_core::error::Code::CliLiveTarget,
                 Kind::Usage,
                 Some("declare the link-local address with an explicit %zone scope"),
             ),
             Self::UnknownZone { .. } | Self::AmbiguousZone { .. } => Classification::new(
-                "io.interface",
+                packetcraftr_core::error::Code::IoInterface,
                 Kind::Io,
                 Some("use a zone naming exactly one current interface"),
             ),
             Self::InvalidZoneInterface { .. } => Classification::new(
-                "io.interface",
+                packetcraftr_core::error::Code::IoInterface,
                 Kind::Io,
                 Some(
                     "the zone resolver must return an interface with a non-empty name and nonzero index",
@@ -438,7 +438,7 @@ impl Classified for Error {
                 source: packetcraftr_netio::interface::Error::Discovery { .. },
                 ..
             } => Classification::new(
-                "io.interface",
+                packetcraftr_core::error::Code::IoInterface,
                 Kind::Io,
                 Some("inspect interface enumeration and retry before any target traffic"),
             ),
@@ -446,7 +446,7 @@ impl Classified for Error {
             // failure, and an interrupted enumeration stays interrupted.
             Self::ZoneResolution { source, .. } => source.classification(),
             Self::ZoneCapability { .. } => Classification::new(
-                "capability.zone_resolution",
+                packetcraftr_core::error::Code::CapabilityZoneResolution,
                 Kind::Capability,
                 Some("use a resolver that can enumerate interfaces for scoped targets"),
             ),

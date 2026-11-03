@@ -1,13 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::clock::{Clock, SystemClock};
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crate::workers::{RootLease, Task};
@@ -51,7 +52,7 @@ pub(super) fn capture_worker(
     link_type: LinkType,
 ) -> Result<(), Error> {
     let mut native_statistics = source.stats()?;
-    let mut statistics_checked_at = Instant::now();
+    let mut statistics_checked_at = SystemClock.now();
     shared.set_ready();
 
     while !stop.load(Ordering::Acquire) {
@@ -87,7 +88,7 @@ pub(super) fn capture_worker(
             let current = source.stats()?;
             shared.add_native_drop_deltas(native_statistics, current)?;
             native_statistics = current;
-            statistics_checked_at = Instant::now();
+            statistics_checked_at = SystemClock.now();
         }
     }
 

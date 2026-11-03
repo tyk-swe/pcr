@@ -1,5 +1,7 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
+from contextlib import redirect_stdout
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,6 +29,13 @@ class CheckLayersTests(unittest.TestCase):
         temporary, root = workspace(files)
         self.addCleanup(temporary.cleanup)
         return layers.check_workspace(root, layers=TABLE, allowlist=allowlist)
+
+    def check_with_tests(self, files, allowlist=()):
+        temporary, root = workspace(files)
+        self.addCleanup(temporary.cleanup)
+        return layers.check_workspace(
+            root, layers=TABLE, allowlist=allowlist, include_tests=True
+        )
 
     def test_downward_and_same_layer_dependencies_pass(self):
         problems = self.check({
@@ -134,6 +143,48 @@ class CheckLayersTests(unittest.TestCase):
             "low/tests.rs": "use crate::high::Thing;",
         })
         self.assertEqual(problems, [])
+
+    def test_test_report_shows_upward_test_dependencies(self):
+        couplings = self.check_with_tests({
+            "low.rs": (
+                "pub struct Thing;\n"
+                "#[cfg(test)]\nmod tests { use crate::high::Thing; }\n"
+            ),
+            "low/tests.rs": "use crate::high::Thing;",
+            "high.rs": (
+                "pub struct Thing;\n"
+                "#[cfg(test)]\nmod tests { use crate::low::Thing; }\n"
+            ),
+        })
+        self.assertEqual(len(couplings), 2)
+        self.assertTrue(
+            all(
+                "low::tests (layer 1) depends on high::Thing (layer 2)" in coupling
+                for coupling in couplings
+            )
+        )
+
+    def test_test_report_ignores_production_dependencies(self):
+        couplings = self.check_with_tests({
+            "low.rs": "use crate::high::Thing;",
+        })
+        self.assertEqual(couplings, [])
+
+    def test_report_tests_main_never_fails(self):
+        temporary, root = workspace({
+            "low.rs": "#[cfg(test)]\nmod tests { use crate::high::Thing; }",
+        })
+        self.addCleanup(temporary.cleanup)
+        real_layers, real_allowlist = layers.LAYERS, layers.ALLOWLIST
+        layers.LAYERS, layers.ALLOWLIST = TABLE, ()
+        try:
+            with io.StringIO() as out, redirect_stdout(out):
+                status = layers.main(["--root", str(root), "--report-tests"])
+                report = out.getvalue()
+        finally:
+            layers.LAYERS, layers.ALLOWLIST = real_layers, real_allowlist
+        self.assertEqual(status, 0)
+        self.assertIn("1 test layer coupling(s) (report only)", report)
 
     def test_allowlist_covers_only_the_named_edge(self):
         allowlist = (("mini", ("low",), ("high", "Special"), "named edge"),)

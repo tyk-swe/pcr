@@ -177,7 +177,7 @@ fn parent_cancellation_retains_callback_and_tls_charges_without_blocking_an_inde
     cancellation.cancel();
     assert_eq!(
         result.recv_timeout(Duration::from_secs(5)).unwrap(),
-        Some("io.cancelled")
+        Some(packetcraftr_core::error::Code::IoCancelled)
     );
     caller.join().unwrap();
     assert_eq!(runtime.snapshot().active, 1);

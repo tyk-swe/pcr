@@ -97,7 +97,12 @@ impl DecodeArgs {
             for ((parent, port), child) in bindings {
                 // The builder rejects changing an existing child's priority.
                 if default.child_for(parent, Discriminator(u64::from(port))) != Some(child) {
-                    builder.bind(parent, u64::from(port), child, i32::MAX)?;
+                    builder.replace_binding(
+                        parent,
+                        u64::from(port),
+                        child,
+                        packetcraftr_core::registry::Priority::Primary,
+                    )?;
                 }
             }
             Ok(())
@@ -106,7 +111,7 @@ impl DecodeArgs {
         .map_err(|source| {
             CliError::from_classification(
                 Classification::new(
-                    "cli.decode_as",
+                    packetcraftr_core::error::Code::CliDecodeAs,
                     Kind::Usage,
                     Some("declare one compatible protocol per TCP or UDP port"),
                 ),
@@ -139,7 +144,7 @@ fn insert(
 fn error(message: impl Into<String>) -> CliError {
     CliError::from_classification(
         Classification::new(
-            "cli.decode_as",
+            packetcraftr_core::error::Code::CliDecodeAs,
             Kind::Usage,
             Some("declare one compatible protocol per TCP or UDP port"),
         ),

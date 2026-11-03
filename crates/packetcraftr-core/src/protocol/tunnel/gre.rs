@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::diagnostic::Severity;
-use std::collections::BTreeMap;
 
 use bytes::Bytes;
 
@@ -15,9 +14,9 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, make_layer,
-    payload_without_padding, resolve_u16, resolve_u16_discriminator, strict_or_diagnostic,
-    truncated, typed_layer, unsupported,
+    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, payload_without_padding,
+    resolve_u16, resolve_u16_discriminator, strict_or_diagnostic, truncated, typed_layer,
+    unsupported,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -219,11 +218,12 @@ impl Codec for GreCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Gre::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(gre_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Gre::default()))
     }
 }
 
@@ -303,16 +303,12 @@ fn gre_layout(layer: &Gre) -> Vec<crate::layout::FieldLayout> {
     let mut fields = gre_static_layout();
     let mut cursor = GRE_BASE_LEN;
     if layer.checksum.is_some() {
-        fields.push(gre_dynamic_field(
-            "checksum",
-            cursor,
-            cursor.saturating_add(2),
-        ));
+        fields.push(gre_dynamic_field(1, cursor, cursor.saturating_add(2)));
         cursor = cursor.saturating_add(GRE_OPTION_LEN);
     }
     if layer.key.is_some() {
         fields.push(gre_dynamic_field(
-            "key",
+            2,
             cursor,
             cursor.saturating_add(GRE_OPTION_LEN),
         ));
@@ -320,7 +316,7 @@ fn gre_layout(layer: &Gre) -> Vec<crate::layout::FieldLayout> {
     }
     if layer.sequence.is_some() {
         fields.push(gre_dynamic_field(
-            "sequence",
+            3,
             cursor,
             cursor.saturating_add(GRE_OPTION_LEN),
         ));
@@ -328,9 +324,9 @@ fn gre_layout(layer: &Gre) -> Vec<crate::layout::FieldLayout> {
     fields
 }
 
-fn gre_dynamic_field(name: &'static str, start: usize, end: usize) -> crate::layout::FieldLayout {
+fn gre_dynamic_field(index: usize, start: usize, end: usize) -> crate::layout::FieldLayout {
     crate::layout::FieldLayout {
-        name,
+        index,
         range: crate::layout::ByteRange::new(start, end),
     }
 }

@@ -43,18 +43,18 @@ pub(super) fn interrupted_or(invocation: &Invocation, error: CliError) -> CliErr
 #[cfg(unix)]
 pub(super) fn open(invocation: &Invocation, path: &Path) -> io::Result<Source> {
     use std::os::unix::fs::OpenOptionsExt;
+    // FIFO readiness is only verified on Linux. On macOS, polling a FIFO
+    // opened this way never delivered the written data or EOF, so FIFOs keep
+    // the ordinary blocking open and reads there, decided by stat before
+    // opening so a writer never pairs with a probe descriptor about to close.
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    if std::os::unix::fs::FileTypeExt::is_fifo(&std::fs::metadata(path)?.file_type()) {
+        return File::open(path).map(Source::File);
+    }
     let file = std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(rustix::fs::OFlags::NONBLOCK.bits().cast_signed())
         .open(path)?;
-    // FIFO readiness is only verified on Linux. On macOS, polling a FIFO
-    // opened this way never delivered the written data or EOF, so FIFOs keep
-    // the ordinary blocking open and reads there.
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    if std::os::unix::fs::FileTypeExt::is_fifo(&file.metadata()?.file_type()) {
-        drop(file);
-        return File::open(path).map(Source::File);
-    }
     classify(invocation, file)
 }
 

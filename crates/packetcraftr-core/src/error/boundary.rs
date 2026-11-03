@@ -83,7 +83,7 @@ impl BoundaryError {
     #[must_use]
     pub fn internal_execution(
         message: impl Into<String>,
-        code: &'static str,
+        code: super::Code,
         remediation: &'static str,
     ) -> Self {
         Self::execution_error(message, code, Kind::Internal, remediation)
@@ -92,7 +92,7 @@ impl BoundaryError {
     #[must_use]
     pub fn execution_validation(
         message: impl Into<String>,
-        code: &'static str,
+        code: super::Code,
         remediation: &'static str,
     ) -> Self {
         Self::execution_error(message, code, Kind::Usage, remediation)
@@ -100,7 +100,7 @@ impl BoundaryError {
 
     fn execution_error(
         message: impl Into<String>,
-        code: &'static str,
+        code: super::Code,
         kind: Kind,
         remediation: &'static str,
     ) -> Self {

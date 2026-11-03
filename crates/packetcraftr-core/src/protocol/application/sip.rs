@@ -3,9 +3,9 @@
 
 //! SIP/2.0 requests/responses with byte-preserving ordered headers and Content-Length bodies.
 
-use crate::codec::*;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Records, message_codec, record};
 use bytes::Bytes;
 
 use super::text_message::HEADERS;
@@ -28,34 +28,14 @@ impl Default for Sip {
     }
 }
 crate::reflective_layer! {
- fn sip_schema() => { protocol: crate::layer::Id::new("sip"), name: "Sip" }
+ fn sip_schema() => { protocol: crate::protocol::BuiltinProtocol::Sip.id(), name: "Sip" }
  impl Sip {
     "start_line" => { kind: Bytes, derived: false, required: false, description: "start line", reflect: start_line },
     "headers" => { kind: List, derived: false, required: false, description: "Ordered header fields retaining spaces and case", children: HEADERS, reflect: headers },
     "body" => { kind: Bytes, derived: false, required: false, description: "body", reflect: body },
  }
 }
-fn sip_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if let Some(first) = b.windows(2).position(|p| p == b"\r\n") {
-        fields.push(crate::layout::FieldLayout {
-            name: "start_line",
-            range: crate::layout::ByteRange::new(0, first),
-        });
-        if let Some(end) = b.windows(4).position(|p| p == b"\r\n\r\n") {
-            fields.push(crate::layout::FieldLayout {
-                name: "headers",
-                range: crate::layout::ByteRange::new(first + 2, end + 2),
-            });
-            fields.push(crate::layout::FieldLayout {
-                name: "body",
-                range: crate::layout::ByteRange::new(end + 4, b.len()),
-            });
-        }
-    }
-    fields
-}
-message_codec!(SipCodec, Sip, sip_schema, sip_layout_wire);
+message_codec!(SipCodec, Sip, sip_schema);
 
 const NAME: &str = "sip";
 impl Sip {
@@ -69,7 +49,10 @@ impl Sip {
         )?;
         Ok(b)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let (start_line, headers, body) = super::text_message::parse(NAME, &b)?;
         let text =
             std::str::from_utf8(&start_line).map_err(|_| invalid(NAME, "invalid start line"))?;
@@ -84,10 +67,28 @@ impl Sip {
         {
             return Err(unsupported(NAME, "unsupported start line or version"));
         }
-        Ok(Self {
-            start_line,
-            headers,
-            body,
-        })
+        let body_start = b.len() - body.len();
+        let fields = vec![
+            crate::layout::FieldLayout {
+                index: 0,
+                range: crate::layout::ByteRange::new(0, start_line.len()),
+            },
+            crate::layout::FieldLayout {
+                index: 1,
+                range: crate::layout::ByteRange::new(start_line.len() + 2, body_start - 2),
+            },
+            crate::layout::FieldLayout {
+                index: 2,
+                range: crate::layout::ByteRange::new(body_start, b.len()),
+            },
+        ];
+        Ok((
+            Self {
+                start_line,
+                headers,
+                body,
+            },
+            fields,
+        ))
     }
 }

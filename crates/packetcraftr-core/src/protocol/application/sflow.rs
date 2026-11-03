@@ -3,10 +3,12 @@
 
 //! sFlow v5 XDR flow/counter samples and nested record envelopes. Unknown enterprise formats and XDR padding are preserved.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -54,7 +56,7 @@ impl Default for Sflow {
     }
 }
 crate::reflective_layer! {
- fn sflow_schema() => { protocol: crate::layer::Id::new("sflow"), name: "Sflow" }
+ fn sflow_schema() => { protocol: crate::protocol::BuiltinProtocol::Sflow.id(), name: "Sflow" }
  impl Sflow {
     "agent_type" => { kind: Unsigned, derived: false, required: false, description: "agent type", reflect: agent_type },
     "agent_address" => { kind: Bytes, derived: false, required: false, description: "agent address", reflect: agent_address },
@@ -64,17 +66,7 @@ crate::reflective_layer! {
     "samples" => { kind: List, derived: false, required: false, description: "Flow/counter sample records; unknown sample formats remain opaque", children: SAMPLES, reflect: samples },
  }
 }
-fn sflow_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if 8 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "agent_type",
-            range: crate::layout::ByteRange::new(4, 8),
-        });
-    }
-    fields
-}
-message_codec!(SflowCodec, Sflow, sflow_schema, sflow_layout_wire);
+message_codec!(SflowCodec, Sflow, sflow_schema);
 
 const NAME: &str = "sflow";
 const FLOW: &[&str] = &[
@@ -166,8 +158,12 @@ impl Sflow {
         }
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 4..8);
         if r.u32()? != 5 {
             return Err(unsupported(NAME, "only sFlow v5"));
         }
@@ -215,7 +211,7 @@ impl Sflow {
             s.samples.0.push(sample);
         }
         r.finish()?;
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }
 fn opaque(

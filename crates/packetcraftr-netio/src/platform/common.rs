@@ -12,6 +12,9 @@ pub(in crate::platform) mod npcap;
 #[cfg(native_layer2)]
 pub(in crate::platform) mod pcap_api;
 
+#[cfg(any(pcap_backend, npcap_backend))]
+pub(in crate::platform) const READ_TIMEOUT_MILLIS: std::ffi::c_int = 50;
+
 #[cfg(native_route)]
 use packetcraftr_core::error::Source;
 

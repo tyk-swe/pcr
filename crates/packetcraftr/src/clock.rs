@@ -1,52 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::convert::Infallible;
-use std::error::Error;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use packetcraftr_core::budget::Deadline;
-use packetcraftr_netio::deadline::POLL_INTERVAL;
-
-/// The client's source of monotonic time and pacing delays.
-/// A fake clock must share the real monotonic base with capture timestamps.
-pub trait Clock: Clone + Send + Sync + 'static {
-    type Error: Error + Send + Sync + 'static;
-
-    /// Deterministic clocks must advance this value when sleeping or simulating work.
-    fn now(&self) -> Instant {
-        Instant::now()
-    }
-
-    /// Waits `delay`, returning early once `deadline` expires or is cancelled.
-    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error>;
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SystemClock;
-
-impl Clock for SystemClock {
-    type Error = Infallible;
-
-    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error> {
-        interruptible_sleep(delay, || deadline.live_remaining().is_err());
-        Ok(())
-    }
-}
-
-fn interruptible_sleep(delay: Duration, stop: impl Fn() -> bool) {
-    let start = Instant::now();
-    loop {
-        if stop() {
-            return;
-        }
-        let remaining = delay.saturating_sub(start.elapsed());
-        if remaining.is_zero() {
-            return;
-        }
-        std::thread::sleep(remaining.min(POLL_INTERVAL));
-    }
-}
+pub use packetcraftr_core::clock::{Clock, SystemClock};
 
 pub(crate) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
     let Some(rate) = rate else {
@@ -67,11 +24,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clock_stops_at_spent_deadline() {
-        let start = std::time::Instant::now();
-        SystemClock
-            .sleep(Duration::from_secs(10), &Deadline::immediate(None))
-            .unwrap();
-        assert!(start.elapsed() < Duration::from_secs(1));
+    fn rate_delay_without_a_rate_never_waits() {
+        assert_eq!(rate_delay(10, None), Some(Duration::ZERO));
+    }
+
+    #[test]
+    fn rate_delay_spaces_items_evenly_and_rounds_up() {
+        assert_eq!(rate_delay(1, Some(1_000)), Some(Duration::from_millis(1)));
+        assert_eq!(rate_delay(2, Some(2)), Some(Duration::from_secs(1)));
+        assert_eq!(
+            rate_delay(1, Some(3)),
+            Some(Duration::from_nanos(333_333_334))
+        );
+        assert_eq!(rate_delay(0, Some(5)), Some(Duration::ZERO));
+    }
+
+    #[test]
+    fn rate_delay_rejects_a_zero_rate_and_unrepresentable_delays() {
+        assert_eq!(rate_delay(1, Some(0)), None);
+        assert_eq!(rate_delay(usize::MAX, Some(1)), None);
     }
 }

@@ -152,14 +152,14 @@ impl From<output::contract::Error> for CliError {
 }
 
 /// The source's text, then its distinct sources, for errors whose message omits the source.
-const fn fallback_code(kind: Kind) -> &'static str {
+const fn fallback_code(kind: Kind) -> packetcraftr_core::error::Code {
     match kind {
-        Kind::Usage => "cli.error",
-        Kind::Packet => "packet.error",
-        Kind::Capability => "capability.unavailable",
-        Kind::Io => "io.runtime",
-        Kind::Policy => "policy.denied",
-        Kind::Internal => "internal.error",
+        Kind::Usage => packetcraftr_core::error::Code::CliError,
+        Kind::Packet => packetcraftr_core::error::Code::PacketError,
+        Kind::Capability => packetcraftr_core::error::Code::CapabilityUnavailable,
+        Kind::Io => packetcraftr_core::error::Code::IoRuntime,
+        Kind::Policy => packetcraftr_core::error::Code::PolicyDenied,
+        Kind::Internal => packetcraftr_core::error::Code::InternalError,
     }
 }
 
@@ -203,7 +203,11 @@ mod tests {
 
     #[test]
     fn error_handling_context_and_secondary_failure_preserve_primary_details() {
-        let classification = Classification::new("packet.test", Kind::Packet, Some("repair input"));
+        let classification = Classification::new(
+            packetcraftr_core::error::Code::PacketTest,
+            Kind::Packet,
+            Some("repair input"),
+        );
         let capture = output::capture::Snapshot {
             summary: output::capture::Summary {
                 requested_interfaces: Vec::new(),

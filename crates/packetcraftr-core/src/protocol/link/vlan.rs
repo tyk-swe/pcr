@@ -1,18 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
+use crate::protocol::common::{invalid, truncated, typed_layer};
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
 };
 
 use super::ether_type::{link_payload_selection, resolve_ether_type};
-use crate::protocol::common::{invalid, make_layer, truncated, typed_layer};
 
 use crate::protocol::BuiltinProtocol;
 
@@ -144,6 +142,7 @@ fn decode_vlan(
         return Err(truncated(name, VLAN_LEN, input.len()));
     };
     let tci = u16::from_be_bytes([header[0], header[1]]);
+    let tag = crate::packet::VlanTag::from_tci(crate::packet::VlanKind::Ieee8021Q, tci);
     let ether_type = u16::from_be_bytes([header[2], header[3]]);
     let (payload_len, next) = link_payload_selection(
         name,
@@ -153,9 +152,9 @@ fn decode_vlan(
     )?;
     Ok(Decoded {
         layer: layer(
-            ((tci >> 13) & 7) as u8,
-            (tci & 0x1000) != 0,
-            tci & 0x0fff,
+            tag.priority,
+            tag.drop_eligible,
+            tag.vlan_id,
             WireValue::Exact(ether_type),
         ),
         consumed: VLAN_LEN,
@@ -218,11 +217,12 @@ impl Codec for VlanCodec {
         )
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Vlan::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(vlan_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Vlan::default()))
     }
 }
 
@@ -276,10 +276,11 @@ impl Codec for Vlan8021adCodec {
         )
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Vlan8021ad::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(vlan_ad_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Vlan8021ad::default()))
     }
 }

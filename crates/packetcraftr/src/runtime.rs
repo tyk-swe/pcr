@@ -84,7 +84,7 @@ pub struct CapacityError {
 impl Classified for CapacityError {
     fn classification(&self) -> Classification {
         Classification::new(
-            "cli.worker_capacity",
+            packetcraftr_core::error::Code::CliWorkerCapacity,
             Kind::Usage,
             Some("use a worker capacity no greater than runtime::MAX_WORKER_CAPACITY"),
         )
@@ -394,7 +394,7 @@ fn worker_budget_exhausted(capacity: usize) -> BoundaryError {
             "progressive output worker capacity {capacity} is exhausted by admitted sinks or callbacks retaining resources"
         ),
         Classification::new(
-            "internal.progressive_output_worker_exhausted",
+            packetcraftr_core::error::Code::InternalProgressiveOutputWorkerExhausted,
             Kind::Internal,
             Some(
                 "allow an earlier callback to return before starting another progressive operation",
@@ -406,7 +406,7 @@ fn worker_budget_exhausted(capacity: usize) -> BoundaryError {
 
 const fn output_classification() -> Classification {
     Classification::new(
-        "internal.progressive_output",
+        packetcraftr_core::error::Code::InternalProgressiveOutput,
         Kind::Internal,
         Some("treat the progressive operation as incomplete and inspect the event callback"),
     )

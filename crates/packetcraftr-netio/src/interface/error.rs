@@ -79,7 +79,7 @@ impl Classified for Error {
 
 pub(crate) fn discovery_classification() -> Classification {
     Classification::new(
-        "io.interface_discovery",
+        packetcraftr_core::error::Code::IoInterfaceDiscovery,
         Kind::Io,
         Some("inspect the operating-system interface state and retry with an available interface"),
     )

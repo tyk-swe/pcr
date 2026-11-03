@@ -3,8 +3,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::dns::{CLASS_IN, TYPE_OPT};
+use crate::dns::CLASS_IN;
 use crate::dns::{Name, QueryType, Record, RecordValue, RejectedRecord, Section};
+use packetcraftr_core::protocol::application::dns::TYPE_OPT;
 
 const TYPE_NS: u16 = 2;
 const TYPE_CNAME: u16 = 5;

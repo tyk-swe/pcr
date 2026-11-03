@@ -3,9 +3,9 @@
 
 //! BACnet/IPv4 BVLC and NPDU/APDU envelopes. Application object data remains opaque.
 
-use crate::codec::*;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Reader, Writer, message_codec};
 use bytes::Bytes;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -40,7 +40,7 @@ impl Default for BacnetIp {
     }
 }
 crate::reflective_layer! {
- fn bacnetip_schema() => { protocol: crate::layer::Id::new("bacnet_ip"), name: "BacnetIp" }
+ fn bacnetip_schema() => { protocol: crate::protocol::BuiltinProtocol::BacnetIp.id(), name: "BacnetIp" }
  impl BacnetIp {
     "bvlc_function" => { kind: Unsigned, derived: false, required: false, description: "bvlc function", reflect: bvlc_function },
     "forwarded_address" => { kind: Bytes, derived: false, required: false, description: "forwarded address", reflect: forwarded_address },
@@ -55,22 +55,7 @@ crate::reflective_layer! {
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
 }
-fn bacnetip_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "bvlc_function",
-            range: crate::layout::ByteRange::new(1, 2),
-        });
-    }
-    fields
-}
-message_codec!(
-    BacnetIpCodec,
-    BacnetIp,
-    bacnetip_schema,
-    bacnetip_layout_wire
-);
+message_codec!(BacnetIpCodec, BacnetIp, bacnetip_schema);
 
 const NAME: &str = "bacnet_ip";
 impl BacnetIp {
@@ -116,8 +101,12 @@ impl BacnetIp {
         w.put(&p.bytes)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 1..2);
         if r.u8()? != 0x81 {
             return Err(unsupported(NAME, "not BACnet/IPv4 BVLC"));
         }
@@ -186,6 +175,6 @@ impl BacnetIp {
             }
         }
         s.data = Bytes::copy_from_slice(r.rest());
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }

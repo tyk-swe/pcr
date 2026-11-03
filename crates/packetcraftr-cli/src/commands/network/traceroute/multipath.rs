@@ -25,7 +25,6 @@ pub(super) fn run<P: PacketProviders + TargetProviders, K: Clock>(
             .traceroute_multipath(request, collector.clone())
             .map_err(CliError::classified)?;
         let result = collector.finish(report).map_err(CliError::classified)?;
-        invocation.check()?;
         return crate::rendering::emit_published(
             invocation,
             output::contract::Command::Traceroute,

@@ -3,9 +3,9 @@
 
 //! SSDP discovery messages (UPnP Device Architecture): M-SEARCH, NOTIFY and HTTP/1.1 responses.
 
-use crate::codec::*;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Records, message_codec};
 use bytes::Bytes;
 
 use super::text_message::HEADERS;
@@ -23,29 +23,13 @@ impl Default for Ssdp {
     }
 }
 crate::reflective_layer! {
- fn ssdp_schema() => { protocol: crate::layer::Id::new("ssdp"), name: "Ssdp" }
+ fn ssdp_schema() => { protocol: crate::protocol::BuiltinProtocol::Ssdp.id(), name: "Ssdp" }
  impl Ssdp {
     "start_line" => { kind: Bytes, derived: false, required: false, description: "Verbatim request or response start line", reflect: start_line },
     "headers" => { kind: List, derived: false, required: false, description: "Ordered header names and values", children: HEADERS, reflect: headers },
  }
 }
-fn ssdp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if let Some(first) = b.windows(2).position(|p| p == b"\r\n") {
-        fields.push(crate::layout::FieldLayout {
-            name: "start_line",
-            range: crate::layout::ByteRange::new(0, first),
-        });
-        if let Some(end) = b.windows(4).position(|p| p == b"\r\n\r\n") {
-            fields.push(crate::layout::FieldLayout {
-                name: "headers",
-                range: crate::layout::ByteRange::new(first + 2, end + 2),
-            });
-        }
-    }
-    fields
-}
-message_codec!(SsdpCodec, Ssdp, ssdp_schema, ssdp_layout_wire);
+message_codec!(SsdpCodec, Ssdp, ssdp_schema);
 
 const NAME: &str = "ssdp";
 impl Ssdp {
@@ -59,7 +43,10 @@ impl Ssdp {
         )?;
         Ok(w)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let (start_line, headers, body) = super::text_message::parse(NAME, &b)?;
         if !body.is_empty() {
             return Err(invalid(NAME, "SSDP datagram has a body"));
@@ -70,9 +57,22 @@ impl Ssdp {
         {
             return Err(unsupported(NAME, "unknown SSDP start line"));
         }
-        Ok(Self {
-            start_line,
-            headers,
-        })
+        let fields = vec![
+            crate::layout::FieldLayout {
+                index: 0,
+                range: crate::layout::ByteRange::new(0, start_line.len()),
+            },
+            crate::layout::FieldLayout {
+                index: 1,
+                range: crate::layout::ByteRange::new(start_line.len() + 2, b.len() - 2),
+            },
+        ];
+        Ok((
+            Self {
+                start_line,
+                headers,
+            },
+            fields,
+        ))
     }
 }

@@ -3,14 +3,15 @@
 
 //! Wire correlation shared by DNS, scan, traceroute, and OS fingerprinting.
 
+use packetcraftr_core::protocol::identity;
 use std::net::IpAddr;
 
 use crate::probe::model::Transport;
 use bytes::Bytes;
-use packetcraftr_core::field::{self, WireValue};
+use packetcraftr_core::field::WireValue;
 use packetcraftr_core::protocol::{
     IcmpErrorKind, QuotedTransport, SctpResponseKind,
-    network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
+    network::{Icmpv4, Ipv4, Ipv6},
     quoted_icmp_error, sctp_response_kind,
     transport::{Sctp, Tcp},
     transport_tuple_reversed,
@@ -295,12 +296,10 @@ fn direct_ip_protocol_reply(request: &Packet, response: &Packet) -> Option<IpAdd
         .skip(1)
         .find(|layer| !BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ipv6_extension));
     if outer_payload.is_some_and(|layer| {
-        layer
-            .downcast_ref::<Icmpv4>()
-            .is_some_and(|icmp| matches!(icmp.icmp_type, 3 | 4 | 5 | 11 | 12))
-            || layer
-                .downcast_ref::<Icmpv6>()
-                .is_some_and(|icmp| icmp.icmp_type < 128)
+        identity::icmp_message(layer).is_some_and(|icmp| match icmp.protocol {
+            BuiltinProtocol::Icmpv4 => matches!(icmp.icmp_type, 3 | 4 | 5 | 11 | 12),
+            _ => icmp.icmp_type < 128,
+        })
     }) {
         return None;
     }
@@ -342,17 +341,7 @@ fn direct_ip_protocol_reply(request: &Packet, response: &Packet) -> Option<IpAdd
 }
 
 pub(crate) fn outer_has_protocol(packet: &Packet, protocol: u8) -> bool {
-    let mut layers = semantics::outer_layers(packet)
-        .skip_while(|layer| !BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ip));
-    let Some(header) = layers.next() else {
-        return false;
-    };
-    if let Some(ipv4) = header.downcast_ref::<Ipv4>() {
-        return ipv4.protocol == WireValue::Exact(protocol);
-    }
-    header.downcast_ref::<Ipv6>().is_some_and(|ipv6| ipv6.next_header == WireValue::Exact(protocol))
-        || layers.take_while(|layer| BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ipv6_extension))
-            .any(|layer| matches!(layer.field("next_header"), Some(field::Value::Unsigned(value)) if value == u64::from(protocol)))
+    packetcraftr_core::protocol::identity::outer_has_protocol(packet, protocol)
 }
 
 fn classify_icmp_error(

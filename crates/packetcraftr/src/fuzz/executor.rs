@@ -16,7 +16,7 @@ use crate::providers::PacketProviders;
 use packetcraftr_core::error::BoundaryError;
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
-    "internal.fuzz_executor",
+    packetcraftr_core::error::Code::InternalFuzzExecutor,
     "execute exactly one bounded fuzz case per capture-ready exchange",
 );
 

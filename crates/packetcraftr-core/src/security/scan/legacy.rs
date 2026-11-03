@@ -115,11 +115,16 @@ fn state(e: &Value) -> Option<State> {
 mod tests {
     use super::*;
 
-    const CURRENT_SCAN: &[u8] =
-        include_bytes!("../../../../../examples/documents/output-scan-success.json");
+    fn current_scan() -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/documents/output-scan-success.json"),
+        )
+        .unwrap()
+    }
 
     fn scan_with_schema(schema: &str) -> Vec<u8> {
-        let mut value: Value = serde_json::from_slice(CURRENT_SCAN).unwrap();
+        let mut value: Value = serde_json::from_slice(&current_scan()).unwrap();
         value["schema"] = Value::from(schema);
         serde_json::to_vec(&value).unwrap()
     }
@@ -133,7 +138,7 @@ mod tests {
 
     #[test]
     fn current_published_scan_output_is_accepted() {
-        let snapshot = parse(CURRENT_SCAN, Limits::default()).unwrap();
+        let snapshot = parse(&current_scan(), Limits::default()).unwrap();
         assert_eq!(snapshot.endpoints.len(), 1);
     }
 

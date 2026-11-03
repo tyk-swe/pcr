@@ -1,21 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, Severity},
-    field,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use super::VNI_MAX;
 use crate::protocol::common::{
-    ensure_encode_budget, invalid, make_layer, strict_or_diagnostic, truncated, typed_layer,
+    ensure_encode_budget, invalid, strict_or_diagnostic, truncated, typed_layer,
     validate_raw_child_discriminator,
 };
 
@@ -175,10 +172,11 @@ impl Codec for VxlanCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Vxlan::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(vxlan_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Vxlan::default()))
     }
 }

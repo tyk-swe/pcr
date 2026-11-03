@@ -1,0 +1,39 @@
+{
+  "command": "scan",
+  "diagnostics": [],
+  "event": "connect_probe",
+  "mode": "stream",
+  "result": {
+    "address": "127.0.0.1",
+    "attempt": 1,
+    "attempted": true,
+    "classification": "closed",
+    "connect_succeeded": false,
+    "elapsed": {
+      "nanos": 195389,
+      "secs": 0
+    },
+    "error": {
+      "kind": "ConnectionRefused",
+      "message": "Connection refused (os error 111)",
+      "os_code": 111
+    },
+    "finished_at": {
+      "nanoseconds": 150330927,
+      "unix_seconds": 1793697375
+    },
+    "local": null,
+    "method": "tcp_connect",
+    "outcome": "refused",
+    "port": 9,
+    "scheduled_at": {
+      "nanoseconds": 150135625,
+      "unix_seconds": 1793697375
+    },
+    "sequence": 0,
+    "stage": "scan"
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 0,
+  "status": "success"
+}

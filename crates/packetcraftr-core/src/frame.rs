@@ -55,12 +55,12 @@ impl Classified for Error {
             Self::CapturedLengthTooLarge { .. }
             | Self::CapturedLengthMismatch { .. }
             | Self::OriginalLengthTooSmall { .. } => Classification::new(
-                "packet.frame_metadata",
+                crate::error::Code::PacketFrameMetadata,
                 Kind::Packet,
                 Some("repair the capture record whose declared and actual frame lengths disagree"),
             ),
             Self::ReversedTimeBounds { .. } => Classification::new(
-                "cli.reversed_time_bounds",
+                crate::error::Code::CliReversedTimeBounds,
                 Kind::Usage,
                 Some("order the bounds so the earlier time comes first"),
             ),

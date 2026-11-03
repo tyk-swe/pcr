@@ -118,12 +118,12 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Jumbogram => Classification::new(
-                "packet.transform_unsupported",
+                crate::error::Code::PacketTransformUnsupported,
                 Kind::Packet,
                 Some("inspect the documented transform boundaries"),
             ),
             Self::Depth { .. } => Classification::new(
-                "policy.transform_limit",
+                crate::error::Code::PolicyTransformLimit,
                 Kind::Policy,
                 Some("raise a finite transform limit or reduce the input"),
             ),
@@ -131,7 +131,7 @@ impl Classified for Error {
             | Self::Length(_)
             | Self::UnknownIpVersion(_)
             | Self::IpVersionMismatch { .. } => Classification::new(
-                "packet.transform_input",
+                crate::error::Code::PacketTransformInput,
                 Kind::Packet,
                 Some("supply a complete supported datagram"),
             ),
@@ -212,7 +212,9 @@ impl EthernetHeader {
     pub const LENGTH: usize = 14;
     pub const VLAN_TAG_LENGTH: usize = 4;
 
-    pub fn walk(frame: &[u8]) -> Result<Self, Error> {
+    /// The fixed 14-byte prefix: both addresses and the first EtherType,
+    /// before any VLAN tag walk.
+    pub fn base(frame: &[u8]) -> Result<(MacAddress, MacAddress, u16), Error> {
         let header = frame
             .first_chunk::<{ Self::LENGTH }>()
             .ok_or(Error::Truncated(Header::Ethernet))?;
@@ -220,7 +222,15 @@ impl EthernetHeader {
         destination.copy_from_slice(&header[..6]);
         let mut source = [0; 6];
         source.copy_from_slice(&header[6..12]);
-        let mut ether_type = u16::from_be_bytes([header[12], header[13]]);
+        Ok((
+            MacAddress(destination),
+            MacAddress(source),
+            u16::from_be_bytes([header[12], header[13]]),
+        ))
+    }
+
+    pub fn walk(frame: &[u8]) -> Result<Self, Error> {
+        let (destination, source, mut ether_type) = Self::base(frame)?;
         let mut vlan_tags = Vec::new();
         while let Some(kind) = VlanKind::from_ether_type(ether_type) {
             if vlan_tags.len() == MAX_VLAN_DEPTH {
@@ -241,8 +251,8 @@ impl EthernetHeader {
             ether_type = u16::from_be_bytes([tag[2], tag[3]]);
         }
         Ok(Self {
-            destination: MacAddress(destination),
-            source: MacAddress(source),
+            destination,
+            source,
             vlan_tags,
             ether_type,
         })

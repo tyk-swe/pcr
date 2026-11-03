@@ -1,15 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::codec::{Codec, DecodeContext, Decoded};
+use crate::protocol::identity;
 use std::ops::Range;
 
 use bytes::Bytes;
 
-use crate::codec::{Codec, DecodeContext, Decoded};
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::frame::Frame;
 use crate::packet::Packet;
-use crate::protocol::network::{Ipv4, Ipv6};
 
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
 use crate::registry::Discriminator;
@@ -324,14 +324,12 @@ impl<'registry> DecodeSession<'registry> {
         self.layouts.push(LayerLayout {
             index,
             protocol: decoded_protocol,
+            schema: decoded.layer.schema(),
             range: ByteRange::new(cursor.bytes.start, layer_end),
             fields: decoded.fields,
         });
-        let committed = decoded.layer.as_ref();
-        if let Some(ipv4) = committed.downcast_ref::<Ipv4>() {
-            self.last_hop_limit = Some(ipv4.ttl);
-        } else if let Some(ipv6) = committed.downcast_ref::<Ipv6>() {
-            self.last_hop_limit = Some(ipv6.hop_limit);
+        if let Some(hop_limit) = identity::hop_limit(decoded.layer.as_ref()) {
+            self.last_hop_limit = Some(hop_limit);
         }
         self.traversal.accept_network(decoded.network);
         self.traversal

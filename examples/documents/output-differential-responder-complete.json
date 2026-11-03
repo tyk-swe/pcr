@@ -1,0 +1,14 @@
+{
+  "command": "differential-responder",
+  "diagnostics": [],
+  "event": "complete",
+  "mode": "stream",
+  "result": {
+    "ignored": 1,
+    "received": 0,
+    "replies_sent": 0
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 0,
+  "status": "success"
+}

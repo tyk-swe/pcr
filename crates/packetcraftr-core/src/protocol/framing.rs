@@ -3,8 +3,9 @@
 
 //! Incremental message boundaries; never treats a TCP segment as a message boundary.
 
+use super::BuiltinProtocol;
 use super::common::{invalid, truncated, unsupported};
-use crate::codec::Error as CodecError;
+use crate::codec::{Error as CodecError, Framing};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
@@ -24,6 +25,7 @@ struct Resp {
 }
 
 pub(crate) struct Framer {
+    kind: Framing,
     name: &'static str,
     expected: Option<usize>,
     scan: usize,
@@ -31,8 +33,9 @@ pub(crate) struct Framer {
 }
 
 impl Framer {
-    pub(crate) fn new(name: &'static str) -> Self {
+    pub(crate) fn new(kind: Framing, name: &'static str) -> Self {
         Self {
+            kind,
             name,
             expected: None,
             scan: 0,
@@ -44,8 +47,8 @@ impl Framer {
         if let Some(end) = self.expected {
             return Self::ready(b, end, maximum);
         }
-        let len = match n {
-            "eap" | "ppp_lcp" | "ppp_ipcp" | "ppp_ipv6cp" => {
+        let len = match self.kind {
+            Framing::Control => {
                 if b.len() < 4 {
                     return Ok(None);
                 }
@@ -55,7 +58,7 @@ impl Framer {
                 }
                 len
             }
-            "lacp" => {
+            Framing::Lacp => {
                 let Some(&subtype) = b.first() else {
                     return Ok(None);
                 };
@@ -68,7 +71,7 @@ impl Framer {
                 }
                 110
             }
-            "mqtt" => {
+            Framing::Mqtt => {
                 if b.len() < 2 {
                     return Ok(None);
                 }
@@ -91,8 +94,8 @@ impl Framer {
                 }
                 end.ok_or_else(|| invalid(n, "remaining length exceeds four bytes"))?
             }
-            "amqp" if b.starts_with(b"AMQP") => 8,
-            "amqp" => {
+            Framing::Amqp if b.starts_with(b"AMQP") => 8,
+            Framing::Amqp => {
                 if b.len() < 7 {
                     return Ok(None);
                 }
@@ -101,7 +104,7 @@ impl Framer {
                     .checked_add(8)
                     .ok_or_else(|| invalid(n, "length overflow"))?
             }
-            "bgp" => {
+            Framing::Bgp => {
                 if b.len() < 19 {
                     return Ok(None);
                 }
@@ -111,13 +114,13 @@ impl Framer {
                 }
                 l
             }
-            "ldap" => match ber_length(b, n)? {
+            Framing::Ber => match ber_length(b, n)? {
                 Some(v) => v,
                 None => return Ok(None),
             },
-            "resp" => return self.resp.progress(b, maximum),
-            "sip" | "rtsp" => {
-                if n == "rtsp" && b.first() == Some(&b'$') {
+            Framing::Resp => return self.resp.progress(b, maximum),
+            Framing::Sip | Framing::Rtsp => {
+                if self.kind == Framing::Rtsp && b.first() == Some(&b'$') {
                     if b.len() < 4 {
                         return Ok(None);
                     }
@@ -134,14 +137,14 @@ impl Framer {
                     let end = start + offset + 4;
                     let length = super::application::text_message::content_length(n, &b[..end])?;
                     // SIP stream messages require an explicit length. RTSP bodies default to empty.
-                    if n == "sip" && length.is_none() {
+                    if self.kind == Framing::Sip && length.is_none() {
                         return Err(invalid(n, "SIP over TCP requires Content-Length").into());
                     }
                     end.checked_add(length.unwrap_or(0))
                         .ok_or_else(|| invalid(n, "length overflow"))?
                 }
             }
-            "memcached" => {
+            Framing::Memcached => {
                 if b.first().is_some_and(|v| !matches!(*v, 0x80 | 0x81)) {
                     return Err(unsupported(n, "not Memcached binary framing").into());
                 }
@@ -155,7 +158,7 @@ impl Framer {
                     .checked_add(24)
                     .ok_or_else(|| invalid(n, "length overflow"))?
             }
-            "ipfix" => {
+            Framing::Ipfix => {
                 if b.len() < 4 {
                     return Ok(None);
                 }
@@ -165,7 +168,7 @@ impl Framer {
                 }
                 l
             }
-            "radius" => {
+            Framing::Radius => {
                 if b.len() < 4 {
                     return Ok(None);
                 }
@@ -175,13 +178,13 @@ impl Framer {
                 }
                 len
             }
-            "stun" => {
+            Framing::Stun => {
                 if b.len() < 20 {
                     return Ok(None);
                 }
                 20 + usize::from(u16::from_be_bytes([b[2], b[3]]))
             }
-            "modbus_tcp" => {
+            Framing::ModbusTcp => {
                 if b.len() < 7 {
                     return Ok(None);
                 }
@@ -191,7 +194,7 @@ impl Framer {
                 }
                 6 + l
             }
-            "dnp3" => {
+            Framing::Dnp3 => {
                 if b.len() < 3 {
                     return Ok(None);
                 }
@@ -201,13 +204,13 @@ impl Framer {
                 let payload = usize::from(b[2]) - 5;
                 10 + payload + payload.div_ceil(16) * 2
             }
-            "ethernet_ip" => {
+            Framing::EthernetIp => {
                 if b.len() < 24 {
                     return Ok(None);
                 }
                 24 + usize::from(u16::from_le_bytes([b[2], b[3]]))
             }
-            "iec104" => {
+            Framing::Iec104 => {
                 if b.len() < 2 {
                     return Ok(None);
                 }
@@ -216,7 +219,7 @@ impl Framer {
                 }
                 2 + usize::from(b[1])
             }
-            "opcua_tcp" => {
+            Framing::OpcuaTcp => {
                 if b.len() < 8 {
                     return Ok(None);
                 }
@@ -226,7 +229,7 @@ impl Framer {
                 }
                 l
             }
-            _ => return Ok(Some(b.len())),
+            Framing::Datagram => return Ok(Some(b.len())),
         };
         self.expected = Some(len);
         Self::ready(b, len, maximum)
@@ -240,14 +243,15 @@ impl Framer {
 }
 
 pub(crate) fn packet_length(
+    kind: Framing,
     name: &'static str,
     b: &[u8],
     parent: Option<crate::layer::Id>,
 ) -> Result<usize, CodecError> {
-    if name == "sip" && parent == Some(crate::layer::Id::new("udp")) {
+    if kind == Framing::Sip && parent == Some(BuiltinProtocol::Udp.id()) {
         return super::application::text_message::datagram_length(name, b);
     }
-    Framer::new(name)
+    Framer::new(kind, name)
         .progress(b, usize::MAX)
         .map_err(|error| match error {
             Error::Codec(error) => error,

@@ -122,16 +122,26 @@ impl Classified for Error {
         match self {
             Self::Capture(source) => source.classification(),
             Self::Compression(source) => source.classification(),
-            Self::Io { .. } | Self::Exists(_) => {
-                Classification::new("io.capture_file", Kind::Io, None)
-            }
-            Self::Invalid(_) => Classification::new("cli.capture_files", Kind::Usage, None),
-            Self::FrameTooLarge { .. } => {
-                Classification::new("policy.capture_file_bytes", Kind::Policy, None)
-            }
-            Self::State | Self::Counters | Self::ElapsedRegressed => {
-                Classification::new("internal.capture_files", Kind::Internal, None)
-            }
+            Self::Io { .. } | Self::Exists(_) => Classification::new(
+                packetcraftr_core::error::Code::IoCaptureFile,
+                Kind::Io,
+                None,
+            ),
+            Self::Invalid(_) => Classification::new(
+                packetcraftr_core::error::Code::CliCaptureFiles,
+                Kind::Usage,
+                None,
+            ),
+            Self::FrameTooLarge { .. } => Classification::new(
+                packetcraftr_core::error::Code::PolicyCaptureFileBytes,
+                Kind::Policy,
+                None,
+            ),
+            Self::State | Self::Counters | Self::ElapsedRegressed => Classification::new(
+                packetcraftr_core::error::Code::InternalCaptureFiles,
+                Kind::Internal,
+                None,
+            ),
         }
     }
 }

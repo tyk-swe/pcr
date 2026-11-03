@@ -6,17 +6,13 @@ use super::{
     Session, Stats,
 };
 use crate::{Error, interface::Id};
+use packetcraftr_core::clock::{Clock, SystemClock};
 use packetcraftr_core::{
     budget::{Deadline, Interrupted},
     frame::LinkType,
 };
 use source::Owned;
-use std::{
-    collections::HashSet,
-    fmt,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashSet, fmt, sync::Arc, time::Duration};
 
 mod source;
 
@@ -296,7 +292,7 @@ impl<C: Session> Group<C> {
             let Ok(slice) = caller.for_wait(wait) else {
                 return Ok(None);
             };
-            let started = Instant::now();
+            let started = SystemClock.now();
             if let Some(captured) = self.sources[index].poll(&slice, caller)? {
                 return Ok(Some(captured));
             }

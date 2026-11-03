@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 use memchr::memmem;
 
@@ -347,8 +345,31 @@ impl Codec for HttpCodec {
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
         matches!(protocol.as_str(), NAME | "raw")
     }
-    fn published_schema(&self) -> Option<&'static crate::layer::Schema> {
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
         Some(http_schema())
+    }
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Err(invalid(
+            NAME,
+            "HTTP/1 dissection requires retained header wire",
+        ))
+    }
+    fn seed_layer(
+        &self,
+        fields: &[(usize, &field::Value)],
+    ) -> Result<Option<crate::codec::SeededLayer>, crate::codec::Error> {
+        let wire = http_schema()
+            .field_index("wire")
+            .expect("HTTP schema declares a wire field");
+        let Some((_, field::Value::Bytes(bytes))) = fields.iter().find(|(index, _)| *index == wire)
+        else {
+            return Ok(None);
+        };
+        let layer = Http::try_from(bytes.as_ref()).map_err(|error| rejected(NAME, error))?;
+        Ok(Some(crate::codec::SeededLayer {
+            layer: Box::new(layer),
+            consumed: Some(wire),
+        }))
     }
     fn encode(
         &self,
@@ -385,24 +406,6 @@ impl Codec for HttpCodec {
             stop: false,
             network: None,
         })
-    }
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        let Some(field::Value::Bytes(wire)) = fields.get("wire") else {
-            return Err(invalid(
-                NAME,
-                "HTTP/1 dissection requires retained header wire",
-            ));
-        };
-        let mut layer = Http::try_from(wire.as_ref()).map_err(|error| rejected(NAME, error))?;
-        for (name, value) in fields {
-            if layer.field(name).as_ref() != Some(value) {
-                layer.set_field(name, value.clone())?;
-            }
-        }
-        Ok(Box::new(layer))
     }
 }
 

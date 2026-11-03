@@ -55,7 +55,7 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Empty | Self::Syntax { .. } | Self::DuplicateField { .. } => Classification::new(
-                "cli.expression_syntax",
+                crate::error::Code::CliExpressionSyntax,
                 Kind::Usage,
                 Some("write one `protocol(field=value)` layer per `/`-separated segment"),
             ),
@@ -64,21 +64,21 @@ impl Classified for Error {
             | Self::GeneratedBytesLimit { .. }
             | Self::NestingLimit { .. }
             | Self::InvalidNestingLimit { .. } => Classification::new(
-                "cli.expression_limit",
+                crate::error::Code::CliExpressionLimit,
                 Kind::Usage,
                 Some(
                     "shorten the expression to stay inside its byte, layer, nesting, and generated-byte bounds",
                 ),
             ),
             Self::UnknownProtocol { .. } => Classification::new(
-                "cli.expression_protocol",
+                crate::error::Code::CliExpressionProtocol,
                 Kind::Usage,
                 Some(
                     "run `packetcraftr reference protocols` to list the protocol names the registry binds",
                 ),
             ),
             Self::Layer { .. } => Classification::new(
-                "cli.expression_field",
+                crate::error::Code::CliExpressionField,
                 Kind::Usage,
                 Some("correct the layer's field names and values against its reflective schema"),
             ),
@@ -154,7 +154,7 @@ pub fn parse(input: &str, registry: &Registry, limits: Limits) -> Result<Packet,
                 layer: layer_index,
                 name: name.clone(),
             })?;
-        let layer = codec.make_layer(&fields).map_err(|source| Error::Layer {
+        let layer = codec.construct(&fields).map_err(|source| Error::Layer {
             layer: layer_index,
             name: name.clone(),
             source,

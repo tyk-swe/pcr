@@ -51,11 +51,11 @@ pub(super) fn configured(
     let mut builder = base.to_builder();
     for (port, child) in overrides {
         builder
-            .bind(
+            .replace_binding(
                 BuiltinProtocol::Udp.id(),
                 u64::from(*port),
                 *child,
-                i32::MAX,
+                packetcraftr_core::registry::Priority::Primary,
             )
             .map_err(profile_error)?;
     }
@@ -66,7 +66,7 @@ fn profile_error(error: impl std::fmt::Display) -> BoundaryError {
     BoundaryError::new(
         error.to_string(),
         packetcraftr_core::error::Classification::new(
-            "cli.udp_profile",
+            packetcraftr_core::error::Code::CliUdpProfile,
             packetcraftr_core::error::Kind::Usage,
             None,
         ),

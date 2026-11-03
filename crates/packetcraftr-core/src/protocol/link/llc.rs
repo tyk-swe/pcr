@@ -1,21 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, child_is_opaque, ensure_encode_budget, invalid, make_layer, resolve_u16,
-    strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
-    validate_raw_child_discriminator, validate_typed_child_discriminator,
+    ValueExpectation, ensure_encode_budget, invalid, resolve_u16, strict_or_diagnostic, truncated,
+    typed_layer, validate_auto_raw_discriminator, validate_raw_child_discriminator,
+    validate_typed_child_discriminator,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -25,6 +23,9 @@ const SNAP_NAME: &str = BuiltinProtocol::Snap.as_str();
 
 /// Synthetic discriminator selecting IEEE 802.2 LLC framing.
 pub(crate) const LLC_FRAME_DISCRIMINATOR: u64 = 0x1_0000;
+pub(crate) const SNAP_DISCRIMINATOR: u64 = (SNAP_SAP as u64) << 8 | SNAP_SAP as u64;
+pub(crate) const STP_DISCRIMINATOR: u64 = (STP_SAP as u64) << 8 | STP_SAP as u64;
+pub(crate) const CDP_SNAP_DISCRIMINATOR: u64 = snap_discriminator(0x0000_000c, 0x2000);
 /// The largest 802.3 length; 1501–1535 are undefined, 1536+ are EtherTypes.
 pub(crate) const MAX_FRAME_LENGTH: u16 = 1500;
 
@@ -35,6 +36,7 @@ const POLL_FINAL_MASK: u8 = 0x10;
 const UI_CONTROL: u8 = 0x03;
 const OUI_MAX: u32 = 0x00ff_ffff;
 const SNAP_SAP: u8 = 0xaa;
+const STP_SAP: u8 = 0x42;
 
 fn is_ui_control(control: &[u8]) -> bool {
     matches!(control, [byte] if byte & !POLL_FINAL_MASK == UI_CONTROL)
@@ -107,7 +109,7 @@ impl Codec for LlcCodec {
             validate_raw_child_discriminator(LLC_NAME, sap_pair, context, &mut diagnostics)?;
             validate_typed_child_discriminator(LLC_NAME, sap_pair, context, &mut diagnostics)?;
         } else if let Some(child) = context.child
-            && !child_is_opaque(child)
+            && !child.is_opaque()
         {
             // Only unnumbered-information frames carry an upper protocol's
             // payload, so dissection never selects a typed child here.
@@ -175,11 +177,12 @@ impl Codec for LlcCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Llc::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(llc_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Llc::default()))
     }
 }
 
@@ -207,11 +210,11 @@ reflective_layer! {
     layout pub(crate) fn snap_layout();
 }
 
-pub(crate) fn snap_discriminator(oui: u32, protocol_id: u16) -> u64 {
+pub(crate) const fn snap_discriminator(oui: u32, protocol_id: u16) -> u64 {
     if oui == 0 {
-        u64::from(protocol_id)
+        protocol_id as u64
     } else {
-        (u64::from(oui) << 16) | u64::from(protocol_id)
+        ((oui as u64) << 16) | protocol_id as u64
     }
 }
 
@@ -320,10 +323,11 @@ impl Codec for SnapCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Snap::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(snap_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Snap::default()))
     }
 }

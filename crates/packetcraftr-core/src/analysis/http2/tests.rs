@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+use super::settings::{ENABLE_PUSH, INITIAL_WINDOW_SIZE, MAX_CONCURRENT_STREAMS, MAX_FRAME_SIZE};
 use super::*;
 use crate::analysis::{
     provenance::{SourceFrame, Tracker},
@@ -24,11 +25,6 @@ const CONTINUATION: u8 = 0x9;
 const END_STREAM: u8 = 0x1;
 const END_HEADERS: u8 = 0x4;
 const ACK: u8 = 0x1;
-
-const ENABLE_PUSH: u16 = 0x2;
-const MAX_CONCURRENT_STREAMS: u16 = 0x3;
-const INITIAL_WINDOW_SIZE: u16 = 0x4;
-const MAX_FRAME_SIZE: u16 = 0x5;
 
 fn flow() -> ScopedFlowKey {
     ScopedFlowKey {

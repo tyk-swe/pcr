@@ -180,7 +180,7 @@ pub(crate) fn report_structured_error(
 
 fn render_human_error(error: &CliError) -> String {
     let style = error_style();
-    let code = terminal_safe(error.classification.code);
+    let code = terminal_safe(error.classification.code.as_str());
     let message = terminal_safe(&error.message);
     let mut rendered = format!("{style}error{style:#}[{code}]: {message}");
 
@@ -265,7 +265,11 @@ mod tests {
             (Coordinate::CaseIndex(0), "case index 0"),
         ] {
             let error = CliError::from_classification(
-                Classification::new("packet.test", Kind::Packet, Some("repair\tinput")),
+                Classification::new(
+                    packetcraftr_core::error::Code::PacketTest,
+                    Kind::Packet,
+                    Some("repair\tinput"),
+                ),
                 "bad\ninput\u{1b}",
                 vec!["cause\r\u{202e}".into()],
             )

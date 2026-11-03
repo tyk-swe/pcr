@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::diagnostic::Severity;
-use crate::protocol::transport::Tcp;
+use crate::protocol::identity::TcpHeader;
 
 use super::DirectionState;
 use crate::analysis::expert::finding::new as new_finding;
@@ -391,7 +391,7 @@ fn observe_close(
 
 fn update_next_sequences(
     sent: &mut DirectionState,
-    tcp: &Tcp,
+    tcp: TcpHeader<'_>,
     payload_len: usize,
     syn: bool,
     fin: bool,

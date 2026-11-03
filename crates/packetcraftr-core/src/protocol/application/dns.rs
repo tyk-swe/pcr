@@ -10,6 +10,7 @@ pub use codec::decode_name;
 pub use model::{Dns, Edns, EdnsOption, Name, Question, Record, RecordValue};
 
 pub const MAX_MESSAGE_BYTES: usize = 65_535;
+pub const TYPE_OPT: u16 = 41;
 pub const MAX_RECORDS: usize = 4_096;
 pub const MAX_NAME_POINTERS: usize = 128;
 pub const MAX_LABEL_LEN: usize = 63;
@@ -161,12 +162,12 @@ impl crate::error::Classified for Error {
             | Self::PointerLimit { .. }
             | Self::MessageTooLarge { .. }
             | Self::InvalidLimit { .. } => Classification::new(
-                "policy.dns_limit",
+                crate::error::Code::PolicyDnsLimit,
                 Kind::Policy,
                 Some("raise the finite DNS decode limit or inspect the oversized message"),
             ),
             _ => Classification::new(
-                "packet.dns",
+                crate::error::Code::PacketDns,
                 Kind::Packet,
                 Some("inspect the DNS message that breaks a wire rule"),
             ),

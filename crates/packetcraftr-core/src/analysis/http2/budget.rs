@@ -54,6 +54,11 @@ pub(crate) struct Budget {
 }
 
 impl Budget {
+    #[cfg(test)]
+    pub(super) fn live(&self) -> usize {
+        self.live
+    }
+
     pub(crate) fn into_summary(self) -> Summary {
         self.summary
     }

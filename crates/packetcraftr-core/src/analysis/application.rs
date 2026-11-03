@@ -262,6 +262,7 @@ impl FlowSpans {
 #[cfg(test)]
 thread_local! {
     static SPANS_VISITED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static RESET_FLOWS_VISITED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 /// A payload span awaiting insertion; `after` is the index of the frame's
 /// reassembly event it must follow, or `None` to precede them all.
@@ -280,6 +281,7 @@ pub(crate) struct TcpSources {
     spans: HashMap<ScopedFlowKey, FlowSpans>,
     span_count: usize,
     streams: HashMap<ScopedFlowKey, u64>,
+    stream_flows: HashMap<u64, HashSet<ScopedFlowKey>>,
     generations: HashMap<u64, u64>,
     syns: HashMap<ScopedFlowKey, u32>,
     closed: HashSet<ScopedFlowKey>,
@@ -297,6 +299,7 @@ impl TcpSources {
             spans: HashMap::new(),
             span_count: 0,
             streams: HashMap::new(),
+            stream_flows: HashMap::new(),
             generations: HashMap::new(),
             syns: HashMap::new(),
             closed: HashSet::new(),
@@ -370,7 +373,7 @@ impl TcpSources {
             self.limits.check_streams(self.generations.len())?;
         }
         self.generations.entry(conversation.index).or_insert(0);
-        self.streams.insert(flow.clone(), conversation.index);
+        self.associate(flow.clone(), conversation.index);
         let last_stream_eviction = record.tcp_events.iter().rposition(|event| {
             matches!(event, TcpEvent::Evicted { flow: expired, .. }
                 if self.streams.get(expired) == Some(&conversation.index))
@@ -443,17 +446,36 @@ impl TcpSources {
         }
         Ok(output)
     }
+    #[cfg(test)]
+    pub(super) fn associate_test(&mut self, flow: ScopedFlowKey, stream: u64) {
+        self.generations.entry(stream).or_insert(0);
+        self.associate(flow, stream);
+    }
+
+    fn associate(&mut self, flow: ScopedFlowKey, stream: u64) {
+        if let Some(old) = self.streams.insert(flow.clone(), stream)
+            && old != stream
+            && let Some(flows) = self.stream_flows.get_mut(&old)
+        {
+            flows.remove(&flow);
+            if flows.is_empty() {
+                self.stream_flows.remove(&old);
+            }
+        }
+        self.stream_flows.entry(stream).or_default().insert(flow);
+    }
+
     fn reset_stream(&mut self, stream: u64) {
         *self.generations.entry(stream).or_insert(0) += 1;
-        let flows: Vec<_> = self
-            .streams
-            .iter()
-            .filter(|(_, id)| **id == stream)
-            .map(|(flow, _)| flow.clone())
-            .collect();
-        for flow in flows {
-            self.forget_spans(&flow);
-            self.closed.remove(&flow);
+        if let Some(flows) = self.stream_flows.get(&stream) {
+            for flow in flows {
+                #[cfg(test)]
+                RESET_FLOWS_VISITED.with(|count| count.set(count.get() + 1));
+                if let Some(spans) = self.spans.remove(flow) {
+                    self.span_count -= spans.ranges.len();
+                }
+                self.closed.remove(flow);
+            }
         }
     }
     fn forget_spans(&mut self, flow: &ScopedFlowKey) {

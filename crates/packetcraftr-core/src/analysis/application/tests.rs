@@ -32,7 +32,7 @@ fn source(tracker: &Tracker, number: u64) -> SourceSet {
 
 fn sources(flow: &ScopedFlowKey) -> TcpSources {
     let mut sources = TcpSources::new(vec![1883], Limits::default());
-    sources.streams.insert(flow.clone(), 7);
+    sources.associate(flow.clone(), 7);
     sources.generations.insert(7, 0);
     sources
 }
@@ -321,5 +321,67 @@ fn moving_anchor_survives_multiple_wraps_with_a_future_span_held() {
             )
             .unwrap();
         current = current.wrapping_add(step);
+    }
+}
+
+#[test]
+fn reset_touches_only_currently_owned_flows_and_keeps_reassigned_sources() {
+    let tracker = Tracker::new(1 << 20, 32).unwrap();
+    for population in [8u16, 256, 1000] {
+        let first = flow();
+        let reverse = first.reverse();
+        let mut actual = sources(&first);
+        actual.associate(reverse.clone(), 7);
+        let others: Vec<_> = (0..population)
+            .map(|index| {
+                let mut key = flow();
+                key.flow.source_port = 10_000 + index;
+                actual.associate(key.clone(), u64::from(index) + 100);
+                key
+            })
+            .collect();
+        for (index, key) in std::iter::once(first.clone())
+            .chain(std::iter::once(reverse.clone()))
+            .chain(others)
+            .enumerate()
+        {
+            actual
+                .insert(
+                    key.clone(),
+                    Span {
+                        sequence: 0,
+                        length: 1,
+                        number: index as u64 + 1,
+                        sources: source(&tracker, index as u64 + 1),
+                    },
+                )
+                .unwrap();
+            if key == first || key == reverse {
+                actual.closed.insert(key);
+            }
+        }
+        actual.associate_test(first.clone(), 88);
+        RESET_FLOWS_VISITED.with(|count| count.set(0));
+        actual.reset_stream(7);
+        assert_eq!(RESET_FLOWS_VISITED.with(std::cell::Cell::get), 1);
+        assert_eq!(actual.span_count, population as usize + 1);
+        assert!(!actual.closed.contains(&reverse));
+        assert!(actual.closed.contains(&first));
+        let mut output = Vec::new();
+        actual
+            .event(
+                &TcpEvent::Data {
+                    flow: first,
+                    sequence: 0,
+                    bytes: Bytes::from_static(b"x"),
+                },
+                10_000,
+                None,
+                &mut output,
+            )
+            .unwrap();
+        assert!(
+            matches!(output.as_slice(), [Event::Data(data)] if data.stream == 88 && data.sources.iter().next().unwrap().number == 1)
+        );
     }
 }

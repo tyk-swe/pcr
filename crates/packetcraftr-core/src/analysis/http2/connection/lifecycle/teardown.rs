@@ -236,7 +236,7 @@ impl ConnectionState {
         }
         self.emit_connection(context)?;
         self.drain(context)?;
-        Ok(())
+        context.release_all(&mut self.charge)
     }
 
     pub(crate) fn emit_connection(&mut self, context: &mut Context<'_>) -> Result<(), Error> {

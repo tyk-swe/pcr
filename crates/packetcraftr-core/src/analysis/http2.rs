@@ -49,6 +49,12 @@ use super::{
 
 type ConnectionKey = (u64, u64);
 
+#[cfg(test)]
+thread_local! {
+    static FAILURE_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static REPLACEMENT_FLOWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 struct Resources {
     app_limits: application::Limits,
     limits: Limits,
@@ -81,6 +87,7 @@ pub struct Collector {
     // Boxed to keep B-tree nodes small; connection state is large.
     connections: BTreeMap<ConnectionKey, Box<ConnectionState>>,
     flow_index: BTreeMap<ScopedFlowKey, ConnectionKey>,
+    connection_flows: BTreeMap<ConnectionKey, BTreeSet<ScopedFlowKey>>,
     failed: bool,
 }
 
@@ -103,6 +110,7 @@ impl Collector {
             tcp: TcpSources::new(ports, application),
             connections: BTreeMap::new(),
             flow_index: BTreeMap::new(),
+            connection_flows: BTreeMap::new(),
             failed: false,
         })
     }
@@ -126,6 +134,7 @@ impl Collector {
             self.failed = true;
             self.connections.clear();
             self.flow_index.clear();
+            self.connection_flows.clear();
             return Err(error);
         }
         Ok(out)
@@ -156,7 +165,7 @@ impl Collector {
                     && old != key
                     && let Some(mut conn) = self.connections.remove(&old)
                 {
-                    self.flow_index.retain(|_, k| *k != old);
+                    self.forget_connection_flows(old);
                     conn.number = number;
                     if !conn.done && !matches!(conn.phase, Phase::Dead) {
                         conn.terminate(
@@ -169,7 +178,7 @@ impl Collector {
                     }
                     conn.finish(&mut self.resources.context(out))?;
                 }
-                self.flow_index.insert(delivery.flow.clone(), key);
+                self.associate_flow(delivery.flow.clone(), key);
                 let conn = self.connections.entry(key).or_insert_with(|| {
                     Box::new(ConnectionState::new(
                         delivery.stream,
@@ -214,7 +223,11 @@ impl Collector {
                     return Ok(());
                 };
                 conn.number = number;
-                conn.close(&flow, reset, &mut self.resources.context(out))
+                conn.close(&flow, reset, &mut self.resources.context(out))?;
+                if matches!(conn.phase, Phase::Dead) {
+                    conn.drain(&mut self.resources.context(out))?;
+                }
+                Ok(())
             }
         }
     }
@@ -228,19 +241,48 @@ impl Collector {
         detail: &'static str,
         out: &mut Vec<Event>,
     ) -> Result<(), Error> {
-        let keys: BTreeSet<ConnectionKey> = self
-            .flow_index
-            .iter()
-            .filter(|(f, _)| *f == flow || f.reverse() == *flow)
-            .map(|(_, key)| *key)
-            .collect();
-        for key in keys {
+        let mut keys = [flow, &flow.reverse()].map(|flow| {
+            #[cfg(test)]
+            FAILURE_LOOKUPS.with(|count| count.set(count.get() + 1));
+            self.flow_index.get(flow).copied()
+        });
+        keys.sort_unstable();
+        let [first, second] = keys;
+        for key in [first, second.filter(|key| Some(*key) != first)]
+            .into_iter()
+            .flatten()
+        {
             if let Some(conn) = self.connections.get_mut(&key) {
                 conn.number = number;
                 conn.terminate(flow, status, code, detail, &mut self.resources.context(out))?;
             }
         }
         Ok(())
+    }
+
+    fn associate_flow(&mut self, flow: ScopedFlowKey, key: ConnectionKey) {
+        if let Some(old) = self.flow_index.insert(flow.clone(), key)
+            && old != key
+            && let Some(flows) = self.connection_flows.get_mut(&old)
+        {
+            flows.remove(&flow);
+            if flows.is_empty() {
+                self.connection_flows.remove(&old);
+            }
+        }
+        self.connection_flows.entry(key).or_default().insert(flow);
+    }
+
+    fn forget_connection_flows(&mut self, key: ConnectionKey) {
+        if let Some(flows) = self.connection_flows.remove(&key) {
+            for flow in flows {
+                #[cfg(test)]
+                REPLACEMENT_FLOWS.with(|count| count.set(count.get() + 1));
+                if self.flow_index.get(&flow) == Some(&key) {
+                    self.flow_index.remove(&flow);
+                }
+            }
+        }
     }
 
     pub fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), Error> {

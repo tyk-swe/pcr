@@ -149,12 +149,22 @@ fn rig_bounded(app: application::Limits, limits: Limits) -> Rig {
 
 impl Rig {
     fn send_on(&mut self, flow: ScopedFlowKey, bytes: &[u8], generation: u64) -> Result<(), Error> {
+        self.send_stream(flow, 0, generation, bytes)
+    }
+
+    fn send_stream(
+        &mut self,
+        flow: ScopedFlowKey,
+        stream: u64,
+        generation: u64,
+        bytes: &[u8],
+    ) -> Result<(), Error> {
         self.number += 1;
         let number = self.number;
         self.collector.dispatch(
             application::Event::Data(application::Delivery {
                 flow,
-                stream: 0,
+                stream,
                 generation,
                 bytes: Bytes::copy_from_slice(bytes),
                 sources: self
@@ -2086,4 +2096,191 @@ fn expired_deadline_stops_analysis() {
         )));
     let error = rig.send_on(flow(), CLIENT_PREFACE, 0).unwrap_err();
     assert!(matches!(error, Error::Analysis(_)), "{error:?}");
+}
+
+#[test]
+fn transport_fault_targets_both_generations_in_order_and_keeps_other_connections_live() {
+    let mut rig = rig();
+    let forward = flow();
+    let reverse = forward.reverse();
+    let mut other = forward.clone();
+    other.flow.source_port += 1;
+    rig.send_stream(forward.clone(), 9, 0, CLIENT_PREFACE)
+        .unwrap();
+    rig.send_stream(reverse, 2, 4, CLIENT_PREFACE).unwrap();
+    rig.send_stream(other.clone(), 5, 0, CLIENT_PREFACE)
+        .unwrap();
+    rig.send_stream(other.reverse(), 5, 0, &settings(&[]))
+        .unwrap();
+    rig.send_stream(other.clone(), 5, 0, &settings(&[]))
+        .unwrap();
+    rig.event(application::Event::Gap {
+        flow: forward.clone(),
+        stream: 9,
+        generation: 0,
+    });
+    let failures: Vec<_> = rig
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Issue(issue) if issue.code == IssueCode::TcpGap => {
+                Some((issue.stream, issue.generation))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures, [(2, 4), (9, 0)]);
+    let after_failure = rig.events.len();
+    rig.event(application::Event::Gap {
+        flow: forward,
+        stream: 9,
+        generation: 0,
+    });
+    assert_eq!(rig.events.len(), after_failure);
+    rig.send_stream(
+        other,
+        5,
+        0,
+        &frame(HEADERS, END_HEADERS | END_STREAM, 1, &request_headers()),
+    )
+    .unwrap();
+    assert!(rig.events.iter().any(|event| matches!(event, Event::Message(message) if message.stream == 5 && message.http2_stream_id == 1)));
+}
+
+#[test]
+fn flow_failure_and_generation_replacement_visit_only_owned_flows() {
+    for population in [8u16, 256, 1000] {
+        let mut rig = rig();
+        let forward = flow();
+        rig.send_stream(forward.clone(), 1, 0, CLIENT_PREFACE)
+            .unwrap();
+        rig.send_stream(forward.reverse(), 1, 0, &settings(&[]))
+            .unwrap();
+        for index in 0..population {
+            let mut other = flow();
+            other.flow.source_port = 10_000 + index;
+            rig.collector
+                .associate_flow(other, (u64::from(index) + 100, 0));
+        }
+        FAILURE_LOOKUPS.with(|count| count.set(0));
+        REPLACEMENT_FLOWS.with(|count| count.set(0));
+        rig.send_stream(forward.clone(), 1, 1, CLIENT_PREFACE)
+            .unwrap();
+        assert_eq!(REPLACEMENT_FLOWS.with(std::cell::Cell::get), 2);
+        assert_eq!(rig.collector.flow_index.len(), population as usize + 1);
+        rig.event(application::Event::Gap {
+            flow: forward,
+            stream: 1,
+            generation: 1,
+        });
+        assert_eq!(FAILURE_LOOKUPS.with(std::cell::Cell::get), 2);
+        assert_eq!(rig.collector.flow_index.len(), population as usize + 1);
+    }
+}
+
+#[test]
+fn removing_an_old_generation_preserves_reassigned_flow_ownership() {
+    let mut rig = rig();
+    let key = flow();
+    rig.collector.associate_flow(key.clone(), (1, 0));
+    rig.collector.associate_flow(key.clone(), (2, 1));
+    rig.collector.forget_connection_flows((1, 0));
+    assert_eq!(rig.collector.flow_index.get(&key), Some(&(2, 1)));
+    rig.collector.forget_connection_flows((2, 1));
+    assert!(!rig.collector.flow_index.contains_key(&key));
+}
+
+#[test]
+fn termination_releases_decoder_and_stream_state_once_and_retains_terminal_evidence() {
+    for mode in 0..3 {
+        let mut rig = rig();
+        handshake(&mut rig);
+        rig.send(&frame(HEADERS, END_HEADERS, 1, &request_headers()));
+        rig.send(&settings(&[(1, 1024)]));
+        rig.send(&frame(PING, 0, 0, b"12345678"));
+        let partial = frame(DATA, 0, 1, &[7; 4096]);
+        if mode != 2 {
+            rig.send(&partial[..partial.len() - 1]);
+        }
+        assert!(rig.collector.resources.budget.live() > 2 * budget::DIR_OVERHEAD);
+        match mode {
+            0 => rig.event(application::Event::Gap {
+                flow: flow(),
+                stream: 0,
+                generation: 0,
+            }),
+            1 => rig.event(application::Event::Closed {
+                flow: flow(),
+                stream: 0,
+                generation: 0,
+                reset: true,
+            }),
+            _ => rig.send(&frame(CONTINUATION, 4, 1, b"bad")),
+        };
+        assert_eq!(
+            rig.collector.resources.budget.live(),
+            2 * budget::DIR_OVERHEAD,
+            "mode {mode}"
+        );
+        if mode != 2 {
+            assert!(rig.events.iter().any(|event| matches!(event, Event::Issue(issue) if issue.code == IssueCode::UnconsumedBytes && issue.wire == partial[..partial.len() - 1])));
+            assert!(rig.events.iter().any(
+                |event| matches!(event, Event::Message(message) if message.http2_stream_id == 1)
+            ));
+        }
+        let count = rig.events.len();
+        rig.event(application::Event::Gap {
+            flow: flow(),
+            stream: 0,
+            generation: 0,
+        });
+        rig.event(application::Event::Closed {
+            flow: flow(),
+            stream: 0,
+            generation: 0,
+            reset: true,
+        });
+        assert_eq!(rig.events.len(), count);
+        assert_eq!(
+            rig.collector.resources.budget.live(),
+            2 * budget::DIR_OVERHEAD
+        );
+        let (events, _) = rig.finish();
+        let connection = events
+            .iter()
+            .find_map(|event| match event {
+                Event::Connection(connection) => Some(connection),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            (connection.pending_settings, connection.pending_pings),
+            (1, 1)
+        );
+    }
+}
+
+#[test]
+fn trailing_eviction_finishes_without_a_transport_fault() {
+    let mut rig = rig();
+    handshake(&mut rig);
+    rig.collector.tcp.associate_test(flow(), 0);
+    let run = RunSummary {
+        trailing_tcp_events: vec![crate::analysis::reassembly::tcp::Event::Evicted {
+            flow: flow(),
+            pending_bytes: 3,
+        }],
+        ..RunSummary::default()
+    };
+    let output = rig.collector.finish(&run).unwrap().0;
+    assert!(
+        !output.iter().any(
+            |event| matches!(event, Event::Issue(issue) if issue.code == IssueCode::TcpEvicted)
+        )
+    );
+    assert!(
+        output
+            .iter()
+            .any(|event| matches!(event, Event::Connection(_)))
+    );
 }

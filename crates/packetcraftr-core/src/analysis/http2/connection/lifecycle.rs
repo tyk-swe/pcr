@@ -35,8 +35,8 @@ impl ConnectionState {
         {
             context.release_all(&mut msg.charge)?;
         }
-        self.deferred.promises.clear();
-        self.deferred.awaiting_ack.clear();
+        self.deferred.promises = Default::default();
+        self.deferred.awaiting_ack = Default::default();
         if let Some(mut prelude) = self.upgrade.prelude.take() {
             for side in Side::BOTH {
                 context.release_all(&mut prelude.body_charge[side])?;
@@ -51,7 +51,7 @@ impl ConnectionState {
         }
         self.control.final_pending = Some(self.control.pending_counts());
         for direction in self.control.settings.iter_mut() {
-            for mut pending in direction.pending.drain(..) {
+            for mut pending in std::mem::take(&mut direction.pending) {
                 context.release_all(&mut pending.charge)?;
             }
         }
@@ -63,7 +63,13 @@ impl ConnectionState {
         self.streams.early_responses.clear();
         self.streams.pending_openers.clear();
         self.streams.closed_credit.clear();
-        context.release_all(&mut self.charge)
+        let directions = self.directions.iter().count() * budget::DIR_OVERHEAD;
+        let released = self
+            .charge
+            .bytes()
+            .checked_sub(directions)
+            .ok_or(Error::Invariant("direction charge underflow"))?;
+        context.release(&mut self.charge, released)
     }
 
     pub(crate) fn close(
@@ -72,6 +78,9 @@ impl ConnectionState {
         reset: bool,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
+        if matches!(self.phase, Phase::Dead) {
+            return Ok(());
+        }
         if reset {
             return self.terminate(
                 flow,
@@ -281,7 +290,7 @@ impl ConnectionState {
         detail: &'static str,
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
-        if (self.done || matches!(self.phase, Phase::Dead)) && code == IssueCode::TcpEvicted {
+        if matches!(self.phase, Phase::Dead) || (self.done && code == IssueCode::TcpEvicted) {
             return Ok(());
         }
         self.issue(
@@ -329,7 +338,8 @@ impl ConnectionState {
             )?;
         }
         self.flush_messages(status, context)?;
-        self.fail(context, status)
+        self.fail(context, status)?;
+        self.drain(context)
     }
 
     pub(crate) fn fail(&mut self, context: &mut Context<'_>, status: Status) -> Result<(), Error> {

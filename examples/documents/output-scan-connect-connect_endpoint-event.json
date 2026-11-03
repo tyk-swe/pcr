@@ -1,0 +1,29 @@
+{
+  "command": "scan",
+  "diagnostics": [],
+  "event": "connect_endpoint",
+  "mode": "stream",
+  "result": {
+    "address": "127.0.0.1",
+    "classification": "closed",
+    "inference": {
+      "conflicting": [],
+      "failed": [],
+      "rule": "tcp_connect.refused",
+      "state": "closed",
+      "supporting": [
+        0
+      ],
+      "unanswered": []
+    },
+    "method": "tcp_connect",
+    "port": 9,
+    "port_hint": "discard",
+    "probes": [
+      0
+    ]
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 1,
+  "status": "success"
+}

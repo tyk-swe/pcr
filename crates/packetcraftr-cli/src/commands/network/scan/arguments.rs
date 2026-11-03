@@ -562,7 +562,7 @@ pub(crate) struct Args {
     )]
     pub(crate) reverse_dns_port: u16,
     /// Number of bounded attempts per selected endpoint.
-    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_ATTEMPTS)]
+    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_PROBE_ATTEMPTS)]
     pub(crate) attempts: u32,
     #[command(flatten)]
     pub(crate) adaptive: AdaptiveArgs,

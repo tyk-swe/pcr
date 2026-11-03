@@ -3,9 +3,9 @@
 
 //! IEEE 802.1AX LACP version 1. Marker and other Slow Protocols remain opaque.
 
-use crate::codec::*;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Reader, Writer, message_codec};
 use bytes::Bytes;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,7 +46,7 @@ impl Default for Lacp {
     }
 }
 crate::reflective_layer! {
- fn lacp_schema() => { protocol: crate::layer::Id::new("lacp"), name: "Lacp" }
+ fn lacp_schema() => { protocol: crate::protocol::BuiltinProtocol::Lacp.id(), name: "Lacp" }
  impl Lacp {
     "actor_system_priority" => { kind: Unsigned, derived: false, required: false, description: "actor system priority", reflect: actor_system_priority },
     "actor_system" => { kind: Mac, derived: false, required: false, description: "actor system", reflect: actor_system },
@@ -64,89 +64,7 @@ crate::reflective_layer! {
     "reserved" => { kind: Bytes, derived: false, required: false, description: "Actor, partner, collector and trailing reserved bytes", reflect: reserved },
  }
 }
-fn lacp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if 6 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "actor_system_priority",
-            range: crate::layout::ByteRange::new(4, 6),
-        });
-    }
-    if 12 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "actor_system",
-            range: crate::layout::ByteRange::new(6, 12),
-        });
-    }
-    if 14 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "actor_key",
-            range: crate::layout::ByteRange::new(12, 14),
-        });
-    }
-    if 16 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "actor_port_priority",
-            range: crate::layout::ByteRange::new(14, 16),
-        });
-    }
-    if 18 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "actor_port",
-            range: crate::layout::ByteRange::new(16, 18),
-        });
-    }
-    if 19 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "actor_state",
-            range: crate::layout::ByteRange::new(18, 19),
-        });
-    }
-    if 26 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "partner_system_priority",
-            range: crate::layout::ByteRange::new(24, 26),
-        });
-    }
-    if 32 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "partner_system",
-            range: crate::layout::ByteRange::new(26, 32),
-        });
-    }
-    if 34 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "partner_key",
-            range: crate::layout::ByteRange::new(32, 34),
-        });
-    }
-    if 36 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "partner_port_priority",
-            range: crate::layout::ByteRange::new(34, 36),
-        });
-    }
-    if 38 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "partner_port",
-            range: crate::layout::ByteRange::new(36, 38),
-        });
-    }
-    if 39 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "partner_state",
-            range: crate::layout::ByteRange::new(38, 39),
-        });
-    }
-    if 46 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "collector_delay",
-            range: crate::layout::ByteRange::new(44, 46),
-        });
-    }
-    fields
-}
-message_codec!(LacpCodec, Lacp, lacp_schema, lacp_layout_wire);
+message_codec!(LacpCodec, Lacp, lacp_schema);
 
 const NAME: &str = "lacp";
 impl Lacp {
@@ -179,8 +97,24 @@ impl Lacp {
         w.put(&self.reserved[18..])?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 4..6);
+        r.mark(1, 6..12);
+        r.mark(2, 12..14);
+        r.mark(3, 14..16);
+        r.mark(4, 16..18);
+        r.mark(5, 18..19);
+        r.mark(6, 24..26);
+        r.mark(7, 26..32);
+        r.mark(8, 32..34);
+        r.mark(9, 34..36);
+        r.mark(10, 36..38);
+        r.mark(11, 38..39);
+        r.mark(12, 44..46);
         if r.take(2)? != [1, 1] {
             return Err(unsupported(NAME, "not LACP version 1"));
         }
@@ -217,6 +151,6 @@ impl Lacp {
         reserved.extend_from_slice(r.take(50)?);
         r.finish()?;
         s.reserved = reserved.into();
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }

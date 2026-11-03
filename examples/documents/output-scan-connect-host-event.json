@@ -1,0 +1,16 @@
+{
+  "command": "scan",
+  "diagnostics": [],
+  "event": "host",
+  "mode": "stream",
+  "result": {
+    "address": "127.0.0.1",
+    "discovery": "not_requested",
+    "probes": [],
+    "reasons": [],
+    "scan": "scanned"
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 2,
+  "status": "success"
+}

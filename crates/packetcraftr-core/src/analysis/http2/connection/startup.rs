@@ -164,10 +164,8 @@ impl ConnectionState {
         if dir.buffer.bytes()[..have] != wire::CLIENT_PREFACE[..have] {
             let flow = dir.flow.clone();
             let take = dir.buffer.len();
-            let sets = dir.buffer.contributors(take);
-            let (wire, dropped) = dir.buffer.take(take);
+            let (wire, sets) = dir.buffer.take(take, context)?;
             let sources = union_balanced(sets)?;
-            dir.release_consumed(take, dropped, context)?;
             self.reject(
                 context,
                 Fault::new(
@@ -184,8 +182,7 @@ impl ConnectionState {
         if dir.buffer.len() < PREFACE_LEN {
             return Ok(false);
         }
-        let dropped = dir.buffer.consume(PREFACE_LEN);
-        dir.release_consumed(PREFACE_LEN, dropped, context)?;
+        dir.buffer.discard(PREFACE_LEN, context)?;
         if let Some(dir) = self.directions.get_mut(side) {
             dir.phase = DirectionPhase::Frames;
         }

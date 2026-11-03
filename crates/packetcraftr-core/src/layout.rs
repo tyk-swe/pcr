@@ -40,14 +40,22 @@ impl ByteRange {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct FieldLayout {
-    pub name: &'static str,
+    pub index: usize,
     pub range: ByteRange,
+}
+
+impl FieldLayout {
+    pub fn name(&self, schema: &crate::layer::Schema) -> Option<&'static str> {
+        schema.fields.get(self.index).map(|field| field.name)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct LayerLayout {
     pub index: usize,
     pub protocol: crate::layer::Id,
+    #[serde(skip)]
+    pub schema: &'static crate::layer::Schema,
     pub range: ByteRange,
     pub fields: Vec<FieldLayout>,
 }
@@ -96,5 +104,51 @@ impl PacketLayout {
         self.layers
             .get(index)
             .filter(|layout| layout.index == index)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn layout() -> LayerLayout {
+        static SCHEMA: crate::layer::Schema = crate::layer::Schema {
+            protocol: crate::layer::Id::new("test"),
+            name: "Test",
+            fields: &[],
+        };
+        LayerLayout {
+            index: 0,
+            protocol: crate::layer::Id::new("test"),
+            schema: &SCHEMA,
+            range: ByteRange::new(2, 6),
+            fields: vec![FieldLayout {
+                index: 0,
+                range: ByteRange::new(2, 4),
+            }],
+        }
+    }
+
+    #[test]
+    fn byte_range_len_is_end_minus_start() {
+        assert_eq!(ByteRange::new(2, 6).len(), 4);
+        assert_eq!(ByteRange::new(6, 6).len(), 0);
+        assert_eq!(ByteRange::new(6, 2).len(), 0);
+    }
+
+    #[test]
+    fn checked_shift_moves_layer_and_fields_together() {
+        let mut layout = layout();
+        assert!(layout.checked_shift(3));
+        assert_eq!(layout.range, ByteRange::new(5, 9));
+        assert_eq!(layout.fields[0].range, ByteRange::new(5, 7));
+    }
+
+    #[test]
+    fn checked_shift_overflow_leaves_layout_unchanged() {
+        let mut layout = layout();
+        assert!(!layout.checked_shift(usize::MAX));
+        assert_eq!(layout.range, ByteRange::new(2, 6));
+        assert_eq!(layout.fields[0].range, ByteRange::new(2, 4));
     }
 }

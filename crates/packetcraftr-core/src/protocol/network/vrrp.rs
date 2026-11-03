@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::diagnostic::Severity;
-use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
@@ -15,9 +14,9 @@ use crate::{
     layout::FieldLayout,
 };
 
-use super::{ip_protocol, resolve_envelope};
+use super::ip_protocol;
 use crate::protocol::common::{
-    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, make_layer, out_of_range,
+    ValueExpectation, checksum_parts, ensure_encode_budget, invalid, out_of_range,
     payload_without_padding, resolve_u8, resolve_u16, strict_or_diagnostic,
     transport_checksum_parts, truncated, typed_layer, wrong_type,
 };
@@ -215,13 +214,9 @@ reflective_layer! {
 
 /// Only the interval fields of the message's own version occupy bytes.
 fn vrrp_layout(version: u8, addresses_end: usize, message_end: usize) -> Vec<FieldLayout> {
-    let other_version: &[&str] = if version == 2 {
-        &["reserved", "max_advert_interval"]
-    } else {
-        &["auth_type", "advert_interval"]
-    };
+    let other_version: &[usize] = if version == 2 { &[7, 8] } else { &[5, 6] };
     let mut fields = vrrp_base_layout(addresses_end, message_end);
-    fields.retain(|field| !other_version.contains(&field.name));
+    fields.retain(|field| !other_version.contains(&field.index));
     fields
 }
 
@@ -277,7 +272,7 @@ impl Codec for VrrpCodec {
         if layer.vrrp_type > MAX_RESERVED {
             return Err(invalid(NAME, "VRRP type does not fit four bits"));
         }
-        let envelope = resolve_envelope(NAME, context)?;
+        let envelope = context.network_envelope()?;
         let ipv6 = envelope.source.is_ipv6();
         let mut diagnostics = Vec::new();
         if version == 2 && ipv6 {
@@ -545,10 +540,11 @@ impl Codec for VrrpCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Vrrp::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(vrrp_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Vrrp::default()))
     }
 }

@@ -4,7 +4,7 @@
 //! Compatibility decoder for the historical byte API. New callers can supply snapshots.
 
 use super::{Endpoint, Error, Limits, MAX_INPUT_BYTES, Snapshot, State};
-use crate::security::{AMBIGUOUS_OUTPUT_SCHEMA, OUTPUT_SCHEMA};
+use crate::security::input;
 use serde_json::Value;
 use std::{collections::BTreeMap, net::IpAddr};
 
@@ -15,22 +15,9 @@ pub(super) fn parse(bytes: &[u8], limits: Limits) -> Result<Snapshot, Error> {
             limit: MAX_INPUT_BYTES,
         });
     }
-    let value: Value = serde_json::from_slice(bytes).map_err(|e| Error::Invalid(e.to_string()))?;
-    if value["schema"] == AMBIGUOUS_OUTPUT_SCHEMA {
-        return Err(Error::Invalid(format!(
-            "{AMBIGUOUS_OUTPUT_SCHEMA} is ambiguous across releases; regenerate the scan with this release, which emits {OUTPUT_SCHEMA}"
-        )));
-    }
-    if value["schema"] != OUTPUT_SCHEMA
-        || value["command"] != "scan"
-        || value["mode"] != "aggregate"
-        || value["status"] != "success"
-    {
-        return Err(Error::Invalid(format!(
-            "scan-diff requires successful native aggregate scan JSON ({OUTPUT_SCHEMA})"
-        )));
-    }
-    let result = &value["result"];
+    let envelope = input::aggregate::<Value>(bytes, &["scan"])
+        .map_err(|error| Error::Invalid(error.to_string()))?;
+    let result = &envelope.result;
     let method = result["method"]
         .as_str()
         .unwrap_or_else(|| result["plan"]["method"]["selected"].as_str().unwrap_or(""));
@@ -128,11 +115,16 @@ fn state(e: &Value) -> Option<State> {
 mod tests {
     use super::*;
 
-    const CURRENT_SCAN: &[u8] =
-        include_bytes!("../../../../../examples/documents/output-scan-success.json");
+    fn current_scan() -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/documents/output-scan-success.json"),
+        )
+        .unwrap()
+    }
 
     fn scan_with_schema(schema: &str) -> Vec<u8> {
-        let mut value: Value = serde_json::from_slice(CURRENT_SCAN).unwrap();
+        let mut value: Value = serde_json::from_slice(&current_scan()).unwrap();
         value["schema"] = Value::from(schema);
         serde_json::to_vec(&value).unwrap()
     }
@@ -146,7 +138,7 @@ mod tests {
 
     #[test]
     fn current_published_scan_output_is_accepted() {
-        let snapshot = parse(CURRENT_SCAN, Limits::default()).unwrap();
+        let snapshot = parse(&current_scan(), Limits::default()).unwrap();
         assert_eq!(snapshot.endpoints.len(), 1);
     }
 

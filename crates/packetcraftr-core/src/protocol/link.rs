@@ -3,7 +3,7 @@
 
 mod arp;
 mod eapol;
-mod ether_type;
+pub(crate) mod ether_type;
 mod ethernet;
 mod llc;
 mod lldp;
@@ -13,10 +13,13 @@ mod vlan;
 pub use arp::Arp;
 pub(crate) use arp::ArpCodec;
 pub use eapol::Eapol;
-pub(crate) use eapol::EapolCodec;
+pub(crate) use eapol::{EAP_PACKET_SELECTOR, EapolCodec};
 pub use ethernet::Ethernet;
 pub(crate) use ethernet::EthernetCodec;
-pub(crate) use llc::{LLC_FRAME_DISCRIMINATOR, LlcCodec, SnapCodec};
+pub(crate) use llc::{
+    CDP_SNAP_DISCRIMINATOR, LLC_FRAME_DISCRIMINATOR, LlcCodec, SNAP_DISCRIMINATOR,
+    STP_DISCRIMINATOR, SnapCodec,
+};
 pub use llc::{Llc, Snap};
 pub use lldp::Lldp;
 pub(crate) use lldp::LldpCodec;

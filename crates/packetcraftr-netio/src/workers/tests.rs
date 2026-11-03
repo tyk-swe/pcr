@@ -351,7 +351,7 @@ fn nested_lookup_allocation_stays_charged_through_cancelled_panic_cleanup() {
     cancellation.cancel();
     assert_eq!(
         result.recv_timeout(Duration::from_secs(5)).unwrap(),
-        Some("io.cancelled")
+        Some(packetcraftr_core::error::Code::IoCancelled)
     );
     caller.join().unwrap();
     assert_eq!(allocation.snapshot().cleanup_retaining_capacity, 1);

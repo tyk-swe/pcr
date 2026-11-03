@@ -91,36 +91,36 @@ impl Classified for Error {
             | Self::LayerLimit { .. }
             | Self::NestingLimit { .. }
             | Self::ResourceLimit { .. } => Classification::new(
-                "cli.document_limit",
+                crate::error::Code::CliDocumentLimit,
                 Kind::Usage,
                 Some(
                     "shrink the packet document to stay inside its finite byte, node, and nesting bounds",
                 ),
             ),
             Self::InvalidLimit { .. } => Classification::new(
-                "cli.document_limit",
+                crate::error::Code::CliDocumentLimit,
                 Kind::Usage,
                 Some("lower the configured document limit to at most its stable maximum"),
             ),
             Self::Parse { .. } => Classification::new(
-                "cli.document_syntax",
+                crate::error::Code::CliDocumentSyntax,
                 Kind::Usage,
                 Some("repair the packet document so it parses as well-formed JSON or YAML"),
             ),
             Self::Schema { .. } => Classification::new(
-                "cli.document_schema",
+                crate::error::Code::CliDocumentSchema,
                 Kind::Usage,
                 Some("declare the packet document schema this build supports"),
             ),
             Self::UnknownProtocol { .. } => Classification::new(
-                "cli.document_protocol",
+                crate::error::Code::CliDocumentProtocol,
                 Kind::Usage,
                 Some(
                     "run `packetcraftr reference protocols` to list the protocol names the registry binds",
                 ),
             ),
             Self::Layer { .. } | Self::Field { .. } => Classification::new(
-                "cli.document_field",
+                crate::error::Code::CliDocumentField,
                 Kind::Usage,
                 Some("correct the layer's field names and values against its reflective schema"),
             ),

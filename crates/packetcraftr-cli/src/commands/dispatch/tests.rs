@@ -55,7 +55,7 @@ fn generator_cancellation_maps_to_interrupt_status_after_diagnostic_write() {
     invocation.cancellation.cancel();
     let error = invocation.cancellation.check().unwrap_err();
     let code = generation_exit(&invocation, Err(CliError::classified(error)), |error| {
-        assert_eq!(error.classification.code, "io.cancelled");
+        assert_eq!(error.classification.code.as_str(), "io.cancelled");
         Ok(())
     });
     assert_eq!(code, ExitCode::from(CANCELLED_EXIT_CODE));
@@ -77,7 +77,11 @@ fn generator_diagnostic_write_failure_precedes_cancellation_status() {
 fn error_handling_json_reporting_failure_keeps_original_diagnostics() {
     let invocation = invocation(Format::Json, Writer::default());
     let error = CliError::from_classification(
-        Classification::new("packet.test", Kind::Packet, Some("repair input")),
+        Classification::new(
+            packetcraftr_core::error::Code::PacketTest,
+            Kind::Packet,
+            Some("repair input"),
+        ),
         "original command failure",
         vec!["original cause".into()],
     )
@@ -119,7 +123,7 @@ fn error_handling_json_after_publication_uses_stderr_and_prioritizes_output_fail
         }
         let error = if output_failed {
             CliError::from_classification(
-                Classification::new("io.stdout", Kind::Io, None),
+                Classification::new(packetcraftr_core::error::Code::IoStdout, Kind::Io, None),
                 "write failed",
                 Vec::new(),
             )
@@ -202,7 +206,11 @@ fn error_handling_failed_ndjson_preserves_context_and_original_cause() {
     );
     invocation.cancellation.cancel();
     let error = CliError::from_classification(
-        Classification::new("packet.test", Kind::Packet, None),
+        Classification::new(
+            packetcraftr_core::error::Code::PacketTest,
+            Kind::Packet,
+            None,
+        ),
         "original failure",
         vec!["original cause".into()],
     )
@@ -214,7 +222,7 @@ fn error_handling_failed_ndjson_preserves_context_and_original_cause() {
         error,
         |_, _| panic!("failed NDJSON must not use aggregate JSON"),
         |error| {
-            assert_eq!(error.classification.code, "io.stdout");
+            assert_eq!(error.classification.code.as_str(), "io.stdout");
             assert_eq!(error.context(), Some(Coordinate::ProbeSequence(4)));
             assert_eq!(error.causes, ["original failure", "original cause"]);
             Ok(())

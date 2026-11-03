@@ -6,7 +6,7 @@ use bytes::Bytes;
 
 use crate::{
     diagnostic::Diagnostic,
-    layer::{Malformed, Padding, Raw},
+    layer::{Layer, Malformed, Padding, Raw},
     layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout},
     packet::Packet,
     protocol::BuiltinProtocol,
@@ -22,13 +22,15 @@ pub(super) fn append_padding(
     outside_layer: usize,
 ) {
     let index = packet.len();
+    let layer = Padding::after_layer(bytes.clone(), outside_layer);
     let layout = bytes_layer_layout(
         index,
         BuiltinProtocol::Padding,
+        layer.schema(),
         absolute_offset,
         bytes.len(),
     );
-    packet.push(Padding::after_layer(bytes, outside_layer));
+    packet.push(layer);
     layouts.push(layout);
 }
 
@@ -39,8 +41,15 @@ pub(super) fn append_raw(
     absolute_offset: usize,
 ) {
     let index = packet.len();
-    let layout = bytes_layer_layout(index, BuiltinProtocol::Raw, absolute_offset, bytes.len());
-    packet.push(Raw::new(bytes));
+    let layer = Raw::new(bytes.clone());
+    let layout = bytes_layer_layout(
+        index,
+        BuiltinProtocol::Raw,
+        layer.schema(),
+        absolute_offset,
+        bytes.len(),
+    );
+    packet.push(layer);
     layouts.push(layout);
 }
 
@@ -59,9 +68,11 @@ pub(super) fn append_malformed(
         bytes,
         reason,
     ));
+    let schema = packet.layer(index).expect("just pushed").schema();
     layouts.push(LayerLayout {
         index,
         protocol: BuiltinProtocol::Malformed.id(),
+        schema,
         range: ByteRange::new(absolute_offset, end),
         fields: Vec::new(),
     });
@@ -70,16 +81,18 @@ pub(super) fn append_malformed(
 fn bytes_layer_layout(
     index: usize,
     protocol: BuiltinProtocol,
+    schema: &'static crate::layer::Schema,
     absolute_offset: usize,
     byte_length: usize,
 ) -> LayerLayout {
     let end = absolute_offset.saturating_add(byte_length);
     LayerLayout {
         index,
-        protocol: crate::layer::Id::new(protocol.as_str()),
+        protocol: protocol.id(),
+        schema,
         range: ByteRange::new(absolute_offset, end),
         fields: vec![FieldLayout {
-            name: "bytes",
+            index: schema.field_index("bytes").expect("bytes field"),
             range: ByteRange::new(absolute_offset, end),
         }],
     }

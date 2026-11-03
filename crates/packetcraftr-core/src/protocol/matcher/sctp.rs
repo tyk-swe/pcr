@@ -1,14 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::protocol::transport::CHUNK_HEADER_LEN;
 use bytes::Bytes;
 
 use crate::packet::Packet;
 
 use super::opaque_bytes;
 use crate::protocol::transport::validate_sctp_chunks;
-
-const CHUNK_HEADER_LEN: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SctpResponseKind {

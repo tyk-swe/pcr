@@ -79,17 +79,17 @@ impl Classified for Error {
             Self::TargetSelection(source) => source.classification(),
             Self::Authorization(source) => source.classification(),
             Self::InvalidLimit { .. } => Classification::new(
-                "cli.scan_limit",
+                packetcraftr_core::error::Code::CliScanLimit,
                 Kind::Usage,
                 Some("use finite non-zero target, duration, and budget limits"),
             ),
             Self::Family { .. } => Classification::new(
-                "packet.target_address_family",
+                packetcraftr_core::error::Code::PacketTargetAddressFamily,
                 Kind::Packet,
                 Some("select an address family returned by the authorized target resolution"),
             ),
             Self::DurationLimit { .. } => Classification::new(
-                "policy.scan_duration_limit",
+                packetcraftr_core::error::Code::PolicyScanDurationLimit,
                 Kind::Policy,
                 Some("reduce declarations or deliberately raise the finite duration limit"),
             ),
@@ -138,7 +138,7 @@ fn selection_error(step: u64, failure: crate::error::Failure) -> Error {
 
             BoundaryError::internal_execution(
                 "target planning never waits on a clock",
-                "internal.target_plan",
+                packetcraftr_core::error::Code::InternalTargetPlan,
                 "report the unexpected selection path",
             )
             .into()
@@ -153,7 +153,7 @@ fn selection_error(step: u64, failure: crate::error::Failure) -> Error {
 
             BoundaryError::internal_execution(
                 "target planning produces no evidence",
-                "internal.target_plan",
+                packetcraftr_core::error::Code::InternalTargetPlan,
                 "report the unexpected selection path",
             )
             .into()
@@ -163,7 +163,7 @@ fn selection_error(step: u64, failure: crate::error::Failure) -> Error {
 
             BoundaryError::internal_execution(
                 "target planning accumulates no statistics",
-                "internal.target_plan",
+                packetcraftr_core::error::Code::InternalTargetPlan,
                 "report the unexpected selection path",
             )
             .into()

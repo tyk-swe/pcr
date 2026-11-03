@@ -31,7 +31,7 @@ fn reply_payload(decoded: &DecodedPacket) -> Option<Vec<u8>> {
         .packet
         .iter()
         .last()
-        .and_then(|layer| layer.downcast_ref::<Raw>())
+        .and_then(|layer| Raw::from_layer(layer))
         .map(|raw| raw.bytes.to_vec())
 }
 
@@ -267,6 +267,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
 mod tests {
     use super::*;
     use crate::SystemProviders;
+    use crate::clock::{Clock, SystemClock};
     use crate::differential::Collector;
     use crate::differential::catalog::catalog;
     use crate::policy::Policy;
@@ -276,7 +277,7 @@ mod tests {
     use packetcraftr_core::layer::Raw;
     use packetcraftr_core::protocol::builtin;
     use std::collections::HashSet;
-    use std::time::{Duration, SystemTime};
+    use std::time::Duration;
 
     fn client() -> Client<SystemProviders> {
         Client::new(builtin::registry(), Policy::default(), SystemProviders)
@@ -395,7 +396,7 @@ mod tests {
             .expect("packet builds");
         Dissector::new(builtin::registry())
             .decode(
-                Frame::new(Some(SystemTime::now()), LinkType::RAW, built.bytes)
+                Frame::new(Some(SystemClock.wall_now()), LinkType::RAW, built.bytes)
                     .expect("frame builds"),
                 Default::default(),
             )
@@ -482,7 +483,7 @@ mod tests {
                 stats: Stats::default(),
             },
             unsolicited_ingress: Vec::new(),
-            response_deadline: std::time::Instant::now(),
+            response_deadline: SystemClock.now(),
         }
     }
 

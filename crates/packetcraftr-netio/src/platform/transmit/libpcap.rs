@@ -6,7 +6,8 @@ use pcap::{Capture, Error as PcapError};
 use crate::{
     Error,
     interface::Id as InterfaceId,
-    platform::common::libpcap::{READ_TIMEOUT_MILLIS, map_open_error},
+    platform::common::READ_TIMEOUT_MILLIS,
+    platform::common::libpcap::map_open_error,
     platform::common::pcap_api::is_permission_denied,
     transmit::{self, Layer2Frame, Submission},
 };

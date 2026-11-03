@@ -2,21 +2,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::diagnostic::Severity;
-use std::collections::BTreeMap;
 
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, SCTP_CHECKSUM},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, invalid, make_layer, payload_without_padding, resolve_fixed,
-    strict_or_diagnostic, truncated, typed_layer,
+    ValueExpectation, invalid, payload_without_padding, resolve_fixed, strict_or_diagnostic,
+    truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -24,7 +23,7 @@ use crate::protocol::BuiltinProtocol;
 const NAME: &str = BuiltinProtocol::Sctp.as_str();
 
 const SCTP_HEADER_LEN: usize = 12;
-const CHUNK_HEADER_LEN: usize = 4;
+pub(crate) const CHUNK_HEADER_LEN: usize = 4;
 const CRC32C_POLYNOMIAL: u32 = 0x82f6_3b78;
 const CRC32C_TABLE: [u32; 256] = crc32c_table();
 
@@ -181,11 +180,12 @@ impl Codec for SctpCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Sctp::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(sctp_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Sctp::default()))
     }
 }
 

@@ -3,10 +3,12 @@
 
 //! MQTT 3.1.1 control packets (OASIS MQTT 3.1.1). MQTT 5 is not inferred.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 const SUBS: &[crate::layer::FieldSchema] = &[
@@ -54,7 +56,7 @@ impl Default for Mqtt {
     }
 }
 crate::reflective_layer! {
- fn mqtt_schema() => { protocol: crate::layer::Id::new("mqtt"), name: "Mqtt" }
+ fn mqtt_schema() => { protocol: crate::protocol::BuiltinProtocol::Mqtt.id(), name: "Mqtt" }
  impl Mqtt {
     "packet_type" => { kind: Unsigned, derived: false, required: false, description: "MQTT control packet type 1 through 14", reflect: packet_type },
     "flags" => { kind: Unsigned, derived: false, required: false, description: "MQTT fixed header flags", reflect: flags },
@@ -73,23 +75,7 @@ crate::reflective_layer! {
     "subscriptions" => { kind: List, derived: false, required: false, description: "Ordered SUBSCRIBE or UNSUBSCRIBE topics", children: SUBS, reflect: subscriptions },
  }
 }
-fn mqtt_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if !b.is_empty() {
-        fields.push(crate::layout::FieldLayout {
-            name: "packet_type",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-    }
-    if !b.is_empty() {
-        fields.push(crate::layout::FieldLayout {
-            name: "flags",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-    }
-    fields
-}
-message_codec!(MqttCodec, Mqtt, mqtt_schema, mqtt_layout_wire);
+message_codec!(MqttCodec, Mqtt, mqtt_schema);
 
 const NAME: &str = "mqtt";
 
@@ -308,8 +294,13 @@ impl Mqtt {
         head.put(&w.bytes)?;
         Ok(head.bytes)
     }
-    fn parse_wire(b: Bytes, _c: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _c: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..1);
+        r.mark(1, 0..1);
         let h = r.u8()?;
         let mut v = r.u8()?;
         while v & 128 != 0 {
@@ -426,7 +417,7 @@ impl Mqtt {
             return Err(invalid(NAME, "packet identifier cannot be zero"));
         }
         r.finish()?;
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }
 fn mqtt_text(b: &[u8]) -> Result<(), Error> {

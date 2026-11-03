@@ -3,10 +3,12 @@
 
 //! NetFlow version 5 fixed 48-byte flow records, with reserved bytes retained.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -44,7 +46,7 @@ pub struct Netflowv5 {
     pub records: Records,
 }
 crate::reflective_layer! {
- fn netflowv5_schema() => { protocol: crate::layer::Id::new("netflowv5"), name: "Netflowv5" }
+ fn netflowv5_schema() => { protocol: crate::protocol::BuiltinProtocol::Netflowv5.id(), name: "Netflowv5" }
  impl Netflowv5 {
     "uptime" => { kind: Unsigned, derived: false, required: false, description: "uptime", reflect: uptime },
     "unix_seconds" => { kind: Unsigned, derived: false, required: false, description: "unix seconds", reflect: unix_seconds },
@@ -56,64 +58,7 @@ crate::reflective_layer! {
     "records" => { kind: List, derived: false, required: false, description: "Fixed-width NetFlow v5 flow records", children: FLOW_FIELDS, reflect: records },
  }
 }
-fn netflowv5_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if 8 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "uptime",
-            range: crate::layout::ByteRange::new(4, 8),
-        });
-    }
-    if 12 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "unix_seconds",
-            range: crate::layout::ByteRange::new(8, 12),
-        });
-    }
-    if 16 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "unix_nanoseconds",
-            range: crate::layout::ByteRange::new(12, 16),
-        });
-    }
-    if 20 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "sequence",
-            range: crate::layout::ByteRange::new(16, 20),
-        });
-    }
-    if 21 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "engine_type",
-            range: crate::layout::ByteRange::new(20, 21),
-        });
-    }
-    if 22 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "engine_id",
-            range: crate::layout::ByteRange::new(21, 22),
-        });
-    }
-    if 24 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "sampling",
-            range: crate::layout::ByteRange::new(22, 24),
-        });
-    }
-    if 24 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "records",
-            range: crate::layout::ByteRange::new(24, b.len()),
-        });
-    }
-    fields
-}
-message_codec!(
-    Netflowv5Codec,
-    Netflowv5,
-    netflowv5_schema,
-    netflowv5_layout_wire
-);
+message_codec!(Netflowv5Codec, Netflowv5, netflowv5_schema);
 
 const NAME: &str = "netflowv5";
 impl Netflowv5 {
@@ -199,8 +144,19 @@ impl Netflowv5 {
         }
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 4..8);
+        r.mark(1, 8..12);
+        r.mark(2, 12..16);
+        r.mark(3, 16..20);
+        r.mark(4, 20..21);
+        r.mark(5, 21..22);
+        r.mark(6, 22..24);
+        r.mark(7, 24..b.len());
         if r.u16()? != 5 {
             return Err(unsupported(NAME, "only NetFlow v5"));
         }
@@ -294,6 +250,6 @@ impl Netflowv5 {
                 ),
             ]));
         }
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }

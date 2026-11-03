@@ -12,7 +12,7 @@ pub use v4::{Dhcpv4, Option4, Value4};
 pub(crate) use v6::Dhcpv6Codec;
 pub use v6::{Dhcpv6, Duid, Option6, Value6};
 
-pub const MAX_MESSAGE_BYTES: usize = 65_535;
+pub const MAX_DHCP_MESSAGE_BYTES: usize = 65_535;
 pub const MAX_OPTIONS: usize = 4_096;
 pub const MAX_NESTING: usize = 8;
 
@@ -27,7 +27,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_message_bytes: MAX_MESSAGE_BYTES,
+            max_message_bytes: MAX_DHCP_MESSAGE_BYTES,
             max_options: 512,
             max_nesting: MAX_NESTING,
         }
@@ -39,7 +39,7 @@ impl Limits {
             (
                 Limit::MessageBytes,
                 self.max_message_bytes,
-                MAX_MESSAGE_BYTES,
+                MAX_DHCP_MESSAGE_BYTES,
             ),
             (Limit::OptionCount, self.max_options, MAX_OPTIONS),
             (Limit::OptionNesting, self.max_nesting, MAX_NESTING),
@@ -110,9 +110,9 @@ impl crate::error::Classified for Error {
         use crate::error::{Classification, Kind};
         match self {
             Self::Limit(_) | Self::InvalidLimit { .. } => {
-                Classification::new("policy.dhcp_limit", Kind::Policy, None)
+                Classification::new(crate::error::Code::PolicyDhcpLimit, Kind::Policy, None)
             }
-            _ => Classification::new("packet.dhcp", Kind::Packet, None),
+            _ => Classification::new(crate::error::Code::PacketDhcp, Kind::Packet, None),
         }
     }
 }

@@ -159,9 +159,9 @@ impl ConnectionState {
             .get_mut(side)
             .ok_or(Error::Invariant("dir"))?;
         if let Some(sources) = block_sources.clone() {
-            context.track(&mut dir.charge, &sources)?;
+            context.track(&mut dir.origins_charge, &sources)?;
             dir.block_sources.insert(origin, sources);
-            context.charge(&mut dir.charge, budget::ORIGIN_ENTRY_OVERHEAD)?;
+            context.charge(&mut dir.origins_charge, budget::ORIGIN_ENTRY_OVERHEAD)?;
         }
         let scratch = 6usize
             .checked_mul(context.limits.max_header_bytes)
@@ -310,8 +310,11 @@ impl ConnectionState {
                             .collect();
                         for id in removed {
                             if let Some(set) = dir.block_sources.remove(&id) {
-                                context.untrack(&mut dir.charge, &set)?;
-                                context.release(&mut dir.charge, budget::ORIGIN_ENTRY_OVERHEAD)?;
+                                context.untrack(&mut dir.origins_charge, &set)?;
+                                context.release(
+                                    &mut dir.origins_charge,
+                                    budget::ORIGIN_ENTRY_OVERHEAD,
+                                )?;
                             }
                         }
                     }

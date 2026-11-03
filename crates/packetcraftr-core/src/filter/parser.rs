@@ -140,7 +140,7 @@ impl<'a> Compiler<'a> {
                     self.limits,
                     &mut self.requirements,
                 )?;
-                self.program.push(Op::Leaf(predicate));
+                self.program.push(Op::Leaf(Box::new(predicate)));
                 self.index = next;
                 self.expect_operand = false;
             }

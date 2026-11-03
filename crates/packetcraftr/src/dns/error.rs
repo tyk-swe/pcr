@@ -95,14 +95,14 @@ impl Classified for Error {
             | Self::InvalidSourcePort
             | Self::InvalidTimeout { .. }
             | Self::InvalidDuration { .. } => Classification::new(
-                "cli.dns_limit",
+                packetcraftr_core::error::Code::CliDnsLimit,
                 Kind::Usage,
                 Some(
                     "use a valid query and finite non-zero DNS attempt, timeout, rate, message, record, and evidence limits",
                 ),
             ),
             Self::Query(_) => Classification::new(
-                "packet.dns_query",
+                packetcraftr_core::error::Code::PacketDnsQuery,
                 Kind::Packet,
                 Some(
                     "use a bounded ASCII DNS name, a 16-bit query type, and an EDNS payload size within 512..=65535 when enabled",
@@ -110,27 +110,27 @@ impl Classified for Error {
             ),
             Self::Authorization(error) => error.classification(),
             Self::Family { .. } => Classification::new(
-                "packet.target_address_family",
+                packetcraftr_core::error::Code::PacketTargetAddressFamily,
                 Kind::Packet,
                 Some("select a DNS server address family returned by the authorized resolution"),
             ),
             Self::TcpLinkLocal { .. } => Classification::new(
-                "capability.dns_tcp_scope",
+                packetcraftr_core::error::Code::CapabilityDnsTcpScope,
                 Kind::Capability,
                 Some("use --udp-only for a scoped IPv6 link-local DNS server"),
             ),
             Self::ScopedServer { .. } => Classification::new(
-                "capability.dns_scope",
+                packetcraftr_core::error::Code::CapabilityDnsScope,
                 Kind::Capability,
                 Some("use an unscoped DNS server address or scan for scoped target support"),
             ),
             Self::UnsupportedTcpRoute => Classification::new(
-                "capability.dns_tcp",
+                packetcraftr_core::error::Code::CapabilityDnsTcp,
                 Kind::Capability,
                 Some("use --udp-only or omit interface, source, and link-mode overrides"),
             ),
             Self::DurationLimit { .. } => Classification::new(
-                "policy.dns_duration_limit",
+                packetcraftr_core::error::Code::PolicyDnsDurationLimit,
                 Kind::Policy,
                 Some(
                     "reduce attempts, timeout, or retry delay, or deliberately raise the finite duration limit",
@@ -139,7 +139,7 @@ impl Classified for Error {
             Self::Execution { source, .. } | Self::Output { source } => source.classification(),
             Self::TcpExecution { source, .. } => source.classification(),
             Self::Clock { .. } => Classification::new(
-                "io.dns_clock",
+                packetcraftr_core::error::Code::IoDnsClock,
                 Kind::Io,
                 Some("inspect the DNS retry timer and account for queries already transmitted"),
             ),
@@ -148,7 +148,7 @@ impl Classified for Error {
             | Self::InvalidEvidence { .. }
             | Self::TcpRequestRejected { .. }
             | Self::StatisticsOverflow { .. } => Classification::new(
-                "internal.dns_evidence",
+                packetcraftr_core::error::Code::InternalDnsEvidence,
                 Kind::Internal,
                 Some(
                     "treat the DNS operation as incomplete because executor evidence was inconsistent",

@@ -60,10 +60,8 @@ impl ConnectionState {
             Err(error) => {
                 let flow = dir.flow.clone();
                 let take = dir.buffer.len();
-                let sets = dir.buffer.contributors(take);
-                let (wire, dropped) = dir.buffer.take(take);
+                let (wire, sets) = dir.buffer.take(take, context)?;
                 let sources = union_balanced(sets)?;
-                dir.release_consumed(take, dropped, context)?;
                 let status = if matches!(error, http::Error::Limit(_)) {
                     Status::Limit
                 } else {
@@ -103,9 +101,7 @@ impl ConnectionState {
             Vec::new()
         };
         if consumed > 0 {
-            let sets = dir.buffer.contributors(consumed);
-            let dropped = dir.buffer.consume(consumed);
-            dir.release_consumed(consumed, dropped, context)?;
+            let sets = dir.buffer.consume(consumed, context)?;
             let prelude = self
                 .upgrade
                 .prelude

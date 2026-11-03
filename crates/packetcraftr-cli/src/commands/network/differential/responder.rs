@@ -182,6 +182,7 @@ mod tests {
     use crate::output::contract::Command;
     use clap::Parser as _;
     use lib::canary;
+    use packetcraftr_core::clock::{Clock, SystemClock};
     use std::net::UdpSocket;
     use std::thread;
 
@@ -250,8 +251,8 @@ mod tests {
         let target = (Ipv4Addr::LOCALHOST, port);
         let mut buffer = [0_u8; 128];
         let mut answered = false;
-        let probe_deadline = std::time::Instant::now() + Duration::from_secs(3);
-        while std::time::Instant::now() < probe_deadline {
+        let probe_deadline = SystemClock.now() + Duration::from_secs(3);
+        while SystemClock.now() < probe_deadline {
             if handle.is_finished() {
                 break;
             }

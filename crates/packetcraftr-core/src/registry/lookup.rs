@@ -5,7 +5,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
 
-use super::binding::{ChildBinding, Discriminator, FilterFieldBinding, ReverseBinding};
+use super::binding::{
+    ChildBinding, Discriminator, FilterFieldBinding, MatcherIdentity, RegisteredMatcher,
+    ReverseBinding,
+};
 use super::builder::Builder;
 use super::hasher::FixedState;
 use crate::codec::Codec;
@@ -28,7 +31,7 @@ pub struct Registry {
         HashMap<crate::layer::Id, Vec<ReverseBinding>, FixedState>,
         FixedState,
     >,
-    pub(super) matchers: BTreeMap<crate::layer::Id, Arc<dyn ResponseMatcher>>,
+    pub(super) matchers: BTreeMap<crate::layer::Id, RegisteredMatcher>,
     pub(super) trailing_padding: BTreeSet<crate::layer::Id>,
     pub(super) schemas: BTreeMap<crate::layer::Id, &'static crate::layer::Schema>,
     pub(super) filter_fields: BTreeMap<String, FilterFieldBinding>,
@@ -108,6 +111,20 @@ impl Registry {
         })
     }
 
+    pub(crate) fn child_bindings(&self, parent: &str) -> Vec<(Discriminator, crate::layer::Id)> {
+        self.bindings
+            .get(parent)
+            .map(|children| {
+                children
+                    .iter()
+                    .filter_map(|(discriminator, entries)| {
+                        entries.first().map(|entry| (*discriminator, entry.child))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn discriminator_for(&self, parent: &str, child: &str) -> Option<Discriminator> {
         self.reverse_bindings
             .get(parent)?
@@ -135,7 +152,15 @@ impl Registry {
     }
 
     pub fn matcher(&self, protocol: &str) -> Option<&Arc<dyn ResponseMatcher>> {
-        self.matchers.get(protocol)
+        self.matchers
+            .get(protocol)
+            .map(|registered| &registered.matcher)
+    }
+
+    pub fn matcher_identity(&self, protocol: &str) -> Option<MatcherIdentity> {
+        self.matchers
+            .get(protocol)
+            .map(|registered| registered.identity)
     }
 
     pub fn allows_trailing_padding(&self, protocol: &str) -> bool {

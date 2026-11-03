@@ -1,0 +1,184 @@
+{
+  "command": "identify",
+  "diagnostics": [],
+  "event": "identify_endpoint",
+  "mode": "stream",
+  "result": {
+    "candidates": [],
+    "endpoint": {
+      "address": "127.0.0.1:9",
+      "transport": "tcp"
+    },
+    "outcome": "truncated",
+    "probes": [
+      {
+        "attempt": 1,
+        "bytes_written": 0,
+        "completed_at": {
+          "nanoseconds": 298354058,
+          "unix_seconds": 1793697331
+        },
+        "diagnostic": "Connection refused (os error 111)",
+        "elapsed": {
+          "nanos": 283137,
+          "secs": 0
+        },
+        "identification": {
+          "candidates": [],
+          "outcome": "unknown"
+        },
+        "io_outcome": "failed",
+        "local_address": null,
+        "observation": {
+          "claims": [],
+          "diagnostic": null,
+          "outcome": "unknown",
+          "protocol": null
+        },
+        "peer_address": null,
+        "probe": "ssh-banner",
+        "request_hex": "",
+        "response_hex": "",
+        "started_at": {
+          "nanoseconds": 298070959,
+          "unix_seconds": 1793697331
+        }
+      },
+      {
+        "attempt": 1,
+        "bytes_written": 0,
+        "completed_at": {
+          "nanoseconds": 298505578,
+          "unix_seconds": 1793697331
+        },
+        "diagnostic": "Connection refused (os error 111)",
+        "elapsed": {
+          "nanos": 137933,
+          "secs": 0
+        },
+        "identification": {
+          "candidates": [],
+          "outcome": "unknown"
+        },
+        "io_outcome": "failed",
+        "local_address": null,
+        "observation": {
+          "claims": [],
+          "diagnostic": null,
+          "outcome": "unknown",
+          "protocol": null
+        },
+        "peer_address": null,
+        "probe": "http-head",
+        "request_hex": "48454144202f20485454502f312e300d0a0d0a",
+        "response_hex": "",
+        "started_at": {
+          "nanoseconds": 298367564,
+          "unix_seconds": 1793697331
+        }
+      },
+      {
+        "attempt": 1,
+        "bytes_written": 0,
+        "completed_at": {
+          "nanoseconds": 298674997,
+          "unix_seconds": 1793697331
+        },
+        "diagnostic": "Connection refused (os error 111)",
+        "elapsed": {
+          "nanos": 143215,
+          "secs": 0
+        },
+        "identification": {
+          "candidates": [],
+          "outcome": "truncated"
+        },
+        "io_outcome": "failed",
+        "local_address": null,
+        "observation": {
+          "claims": [],
+          "diagnostic": "DNS message is 0 bytes; expected at least 12",
+          "outcome": "truncated",
+          "protocol": "dns"
+        },
+        "peer_address": null,
+        "probe": "dns-tcp",
+        "request_hex": "001136ca000000010000000000000000010001",
+        "response_hex": "",
+        "started_at": {
+          "nanoseconds": 298531725,
+          "unix_seconds": 1793697331
+        }
+      },
+      {
+        "attempt": 1,
+        "bytes_written": 0,
+        "completed_at": {
+          "nanoseconds": 298817698,
+          "unix_seconds": 1793697331
+        },
+        "diagnostic": "Connection refused (os error 111)",
+        "elapsed": {
+          "nanos": 130688,
+          "secs": 0
+        },
+        "identification": {
+          "candidates": [],
+          "outcome": "unknown"
+        },
+        "io_outcome": "failed",
+        "local_address": null,
+        "observation": {
+          "claims": [],
+          "diagnostic": null,
+          "outcome": "unknown",
+          "protocol": null
+        },
+        "peer_address": null,
+        "probe": "smtp-greeting",
+        "request_hex": "",
+        "response_hex": "",
+        "started_at": {
+          "nanoseconds": 298686966,
+          "unix_seconds": 1793697331
+        }
+      },
+      {
+        "attempt": 1,
+        "bytes_written": 0,
+        "completed_at": {
+          "nanoseconds": 298953922,
+          "unix_seconds": 1793697331
+        },
+        "diagnostic": "Connection refused (os error 111)",
+        "elapsed": {
+          "nanos": 125134,
+          "secs": 0
+        },
+        "identification": {
+          "candidates": [],
+          "outcome": "unknown"
+        },
+        "io_outcome": "failed",
+        "local_address": null,
+        "observation": {
+          "claims": [],
+          "diagnostic": null,
+          "outcome": "unknown",
+          "protocol": null
+        },
+        "peer_address": null,
+        "probe": "ftp-greeting",
+        "request_hex": "",
+        "response_hex": "",
+        "started_at": {
+          "nanoseconds": 298828748,
+          "unix_seconds": 1793697331
+        }
+      }
+    ]
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 0,
+  "status": "success"
+}

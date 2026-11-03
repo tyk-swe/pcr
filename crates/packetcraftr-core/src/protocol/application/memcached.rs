@@ -3,9 +3,9 @@
 
 //! Memcached binary request/response envelope. ASCII and meta protocols remain raw.
 
-use crate::codec::*;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Reader, Writer, message_codec};
 use bytes::Bytes;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,7 +36,7 @@ impl Default for Memcached {
     }
 }
 crate::reflective_layer! {
- fn memcached_schema() => { protocol: crate::layer::Id::new("memcached"), name: "Memcached" }
+ fn memcached_schema() => { protocol: crate::protocol::BuiltinProtocol::Memcached.id(), name: "Memcached" }
  impl Memcached {
     "magic" => { kind: Unsigned, derived: false, required: false, description: "magic", reflect: magic },
     "opcode" => { kind: Unsigned, derived: false, required: false, description: "opcode", reflect: opcode },
@@ -49,74 +49,7 @@ crate::reflective_layer! {
     "value" => { kind: Bytes, derived: false, required: false, description: "value", reflect: value },
  }
 }
-fn memcached_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if !b.is_empty() {
-        fields.push(crate::layout::FieldLayout {
-            name: "magic",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-    }
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "opcode",
-            range: crate::layout::ByteRange::new(1, 2),
-        });
-    }
-    if 6 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "data_type",
-            range: crate::layout::ByteRange::new(5, 6),
-        });
-    }
-    if 8 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "status",
-            range: crate::layout::ByteRange::new(6, 8),
-        });
-    }
-    if 16 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "opaque",
-            range: crate::layout::ByteRange::new(12, 16),
-        });
-    }
-    if 24 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "cas",
-            range: crate::layout::ByteRange::new(16, 24),
-        });
-    }
-    if b.len() >= 24 {
-        let extras_end = 24 + usize::from(b[4]);
-        let key_end = extras_end + usize::from(u16::from_be_bytes([b[2], b[3]]));
-        let total = u32::from_be_bytes([b[8], b[9], b[10], b[11]]);
-        if let Some(body_end) = usize::try_from(total)
-            .ok()
-            .and_then(|n| 24usize.checked_add(n))
-            && key_end <= body_end
-            && body_end <= b.len()
-        {
-            for (name, start, end) in [
-                ("extras", 24, extras_end),
-                ("key", extras_end, key_end),
-                ("value", key_end, body_end),
-            ] {
-                fields.push(crate::layout::FieldLayout {
-                    name,
-                    range: crate::layout::ByteRange::new(start, end),
-                });
-            }
-        }
-    }
-    fields
-}
-message_codec!(
-    MemcachedCodec,
-    Memcached,
-    memcached_schema,
-    memcached_layout_wire
-);
+message_codec!(MemcachedCodec, Memcached, memcached_schema);
 
 const NAME: &str = "memcached";
 impl Memcached {
@@ -146,8 +79,17 @@ impl Memcached {
         w.put(&self.value)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..1);
+        r.mark(1, 1..2);
+        r.mark(2, 5..6);
+        r.mark(3, 6..8);
+        r.mark(4, 12..16);
+        r.mark(5, 16..24);
         let magic = r.u8()?;
         if !matches!(magic, 0x80 | 0x81) {
             return Err(unsupported(NAME, "not binary protocol"));
@@ -167,16 +109,22 @@ impl Memcached {
         let key = Bytes::copy_from_slice(r.take(key_len)?);
         let value = Bytes::copy_from_slice(r.take(total - extras_len - key_len)?);
         r.finish()?;
-        Ok(Self {
-            magic,
-            opcode,
-            data_type,
-            status,
-            opaque,
-            cas,
-            extras,
-            key,
-            value,
-        })
+        r.mark(6, 24..24 + extras_len);
+        r.mark(7, 24 + extras_len..24 + extras_len + key_len);
+        r.mark(8, 24 + extras_len + key_len..24 + total);
+        Ok((
+            Self {
+                magic,
+                opcode,
+                data_type,
+                status,
+                opaque,
+                cas,
+                extras,
+                key,
+                value,
+            },
+            r.take_layouts(),
+        ))
     }
 }

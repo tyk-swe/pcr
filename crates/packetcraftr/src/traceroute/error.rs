@@ -97,7 +97,7 @@ impl Classified for Error {
             | Self::InvalidProbeOption { .. }
             | Self::InvalidTimeout { .. }
             | Self::InvalidDuration { .. } => Classification::new(
-                "cli.traceroute_limit",
+                packetcraftr_core::error::Code::CliTracerouteLimit,
                 Kind::Usage,
                 Some(
                     "use finite non-zero hops, attempts, timeouts, rates, ports, evidence limits, and probe options valid for the strategy and address family",
@@ -108,36 +108,36 @@ impl Classified for Error {
             | Self::Execution { source, .. }
             | Self::Output { source } => source.classification(),
             Self::ScopedTarget { .. } => Classification::new(
-                "capability.traceroute_scope",
+                packetcraftr_core::error::Code::CapabilityTracerouteScope,
                 Kind::Capability,
                 Some("use an unscoped destination or scan for scoped target support"),
             ),
             Self::Family { .. } => Classification::new(
-                "packet.target_address_family",
+                packetcraftr_core::error::Code::PacketTargetAddressFamily,
                 Kind::Packet,
                 Some(
                     "select a traceroute address family returned by the authorized target resolution",
                 ),
             ),
             Self::DurationLimit { .. } => Classification::new(
-                "policy.traceroute_duration_limit",
+                packetcraftr_core::error::Code::PolicyTracerouteDurationLimit,
                 Kind::Policy,
                 Some(
                     "reduce hops, attempts, timeout, or rate delay, or deliberately raise the finite duration limit",
                 ),
             ),
             Self::Clock { .. } => Classification::new(
-                "io.traceroute_clock",
+                packetcraftr_core::error::Code::IoTracerouteClock,
                 Kind::Io,
                 Some("inspect the traceroute timer and account for probes already transmitted"),
             ),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
-                "internal.traceroute_evidence",
+                packetcraftr_core::error::Code::InternalTracerouteEvidence,
                 Kind::Internal,
                 Some("treat the trace as incomplete because executor evidence was inconsistent"),
             ),
             Self::IncoherentEvents { .. } => Classification::new(
-                "internal.traceroute_event_coherence",
+                packetcraftr_core::error::Code::InternalTracerouteEventCoherence,
                 Kind::Internal,
                 Some(
                     "collect every traceroute event once, from one traceroute, in publication order",

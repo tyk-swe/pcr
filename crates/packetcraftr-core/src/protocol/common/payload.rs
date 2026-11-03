@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::{codec::EncodeContext, layer::Padding};
+use crate::codec::EncodeContext;
 
 use super::errors::invalid;
 
@@ -11,27 +11,11 @@ pub(crate) fn payload_without_padding<'a>(
     context: &EncodeContext<'_>,
 ) -> Result<&'a [u8], crate::codec::Error> {
     let trailing = context
-        .packet
-        .iter()
-        .skip(context.index.saturating_add(1))
-        .rev()
-        .take_while(|layer| layer.is::<Padding>())
-        .filter(|layer| {
-            layer
-                .downcast_ref::<Padding>()
-                .is_some_and(|padding| padding.excluded_from(context.index))
-        })
-        .try_fold(0_usize, |total, layer| {
-            let length = layer
-                .downcast_ref::<Padding>()
-                .map_or(0, |padding| padding.bytes.len());
-            total.checked_add(length)
-        })
+        .trailing_padding
         .ok_or_else(|| invalid(name, "trailing padding length overflow"))?;
     let covered = payload
         .len()
         .checked_sub(trailing)
         .ok_or_else(|| invalid(name, "trailing padding exceeds encoded payload"))?;
-    let covered_payload = &payload[..covered];
-    Ok(covered_payload)
+    Ok(&payload[..covered])
 }

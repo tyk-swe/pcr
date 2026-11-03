@@ -108,10 +108,12 @@ where
         .first()
         .ok_or_else(|| Error::Invalid("no selected target".into()))?;
     let mut entropy = [0_u8; 8];
-    getrandom::fill(&mut entropy).map_err(|source| Error::Execution {
-        sequence: 0,
-        source: super::executor::failure(source),
-    })?;
+    packetcraftr_netio::entropy::OsEntropy
+        .fill(&mut entropy)
+        .map_err(|source| Error::Execution {
+            sequence: 0,
+            source: super::executor::failure(source),
+        })?;
     let base_identity = u32::from_be_bytes(entropy[..4].try_into().expect("four entropy bytes"));
     let source_port =
         49152 + u16::from_be_bytes(entropy[4..6].try_into().expect("two entropy bytes")) % 16384;

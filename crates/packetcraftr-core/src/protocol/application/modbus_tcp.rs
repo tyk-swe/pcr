@@ -3,9 +3,9 @@
 
 //! Modbus TCP MBAP and common function PDUs. Packet-only decoding preserves direction-ambiguous PDUs as raw; interpret uses an established connection role.
 
-use crate::codec::*;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Reader, Writer, message_codec};
 use bytes::Bytes;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,7 +36,7 @@ impl Default for ModbusTcp {
     }
 }
 crate::reflective_layer! {
- fn modbustcp_schema() => { protocol: crate::layer::Id::new("modbus_tcp"), name: "ModbusTcp" }
+ fn modbustcp_schema() => { protocol: crate::protocol::BuiltinProtocol::ModbusTcp.id(), name: "ModbusTcp" }
  impl ModbusTcp {
     "transaction_id" => { kind: Unsigned, derived: false, required: false, description: "transaction id", reflect: transaction_id },
     "unit_id" => { kind: Unsigned, derived: false, required: false, description: "unit id", reflect: unit_id },
@@ -49,37 +49,18 @@ crate::reflective_layer! {
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
 }
-fn modbustcp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "transaction_id",
-            range: crate::layout::ByteRange::new(0, 2),
-        });
-    }
-    if 7 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "unit_id",
-            range: crate::layout::ByteRange::new(6, 7),
-        });
-    }
-    if 8 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "function",
-            range: crate::layout::ByteRange::new(7, 8),
-        });
-    }
-    fields
-}
-message_codec!(
-    ModbusTcpCodec,
-    ModbusTcp,
-    modbustcp_schema,
-    modbustcp_layout_wire
-);
+message_codec!(ModbusTcpCodec, ModbusTcp, modbustcp_schema);
 
 const NAME: &str = "modbus_tcp";
 impl ModbusTcp {
+    pub(crate) fn interpret_layer(
+        layer: &mut dyn crate::layer::Layer,
+        response: bool,
+    ) -> Option<Result<(), Error>> {
+        layer
+            .downcast_mut::<Self>()
+            .map(|modbus| modbus.interpret(response))
+    }
     fn validate_fields(&self) -> Result<(), Error> {
         let quantity_limit = match (self.form.as_str(), self.function) {
             ("request", 1 | 2) => Some(2000),
@@ -169,8 +150,14 @@ impl ModbusTcp {
         w.put(&p.bytes)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..2);
+        r.mark(1, 6..7);
+        r.mark(2, 7..8);
         let transaction_id = r.u16()?;
         if r.u16()? != 0 {
             return Err(unsupported(NAME, "non-Modbus protocol identifier"));
@@ -196,7 +183,7 @@ impl ModbusTcp {
             s.exception_code = s.data[0];
             s.data = Bytes::new();
         }
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
     /// Interpret a direction-ambiguous PDU after its connection role is known.
     pub fn interpret(&mut self, response: bool) -> Result<(), Error> {

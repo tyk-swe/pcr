@@ -10,28 +10,42 @@ mod link;
 pub use limits::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE, Limits};
 pub use link::{MacAddress, VlanKind, VlanTag};
 
+#[derive(Clone)]
+struct Entry {
+    layer: Box<dyn Layer>,
+    encoded_payload_length: Option<usize>,
+}
+
+impl Entry {
+    fn new(layer: Box<dyn Layer>) -> Self {
+        Self {
+            layer,
+            encoded_payload_length: None,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Packet {
-    layers: Vec<Box<dyn Layer>>,
-    encoded_payload_lengths: Vec<Option<usize>>,
+    layers: Vec<Entry>,
 }
 
 impl Packet {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             layers: Vec::with_capacity(capacity),
-            encoded_payload_lengths: Vec::new(),
         }
     }
 
-    pub(crate) fn from_encoded_layers(
-        layers: Vec<Box<dyn Layer>>,
-        encoded_payload_lengths: Vec<Option<usize>>,
-    ) -> Self {
-        debug_assert_eq!(encoded_payload_lengths.len(), layers.len());
+    pub(crate) fn from_encoded_layers(entries: Vec<(Box<dyn Layer>, Option<usize>)>) -> Self {
         Self {
-            layers,
-            encoded_payload_lengths,
+            layers: entries
+                .into_iter()
+                .map(|(layer, encoded_payload_length)| Entry {
+                    layer,
+                    encoded_payload_length,
+                })
+                .collect(),
         }
     }
 
@@ -40,7 +54,9 @@ impl Packet {
         encoded_payload_lengths: Vec<Option<usize>>,
     ) {
         debug_assert_eq!(encoded_payload_lengths.len(), self.layers.len());
-        self.encoded_payload_lengths = encoded_payload_lengths;
+        for (entry, length) in self.layers.iter_mut().zip(encoded_payload_lengths) {
+            entry.encoded_payload_length = length;
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -56,7 +72,7 @@ impl Packet {
     }
 
     pub fn push_boxed(&mut self, layer: Box<dyn Layer>) -> &mut Self {
-        self.layers.push(layer);
+        self.layers.push(Entry::new(layer));
         self.invalidate_encoded_payload_lengths();
         self
     }
@@ -69,7 +85,7 @@ impl Packet {
             });
         }
         shift_padding_for_insert(&mut self.layers, index);
-        self.layers.insert(index, Box::new(layer));
+        self.layers.insert(index, Entry::new(Box::new(layer)));
         self.invalidate_encoded_payload_lengths();
         Ok(self)
     }
@@ -84,7 +100,7 @@ impl Packet {
         if removal_would_orphan_padding(&self.layers, index) {
             return Err(Error::PaddingBoundaryRemoval { index });
         }
-        let removed = self.layers.remove(index);
+        let removed = self.layers.remove(index).layer;
         shift_padding_for_remove(&mut self.layers, index);
         self.invalidate_encoded_payload_lengths();
         Ok(removed)
@@ -97,7 +113,7 @@ impl Packet {
             .layers
             .get_mut(index)
             .ok_or(Error::IndexOutOfBounds { index, len })?;
-        std::mem::swap(slot, &mut layer);
+        std::mem::swap(&mut slot.layer, &mut layer);
         self.invalidate_encoded_payload_lengths();
         Ok(layer)
     }
@@ -105,17 +121,17 @@ impl Packet {
     pub fn get<T: Layer>(&self) -> Option<&T> {
         self.layers
             .iter()
-            .find_map(|layer| layer.downcast_ref::<T>())
+            .find_map(|entry| entry.layer.downcast_ref::<T>())
     }
 
     pub fn get_mut<T: Layer>(&mut self) -> Option<&mut T> {
-        let index = self.layers.iter().position(|layer| layer.is::<T>())?;
+        let index = self.layers.iter().position(|entry| entry.layer.is::<T>())?;
         self.invalidate_encoded_payload_lengths();
-        self.layers.get_mut(index)?.downcast_mut::<T>()
+        self.layers.get_mut(index)?.layer.downcast_mut::<T>()
     }
 
     pub fn layer(&self, index: usize) -> Option<&dyn Layer> {
-        self.layers.get(index).map(Box::as_ref)
+        self.layers.get(index).map(|entry| entry.layer.as_ref())
     }
 
     pub fn layer_mut(&mut self, index: usize) -> Option<&mut dyn Layer> {
@@ -123,44 +139,48 @@ impl Packet {
             return None;
         }
         self.invalidate_encoded_payload_lengths();
-        Some(self.layers.get_mut(index)?.as_mut())
+        Some(self.layers.get_mut(index)?.layer.as_mut())
     }
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &dyn Layer> + DoubleEndedIterator {
-        self.layers.iter().map(Box::as_ref)
+        self.layers.iter().map(|entry| entry.layer.as_ref())
     }
 
     pub fn iter_of<T: Layer>(&self) -> impl DoubleEndedIterator<Item = &T> {
         self.layers
             .iter()
-            .filter_map(|layer| layer.downcast_ref::<T>())
+            .filter_map(|entry| entry.layer.downcast_ref::<T>())
     }
 
     pub fn iter_of_mut<T: Layer>(&mut self) -> impl DoubleEndedIterator<Item = &mut T> {
-        if self.layers.iter().any(|layer| layer.is::<T>()) {
+        if self.layers.iter().any(|entry| entry.layer.is::<T>()) {
             self.invalidate_encoded_payload_lengths();
         }
         self.layers
             .iter_mut()
-            .filter_map(|layer| layer.downcast_mut::<T>())
+            .filter_map(|entry| entry.layer.downcast_mut::<T>())
     }
 
     /// The value includes trailing padding and is available only for packets
     /// produced by the decoder or builder without subsequent mutable access.
     pub fn encoded_payload_length(&self, index: usize) -> Option<usize> {
-        self.encoded_payload_lengths.get(index).copied().flatten()
+        self.layers
+            .get(index)
+            .and_then(|entry| entry.encoded_payload_length)
     }
 
     fn invalidate_encoded_payload_lengths(&mut self) {
-        self.encoded_payload_lengths.clear();
+        for entry in &mut self.layers {
+            entry.encoded_payload_length = None;
+        }
     }
 }
 
 impl fmt::Debug for Packet {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut list = formatter.debug_list();
-        for layer in &self.layers {
-            list.entry(layer);
+        for entry in &self.layers {
+            list.entry(&entry.layer);
         }
         list.finish()
     }
@@ -168,37 +188,55 @@ impl fmt::Debug for Packet {
 
 impl<L: Layer> FromIterator<L> for Packet {
     fn from_iter<T: IntoIterator<Item = L>>(iter: T) -> Self {
-        let layers = iter
-            .into_iter()
-            .map(|layer| Box::new(layer) as Box<dyn Layer>)
-            .collect::<Vec<_>>();
-        let encoded_payload_lengths = Vec::new();
         Self {
-            layers,
-            encoded_payload_lengths,
+            layers: iter
+                .into_iter()
+                .map(|layer| Entry::new(Box::new(layer)))
+                .collect(),
         }
     }
 }
 
 impl<L: Layer> Extend<L> for Packet {
     fn extend<T: IntoIterator<Item = L>>(&mut self, iter: T) {
-        self.layers.extend(
-            iter.into_iter()
-                .map(|layer| Box::new(layer) as Box<dyn Layer>),
-        );
+        self.layers
+            .extend(iter.into_iter().map(|layer| Entry::new(Box::new(layer))));
         self.invalidate_encoded_payload_lengths();
     }
 }
 
+pub struct Iter<'a> {
+    entries: std::slice::Iter<'a, Entry>,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = &'a dyn Layer;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.entries.next().map(|entry| entry.layer.as_ref())
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.entries.size_hint()
+    }
+}
+
+impl DoubleEndedIterator for Iter<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.entries.next_back().map(|entry| entry.layer.as_ref())
+    }
+}
+
+impl ExactSizeIterator for Iter<'_> {}
+
 impl<'a> IntoIterator for &'a Packet {
     type Item = &'a dyn Layer;
-    type IntoIter = std::iter::Map<
-        std::slice::Iter<'a, Box<dyn Layer>>,
-        fn(&'a Box<dyn Layer>) -> &'a dyn Layer,
-    >;
+    type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.layers.iter().map(Box::as_ref)
+        Iter {
+            entries: self.layers.iter(),
+        }
     }
 }
 
@@ -222,31 +260,33 @@ impl crate::error::Classified for Error {
         use crate::error::{Classification, Kind};
         match self {
             Self::IndexOutOfBounds { .. } => Classification::new(
-                "cli.layer_index",
+                crate::error::Code::CliLayerIndex,
                 Kind::Usage,
                 Some("address a layer index inside the packet"),
             ),
             Self::PaddingBoundaryRemoval { .. } => Classification::new(
-                "packet.padding_boundary",
+                crate::error::Code::PacketPaddingBoundary,
                 Kind::Packet,
                 Some("remove the padding layer before the layer its boundary depends on"),
             ),
-            Self::InvalidMacAddress => Classification::new("cli.error", Kind::Usage, None),
+            Self::InvalidMacAddress => {
+                Classification::new(crate::error::Code::CliError, Kind::Usage, None)
+            }
         }
     }
 }
 
-fn removal_would_orphan_padding(layers: &[Box<dyn Layer>], index: usize) -> bool {
-    layers.iter().enumerate().any(|(padding_index, layer)| {
-        layer.downcast_ref::<Padding>().is_some_and(|padding| {
+fn removal_would_orphan_padding(layers: &[Entry], index: usize) -> bool {
+    layers.iter().enumerate().any(|(padding_index, entry)| {
+        Padding::from_layer(&*entry.layer).is_some_and(|padding| {
             padding.outside_layer == Some(index) && index.saturating_add(1) >= padding_index
         })
     })
 }
 
-fn shift_padding_for_insert(layers: &mut [Box<dyn Layer>], index: usize) {
-    for layer in layers {
-        let Some(padding) = layer.downcast_mut::<Padding>() else {
+fn shift_padding_for_insert(layers: &mut [Entry], index: usize) {
+    for entry in layers {
+        let Some(padding) = Padding::from_layer_mut(&mut *entry.layer) else {
             continue;
         };
         if let Some(outside_layer) = &mut padding.outside_layer
@@ -257,9 +297,9 @@ fn shift_padding_for_insert(layers: &mut [Box<dyn Layer>], index: usize) {
     }
 }
 
-fn shift_padding_for_remove(layers: &mut [Box<dyn Layer>], index: usize) {
-    for layer in layers {
-        let Some(padding) = layer.downcast_mut::<Padding>() else {
+fn shift_padding_for_remove(layers: &mut [Entry], index: usize) {
+    for entry in layers {
+        let Some(padding) = Padding::from_layer_mut(&mut *entry.layer) else {
             continue;
         };
         if let Some(outside_layer) = &mut padding.outside_layer

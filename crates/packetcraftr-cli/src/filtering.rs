@@ -45,7 +45,7 @@ pub(crate) fn compile(
     if filter.requirements().stream_index && !capabilities.stream_index {
         return Err(CliError::from_classification(
             Classification::new(
-                "cli.filter_unsupported_field",
+                packetcraftr_core::error::Code::CliFilterUnsupportedField,
                 Kind::Usage,
                 Some(
                     "use `analyze stats`, `analyze expert`, or `files export` for stream-aware filters, \

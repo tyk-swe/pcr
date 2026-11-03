@@ -111,7 +111,6 @@ pub(crate) fn run(
     .map_err(CliError::classified)?;
     let _ = writer.into_inner().finish().map_err(CliError::classified)?;
     staged.sync()?;
-    invocation.check()?;
     staged.persist()?;
     let report = output::merge::Report::from((args.write.display().to_string(), report));
     match format {

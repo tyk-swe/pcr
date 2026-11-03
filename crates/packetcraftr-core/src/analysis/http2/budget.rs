@@ -57,11 +57,6 @@ impl Budget {
     pub(crate) fn into_summary(self) -> Summary {
         self.summary
     }
-
-    #[cfg(test)]
-    pub(crate) fn outstanding(&self) -> (usize, usize) {
-        (self.live, self.spans)
-    }
 }
 
 pub(crate) struct Context<'a> {

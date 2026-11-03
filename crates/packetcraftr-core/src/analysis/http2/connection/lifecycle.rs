@@ -20,8 +20,6 @@ use std::collections::HashMap;
 impl ConnectionState {
     pub(crate) fn drain(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
         for dir in self.directions.iter_mut() {
-            let pending = dir.buffer.len();
-            dir.buffer.consume(pending);
             dir.release_all(context)?;
             dir.decoder = None;
             dir.block_sources = HashMap::new();
@@ -187,10 +185,8 @@ impl ConnectionState {
             let phase = dir.phase;
             let partial = dir.buffer.len();
             if partial > 0 && !deferred_ack {
-                let sets = dir.buffer.contributors(partial);
-                let (wire, dropped) = dir.buffer.take(partial);
+                let (wire, sets) = dir.buffer.take(partial, context)?;
                 let sources = union_balanced(sets)?;
-                dir.release_consumed(partial, dropped, context)?;
                 let detail = match phase {
                     DirectionPhase::Sniff => "connection closed before startup was determined",
                     DirectionPhase::Prelude => "connection closed mid HTTP/1 exchange",
@@ -298,10 +294,8 @@ impl ConnectionState {
         for dir in self.directions.iter_mut() {
             let partial = dir.buffer.len();
             if partial > 0 {
-                let sets = dir.buffer.contributors(partial);
-                let (wire, dropped) = dir.buffer.take(partial);
+                let (wire, sets) = dir.buffer.take(partial, context)?;
                 let sources = union_balanced(sets)?;
-                dir.release_consumed(partial, dropped, context)?;
                 partials.push((dir.flow.clone(), None, wire, sources));
             }
             if let Some(mut chain) = dir.chain.take() {

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::clock::{Clock, SystemClock};
 use std::{
     any::Any,
     collections::VecDeque,
@@ -102,7 +103,7 @@ impl Inbox {
 
     pub(super) fn next_with_idle(&self, idle: Duration) -> Option<NetlinkRequest> {
         let mut state = lock(&self.state);
-        let expires = Instant::now() + idle;
+        let expires = SystemClock.now() + idle;
         loop {
             if let Some(request) = state.queue.pop_front() {
                 state.active = true;

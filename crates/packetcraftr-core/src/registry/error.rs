@@ -21,7 +21,7 @@ pub enum Error {
     BindingConflict {
         parent: crate::layer::Id,
         discriminator: u64,
-        priority: i32,
+        priority: super::Priority,
     },
     #[error("response matcher for {protocol} is already registered")]
     DuplicateMatcher { protocol: crate::layer::Id },
@@ -40,12 +40,17 @@ pub enum Error {
     },
     #[error("filter field path {path} is not usable: {reason}")]
     InvalidFilterField { path: String, reason: String },
+    #[error("codec {protocol} declares schema for {schema_protocol}")]
+    SchemaProtocolMismatch {
+        protocol: crate::layer::Id,
+        schema_protocol: crate::layer::Id,
+    },
 }
 
 impl crate::error::Classified for Error {
     fn classification(&self) -> crate::error::Classification {
         crate::error::Classification::new(
-            "internal.registry",
+            crate::error::Code::InternalRegistry,
             crate::error::Kind::Internal,
             Some("register each protocol, alias, link type, matcher, and filter field once"),
         )

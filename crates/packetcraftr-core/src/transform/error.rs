@@ -36,22 +36,22 @@ impl Classified for Error {
             Self::Decode(source) => source.classification(),
             Self::Header(source) => source.classification(),
             Self::Unsupported(_) => Classification::new(
-                "packet.transform_unsupported",
+                crate::error::Code::PacketTransformUnsupported,
                 Kind::Packet,
                 Some("inspect the documented transform boundaries"),
             ),
             Self::Limit { .. } | Self::LimitRange { .. } => Classification::new(
-                "policy.transform_limit",
+                crate::error::Code::PolicyTransformLimit,
                 Kind::Policy,
                 Some("raise a finite transform limit or reduce the input"),
             ),
             Self::Invalid(_) => Classification::new(
-                "packet.transform_input",
+                crate::error::Code::PacketTransformInput,
                 Kind::Packet,
                 Some("supply a complete supported datagram"),
             ),
             Self::Checksum(_) => Classification::new(
-                "packet.transform_checksum",
+                crate::error::Code::PacketTransformChecksum,
                 Kind::Packet,
                 Some("supply a complete datagram the checksum can cover"),
             ),

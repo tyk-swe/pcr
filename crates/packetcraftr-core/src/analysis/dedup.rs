@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::protocol::identity::TcpHeader;
 use crate::protocol::transport::Tcp;
 use bytes::Bytes;
 
@@ -68,7 +69,12 @@ impl Deduplicator {
         self.flow_half(flow, client).closed = true;
     }
 
-    pub(crate) fn observe_syn(&mut self, flow: &ScopedFlowKey, client: &ScopedFlowKey, tcp: &Tcp) {
+    pub(crate) fn observe_syn(
+        &mut self,
+        flow: &ScopedFlowKey,
+        client: &ScopedFlowKey,
+        tcp: TcpHeader<'_>,
+    ) {
         if tcp.flags & Tcp::SYN != 0 {
             let first = tcp.sequence.wrapping_add(1);
             let half = self.flow_half(flow, client);

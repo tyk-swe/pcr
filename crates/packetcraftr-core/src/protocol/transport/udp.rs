@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::diagnostic::Severity;
-use std::collections::BTreeMap;
 use std::net::IpAddr;
 
 use bytes::Bytes;
@@ -10,18 +9,18 @@ use bytes::Bytes;
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
     diagnostic::{Diagnostic, UDP_CHECKSUM},
-    field::{self, WireValue},
-    layer::{Id, Layer, Malformed, Padding, reflective_layer},
+    field::WireValue,
+    layer::{Id, Layer, reflective_layer},
     protocol::BuiltinProtocol,
     registry::Discriminator,
 };
 
 use super::ports::child_discriminators;
 use crate::protocol::common::{
-    ValueExpectation, invalid, make_layer, payload_without_padding, resolve_u16,
-    strict_or_diagnostic, transport_checksum_parts, truncated, typed_layer,
+    ValueExpectation, invalid, payload_without_padding, resolve_u16, strict_or_diagnostic,
+    transport_checksum_parts, truncated, typed_layer,
 };
-use crate::protocol::network::{ip_protocol, resolve_envelope};
+use crate::protocol::network::ip_protocol;
 
 const NAME: &str = BuiltinProtocol::Udp.as_str();
 
@@ -137,7 +136,7 @@ impl Codec for UdpCodec {
             context.mode,
             &mut diagnostics,
         )?;
-        let network = resolve_envelope(NAME, context)?;
+        let network = context.network_envelope()?;
         let mut header = [0_u8; UDP_LEN];
         header[0..2].copy_from_slice(&layer.source_port.to_be_bytes());
         header[2..4].copy_from_slice(&layer.destination_port.to_be_bytes());
@@ -235,11 +234,12 @@ impl Codec for UdpCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Udp::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(udp_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Udp::default()))
     }
 }
 
@@ -252,7 +252,9 @@ fn validate_child_selection(
     let Some(child) = context.child else {
         return Ok(diagnostics);
     };
-    if child.is::<Padding>() || child.is::<Malformed>() {
+    if child.is_builtin(crate::protocol::BuiltinProtocol::Padding.id())
+        || child.is_builtin(crate::protocol::BuiltinProtocol::Malformed.id())
+    {
         return Ok(diagnostics);
     }
     let Some((selecting_port, selected)) = child_discriminators(preferred_ports(
@@ -263,8 +265,7 @@ fn validate_child_selection(
     .into_iter()
     .find_map(|discriminator| {
         context
-            .registry
-            .child_for(NAME, discriminator)
+            .child_for(discriminator)
             .map(|selected| (discriminator.0, selected))
     }) else {
         return Ok(diagnostics);
@@ -276,10 +277,7 @@ fn validate_child_selection(
         .into_iter()
         .find(|port| {
             *port != 0
-                && context
-                    .registry
-                    .child_for(NAME, Discriminator(u64::from(*port)))
-                    == Some(*child.protocol_id())
+                && context.child_for(Discriminator(u64::from(*port))) == Some(*child.protocol_id())
         });
     let message = if let Some(child_port) = child_port {
         format!(
@@ -287,9 +285,8 @@ fn validate_child_selection(
             child.protocol_id()
         )
     } else {
-        match context
-            .registry
-            .discriminator_for(NAME, child.protocol_id().as_str())
+        match child
+            .discriminator
             .filter(|discriminator| discriminator.0 != 0)
         {
             Some(registered) => format!(

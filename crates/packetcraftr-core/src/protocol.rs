@@ -5,24 +5,22 @@
 
 pub mod application;
 pub mod builtin;
-mod capabilities;
 pub mod capture;
 mod catalog;
-pub use capabilities::{MESSAGE_PROTOCOLS, MessageProtocol};
 mod common;
 pub(crate) mod framing;
 mod message;
 pub use message::Records;
 pub mod headers;
+pub mod identity;
 pub mod link;
 mod matcher;
 pub mod network;
-pub mod response_identity;
 pub mod semantics;
 pub mod transport;
 pub mod tunnel;
 
-pub use catalog::{BuiltinProtocol, UnknownProtocolName};
+pub use catalog::{BuiltinProtocol, MatcherKind, UnknownProtocolName};
 pub use common::{ChecksumAccumulator, checksum_parts};
 pub(crate) use common::{network_from_addresses, transport_checksum_parts};
 

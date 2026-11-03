@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
@@ -14,8 +12,8 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    binding_protocol, make_layer, out_of_range, strict_or_diagnostic, truncated, typed_layer,
-    validate_raw_child_discriminator, wrong_type,
+    out_of_range, strict_or_diagnostic, truncated, typed_layer, validate_raw_child_discriminator,
+    wrong_type,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -111,13 +109,10 @@ pub(crate) fn validate_family_binding(
     let Some(child) = context.child else {
         return Ok(diagnostics);
     };
-    if BuiltinProtocol::Raw.identifies(child) {
+    if child.is_builtin(BuiltinProtocol::Raw.id()) {
         return Ok(diagnostics);
     }
-    let Some(expected) = context
-        .registry
-        .discriminator_for(parent, binding_protocol(child))
-    else {
+    let Some(expected) = child.discriminator else {
         return Ok(diagnostics);
     };
     if family_discriminator(family) == expected.0 {
@@ -167,11 +162,12 @@ impl Codec for BsdNullCodec {
         decode_family(&input, FamilyHeader::Null)
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(BsdNull::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(null_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(BsdNull::default()))
     }
 }
 
@@ -202,11 +198,12 @@ impl Codec for BsdLoopCodec {
         decode_family(&input, FamilyHeader::Loop)
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(BsdLoop::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(loop_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(BsdLoop::default()))
     }
 }
 

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
@@ -13,7 +11,7 @@ use crate::{
     protocol::{
         application::byte_string_field,
         common::{
-            ensure_encode_budget, invalid, make_layer,
+            ensure_encode_budget, invalid,
             structured::{Encoder, Object, list, member, object},
             typed_layer, unsupported,
         },
@@ -149,36 +147,32 @@ reflective_layer! {
 
 fn tftp_layout(layer: &Tftp) -> Vec<FieldLayout> {
     let mut fields = tftp_static_layout();
-    let field = |name: &'static str, start: usize, end: usize| FieldLayout {
-        name,
+    let field = |index: usize, start: usize, end: usize| FieldLayout {
+        index,
         range: ByteRange::new(start, end),
     };
     let mut cursor = OPCODE_LEN;
     match layer.opcode {
         RRQ | WRQ => {
             let filename_end = cursor.saturating_add(layer.filename.len());
-            fields.push(field("filename", cursor, filename_end));
+            fields.push(field(1, cursor, filename_end));
             let mode_start = filename_end.saturating_add(1);
             let mode_end = mode_start.saturating_add(layer.mode.len());
-            fields.push(field("mode", mode_start, mode_end));
+            fields.push(field(2, mode_start, mode_end));
             cursor = mode_end.saturating_add(1);
             push_options_layout(&mut fields, layer, cursor);
         }
         DATA => {
-            fields.push(field("block", cursor, cursor.saturating_add(2)));
+            fields.push(field(4, cursor, cursor.saturating_add(2)));
             cursor = cursor.saturating_add(2);
-            fields.push(field(
-                "data",
-                cursor,
-                cursor.saturating_add(layer.data.len()),
-            ));
+            fields.push(field(5, cursor, cursor.saturating_add(layer.data.len())));
         }
-        ACK => fields.push(field("block", cursor, cursor.saturating_add(2))),
+        ACK => fields.push(field(4, cursor, cursor.saturating_add(2))),
         ERROR => {
-            fields.push(field("error_code", cursor, cursor.saturating_add(2)));
+            fields.push(field(6, cursor, cursor.saturating_add(2)));
             cursor = cursor.saturating_add(2);
             fields.push(field(
-                "error_message",
+                7,
                 cursor,
                 cursor.saturating_add(layer.error_message.len()),
             ));
@@ -198,7 +192,7 @@ fn push_options_layout(fields: &mut Vec<FieldLayout>, layer: &Tftp, start: usize
     });
     if end != start {
         fields.push(FieldLayout {
-            name: "options",
+            index: 3,
             range: ByteRange::new(start, end),
         });
     }
@@ -407,10 +401,11 @@ impl Codec for TftpCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Tftp::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(tftp_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Tftp::default()))
     }
 }

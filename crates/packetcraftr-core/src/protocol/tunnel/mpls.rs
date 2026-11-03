@@ -1,19 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    field,
-    layer::{Id, Layer, Malformed, reflective_layer},
+    layer::{Id, Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ensure_encode_budget, invalid, make_layer, strict_or_diagnostic, truncated, typed_layer,
+    ensure_encode_budget, invalid, strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -80,8 +77,12 @@ impl Codec for MplsCodec {
 
         let mut diagnostics = Vec::new();
         let expected_bottom = match context.child {
-            Some(child) if child.is::<Mpls>() => Some(false),
-            Some(child) if child.is::<Malformed>() => None,
+            Some(child) if child.is_builtin(crate::protocol::BuiltinProtocol::Mpls.id()) => {
+                Some(false)
+            }
+            Some(child) if child.is_builtin(crate::protocol::BuiltinProtocol::Malformed.id()) => {
+                None
+            }
             _ => Some(true),
         };
         if let Some(expected_bottom) = expected_bottom
@@ -151,10 +152,11 @@ impl Codec for MplsCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Mpls::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(mpls_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Mpls::default()))
     }
 }

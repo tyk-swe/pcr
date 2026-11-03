@@ -7,3 +7,6 @@ mod filter_fields;
 
 pub use assembly::{registry, registry_with, registry_with_tls_ports};
 pub use bindings::TLS_TCP_PORTS;
+
+#[cfg(test)]
+mod tests;

@@ -163,7 +163,7 @@ pub enum Error {
 }
 
 const INVALID_PACKET_SEMANTICS: Classification = Classification::new(
-    "policy.invalid_packet_semantics",
+    packetcraftr_core::error::Code::PolicyInvalidPacketSemantics,
     Kind::Policy,
     Some("repair malformed or unsupported route-bearing packet fields before live transmission"),
 );
@@ -174,23 +174,23 @@ impl Classified for Error {
             // A malformed resolved-address bound is a caller request error and
             // shares the `cli.live_target` code with target resolution.
             Self::InvalidAddressLimit { .. } => (
-                "cli.live_target",
+                packetcraftr_core::error::Code::CliLiveTarget,
                 "set the resolved-address limit to at least 1 and no more than the supported maximum",
             ),
             Self::PublicDestination { .. } => (
-                "policy.public_destination",
+                packetcraftr_core::error::Code::PolicyPublicDestination,
                 "explicitly authorize public destinations only for networks you are permitted to test",
             ),
             Self::DestinationNotAllowed { .. } => (
-                "policy.destination_not_allowed",
+                packetcraftr_core::error::Code::PolicyDestinationNotAllowed,
                 "permit the destination with an exact address or CIDR allowlist entry, or choose a permitted destination",
             ),
             Self::InvalidDestinationConstraint { .. } => (
-                "cli.live_target",
+                packetcraftr_core::error::Code::CliLiveTarget,
                 "use an IP address or canonical CIDR network as the destination constraint",
             ),
             Self::DestinationConstraintLimit { .. } => (
-                "cli.live_target",
+                packetcraftr_core::error::Code::CliLiveTarget,
                 "declare fewer destination constraints, covering adjacent hosts with one CIDR network where possible",
             ),
             Self::InvalidPacketSemantics { .. }
@@ -199,35 +199,35 @@ impl Classified for Error {
                 return INVALID_PACKET_SEMANTICS;
             }
             Self::HostnameResolution { .. } => (
-                "policy.hostname_resolution",
+                packetcraftr_core::error::Code::PolicyHostnameResolution,
                 "explicitly authorize hostname resolution, then independently authorize every resolved address",
             ),
             Self::PermissivePacket => (
-                "policy.permissive_packet",
+                packetcraftr_core::error::Code::PolicyPermissivePacket,
                 "authorize permissive live traffic in both build options and traffic policy",
             ),
             Self::PermissiveLiveOptIn => (
-                "policy.permissive_live_opt_in",
+                packetcraftr_core::error::Code::PolicyPermissiveLiveOptIn,
                 "set the explicit per-operation malformed-live opt-in in addition to policy approval",
             ),
             Self::SourceNotInterfaceOwned { .. } => (
-                "policy.source_ownership",
+                packetcraftr_core::error::Code::PolicySourceOwnership,
                 "use an interface-owned source, select it with the route source option, or explicitly authorize source spoofing",
             ),
             Self::PacketLimit { .. } => (
-                "policy.packet_limit",
+                packetcraftr_core::error::Code::PolicyPacketLimit,
                 "reduce the operation packet count or deliberately raise the configured traffic budget",
             ),
             Self::ByteLimit { .. } => (
-                "policy.byte_limit",
+                packetcraftr_core::error::Code::PolicyByteLimit,
                 "reduce the operation byte count or deliberately raise the configured traffic budget",
             ),
             Self::TrafficUnitLimit { .. } => (
-                "policy.traffic_unit_limit",
+                packetcraftr_core::error::Code::PolicyTrafficUnitLimit,
                 "reduce the connections, messages, or DNS attempts, or deliberately raise the packet/socket traffic-unit budget",
             ),
             Self::TrafficByteLimit { .. } => (
-                "policy.traffic_byte_limit",
+                packetcraftr_core::error::Code::PolicyTrafficByteLimit,
                 "reduce the application or query bytes, or deliberately raise the wire/application byte budget",
             ),
         };

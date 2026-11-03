@@ -48,12 +48,12 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Socket(_) => Classification::new(
-                "io.tcp_connect",
+                packetcraftr_core::error::Code::IoTcpConnect,
                 Kind::Io,
                 Some("inspect the socket failure and the destination's reachability"),
             ),
             Self::Evidence { .. } => Classification::new(
-                "io.tcp_connect_evidence",
+                packetcraftr_core::error::Code::IoTcpConnectEvidence,
                 Kind::Io,
                 Some("inspect the socket endpoint query failure"),
             ),
@@ -62,24 +62,28 @@ impl Classified for Error {
                 operation: "starting a TCP connection",
             }
             .classification(),
-            Self::ExchangeLimit => Classification::new("cli.tcp_exchange_limit", Kind::Usage, None),
+            Self::ExchangeLimit => Classification::new(
+                packetcraftr_core::error::Code::CliTcpExchangeLimit,
+                Kind::Usage,
+                None,
+            ),
             Self::Timeout => Classification::new(
-                "cli.tcp_connect_timeout",
+                packetcraftr_core::error::Code::CliTcpConnectTimeout,
                 Kind::Usage,
                 Some("choose a finite nonzero connection timeout"),
             ),
             Self::Capacity { .. } => Classification::new(
-                "io.tcp_connect_capacity",
+                packetcraftr_core::error::Code::IoTcpConnectCapacity,
                 Kind::Io,
                 Some("wait for admitted connection cleanup or reduce concurrency"),
             ),
             Self::Spawn(_) | Self::Worker => Classification::new(
-                "io.tcp_connect_worker",
+                packetcraftr_core::error::Code::IoTcpConnectWorker,
                 Kind::Io,
                 Some("inspect local worker resources and retry"),
             ),
             Self::Completed => Classification::new(
-                "internal.tcp_connect_state",
+                packetcraftr_core::error::Code::InternalTcpConnectState,
                 Kind::Internal,
                 Some("consume each completed connection exactly once"),
             ),

@@ -146,7 +146,6 @@ impl crate::commands::Spec for Args {
         .identify(&request)
         .map_err(CliError::classified)?;
         invocation.check()?;
-        invocation.check()?;
         let report = output::identify::Report::try_from(report).map_err(CliError::classified)?;
         match format {
             Format::Text => rendering::render_text(invocation, &report, stream.presentation())?,
@@ -157,7 +156,6 @@ impl crate::commands::Spec for Args {
             )?,
             Format::Ndjson => {
                 for record in &report.records {
-                    invocation.check()?;
                     invocation.check()?;
                     stream.emit_published(Published::new(record, Vec::new()))?;
                 }

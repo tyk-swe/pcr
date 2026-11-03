@@ -19,12 +19,10 @@ use crate::{
     invocation::StreamEncoder,
     system::{Runtime, client, resolve},
 };
+use packetcraftr_core::clock::{Clock, SystemClock};
 use packetcraftr_core::{capture_file, error::Kind};
 use packetcraftr_netio as net;
-use std::{
-    collections::HashSet,
-    time::{Duration, Instant},
-};
+use std::{collections::HashSet, time::Duration};
 
 use self::files::Files;
 use self::frames::{Decoding, Destinations};
@@ -79,7 +77,7 @@ pub(super) fn run(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let timeout = args.timeout.timeout();
-    if timeout > net::deadline::MAX_WAIT || Instant::now().checked_add(timeout).is_none() {
+    if timeout > net::deadline::MAX_WAIT || SystemClock.now().checked_add(timeout).is_none() {
         return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
             timeout,
             maximum: net::deadline::MAX_WAIT,
@@ -226,7 +224,7 @@ fn validate_output(args: &Args, format: Format) -> Result<Compression, CliError>
     if args.tree.tree && !args.dissect {
         return Err(CliError::from_classification(
             packetcraftr_core::error::Classification::new(
-                "cli.tree_requires_dissect",
+                packetcraftr_core::error::Code::CliTreeRequiresDissect,
                 Kind::Usage,
                 Some("add --dissect to show each frame's layers as a tree"),
             ),
@@ -239,7 +237,7 @@ fn validate_output(args: &Args, format: Format) -> Result<Compression, CliError>
     {
         return Err(CliError::from_classification(
             packetcraftr_core::error::Classification::new(
-                "cli.capture_decode_format",
+                packetcraftr_core::error::Code::CliCaptureDecodeFormat,
                 Kind::Usage,
                 Some("use --output text or --output ndjson for decoded frame output"),
             ),

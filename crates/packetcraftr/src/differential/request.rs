@@ -124,9 +124,11 @@ impl Request {
 
 pub fn generate_token() -> Result<[u8; TOKEN_LEN], Error> {
     let mut token = [0_u8; TOKEN_LEN];
-    getrandom::fill(&mut token).map_err(|source| Error::TokenGeneration {
-        message: source.to_string(),
-    })?;
+    packetcraftr_netio::entropy::OsEntropy
+        .fill(&mut token)
+        .map_err(|source| Error::TokenGeneration {
+            message: source.to_string(),
+        })?;
     Ok(token)
 }
 

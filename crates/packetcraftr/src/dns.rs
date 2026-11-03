@@ -36,7 +36,6 @@ const OPCODE_MASK: u16 = 0x7800;
 const RESERVED_MASK: u16 = 0x0040;
 const RCODE_MASK: u16 = 0x000f;
 const CLASS_IN: u16 = 1;
-const TYPE_OPT: u16 = 41;
 const MAX_PROBE_OVERHEAD: u64 = 14 + 40 + 8;
 
 pub mod batch;

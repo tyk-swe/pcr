@@ -25,10 +25,41 @@ pub enum Error {
     InvalidPath { path: String },
 }
 
+impl Error {
+    pub fn with_field_name(self, name: &str) -> Self {
+        match self {
+            Self::UnknownField { protocol, .. } => Self::UnknownField {
+                protocol,
+                field: name.to_owned(),
+            },
+            Self::WrongType {
+                protocol, expected, ..
+            } => Self::WrongType {
+                protocol,
+                field: name.to_owned(),
+                expected,
+            },
+            Self::OutOfRange { protocol, .. } => Self::OutOfRange {
+                protocol,
+                field: name.to_owned(),
+            },
+            Self::ReadOnly { protocol, .. } => Self::ReadOnly {
+                protocol,
+                field: name.to_owned(),
+            },
+            Self::MissingRequired { protocol, .. } => Self::MissingRequired {
+                protocol,
+                field: name.to_owned(),
+            },
+            Self::InvalidPath { .. } => self,
+        }
+    }
+}
+
 impl Classified for Error {
     fn classification(&self) -> Classification {
         Classification::new(
-            "packet.invalid_layer",
+            crate::error::Code::PacketInvalidLayer,
             Kind::Packet,
             Some("correct the layer's field names and values against its reflective schema"),
         )

@@ -60,47 +60,47 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::EmptyPacket => Classification::new(
-                "packet.empty",
+                crate::error::Code::PacketEmpty,
                 Kind::Packet,
                 Some("supply at least one layer before building"),
             ),
             Self::LayerLimit { .. }
             | Self::PacketSizeLimit { .. }
             | Self::AllocationFailure { .. } => Classification::new(
-                "policy.build_resource_limit",
+                crate::error::Code::PolicyBuildResourceLimit,
                 Kind::Policy,
                 Some(
                     "shrink the packet or deliberately raise the finite build layer and byte budget",
                 ),
             ),
             Self::MissingCodec { .. } => Classification::new(
-                "packet.missing_codec",
+                crate::error::Code::PacketMissingCodec,
                 Kind::Packet,
                 Some("name a protocol the registry binds, or register a codec for it"),
             ),
             Self::InvalidLayer { .. } => Classification::new(
-                "packet.invalid_layer",
+                crate::error::Code::PacketInvalidLayer,
                 Kind::Packet,
                 Some("supply every field the layer's reflective schema declares required"),
             ),
             Self::UnboundLayers { .. } => Classification::new(
-                "packet.unbound_layers",
+                crate::error::Code::PacketUnboundLayers,
                 Kind::Packet,
                 Some("order the layers so each parent can carry the next, or build permissively"),
             ),
             Self::Codec { .. } => Classification::new(
-                "packet.codec",
+                crate::error::Code::PacketCodec,
                 Kind::Packet,
                 Some("correct the layer field values the codec refused to encode"),
             ),
             Self::LengthOverflow => Classification::new(
-                "packet.length_overflow",
+                crate::error::Code::PacketLengthOverflow,
                 Kind::Packet,
                 Some("shrink the packet so its byte offsets stay representable"),
             ),
             Self::MaterializedProtocolMismatch { .. } | Self::InvalidCodecLayout { .. } => {
                 Classification::new(
-                    "internal.codec_contract",
+                    crate::error::Code::InternalCodecContract,
                     Kind::Internal,
                     Some(
                         "report the codec that returned a protocol or byte layout its own contract forbids",
@@ -109,7 +109,7 @@ impl Classified for Error {
             }
             Self::InvalidPaddingBoundary { .. } | Self::PaddingWithoutLinkLayer { .. } => {
                 Classification::new(
-                    "packet.padding_boundary",
+                    crate::error::Code::PacketPaddingBoundary,
                     Kind::Packet,
                     Some(
                         "attach padding to an enclosing link-layer frame with a valid outside-layer index",

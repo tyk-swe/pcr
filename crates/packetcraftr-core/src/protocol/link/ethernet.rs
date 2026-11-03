@@ -1,32 +1,23 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
+use crate::protocol::common::{truncated, typed_layer};
 use bytes::Bytes;
 
 use crate::{
     codec::{Codec, DecodeContext, Decoded, EncodeContext, Encoded},
-    field::{self, WireValue},
+    field::WireValue,
     layer::{Id, Layer, reflective_layer},
 };
 
 use super::ether_type::{link_payload_selection, resolve_ether_type};
-use crate::protocol::common::{make_layer, truncated, typed_layer};
+use crate::protocol::headers::EthernetHeader;
 
 use crate::protocol::BuiltinProtocol;
 
 const NAME: &str = BuiltinProtocol::Ethernet.as_str();
 
-const ETHERNET_LEN: usize = 14;
-const MAC_LEN: usize = 6;
-
-fn ethernet_chunk<const N: usize>(input: &[u8], offset: usize) -> Option<[u8; N]> {
-    input
-        .get(offset..)
-        .and_then(<[u8]>::first_chunk::<N>)
-        .copied()
-}
+const ETHERNET_LEN: usize = EthernetHeader::LENGTH;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ethernet {
@@ -88,14 +79,10 @@ impl Codec for EthernetCodec {
         input: Bytes,
         _context: &DecodeContext<'_>,
     ) -> Result<Decoded, crate::codec::Error> {
-        let (Some(destination), Some(source), Some(ether_type)) = (
-            ethernet_chunk::<MAC_LEN>(&input, 0),
-            ethernet_chunk::<MAC_LEN>(&input, MAC_LEN),
-            ethernet_chunk::<2>(&input, 12),
-        ) else {
+        let Ok((destination, source, ether_type)) = EthernetHeader::base(&input) else {
             return Err(truncated(NAME, ETHERNET_LEN, input.len()));
         };
-        let ether_type = u16::from_be_bytes(ether_type);
+        let (destination, source) = (destination.0, source.0);
         let (payload_len, next) = link_payload_selection(
             NAME,
             ether_type,
@@ -118,10 +105,11 @@ impl Codec for EthernetCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Ethernet::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(ethernet_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Ethernet::default()))
     }
 }

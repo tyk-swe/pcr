@@ -1,0 +1,18 @@
+{
+  "command": "read",
+  "diagnostics": [],
+  "event": "fields",
+  "mode": "stream",
+  "result": {
+    "columns": [
+      "ipv4.source"
+    ],
+    "source_frame": 1,
+    "values": [
+      "192.0.2.53"
+    ]
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 0,
+  "status": "success"
+}

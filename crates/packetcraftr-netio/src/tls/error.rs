@@ -65,16 +65,32 @@ impl Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::InvalidLimits => Classification::new("cli.tls_limits", Kind::Usage, None),
-            Self::InvalidServerName => {
-                Classification::new("cli.tls_server_name", Kind::Usage, None)
-            }
+            Self::InvalidLimits => Classification::new(
+                packetcraftr_core::error::Code::CliTlsLimits,
+                Kind::Usage,
+                None,
+            ),
+            Self::InvalidServerName => Classification::new(
+                packetcraftr_core::error::Code::CliTlsServerName,
+                Kind::Usage,
+                None,
+            ),
             Self::Interrupted(source) => source.classification(),
-            Self::WireLimit { .. } | Self::StepLimit { .. } => {
-                Classification::new("policy.tls_limit", Kind::Policy, None)
-            }
-            Self::Io(_) => Classification::new("io.tls_transport", Kind::Io, None),
-            Self::Protocol(_) => Classification::new("io.tls_protocol", Kind::Io, None),
+            Self::WireLimit { .. } | Self::StepLimit { .. } => Classification::new(
+                packetcraftr_core::error::Code::PolicyTlsLimit,
+                Kind::Policy,
+                None,
+            ),
+            Self::Io(_) => Classification::new(
+                packetcraftr_core::error::Code::IoTlsTransport,
+                Kind::Io,
+                None,
+            ),
+            Self::Protocol(_) => Classification::new(
+                packetcraftr_core::error::Code::IoTlsProtocol,
+                Kind::Io,
+                None,
+            ),
         }
     }
 }

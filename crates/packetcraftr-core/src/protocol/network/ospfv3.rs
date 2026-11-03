@@ -3,10 +3,10 @@
 
 //! OSPF version 3 packet types 1-5. LSA bodies remain opaque.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, transport_checksum_parts, unsupported};
+use crate::protocol::message::{Reader, Records, Writer, message_codec};
 use bytes::Bytes;
 
 use super::ospf;
@@ -53,7 +53,7 @@ impl Default for Ospfv3 {
     }
 }
 crate::reflective_layer! {
- fn ospfv3_schema() => { protocol: crate::layer::Id::new("ospfv3"), name: "Ospfv3" }
+ fn ospfv3_schema() => { protocol: crate::protocol::BuiltinProtocol::Ospfv3.id(), name: "Ospfv3" }
  impl Ospfv3 {
     "packet_type" => { kind: Unsigned, derived: false, required: false, description: "packet type", reflect: packet_type },
     "router_id" => { kind: Unsigned, derived: false, required: false, description: "router id", reflect: router_id },
@@ -73,7 +73,7 @@ crate::reflective_layer! {
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
 }
-message_codec!(Ospfv3Codec, Ospfv3, ospfv3_schema, ospf::header_layout);
+message_codec!(Ospfv3Codec, Ospfv3, ospfv3_schema);
 
 const NAME: &str = "ospfv3";
 const VERSION: u8 = 3;
@@ -110,13 +110,15 @@ impl Ospfv3 {
         w.u8(self.instance_id)?;
         w.u8(self.reserved)?;
         w.put(&p.bytes)?;
-        let expected =
-            transport_checksum_parts(NAME, super::resolve_envelope(NAME, c)?, 89, &[&w.bytes])?;
+        let expected = transport_checksum_parts(NAME, c.network_envelope()?, 89, &[&w.bytes])?;
         let sum = crate::protocol::message::checksum_value(NAME, &self.checksum, expected, c)?;
         w.bytes[12..14].copy_from_slice(&sum.to_be_bytes());
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, c: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        c: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
         if r.u8()? != VERSION {
             return Err(unsupported(NAME, "wrong OSPF version"));
@@ -159,6 +161,6 @@ impl Ospfv3 {
             _ => return Err(unsupported(NAME, "unsupported packet type")),
         }
         r.finish()?;
-        Ok(s)
+        Ok((s, ospf::header_layout(&b)))
     }
 }

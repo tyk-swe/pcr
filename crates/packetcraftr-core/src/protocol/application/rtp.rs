@@ -3,10 +3,10 @@
 
 //! RTP version 2 (RFC 3550), including CSRC, extension and padding; media data remains opaque.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Reader, Records, Writer, message_codec, number, record};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -43,7 +43,7 @@ impl Default for Rtp {
     }
 }
 crate::reflective_layer! {
- fn rtp_schema() => { protocol: crate::layer::Id::new("rtp"), name: "Rtp" }
+ fn rtp_schema() => { protocol: crate::protocol::BuiltinProtocol::Rtp.id(), name: "Rtp" }
  impl Rtp {
     "marker" => { kind: Bool, derived: false, required: false, description: "marker", reflect: marker },
     "payload_type" => { kind: Unsigned, derived: false, required: false, description: "payload type", reflect: payload_type },
@@ -58,41 +58,7 @@ crate::reflective_layer! {
     "padding" => { kind: Bytes, derived: false, required: false, description: "padding", reflect: padding },
  }
 }
-fn rtp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "marker",
-            range: crate::layout::ByteRange::new(1, 2),
-        });
-    }
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "payload_type",
-            range: crate::layout::ByteRange::new(1, 2),
-        });
-    }
-    if 4 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "sequence",
-            range: crate::layout::ByteRange::new(2, 4),
-        });
-    }
-    if 8 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "timestamp",
-            range: crate::layout::ByteRange::new(4, 8),
-        });
-    }
-    if 12 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "ssrc",
-            range: crate::layout::ByteRange::new(8, 12),
-        });
-    }
-    fields
-}
-message_codec!(RtpCodec, Rtp, rtp_schema, rtp_layout_wire);
+message_codec!(RtpCodec, Rtp, rtp_schema);
 
 const NAME: &str = "rtp";
 impl Rtp {
@@ -140,8 +106,16 @@ impl Rtp {
         }
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 1..2);
+        r.mark(1, 1..2);
+        r.mark(2, 2..4);
+        r.mark(3, 4..8);
+        r.mark(4, 8..12);
         let h = r.u8()?;
         if h >> 6 != 2 {
             return Err(unsupported(NAME, "only RTP v2"));
@@ -176,6 +150,6 @@ impl Rtp {
         };
         s.payload = Bytes::copy_from_slice(&remaining[..remaining.len() - pad]);
         s.padding = Bytes::copy_from_slice(&remaining[remaining.len() - pad..]);
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }

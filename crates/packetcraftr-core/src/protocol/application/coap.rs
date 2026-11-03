@@ -3,10 +3,12 @@
 
 //! CoAP version 1 (RFC 7252). Options remain ordered, including repeated options.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -38,7 +40,7 @@ impl Default for Coap {
     }
 }
 crate::reflective_layer! {
- fn coap_schema() => { protocol: crate::layer::Id::new("coap"), name: "Coap" }
+ fn coap_schema() => { protocol: crate::protocol::BuiltinProtocol::Coap.id(), name: "Coap" }
  impl Coap {
     "version" => { kind: Unsigned, derived: false, required: false, description: "version", reflect: version },
     "message_type" => { kind: Unsigned, derived: false, required: false, description: "message type", reflect: message_type },
@@ -49,68 +51,7 @@ crate::reflective_layer! {
     "payload" => { kind: Bytes, derived: false, required: false, description: "payload", reflect: payload },
  }
 }
-fn coap_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if !b.is_empty() {
-        fields.push(crate::layout::FieldLayout {
-            name: "version",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-    }
-    if !b.is_empty() {
-        fields.push(crate::layout::FieldLayout {
-            name: "message_type",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-    }
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "code",
-            range: crate::layout::ByteRange::new(1, 2),
-        });
-    }
-    if 4 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "message_id",
-            range: crate::layout::ByteRange::new(2, 4),
-        });
-    }
-    let ranges = (|| -> Result<_, Error> {
-        let mut r = Reader::new(NAME, b);
-        let token_len = usize::from(r.u8()? & 15);
-        if token_len > 8 {
-            return Err(invalid(NAME, "token exceeds eight bytes"));
-        }
-        r.take(3)?;
-        r.take(token_len)?;
-        let options_start = r.pos;
-        while r.left() > 0 {
-            let start = r.pos;
-            let header = r.u8()?;
-            if header == 255 {
-                return Ok((options_start, start, r.pos));
-            }
-            read_option(header >> 4, &mut r)?;
-            let len = read_option(header & 15, &mut r)?;
-            r.take(usize::try_from(len).map_err(|_| invalid(NAME, "option length overflow"))?)?;
-        }
-        Ok((options_start, r.pos, r.pos))
-    })();
-    if let Ok((options_start, options_end, payload_start)) = ranges {
-        for (name, start, end) in [
-            ("token", 4, options_start),
-            ("options", options_start, options_end),
-            ("payload", payload_start, b.len()),
-        ] {
-            fields.push(crate::layout::FieldLayout {
-                name,
-                range: crate::layout::ByteRange::new(start, end),
-            });
-        }
-    }
-    fields
-}
-message_codec!(CoapCodec, Coap, coap_schema, coap_layout_wire);
+message_codec!(CoapCodec, Coap, coap_schema);
 
 const NAME: &str = "coap";
 impl Coap {
@@ -144,8 +85,15 @@ impl Coap {
         }
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..1);
+        r.mark(1, 0..1);
+        r.mark(2, 1..2);
+        r.mark(3, 2..4);
         let h = r.u8()?;
         if h >> 6 != 1 {
             return Err(unsupported(NAME, "only CoAP version 1 is supported"));
@@ -162,13 +110,20 @@ impl Coap {
             ..Self::default()
         };
         s.token = Bytes::copy_from_slice(r.take(tkl as usize)?);
+        let options_start = r.pos;
+        let mut payload_start = None;
         let mut n = 0u64;
         while r.left() > 0 {
+            let option_start = r.pos;
             let h = r.u8()?;
             if h == 255 {
                 if r.left() == 0 {
                     return Err(invalid(NAME, "empty payload marker"));
                 }
+                r.mark(4, 4..options_start);
+                r.mark(5, options_start..option_start);
+                r.mark(6, r.pos..b.len());
+                payload_start = Some(r.pos);
                 s.payload = Bytes::copy_from_slice(r.rest());
                 break;
             }
@@ -188,7 +143,12 @@ impl Coap {
         {
             return Err(invalid(NAME, "empty CoAP message contains data"));
         }
-        Ok(s)
+        if payload_start.is_none() {
+            r.mark(4, 4..options_start);
+            r.mark(5, options_start..r.pos);
+            r.mark(6, r.pos..b.len());
+        }
+        Ok((s, r.take_layouts()))
     }
 }
 fn option_number(n: u64) -> Result<(u8, Vec<u8>), Error> {

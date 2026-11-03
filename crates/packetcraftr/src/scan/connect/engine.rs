@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider};
@@ -362,7 +362,7 @@ where
                 .min(host_remaining);
             selection.host_limited = selection.host_limited || timeout < selection.timeout;
             let admitted = clock.now();
-            let scheduled_at = SystemTime::now();
+            let scheduled_at = clock.wall_now();
             let pending =
                 match budget.start(Arc::clone(provider), endpoint, &deadline.for_wait(timeout)?) {
                     Ok(pending) => pending,

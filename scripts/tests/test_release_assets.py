@@ -62,5 +62,22 @@ class ReleaseAssetTests(unittest.TestCase):
                 assets.validate_protocol_fixtures(root, assets.MANIFEST)
 
 
+    def test_checked_in_manifest_matches_the_worktree(self):
+        root = Path(assets.__file__).resolve().parent.parent
+        assets.validate_generated(root, assets.MANIFEST)
+        manifest = copy.deepcopy(assets.MANIFEST)
+        manifest['source_assets'].remove('examples/documents/packet-mqtt.json')
+        with self.assertRaisesRegex(ValueError, 'drifted'):
+            assets.validate_generated(root, manifest)
+
+    def test_all_source_assets_exist(self):
+        root = Path(assets.__file__).resolve().parent.parent
+        assets.validate_source_assets_exist(root, assets.MANIFEST)
+        manifest = copy.deepcopy(assets.MANIFEST)
+        manifest['source_assets'].append('examples/documents/no-such-file.json')
+        with self.assertRaisesRegex(ValueError, 'no-such-file'):
+            assets.validate_source_assets_exist(root, manifest)
+
+
 if __name__ == '__main__':
     unittest.main()

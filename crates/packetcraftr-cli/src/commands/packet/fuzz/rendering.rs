@@ -33,7 +33,6 @@ pub(super) fn render_text(
         ),
     )?;
     for case in &result.cases {
-        invocation.check()?;
         write_stdout_line(
             invocation,
             format_args!(
@@ -93,7 +92,6 @@ pub(super) fn render_text(
         render_diagnostics_text(invocation, &case.diagnostics)?;
         presentation.details(invocation, "Case evidence", case)?;
     }
-    invocation.check()?;
     write_stdout_line(
         invocation,
         format_args!(

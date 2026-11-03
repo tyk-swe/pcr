@@ -405,9 +405,7 @@ impl ConnectionState {
             let dir = self
                 .dir_mut(&delivery.flow)
                 .ok_or(Error::Invariant("dir"))?;
-            context.charge(&mut dir.charge, chunk.len())?;
-            context.track(&mut dir.charge, &delivery.sources)?;
-            dir.buffer.push(chunk, delivery.sources.clone());
+            dir.buffer.push(chunk, delivery.sources.clone(), context)?;
             cursor += want;
             self.pump(context)?;
             if matches!(self.phase, Phase::Dead) {

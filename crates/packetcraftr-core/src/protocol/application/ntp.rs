@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use crate::{
@@ -12,7 +10,7 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    ensure_encode_budget, invalid, make_layer, out_of_range, typed_layer, wrong_type,
+    ensure_encode_budget, invalid, out_of_range, typed_layer, wrong_type,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -288,10 +286,11 @@ impl Codec for NtpCodec {
         })
     }
 
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, field::Value>,
-    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Ntp::default(), fields)
+    fn schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(ntp_schema())
+    }
+
+    fn new_layer(&self) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Ok(Box::new(Ntp::default()))
     }
 }

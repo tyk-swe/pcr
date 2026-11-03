@@ -74,11 +74,17 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Analysis(error) => error.classification(),
-            Self::Limit { .. } => Classification::new("policy.export_limit", Kind::Policy, None),
-            Self::Selection => Classification::new("cli.export_selection", Kind::Usage, None),
-            Self::Sources { .. } => {
-                Classification::new("internal.export_sources", Kind::Internal, None)
+            Self::Limit { .. } => {
+                Classification::new(crate::error::Code::PolicyExportLimit, Kind::Policy, None)
             }
+            Self::Selection => {
+                Classification::new(crate::error::Code::CliExportSelection, Kind::Usage, None)
+            }
+            Self::Sources { .. } => Classification::new(
+                crate::error::Code::InternalExportSources,
+                Kind::Internal,
+                None,
+            ),
         }
     }
 }

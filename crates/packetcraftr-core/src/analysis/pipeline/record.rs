@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
 use crate::analysis::scope::{Interner, ScopeId};
 use crate::decode::DecodedPacket;
-use crate::protocol::transport::Tcp;
+use crate::protocol::identity::TcpHeader;
 
 /// A complete datagram decoded separately from, and attributed to, the
 /// physical fragment whose arrival filled its final gap.
@@ -69,7 +69,7 @@ pub struct Conversation<'a> {
 pub struct TcpView<'a> {
     pub decoded: &'a DecodedPacket,
     pub layer: usize,
-    pub header: &'a Tcp,
+    pub header: TcpHeader<'a>,
     pub conversation: Option<Conversation<'a>>,
     /// Indexed segment bytes; control segments and unindexed carriers are empty.
     pub payload: &'a [u8],

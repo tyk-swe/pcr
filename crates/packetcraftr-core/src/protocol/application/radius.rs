@@ -3,10 +3,12 @@
 
 //! RADIUS envelopes and attributes (RFC 2865). Authenticators and encrypted attributes are supplied bytes.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::invalid;
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -32,7 +34,7 @@ impl Default for Radius {
     }
 }
 crate::reflective_layer! {
- fn radius_schema() => { protocol: crate::layer::Id::new("radius"), name: "Radius" }
+ fn radius_schema() => { protocol: crate::protocol::BuiltinProtocol::Radius.id(), name: "Radius" }
  impl Radius {
     "code" => { kind: Unsigned, derived: false, required: false, description: "code", reflect: code },
     "identifier" => { kind: Unsigned, derived: false, required: false, description: "identifier", reflect: identifier },
@@ -40,35 +42,7 @@ crate::reflective_layer! {
     "attributes" => { kind: List, derived: false, required: false, description: "Ordered attributes including unknown and duplicate types", children: ATTRIBUTES, reflect: attributes },
  }
 }
-fn radius_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if !b.is_empty() {
-        fields.push(crate::layout::FieldLayout {
-            name: "code",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-    }
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "identifier",
-            range: crate::layout::ByteRange::new(1, 2),
-        });
-    }
-    if 20 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "authenticator",
-            range: crate::layout::ByteRange::new(4, 20),
-        });
-    }
-    if 20 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "attributes",
-            range: crate::layout::ByteRange::new(20, b.len()),
-        });
-    }
-    fields
-}
-message_codec!(RadiusCodec, Radius, radius_schema, radius_layout_wire);
+message_codec!(RadiusCodec, Radius, radius_schema);
 
 const NAME: &str = "radius";
 impl Radius {
@@ -92,8 +66,15 @@ impl Radius {
         w.put(&body.bytes)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..1);
+        r.mark(1, 1..2);
+        r.mark(2, 4..20);
+        r.mark(3, 20..b.len());
         let code = r.u8()?;
         let identifier = r.u8()?;
         let len = r.u16()? as usize;
@@ -119,11 +100,14 @@ impl Radius {
                 ),
             ]));
         }
-        Ok(Self {
-            code,
-            identifier,
-            authenticator,
-            attributes,
-        })
+        Ok((
+            Self {
+                code,
+                identifier,
+                authenticator,
+                attributes,
+            },
+            r.take_layouts(),
+        ))
     }
 }

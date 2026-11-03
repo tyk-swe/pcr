@@ -470,7 +470,7 @@ fn classifications_delegate_sources_and_separate_query_faults() {
     use packetcraftr_core::error::Classified;
 
     let encode_source = packetcraftr_core::codec::Error::LengthOverflow {
-        protocol: packetcraftr_core::layer::Id::new("dns"),
+        protocol: packetcraftr_core::protocol::BuiltinProtocol::Dns.id(),
     };
     let expected = encode_source.classification();
     assert_eq!(Error::Encode(encode_source).classification(), expected);
@@ -487,9 +487,16 @@ fn classifications_delegate_sources_and_separate_query_faults() {
             message: "x".into()
         }
         .classification()
-        .code,
+        .code
+        .as_str(),
         "packet.dns_query"
     );
-    assert_eq!(Error::NameTooLong.classification().code, "packet.dns_query");
-    assert_eq!(Error::NotResponse.classification().code, "packet.dns");
+    assert_eq!(
+        Error::NameTooLong.classification().code.as_str(),
+        "packet.dns_query"
+    );
+    assert_eq!(
+        Error::NotResponse.classification().code.as_str(),
+        "packet.dns"
+    );
 }

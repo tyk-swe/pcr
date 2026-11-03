@@ -27,7 +27,8 @@ pub use tls::{TlsBudget, TlsSettings};
 pub const MAX_ENDPOINTS: usize = 1_024;
 pub const MAX_ATTEMPTS: u64 = 4_096;
 pub const MAX_OPERATION_BYTES: u64 = 64 * 1024 * 1024;
-pub const MAX_RESPONSE_BYTES: u64 = 65_535;
+pub const MAX_RESPONSE_BYTES: u64 =
+    packetcraftr_core::document::service_probes::MAX_RESPONSE_BYTES as u64;
 /// Maximum retained candidate entries across evidence and endpoint records
 /// in one operation. This independently bounds match-output amplification.
 pub const MAX_RESULT_CANDIDATES: usize = 8_192;

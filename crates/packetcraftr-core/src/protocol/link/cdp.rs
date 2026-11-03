@@ -3,10 +3,12 @@
 
 //! CDP v1/v2 header, checksum and ordered TLVs. Unknown TLVs retain their original bytes.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error, Mode};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use crate::protocol::common::structured::member;
@@ -32,7 +34,7 @@ impl Default for Cdp {
     }
 }
 crate::reflective_layer! {
- fn cdp_schema() => { protocol: crate::layer::Id::new("cdp"), name: "Cdp" }
+ fn cdp_schema() => { protocol: crate::protocol::BuiltinProtocol::Cdp.id(), name: "Cdp" }
  impl Cdp {
     "version" => { kind: Unsigned, derived: false, required: false, description: "version", reflect: version },
     "ttl" => { kind: Unsigned, derived: false, required: false, description: "ttl", reflect: ttl },
@@ -40,35 +42,7 @@ crate::reflective_layer! {
     "tlvs" => { kind: List, derived: false, required: false, description: "Ordered CDP TLVs including unknown types", children: TLVS, reflect: tlvs },
  }
 }
-fn cdp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = Vec::new();
-    if !b.is_empty() {
-        fields.push(crate::layout::FieldLayout {
-            name: "version",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-    }
-    if 2 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "ttl",
-            range: crate::layout::ByteRange::new(1, 2),
-        });
-    }
-    if 4 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "checksum",
-            range: crate::layout::ByteRange::new(2, 4),
-        });
-    }
-    if 4 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "tlvs",
-            range: crate::layout::ByteRange::new(4, b.len()),
-        });
-    }
-    fields
-}
-message_codec!(CdpCodec, Cdp, cdp_schema, cdp_layout_wire);
+message_codec!(CdpCodec, Cdp, cdp_schema);
 
 const NAME: &str = "cdp";
 impl Cdp {
@@ -103,8 +77,15 @@ impl Cdp {
         w.bytes[2..4].copy_from_slice(&value.to_be_bytes());
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..1);
+        r.mark(1, 1..2);
+        r.mark(2, 2..4);
+        r.mark(3, 4..b.len());
         let version = r.u8()?;
         let ttl = r.u8()?;
         let checksum = r.u16()?;
@@ -132,12 +113,15 @@ impl Cdp {
                 ),
             ]));
         }
-        Ok(Self {
-            version,
-            ttl,
-            checksum: field::WireValue::Exact(checksum),
-            tlvs,
-        })
+        Ok((
+            Self {
+                version,
+                ttl,
+                checksum: field::WireValue::Exact(checksum),
+                tlvs,
+            },
+            r.take_layouts(),
+        ))
     }
 }
 fn cdp_checksum(b: &[u8]) -> u16 {

@@ -4,11 +4,11 @@
 //! Indicator matching across packet, DNS, HTTP, and TLS observations.
 
 use super::{Collector, Finding, Mode, Severity, sample};
+use crate::protocol::identity;
 use crate::security::indicators::Kind;
 use crate::{
     analysis::{FrameRecord, http, tls},
     error::BoundaryError,
-    protocol::network::{Ipv4, Ipv6},
 };
 use serde_json::json;
 use std::net::IpAddr;
@@ -153,13 +153,8 @@ impl Collector {
                 .map(|d| (&d.decoded.packet, d.sources.as_ref())),
         ) {
             for layer in packet.iter() {
-                let ips: Option<[IpAddr; 2]> = if let Some(ip) = layer.downcast_ref::<Ipv4>() {
-                    Some([ip.source.into(), ip.destination.into()])
-                } else {
-                    layer
-                        .downcast_ref::<Ipv6>()
-                        .map(|ip| [ip.source.into(), ip.destination.into()])
-                };
+                let ips: Option<[IpAddr; 2]> = identity::network_endpoints(layer)
+                    .map(|(source, destination)| [source, destination]);
                 if let Some(ips) = ips {
                     for ip in ips {
                         self.indicator_matches(

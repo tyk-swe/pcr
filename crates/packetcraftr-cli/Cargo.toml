@@ -36,7 +36,6 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
-getrandom.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true

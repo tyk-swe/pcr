@@ -148,7 +148,7 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::DurationLimit { .. } => Classification::new(
-                "policy.duration_limit",
+                crate::error::Code::PolicyDurationLimit,
                 Kind::Policy,
                 Some("reduce input or raise the finite invocation duration"),
             ),
@@ -157,24 +157,28 @@ impl Classified for Error {
                 source.classification()
             }
             Self::MergeSource { source, .. } => source.classification(),
-            Self::TransformMetadata(_) => {
-                Classification::new("packet.capture_transform_metadata", Kind::Packet, None)
-            }
-            Self::TransformIdentity { .. } => {
-                Classification::new("internal.capture_transform_identity", Kind::Internal, None)
-            }
+            Self::TransformMetadata(_) => Classification::new(
+                crate::error::Code::PacketCaptureTransformMetadata,
+                Kind::Packet,
+                None,
+            ),
+            Self::TransformIdentity { .. } => Classification::new(
+                crate::error::Code::InternalCaptureTransformIdentity,
+                Kind::Internal,
+                None,
+            ),
             Self::MergeSources { .. } => Classification::new(
-                "cli.capture_merge_sources",
+                crate::error::Code::CliCaptureMergeSources,
                 Kind::Usage,
                 Some("select a bounded set of named capture sources"),
             ),
             Self::MergeClockRegression { .. } => Classification::new(
-                "packet.capture_merge_order",
+                crate::error::Code::PacketCaptureMergeOrder,
                 Kind::Packet,
                 Some("each merge input must already be ordered by timestamp"),
             ),
             Self::MergeMetadata { .. } => Classification::new(
-                "packet.capture_merge_metadata",
+                crate::error::Code::PacketCaptureMergeMetadata,
                 Kind::Packet,
                 Some(
                     "use faithful source-record export for metadata the normalized merge cannot preserve",
@@ -193,34 +197,34 @@ impl Classified for Error {
                     .classification()
             }
             Self::Io(_) => Classification::new(
-                "io.capture_file",
+                crate::error::Code::IoCaptureFile,
                 Kind::Io,
                 Some(
                     "inspect the capture input/output stream and retry from a known record boundary",
                 ),
             ),
             Self::InvalidLimit { .. } => Classification::new(
-                "cli.capture_limit",
+                crate::error::Code::CliCaptureLimit,
                 Kind::Usage,
                 Some("use finite non-zero capture frame and byte limits"),
             ),
             Self::InvalidTimestampResolution { .. } => Classification::new(
-                "cli.capture_option",
+                crate::error::Code::CliCaptureOption,
                 Kind::Usage,
                 Some("use a supported finite capture timestamp or replay timing option"),
             ),
             Self::MergeOption(_) => Classification::new(
-                "cli.capture_option",
+                crate::error::Code::CliCaptureOption,
                 Kind::Usage,
                 Some("choose a supported merge order and a reorder window within the limit"),
             ),
             Self::WrongWriterFormat { .. } => Classification::new(
-                "cli.capture_option",
+                crate::error::Code::CliCaptureOption,
                 Kind::Usage,
                 Some("call the writer method that matches the writer's configured format"),
             ),
             Self::TimestampUnavailable { .. } => Classification::new(
-                "packet.timestamp_unavailable",
+                crate::error::Code::PacketTimestampUnavailable,
                 Kind::Packet,
                 Some("use a timestamped frame with generated capture writers"),
             ),
@@ -233,14 +237,14 @@ impl Classified for Error {
             | Self::OptionLimit { .. }
             | Self::FrameLimitExceeded { .. }
             | Self::StreamByteLimitExceeded { .. } => Classification::new(
-                "policy.capture_stream_limit",
+                crate::error::Code::PolicyCaptureStreamLimit,
                 Kind::Policy,
                 Some(
                     "reduce the capture stream or deliberately raise its finite frame/byte budget",
                 ),
             ),
             _ => Classification::new(
-                "packet.capture_file",
+                crate::error::Code::PacketCaptureFile,
                 Kind::Packet,
                 Some("repair the malformed or unrepresentable capture record before processing it"),
             ),

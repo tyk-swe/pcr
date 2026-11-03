@@ -3,10 +3,12 @@
 
 //! SNMPv1 and SNMPv2c BER PDUs (RFC 1157, RFC 3416); value envelopes preserve unknown ASN.1 types.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+};
 use bytes::Bytes;
 
 use super::ber;
@@ -50,7 +52,7 @@ impl Default for Snmp {
     }
 }
 crate::reflective_layer! {
- fn snmp_schema() => { protocol: crate::layer::Id::new("snmp"), name: "Snmp" }
+ fn snmp_schema() => { protocol: crate::protocol::BuiltinProtocol::Snmp.id(), name: "Snmp" }
  impl Snmp {
     "version" => { kind: Unsigned, derived: false, required: false, description: "version", reflect: version },
     "community" => { kind: Bytes, derived: false, required: false, description: "community", reflect: community },
@@ -66,12 +68,7 @@ crate::reflective_layer! {
     "varbinds" => { kind: List, derived: false, required: false, description: "BER object identifier content and typed value envelopes", children: VARBINDS, reflect: varbinds },
  }
 }
-fn snmp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let fields = Vec::new();
-    let _ = b;
-    fields
-}
-message_codec!(SnmpCodec, Snmp, snmp_schema, snmp_layout_wire);
+message_codec!(SnmpCodec, Snmp, snmp_schema);
 
 const NAME: &str = "snmp";
 impl Snmp {
@@ -119,7 +116,10 @@ impl Snmp {
         ber::put(&mut w, 0x30, &body.bytes)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         ber::validate(NAME, &b)?;
         let mut r = Reader::new(NAME, &b);
         let top = ber::expect(&mut r, 0x30)?;
@@ -176,7 +176,7 @@ impl Snmp {
                 ("value", Bytes::copy_from_slice(value).into()),
             ]));
         }
-        Ok(s)
+        Ok((s, Vec::new()))
     }
 }
 fn read_uint(r: &mut Reader<'_>, tag: u8) -> Result<u32, Error> {

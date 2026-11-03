@@ -3,7 +3,7 @@
 
 use crate::protocol::{
     common::{invalid, structured::member},
-    message::*,
+    message::{Records, Writer, data, record},
 };
 use crate::{codec::Error, field, layer::FieldSchema};
 use bytes::Bytes;

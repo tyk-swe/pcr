@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+use super::settings::{ENABLE_PUSH, INITIAL_WINDOW_SIZE, MAX_CONCURRENT_STREAMS, MAX_FRAME_SIZE};
 use super::*;
 use crate::analysis::{
     provenance::{SourceFrame, Tracker},
@@ -24,11 +25,6 @@ const CONTINUATION: u8 = 0x9;
 const END_STREAM: u8 = 0x1;
 const END_HEADERS: u8 = 0x4;
 const ACK: u8 = 0x1;
-
-const ENABLE_PUSH: u16 = 0x2;
-const MAX_CONCURRENT_STREAMS: u16 = 0x3;
-const INITIAL_WINDOW_SIZE: u16 = 0x4;
-const MAX_FRAME_SIZE: u16 = 0x5;
 
 fn flow() -> ScopedFlowKey {
     ScopedFlowKey {
@@ -130,6 +126,7 @@ struct Rig {
     tracker: Tracker,
     events: Vec<Event>,
     number: u64,
+    generation: u64,
 }
 
 fn rig() -> Rig {
@@ -146,6 +143,7 @@ fn rig_bounded(app: application::Limits, limits: Limits) -> Rig {
         tracker: Tracker::new(1 << 22, 32).unwrap(),
         events: Vec::new(),
         number: 0,
+        generation: 0,
     }
 }
 
@@ -173,12 +171,13 @@ impl Rig {
     }
 
     fn send(&mut self, bytes: &[u8]) -> &mut Self {
-        self.send_on(flow(), bytes, 0).unwrap();
+        self.send_on(flow(), bytes, self.generation).unwrap();
         self
     }
 
     fn recv(&mut self, bytes: &[u8]) -> &mut Self {
-        self.send_on(flow().reverse(), bytes, 0).unwrap();
+        self.send_on(flow().reverse(), bytes, self.generation)
+            .unwrap();
         self
     }
 
@@ -194,7 +193,7 @@ impl Rig {
         self.event(application::Event::Closed {
             flow: flow(),
             stream: 0,
-            generation: 0,
+            generation: self.generation,
             reset,
         })
     }
@@ -203,7 +202,7 @@ impl Rig {
         self.event(application::Event::Closed {
             flow: flow().reverse(),
             stream: 0,
-            generation: 0,
+            generation: self.generation,
             reset,
         })
     }
@@ -412,6 +411,35 @@ fn h2c_upgrade() {
         ],
     );
     assert_eq!(summary.upgraded_connections, 1);
+}
+
+#[test]
+fn h2c_upgrade_preserves_sources_across_a_partial_body() {
+    let mut rig = rig();
+    rig.send(b"POST / HTTP/1.1\r\nHost: example.test\r\nConnection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: AAMAAABk\r\nContent-Length: 6\r\n\r\nabc");
+    rig.send(b"def");
+    rig.recv(b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n");
+    handshake(&mut rig);
+    rig.recv(&frame(
+        HEADERS,
+        END_HEADERS | END_STREAM,
+        1,
+        &response_headers(),
+    ));
+    rig.client_close(false).server_close(false);
+    let (events, summary) = rig.finish();
+    let request = events
+        .iter()
+        .find_map(|event| match event {
+            Event::Message(message) if message.kind == MessageKind::Request => Some(message),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(request.status, Status::Complete);
+    assert_eq!(request.body_bytes, 6);
+    assert_eq!(numbers(Some(&request.sources)), [1, 2]);
+    assert_eq!(summary.upgraded_connections, 1);
+    assert_eq!(summary.issues, 0);
 }
 
 #[test]
@@ -1497,6 +1525,18 @@ fn tcp_faults_mid_frame() {
         rig.event(event);
         let (events, _) = rig.finish();
         let fault = format!("issue {code} {status} Confirmed Capture stream=None {detail}");
+        let unconsumed_issue = events
+            .iter()
+            .find_map(|event| match event {
+                Event::Issue(issue) if issue.code == IssueCode::UnconsumedBytes => Some(issue),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            unconsumed_issue.wire.as_ref(),
+            &frame(HEADERS, END_HEADERS, 1, &request_headers())[..5]
+        );
+        assert_eq!(numbers(unconsumed_issue.sources.as_ref()), [1]);
         let unconsumed = format!(
             "issue unconsumed_bytes {status} Confirmed Capture stream=None the byte stream ended with undecoded bytes"
         );
@@ -1700,59 +1740,102 @@ fn max_streams_limit() {
     );
 }
 
-fn charges(rig: &Rig) -> (usize, usize) {
-    rig.collector.resources.budget.outstanding()
-}
-
-fn charges_after_replacement(earlier: impl FnOnce(&mut Rig)) -> (usize, usize) {
-    let mut rig = rig();
-    earlier(&mut rig);
-    rig.send_on(flow(), CLIENT_PREFACE, 1).unwrap();
-    charges(&rig)
+fn capacity_limited_rig(max_source_spans: usize) -> Rig {
+    rig_bounded(
+        application::Limits {
+            max_buffer_bytes: 16 * 1024,
+            max_source_spans,
+            ..application::Limits::default()
+        },
+        Limits {
+            max_header_bytes: 256,
+            max_headers: 8,
+            max_table_bytes: 1024,
+            ..Limits::default()
+        },
+    )
 }
 
 #[test]
-fn replaced_connections_release_every_charge() {
-    let fresh = charges_after_replacement(|_| {});
-    let clean = charges_after_replacement(|rig| {
-        handshake(rig);
-        get_exchange(rig);
+fn consumed_frames_release_capacity() {
+    let mut rig = capacity_limited_rig(128);
+    handshake(&mut rig);
+    rig.send(&frame(HEADERS, END_HEADERS, 1, &request_headers()));
+    for _ in 0..48 {
+        rig.send(&frame(DATA, 0, 1, &[b'x'; 1024]));
+    }
+    rig.send(&frame(DATA, END_STREAM, 1, &[]));
+    rig.recv(&frame(
+        HEADERS,
+        END_HEADERS | END_STREAM,
+        1,
+        &response_headers(),
+    ));
+    rig.client_close(false).server_close(false);
+    let (events, summary) = rig.finish();
+    let request = events
+        .iter()
+        .find_map(|event| match event {
+            Event::Message(message) if message.kind == MessageKind::Request => Some(message),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(request.body_bytes, 48 * 1024);
+    assert_eq!(request.status, Status::Complete);
+    assert_eq!(summary.issues, 0);
+}
+
+#[test]
+fn replaced_connections_release_capacity() {
+    let scenarios: [fn(&mut Rig); 4] = [
+        |rig| {
+            handshake(rig);
+            get_exchange(rig);
+            rig.client_close(false).server_close(false);
+        },
+        |rig| {
+            handshake(rig);
+            rig.send(&frame(HEADERS, END_HEADERS, 1, &request_headers()));
+            let pending = frame(DATA, 0, 1, &[b'x'; 4096]);
+            rig.send(&pending[..pending.len() - 1]);
+        },
+        |rig| {
+            let wire = [
+                CLIENT_PREFACE,
+                settings(&[]).as_slice(),
+                frame(CONTINUATION, END_HEADERS, 1, &[0x82]).as_slice(),
+            ]
+            .concat();
+            rig.send(&wire);
+        },
+        |rig| {
+            let wire = [
+                CLIENT_PREFACE,
+                settings(&[]).as_slice(),
+                &frame(HEADERS, END_HEADERS, 1, &request_headers())[..5],
+            ]
+            .concat();
+            rig.send(&wire);
+            rig.event(application::Event::Gap {
+                flow: flow(),
+                stream: 0,
+                generation: rig.generation,
+            });
+        },
+    ];
+    for scenario in scenarios {
+        let mut rig = capacity_limited_rig(16);
+        for generation in 0..32 {
+            rig.generation = generation;
+            scenario(&mut rig);
+        }
+        rig.generation += 1;
+        handshake(&mut rig);
+        get_exchange(&mut rig);
         rig.client_close(false).server_close(false);
-    });
-    let open = charges_after_replacement(|rig| {
-        handshake(rig);
-        rig.send(&frame(HEADERS, END_HEADERS, 1, &request_headers()));
-        rig.recv(&frame(DATA, 0, 1, b"partial"));
-    });
-    let failed = charges_after_replacement(|rig| {
-        let mut wire = CLIENT_PREFACE.to_vec();
-        wire.extend_from_slice(&settings(&[]));
-        wire.extend_from_slice(&frame(CONTINUATION, END_HEADERS, 1, &[0x82]));
-        rig.send(&wire);
-    });
-    let gapped = charges_after_replacement(|rig| {
-        let mut wire = CLIENT_PREFACE.to_vec();
-        wire.extend_from_slice(&settings(&[]));
-        wire.extend_from_slice(&frame(HEADERS, END_HEADERS, 1, &request_headers())[..5]);
-        rig.send(&wire);
-        rig.event(application::Event::Gap {
-            flow: flow(),
-            stream: 0,
-            generation: 0,
-        });
-    });
-    assert_eq!(fresh.1, 0);
-    assert_eq!([clean, open, failed, gapped], [fresh; 4]);
-}
-
-#[test]
-fn failed_connection_releases_every_charge() {
-    let mut rig = rig();
-    let mut wire = CLIENT_PREFACE.to_vec();
-    wire.extend_from_slice(&settings(&[]));
-    wire.extend_from_slice(&frame(CONTINUATION, END_HEADERS, 1, &[0x82]));
-    rig.send(&wire);
-    assert_eq!(charges(&rig), (0, 0));
+        let (_, summary) = rig.finish();
+        assert!(summary.complete_messages >= 2);
+    }
 }
 
 fn numbers(set: Option<&crate::analysis::provenance::SourceSet>) -> Vec<u64> {

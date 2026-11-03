@@ -7,6 +7,7 @@ use crate::exchange::WorkflowExecutor;
 use crate::exchange::WorkflowOverrides;
 use crate::probe::{Batch, Evidence, Transport};
 use packetcraftr_core::error::BoundaryError;
+use packetcraftr_core::protocol::identity;
 
 use crate::clock::Clock;
 use crate::providers::PacketProviders;
@@ -15,7 +16,7 @@ use super::Probe;
 use super::evidence::classify_response;
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
-    "cli.traceroute_executor",
+    packetcraftr_core::error::Code::CliTracerouteExecutor,
     "use homogeneous bounded hop batches and retain at least one response per probe",
 );
 
@@ -41,7 +42,20 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for WorkflowExecutor<'
                         .packet()
                         .iter()
                         .nth(1)
-                        .and_then(|layer| layer.field(varying_field))
+                        .and_then(|layer| match first.target.transport() {
+                            Transport::Udp => identity::transport_key(layer).map(|key| {
+                                packetcraftr_core::field::Value::Unsigned(
+                                    key.destination_port.into(),
+                                )
+                            }),
+                            Transport::Tcp => identity::tcp_header(layer).map(|tcp| {
+                                packetcraftr_core::field::Value::Unsigned(tcp.sequence.into())
+                            }),
+                            Transport::Icmp => identity::icmp_message(layer).map(|icmp| {
+                                packetcraftr_core::field::Value::Bytes(icmp.body.clone())
+                            }),
+                            Transport::Sctp | Transport::Ip => None,
+                        })
                         .ok_or_else(|| {
                             EXECUTOR_FAULT.invalid(format!(
                                 "{} probe has no {varying_field} correlation field",

@@ -33,9 +33,15 @@ pub mod ip_protocol {
     pub const SCTP: u8 = 132;
     pub const MPLS_IN_IP: u8 = 137;
     pub const ETHERNET: u8 = 143;
+    pub const OSPF: u8 = 89;
+    pub const PIM: u8 = 103;
+    pub const L2TPV3: u8 = 115;
+    pub const RESERVED: u8 = 255;
 }
 
-pub(crate) use envelope::resolve_envelope;
+pub(crate) use envelope::{
+    is_outer_network_layer, resolve_envelope, srh_active_segment, srh_reduced,
+};
 pub use icmp::{Icmpv4, Icmpv6};
 pub(crate) use icmp::{Icmpv4Codec, Icmpv6Codec};
 pub use igmp::Igmp;

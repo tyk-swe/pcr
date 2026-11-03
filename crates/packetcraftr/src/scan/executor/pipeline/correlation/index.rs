@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use packetcraftr_core::{
     error::BoundaryError,
     packet::Packet,
-    protocol::response_identity::{self, Identity},
+    protocol::identity::{self, Identity},
     registry::Registry,
 };
 
@@ -60,15 +60,15 @@ impl CandidateIndex {
         if source >= self.scopes.len() || self.entries.contains_key(&index) {
             return Err(BoundaryError::internal_execution(
                 "scan candidate index received an invalid source or repeated attempt",
-                "internal.scan_candidate_index",
+                packetcraftr_core::error::Code::InternalScanCandidateIndex,
                 "retain unique attempt identity within the armed capture group",
             ));
         }
         let keys = packet
             .iter()
-            .filter_map(|layer| registry.matcher(layer.protocol_id().as_str()))
-            .all(|matcher| matcher.uses_builtin_response_identity())
-            .then(|| response_identity::request(packet))
+            .filter_map(|layer| registry.matcher_identity(layer.protocol_id().as_str()))
+            .all(|identity| identity == packetcraftr_core::registry::MatcherIdentity::Builtin)
+            .then(|| identity::request(packet))
             .flatten();
         let scope = &mut self.scopes[source];
         scope.all.insert(index);
@@ -120,7 +120,7 @@ impl CandidateIndex {
         let Some(scope) = self.scopes.get(source) else {
             return Vec::new();
         };
-        let Some(keys) = response_identity::response(response) else {
+        let Some(keys) = identity::response(response) else {
             #[cfg(test)]
             self.discovered.set(self.discovered.get() + scope.all.len());
             return scope.all.iter().copied().collect();
@@ -160,7 +160,7 @@ pub(in crate::scan::executor::pipeline) fn charge(capacity: usize, sources: usiz
                 .saturating_mul(2),
         )
         .saturating_add(
-            response_identity::MAX_RESPONSE_IDENTITIES
+            identity::MAX_RESPONSE_IDENTITIES
                 .saturating_mul(std::mem::size_of::<Identity>())
                 .saturating_mul(2),
         )

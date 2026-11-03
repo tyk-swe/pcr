@@ -67,7 +67,7 @@ impl Classified for Error {
         match self {
             Self::ByteLimit { .. } | Self::EncodedByteLimit { .. } | Self::WindowLimit { .. } => {
                 Classification::new(
-                    "packet.capture_compression_limit",
+                    crate::error::Code::PacketCaptureCompressionLimit,
                     Kind::Packet,
                     Some("choose a finite decoded-byte/window limit adequate for this capture"),
                 )
@@ -83,7 +83,7 @@ impl Classified for Error {
                     return interrupted.classification();
                 }
                 Classification::new(
-                    "io.capture_compression",
+                    crate::error::Code::IoCaptureCompression,
                     Kind::Io,
                     Some("check the compressed capture and its storage source"),
                 )

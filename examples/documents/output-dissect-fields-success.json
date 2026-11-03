@@ -1,0 +1,23 @@
+{
+  "command": "dissect",
+  "diagnostics": [],
+  "mode": "aggregate",
+  "result": {
+    "captured_bytes_read": 4,
+    "columns": [
+      "raw.bytes"
+    ],
+    "frames_read": 1,
+    "rows": [
+      {
+        "source_frame": 1,
+        "values": [
+          null
+        ]
+      }
+    ],
+    "rows_written": 1
+  },
+  "schema": "packetcraftr.output/v19",
+  "status": "success"
+}

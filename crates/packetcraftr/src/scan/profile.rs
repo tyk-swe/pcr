@@ -5,6 +5,7 @@
 //! authenticated identity.
 use bytes::Bytes;
 use packetcraftr_core::document::udp_profiles::{self, Config, Payload, ResponseCheck};
+use packetcraftr_core::protocol::identity;
 use packetcraftr_core::{
     decode::DecodedPacket,
     error::{Classification, Classified, Kind},
@@ -13,7 +14,6 @@ use packetcraftr_core::{
     protocol::{
         application::dns::{Dns, Name, Question},
         semantics,
-        transport::Udp,
     },
 };
 use serde::Serialize;
@@ -57,12 +57,18 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::Invalid(_) => Classification::new("cli.udp_profile", Kind::Usage, None),
+            Self::Invalid(_) => Classification::new(
+                packetcraftr_core::error::Code::CliUdpProfile,
+                Kind::Usage,
+                None,
+            ),
             Self::Document(source) => source.classification(),
             Self::PortCount { .. }
             | Self::Storage
             | Self::ConflictingPort { .. }
-            | Self::MappedPorts => Classification::new("cli.error", Kind::Usage, None),
+            | Self::MappedPorts => {
+                Classification::new(packetcraftr_core::error::Code::CliError, Kind::Usage, None)
+            }
         }
     }
 }
@@ -323,14 +329,13 @@ fn udp_payload(request: &Packet, response: &DecodedPacket) -> Option<Bytes> {
     if sent.source != received.final_destination || sent.final_destination != received.source {
         return None;
     }
-    let sent_udp =
-        semantics::outer_layers(request).find_map(|layer| layer.downcast_ref::<Udp>())?;
+    let sent_udp = semantics::outer_layers(request).find_map(identity::udp_header)?;
     let (index, udp) = response
         .packet
         .iter()
         .take(semantics::outer_scope_len(&response.packet))
         .enumerate()
-        .find_map(|(index, layer)| layer.downcast_ref::<Udp>().map(|udp| (index, udp)))?;
+        .find_map(|(index, layer)| identity::udp_header(layer).map(|udp| (index, udp)))?;
     if sent_udp.source_port != udp.destination_port || sent_udp.destination_port != udp.source_port
     {
         return None;

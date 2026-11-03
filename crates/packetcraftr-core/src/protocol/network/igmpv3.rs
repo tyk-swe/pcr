@@ -48,10 +48,10 @@ const QUERY_LENGTH: usize = 8;
 const REPORT_LENGTH: usize = 4;
 const RECORD_LENGTH: usize = 8;
 /// Auxiliary data is sized in 32-bit words.
-const AUX_UNIT: usize = 4;
-const SUPPRESS_FLAG: u8 = 0x08;
-const ROBUSTNESS_MASK: u8 = 0x07;
-const QUERY_RESERVED_MAX: u8 = 0x0f;
+pub(crate) const AUX_UNIT: usize = 4;
+pub(crate) const SUPPRESS_FLAG: u8 = 0x08;
+pub(crate) const ROBUSTNESS_MASK: u8 = 0x07;
+pub(crate) const QUERY_RESERVED_MAX: u8 = 0x0f;
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -79,7 +79,7 @@ pub enum Error {
 impl crate::error::Classified for Error {
     fn classification(&self) -> crate::error::Classification {
         crate::error::Classification::new(
-            "packet.codec",
+            crate::error::Code::PacketCodec,
             crate::error::Kind::Packet,
             Some("correct the layer bytes or field values the codec refused"),
         )

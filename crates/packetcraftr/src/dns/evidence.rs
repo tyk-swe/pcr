@@ -1,12 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::protocol::identity;
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use packetcraftr_core::protocol::application::dns::Dns;
-use packetcraftr_core::protocol::transport::Udp;
 use packetcraftr_core::protocol::{BuiltinProtocol, transport_tuple_reversed};
 use packetcraftr_core::{
     codec::NetworkEnvelope, decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw,
@@ -150,23 +149,24 @@ fn direct_udp_match(request: &Packet, response: &Packet) -> bool {
 }
 
 pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {
-    let (udp_index, udp) = packet
-        .iter()
-        .enumerate()
-        .find_map(|(index, layer)| Some((index, layer.downcast_ref::<Udp>()?)))?;
+    let (udp_index, udp) = packet.iter().enumerate().find_map(|(index, layer)| {
+        Some((
+            index,
+            identity::transport_key(layer).filter(|key| key.protocol == BuiltinProtocol::Udp)?,
+        ))
+    })?;
     let registered_dns = udp_dissects_as_dns(udp.source_port, udp.destination_port);
     let payload = packet.layer(udp_index.checked_add(1)?)?;
     match BuiltinProtocol::of(payload) {
-        Some(BuiltinProtocol::Dns) if registered_dns => {
-            payload.downcast_ref::<Dns>().map(|dns| dns.wire().clone())
+        Some(BuiltinProtocol::Dns) if registered_dns => identity::dns_wire(payload).cloned(),
+        Some(BuiltinProtocol::Malformed) if registered_dns => {
+            packetcraftr_core::layer::Malformed::from_layer(payload)
+                .filter(|layer| {
+                    layer.intended_protocol.as_deref() == Some(BuiltinProtocol::Dns.as_str())
+                })
+                .map(|layer| layer.bytes.clone())
         }
-        Some(BuiltinProtocol::Malformed) if registered_dns => payload
-            .downcast_ref::<packetcraftr_core::layer::Malformed>()
-            .filter(|layer| {
-                layer.intended_protocol.as_deref() == Some(BuiltinProtocol::Dns.as_str())
-            })
-            .map(|layer| layer.bytes.clone()),
-        Some(BuiltinProtocol::Raw) => payload.downcast_ref::<Raw>().map(|raw| raw.bytes.clone()),
+        Some(BuiltinProtocol::Raw) => Raw::from_layer(payload).map(|raw| raw.bytes.clone()),
         _ => None,
     }
 }
@@ -429,7 +429,7 @@ fn dns_udp_ports(packet: &Packet) -> Option<UdpPorts> {
     let udp = packet
         .iter()
         .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Udp))?;
-    let udp = packetcraftr_core::protocol::semantics::transport_key(udp)?;
+    let udp = packetcraftr_core::protocol::identity::transport_key(udp)?;
     Some(UdpPorts {
         source: udp.source_port,
         destination: udp.destination_port,

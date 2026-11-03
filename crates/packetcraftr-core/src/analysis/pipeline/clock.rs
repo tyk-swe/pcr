@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::clock::{Clock, SystemClock};
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::analysis::Error;
@@ -30,7 +31,7 @@ const SWEEP_GRANULARITY: Duration = Duration::from_secs(1);
 
 impl CaptureClock {
     pub(super) fn new() -> Self {
-        let base = Instant::now();
+        let base = SystemClock.now();
         Self {
             base,
             origin: None,

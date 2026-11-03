@@ -88,6 +88,7 @@ pub(crate) struct Reader<'a> {
     pub(crate) name: &'static str,
     pub(crate) bytes: &'a [u8],
     pub(crate) pos: usize,
+    layouts: Vec<crate::layout::FieldLayout>,
 }
 impl<'a> Reader<'a> {
     pub(crate) fn new(name: &'static str, bytes: &'a [u8]) -> Self {
@@ -95,7 +96,17 @@ impl<'a> Reader<'a> {
             name,
             bytes,
             pos: 0,
+            layouts: Vec::new(),
         }
+    }
+    pub(crate) fn mark(&mut self, index: usize, range: std::ops::Range<usize>) {
+        self.layouts.push(crate::layout::FieldLayout {
+            index,
+            range: crate::layout::ByteRange::new(range.start, range.end),
+        });
+    }
+    pub(crate) fn take_layouts(&mut self) -> Vec<crate::layout::FieldLayout> {
+        std::mem::take(&mut self.layouts)
     }
     pub(crate) fn take(&mut self, n: usize) -> Result<&'a [u8], codec::Error> {
         let end = self
@@ -140,7 +151,7 @@ impl<'a> Reader<'a> {
     pub(crate) fn left(&self) -> usize {
         self.bytes.len() - self.pos
     }
-    pub(crate) fn finish(self) -> Result<(), codec::Error> {
+    pub(crate) fn finish(&self) -> Result<(), codec::Error> {
         if self.left() == 0 {
             Ok(())
         } else {
@@ -202,30 +213,28 @@ impl Writer {
 
 /// Implement the common complete-message codec contract while retaining each protocol's parser.
 macro_rules! message_codec {
-    ($codec:ident, $ty:ident, $schema:ident, $layout:path) => {
+    ($codec:ident, $ty:ident, $schema:ident) => {
         #[derive(Clone, Copy, Debug, Default)]
         pub(crate) struct $codec;
-        #[cfg(test)]
-        impl $codec {
-            pub(crate) fn layout(bytes: &[u8]) -> Vec<crate::layout::FieldLayout> {
-                $layout(bytes)
-            }
-        }
+        $crate::protocol::message::message_codec!(@test_layout $codec, $ty);
         impl crate::codec::Codec for $codec {
             fn protocol_id(&self) -> &'static crate::layer::Id {
                 &$schema().protocol
             }
-            fn published_schema(&self) -> Option<&'static crate::layer::Schema> {
+            fn schema(&self) -> Option<&'static crate::layer::Schema> {
                 Some($schema())
+            }
+            fn new_layer(&self) -> Result<Box<dyn crate::layer::Layer>, crate::codec::Error> {
+                Ok(Box::new($ty::default()))
+            }
+            fn framing(&self) -> crate::codec::Framing {
+                crate::protocol::BuiltinProtocol::from_id(*self.protocol_id())
+                    .map_or(crate::codec::Framing::Datagram, |protocol| {
+                        protocol.framing()
+                    })
             }
             fn accepts_decoded_protocol(&self, p: &crate::layer::Id) -> bool {
                 p == self.protocol_id() || p.as_str() == "raw"
-            }
-            fn make_layer(
-                &self,
-                fields: &std::collections::BTreeMap<String, crate::field::Value>,
-            ) -> Result<Box<dyn crate::layer::Layer>, crate::codec::Error> {
-                crate::protocol::common::make_layer($ty::default(), fields)
             }
             fn encode(
                 &self,
@@ -238,8 +247,7 @@ macro_rules! message_codec {
                     crate::protocol::common::payload_without_padding(name, payload, context)?;
                 if !payload.is_empty()
                     && context.child.is_none_or(|child| {
-                        child.protocol_id() != self.protocol_id()
-                            && !crate::protocol::common::child_is_opaque(child)
+                        child.protocol_id() != self.protocol_id() && !child.is_opaque()
                     })
                 {
                     return Err(crate::protocol::common::invalid(
@@ -258,46 +266,46 @@ macro_rules! message_codec {
                         .map_err(|_| crate::protocol::common::invalid(name, "allocation failed"))?;
                     bytes.push(next);
                 }
+                let registry = crate::protocol::builtin::registry();
                 let decoded_context = crate::codec::DecodeContext {
-                    parent: context
-                        .index
-                        .checked_sub(1)
-                        .and_then(|index| context.packet.layer(index))
-                        .map(|parent| *parent.protocol_id()),
-                    registry: context.registry,
-                    network: crate::protocol::network::resolve_envelope(name, context).ok(),
+                    parent: context.parent.map(|parent| parent.protocol),
+                    registry: &registry,
+                    network: context.network_envelope().ok(),
                     hop_limit: None,
                     discriminator: None,
                 };
                 let mut diagnostics = Vec::new();
-                let validated =
-                    crate::protocol::framing::packet_length(name, &bytes, decoded_context.parent)
-                        .and_then(|length| {
-                            if length != prefix_len {
-                                return Err(crate::protocol::common::invalid(
-                                    name,
-                                    "encoded message does not match its framing length",
-                                ));
-                            }
-                            $ty::parse_wire(
-                                bytes::Bytes::copy_from_slice(&bytes[..prefix_len]),
-                                &decoded_context,
-                            )
-                        });
+                let validated = crate::protocol::framing::packet_length(
+                    self.framing(),
+                    name,
+                    &bytes,
+                    decoded_context.parent,
+                )
+                .and_then(|length| {
+                    if length != prefix_len {
+                        return Err(crate::protocol::common::invalid(
+                            name,
+                            "encoded message does not match its framing length",
+                        ));
+                    }
+                    $ty::parse_wire(
+                        bytes::Bytes::copy_from_slice(&bytes[..prefix_len]),
+                        &decoded_context,
+                    )
+                });
                 bytes.truncate(prefix_len);
-                let materialized = match validated {
-                    Ok(layer) => layer,
+                let (materialized, fields) = match validated {
+                    Ok(pair) => pair,
                     Err(error) if context.mode == crate::codec::Mode::Permissive => {
                         diagnostics.push(crate::diagnostic::Diagnostic::new(
                             $crate::diagnostic::Severity::Warning,
                             "build.message",
                             error.to_string(),
                         ));
-                        layer.clone()
+                        (layer.clone(), Vec::new())
                     }
                     Err(error) => return Err(error),
                 };
-                let fields = $layout(&bytes);
                 Ok(crate::codec::Encoded::header(bytes, Box::new(materialized))
                     .with_fields(fields)
                     .with_diagnostics(diagnostics))
@@ -308,23 +316,28 @@ macro_rules! message_codec {
                 context: &crate::codec::DecodeContext<'_>,
             ) -> Result<crate::codec::Decoded, crate::codec::Error> {
                 let name = $schema().protocol.as_str();
-                let len =
-                    match crate::protocol::framing::packet_length(name, &input, context.parent) {
-                        Ok(n) => n,
-                        Err(crate::codec::Error::Unsupported { .. }) => {
-                            return Ok(crate::layer::Raw::decoded(input));
-                        }
-                        Err(e) => return Err(e),
-                    };
+                let len = match crate::protocol::framing::packet_length(
+                    self.framing(),
+                    name,
+                    &input,
+                    context.parent,
+                ) {
+                    Ok(n) => n,
+                    Err(crate::codec::Error::Unsupported { .. }) => {
+                        return Ok(crate::layer::Raw::decoded(input));
+                    }
+                    Err(e) => return Err(e),
+                };
                 let wire = input.slice(..len);
                 match $ty::parse_wire(wire, context) {
-                    Ok(layer) => {
+                    Ok((layer, fields)) => {
                         let mut result = crate::codec::Decoded::terminal(Box::new(layer), len);
-                        result.fields = $layout(&input[..len]);
+                        result.fields = fields;
                         if input.len() > len {
                             result.payload_len = input.len() - len;
                             let tail = if name == "sip"
-                                && context.parent == Some(crate::layer::Id::new("udp"))
+                                && context.parent
+                                    == Some(crate::protocol::BuiltinProtocol::Udp.id())
                             {
                                 crate::protocol::message::OPAQUE_TAIL
                             } else {
@@ -340,6 +353,24 @@ macro_rules! message_codec {
                     }
                     Err(e) => Err(e),
                 }
+            }
+        }
+    };
+    (@test_layout $codec:ident, $ty:ident) => {
+        #[cfg(test)]
+        impl $codec {
+            pub(crate) fn layout(bytes: &[u8]) -> Vec<crate::layout::FieldLayout> {
+                let registry = crate::protocol::builtin::registry();
+                let context = crate::codec::DecodeContext {
+                    parent: None,
+                    registry: &registry,
+                    network: None,
+                    hop_limit: None,
+                    discriminator: None,
+                };
+                $ty::parse_wire(bytes::Bytes::copy_from_slice(bytes), &context)
+                    .map(|(_, fields)| fields)
+                    .unwrap_or_default()
             }
         }
     };

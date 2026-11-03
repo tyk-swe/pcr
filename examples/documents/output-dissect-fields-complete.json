@@ -1,0 +1,17 @@
+{
+  "command": "dissect",
+  "diagnostics": [],
+  "event": "complete",
+  "mode": "stream",
+  "result": {
+    "captured_bytes_read": 4,
+    "columns": [
+      "raw.bytes"
+    ],
+    "frames_read": 1,
+    "rows_written": 1
+  },
+  "schema": "packetcraftr.output/v19",
+  "sequence": 1,
+  "status": "success"
+}

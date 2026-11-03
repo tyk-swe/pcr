@@ -48,7 +48,7 @@ fn discovery_request(probes: Vec<arguments::DiscoveryProbe>) -> DiscoveryRequest
 fn assert_usage_error(error: CliError, code: &'static str) {
     assert_eq!(error.exit_code(), 2);
     assert_eq!(error.classification.kind, Kind::Usage);
-    assert_eq!(error.classification.code, code);
+    assert_eq!(error.classification.code.as_str(), code);
 }
 
 #[test]

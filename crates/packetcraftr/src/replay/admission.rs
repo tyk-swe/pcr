@@ -105,8 +105,7 @@ impl<'c> FrameAdmission<'c> {
             .map_err(|source| {
                 BoundaryError::with_source(
                     format!("captured frame cannot be rebuilt exactly: {source}"),
-                    Classification::new(
-                        "packet.replay_rebuild",
+                    Classification::new(packetcraftr_core::error::Code::PacketReplayRebuild,
                         Kind::Packet,
                         Some(
                             "repair the capture so its decoded layers rebuild the exact submitted bytes",
@@ -127,7 +126,7 @@ impl<'c> FrameAdmission<'c> {
             return Err(BoundaryError::new(
                 "captured frame did not reproduce the exact source bytes",
                 Classification::new(
-                    "internal.replay_rebuild",
+                    packetcraftr_core::error::Code::InternalReplayRebuild,
                     Kind::Internal,
                     Some(
                         "do not replay bytes whose codec round trip changed the authoritative capture",
@@ -155,7 +154,7 @@ fn decode_error(source: decode::Error) -> BoundaryError {
     BoundaryError::with_source(
         source.to_string(),
         Classification::new(
-            "packet.decode",
+            packetcraftr_core::error::Code::PacketDecode,
             Kind::Packet,
             Some("repair the frame or link type before authorizing live replay"),
         ),
@@ -169,7 +168,7 @@ fn permissive_live_error(error: crate::policy::Error) -> BoundaryError {
         crate::policy::Error::PermissiveLiveOptIn => BoundaryError::new(
             "permissive or malformed captured bytes require --allow-malformed-live",
             Classification::new(
-                "policy.permissive_live_opt_in",
+                packetcraftr_core::error::Code::PolicyPermissiveLiveOptIn,
                 Kind::Policy,
                 Some("set the per-operation malformed-live opt-in in addition to policy approval"),
             ),
@@ -190,7 +189,7 @@ fn validate_complete_frame(frame: &Frame) -> Result<(), BoundaryError> {
             frame.original_length()
         ),
         Classification::new(
-            "packet.replay_truncated",
+            packetcraftr_core::error::Code::PacketReplayTruncated,
             Kind::Packet,
             Some("replay only complete captured frames whose captured and original lengths match"),
         ),
@@ -206,7 +205,7 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
         BoundaryError::with_source(
             source.to_string(),
             Classification::new(
-                "packet.replay_network",
+                packetcraftr_core::error::Code::PacketReplayNetwork,
                 Kind::Packet,
                 Some("repair the raw IP header or capture link type before live replay"),
             ),

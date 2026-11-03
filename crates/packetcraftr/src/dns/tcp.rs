@@ -13,6 +13,7 @@ use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr_core::budget::{Cancellation, Deadline, Interrupted};
+use packetcraftr_core::clock::{Clock, SystemClock};
 use packetcraftr_core::error::Source;
 
 mod error;
@@ -55,8 +56,29 @@ where
     query_with_connect_wait(
         request,
         provider,
-        Instant::now,
+        || SystemClock.now(),
+        || SystemClock.wall_now(),
         Deadline::new,
+        tcp::PendingConnect::wait,
+    )
+}
+
+pub(crate) fn query_with_sources<P>(
+    request: Request<'_>,
+    provider: Arc<P>,
+    now: impl Fn() -> Instant,
+    wall_now: impl Fn() -> SystemTime,
+    connect_deadline: impl FnOnce(Duration) -> Deadline,
+) -> Result<Response, Error>
+where
+    P: Provider<Stream: 'static> + 'static,
+{
+    query_with_connect_wait(
+        request,
+        provider,
+        now,
+        wall_now,
+        connect_deadline,
         tcp::PendingConnect::wait,
     )
 }
@@ -65,6 +87,7 @@ fn query_with_connect_wait<P>(
     request: Request<'_>,
     connector: Arc<P>,
     now: impl Fn() -> Instant,
+    wall_now: impl Fn() -> SystemTime,
     connect_deadline: impl FnOnce(Duration) -> Deadline,
     wait: impl FnOnce(
         &mut tcp::PendingConnect<P::Stream>,
@@ -95,7 +118,7 @@ where
         &now,
     )?;
     let sent = now();
-    let sent_at = SystemTime::now();
+    let sent_at = wall_now();
 
     let frame = read_frame(
         &mut stream,
@@ -104,7 +127,7 @@ where
         request.max_message_bytes,
         &now,
     )?;
-    let received_at = SystemTime::now();
+    let received_at = wall_now();
     let completed = now();
     if completed >= deadline {
         return Err(Error::Timeout {
@@ -633,7 +656,7 @@ mod tests {
             cancellation: None,
             reads: reads.clone(),
         };
-        let started = Instant::now();
+        let started = SystemClock.now();
         let ticks = std::cell::Cell::new(0);
         let now = || {
             ticks.set(ticks.get() + 1);

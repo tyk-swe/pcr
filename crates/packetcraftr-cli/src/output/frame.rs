@@ -112,15 +112,6 @@ pub struct FieldLayout {
     pub range: ByteRange,
 }
 
-impl From<layout::FieldLayout> for FieldLayout {
-    fn from(value: layout::FieldLayout) -> Self {
-        Self {
-            name: value.name,
-            range: value.range.into(),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct LayerLayout {
     pub index: usize,
@@ -135,7 +126,14 @@ impl From<layout::LayerLayout> for LayerLayout {
             index: value.index,
             protocol: value.protocol.as_str(),
             range: value.range.into(),
-            fields: value.fields.into_iter().map(Into::into).collect(),
+            fields: value
+                .fields
+                .iter()
+                .map(|field| FieldLayout {
+                    name: field.name(value.schema).unwrap_or_default(),
+                    range: field.range.into(),
+                })
+                .collect(),
         }
     }
 }

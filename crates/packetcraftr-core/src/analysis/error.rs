@@ -135,17 +135,17 @@ impl Classified for Error {
             Self::Cancelled(source) => source.classification(),
             Self::Provenance(source) => source.classification(),
             Self::DurationLimit { .. } => Classification::new(
-                "policy.duration_limit",
+                crate::error::Code::PolicyDurationLimit,
                 Kind::Policy,
                 Some("reduce input or raise the finite invocation duration"),
             ),
             Self::InvalidLimit { .. } => Classification::new(
-                "cli.analysis_limit",
+                crate::error::Code::CliAnalysisLimit,
                 Kind::Usage,
                 Some("use finite non-zero analysis frame, byte, flow, and duration limits"),
             ),
             Self::SniPattern { .. } => Classification::new(
-                "cli.error",
+                crate::error::Code::CliError,
                 Kind::Usage,
                 Some("write '*' only at the start, the end, or both ends of the pattern"),
             ),
@@ -169,17 +169,17 @@ impl Classified for Error {
                 source.classification()
             }
             Self::DerivedFrame { .. } => Classification::new(
-                "internal.derived_frame",
+                crate::error::Code::InternalDerivedFrame,
                 Kind::Internal,
                 Some("report the capture and command as an internal reconstruction failure"),
             ),
             Self::TimestampRange { .. } => Classification::new(
-                "packet.timestamp",
+                crate::error::Code::PacketTimestamp,
                 Kind::Packet,
                 Some("repair the capture timestamp that exceeds the platform clock range"),
             ),
             Self::TimestampUnavailable { .. } => Classification::new(
-                "packet.timestamp_unavailable",
+                crate::error::Code::PacketTimestampUnavailable,
                 Kind::Packet,
                 Some("use timestamped packet blocks for time-dependent offline analysis"),
             ),
@@ -221,7 +221,7 @@ pub(super) fn check_ceiling(field: &'static str, value: u64, maximum: u64) -> Re
 pub(super) const GENERAL_RESOURCE_REMEDIATION: &str = "trim the capture before analysis or deliberately raise the finite budget; display filters do not reduce physical input, conversation-index, or scope costs";
 pub(super) fn resource_limit(remediation: &'static str) -> Classification {
     Classification::new(
-        "policy.analysis_resource_limit",
+        crate::error::Code::PolicyAnalysisResourceLimit,
         Kind::Policy,
         Some(remediation),
     )
@@ -229,7 +229,7 @@ pub(super) fn resource_limit(remediation: &'static str) -> Classification {
 
 pub(super) fn malformed_reassembly() -> Classification {
     Classification::new(
-        "packet.reassembly",
+        crate::error::Code::PacketReassembly,
         Kind::Packet,
         Some(
             "the capture carries conflicting or malformed reassembly data; inspect the flow \

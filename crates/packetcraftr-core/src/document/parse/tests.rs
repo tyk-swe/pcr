@@ -36,7 +36,7 @@ fn assert_yaml_syntax_error(input: &str) {
         "{input:?}: {error:?}"
     );
     assert_eq!(error.limit(), None);
-    assert_eq!(error.classification().code, "cli.document_syntax");
+    assert_eq!(error.classification().code.as_str(), "cli.document_syntax");
     assert_eq!(error.classification().kind, Kind::Usage);
 }
 
@@ -88,7 +88,7 @@ fn yaml_preserves_resource_limit_classification() {
     ] {
         let error = Packet::parse_with_limits(YAML, Format::Yaml, &limits).unwrap_err();
         assert_eq!(error.limit(), Some(limit));
-        assert_eq!(error.classification().code, "cli.document_limit");
+        assert_eq!(error.classification().code.as_str(), "cli.document_limit");
         assert_eq!(error.classification().kind, Kind::Usage);
     }
 }

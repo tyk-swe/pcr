@@ -5,7 +5,7 @@ use bytes::Bytes;
 
 use crate::codec::Mode;
 use crate::diagnostic::Diagnostic;
-use crate::layer::{Malformed, Padding};
+use crate::layer::Padding;
 use crate::layout::PacketLayout;
 use crate::packet::Packet;
 use crate::protocol::BuiltinProtocol;
@@ -41,14 +41,13 @@ impl BuiltPacket {
     pub fn contains_malformed(&self) -> bool {
         self.packet
             .iter()
-            .any(<dyn crate::layer::Layer>::is::<Malformed>)
+            .any(|layer| BuiltinProtocol::Malformed.identifies(layer))
     }
 
     #[must_use]
     pub fn contains_network_trailer(&self) -> bool {
         self.packet.iter().any(|layer| {
-            layer
-                .downcast_ref::<Padding>()
+            Padding::from_layer(layer)
                 .and_then(|padding| padding.outside_layer)
                 .and_then(|outside_layer| self.packet.layer(outside_layer))
                 .is_some_and(|outside| is_network_boundary(BuiltinProtocol::of(outside)))

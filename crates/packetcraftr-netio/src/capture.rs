@@ -14,6 +14,7 @@ mod record;
 mod settings;
 mod system;
 
+use packetcraftr_core::clock::{Clock, SystemClock};
 use std::time::Instant;
 
 use super::Error;
@@ -213,7 +214,8 @@ pub(crate) fn wait_end(deadline: &Deadline) -> Result<Option<Instant>, Error> {
             maximum: crate::deadline::MAX_WAIT,
         });
     }
-    Instant::now()
+    SystemClock
+        .now()
         .checked_add(timeout)
         .map(Some)
         .ok_or(Error::InvalidCaptureTimeout {

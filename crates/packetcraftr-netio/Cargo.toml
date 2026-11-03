@@ -42,6 +42,7 @@ serde_json.workspace = true
 webpki-roots.workspace = true
 bytes.workspace = true
 packetcraftr-core.workspace = true
+getrandom.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 rustls.workspace = true

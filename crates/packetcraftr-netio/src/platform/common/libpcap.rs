@@ -10,8 +10,6 @@ use crate::{
 };
 use packetcraftr_core::error::Source;
 
-pub(in crate::platform) const READ_TIMEOUT_MILLIS: i32 = 50;
-
 pub(in crate::platform) fn map_open_error(interface: &InterfaceId, error: PcapError) -> Error {
     let message = error.to_string();
     let source = Some(Source::new(error));

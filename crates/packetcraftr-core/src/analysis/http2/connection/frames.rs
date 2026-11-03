@@ -45,10 +45,8 @@ impl ConnectionState {
             let effective_max = receiver.permitted_frame_size();
             if length as u32 > effective_max {
                 let flow = dir.flow.clone();
-                let sets = dir.buffer.contributors(wire::HEADER_LEN);
-                let (_, dropped) = dir.buffer.take(wire::HEADER_LEN);
+                let sets = dir.buffer.consume(wire::HEADER_LEN, context)?;
                 let sources = union_balanced(sets)?;
-                dir.release_consumed(wire::HEADER_LEN, dropped, context)?;
                 self.reject(
                     context,
                     Fault::new(
@@ -114,9 +112,7 @@ impl ConnectionState {
                     .directions
                     .get_mut(side)
                     .ok_or(Error::Invariant("dir"))?;
-                let sets = dir.buffer.contributors(total);
-                let dropped = dir.buffer.consume(total);
-                dir.release_consumed(total, dropped, context)?;
+                let sets = dir.buffer.consume(total, context)?;
                 let sources = union_balanced(sets)?;
                 self.frames += 1;
                 self.handle_frame(side, frame, wire_bytes, sources, context)?;
@@ -165,10 +161,8 @@ impl ConnectionState {
                 _ => dir.buffer.len(),
             }
         };
-        let sets = dir.buffer.contributors(take);
-        let (wire, dropped) = dir.buffer.take(take);
+        let (wire, sets) = dir.buffer.take(take, context)?;
         let sources = union_balanced(sets)?;
-        dir.release_consumed(take, dropped, context)?;
         let flow = dir.flow.clone();
         let (status, code, detail) = match &error {
             _ if interrupted_chain => (

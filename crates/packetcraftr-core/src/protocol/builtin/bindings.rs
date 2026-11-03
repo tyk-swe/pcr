@@ -5,17 +5,21 @@ use crate::{
     frame::LinkType,
     protocol::BuiltinProtocol,
     protocol::{
-        link::LLC_FRAME_DISCRIMINATOR,
+        link::{
+            CDP_SNAP_DISCRIMINATOR, EAP_PACKET_SELECTOR, LLC_FRAME_DISCRIMINATOR,
+            SNAP_DISCRIMINATOR, STP_DISCRIMINATOR, ether_type,
+        },
         network::ip_protocol,
         tunnel::{
             GTPU_IP_VERSION_BASE, GTPU_OTHER_PAYLOAD, MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE,
-            MPLS_NEXT_LABEL, PPPOE_DISCOVERY, PPPOE_SESSION,
+            MPLS_NEXT_LABEL, PPPOE_DISCOVERY, PPPOE_SESSION, ppp_protocol,
         },
     },
+    registry::Priority,
 };
 
-type Child = (u64, BuiltinProtocol, i32);
-type Binding = (BuiltinProtocol, u64, BuiltinProtocol, i32);
+type Child = (u64, BuiltinProtocol, Priority);
+type Binding = (BuiltinProtocol, u64, BuiltinProtocol, Priority);
 
 pub(super) fn register(
     builder: &mut crate::registry::Builder,
@@ -28,40 +32,159 @@ pub(super) fn register(
         BuiltinProtocol::Tcp,
         BuiltinProtocol::Sctp,
     ] {
-        bind_children(builder, parent, &[(0, BuiltinProtocol::Raw, 0)])?;
+        bind_children(
+            builder,
+            parent,
+            &[(0, BuiltinProtocol::Raw, Priority::Fallback)],
+        )?;
     }
     bind_all(
         builder,
         &[
-            (BuiltinProtocol::Udp, 53, BuiltinProtocol::Dns, 100),
-            (BuiltinProtocol::Udp, 69, BuiltinProtocol::Tftp, 100),
-            (BuiltinProtocol::Udp, 123, BuiltinProtocol::Ntp, 100),
-            (BuiltinProtocol::Udp, 514, BuiltinProtocol::Syslog, 100),
-            (BuiltinProtocol::Udp, 5353, BuiltinProtocol::Dns, 100),
-            (BuiltinProtocol::Udp, 5355, BuiltinProtocol::Dns, 100),
-            (BuiltinProtocol::Udp, 67, BuiltinProtocol::Dhcpv4, 100),
-            (BuiltinProtocol::Udp, 68, BuiltinProtocol::Dhcpv4, 100),
-            (BuiltinProtocol::Udp, 546, BuiltinProtocol::Dhcpv6, 100),
-            (BuiltinProtocol::Udp, 547, BuiltinProtocol::Dhcpv6, 100),
-            (BuiltinProtocol::Tcp, 53, BuiltinProtocol::Dns, 100),
-            (BuiltinProtocol::Tcp, 80, BuiltinProtocol::Http, 100),
-            (BuiltinProtocol::Tcp, 8080, BuiltinProtocol::Http, 100),
-            (BuiltinProtocol::Http, 0, BuiltinProtocol::Raw, 0),
-            (BuiltinProtocol::Dns, 0, BuiltinProtocol::Raw, 0),
-            (BuiltinProtocol::Arp, 0, BuiltinProtocol::Padding, 0),
-            (BuiltinProtocol::Eapol, 0, BuiltinProtocol::Raw, 0),
-            (BuiltinProtocol::Eapol, 256, BuiltinProtocol::Eap, 100),
-            (BuiltinProtocol::Ah, 345, BuiltinProtocol::Ospfv3, 100),
-            (BuiltinProtocol::Snap, 0x000c2000, BuiltinProtocol::Cdp, 100),
-            (BuiltinProtocol::Ppp, 0xc021, BuiltinProtocol::PppLcp, 100),
-            (BuiltinProtocol::Ppp, 0x8021, BuiltinProtocol::PppIpcp, 100),
+            (
+                BuiltinProtocol::Udp,
+                53,
+                BuiltinProtocol::Dns,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Udp,
+                69,
+                BuiltinProtocol::Tftp,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Udp,
+                123,
+                BuiltinProtocol::Ntp,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Udp,
+                514,
+                BuiltinProtocol::Syslog,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Udp,
+                5353,
+                BuiltinProtocol::Dns,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Udp,
+                5355,
+                BuiltinProtocol::Dns,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Udp,
+                67,
+                BuiltinProtocol::Dhcpv4,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Udp,
+                68,
+                BuiltinProtocol::Dhcpv4,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Udp,
+                546,
+                BuiltinProtocol::Dhcpv6,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Udp,
+                547,
+                BuiltinProtocol::Dhcpv6,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Tcp,
+                53,
+                BuiltinProtocol::Dns,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Tcp,
+                80,
+                BuiltinProtocol::Http,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Tcp,
+                8080,
+                BuiltinProtocol::Http,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Http,
+                0,
+                BuiltinProtocol::Raw,
+                Priority::Fallback,
+            ),
+            (
+                BuiltinProtocol::Dns,
+                0,
+                BuiltinProtocol::Raw,
+                Priority::Fallback,
+            ),
+            (
+                BuiltinProtocol::Arp,
+                0,
+                BuiltinProtocol::Padding,
+                Priority::Fallback,
+            ),
+            (
+                BuiltinProtocol::Eapol,
+                0,
+                BuiltinProtocol::Raw,
+                Priority::Fallback,
+            ),
+            (
+                BuiltinProtocol::Eapol,
+                EAP_PACKET_SELECTOR,
+                BuiltinProtocol::Eap,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Ah,
+                256 + u64::from(ip_protocol::OSPF),
+                BuiltinProtocol::Ospfv3,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Snap,
+                CDP_SNAP_DISCRIMINATOR,
+                BuiltinProtocol::Cdp,
+                Priority::Primary,
+            ),
             (
                 BuiltinProtocol::Ppp,
-                0x8057,
-                BuiltinProtocol::PppIpv6cp,
-                100,
+                u64::from(ppp_protocol::LCP),
+                BuiltinProtocol::PppLcp,
+                Priority::Primary,
             ),
-            (BuiltinProtocol::Ppp, 0xc227, BuiltinProtocol::Eap, 100),
+            (
+                BuiltinProtocol::Ppp,
+                u64::from(ppp_protocol::IPCP),
+                BuiltinProtocol::PppIpcp,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Ppp,
+                u64::from(ppp_protocol::IPV6CP),
+                BuiltinProtocol::PppIpv6cp,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Ppp,
+                u64::from(ppp_protocol::EAP),
+                BuiltinProtocol::Eap,
+                Priority::Primary,
+            ),
         ],
     )?;
     register_messages(builder)?;
@@ -75,7 +198,12 @@ fn register_tls(builder: &mut crate::registry::Builder) -> Result<(), crate::reg
     bind_tls_ports(builder, TLS_TCP_PORTS)?;
     bind_all(
         builder,
-        &[(BuiltinProtocol::Tls, 0, BuiltinProtocol::Raw, 0)],
+        &[(
+            BuiltinProtocol::Tls,
+            0,
+            BuiltinProtocol::Raw,
+            Priority::Fallback,
+        )],
     )
 }
 
@@ -85,7 +213,7 @@ pub(crate) fn bind_tls_ports(
     builder: &mut crate::registry::Builder,
     ports: &[u16],
 ) -> Result<(), crate::registry::Error> {
-    const TLS_PORT_PRIORITY: i32 = 100;
+    const TLS_PORT_PRIORITY: Priority = Priority::Primary;
     for port in ports {
         if *port == 0 {
             return Err(crate::registry::Error::BindingConflict {
@@ -134,16 +262,20 @@ fn register_link(builder: &mut crate::registry::Builder) -> Result<(), crate::re
         bind_children(
             builder,
             parent,
-            &[(LLC_FRAME_DISCRIMINATOR, BuiltinProtocol::Llc, 100)],
+            &[(
+                LLC_FRAME_DISCRIMINATOR,
+                BuiltinProtocol::Llc,
+                Priority::Primary,
+            )],
         )?;
     }
     bind_children(
         builder,
         BuiltinProtocol::Llc,
         &[
-            (0xaaaa, BuiltinProtocol::Snap, 100),
-            (0x4242, BuiltinProtocol::Stp, 100),
-            (0, BuiltinProtocol::Raw, -100),
+            (SNAP_DISCRIMINATOR, BuiltinProtocol::Snap, Priority::Primary),
+            (STP_DISCRIMINATOR, BuiltinProtocol::Stp, Priority::Primary),
+            (0, BuiltinProtocol::Raw, Priority::Fallback),
         ],
     )?;
     bind_link_children(builder, BuiltinProtocol::Snap)?;
@@ -155,9 +287,9 @@ fn register_link(builder: &mut crate::registry::Builder) -> Result<(), crate::re
             builder,
             parent,
             &[
-                (4, BuiltinProtocol::Ipv4, 100),
-                (6, BuiltinProtocol::Ipv6, 100),
-                (0, BuiltinProtocol::Raw, -100),
+                (4, BuiltinProtocol::Ipv4, Priority::Primary),
+                (6, BuiltinProtocol::Ipv6, Priority::Primary),
+                (0, BuiltinProtocol::Raw, Priority::Fallback),
             ],
         )?;
     }
@@ -165,7 +297,11 @@ fn register_link(builder: &mut crate::registry::Builder) -> Result<(), crate::re
 }
 
 fn register_ip(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
-    bind_ip_children(builder, BuiltinProtocol::Ipv4, 1)?;
+    bind_ip_children(
+        builder,
+        BuiltinProtocol::Ipv4,
+        u64::from(ip_protocol::ICMPV4),
+    )?;
     bind_ipv6_children(builder, BuiltinProtocol::Ipv6)?;
     bind_ipv6_extensions(builder, BuiltinProtocol::Ipv6)?;
     for parent in [
@@ -177,13 +313,21 @@ fn register_ip(builder: &mut crate::registry::Builder) -> Result<(), crate::regi
         bind_ipv6_children(builder, parent)?;
         bind_ipv6_extensions(builder, parent)?;
     }
-    bind_ip_children(builder, BuiltinProtocol::Ah, 1)?;
+    bind_ip_children(builder, BuiltinProtocol::Ah, u64::from(ip_protocol::ICMPV4))?;
     bind_children(
         builder,
         BuiltinProtocol::Ah,
         &[
-            (58, BuiltinProtocol::Icmpv6, 100),
-            (59, BuiltinProtocol::Malformed, 100),
+            (
+                u64::from(ip_protocol::ICMPV6),
+                BuiltinProtocol::Icmpv6,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::NO_NEXT_HEADER),
+                BuiltinProtocol::Malformed,
+                Priority::Primary,
+            ),
         ],
     )?;
     bind_ipv6_extensions(builder, BuiltinProtocol::Ah)
@@ -193,89 +337,179 @@ fn register_tunnels(builder: &mut crate::registry::Builder) -> Result<(), crate:
     bind_all(
         builder,
         &[
-            (BuiltinProtocol::Esp, 0, BuiltinProtocol::Raw, 0),
-            (BuiltinProtocol::L2tpv3, 0, BuiltinProtocol::Raw, 0),
+            (
+                BuiltinProtocol::Esp,
+                0,
+                BuiltinProtocol::Raw,
+                Priority::Fallback,
+            ),
+            (
+                BuiltinProtocol::L2tpv3,
+                0,
+                BuiltinProtocol::Raw,
+                Priority::Fallback,
+            ),
         ],
     )?;
     bind_link_children(builder, BuiltinProtocol::Gre)?;
     bind_all(
         builder,
         &[
-            (BuiltinProtocol::Gre, 0x6558, BuiltinProtocol::Ethernet, 100),
-            (BuiltinProtocol::Gre, 0x88be, BuiltinProtocol::Erspan, 100),
-            (BuiltinProtocol::Gre, 0x22eb, BuiltinProtocol::Erspan, 90),
-            (BuiltinProtocol::Erspan, 0, BuiltinProtocol::Ethernet, 100),
-            (BuiltinProtocol::Udp, 4789, BuiltinProtocol::Vxlan, 100),
-            (BuiltinProtocol::Vxlan, 0, BuiltinProtocol::Ethernet, 100),
-            (BuiltinProtocol::Etherip, 0, BuiltinProtocol::Ethernet, 100),
-            (BuiltinProtocol::Udp, 2152, BuiltinProtocol::Gtpu, 100),
+            (
+                BuiltinProtocol::Gre,
+                u64::from(ether_type::TRANSPARENT_ETHERNET_BRIDGING),
+                BuiltinProtocol::Ethernet,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Gre,
+                u64::from(ether_type::ERSPAN_TYPE_II),
+                BuiltinProtocol::Erspan,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Gre,
+                u64::from(ether_type::ERSPAN_TYPE_III),
+                BuiltinProtocol::Erspan,
+                Priority::Secondary,
+            ),
+            (
+                BuiltinProtocol::Erspan,
+                0,
+                BuiltinProtocol::Ethernet,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Udp,
+                4789,
+                BuiltinProtocol::Vxlan,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Vxlan,
+                0,
+                BuiltinProtocol::Ethernet,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Etherip,
+                0,
+                BuiltinProtocol::Ethernet,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Udp,
+                2152,
+                BuiltinProtocol::Gtpu,
+                Priority::Primary,
+            ),
             (
                 BuiltinProtocol::Gtpu,
                 GTPU_IP_VERSION_BASE + 4,
                 BuiltinProtocol::Ipv4,
-                100,
+                Priority::Primary,
             ),
             (
                 BuiltinProtocol::Gtpu,
                 GTPU_IP_VERSION_BASE + 6,
                 BuiltinProtocol::Ipv6,
-                100,
+                Priority::Primary,
             ),
             (
                 BuiltinProtocol::Gtpu,
                 GTPU_OTHER_PAYLOAD,
                 BuiltinProtocol::Raw,
-                -100,
+                Priority::Fallback,
             ),
-            (BuiltinProtocol::Udp, 6635, BuiltinProtocol::Mpls, 100),
-            (BuiltinProtocol::Udp, 6081, BuiltinProtocol::Geneve, 100),
+            (
+                BuiltinProtocol::Udp,
+                6635,
+                BuiltinProtocol::Mpls,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Udp,
+                6081,
+                BuiltinProtocol::Geneve,
+                Priority::Primary,
+            ),
             (
                 BuiltinProtocol::Geneve,
-                0x6558,
+                u64::from(ether_type::TRANSPARENT_ETHERNET_BRIDGING),
                 BuiltinProtocol::Ethernet,
-                100,
+                Priority::Primary,
             ),
-            (BuiltinProtocol::Geneve, 0x0800, BuiltinProtocol::Ipv4, 100),
-            (BuiltinProtocol::Geneve, 0x86dd, BuiltinProtocol::Ipv6, 100),
-            (BuiltinProtocol::Geneve, 0, BuiltinProtocol::Raw, -100),
+            (
+                BuiltinProtocol::Geneve,
+                u64::from(ether_type::IPV4),
+                BuiltinProtocol::Ipv4,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Geneve,
+                u64::from(ether_type::IPV6),
+                BuiltinProtocol::Ipv6,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Geneve,
+                0,
+                BuiltinProtocol::Raw,
+                Priority::Fallback,
+            ),
             (
                 BuiltinProtocol::Pppoe,
                 PPPOE_SESSION,
                 BuiltinProtocol::Ppp,
-                100,
+                Priority::Primary,
             ),
             (
                 BuiltinProtocol::Pppoe,
                 PPPOE_DISCOVERY,
                 BuiltinProtocol::Raw,
-                0,
+                Priority::Fallback,
             ),
-            (BuiltinProtocol::Ppp, 0x0021, BuiltinProtocol::Ipv4, 100),
-            (BuiltinProtocol::Ppp, 0x0057, BuiltinProtocol::Ipv6, 100),
-            (BuiltinProtocol::Ppp, 0, BuiltinProtocol::Raw, -100),
+            (
+                BuiltinProtocol::Ppp,
+                u64::from(ppp_protocol::IPV4),
+                BuiltinProtocol::Ipv4,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Ppp,
+                u64::from(ppp_protocol::IPV6),
+                BuiltinProtocol::Ipv6,
+                Priority::Primary,
+            ),
+            (
+                BuiltinProtocol::Ppp,
+                0,
+                BuiltinProtocol::Raw,
+                Priority::Fallback,
+            ),
             (
                 BuiltinProtocol::Mpls,
                 MPLS_NEXT_LABEL,
                 BuiltinProtocol::Mpls,
-                100,
+                Priority::Primary,
             ),
             (
                 BuiltinProtocol::Mpls,
                 MPLS_BOTTOM_VERSION_BASE + 4,
                 BuiltinProtocol::Ipv4,
-                100,
+                Priority::Primary,
             ),
             (
                 BuiltinProtocol::Mpls,
                 MPLS_BOTTOM_VERSION_BASE + 6,
                 BuiltinProtocol::Ipv6,
-                100,
+                Priority::Primary,
             ),
             (
                 BuiltinProtocol::Mpls,
                 MPLS_BOTTOM_RAW,
                 BuiltinProtocol::Raw,
-                -100,
+                Priority::Fallback,
             ),
         ],
     )
@@ -289,33 +523,81 @@ fn bind_common_ip_children(
         builder,
         parent,
         &[
-            (4, BuiltinProtocol::Ipv4, 100),
-            (6, BuiltinProtocol::Tcp, 100),
-            (17, BuiltinProtocol::Udp, 100),
-            (41, BuiltinProtocol::Ipv6, 100),
-            (47, BuiltinProtocol::Gre, 100),
-            (50, BuiltinProtocol::Esp, 100),
-            (51, BuiltinProtocol::Ah, 100),
+            (
+                u64::from(ip_protocol::IPV4),
+                BuiltinProtocol::Ipv4,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::TCP),
+                BuiltinProtocol::Tcp,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::UDP),
+                BuiltinProtocol::Udp,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::IPV6),
+                BuiltinProtocol::Ipv6,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::GRE),
+                BuiltinProtocol::Gre,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::ESP),
+                BuiltinProtocol::Esp,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::AH),
+                BuiltinProtocol::Ah,
+                Priority::Primary,
+            ),
             (
                 u64::from(ip_protocol::ETHERIP),
                 BuiltinProtocol::Etherip,
-                100,
+                Priority::Primary,
             ),
-            (112, BuiltinProtocol::Vrrp, 100),
-            (103, BuiltinProtocol::Pim, 100),
-            (115, BuiltinProtocol::L2tpv3, 100),
-            (132, BuiltinProtocol::Sctp, 100),
+            (
+                u64::from(ip_protocol::VRRP),
+                BuiltinProtocol::Vrrp,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::PIM),
+                BuiltinProtocol::Pim,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::L2TPV3),
+                BuiltinProtocol::L2tpv3,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::SCTP),
+                BuiltinProtocol::Sctp,
+                Priority::Primary,
+            ),
             (
                 u64::from(ip_protocol::MPLS_IN_IP),
                 BuiltinProtocol::Mpls,
-                100,
+                Priority::Primary,
             ),
             (
                 u64::from(ip_protocol::ETHERNET),
                 BuiltinProtocol::Ethernet,
-                100,
+                Priority::Primary,
             ),
-            (255, BuiltinProtocol::Raw, -100),
+            (
+                u64::from(ip_protocol::RESERVED),
+                BuiltinProtocol::Raw,
+                Priority::Fallback,
+            ),
         ],
     )
 }
@@ -329,9 +611,21 @@ fn bind_ipv6_children(
         builder,
         parent,
         &[
-            (58, BuiltinProtocol::Icmpv6, 100),
-            (89, BuiltinProtocol::Ospfv3, 100),
-            (59, BuiltinProtocol::Malformed, 100),
+            (
+                u64::from(ip_protocol::ICMPV6),
+                BuiltinProtocol::Icmpv6,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::OSPF),
+                BuiltinProtocol::Ospfv3,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::NO_NEXT_HEADER),
+                BuiltinProtocol::Malformed,
+                Priority::Primary,
+            ),
         ],
     )
 }
@@ -341,15 +635,35 @@ fn bind_ipv6_extensions(
     parent: BuiltinProtocol,
 ) -> Result<(), crate::registry::Error> {
     if parent == BuiltinProtocol::Ipv6 {
-        bind_children(builder, parent, &[(0, BuiltinProtocol::Ipv6HopByHop, 100)])?;
+        bind_children(
+            builder,
+            parent,
+            &[(
+                u64::from(ip_protocol::HOP_BY_HOP),
+                BuiltinProtocol::Ipv6HopByHop,
+                Priority::Primary,
+            )],
+        )?;
     }
     bind_children(
         builder,
         parent,
         &[
-            (43, BuiltinProtocol::Ipv6Srh, 100),
-            (44, BuiltinProtocol::Ipv6Fragment, 100),
-            (60, BuiltinProtocol::Ipv6DestinationOptions, 100),
+            (
+                u64::from(ip_protocol::ROUTING),
+                BuiltinProtocol::Ipv6Srh,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::FRAGMENT),
+                BuiltinProtocol::Ipv6Fragment,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::DESTINATION_OPTIONS),
+                BuiltinProtocol::Ipv6DestinationOptions,
+                Priority::Primary,
+            ),
         ],
     )
 }
@@ -362,19 +676,67 @@ fn bind_link_children(
         builder,
         parent,
         &[
-            (0x0800, BuiltinProtocol::Ipv4, 100),
-            (0x0806, BuiltinProtocol::Arp, 100),
-            (0x8100, BuiltinProtocol::Vlan, 100),
-            (0x8847, BuiltinProtocol::Mpls, 100),
-            (0x8848, BuiltinProtocol::Mpls, 90),
-            (0x8864, BuiltinProtocol::Pppoe, 100),
-            (0x8863, BuiltinProtocol::Pppoe, 90),
-            (0x888e, BuiltinProtocol::Eapol, 100),
-            (0x88a8, BuiltinProtocol::Vlan8021ad, 100),
-            (0x88cc, BuiltinProtocol::Lldp, 100),
-            (0x8809, BuiltinProtocol::Lacp, 100),
-            (0x86dd, BuiltinProtocol::Ipv6, 100),
-            (0, BuiltinProtocol::Raw, -100),
+            (
+                u64::from(ether_type::IPV4),
+                BuiltinProtocol::Ipv4,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ether_type::ARP),
+                BuiltinProtocol::Arp,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ether_type::VLAN),
+                BuiltinProtocol::Vlan,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ether_type::MPLS_UNICAST),
+                BuiltinProtocol::Mpls,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ether_type::MPLS_MULTICAST),
+                BuiltinProtocol::Mpls,
+                Priority::Secondary,
+            ),
+            (
+                u64::from(ether_type::PPPOE_SESSION_STAGE),
+                BuiltinProtocol::Pppoe,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ether_type::PPPOE_DISCOVERY_STAGE),
+                BuiltinProtocol::Pppoe,
+                Priority::Secondary,
+            ),
+            (
+                u64::from(ether_type::EAPOL),
+                BuiltinProtocol::Eapol,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ether_type::VLAN_8021AD),
+                BuiltinProtocol::Vlan8021ad,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ether_type::LLDP),
+                BuiltinProtocol::Lldp,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ether_type::SLOW_PROTOCOLS),
+                BuiltinProtocol::Lacp,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ether_type::IPV6),
+                BuiltinProtocol::Ipv6,
+                Priority::Primary,
+            ),
+            (0, BuiltinProtocol::Raw, Priority::Fallback),
         ],
     )
 }
@@ -389,9 +751,17 @@ fn bind_ip_children(
         builder,
         parent,
         &[
-            (icmp_number, BuiltinProtocol::Icmpv4, 100),
-            (2, BuiltinProtocol::Igmp, 100),
-            (89, BuiltinProtocol::Ospfv2, 100),
+            (icmp_number, BuiltinProtocol::Icmpv4, Priority::Primary),
+            (
+                u64::from(ip_protocol::IGMP),
+                BuiltinProtocol::Igmp,
+                Priority::Primary,
+            ),
+            (
+                u64::from(ip_protocol::OSPF),
+                BuiltinProtocol::Ospfv2,
+                Priority::Primary,
+            ),
         ],
     )
 }
@@ -419,7 +789,7 @@ fn bind_all(
 
 fn register_messages(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
     for protocol in BuiltinProtocol::ALL {
-        if let Some(info) = protocol.message_protocol() {
+        if protocol.is_message_protocol() {
             builder.bind(
                 protocol.as_str(),
                 0,
@@ -428,7 +798,7 @@ fn register_messages(builder: &mut crate::registry::Builder) -> Result<(), crate
                 } else {
                     "raw"
                 },
-                100,
+                Priority::Primary,
             )?;
             if protocol.stream_decode() {
                 // Zero continues typed frames; one permits a preserved opaque build tail.
@@ -436,15 +806,20 @@ fn register_messages(builder: &mut crate::registry::Builder) -> Result<(), crate
                     protocol.as_str(),
                     crate::protocol::message::OPAQUE_TAIL,
                     "raw",
-                    100,
+                    Priority::Primary,
                 )?;
             }
             for (parent, ports) in [
-                (BuiltinProtocol::Tcp, info.tcp_ports),
-                (BuiltinProtocol::Udp, info.udp_ports),
+                (BuiltinProtocol::Tcp, protocol.tcp_ports()),
+                (BuiltinProtocol::Udp, protocol.udp_ports()),
             ] {
                 for &port in ports {
-                    builder.bind(parent.as_str(), u64::from(port), protocol.as_str(), 100)?;
+                    builder.bind(
+                        parent.as_str(),
+                        u64::from(port),
+                        protocol.as_str(),
+                        Priority::Primary,
+                    )?;
                 }
             }
         }

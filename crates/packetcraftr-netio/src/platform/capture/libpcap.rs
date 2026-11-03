@@ -5,11 +5,11 @@
 
 mod bpf;
 
+use packetcraftr_core::clock::{Clock, SystemClock};
 use std::{
     ffi::{CStr, c_char, c_int, c_void},
     ptr::null_mut,
     sync::Arc,
-    time::{Instant, SystemTime},
 };
 
 use bytes::Bytes;
@@ -26,7 +26,8 @@ use crate::{
         Limits, MAX_TIMESTAMP_TYPES, Metadata, NativeSettings, TimestampPrecision, TimestampType,
     },
     interface::Id as InterfaceId,
-    platform::common::libpcap::{READ_TIMEOUT_MILLIS, map_open_error},
+    platform::common::READ_TIMEOUT_MILLIS,
+    platform::common::libpcap::map_open_error,
     platform::common::pcap_api::{
         Diagnostic, canonical_link_type, check_setting_status, realize_settings,
         timestamp_precision_value, timestamp_source_of_value, timestamp_source_value,
@@ -275,8 +276,8 @@ impl NativeCaptureSource for PcapCaptureSource {
         match self.capture.next_packet() {
             Ok(packet) => {
                 // Monotonic first makes the paired-clock sampling skew conservative.
-                let observed_at = Instant::now();
-                let observed_wall = SystemTime::now();
+                let observed_at = SystemClock.now();
+                let observed_wall = SystemClock.wall_now();
                 #[cfg(target_os = "linux")]
                 let timestamp = system_time(
                     packet.header.ts.tv_sec,

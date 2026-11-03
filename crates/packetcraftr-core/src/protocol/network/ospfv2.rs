@@ -3,10 +3,10 @@
 
 //! OSPF version 2 packet types 1-5. LSA bodies and authentication bytes remain opaque.
 
-use crate::codec::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::protocol::common::{checksum_parts, invalid, unsupported};
+use crate::protocol::message::{Reader, Records, Writer, message_codec};
 use bytes::Bytes;
 
 use super::ospf;
@@ -56,7 +56,7 @@ impl Default for Ospfv2 {
     }
 }
 crate::reflective_layer! {
- fn ospfv2_schema() => { protocol: crate::layer::Id::new("ospfv2"), name: "Ospfv2" }
+ fn ospfv2_schema() => { protocol: crate::protocol::BuiltinProtocol::Ospfv2.id(), name: "Ospfv2" }
  impl Ospfv2 {
     "packet_type" => { kind: Unsigned, derived: false, required: false, description: "packet type", reflect: packet_type },
     "router_id" => { kind: Unsigned, derived: false, required: false, description: "router id", reflect: router_id },
@@ -77,20 +77,7 @@ crate::reflective_layer! {
     "data" => { kind: Bytes, derived: false, required: false, description: "data", reflect: data },
  }
 }
-fn ospfv2_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    let mut fields = ospf::header_layout(b);
-    if b.len() >= 24 && b[14..16] == [0, 2] {
-        let start = usize::from(u16::from_be_bytes([b[2], b[3]]));
-        if start <= b.len() {
-            fields.push(crate::layout::FieldLayout {
-                name: "auth_trailer",
-                range: crate::layout::ByteRange::new(start, b.len()),
-            });
-        }
-    }
-    fields
-}
-message_codec!(Ospfv2Codec, Ospfv2, ospfv2_schema, ospfv2_layout_wire);
+message_codec!(Ospfv2Codec, Ospfv2, ospfv2_schema);
 
 const NAME: &str = "ospfv2";
 const VERSION: u8 = 2;
@@ -145,7 +132,10 @@ impl Ospfv2 {
         w.put(&self.auth_trailer)?;
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         let mut r = Reader::new(NAME, &b);
         if r.u8()? != VERSION {
             return Err(unsupported(NAME, "wrong OSPF version"));
@@ -175,6 +165,13 @@ impl Ospfv2 {
             ));
         }
         s.auth_trailer = b.slice(len..);
+        let mut layouts = ospf::header_layout(&b);
+        if s.auth_type == 2 {
+            layouts.push(crate::layout::FieldLayout {
+                index: 6,
+                range: crate::layout::ByteRange::new(len, b.len()),
+            });
+        }
         r.bytes = &b[..len];
         let valid = s.auth_type == 2 || checksum_parts(&[&b[..16], &b[24..len]]) == 0;
         if !valid {
@@ -196,6 +193,6 @@ impl Ospfv2 {
             _ => return Err(unsupported(NAME, "unsupported packet type")),
         }
         r.finish()?;
-        Ok(s)
+        Ok((s, layouts))
     }
 }

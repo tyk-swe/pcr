@@ -4,14 +4,14 @@
 //! Shared OSPF header layout, neighbor lists, LSA envelopes, and opaque bodies
 //! for versions 2 and 3.
 
-use bytes::Bytes;
-
 use crate::codec::Error;
-use crate::field;
-use crate::layout::{ByteRange, FieldLayout};
 use crate::protocol::common::invalid;
 use crate::protocol::common::structured::member;
 use crate::protocol::message::{MAX_RECORDS, Reader, Records, Writer, data, number, record};
+use bytes::Bytes;
+
+use crate::field;
+use crate::layout::{ByteRange, FieldLayout};
 
 pub(crate) const NEIGHBORS: &[crate::layer::FieldSchema] =
     &[member("router_id", field::Kind::Unsigned, &[])];
@@ -24,25 +24,25 @@ pub(crate) fn header_layout(b: &[u8]) -> Vec<FieldLayout> {
     let mut fields = Vec::new();
     if 2 <= b.len() {
         fields.push(FieldLayout {
-            name: "packet_type",
+            index: 0,
             range: ByteRange::new(1, 2),
         });
     }
     if 8 <= b.len() {
         fields.push(FieldLayout {
-            name: "router_id",
+            index: 1,
             range: ByteRange::new(4, 8),
         });
     }
     if 12 <= b.len() {
         fields.push(FieldLayout {
-            name: "area_id",
+            index: 2,
             range: ByteRange::new(8, 12),
         });
     }
     if 14 <= b.len() {
         fields.push(FieldLayout {
-            name: "checksum",
+            index: 3,
             range: ByteRange::new(12, 14),
         });
     }

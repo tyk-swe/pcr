@@ -65,7 +65,7 @@ pub(super) enum Predicate {
 /// Postfix order keeps evaluation non-recursive, so untrusted input cannot drive stack depth.
 #[derive(Clone, Debug)]
 pub(super) enum Op {
-    Leaf(Predicate),
+    Leaf(Box<Predicate>),
     Not,
     And,
     Or,

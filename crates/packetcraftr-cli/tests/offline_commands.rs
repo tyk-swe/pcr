@@ -568,6 +568,165 @@ fn analyze_scan_diff_rejects_invalid_scan_input() {
     assert_eq!(report["error"]["code"], "cli.security_input");
 }
 
+mod differential {
+    use packetcraftr::differential as lib;
+    use packetcraftr_cli::output::{contract::Command, differential::Report, envelope};
+    use serde_json::{Value, json};
+    use std::process::Output;
+
+    pub(super) fn campaign() -> Vec<u8> {
+        let attempts = [u32::MAX, 7]
+            .into_iter()
+            .map(|attempt_seq| lib::AttemptEvidence {
+                variant_index: 0,
+                attempt_seq,
+                answered: false,
+                packets_sent: 1,
+                payload_sha256: [0x11; 32],
+                reply: None,
+            })
+            .collect::<Vec<_>>();
+        let published = envelope::Published::<Report>::try_from(lib::Aggregate {
+            valid: false,
+            provisional: true,
+            plan_digest: "fixture".into(),
+            source_port: 40000,
+            spoof_source: Some("192.0.2.1".parse().unwrap()),
+            rows: lib::rows_for(&attempts),
+            attempts,
+            diagnostics: Vec::new(),
+            stats: Default::default(),
+        })
+        .unwrap();
+        serde_json::to_vec(&envelope::Envelope::published(
+            Command::Differential,
+            published,
+        ))
+        .unwrap()
+    }
+
+    fn reception(attempt_seq: u32) -> Vec<u8> {
+        serde_json::to_vec(&lib::ReceptionRecord {
+            variant_index: 0,
+            attempt_seq,
+            source: "192.0.2.1:40000".parse().unwrap(),
+            payload_sha256: lib::hex(&[0x11; 32]),
+        })
+        .unwrap()
+    }
+
+    fn join(campaign: &[u8], log: &[u8]) -> Output {
+        let dir = tempfile::tempdir().unwrap();
+        let campaign_path = dir.path().join("campaign.json");
+        let log_path = dir.path().join("receptions.jsonl");
+        std::fs::write(&campaign_path, campaign).unwrap();
+        std::fs::write(&log_path, log).unwrap();
+        super::run(&[
+            "--output",
+            "json",
+            "network",
+            "differential-join",
+            campaign_path.to_str().unwrap(),
+            "--responder-log",
+            log_path.to_str().unwrap(),
+        ])
+    }
+
+    fn result(output: &Output) -> Value {
+        serde_json::from_str(&super::assert_success(
+            output,
+            &["network", "differential-join"],
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn differential_join_preserves_answers_when_merging_another_log() {
+        let first = join(&campaign(), &reception(u32::MAX));
+        let report = result(&first);
+        assert_eq!(report["result"]["rows"][0]["verdict"], "flaky");
+        assert_eq!(report["result"]["attempts"][0]["attempt_seq"], u32::MAX);
+        assert_eq!(report["result"]["attempts"][0]["answered"], true);
+        assert_eq!(report["result"]["attempts"][1]["answered"], false);
+        let second = join(
+            &first.stdout,
+            &[b"\n\n", reception(7).as_slice(), b"\n"].concat(),
+        );
+        let report = result(&second);
+        assert_eq!(report["result"]["valid"], true);
+        assert_eq!(report["result"]["provisional"], false);
+        assert_eq!(report["result"]["rows"][0]["verdict"], "accepted");
+        assert_eq!(report["result"]["rows"][0]["answered"], 2);
+        assert_eq!(
+            result(&join(&second.stdout, b""))["result"],
+            report["result"]
+        );
+    }
+
+    #[test]
+    fn differential_join_rejects_an_attempt_that_would_alias_a_reception() {
+        let mut value: Value = serde_json::from_slice(&campaign()).unwrap();
+        value["result"]["attempts"][0]["attempt_seq"] = json!(u64::from(u32::MAX) + 1);
+        let output = join(&serde_json::to_vec(&value).unwrap(), &reception(u32::MAX));
+        super::assert_error(&output, "cli.error");
+    }
+
+    #[test]
+    fn differential_join_requires_a_current_successful_campaign_and_source_identity() {
+        let original: Value = serde_json::from_slice(&campaign()).unwrap();
+        for (field, replacement) in [
+            (
+                "schema",
+                json!(packetcraftr_core::security::AMBIGUOUS_OUTPUT_SCHEMA),
+            ),
+            ("schema", json!("unsupported-schema")),
+            ("command", json!("scan")),
+            ("mode", json!("stream")),
+            ("status", json!("error")),
+        ] {
+            let mut value = original.clone();
+            value[field] = replacement;
+            let output = join(&serde_json::to_vec(&value).unwrap(), b"");
+            super::assert_error(&output, "cli.error");
+            if value[field] == packetcraftr_core::security::AMBIGUOUS_OUTPUT_SCHEMA {
+                assert!(super::stdout(&output).contains("regenerate"));
+            }
+        }
+        for field in ["schema", "command", "mode", "status"] {
+            let mut value = original.clone();
+            value.as_object_mut().unwrap().remove(field);
+            super::assert_error(
+                &join(&serde_json::to_vec(&value).unwrap(), b""),
+                "cli.error",
+            );
+        }
+        for field in ["source_port", "spoof_source", "attempts"] {
+            let mut value = original.clone();
+            value["result"].as_object_mut().unwrap().remove(field);
+            super::assert_error(
+                &join(&serde_json::to_vec(&value).unwrap(), b""),
+                "cli.error",
+            );
+        }
+        let mut unspoofed = original;
+        unspoofed["result"]["spoof_source"] = Value::Null;
+        assert_eq!(
+            result(&join(&serde_json::to_vec(&unspoofed).unwrap(), b""))["result"]["spoof_source"],
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn differential_join_bounds_both_files_before_parsing() {
+        let mut oversized = campaign();
+        oversized.resize(16 * 1024 * 1024 + 1, b' ');
+        for output in [join(&oversized, b""), join(&campaign(), &oversized)] {
+            super::assert_error(&output, "cli.error");
+            assert!(super::stdout(&output).contains("byte limit"));
+        }
+    }
+}
+
 #[cfg(unix)]
 mod stalled_inputs {
     use std::io::Write;
@@ -772,6 +931,73 @@ mod stalled_inputs {
         std::fs::read_dir("/proc/self/fd")
             .expect("list /proc/self/fd")
             .count()
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn differential_join_cancels_while_either_input_is_stalled() {
+        let directory = tempfile::tempdir().unwrap();
+        let campaign = directory.path().join("campaign.json");
+        let log = directory.path().join("receptions.jsonl");
+        std::fs::write(&campaign, super::differential::campaign()).unwrap();
+        std::fs::write(&log, b"").unwrap();
+        let fifo = directory.path().join("input.fifo");
+        assert!(
+            Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let _writer = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&fifo)
+            .unwrap();
+        for (campaign, log) in [(&fifo, &log), (&campaign, &fifo)] {
+            let args = [
+                "--output",
+                "json",
+                "network",
+                "differential-join",
+                campaign.to_str().unwrap(),
+                "--responder-log",
+                log.to_str().unwrap(),
+            ];
+            let mut child = spawn(&args, Stdio::null());
+            let started = Instant::now();
+            loop {
+                assert!(
+                    child.try_wait().unwrap().is_none(),
+                    "command exited before reading input"
+                );
+                let reading = std::fs::read_dir(format!("/proc/{}/fd", child.id()))
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+                    .any(|path| path == fifo);
+                if reading && sigint_handler_installed(child.id()) {
+                    break;
+                }
+                if started.elapsed() > EXIT_WITHIN {
+                    kill_after_timeout(child, &args, "the stalled input");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                Command::new("kill")
+                    .args(["-INT", &child.id().to_string()])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            assert_interrupted(
+                &wait_bounded(child, &args),
+                130,
+                "io.cancelled",
+                "cancelled",
+            );
+        }
     }
 
     #[test]

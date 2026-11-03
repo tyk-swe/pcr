@@ -3,9 +3,9 @@
 
 //! AMQP 0-9-1 framing. Method argument bytes and content properties retain their wire encoding; frame_type=0 builds the protocol preface.
 
-use crate::codec::*;
-use crate::protocol::common::*;
-use crate::protocol::message::*;
+use crate::codec::{DecodeContext, EncodeContext, Error};
+use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::message::{Reader, Writer, message_codec};
 use bytes::Bytes;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,7 +28,7 @@ impl Default for Amqp {
     }
 }
 crate::reflective_layer! {
- fn amqp_schema() => { protocol: crate::layer::Id::new("amqp"), name: "Amqp" }
+ fn amqp_schema() => { protocol: crate::protocol::BuiltinProtocol::Amqp.id(), name: "Amqp" }
  impl Amqp {
     "frame_type" => { kind: Unsigned, derived: false, required: false, description: "frame type", reflect: frame_type },
     "channel" => { kind: Unsigned, derived: false, required: false, description: "channel", reflect: channel },
@@ -37,26 +37,7 @@ crate::reflective_layer! {
     "payload" => { kind: Bytes, derived: false, required: false, description: "payload", reflect: payload },
  }
 }
-fn amqp_layout_wire(b: &[u8]) -> Vec<crate::layout::FieldLayout> {
-    if b.starts_with(b"AMQP") {
-        return Vec::new();
-    }
-    let mut fields = Vec::new();
-    if !b.is_empty() {
-        fields.push(crate::layout::FieldLayout {
-            name: "frame_type",
-            range: crate::layout::ByteRange::new(0, 1),
-        });
-    }
-    if 3 <= b.len() {
-        fields.push(crate::layout::FieldLayout {
-            name: "channel",
-            range: crate::layout::ByteRange::new(1, 3),
-        });
-    }
-    fields
-}
-message_codec!(AmqpCodec, Amqp, amqp_schema, amqp_layout_wire);
+message_codec!(AmqpCodec, Amqp, amqp_schema);
 
 const NAME: &str = "amqp";
 impl Amqp {
@@ -91,18 +72,26 @@ impl Amqp {
         }
         Ok(w.bytes)
     }
-    fn parse_wire(b: Bytes, _: &DecodeContext<'_>) -> Result<Self, Error> {
+    fn parse_wire(
+        b: Bytes,
+        _: &DecodeContext<'_>,
+    ) -> Result<(Self, Vec<crate::layout::FieldLayout>), Error> {
         if b.starts_with(b"AMQP") {
             return if b.as_ref() == b"AMQP\0\0\x09\x01" {
-                Ok(Self {
-                    frame_type: 0,
-                    ..Self::default()
-                })
+                Ok((
+                    Self {
+                        frame_type: 0,
+                        ..Self::default()
+                    },
+                    Vec::new(),
+                ))
             } else {
                 Err(unsupported(NAME, "only AMQP 0-9-1 is supported"))
             };
         }
         let mut r = Reader::new(NAME, &b);
+        r.mark(0, 0..1);
+        r.mark(1, 1..3);
         let mut s = Self {
             frame_type: r.u8()?,
             channel: r.u16()?,
@@ -131,7 +120,7 @@ impl Amqp {
             }
             s.payload = Bytes::copy_from_slice(payload);
         }
-        Ok(s)
+        Ok((s, r.take_layouts()))
     }
 }
 

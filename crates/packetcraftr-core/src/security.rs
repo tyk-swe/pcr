@@ -6,6 +6,7 @@
 pub mod capture;
 pub mod http;
 pub mod indicators;
+pub mod input;
 pub mod scan;
 
 /// Output contract identifier that PacketcraftR emits and that security inputs
@@ -130,9 +131,11 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::Invalid(_) => Classification::new("cli.security_input", Kind::Usage, None),
+            Self::Invalid(_) => {
+                Classification::new(crate::error::Code::CliSecurityInput, Kind::Usage, None)
+            }
             Self::Limit { .. } => Classification::new(
-                "policy.security_limit",
+                crate::error::Code::PolicySecurityLimit,
                 Kind::Policy,
                 Some("narrow the input or raise the finite security analysis limit"),
             ),

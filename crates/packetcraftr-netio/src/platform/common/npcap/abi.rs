@@ -7,7 +7,6 @@ pub(in crate::platform) const NPCAP_DEPENDENCY: &str = "Npcap 1.88 runtime";
 pub(in crate::platform) const PCAP_ERROR_BUFFER_SIZE: usize = 256;
 pub(in crate::platform) const PCAP_CHAR_ENC_UTF_8: c_uint = 1;
 pub(in crate::platform) const PCAP_NETMASK_UNKNOWN: c_uint = 0xffff_ffff;
-pub(in crate::platform) const READ_TIMEOUT_MILLIS: c_int = 50;
 pub(in crate::platform) const SEND_SNAPSHOT_LENGTH: c_int = 65_535;
 
 pub(in crate::platform) const PCAP_WARNING_PROMISC_NOTSUP: c_int = 2;

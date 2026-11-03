@@ -139,7 +139,10 @@ fn locate(diagnostic: Diagnostic, layout: &PacketLayout, offset: usize) -> Diagn
         .iter()
         .find(|field| field.range.start <= offset && offset < field.range.end)
     {
-        Some(field) => diagnostic.at_field(field.name),
+        Some(field) => match field.name(layer.schema) {
+            Some(name) => diagnostic.at_field(name),
+            None => diagnostic,
+        },
         None => diagnostic,
     }
 }

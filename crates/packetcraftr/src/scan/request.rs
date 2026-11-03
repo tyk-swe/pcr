@@ -18,7 +18,7 @@ use super::Error;
 use super::error::probe_error;
 use crate::probe::{self, Transport};
 use crate::scan::{
-    DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS, MAX_IN_FLIGHT, MAX_PROBES,
+    DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_IN_FLIGHT, MAX_PROBE_ATTEMPTS, MAX_PROBES,
 };
 
 crate::evidence::limits_serde!(
@@ -248,11 +248,11 @@ impl Request {
                 ),
             });
         }
-        if !(1..=MAX_ATTEMPTS).contains(&self.attempts) {
+        if !(1..=MAX_PROBE_ATTEMPTS).contains(&self.attempts) {
             return Err(Error::InvalidLimit {
                 field: "attempts",
                 value: u64::from(self.attempts),
-                reason: format!("must be within 1..={MAX_ATTEMPTS}"),
+                reason: format!("must be within 1..={MAX_PROBE_ATTEMPTS}"),
             });
         }
         if duration_violation(self.timeout, MAX_WAIT) {

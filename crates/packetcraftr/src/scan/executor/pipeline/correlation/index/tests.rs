@@ -385,14 +385,11 @@ impl codec::Codec for ProxyCodec {
             .unwrap()
             .decode(bytes, context)
     }
-    fn make_layer(
-        &self,
-        fields: &std::collections::BTreeMap<String, packetcraftr_core::field::Value>,
-    ) -> Result<Box<dyn packetcraftr_core::layer::Layer>, codec::Error> {
-        builtin::registry()
-            .codec(self.0)
-            .unwrap()
-            .make_layer(fields)
+    fn schema(&self) -> Option<&'static packetcraftr_core::layer::Schema> {
+        builtin::registry().codec(self.0).unwrap().schema()
+    }
+    fn new_layer(&self) -> Result<Box<dyn packetcraftr_core::layer::Layer>, codec::Error> {
+        builtin::registry().codec(self.0).unwrap().new_layer()
     }
 }
 

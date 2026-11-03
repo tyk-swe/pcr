@@ -77,7 +77,7 @@ impl Plan {
             if let Op::Leaf(predicate) = op {
                 step_of[index] = steps.len() as u32;
                 steps.push(Step {
-                    predicate,
+                    predicate: *predicate,
                     on_true: on_true[index],
                     on_false: on_false[index],
                 });

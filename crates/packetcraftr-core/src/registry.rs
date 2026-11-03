@@ -8,7 +8,7 @@ mod hasher;
 mod lookup;
 mod validation;
 
-pub use binding::{Discriminator, FilterFieldBinding};
+pub use binding::{Discriminator, FilterFieldBinding, MatcherIdentity, Priority};
 pub use builder::Builder;
 pub use error::Error;
 pub use lookup::Registry;

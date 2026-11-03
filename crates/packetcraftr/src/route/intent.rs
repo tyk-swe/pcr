@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::neighbor::MAX_VLAN_TAGS;
+use packetcraftr_core::protocol::identity;
+use packetcraftr_core::protocol::link::Arp;
 use packetcraftr_core::{
     packet::{MacAddress, Packet, VlanTag},
     protocol::BuiltinProtocol,
-    protocol::link::{Arp, Ethernet},
     protocol::semantics,
 };
 
@@ -24,9 +25,9 @@ pub(super) fn packet_has_link_layer_intent(packet: &Packet) -> bool {
 /// an all-zero address counts as unset.
 pub(super) fn outer_ethernet_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacAddress>) {
     semantics::outer_layers(packet)
-        .find_map(|layer| layer.downcast_ref::<Ethernet>())
-        .map_or((None, None), |ethernet| {
-            (set_mac(ethernet.source), set_mac(ethernet.destination))
+        .find_map(identity::link_addresses)
+        .map_or((None, None), |(source, destination)| {
+            (set_mac(source), set_mac(destination))
         })
 }
 
@@ -54,8 +55,7 @@ pub(super) fn reject_oversized_discovery_stack(tags: &[VlanTag]) -> Result<(), E
 }
 
 pub(super) fn arp_link_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacAddress>) {
-    let Some(arp) = semantics::outer_layers(packet).find_map(|layer| layer.downcast_ref::<Arp>())
-    else {
+    let Some(arp) = semantics::outer_layers(packet).find_map(identity::arp_message) else {
         return (None, None);
     };
     let target = set_mac(arp.target_hardware)

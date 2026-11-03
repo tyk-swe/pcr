@@ -169,7 +169,7 @@ impl Classified for Error {
             Self::InvalidLimit { .. }
             | Self::InvalidDuration { .. }
             | Self::InvalidTiming { .. } => Classification::new(
-                "cli.replay_limit",
+                packetcraftr_core::error::Code::CliReplayLimit,
                 Kind::Usage,
                 Some("use finite non-zero replay limits and a valid positive timing value"),
             ),
@@ -177,30 +177,30 @@ impl Classified for Error {
             Self::SourceFrameLimit { .. }
             | Self::TransmittedByteLimit { .. }
             | Self::DurationLimit { .. } => Classification::new(
-                "policy.replay_limit",
+                packetcraftr_core::error::Code::PolicyReplayLimit,
                 Kind::Policy,
                 Some("reduce the replay input or deliberately raise the finite operation budget"),
             ),
             Self::FrameSizeLimit { .. } => Classification::new(
-                "packet.capture_size",
+                packetcraftr_core::error::Code::PacketCaptureSize,
                 Kind::Packet,
                 Some(
                     "reduce the captured frame size or deliberately raise the bounded frame limit",
                 ),
             ),
             Self::Timing { .. } => Classification::new(
-                "packet.replay_timing",
+                packetcraftr_core::error::Code::PacketReplayTiming,
                 Kind::Packet,
                 Some("reduce the captured interval or select a bounded replay timing"),
             ),
             Self::TimestampUnavailable { .. } => Classification::new(
-                "packet.timestamp_unavailable",
+                packetcraftr_core::error::Code::PacketTimestampUnavailable,
                 Kind::Packet,
                 Some("select bounded fixed-rate or immediate replay timing"),
             ),
             Self::UnsupportedLinkType { .. } | Self::LinkModeMismatch { .. } => {
                 Classification::new(
-                    "capability.replay_link_type",
+                    packetcraftr_core::error::Code::CapabilityReplayLinkType,
                     Kind::Capability,
                     Some(
                         "replay complete Ethernet frames through Layer 2 or raw IPv4/IPv6 datagrams through Layer 3",
@@ -211,26 +211,26 @@ impl Classified for Error {
             // Routing is part of the request, so a frame it cannot route is
             // the caller's to fix.
             Self::ConflictingInterfaces { .. } | Self::Unmapped { .. } => {
-                Classification::new("cli.error", Kind::Usage, None)
+                Classification::new(packetcraftr_core::error::Code::CliError, Kind::Usage, None)
             }
             Self::Authorization { source, .. } => source.classification(),
             Self::Transmission { source, .. } => source.classification(),
             Self::InvalidEvidence { .. } => Classification::new(
-                "internal.replay_evidence",
+                packetcraftr_core::error::Code::InternalReplayEvidence,
                 Kind::Internal,
                 Some(
                     "treat the operation as incomplete; the backend did not confirm the exact submitted bytes",
                 ),
             ),
             Self::IncoherentEvents { .. } => Classification::new(
-                "internal.replay_event_coherence",
+                packetcraftr_core::error::Code::InternalReplayEventCoherence,
                 Kind::Internal,
                 Some("collect every replay event once, from one replay, in publication order"),
             ),
             // Output keeps the sink's failure as its source but publishes
             // replay's own I/O code: the sink is replay's output.
             Self::Clock { .. } | Self::Output { .. } => Classification::new(
-                "io.replay",
+                packetcraftr_core::error::Code::IoReplay,
                 Kind::Io,
                 Some(
                     "inspect the replay timer or output sink and account for frames already transmitted",

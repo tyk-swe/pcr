@@ -102,7 +102,6 @@ pub(crate) fn run(
     let report = output::export::Report::try_from((args.write.display().to_string(), report, plan))
         .map_err(CliError::classified)?;
     staged.sync()?;
-    invocation.check()?;
     staged.persist()?;
     match format {
         Format::Json => emit_published(

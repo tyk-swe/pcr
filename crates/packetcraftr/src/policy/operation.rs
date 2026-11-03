@@ -86,7 +86,7 @@ pub struct LimitOverflow;
 impl packetcraftr_core::error::Classified for LimitOverflow {
     fn classification(&self) -> packetcraftr_core::error::Classification {
         packetcraftr_core::error::Classification::new(
-            "policy.budget_overflow",
+            packetcraftr_core::error::Code::PolicyBudgetOverflow,
             packetcraftr_core::error::Kind::Policy,
             Some("reduce the finite operation budget"),
         )
@@ -352,7 +352,7 @@ mod tests {
             Ok(WireLimits::new(u64::MAX, 3))
         );
         let classification = LimitOverflow.classification();
-        assert_eq!(classification.code, "policy.budget_overflow");
+        assert_eq!(classification.code.as_str(), "policy.budget_overflow");
         assert_eq!(classification.kind, Kind::Policy);
     }
 
@@ -476,7 +476,7 @@ mod tests {
         let error = authorizer
             .authorize_operation(Operation::Wire(WireLimits::new(11, 100)))
             .unwrap_err();
-        assert_eq!(error.classification().code, "policy.packet_limit");
+        assert_eq!(error.classification().code.as_str(), "policy.packet_limit");
         assert!(
             authorizer
                 .authorize_operation(Operation::Wire(WireLimits::new(10, 100)))

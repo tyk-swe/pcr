@@ -1,6 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use super::{
+    Error,
+    budget::{Charge, Context},
+};
 use crate::analysis::provenance::SourceSet;
 use bytes::{Bytes, BytesMut};
 use std::collections::VecDeque;
@@ -15,6 +19,7 @@ pub(crate) struct SourceBuffer {
     spans: VecDeque<Span>,
     base: u64,
     offset: u64,
+    charge: Charge,
 }
 impl SourceBuffer {
     pub(crate) fn new() -> Self {
@@ -23,6 +28,7 @@ impl SourceBuffer {
             spans: VecDeque::new(),
             base: 0,
             offset: 0,
+            charge: Charge::default(),
         }
     }
     pub(crate) fn len(&self) -> usize {
@@ -34,20 +40,28 @@ impl SourceBuffer {
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
     }
-    pub(crate) fn push(&mut self, bytes: Bytes, sources: SourceSet) {
+    pub(crate) fn push(
+        &mut self,
+        bytes: Bytes,
+        sources: SourceSet,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
+        context.charge(&mut self.charge, bytes.len())?;
+        context.track(&mut self.charge, &sources)?;
         self.offset += bytes.len() as u64;
         self.bytes.extend_from_slice(&bytes);
         self.spans.push_back(Span {
             end: self.offset,
             sources,
         });
+        Ok(())
     }
-    pub(crate) fn consume(&mut self, n: usize) -> Vec<SourceSet> {
+    pub(crate) fn discard(&mut self, n: usize, context: &mut Context<'_>) -> Result<(), Error> {
         self.base += n as u64;
         let _ = self.bytes.split_to(n);
-        let mut dropped = Vec::new();
+        context.release(&mut self.charge, n)?;
         while let Some(span) = self.spans.pop_front_if(|span| span.end <= self.base) {
-            dropped.push(span.sources);
+            context.untrack(&mut self.charge, &span.sources)?;
         }
         if self.bytes.is_empty() {
             self.bytes = BytesMut::new();
@@ -55,11 +69,30 @@ impl SourceBuffer {
         if self.spans.is_empty() {
             self.spans = VecDeque::new();
         }
-        dropped
+        Ok(())
     }
-    pub(crate) fn take(&mut self, n: usize) -> (Bytes, Vec<SourceSet>) {
+    pub(crate) fn consume(
+        &mut self,
+        n: usize,
+        context: &mut Context<'_>,
+    ) -> Result<Vec<SourceSet>, Error> {
+        let contributors = self.contributors(n);
+        self.discard(n, context)?;
+        Ok(contributors)
+    }
+    pub(crate) fn take(
+        &mut self,
+        n: usize,
+        context: &mut Context<'_>,
+    ) -> Result<(Bytes, Vec<SourceSet>), Error> {
         let taken = Bytes::copy_from_slice(&self.bytes[..n]);
-        (taken, self.consume(n))
+        Ok((taken, self.consume(n, context)?))
+    }
+    pub(crate) fn clear(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
+        self.bytes = BytesMut::new();
+        self.spans = VecDeque::new();
+        self.base = self.offset;
+        context.release_all(&mut self.charge)
     }
     pub(crate) fn contributors(&self, n: usize) -> Vec<SourceSet> {
         let end = self.base + n as u64;

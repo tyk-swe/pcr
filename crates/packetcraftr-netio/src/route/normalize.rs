@@ -72,20 +72,7 @@ pub(crate) fn finish_route(
             }
         });
     }
-    let route_mtu = snapshot.route_mtu.filter(|mtu| *mtu != 0);
-    let interface_mtu = snapshot.interface.mtu.filter(|mtu| *mtu != 0);
-    let mtu = match (route_mtu, interface_mtu) {
-        (Some(route), Some(interface)) => route.min(interface),
-        (Some(mtu), None) | (None, Some(mtu)) => mtu,
-        (None, None) => {
-            return Err(route::Error::InvalidResponse {
-                message: format!(
-                    "interface {} reported no usable MTU",
-                    snapshot.interface.id.name
-                ),
-            });
-        }
-    };
+    let mtu = usable_mtu(&snapshot.interface, snapshot.route_mtu)?;
     let selection_reason = match snapshot.selection_reason {
         SelectionReason::Local | SelectionReason::InterfaceOnly => snapshot.selection_reason,
         SelectionReason::Broadcast if snapshot.next_hop.is_none() => SelectionReason::Broadcast,
@@ -131,13 +118,7 @@ fn is_interface_broadcast(destination: IpAddr, interface: &interface::Info) -> b
 
 pub(crate) fn interface_decision(interface: interface::Info) -> Result<Decision, route::Error> {
     validate_native_interface(&interface)?;
-    let mtu =
-        interface
-            .mtu
-            .filter(|mtu| *mtu != 0)
-            .ok_or_else(|| route::Error::InvalidResponse {
-                message: format!("interface {} reported no usable MTU", interface.id.name),
-            })?;
+    let mtu = usable_mtu(&interface, None)?;
     Ok(Decision {
         interface: interface.id,
         source_mac: interface.mac_address,
@@ -150,6 +131,17 @@ pub(crate) fn interface_decision(interface: interface::Info) -> Result<Decision,
         capability: interface.capability,
         link_type: interface.link_type,
     })
+}
+
+fn usable_mtu(interface: &interface::Info, route_mtu: Option<u32>) -> Result<u32, route::Error> {
+    [route_mtu, interface.mtu]
+        .into_iter()
+        .flatten()
+        .filter(|mtu| *mtu != 0)
+        .min()
+        .ok_or_else(|| route::Error::InvalidResponse {
+            message: format!("interface {} reported no usable MTU", interface.id.name),
+        })
 }
 
 fn classify_destination(address: IpAddr) -> Scope {
@@ -194,30 +186,36 @@ struct SourceAddressRank {
 }
 
 fn fallback_source(addresses: &[interface::Address], destination: IpAddr) -> Option<IpAddr> {
-    let mut best: Option<(IpAddr, SourceAddressRank)> = None;
-    for assigned in addresses {
-        let address = assigned.address;
-        if address.is_ipv4() != destination.is_ipv4()
-            || address.is_unspecified()
-            || address.is_multicast()
-        {
-            continue;
-        }
-        let prefix_match = prefix_matches(address, destination, assigned.prefix_length);
-        let rank = SourceAddressRank {
-            prefix_match,
-            matched_prefix_length: if prefix_match {
-                assigned.prefix_length
+    let destination_scope = address_scope(destination);
+    addresses
+        .iter()
+        .filter(|assigned| {
+            assigned.address.is_ipv4() == destination.is_ipv4()
+                && !assigned.address.is_unspecified()
+                && !assigned.address.is_multicast()
+        })
+        .map(|assigned| {
+            let prefix_match =
+                prefix_matches(assigned.address, destination, assigned.prefix_length);
+            let rank = SourceAddressRank {
+                scope_match: address_scope(assigned.address) == destination_scope,
+                prefix_match,
+                matched_prefix_length: if prefix_match {
+                    assigned.prefix_length
+                } else {
+                    0
+                },
+            };
+            (assigned.address, rank)
+        })
+        .reduce(|best, candidate| {
+            if candidate.1 > best.1 {
+                candidate
             } else {
-                0
-            },
-            scope_match: address_scope(address) == address_scope(destination),
-        };
-        if best.as_ref().is_none_or(|(_, current)| rank > *current) {
-            best = Some((address, rank));
-        }
-    }
-    best.map(|(address, _)| address)
+                best
+            }
+        })
+        .map(|(address, _)| address)
 }
 
 fn prefix_matches(source: IpAddr, destination: IpAddr, prefix_length: u8) -> bool {
@@ -246,6 +244,30 @@ fn address_scope(address: IpAddr) -> Scope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn address(ip: &str, prefix_length: u8) -> interface::Address {
+        interface::Address {
+            address: ip.parse().unwrap(),
+            prefix_length,
+        }
+    }
+
+    fn interface(mtu: Option<u32>) -> interface::Info {
+        interface::Info {
+            id: InterfaceId {
+                name: "test0".to_owned(),
+                index: 1,
+            },
+            description: None,
+            mac_address: None,
+            addresses: vec![address("192.0.2.1", 24)],
+            flags: interface::Flags::default(),
+            mtu,
+            capability: crate::link::Capability::Layer3,
+            link_type: packetcraftr_core::frame::LinkType::RAW,
+        }
+    }
+
     #[test]
     fn scope_precedes_prefix_specificity() {
         let destination = "8.8.8.8".parse().unwrap();
@@ -261,5 +283,121 @@ mod tests {
             },
         ];
         assert_eq!(fallback_source(&addresses, destination), Some(global));
+    }
+
+    #[test]
+    fn matching_prefix_specificity_precedes_address_order() {
+        for (destination, broad, specific, nonmatching) in [
+            (
+                "10.0.1.10",
+                address("10.0.0.1", 16),
+                address("10.0.1.1", 24),
+                address("10.0.2.1", 32),
+            ),
+            (
+                "2001:db8:1::10",
+                address("2001:db8::1", 32),
+                address("2001:db8:1::1", 64),
+                address("2001:db8:2::1", 128),
+            ),
+        ] {
+            let destination = destination.parse().unwrap();
+            for addresses in [
+                [broad, specific, nonmatching],
+                [nonmatching, specific, broad],
+            ] {
+                assert_eq!(
+                    fallback_source(&addresses, destination),
+                    Some(specific.address)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn equally_ranked_sources_keep_the_first_address() {
+        for (destination, first, second) in [
+            (
+                "10.0.1.10",
+                address("10.0.1.1", 24),
+                address("10.0.1.2", 24),
+            ),
+            (
+                "2001:db8::10",
+                address("2001:db8::1", 64),
+                address("2001:db8::2", 64),
+            ),
+        ] {
+            let destination = destination.parse().unwrap();
+            for addresses in [[first, second], [second, first]] {
+                assert_eq!(
+                    fallback_source(&addresses, destination),
+                    Some(addresses[0].address)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fallback_skips_unspecified_multicast_and_wrong_family_sources() {
+        let destination = "192.0.2.10".parse().unwrap();
+        let addresses = [
+            address("0.0.0.0", 0),
+            address("224.0.0.1", 0),
+            address("2001:db8::1", 0),
+            address("198.51.100.1", 24),
+        ];
+        assert_eq!(
+            fallback_source(&addresses, destination),
+            Some(addresses[3].address)
+        );
+        assert_eq!(fallback_source(&addresses[..3], destination), None);
+    }
+
+    #[test]
+    fn route_mtu_uses_the_smallest_positive_route_or_interface_value() {
+        for (route_mtu, interface_mtu, expected) in [
+            (None, None, None),
+            (Some(0), Some(0), None),
+            (None, Some(0), None),
+            (Some(0), None, None),
+            (Some(1200), None, Some(1200)),
+            (None, Some(1400), Some(1400)),
+            (Some(0), Some(1400), Some(1400)),
+            (Some(1200), Some(0), Some(1200)),
+            (Some(1200), Some(1400), Some(1200)),
+            (Some(1600), Some(1400), Some(1400)),
+        ] {
+            let result = finish_route(
+                "192.0.2.10".parse().unwrap(),
+                None,
+                None,
+                NativeRouteSnapshot {
+                    interface: interface(interface_mtu),
+                    local_addresses: Vec::new(),
+                    selected_source: None,
+                    next_hop: None,
+                    route_mtu,
+                    selection_reason: SelectionReason::OnLink,
+                },
+            );
+            match expected {
+                Some(mtu) => assert_eq!(result.unwrap().mtu, mtu),
+                None => assert!(
+                    matches!(result, Err(route::Error::InvalidResponse { message })
+                    if message == "interface test0 reported no usable MTU")
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn interface_only_route_requires_a_positive_interface_mtu() {
+        assert_eq!(interface_decision(interface(Some(1400))).unwrap().mtu, 1400);
+        for mtu in [None, Some(0)] {
+            assert!(matches!(interface_decision(interface(mtu)),
+                Err(route::Error::InvalidResponse { message })
+                    if message == "interface test0 reported no usable MTU"));
+        }
     }
 }

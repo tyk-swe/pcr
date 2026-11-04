@@ -6,7 +6,6 @@
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{Arc, Condvar, Mutex, PoisonError},
-    thread,
 };
 
 use packetcraftr_core::budget::Deadline;
@@ -15,7 +14,8 @@ use super::{ConnectPermit, Job, Permit, RetentionMarker, Run, SocketReservation,
 
 /// Internal tasks expose only whether the worker panicked, never its opaque
 /// panic payload. Destroy arbitrary payloads before finishing job admission.
-struct WorkerPanicked;
+#[derive(Debug)]
+pub(crate) struct WorkerPanicked;
 
 pub(crate) fn discard_panic_payload(mut payload: Box<dyn std::any::Any + Send>) {
     loop {
@@ -65,7 +65,7 @@ impl Permit {
                 Ok(value) => Ok(value),
                 Err(payload) => {
                     discard_panic_payload(payload);
-                    Err(Box::new(WorkerPanicked) as Box<dyn std::any::Any + Send>)
+                    Err(WorkerPanicked)
                 }
             };
             Box::new(move || publish_to.publish(outcome))
@@ -103,7 +103,7 @@ impl ConnectPermit {
 
 enum Slot<T> {
     Running,
-    Finished(thread::Result<T>),
+    Finished(Result<T, WorkerPanicked>),
     Taken,
 }
 
@@ -113,7 +113,7 @@ struct Done<T> {
 }
 
 impl<T> Done<T> {
-    fn publish(&self, outcome: thread::Result<T>) {
+    fn publish(&self, outcome: Result<T, WorkerPanicked>) {
         *lock(&self.slot) = Slot::Finished(outcome);
         self.finished.notify_all();
     }
@@ -127,7 +127,7 @@ pub(crate) struct Task<T> {
 
 #[cfg_attr(not(native_route), allow(dead_code))]
 pub(crate) enum Waited<T> {
-    Finished(thread::Result<T>),
+    Finished(Result<T, WorkerPanicked>),
     Pending(Task<T>),
 }
 
@@ -136,7 +136,7 @@ impl<T> Task<T> {
         self.retention.clone()
     }
 
-    pub(crate) fn try_take(&mut self) -> Option<thread::Result<T>> {
+    pub(crate) fn try_take(&mut self) -> Option<Result<T, WorkerPanicked>> {
         let mut slot = lock(&self.done.slot);
         match std::mem::replace(&mut *slot, Slot::Taken) {
             Slot::Finished(outcome) => Some(outcome),

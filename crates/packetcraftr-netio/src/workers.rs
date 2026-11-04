@@ -65,6 +65,17 @@ struct State {
     next_worker: u64,
 }
 
+impl State {
+    fn thread_count(&self) -> usize {
+        self.idle.len() + self.busy.len() + self.retiring.len()
+    }
+
+    fn prune_retired(&mut self) {
+        self.retiring
+            .retain(|retiring| !retiring.complete.load(Ordering::Acquire));
+    }
+}
+
 struct Retiring {
     complete: Arc<AtomicBool>,
     // A failed queue transfer keeps the join task and its handle owned here.
@@ -155,6 +166,47 @@ impl Pool {
         });
     }
 
+    fn maintain_workers(&self, state: &mut State) -> Result<(), reaper::ReaperStartError> {
+        state.prune_retired();
+        // Main-function completion is only a hint that a handle needs
+        // reaping. It never authorizes dropping or freeing its thread slot.
+        let finished_busy: Vec<_> = state
+            .busy
+            .iter()
+            .filter_map(|(id, worker)| worker.thread.is_finished().then_some(*id))
+            .collect();
+        let has_finished_idle = state.idle.iter().any(|worker| worker.thread.is_finished());
+        let has_pending = state
+            .retiring
+            .iter()
+            .any(|retiring| retiring.pending.is_some());
+        if finished_busy.is_empty() && !has_finished_idle && !has_pending {
+            return Ok(());
+        }
+
+        let reaper = self.retirement_reaper()?;
+        for id in finished_busy {
+            let removed = state.busy.remove(&id);
+            debug_assert!(removed.is_some(), "finished worker vanished under lock");
+            if let Some(worker) = removed {
+                Self::retire(state, worker, &reaper);
+            }
+        }
+        let finished_idle: Vec<_> = state
+            .idle
+            .extract_if(.., |worker| worker.thread.is_finished())
+            .collect();
+        for worker in finished_idle {
+            Self::retire(state, worker, &reaper);
+        }
+        for retiring in &mut state.retiring {
+            if let Some(task) = retiring.pending.take() {
+                retiring.pending = reaper.try_transfer(task).err();
+            }
+        }
+        Ok(())
+    }
+
     /// A failed spawn returns the job so its permit and captured values drop
     /// outside the pool lock. Actual threads, including retirement, stay bounded.
     fn dispatch(
@@ -174,45 +226,8 @@ impl Pool {
                     ),
                 ));
             }
-            state
-                .retiring
-                .retain(|retiring| !retiring.complete.load(Ordering::Acquire));
-            // Main-function completion is only a hint that a handle needs
-            // reaping. It never authorizes dropping or freeing its thread slot.
-            let finished_busy: Vec<_> = state
-                .busy
-                .iter()
-                .filter_map(|(id, worker)| worker.thread.is_finished().then_some(*id))
-                .collect();
-            let has_finished_idle = state.idle.iter().any(|worker| worker.thread.is_finished());
-            let has_pending = state
-                .retiring
-                .iter()
-                .any(|retiring| retiring.pending.is_some());
-            if !finished_busy.is_empty() || has_finished_idle || has_pending {
-                let reaper = match self.retirement_reaper() {
-                    Ok(reaper) => reaper,
-                    Err(error) => return Err((job, std::io::Error::other(error))),
-                };
-                for id in finished_busy {
-                    let removed = state.busy.remove(&id);
-                    debug_assert!(removed.is_some(), "finished worker vanished under lock");
-                    if let Some(worker) = removed {
-                        Self::retire(&mut state, worker, &reaper);
-                    }
-                }
-                let finished_idle: Vec<_> = state
-                    .idle
-                    .extract_if(.., |worker| worker.thread.is_finished())
-                    .collect();
-                for worker in finished_idle {
-                    Self::retire(&mut state, worker, &reaper);
-                }
-                for retiring in &mut state.retiring {
-                    if let Some(task) = retiring.pending.take() {
-                        retiring.pending = reaper.try_transfer(task).err();
-                    }
-                }
+            if let Err(error) = self.maintain_workers(&mut state) {
+                return Err((job, std::io::Error::other(error)));
             }
             if let Some(context) = context
                 && let Some(position) = state
@@ -237,7 +252,7 @@ impl Pool {
                 };
                 Self::retire(&mut state, worker, &reaper);
             }
-            if state.idle.len() + state.busy.len() + state.retiring.len() < self.capacity {
+            if state.thread_count() < self.capacity {
                 break;
             }
             // Retire one stale idle thread first. If its exit remains blocked,
@@ -254,10 +269,8 @@ impl Pool {
                     Self::retire(&mut state, worker, &reaper);
                 }
             }
-            state
-                .retiring
-                .retain(|retiring| !retiring.complete.load(Ordering::Acquire));
-            if state.idle.len() + state.busy.len() + state.retiring.len() < self.capacity {
+            state.prune_retired();
+            if state.thread_count() < self.capacity {
                 break;
             }
             let remaining = match control.live_remaining() {

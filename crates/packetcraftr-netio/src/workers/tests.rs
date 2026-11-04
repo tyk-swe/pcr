@@ -249,7 +249,8 @@ fn work_panic_payload_cleanup_stays_charged_after_caller_cancellation() {
         pending.wait(&Deadline::new(Duration::from_secs(5))),
         Waited::Finished(Err(_))
     ));
-    assert!(pool.admit().is_ok());
+    let recovered = pool.admit().unwrap().spawn(|| 42).unwrap();
+    assert_eq!(wait(recovered), 42);
 }
 
 struct PanickingConnect(Arc<PanicPayloadGate>);

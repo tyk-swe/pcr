@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use crate::Error;
 use crate::interface::Id;
 use crate::platform::transmit::namespace::ExecutionContext;
-use crate::transmit::session::{Backend as SessionBackend, Bounded};
+use crate::platform::transmit::session::{Backend as SessionBackend, Bounded, Preparation};
 use crate::transmit::{Outbound, Provider, Report};
 
 use super::preparation::{PreparedRawIp, prepare};
@@ -40,7 +40,7 @@ impl Environment for NativeEnvironment {
     }
 
     fn verify_interface(&self, interface: &Id) -> Result<(), Error> {
-        crate::platform::verify_interface_identity(interface)
+        crate::platform::interface::verify_identity(interface)
     }
 }
 
@@ -73,16 +73,17 @@ struct Backend<P, E, T> {
 
 impl<P: Provider, E: Environment, T: Transport> SessionBackend for Backend<P, E, T> {
     type Key = Key;
+    type Packet<'a> = PreparedRawIp;
     type Resource = T::Socket;
 
-    fn key(&self, outbound: Outbound<'_>) -> Result<Option<Key>, Error> {
+    fn prepare(&self, outbound: Outbound<'_>) -> Result<Preparation<Key, PreparedRawIp>, Error> {
         self.environment.verify()?;
         let Outbound::Layer3(frame) = outbound else {
-            return Ok(None);
+            return Ok(Preparation::Fallback);
         };
         let interface = &frame.route().decision.interface;
         if interface.index != LOOPBACK_IFINDEX {
-            return Ok(None);
+            return Ok(Preparation::Fallback);
         }
         self.environment.verify_interface(interface)?;
         let packet = prepare(frame)?;
@@ -90,27 +91,23 @@ impl<P: Provider, E: Environment, T: Transport> SessionBackend for Backend<P, E,
             IpAddr::V4(_) => Family::Ipv4,
             IpAddr::V6(_) => Family::Ipv6,
         };
-        Ok(Some(Key {
-            interface: interface.clone(),
-            family,
-        }))
+        Ok(Preparation::Reusable {
+            key: Key {
+                interface: interface.clone(),
+                family,
+            },
+            packet,
+        })
     }
 
-    fn open(&self, outbound: Outbound<'_>) -> Result<Option<Self::Resource>, Error> {
-        let Outbound::Layer3(frame) = outbound else {
-            unreachable!()
-        };
-        let packet = prepare(frame)?;
-        let socket = self.transport.open(&packet)?;
+    fn open(&self, packet: &PreparedRawIp) -> Result<Option<Self::Resource>, Error> {
+        let socket = self.transport.open(packet)?;
         self.environment.verify_interface(&packet.interface)?;
         Ok(socket)
     }
 
-    fn send(&self, socket: &mut Self::Resource, outbound: Outbound<'_>) -> Result<Report, Error> {
-        let Outbound::Layer3(frame) = outbound else {
-            unreachable!()
-        };
-        self.transport.send(socket, prepare(frame)?)
+    fn send(&self, socket: &mut Self::Resource, packet: PreparedRawIp) -> Result<Report, Error> {
+        self.transport.send(socket, packet)
     }
 
     fn fallback(&self, outbound: Outbound<'_>) -> Result<Report, Error> {
@@ -118,7 +115,7 @@ impl<P: Provider, E: Environment, T: Transport> SessionBackend for Backend<P, E,
     }
 }
 
-pub(crate) fn wrap(fallback: impl Provider + 'static) -> Box<dyn Provider> {
+pub(in crate::platform::transmit) fn wrap(fallback: impl Provider + 'static) -> Box<dyn Provider> {
     Box::new(Bounded::new(Backend {
         fallback,
         environment: NativeEnvironment(ExecutionContext::capture()),
@@ -152,6 +149,7 @@ mod tests {
         bad_namespace: AtomicBool,
         bad_credentials: AtomicBool,
         bad_interface: AtomicBool,
+        change_interface_on_open: AtomicBool,
         unsupported: AtomicBool,
         fail_send: AtomicBool,
     }
@@ -203,6 +201,9 @@ mod tests {
             self.0.opens.fetch_add(1, Ordering::SeqCst);
             if self.0.unsupported.load(Ordering::SeqCst) {
                 return Ok(None);
+            }
+            if self.0.change_interface_on_open.load(Ordering::SeqCst) {
+                self.0.bad_interface.store(true, Ordering::SeqCst);
             }
             Ok(Some(FakeSocket(self.0.clone())))
         }
@@ -309,6 +310,16 @@ mod tests {
         assert_eq!(frames.len(), 8);
         assert!(frames.iter().all(|frame| frame == &bytes));
 
+        let mut changed = bytes.to_vec();
+        changed[7] /= 2;
+        let changed = Bytes::from(changed);
+        session
+            .send(outbound(&changed, &route, destination))
+            .unwrap()
+            .validate_exact(&changed)
+            .unwrap();
+        assert_eq!(counts.frames.lock().unwrap().last(), Some(&changed));
+
         let other_destination = IpAddr::V6("::2".parse().unwrap());
         assert!(matches!(
             session.send(outbound(&bytes, &route, other_destination)),
@@ -381,5 +392,47 @@ mod tests {
         assert_eq!(counts.opens.load(Ordering::SeqCst), 1);
         assert_eq!(counts.fallbacks.load(Ordering::SeqCst), 1);
         assert_eq!(counts.drops.load(Ordering::SeqCst), 0);
+
+        counts.unsupported.store(false, Ordering::SeqCst);
+        session
+            .send(outbound(&bytes, &route, destination))
+            .unwrap()
+            .validate_exact(&bytes)
+            .unwrap();
+        assert_eq!(counts.opens.load(Ordering::SeqCst), 2);
+        assert_eq!(counts.fallbacks.load(Ordering::SeqCst), 1);
+        drop(session);
+        assert_eq!(counts.drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn interface_change_during_open_releases_socket_without_transmitting() {
+        let counts = Arc::new(Counts::default());
+        counts
+            .change_interface_on_open
+            .store(true, Ordering::SeqCst);
+        let session = session(&counts);
+        let (bytes, destination) = ipv4();
+        let route = decision(LOOPBACK_IFINDEX, destination);
+
+        assert!(session.send(outbound(&bytes, &route, destination)).is_err());
+        assert!(counts.frames.lock().unwrap().is_empty());
+        assert_eq!(counts.opens.load(Ordering::SeqCst), 1);
+        assert_eq!(counts.drops.load(Ordering::SeqCst), 1);
+        assert_eq!(counts.fallbacks.load(Ordering::SeqCst), 0);
+
+        counts
+            .change_interface_on_open
+            .store(false, Ordering::SeqCst);
+        counts.bad_interface.store(false, Ordering::SeqCst);
+        session
+            .send(outbound(&bytes, &route, destination))
+            .unwrap()
+            .validate_exact(&bytes)
+            .unwrap();
+        assert_eq!(counts.opens.load(Ordering::SeqCst), 2);
+        assert_eq!(counts.frames.lock().unwrap().as_slice(), &[bytes]);
+        drop(session);
+        assert_eq!(counts.drops.load(Ordering::SeqCst), 2);
     }
 }

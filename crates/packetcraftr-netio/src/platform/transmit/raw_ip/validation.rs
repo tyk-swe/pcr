@@ -9,17 +9,17 @@ use crate::interface::Id as InterfaceId;
 use crate::{Error, transmit::Layer3Frame};
 use packetcraftr_core::protocol::checksum_parts;
 
-pub(crate) const IPV4_MINIMUM_HEADER: usize = 20;
-pub(crate) const IPV6_HEADER: usize = 40;
+pub(super) const IPV4_MINIMUM_HEADER: usize = 20;
+pub(super) const IPV6_HEADER: usize = 40;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Validated {
-    pub(crate) interface: InterfaceId,
-    pub(crate) destination: IpAddr,
-    pub(crate) bytes: Bytes,
+pub(super) struct Validated {
+    pub(super) interface: InterfaceId,
+    pub(super) destination: IpAddr,
+    pub(super) bytes: Bytes,
 }
 
-pub(crate) fn validate(
+pub(super) fn validate(
     frame: Layer3Frame<'_>,
     target_restrictions: impl FnOnce(&Bytes, IpAddr, IpAddr) -> Result<(), Error>,
 ) -> Result<Validated, Error> {
@@ -146,6 +146,6 @@ fn ipv6_address(bytes: &[u8]) -> Ipv6Addr {
     Ipv6Addr::from(address)
 }
 
-pub(crate) fn invalid_frame(message: String) -> Error {
+pub(super) fn invalid_frame(message: String) -> Error {
     Error::InvalidTransmissionFrame { message }
 }

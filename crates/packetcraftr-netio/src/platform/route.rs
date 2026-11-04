@@ -1,22 +1,38 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#[cfg(target_os = "macos")]
-pub(in crate::platform) mod af_route;
-#[cfg(target_os = "windows")]
-pub(in crate::platform) mod iphelper;
-#[cfg(target_os = "linux")]
-pub(in crate::platform) mod netlink;
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(not(native_route))]
+use crate::{NativeCapability, Unsupported, route::Decision};
+#[cfg(not(native_route))]
+use packetcraftr_core::budget::Deadline;
+#[cfg(not(native_route))]
 use std::net::IpAddr;
 
-use crate::{
-    interface::{self, Id as InterfaceId},
-    route,
-};
+#[cfg(all(native_route, target_os = "macos"))]
+use af_route as backend;
+#[cfg(all(native_route, target_os = "windows"))]
+use iphelper as backend;
+#[cfg(all(native_route, target_os = "linux"))]
+use netlink as backend;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(native_route)]
+pub(crate) use backend::{interface_route as lookup_interface, route as lookup};
+
+#[cfg(all(native_route, target_os = "macos"))]
+pub(in crate::platform) mod af_route;
+#[cfg(all(native_route, target_os = "windows"))]
+pub(in crate::platform) mod iphelper;
+#[cfg(all(native_route, target_os = "linux"))]
+pub(in crate::platform) mod netlink;
+
+#[cfg(all(native_route, any(target_os = "macos", target_os = "windows")))]
+use std::net::IpAddr;
+
+#[cfg(native_route)]
+use crate::interface;
+use crate::{interface::Id as InterfaceId, route};
+
+#[cfg(all(native_route, any(target_os = "linux", target_os = "macos")))]
 fn find_interface(
     interfaces: &[interface::Info],
     requested: &InterfaceId,
@@ -43,19 +59,19 @@ fn find_interface(
     })
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(all(native_route, any(target_os = "macos", target_os = "windows")))]
 trait InterfaceCandidate: Clone {
     fn interface(&self) -> &interface::Info;
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(all(native_route, any(target_os = "macos", target_os = "windows")))]
 impl InterfaceCandidate for interface::Info {
     fn interface(&self) -> &interface::Info {
         self
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(all(native_route, any(target_os = "macos", target_os = "windows")))]
 fn constrain_by_preferred_source<T: InterfaceCandidate>(
     available: &[T],
     interface_hint: Option<&InterfaceId>,
@@ -91,4 +107,34 @@ fn constrain_by_preferred_source<T: InterfaceCandidate>(
             interface: interface_hint
                 .map_or_else(|| "any interface".to_owned(), |hint| hint.name.clone()),
         })
+}
+
+#[cfg(not(native_route))]
+pub(crate) fn lookup(
+    _destination: IpAddr,
+    _interface_hint: Option<&InterfaceId>,
+    _preferred_source: Option<IpAddr>,
+    _deadline: &Deadline,
+) -> Result<Decision, route::Error> {
+    Err(Unsupported::unbuilt(
+        NativeCapability::Route,
+        cfg!(feature = "native-route"),
+        "native-route",
+        "route selection",
+    )
+    .into())
+}
+
+#[cfg(not(native_route))]
+pub(crate) fn lookup_interface(
+    _interface: &InterfaceId,
+    _deadline: &Deadline,
+) -> Result<Decision, route::Error> {
+    Err(Unsupported::unbuilt(
+        NativeCapability::Route,
+        cfg!(feature = "native-route"),
+        "native-route",
+        "interface selection",
+    )
+    .into())
 }

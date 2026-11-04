@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #[cfg(pcap_backend)]
-pub(in crate::platform) mod libpcap;
+mod libpcap;
 #[cfg(npcap_backend)]
-pub(in crate::platform) mod npcap;
+mod npcap;
+
+#[cfg(pcap_backend)]
+pub(crate) use libpcap::{open_capture as open, timestamp_types};
+#[cfg(npcap_backend)]
+pub(crate) use npcap::{open_capture as open, timestamp_types};

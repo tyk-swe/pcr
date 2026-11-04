@@ -74,7 +74,7 @@ impl Provider for SystemProvider {
         validate_preferred_source_family(destination, preferred_source)?;
         admit(deadline, "looking up a route")?;
         let result =
-            crate::platform::route(destination, interface_hint, preferred_source, deadline);
+            crate::platform::route::lookup(destination, interface_hint, preferred_source, deadline);
         admit(deadline, "looking up a route")?;
         result
     }
@@ -85,7 +85,7 @@ impl Provider for SystemProvider {
         deadline: &Deadline,
     ) -> Result<Option<Decision>, Self::Error> {
         admit(deadline, "looking up an interface route")?;
-        let result = crate::platform::interface_route(interface, deadline);
+        let result = crate::platform::route::lookup_interface(interface, deadline);
         admit(deadline, "looking up an interface route")?;
         result.map(Some)
     }

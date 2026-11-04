@@ -15,6 +15,8 @@ mod preparation;
 #[cfg(target_os = "linux")]
 pub(in crate::platform) mod session;
 mod submission;
+#[forbid(unsafe_code)]
+mod validation;
 
 pub(crate) fn send_layer3(frame: Layer3Frame<'_>) -> Result<transmit::Report, Error> {
     let packet = prepare(frame)?;

@@ -17,9 +17,12 @@
 //! | 4. Native backends | `platform` |
 //!
 //! The one sanctioned upward edge is dispatch: a contract's system provider
-//! calls its `platform` implementation, which in turn returns that contract's
-//! types. `platform` is the only module that may contain `unsafe` code; every
-//! other module forbids it.
+//! calls the matching `platform` module, which owns backend selection and returns
+//! the contract's types. Native transmission sessions own handle reuse, while
+//! backend adapters prepare typed packets before opening or submitting them.
+//! Transmission contracts expose frames and evidence without native session state.
+//! `platform` is the only module that may contain `unsafe` code; every other
+//! module forbids it.
 //!
 //! Unit tests stay beside the implementations they exercise.
 

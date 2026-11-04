@@ -4,28 +4,9 @@
 //! Crate-private FFI and reviewed-unsafe-code boundary.
 
 #[cfg(native_layer2)]
-mod capture;
+pub(crate) mod capture;
 mod common;
-mod dispatch;
-#[cfg(native_route)]
-mod interface;
-#[cfg(native_route)]
-mod route;
-#[cfg(native_send)]
-mod transmit;
-mod udp;
-
-#[cfg(native_send)]
-pub(crate) use dispatch::interfaces_for_identity;
-pub(crate) use dispatch::receive_datagram;
-#[cfg(native_send)]
-pub(crate) use dispatch::verify_interface_identity;
-pub(crate) use dispatch::{
-    interface_route, interfaces, ipv6_interfaces, route, send_layer2, send_layer3,
-};
-#[cfg(native_layer2)]
-pub(crate) use dispatch::{open_capture, timestamp_types};
-#[cfg(all(target_os = "linux", pcap_backend))]
-pub(crate) use transmit::libpcap::session_backend as transmit_backend;
-#[cfg(all(target_os = "linux", native_layer3))]
-pub(crate) use transmit::raw_ip::session::wrap as wrap_raw_transmit_session;
+pub(crate) mod interface;
+pub(crate) mod route;
+pub(crate) mod transmit;
+pub(crate) mod udp;

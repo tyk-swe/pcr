@@ -5,21 +5,21 @@ use std::net::IpAddr;
 
 use bytes::Bytes;
 
+use super::validation::{Validated, validate};
 use crate::interface::Id as InterfaceId;
-use crate::transmit::raw_ip::{Validated, validate};
 use crate::{Error, transmit::Layer3Frame};
 #[cfg(target_os = "windows")]
 use crate::{NativeCapability, Unsupported, link::Mode};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::platform) struct PreparedRawIp {
-    pub(in crate::platform) interface: InterfaceId,
-    pub(in crate::platform) destination: IpAddr,
-    pub(in crate::platform) submission: Bytes,
-    pub(in crate::platform) wire_bytes: Bytes,
+pub(super) struct PreparedRawIp {
+    pub(super) interface: InterfaceId,
+    pub(super) destination: IpAddr,
+    pub(super) submission: Bytes,
+    pub(super) wire_bytes: Bytes,
 }
 
-pub(in crate::platform) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, Error> {
+pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, Error> {
     let Validated {
         interface,
         destination,
@@ -45,7 +45,7 @@ fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
 /// Rewrites the two header fields the macOS raw IPv4 socket expects in host byte order.
 #[cfg(target_os = "macos")]
 fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
-    use crate::transmit::raw_ip::{IPV4_MINIMUM_HEADER, invalid_frame};
+    use super::validation::{IPV4_MINIMUM_HEADER, invalid_frame};
 
     let mut submission = bytes.to_vec();
     let Some(header) = submission.first_chunk_mut::<IPV4_MINIMUM_HEADER>() else {
@@ -91,7 +91,7 @@ fn extension_header(bytes: &[u8], offset: usize) -> Option<[u8; 2]> {
 
 #[cfg(target_os = "windows")]
 fn upper_protocol(bytes: &[u8]) -> Result<u8, Error> {
-    use crate::transmit::raw_ip::{IPV6_HEADER, invalid_frame};
+    use super::validation::{IPV6_HEADER, invalid_frame};
 
     let version = bytes
         .first()

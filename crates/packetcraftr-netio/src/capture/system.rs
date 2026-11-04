@@ -18,7 +18,7 @@ pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Ses
     admit(deadline, ARMING)?;
     let request = request.clone();
     super::activation::open(limits, deadline, move || {
-        crate::platform::open_capture(
+        crate::platform::capture::open(
             &interface.id,
             limits,
             request.filter.as_deref(),
@@ -50,7 +50,7 @@ pub(super) fn timestamp_types(
     admit(deadline, DISCOVERING_TIMESTAMP_TYPES)?;
     let interface = crate::interface::current(interface, deadline)?;
     admit(deadline, DISCOVERING_TIMESTAMP_TYPES)?;
-    crate::platform::timestamp_types(&interface.id)
+    crate::platform::capture::timestamp_types(&interface.id)
 }
 
 #[cfg(not(native_layer2))]

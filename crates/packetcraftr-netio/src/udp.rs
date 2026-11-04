@@ -101,7 +101,7 @@ impl Provider for SystemProvider {
                 {
                     break 'exchange outcome;
                 }
-                match crate::platform::receive_datagram(&socket, &mut response) {
+                match crate::platform::udp::receive(&socket, &mut response) {
                     Ok((count, truncated)) => {
                         bytes_read = count.min(max_response);
                         if let Err(source) = deadline.live_remaining() {

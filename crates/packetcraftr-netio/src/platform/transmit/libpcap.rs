@@ -56,8 +56,8 @@ fn submit(
 mod session;
 
 #[cfg(target_os = "linux")]
-pub(crate) fn session_backend() -> session::Backend {
-    session::Backend::new()
+pub(super) fn session() -> impl crate::transmit::Provider {
+    super::session::Bounded::new(session::Backend::new())
 }
 
 fn map_send_error(interface: &InterfaceId, error: PcapError) -> Error {

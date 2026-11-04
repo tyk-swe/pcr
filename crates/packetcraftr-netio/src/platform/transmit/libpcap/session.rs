@@ -11,15 +11,15 @@ use std::mem::size_of;
 use crate::Error;
 use crate::interface::Id;
 use crate::platform::transmit::namespace::ExecutionContext;
-use crate::transmit::session::Backend as SessionBackend;
-use crate::transmit::{Outbound, Provider, Report, SystemProvider};
+use crate::platform::transmit::session::{Backend as SessionBackend, Preparation};
+use crate::transmit::{Layer2Frame, Outbound, Provider, Report, SystemProvider};
 
-pub(crate) struct Backend {
+pub(super) struct Backend {
     context: Result<ExecutionContext, Error>,
 }
 
 impl Backend {
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             context: ExecutionContext::capture(),
         }
@@ -28,25 +28,29 @@ impl Backend {
 
 impl SessionBackend for Backend {
     type Key = Id;
+    type Packet<'a> = Layer2Frame<'a>;
     type Resource = pcap::Capture<pcap::Active>;
 
-    fn key(&self, outbound: Outbound<'_>) -> Result<Option<Id>, Error> {
+    fn prepare<'a>(
+        &self,
+        outbound: Outbound<'a>,
+    ) -> Result<Preparation<Id, Layer2Frame<'a>>, Error> {
         self.context.as_ref().map_err(Clone::clone)?.verify()?;
         let Outbound::Layer2(frame) = outbound else {
-            return Ok(None);
+            return Ok(Preparation::Fallback);
         };
         let interface = &frame.route().decision.interface;
-        crate::platform::verify_interface_identity(interface)?;
+        crate::platform::interface::verify_identity(interface)?;
         super::validate_length(frame)?;
-        Ok(Some(interface.clone()))
+        Ok(Preparation::Reusable {
+            key: interface.clone(),
+            packet: frame,
+        })
     }
 
-    fn open(&self, outbound: Outbound<'_>) -> Result<Option<Self::Resource>, Error> {
-        let Outbound::Layer2(frame) = outbound else {
-            return Ok(None);
-        };
-        let capture = super::open(frame)?;
-        crate::platform::verify_interface_identity(&frame.route().decision.interface)?;
+    fn open(&self, frame: &Layer2Frame<'_>) -> Result<Option<Self::Resource>, Error> {
+        let capture = super::open(*frame)?;
+        crate::platform::interface::verify_identity(&frame.route().decision.interface)?;
         let socket = socket2::SockRef::from(&capture);
         let Ok(address) = socket.local_addr() else {
             return Ok(None);
@@ -66,10 +70,7 @@ impl SessionBackend for Backend {
         Ok(Some(capture))
     }
 
-    fn send(&self, capture: &mut Self::Resource, outbound: Outbound<'_>) -> Result<Report, Error> {
-        let Outbound::Layer2(frame) = outbound else {
-            unreachable!()
-        };
+    fn send(&self, capture: &mut Self::Resource, frame: Layer2Frame<'_>) -> Result<Report, Error> {
         super::submit(capture, frame)
     }
 

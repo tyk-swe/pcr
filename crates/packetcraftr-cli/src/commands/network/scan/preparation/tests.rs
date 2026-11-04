@@ -22,7 +22,7 @@ fn rejects_multiple_stdin_consumers() {
 }
 
 #[test]
-fn list_rejects_discovery_reverse_dns_and_traceroute() {
+fn list_rejects_live_discovery_options() {
     for error in [
         validate_list_options(true, Some(Discovery::Before), &None, false).unwrap_err(),
         validate_list_options(true, None, &Some("192.0.2.53".to_owned()), false).unwrap_err(),

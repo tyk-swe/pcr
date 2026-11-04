@@ -130,7 +130,7 @@ fn quote(
 }
 
 #[test]
-fn stable_flow_fields_checksums_and_stale_quote_rejection_all_strategies() {
+fn flow_identity_and_checksums_reject_stale_quotes() {
     for v6 in [false, true] {
         for strategy in [Transport::Udp, Transport::Tcp, Transport::Icmp] {
             let mut request = request(strategy, v6);
@@ -189,7 +189,7 @@ fn stable_flow_fields_checksums_and_stale_quote_rejection_all_strategies() {
 }
 
 #[test]
-fn udp_short_quotes_are_attributed_only_with_an_exact_identity() {
+fn short_udp_quotes_require_exact_identity() {
     for v6 in [false, true] {
         let request = request(Transport::Udp, v6);
         let probe = packet::Probe::new(
@@ -264,7 +264,7 @@ fn direct(sent: &BuiltPacket, strategy: Transport, v6: bool) -> DecodedPacket {
 }
 
 #[test]
-fn direct_echo_and_syn_ack_correlate_and_tcp_cleanup_has_correct_sequence() {
+fn direct_replies_correlate_with_correct_tcp_cleanup() {
     for v6 in [false, true] {
         for strategy in [Transport::Icmp, Transport::Tcp] {
             let request = request(strategy, v6);
@@ -298,7 +298,7 @@ fn direct_echo_and_syn_ack_correlate_and_tcp_cleanup_has_correct_sequence() {
 }
 
 #[test]
-fn tcp_cleanup_preserves_the_successful_probe_hop_limit() {
+fn tcp_cleanup_preserves_probe_hop_limit() {
     for v6 in [false, true] {
         let mut request = request(Transport::Tcp, v6);
         request.trace.max_hops = u8::MAX;
@@ -526,7 +526,7 @@ fn simulate(request: &Request, lab: &mut Lab) -> Aggregate {
 }
 
 #[test]
-fn sweeps_preserve_flow_identity_and_independent_termination_with_branch_and_rejoin() {
+fn branching_sweeps_preserve_flow_lifecycles() {
     let mut lab = Lab::default();
     let result = simulate(&request(Transport::Udp, false), &mut lab);
     assert_eq!(result.report.summary.probes_sent, 14);
@@ -548,7 +548,7 @@ fn sweeps_preserve_flow_identity_and_independent_termination_with_branch_and_rej
 }
 
 #[test]
-fn all_strategies_and_families_reach_destination_and_account_for_cleanup() {
+fn destinations_reached_with_cleanup_accounted() {
     for v6 in [false, true] {
         for strategy in [Transport::Udp, Transport::Tcp, Transport::Icmp] {
             let result = simulate(&request(strategy, v6), &mut Lab::default());
@@ -582,7 +582,7 @@ fn all_strategies_and_families_reach_destination_and_account_for_cleanup() {
 }
 
 #[test]
-fn gaps_ambiguity_and_retention_never_manufacture_edges() {
+fn incomplete_evidence_cannot_invent_edges() {
     for mut lab in [
         Lab {
             missing: true,
@@ -629,7 +629,7 @@ fn gaps_ambiguity_and_retention_never_manufacture_edges() {
 }
 
 #[test]
-fn unfinished_correlation_marks_the_batch_incomplete_before_building_topology() {
+fn incomplete_correlation_marks_batch_before_topology() {
     for expiry in [
         CorrelationExpiry::RetainedReply,
         CorrelationExpiry::UndecodedFrame,
@@ -678,7 +678,7 @@ fn unfinished_correlation_marks_the_batch_incomplete_before_building_topology() 
 }
 
 #[test]
-fn invalid_flow_ranges_and_excess_probe_counts_are_rejected() {
+fn invalid_flow_ranges_and_probe_counts_rejected() {
     let mut request = request(Transport::Udp, false);
     request.trace.source_port = Some(u16::MAX);
     assert!(request.validate().is_err());
@@ -693,7 +693,7 @@ fn invalid_flow_ranges_and_excess_probe_counts_are_rejected() {
 }
 
 #[test]
-fn authoritative_exchange_matching_blocks_a_stale_same_tuple_response() {
+fn authoritative_matching_rejects_stale_tuple_reply() {
     let request = request(Transport::Udp, false);
     let flow = packet::flows(&request, destination(false), 8)[0].clone();
     let old = build(packet::Probe::new(&request, flow.clone(), destination(false), 8, 1, 1).packet);
@@ -738,7 +738,7 @@ fn authoritative_exchange_matching_blocks_a_stale_same_tuple_response() {
 }
 
 #[test]
-fn cancellation_and_output_failure_stop_before_another_batch() {
+fn cancellation_and_output_failure_stop_batches() {
     for cancel in [false, true] {
         let mut lab = Lab::default();
         let policy = crate::policy::Policy::default();
@@ -778,7 +778,7 @@ fn cancellation_and_output_failure_stop_before_another_batch() {
 }
 
 #[test]
-fn topology_changes_require_two_observed_adjacent_sweeps() {
+fn topology_changes_require_adjacent_sweeps() {
     let request = request(Transport::Udp, false);
     let mut result = simulate(&request, &mut Lab::default());
     let first = result.probes.remove(0);
@@ -804,7 +804,7 @@ fn topology_changes_require_two_observed_adjacent_sweeps() {
 }
 
 #[test]
-fn non_echoing_udp_reply_is_not_attributed() {
+fn non_echoing_udp_is_unattributed() {
     for v6 in [false, true] {
         let request = request(Transport::Udp, v6);
         let probe = packet::Probe::new(

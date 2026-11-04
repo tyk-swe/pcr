@@ -143,14 +143,14 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_v1_scan_output_is_rejected_with_regeneration_guidance() {
+    fn v1_scan_requires_regeneration() {
         let message = rejection(&scan_with_schema("packetcraftr.output/v1"));
         assert!(message.contains("ambiguous"), "{message}");
         assert!(message.contains("regenerate"), "{message}");
     }
 
     #[test]
-    fn other_output_identities_are_rejected_without_the_v1_explanation() {
+    fn unrelated_output_identity_is_rejected() {
         for schema in [
             "packetcraftr.output/v2",
             "packetcraftr.output/v18",
@@ -162,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn deeply_nested_json_fails_closed_instead_of_recursing() {
+    fn deeply_nested_json_is_rejected() {
         let depth = 100_000;
         let nested = [vec![b'['; depth], vec![b']'; depth]].concat();
         assert!(nested.len() < MAX_INPUT_BYTES);

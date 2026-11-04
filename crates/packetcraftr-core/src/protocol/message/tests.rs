@@ -373,7 +373,7 @@ fn ipv6_ospf_survives_authentication_header() {
 }
 
 #[test]
-fn coalesced_packet_messages_rebuild_without_losing_tail() {
+fn coalesced_messages_preserve_tail() {
     let registry = builtin::registry();
     let mut packet = Packet::default();
     packet.push(crate::protocol::link::Ethernet::default());
@@ -409,7 +409,7 @@ fn coalesced_packet_messages_rebuild_without_losing_tail() {
 }
 
 #[test]
-fn captures_convert_to_editable_documents_and_rebuild() {
+fn captures_rebuild_from_editable_documents() {
     let manifest: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../../examples/captures/protocols.manifest.json"
     ))
@@ -470,7 +470,7 @@ fn captures_convert_to_editable_documents_and_rebuild() {
 }
 
 #[test]
-fn noncanonical_ber_and_unknown_extensions_preserve_wire() {
+fn ber_extensions_preserve_wire_bytes() {
     let registry = builtin::registry();
     let context = DecodeContext {
         parent: None,
@@ -528,7 +528,7 @@ fn reference_packet_prefixes_are_bounded() {
 }
 
 #[test]
-fn malformed_resp_lines_and_modbus_ranges_are_refused() {
+fn malformed_resp_and_modbus_are_rejected() {
     let registry = builtin::registry();
     let context = DecodeContext {
         parent: None,
@@ -557,7 +557,7 @@ fn malformed_resp_lines_and_modbus_ranges_are_refused() {
 }
 
 #[test]
-fn sip_udp_without_content_length_uses_the_datagram() {
+fn sip_without_length_uses_datagram() {
     let registry = builtin::registry();
     let mut packet = Packet::default();
     packet.push(Ethernet::default());
@@ -591,7 +591,7 @@ fn sip_udp_without_content_length_uses_the_datagram() {
 }
 
 #[test]
-fn udp_build_uses_the_selected_registry_bindings() {
+fn udp_build_respects_registry_bindings() {
     let original = builtin::registry();
     let mut changed = original.to_builder();
     changed
@@ -663,7 +663,7 @@ fn sip_tcp_still_requires_content_length() {
 }
 
 #[test]
-fn ospfv2_preserves_the_separate_authentication_digest() {
+fn ospfv2_preserves_authentication_digest() {
     let manifest: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../../examples/captures/protocols.manifest.json"
     ))
@@ -733,7 +733,7 @@ fn ospfv2_preserves_the_separate_authentication_digest() {
 }
 
 #[test]
-fn dtls_document_rejects_oversized_fragment_offsets_without_panicking() {
+fn dtls_rejects_oversized_fragment_offsets() {
     let fragment = field::Value::Object(record([
         ("message_type", 1_u8.into()),
         ("length", 1_u8.into()),
@@ -762,7 +762,7 @@ fn dtls_document_rejects_oversized_fragment_offsets_without_panicking() {
 }
 
 #[test]
-fn sflow_sample_members_support_editing_and_projection() {
+fn sflow_samples_support_edits_and_projection() {
     let registry = builtin::registry();
     let json = include_str!("../../../../../examples/documents/packet-sflow.json");
     let document = document::Packet::parse(json, document::Format::Json, json.len()).unwrap();
@@ -816,7 +816,7 @@ fn sflow_sample_members_support_editing_and_projection() {
 }
 
 #[test]
-fn strict_build_checks_sip_and_rtsp_transport_framing() {
+fn strict_build_validates_sip_rtsp_framing() {
     let registry = builtin::registry();
     let messages: [(u16, Box<dyn Layer>); 2] = [
         (
@@ -869,7 +869,7 @@ fn strict_build_checks_sip_and_rtsp_transport_framing() {
 }
 
 #[test]
-fn large_cdp_checksum_round_trips_without_overflow() {
+fn large_cdp_checksum_round_trips() {
     let mut packet = Packet::default();
     packet.push(crate::protocol::link::cdp::Cdp {
         tlvs: Records(
@@ -949,7 +949,7 @@ fn radius_padding_is_separate_from_attributes() {
 }
 
 #[test]
-fn ethernet_ip_errors_preserve_opaque_command_data() {
+fn ethernet_ip_preserves_opaque_errors() {
     for command in [0x65_u16, 0x6f, 0x70] {
         for data in [&[][..], &[0xa5, 0x5a][..]] {
             let mut wire = Vec::from(command.to_le_bytes());
@@ -980,7 +980,7 @@ fn ipfix_options_template_withdrawals_round_trip() {
 }
 
 #[test]
-fn ipfix_and_dtls_nested_fields_support_editing_and_projection() {
+fn ipfix_dtls_support_nested_field_edits() {
     for (name, json, path, value, members) in [
         (
             "ipfix",
@@ -1133,7 +1133,7 @@ fn datagram_messages_reject_unframed_opaque_tails() {
 }
 
 #[test]
-fn folded_sip_and_rtsp_headers_preserve_bytes_and_frame_lengths() {
+fn folded_sip_rtsp_headers_preserve_framing() {
     for (name, start) in [
         ("sip", "OPTIONS sip:service SIP/2.0"),
         ("rtsp", "OPTIONS * RTSP/1.0"),
@@ -1195,7 +1195,7 @@ fn folded_sip_and_rtsp_headers_preserve_bytes_and_frame_lengths() {
 }
 
 #[test]
-fn amqp_content_headers_require_complete_property_flags() {
+fn amqp_requires_complete_property_flags() {
     for (payload, valid) in [
         (vec![0; 12], false),
         (vec![0; 13], false),
@@ -1256,7 +1256,7 @@ fn amqp_content_headers_require_complete_property_flags() {
 }
 
 #[test]
-fn resp_payloads_support_typed_edits_filters_and_projection() {
+fn resp_supports_edits_filters_and_projection() {
     use crate::protocol::application::resp::{Resp, RespValue};
     for (value, path, replacement, literal) in [
         (
@@ -1330,7 +1330,7 @@ fn resp_payloads_support_typed_edits_filters_and_projection() {
 }
 
 #[test]
-fn bacnet_segment_ack_requires_its_window_size() {
+fn bacnet_segment_ack_requires_window() {
     let ack = b"\x40\x01\x02\x01";
     for len in 0..=ack.len() {
         let registry = builtin::registry();
@@ -1368,7 +1368,7 @@ fn bacnet_segment_ack_requires_its_window_size() {
 }
 
 #[test]
-fn sip_udp_preserves_excess_bytes_after_declared_body() {
+fn sip_preserves_trailing_datagram_bytes() {
     let registry = builtin::registry();
     let builder = crate::build::Builder::new(registry.clone());
     let mut packet = Packet::default();
@@ -1410,7 +1410,7 @@ fn sip_udp_preserves_excess_bytes_after_declared_body() {
 }
 
 #[test]
-fn outer_ethernet_padding_does_not_extend_datagram_framing() {
+fn ethernet_padding_preserves_datagram_framing() {
     let registry = builtin::registry();
     let builder = crate::build::Builder::new(registry.clone());
     let mut packet = Packet::default();
@@ -1452,7 +1452,7 @@ fn outer_ethernet_padding_does_not_extend_datagram_framing() {
 }
 
 #[test]
-fn interleaved_rtsp_layout_only_contains_binary_fields() {
+fn interleaved_rtsp_exposes_binary_fields_only() {
     let registry = builtin::registry();
     let mut packet = Packet::default();
     packet.push(crate::protocol::application::rtsp::Rtsp {
@@ -1493,7 +1493,7 @@ fn interleaved_rtsp_layout_only_contains_binary_fields() {
 }
 
 #[test]
-fn other_slow_protocols_remain_opaque_before_lacp_length_checks() {
+fn non_lacp_slow_protocols_remain_opaque() {
     let registry = builtin::registry();
     for wire in [b"\x03\0\0\x01".as_slice(), b"\x02\x01", b"\x01\x02"] {
         let decoded = registry
@@ -1535,7 +1535,7 @@ fn other_slow_protocols_remain_opaque_before_lacp_length_checks() {
 }
 
 #[test]
-fn rtsp_and_sip_methods_accept_the_token_grammar() {
+fn rtsp_sip_methods_accept_tokens() {
     for (name, version) in [("rtsp", "RTSP/1.0"), ("sip", "SIP/2.0")] {
         for method in ["GET_PARAMETER", "SET_PARAMETER", "custom_method2"] {
             let wire = format!("{method} * {version}\r\nContent-Length: 0\r\n\r\n");
@@ -1545,7 +1545,7 @@ fn rtsp_and_sip_methods_accept_the_token_grammar() {
 }
 
 #[test]
-fn rtcp_explicit_padding_preserves_report_data_boundaries() {
+fn rtcp_padding_preserves_report_boundaries() {
     use crate::protocol::application::rtcp::Rtcp;
 
     let registry = builtin::registry();
@@ -1627,7 +1627,7 @@ fn rtcp_reports_preserve_profile_extensions() {
 }
 
 #[test]
-fn mqtt_persistent_sessions_require_a_client_identifier() {
+fn mqtt_persistent_sessions_require_client_id() {
     use crate::protocol::application::mqtt::Mqtt;
     let registry = builtin::registry();
     for (flags, client_id) in [
@@ -1736,7 +1736,7 @@ fn text_targets_and_content_lengths() {
 }
 
 #[test]
-fn resp_framing_matches_canonical_decoder_and_depth() {
+fn resp_framing_matches_decoder_depth() {
     for number in ["+1", "01", "-0", " 1"] {
         for tag in [":", "$", "*"] {
             let wire = format!("{tag}{number}\r\n");
@@ -1782,7 +1782,7 @@ fn resp_framing_matches_canonical_decoder_and_depth() {
 }
 
 #[test]
-fn resp_null_reflection_requires_canonical_empty_data() {
+fn resp_null_requires_empty_data() {
     use crate::{field::Value, layer::ReflectiveField, protocol::application::resp::RespValue};
     for (kind, good, bad) in [
         (
@@ -2021,7 +2021,7 @@ fn build_in(packet: Packet, mode: Mode) -> Result<crate::build::BuiltPacket, Str
 }
 
 #[test]
-fn mqtt_document_cannot_attach_a_payload_to_pingreq() {
+fn mqtt_pingreq_rejects_payload() {
     let json = r#"{"schema":"packetcraftr.packet/v1","layers":[
         {"protocol":"ethernet","fields":{}},
         {"protocol":"ipv4","fields":{}},
@@ -2041,7 +2041,7 @@ fn mqtt_document_cannot_attach_a_payload_to_pingreq() {
 }
 
 #[test]
-fn mqtt_typed_layers_reject_fields_their_packet_type_does_not_carry() {
+fn mqtt_rejects_fields_from_other_packets() {
     use crate::protocol::application::mqtt::Mqtt;
     let subscription = || {
         Records(vec![record([
@@ -2177,7 +2177,7 @@ fn mqtt_typed_layers_reject_fields_their_packet_type_does_not_carry() {
 }
 
 #[test]
-fn mqtt_carried_fields_survive_document_round_trips() {
+fn mqtt_fields_round_trip() {
     use crate::protocol::application::mqtt::Mqtt;
     let registry = builtin::registry();
     for mqtt in [
@@ -2262,7 +2262,7 @@ fn mqtt_carried_fields_survive_document_round_trips() {
 }
 
 #[test]
-fn mqtt_permissive_build_keeps_malformed_messages_and_raw_tails() {
+fn permissive_mqtt_preserves_malformed_messages() {
     use crate::protocol::application::mqtt::Mqtt;
     let persistent_without_client = Mqtt {
         packet_type: 1,
@@ -2289,7 +2289,7 @@ fn mqtt_permissive_build_keeps_malformed_messages_and_raw_tails() {
 }
 
 #[test]
-fn encode_validation_is_strict_once_and_permissive_with_a_warning() {
+fn strict_validation_errors_and_permissive_warns() {
     use crate::protocol::application::{coap::Coap, mqtt::Mqtt, rtsp::Rtsp, ssdp::Ssdp};
     let udp = |port| -> Box<dyn Layer> {
         Box::new(Udp {
@@ -2439,7 +2439,7 @@ fn rtsp_over_tcp(rtsp: crate::protocol::application::rtsp::Rtsp) -> Packet {
 }
 
 #[test]
-fn rtsp_framing_modes_reject_fields_they_do_not_carry() {
+fn rtsp_rejects_fields_from_other_framings() {
     use crate::protocol::application::rtsp::Rtsp;
     let interleaved = || Rtsp {
         interleaved: true,
@@ -2495,7 +2495,7 @@ fn rtsp_framing_modes_reject_fields_they_do_not_carry() {
 }
 
 #[test]
-fn rtsp_text_and_interleaved_messages_survive_document_round_trips() {
+fn rtsp_text_and_binary_round_trip() {
     use crate::protocol::application::rtsp::Rtsp;
     let registry = builtin::registry();
     let json = include_str!("../../../../../examples/documents/packet-rtsp.json");

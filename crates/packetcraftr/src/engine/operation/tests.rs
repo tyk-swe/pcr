@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use std::time::Instant;
 
 #[test]
-fn cache_isolation_keeps_parent_root_and_retains_unfinished_worker_charges() {
+fn isolated_cache_retains_parent_worker_charges() {
     let runtime = Runtime::new(2).unwrap();
     let signal = Cancellation::default();
     let client = Client::new(Arc::new(Registry::default()), Policy::default(), ())

@@ -174,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn digest_is_stable_and_binds_the_token() {
+    fn stable_digest_binds_token() {
         let registry = builtin::registry();
         let first = prepare(&registry, &request()).expect("plan prepares");
         let second = prepare(&registry, &request()).expect("plan prepares");
@@ -204,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn public_target_is_denied_without_opt_in() {
+    fn public_target_requires_opt_in() {
         let registry = builtin::registry();
         let mut public = request();
         public.target = Ipv4Addr::new(8, 8, 8, 8);

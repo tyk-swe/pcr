@@ -5,7 +5,7 @@ use super::*;
 use crate::scan::{adaptive, inference};
 
 #[test]
-fn local_deadline_is_unavailable_for_both_control_and_port_inference() {
+fn local_deadline_prevents_control_and_port_inference() {
     let mut probe = ProbeEvidence {
         sequence: 7,
         stage: Stage::Scan,

@@ -27,7 +27,7 @@ class DigestTests(unittest.TestCase):
 
 
 class StrictJsonTests(unittest.TestCase):
-    def test_wide_shallow_json_is_accepted_and_deep_json_is_rejected(self):
+    def test_json_limits_depth_without_limiting_width(self):
         width = 20_000
         value = strict_json('[' + ','.join('0' for _ in range(width)) + ']')
         self.assertEqual(len(value), width)
@@ -36,14 +36,14 @@ class StrictJsonTests(unittest.TestCase):
             strict_json('[' * depth + '0' + ']' * depth)
 
     @unittest.skipUnless(hasattr(os, 'mkfifo'), 'named pipes require POSIX')
-    def test_json_reader_rejects_fifo_without_waiting_for_writer(self):
+    def test_fifo_reader_fails_without_waiting(self):
         with tempfile.TemporaryDirectory() as directory:
             fifo = Path(directory) / 'report.json'
             os.mkfifo(fifo)
             with self.assertRaisesRegex(ValueError, 'regular file'):
                 script_support.read_json(fifo)
 
-    def test_duplicate_keys_are_rejected_at_any_depth(self):
+    def test_duplicate_keys_rejected_at_any_depth(self):
         for raw in ['{"a":1,"a":2}', '{"nested":{"a":1,"a":2}}']:
             with self.subTest(raw=raw), self.assertRaisesRegex(ValueError, 'duplicate'):
                 strict_json(raw)
@@ -53,12 +53,12 @@ class StrictJsonTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 strict_json(raw)
 
-    def test_input_must_be_utf8_not_auto_detected_utf16(self):
+    def test_input_requires_utf8(self):
         for encoding in ['utf-16', 'utf-32']:
             with self.subTest(encoding=encoding), self.assertRaises(ValueError):
                 strict_json('{"a":1}'.encode(encoding))
 
-    def test_surrogates_in_additive_fields_and_keys_are_rejected(self):
+    def test_additive_fields_and_keys_reject_surrogates(self):
         for raw in ['{"extra":"\\ud800"}', '{"\\udfff":1}']:
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 strict_json(raw)
@@ -81,14 +81,14 @@ class StrictJsonTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'input.json'):
                 read_json(path, max_bytes=10)
 
-    def test_invalid_json_limits_are_rejected_before_io(self):
+    def test_invalid_limits_rejected_before_io(self):
         for limit in [0, -1, True, 1.5]:
             with self.subTest(limit=limit), self.assertRaises(ValueError):
                 read_json(Path('missing'), max_bytes=limit)
 
 
 class AtomicReportTests(unittest.TestCase):
-    def test_prepare_report_removes_stale_success_but_not_input(self):
+    def test_report_preparation_preserves_input(self):
         with tempfile.TemporaryDirectory() as directory:
             report, source = Path(directory) / 'report.json', Path(directory) / 'input'
             source.write_bytes(b'input')
@@ -107,7 +107,7 @@ class AtomicReportTests(unittest.TestCase):
             self.assertTrue(path.read_bytes().endswith(b'\n'))
             self.assertNotIn(b'\r', path.read_bytes())
 
-    def test_serialization_failure_preserves_existing_report(self):
+    def test_serialization_failure_preserves_report(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'report.json'
             path.write_text('previous')

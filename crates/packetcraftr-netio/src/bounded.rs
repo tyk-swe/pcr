@@ -109,7 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn same_peer_requires_equal_canonical_address_and_port() {
+    fn peer_identity_requires_address_and_port() {
         let peer: SocketAddr = "127.0.0.1:53".parse().unwrap();
         assert!(same_peer(peer, peer));
         assert!(!same_peer(peer, "127.0.0.1:54".parse().unwrap()));
@@ -117,14 +117,14 @@ mod tests {
     }
 
     #[test]
-    fn same_peer_treats_mapped_ipv4_as_the_ipv4_peer() {
+    fn mapped_ipv4_matches_native_peer() {
         let mapped = v6("::ffff:127.0.0.1".parse().unwrap(), 53, 0);
         assert!(same_peer(mapped, "127.0.0.1:53".parse().unwrap()));
         assert!(!same_peer(mapped, "127.0.0.1:54".parse().unwrap()));
     }
 
     #[test]
-    fn same_peer_does_not_treat_flow_information_as_identity() {
+    fn peer_identity_ignores_flow_information() {
         let global: Ipv6Addr = "2001:db8::1".parse().unwrap();
         assert!(same_peer(
             v6_flow(global, 53, 0, 0),
@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn same_peer_ignores_scope_only_where_scope_is_irrelevant() {
+    fn peer_identity_respects_relevant_scope() {
         let global: Ipv6Addr = "2001:db8::1".parse().unwrap();
         assert!(same_peer(v6(global, 53, 0), v6(global, 53, 7)));
         let link_local: Ipv6Addr = "fe80::1".parse().unwrap();
@@ -178,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_transfer_fails_closed_on_expiry_and_timeout_errors() {
+    fn transfer_preparation_rejects_expiry_and_timeout() {
         use std::sync::{
             Arc,
             atomic::{AtomicU64, Ordering},

@@ -56,7 +56,7 @@ fn assert_same_packet(actual: &Frame, expected: &Frame) {
 }
 
 #[test]
-fn pcap_frames_read_back_equal_to_the_frames_written() {
+fn pcap_frames_round_trip() {
     let expected = vec![
         frame(1_700_000_000, 123_456_789, 0x11, 60),
         truncated_frame(1_700_000_001, 987_654_321, 0x22, 14),
@@ -80,7 +80,7 @@ fn pcap_frames_read_back_equal_to_the_frames_written() {
 }
 
 #[test]
-fn pcapng_frames_read_back_with_the_written_bytes_link_type_and_timestamps() {
+fn pcapng_preserves_bytes_link_type_and_timestamps() {
     let expected = vec![
         frame(1_700_000_100, 123_456_789, 0x44, 61),
         truncated_frame(1_700_000_101, 987_654_321, 0x55, 15),
@@ -114,7 +114,7 @@ fn pcapng_frames_read_back_with_the_written_bytes_link_type_and_timestamps() {
 }
 
 #[test]
-fn stream_limits_accept_frames_up_to_the_limit_and_reject_the_next_without_writing_it() {
+fn stream_limits_reject_excess_before_writing() {
     let frames = [
         frame(1_700_000_200, 0, 0x66, 20),
         frame(1_700_000_201, 0, 0x77, 30),

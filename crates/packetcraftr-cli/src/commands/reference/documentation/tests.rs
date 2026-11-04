@@ -52,7 +52,7 @@ fn new_documentation_uses_normal_creation_permissions() {
 }
 
 #[test]
-fn regeneration_atomically_replaces_existing_regular_files() {
+fn regeneration_replaces_files_atomically() {
     let temporary = tempfile::tempdir().unwrap();
     let arguments = Args {
         directory: temporary.path().into(),
@@ -78,7 +78,7 @@ fn regeneration_atomically_replaces_existing_regular_files() {
 }
 
 #[test]
-fn render_failure_and_unsupported_formats_do_not_create_directories() {
+fn render_errors_create_no_directories() {
     let temporary = tempfile::tempdir().unwrap();
     let destination = temporary.path().join("absent");
     let error = run_with(
@@ -119,7 +119,7 @@ fn render_failure_and_unsupported_formats_do_not_create_directories() {
 }
 
 #[test]
-fn write_and_sync_failures_leave_all_originals_intact() {
+fn write_and_sync_failures_preserve_originals() {
     for failed_operation in ["stage", "write", "sync"] {
         let temporary = tempfile::tempdir().unwrap();
         std::fs::create_dir(temporary.path().join("man")).unwrap();
@@ -156,7 +156,7 @@ fn write_and_sync_failures_leave_all_originals_intact() {
 }
 
 #[test]
-fn publication_failure_reports_the_published_prefix_and_destination() {
+fn publication_failure_reports_partial_progress() {
     let temporary = tempfile::tempdir().unwrap();
     let first = temporary.path().join("man/first.1");
     let second = temporary.path().join("man/second.1");
@@ -186,7 +186,7 @@ fn publication_failure_reports_the_published_prefix_and_destination() {
 }
 
 #[test]
-fn cancellation_at_publication_reports_destination_and_published_prefix() {
+fn publication_cancellation_reports_partial_progress() {
     let temporary = tempfile::tempdir().unwrap();
     let first = temporary.path().join("man/first.1");
     let second = temporary.path().join("man/second.1");
@@ -219,7 +219,7 @@ fn cancellation_at_publication_reports_destination_and_published_prefix() {
 }
 
 #[test]
-fn actual_render_includes_completions_and_grouped_manuals() {
+fn rendering_includes_completions_and_grouped_manuals() {
     let files = render(Path::new("docs")).unwrap();
     assert!(files.iter().any(|(path, bytes)| path
         == Path::new("docs/completions/packetcraftr.bash")
@@ -235,7 +235,7 @@ fn actual_render_includes_completions_and_grouped_manuals() {
 }
 
 #[test]
-fn replacement_rejects_directory_and_symlink_destinations() {
+fn replacement_rejects_directories_and_symlinks() {
     let temporary = tempfile::tempdir().unwrap();
     let destination = temporary.path().join("destination");
     std::fs::create_dir(&destination).unwrap();

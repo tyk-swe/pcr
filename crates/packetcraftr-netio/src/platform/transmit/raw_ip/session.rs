@@ -293,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn preparation_rejects_incomplete_interface_identities() {
+    fn preparation_rejects_incomplete_interfaces() {
         let (bytes, destination) = ipv6();
         for interface in [
             Id {
@@ -320,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn loopback_reuses_one_family_socket_and_validates_every_frame() {
+    fn loopback_reuses_socket_and_validates_frames() {
         let counts = Arc::new(Counts::default());
         let session = session(&counts);
         let (bytes, destination) = ipv6();
@@ -371,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn loopback_rejects_namespace_and_interface_changes_and_stops_after_send_failure() {
+    fn loopback_stops_on_identity_or_send_failure() {
         let counts = Arc::new(Counts::default());
         let session = session(&counts);
         let (bytes, destination) = ipv4();
@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_index_binding_falls_back_without_retaining_a_socket() {
+    fn unsupported_binding_fallback_releases_socket() {
         let counts = Arc::new(Counts::default());
         counts.unsupported.store(true, Ordering::SeqCst);
         let session = session(&counts);
@@ -433,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn interface_change_during_open_releases_socket_without_transmitting() {
+    fn interface_change_during_open_prevents_transmission() {
         let counts = Arc::new(Counts::default());
         counts
             .change_interface_on_open

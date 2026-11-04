@@ -155,7 +155,7 @@ impl Backend for TestBackend {
 }
 
 #[test]
-fn operation_session_reuses_one_resource_and_stops_after_device_loss() {
+fn session_reuses_resource_until_device_loss() {
     let counts = Arc::new(Counts::default());
     let session = Bounded::new(TestBackend::new(counts.clone()));
     let decision = decision();
@@ -222,7 +222,7 @@ fn operation_session_reuses_one_resource_and_stops_after_device_loss() {
 }
 
 #[test]
-fn failed_session_initialization_does_not_leave_a_resource() {
+fn failed_initialization_releases_resource() {
     let counts = Arc::new(Counts::default());
     counts.fail_open.store(true, SeqCst);
     let session = Bounded::new(TestBackend::new(counts.clone()));
@@ -239,7 +239,7 @@ fn failed_session_initialization_does_not_leave_a_resource() {
 }
 
 #[test]
-fn session_preserves_partial_send_evidence_without_retrying() {
+fn partial_send_preserves_evidence_without_retry() {
     use packetcraftr_core::error::{Classified, Code};
     let counts = Arc::new(Counts::default());
     counts.partial_send.store(true, SeqCst);
@@ -263,7 +263,7 @@ fn session_preserves_partial_send_evidence_without_retrying() {
 }
 
 #[test]
-fn session_rejects_concurrent_sends_without_opening_another_resource() {
+fn concurrent_sends_cannot_open_another_resource() {
     let barriers = Arc::new((Barrier::new(2), Barrier::new(2)));
     let counts = Arc::new(Counts {
         pause: Some(barriers.clone()),

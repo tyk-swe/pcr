@@ -223,7 +223,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn error_handling_recipe_decoding_and_parsing_keep_file_and_causes() {
+    fn recipe_errors_preserve_file_and_cause() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("packet.json");
         let registry = core::protocol::builtin::registry();

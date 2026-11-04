@@ -130,14 +130,14 @@ mod tests {
     }
 
     #[test]
-    fn byte_range_len_is_end_minus_start() {
+    fn range_length_matches_endpoints() {
         assert_eq!(ByteRange::new(2, 6).len(), 4);
         assert_eq!(ByteRange::new(6, 6).len(), 0);
         assert_eq!(ByteRange::new(6, 2).len(), 0);
     }
 
     #[test]
-    fn checked_shift_moves_layer_and_fields_together() {
+    fn shift_moves_layer_and_fields() {
         let mut layout = layout();
         assert!(layout.checked_shift(3));
         assert_eq!(layout.range, ByteRange::new(5, 9));

@@ -255,7 +255,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn error_handling_manifest_utf8_keeps_physical_line_and_decode_cause() {
+    fn manifest_utf8_error_preserves_line_and_cause() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("targets.txt");
         std::fs::write(&path, b"# comment\n\n\xff").unwrap();

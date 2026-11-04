@@ -10,7 +10,7 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use serde_json::{Value, json};
 
 #[test]
-fn aggregate_and_stream_preserve_the_same_multipath_evidence() {
+fn aggregate_and_stream_preserve_multipath_evidence() {
     let destination: IpAddr = "10.0.0.9".parse().unwrap();
     let flow = library::Flow {
         id: 1,
@@ -179,7 +179,7 @@ fn aggregate_and_stream_preserve_the_same_multipath_evidence() {
 }
 
 #[test]
-fn checked_in_stream_reconstructs_the_aggregate_topology() {
+fn stream_fixture_reconstructs_aggregate_topology() {
     let aggregate: Value = serde_json::from_str(include_str!(
         "../../../../../../examples/documents/output-traceroute-multipath-success.json"
     ))

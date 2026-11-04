@@ -32,7 +32,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn remaining_before_treats_a_past_instant_as_expired() {
+    fn past_instant_is_expired() {
         let past = SystemClock.now() - Duration::from_secs(1);
         assert_eq!(remaining_before(past), None);
         let future = SystemClock.now() + Duration::from_secs(5);
@@ -41,7 +41,7 @@ mod tests {
     }
 
     #[test]
-    fn expires_at_caps_long_deadlines_and_honors_short_ones() {
+    fn expiry_caps_long_deadlines() {
         let before = SystemClock.now();
         let expiry = expires_at(&Deadline::new(Duration::from_secs(10 * 60 * 60))).unwrap();
         let capped = expiry.duration_since(before);
@@ -55,7 +55,7 @@ mod tests {
     }
 
     #[test]
-    fn expires_at_rejects_an_already_expired_deadline() {
+    fn expired_deadline_rejects_expiry_lookup() {
         assert!(expires_at(&Deadline::new(Duration::ZERO)).is_err());
     }
 }

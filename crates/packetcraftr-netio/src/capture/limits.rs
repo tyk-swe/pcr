@@ -102,7 +102,7 @@ mod tests {
     }
 
     #[test]
-    fn rejection_reports_the_offending_value_and_reason() {
+    fn rejection_identifies_value_and_reason() {
         let limits = Limits {
             max_frames: MAX_CAPTURE_QUEUE_FRAMES + 7,
             ..Limits::default()
@@ -162,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_and_over_maximum_fields_are_rejected_by_name() {
+    fn invalid_fields_are_named() {
         let base = Limits::default();
         assert_eq!(
             rejected_field(Limits {
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn snap_length_must_fit_the_aggregate_byte_ceiling() {
+    fn snap_length_respects_aggregate_limit() {
         let base = Limits::default();
         assert_eq!(
             rejected_field(Limits {
@@ -231,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn overflow_policies_render_with_their_cli_names() {
+    fn overflow_policy_names_match_cli() {
         assert_eq!(OverflowPolicy::Fail.as_str(), "fail");
         assert_eq!(OverflowPolicy::DropNewest.as_str(), "drop-newest");
         assert_eq!(OverflowPolicy::DropOldest.as_str(), "drop-oldest");

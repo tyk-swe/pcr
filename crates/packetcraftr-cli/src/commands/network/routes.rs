@@ -122,7 +122,7 @@ mod tests {
     }
 
     #[test]
-    fn listing_uses_one_survey_and_returns_filtered_ordered_routes() {
+    fn route_listing_filters_one_ordered_survey() {
         for size in [1, 1000] {
             for all in [false, true] {
                 let surveys = Cell::new(0);

@@ -360,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn baseline_gate_is_deferred_for_spoofed_campaigns() {
+    fn spoofed_campaign_defers_baseline_gate() {
         let mut request = request();
         request.spoof_source = Some(Ipv4Addr::new(192, 0, 2, 99));
         let mut runner = FakeRunner {
@@ -377,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn mixed_answers_report_flaky_after_a_clean_baseline() {
+    fn mixed_answers_after_baseline_are_flaky() {
         let request = request();
         let mut answered = all_seqs(&request);
         answered.remove(&3);
@@ -488,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_capture_evidence_fails_instead_of_reading_as_unanswered() {
+    fn incomplete_capture_evidence_fails() {
         let outcome = outcome_from_evidence(workflow_evidence(ObservationQuality::Incomplete), 7);
         assert!(matches!(
             outcome,
@@ -501,13 +501,13 @@ mod tests {
     }
 
     #[test]
-    fn live_run_without_digest_is_refused_before_any_send() {
+    fn missing_digest_prevents_transmission() {
         let outcome = client().differential(request(), Collector::default());
         assert!(matches!(outcome, Err(Error::PlanDigestMissing)));
     }
 
     #[test]
-    fn live_run_with_wrong_digest_is_refused_before_any_send() {
+    fn wrong_digest_prevents_transmission() {
         let mut request = request();
         request.plan_digest = Some("not-the-plan-digest".to_owned());
         let outcome = client().differential(request, Collector::default());
@@ -515,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_only_run_returns_a_digest_without_sending() {
+    fn planning_returns_digest_without_transmission() {
         let summary = client()
             .differential_plan(request())
             .expect("documentation-range plan authorizes");

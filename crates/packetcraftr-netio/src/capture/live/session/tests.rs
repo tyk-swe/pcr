@@ -105,7 +105,7 @@ fn until(mut predicate: impl FnMut() -> bool) {
 }
 
 #[test]
-fn unfinished_group_readers_stay_charged_through_drop_until_actual_release() {
+fn dropped_readers_remain_charged_until_release() {
     for count in [1, 4, 15] {
         let pool = Arc::new(Pool::new(count + 1));
         let gate = Arc::new(Gate::default());
@@ -234,17 +234,17 @@ fn elapsed_capture_wait(readiness: bool) {
 }
 
 #[test]
-fn inherited_elapsed_readiness_wait_retains_unfinished_native_work() {
+fn expired_readiness_retains_native_work() {
     elapsed_capture_wait(true);
 }
 
 #[test]
-fn inherited_elapsed_quiet_read_wait_retains_unfinished_native_work() {
+fn expired_quiet_read_retains_native_work() {
     elapsed_capture_wait(false);
 }
 
 #[test]
-fn zero_duration_native_poll_preserves_queued_records_and_cancellation_before_dequeue() {
+fn zero_duration_poll_respects_cancellation() {
     let pool = Arc::new(Pool::new(2));
     let gate = Arc::new(Gate::default());
     let mut session = Backend {

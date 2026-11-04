@@ -162,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn staged_capture_readback_rewinds_and_retains_limits_errors_and_cancellation() {
+    fn staged_readback_preserves_capture_controls() {
         for format in [Format::Pcap, Format::PcapNg] {
             let bytes = capture(format);
             let cancellation = packetcraftr_core::budget::Cancellation::default();

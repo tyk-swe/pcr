@@ -32,7 +32,7 @@ impl Drop for TlsDrop {
 thread_local! { static TLS: std::cell::RefCell<Option<TlsDrop>> = const { std::cell::RefCell::new(None) }; }
 
 #[test]
-fn callback_tls_remains_charged_until_actual_exit_and_other_slots_recover() {
+fn callback_tls_charged_until_exit() {
     let runtime = Runtime::new(2).unwrap();
     let (entered, dropping) = mpsc::channel();
     let gate = Arc::new(Gate {
@@ -87,7 +87,7 @@ fn wait_released(runtime: &Runtime) {
 }
 
 #[test]
-fn worker_admission_waits_for_a_released_permits_cleanup_slot() {
+fn worker_admission_waits_for_cleanup_slot() {
     let runtime = Runtime::new(1).unwrap();
     let cleanup = ThreadCleanup::new(1).unwrap();
     *runtime.budget.cleanup.lock().unwrap() = Some(cleanup.clone());
@@ -123,7 +123,7 @@ fn worker_admission_waits_for_a_released_permits_cleanup_slot() {
 }
 
 #[test]
-fn completed_workers_can_immediately_reuse_a_single_slot_runtime() {
+fn completed_workers_allow_immediate_slot_reuse() {
     let runtime = Runtime::new(1).unwrap();
     for _ in 0..256 {
         let worker = Worker::new_in(&runtime, |event: usize| Ok(event + 1)).unwrap();
@@ -140,7 +140,7 @@ fn completed_workers_can_immediately_reuse_a_single_slot_runtime() {
 }
 
 #[test]
-fn parent_cancellation_retains_callback_and_tls_charges_without_blocking_an_independent_root() {
+fn parent_cancellation_preserves_independent_roots() {
     let runtime = Runtime::new(1).unwrap();
     let (entered, running) = mpsc::channel();
     let work = Arc::new(Gate {
@@ -208,7 +208,7 @@ impl Drop for PanicDrop {
 }
 
 #[test]
-fn callback_panic_payload_cleanup_stays_owned_and_initialization_failure_is_retryable() {
+fn callback_panic_cleanup_retains_ownership() {
     let runtime = Runtime::new(1).unwrap();
     assert!(
         Worker::<(), ()>::new_in_with(

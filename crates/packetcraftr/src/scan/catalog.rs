@@ -55,7 +55,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bundled_catalog_entries_resolve_by_port_name_and_hint() {
+    fn catalog_resolves_ports_names_and_hints() {
         let catalog = bundled();
         assert!(!catalog.entries.is_empty());
         for entry in &catalog.entries {
@@ -77,7 +77,7 @@ mod tests {
     }
 
     #[test]
-    fn bundled_catalog_presets_only_name_catalog_entries() {
+    fn presets_reference_existing_catalog_entries() {
         let catalog = bundled();
         for preset in &catalog.presets {
             assert_eq!(catalog.preset(&preset.name), Some(preset));
@@ -88,7 +88,7 @@ mod tests {
     }
 
     #[test]
-    fn data_set_publishes_the_bundled_catalog_identity() {
+    fn dataset_publishes_catalog_identity() {
         let published = data_set();
         assert_eq!(published.name, bundled().name);
         assert_eq!(published.version, bundled().version);

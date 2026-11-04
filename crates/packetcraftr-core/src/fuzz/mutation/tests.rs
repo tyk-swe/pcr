@@ -18,7 +18,7 @@ fn limits_with_field_bytes(max_field_bytes: usize) -> Limits {
 }
 
 #[test]
-fn random_text_and_bytes_stay_within_max_field_bytes() {
+fn random_values_respect_field_limit() {
     let original_bytes = field::Value::Bytes(Bytes::from_static(&[1, 2, 3]));
     let original_text = field::Value::Text("seed".to_owned());
     for seed in 0..64_u64 {
@@ -70,7 +70,7 @@ fn random_text_and_bytes_stay_within_max_field_bytes() {
 }
 
 #[test]
-fn bit_flip_changes_exactly_one_bit_within_max_field_bytes() {
+fn bit_flip_changes_one_bounded_bit() {
     let original_bytes = Bytes::from((0_u8..12).collect::<Vec<_>>());
     let original = field::Value::Bytes(original_bytes.clone());
     let layer = Raw::new(original_bytes.clone());
@@ -124,7 +124,7 @@ fn bit_flip_changes_exactly_one_bit_within_max_field_bytes() {
 }
 
 #[test]
-fn bounded_value_size_rejects_values_past_byte_item_and_nesting_limits() {
+fn value_limits_bound_size_and_nesting() {
     let bytes = field::Value::Bytes(Bytes::from(vec![0; 4]));
     assert_eq!(bounded_value_size(&bytes, 4, 8), Ok(4));
     assert_eq!(bounded_value_size(&bytes, 3, 8), Err(ValueLimit::Bytes));

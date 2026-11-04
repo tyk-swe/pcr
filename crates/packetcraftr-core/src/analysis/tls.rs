@@ -697,7 +697,7 @@ mod tests {
     }
 
     #[test]
-    fn fragmented_fatal_alert_is_reported_and_selected() {
+    fn fragmented_fatal_alert_is_selected() {
         let capture = std::fs::read(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../examples/captures/tls-fragmented-alert.pcap"),
@@ -719,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn alert_record_layout_and_tcp_chunking_preserve_messages() {
+    fn alert_framing_preserves_messages() {
         for bodies in [
             vec![vec![
                 WARNING.level,
@@ -752,7 +752,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_alerts_are_kept_in_their_own_direction() {
+    fn partial_alerts_remain_directional() {
         let level = record(CONTENT_TYPE_ALERT, &[FATAL.level]);
         let description = record(CONTENT_TYPE_ALERT, &[FATAL.description]);
         let warning = record(CONTENT_TYPE_ALERT, &[WARNING.level, WARNING.description]);
@@ -770,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn coalesced_alerts_keep_the_fatal_alert_when_retention_is_full() {
+    fn full_retention_preserves_fatal_alert() {
         let warning_count = MAX_ALERTS + 2;
         let body = [
             [WARNING.level, WARNING.description].repeat(warning_count),
@@ -793,7 +793,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_alert_bytes_count_toward_the_aggregate_limit() {
+    fn partial_alerts_count_toward_limit() {
         let warning_bytes = [WARNING.level, WARNING.description].repeat(MAX_ALERTS);
         let warnings = record(CONTENT_TYPE_ALERT, &warning_bytes);
         let level = record(CONTENT_TYPE_ALERT, &[FATAL.level]);

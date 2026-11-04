@@ -60,7 +60,7 @@ fn live_port_selection_requires_omitted_ports() {
 }
 
 #[test]
-fn listing_omits_an_unrequested_default_port_selection() {
+fn listing_omits_implicit_default_ports() {
     let selected = endpoint_request(&[Transport::Tcp], vec![], vec![], vec![], vec![])
         .select_if_requested()
         .expect("an omitted list selection is valid");
@@ -68,7 +68,7 @@ fn listing_omits_an_unrequested_default_port_selection() {
 }
 
 #[test]
-fn ip_protocol_only_selection_uses_protocol_endpoints() {
+fn protocol_selection_uses_protocol_endpoints() {
     let selected = endpoint_request(
         &[Transport::Ip],
         vec![],
@@ -83,7 +83,7 @@ fn ip_protocol_only_selection_uses_protocol_endpoints() {
 }
 
 #[test]
-fn invalid_port_and_protocol_combinations_are_usage_errors() {
+fn invalid_endpoint_combinations_report_usage_errors() {
     let cases = [
         endpoint_request(
             &[Transport::Ip],
@@ -113,7 +113,7 @@ fn invalid_port_and_protocol_combinations_are_usage_errors() {
 }
 
 #[test]
-fn listing_preserves_icmp_combined_invalid_option_precedence() {
+fn icmp_listing_preserves_error_precedence() {
     let listing = endpoint_request(
         &[Transport::Icmp],
         vec![port(None, 80)],
@@ -158,7 +158,7 @@ fn listing_preserves_icmp_combined_invalid_option_precedence() {
 }
 
 #[test]
-fn transport_specific_exclusions_only_remove_matching_endpoints() {
+fn exclusions_respect_endpoint_transport() {
     let selected = endpoint_request(
         &[Transport::Tcp, Transport::Udp],
         vec![port(None, 53), port(None, 80)],
@@ -180,7 +180,7 @@ fn transport_specific_exclusions_only_remove_matching_endpoints() {
 }
 
 #[test]
-fn scan_exclusions_keep_terms_discovery_did_not_consume() {
+fn scan_retains_unconsumed_discovery_exclusions() {
     let mut request = endpoint_request(
         &[Transport::Tcp],
         vec![port(None, 53), port(None, 80)],
@@ -198,7 +198,7 @@ fn scan_exclusions_keep_terms_discovery_did_not_consume() {
 }
 
 #[test]
-fn tcp_and_tcp_ack_discovery_expansion_is_deduplicated_and_counted() {
+fn tcp_discovery_counts_deduplicated_expansion() {
     let prepared = discovery_request(vec![
         arguments::DiscoveryProbe::Tcp,
         arguments::DiscoveryProbe::TcpAck,

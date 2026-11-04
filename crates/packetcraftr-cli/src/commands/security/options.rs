@@ -86,7 +86,7 @@ mod tests {
     }
 
     #[test]
-    fn output_byte_limits_preserve_boundaries_and_error_precedence() {
+    fn output_limits_preserve_bounds_and_precedence() {
         let defaults = TestArgs::parse_from(["security"]).bounds;
         for (value, valid) in [
             (0, false),
@@ -131,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn completion_and_severity_gates_are_opt_in_and_combine() {
+    fn completion_and_severity_gates_combine() {
         let defaults = TestArgs::parse_from(["security"]).bounds;
         let gate = TestArgs::parse_from(["security", "--fail-incomplete"]).bounds;
         let both =

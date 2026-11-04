@@ -88,12 +88,12 @@ def reassembly_records(seed):
 
 
 class FuzzSeedTests(unittest.TestCase):
-    def test_raw_ipv4_seed_carries_selector_and_dns_payload_is_extracted(self):
+    def test_ipv4_seed_selector_and_dns_extraction(self):
         frame = dns_frame(228)
         self.assertEqual(seeds.packet_seeds(pcap(228, [frame])), [b"\x06" + frame])
         self.assertEqual(seeds.dns_payload(228, frame), DNS)
 
-    def test_ethernet_seed_carries_selector_and_dns_payload_is_extracted(self):
+    def test_ethernet_seed_selector_and_dns_extraction(self):
         frame = dns_frame(1)
         self.assertEqual(seeds.packet_seeds(pcap(1, [frame])), [b"\x01" + frame])
         self.assertEqual(seeds.dns_payload(1, frame), DNS)
@@ -104,13 +104,13 @@ class FuzzSeedTests(unittest.TestCase):
             seeds.packet_seeds(whole[:-5])
         self.assertEqual(seeds.packet_seeds(pcap(999, [dns_frame(228)])), [])
 
-    def test_pcapng_frames_yield_packet_seeds_with_declared_timestamp_resolution(self):
+    def test_pcapng_preserves_packet_timestamps(self):
         frame = dns_frame(228)
         capture = pcapng(228, 1_500_000_000, frame)
         self.assertEqual(seeds.packet_seeds(capture), [b"\x06" + frame])
         self.assertEqual(seeds.read_frames(capture), [(228, 1_500_000_000, frame)])
 
-    def test_reassembly_seed_encodes_directions_relative_sequences_and_time(self):
+    def test_reassembly_preserves_direction_sequence_time(self):
         plain, in_order, reversed_ = seeds.reassembly_seeds(
             seeds.tcp_segments(handshake_and_request())
         )
@@ -126,7 +126,7 @@ class FuzzSeedTests(unittest.TestCase):
             self.assertEqual([r[0] >> 4 for r in fragmented], [mode] * 5)
             self.assertEqual([r[1:] for r in fragmented], [r[1:] for r in records])
 
-    def test_http2_seed_carries_one_connection_as_directed_chunks(self):
+    def test_http2_encodes_directed_connection_chunks(self):
         seed = seeds.http2_seed(seeds.tcp_segments(handshake_and_request()))
         handshake, port_8080, fin_close = 0x02, 0x08, 0x10
         self.assertEqual(seed[0], handshake | port_8080 | fin_close)
@@ -137,7 +137,7 @@ class FuzzSeedTests(unittest.TestCase):
             + struct.pack("!BH", 1, len(response)) + response,
         )
 
-    def test_filter_examples_come_from_the_first_text_block_of_module_docs(self):
+    def test_filter_examples_use_first_block(self):
         source = "\n".join([
             "//! Filters.", "//!", "//! ```text", "//! tcp.port == 80", "//!",
             "//! dns && udp", "//! ```", "//! ```text", "//! ignored", "//! ```",
@@ -146,7 +146,7 @@ class FuzzSeedTests(unittest.TestCase):
         self.assertEqual(seeds.filter_examples(source), ["tcp.port == 80", "dns && udp"])
         self.assertEqual(seeds.filter_examples("//! no examples"), [])
 
-    def test_main_fails_when_a_requested_corpus_receives_no_seeds(self):
+    def test_empty_requested_corpus_fails(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             udp_only = root / "dns.pcap"

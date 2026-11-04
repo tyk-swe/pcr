@@ -21,7 +21,7 @@ fn request(method: &[u8]) -> Vec<Header> {
 }
 
 #[test]
-fn regular_names_accept_exactly_the_lowercase_token_bytes() {
+fn header_names_require_lowercase_tokens() {
     // Lowercase subset of the HTTP token set from RFC 9110, checked 2026-10-25.
     const LOWERCASE_TOKEN: &[u8] = b"!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz";
     for byte in u8::MIN..=u8::MAX {
@@ -35,7 +35,7 @@ fn regular_names_accept_exactly_the_lowercase_token_bytes() {
 }
 
 #[test]
-fn pseudo_names_keep_lowercase_and_token_rules() {
+fn pseudo_names_require_lowercase_tokens() {
     assert!(check_name(b":protocol", true).is_ok());
     assert!(check_name(b":", true).is_err());
     assert!(check_name(b":Path", true).is_err());
@@ -44,7 +44,7 @@ fn pseudo_names_keep_lowercase_and_token_rules() {
 }
 
 #[test]
-fn request_validation_keeps_token_case_rules_for_method_and_protocol() {
+fn request_tokens_preserve_case_rules() {
     for method in [b"UPPERCASE".as_slice(), b"Mixed-Case-Method"] {
         let meta = validate(FieldRole::Request, &request(method)).unwrap();
         assert_eq!(meta.method.as_deref(), Some(method));

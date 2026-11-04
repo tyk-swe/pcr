@@ -139,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    fn every_dataset_parses_and_names_existing_companions() {
+    fn datasets_parse_with_existing_companions() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         for dataset in ALL {
             if let Some(schema) = dataset.schema {
@@ -287,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn every_data_file_has_a_table_row() {
+    fn data_files_have_table_entries() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut on_disk: Vec<String> = std::fs::read_dir(root.join("data"))
             .expect("data directory reads")

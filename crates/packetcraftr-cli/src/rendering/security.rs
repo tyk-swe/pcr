@@ -165,7 +165,7 @@ pub(crate) fn html(report: &Report<'_>) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn searchable_assessment_escapes_untrusted_content_and_keeps_findings_visible() {
+    fn assessment_escapes_content_and_preserves_findings() {
         use packetcraftr_core::security::{Finding, Report, Severity, Source};
         let mut report = Report::new("report");
         report.findings.push(Finding::new(

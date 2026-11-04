@@ -15,7 +15,7 @@ impl Drop for Owner {
 }
 
 #[test]
-fn reservations_and_failed_transfers_keep_the_join_owner_until_actual_completion() {
+fn failed_transfers_retain_join_ownership() {
     let cleanup = ThreadCleanup::new(1).unwrap();
     let slot = cleanup.reserve().unwrap();
     assert!(cleanup.reserve().is_err());
@@ -40,7 +40,7 @@ fn reservations_and_failed_transfers_keep_the_join_owner_until_actual_completion
 }
 
 #[test]
-fn one_blocked_join_does_not_serialize_independent_cleanup_slots() {
+fn blocked_join_preserves_independent_cleanup() {
     let cleanup = ThreadCleanup::new(2).unwrap();
     let active = Arc::new(AtomicUsize::new(1));
     let (release, held) = mpsc::channel();
@@ -67,7 +67,7 @@ fn one_blocked_join_does_not_serialize_independent_cleanup_slots() {
 }
 
 #[test]
-fn dropping_last_cleanup_owner_retries_a_failed_transfer_without_an_arc_cycle() {
+fn last_owner_drop_retries_failed_transfer() {
     let cleanup = ThreadCleanup::new(1).unwrap();
     let weak = Arc::downgrade(&cleanup.inner);
     let active = Arc::new(AtomicUsize::new(1));
@@ -105,7 +105,7 @@ impl Drop for BlockingOwner {
 }
 
 #[test]
-fn arbitrary_owner_drop_remains_charged_to_cleanup_after_the_thread_has_joined() {
+fn joined_thread_cleanup_retains_owner_charge() {
     let cleanup = ThreadCleanup::new(1).unwrap();
     let (entered, dropping) = mpsc::channel();
     let released = Arc::new((Mutex::new(false), std::sync::Condvar::new()));

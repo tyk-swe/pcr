@@ -329,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_overflow_is_a_classified_budget_error() {
+    fn aggregate_overflow_reports_budget_error() {
         assert_eq!(
             SocketOperation::new(&[], SocketLimits::new(u64::MAX, 1, 0)).err(),
             Some(LimitOverflow)
@@ -357,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn no_traffic_declarations_are_authorized_even_under_zero_ceilings() {
+    fn zero_budget_allows_no_traffic() {
         let policy = ceilings(0, 0);
         let zero = SocketLimits::new(0, 0, 0);
         assert!(
@@ -380,7 +380,7 @@ mod tests {
     }
 
     #[test]
-    fn socket_ceilings_admit_the_exact_total_and_reject_one_more() {
+    fn socket_limits_accept_exact_total() {
         assert!(socket(SocketLimits::new(4, 6, 100)).is_ok());
         assert!(matches!(
             socket(SocketLimits::new(4, 7, 100)),
@@ -399,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn dns_ceilings_admit_the_exact_udp_and_tcp_total_and_reject_one_more() {
+    fn dns_limits_accept_exact_total() {
         let tcp = SocketLimits::new(2, 3, 40);
         assert!(dns(WireLimits::new(5, 60), tcp).is_ok());
         assert!(matches!(
@@ -419,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_ceilings_admit_the_exact_total_and_reject_one_more() {
+    fn wire_limits_accept_exact_total() {
         let policy = ceilings(10, 100);
         assert!(
             policy
@@ -443,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn a_declared_destination_is_checked_against_the_allowlist() {
+    fn declared_destination_requires_allowlisting() {
         let packets: [&Packet; 0] = [];
         let declared = |destination: Option<IpAddr>| {
             Operation::Declared(DeclaredPackets::new(

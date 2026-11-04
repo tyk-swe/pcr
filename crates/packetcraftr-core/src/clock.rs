@@ -61,7 +61,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clock_sleeps_for_the_requested_delay_with_a_live_deadline() {
+    fn live_deadline_allows_requested_sleep() {
         let start = SystemClock.now();
         SystemClock
             .sleep(

@@ -118,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn into_io_preserves_the_kind_each_variant_promises() {
+    fn io_conversion_preserves_error_kind() {
         assert_eq!(
             Error::Io(io::Error::from(io::ErrorKind::ConnectionReset))
                 .into_io()
@@ -180,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn io_roundtrip_keeps_plain_io_errors_and_their_kind() {
+    fn io_errors_round_trip() {
         let recovered = Error::from_io(io::Error::from(io::ErrorKind::ConnectionReset));
         match recovered {
             Error::Io(source) => assert_eq!(source.kind(), io::ErrorKind::ConnectionReset),

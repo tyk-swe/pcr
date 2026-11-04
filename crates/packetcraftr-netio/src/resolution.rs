@@ -174,7 +174,7 @@ fn retain_addresses(
 mod tests {
     use super::*;
     #[test]
-    fn native_resolver_retains_unique_addresses_in_first_seen_order() {
+    fn resolver_deduplicates_in_first_seen_order() {
         let a = "127.0.0.1".parse().unwrap();
         let b = "127.0.0.2".parse().unwrap();
         assert_eq!(

@@ -185,7 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn ca_bundles_reject_every_other_pem_section() {
+    fn ca_bundles_reject_unrelated_pem() {
         let certificate = include_bytes!("test-ca.pem");
         assert!(TrustStore::from_pem(certificate).is_ok());
         for label in ["PRIVATE KEY", "PUBLIC KEY", "UNKNOWN"] {

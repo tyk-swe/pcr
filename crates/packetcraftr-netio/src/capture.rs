@@ -289,7 +289,7 @@ mod tests {
         }
     }
     #[test]
-    fn invalid_group_never_calls_injected_capture_provider() {
+    fn invalid_group_skips_capture_provider() {
         struct RefuseCalls(std::sync::atomic::AtomicUsize);
         impl Provider for RefuseCalls {
             type Capture = Box<dyn Session>;
@@ -328,7 +328,7 @@ mod tests {
         }
     }
     #[test]
-    fn incomplete_capture_identities_and_nul_are_rejected() {
+    fn capture_rejects_incomplete_or_nul_identities() {
         for id in [
             InterfaceId {
                 name: String::new(),

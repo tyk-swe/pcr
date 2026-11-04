@@ -193,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_responder_still_publishes_its_reception_log() {
+    fn cancelled_responder_publishes_receptions() {
         let directory = std::env::temp_dir().join(format!(
             "packetcraftr-responder-cancel-{}",
             std::process::id()

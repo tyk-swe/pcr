@@ -51,7 +51,7 @@ fn fresh_headroom(limit: usize, max_outcomes: usize) -> usize {
 }
 
 #[test]
-fn retirement_preserves_key_order_active_entries_and_omission_counts() {
+fn retirement_preserves_order_entries_and_omissions() {
     const LIMIT: usize = 64 * 1024;
     let mut tracker = Tracker::new(LIMIT, 2).unwrap();
     let keys: Vec<_> = [4, 1, 3, 2]
@@ -79,7 +79,7 @@ fn retirement_preserves_key_order_active_entries_and_omission_counts() {
 }
 
 #[test]
-fn retirement_keeps_extracted_metadata_charged_until_freeze_finishes() {
+fn retirement_charges_metadata_until_freeze() {
     const LIMIT: usize = 16 * 1024;
     let mut tracker = Tracker::new(LIMIT, 1).unwrap();
     fragment_entry(&mut tracker, 1);
@@ -100,7 +100,7 @@ fn retirement_keeps_extracted_metadata_charged_until_freeze_finishes() {
 }
 
 #[test]
-fn assembly_copies_linearly_and_tree_discovery_grows_n_log_n() {
+fn assembly_scales_linearly_discovery_loglinearly() {
     const MAX_COPIES_PER_SOURCE: usize = 4;
     const MAX_COMPARISONS_PER_SOURCE: usize = 64;
     for n in [64, 256, 1024, 4096] {
@@ -149,7 +149,7 @@ fn assembly_copies_linearly_and_tree_discovery_grows_n_log_n() {
 }
 
 #[test]
-fn node_admission_and_freeze_overlap_are_charged_before_mutation() {
+fn admission_and_freeze_charge_before_mutation() {
     const LIMIT: usize = 16 * 1024;
     let tracker = Tracker::new(LIMIT, 16).unwrap();
     let first = tracker
@@ -180,7 +180,7 @@ fn node_admission_and_freeze_overlap_are_charged_before_mutation() {
 }
 
 #[test]
-fn refused_inserts_and_freezes_release_their_charges() {
+fn refused_operations_release_charges() {
     const LIMIT: usize = 16 * 1024;
     let tracker = Tracker::new(LIMIT, 16).unwrap();
     let first = tracker

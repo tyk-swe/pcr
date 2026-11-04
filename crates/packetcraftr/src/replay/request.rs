@@ -321,7 +321,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn duration_bounds_preserve_limits_and_error_precedence() {
+    fn duration_bounds_preserve_error_precedence() {
         for (value, valid) in [
             (Duration::ZERO, false),
             (Duration::from_nanos(1), true),

@@ -72,7 +72,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn unrelated_polls_do_not_visit_pending_entries() {
+    fn unrelated_polls_skip_pending_entries() {
         for count in [32, 128, 512, 4096] {
             let now = SystemClock.now();
             let end = now + Duration::from_secs(1);
@@ -96,7 +96,7 @@ mod tests {
     }
 
     #[test]
-    fn removal_and_reuse_leave_no_stale_deadlines_or_draining_entries() {
+    fn removal_and_reuse_clear_stale_deadlines() {
         let now = SystemClock.now();
         let mut deadlines = PendingDeadlines::default();
         deadlines.insert(now + Duration::from_secs(2), 0);

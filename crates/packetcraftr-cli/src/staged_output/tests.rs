@@ -104,7 +104,7 @@ fn substitute_staging(directory: &Path, destination: &Path) -> PathBuf {
 }
 
 #[test]
-fn replaced_parent_at_publication_never_receives_output() {
+fn publication_rejects_replaced_parent() {
     for &strategy in STRATEGIES {
         for stage in MODES {
             with_strategy(strategy, || {
@@ -142,7 +142,7 @@ fn replaced_parent_at_publication_never_receives_output() {
 }
 
 #[test]
-fn staging_entry_substituted_before_publication_is_refused() {
+fn publication_rejects_previously_substituted_entry() {
     for stage in MODES {
         with_strategy(Strategy::Named, || {
             let temporary = tempfile::tempdir().unwrap();
@@ -160,7 +160,7 @@ fn staging_entry_substituted_before_publication_is_refused() {
 }
 
 #[test]
-fn staging_entry_substituted_at_publication_is_not_left_published() {
+fn publication_removes_concurrently_substituted_entry() {
     with_strategy(Strategy::Named, || {
         let temporary = tempfile::tempdir().unwrap();
         let destination = temporary.path().join("capture.pcap");
@@ -189,7 +189,7 @@ fn staging_entry_substituted_at_publication_is_not_left_published() {
 }
 
 #[test]
-fn replacement_with_substituted_staging_entry_fails_loudly() {
+fn replacement_rejects_substituted_entry() {
     with_strategy(Strategy::Named, || {
         let temporary = tempfile::tempdir().unwrap();
         let destination = temporary.path().join("manual.1");
@@ -219,7 +219,7 @@ fn replacement_with_substituted_staging_entry_fails_loudly() {
 }
 
 #[test]
-fn no_clobber_keeps_a_destination_created_at_publication() {
+fn no_clobber_preserves_concurrent_destination() {
     for &strategy in STRATEGIES {
         with_strategy(strategy, || {
             let temporary = tempfile::tempdir().unwrap();
@@ -247,7 +247,7 @@ fn no_clobber_keeps_a_destination_created_at_publication() {
 }
 
 #[test]
-fn existing_destination_is_refused_or_replaced_with_its_permissions() {
+fn replacement_preserves_destination_permissions() {
     for &strategy in STRATEGIES {
         with_strategy(strategy, || {
             let temporary = tempfile::tempdir().unwrap();
@@ -312,7 +312,7 @@ fn parent_is_bound_when_staging_starts() {
 }
 
 #[test]
-fn a_destination_that_names_a_directory_is_refused() {
+fn directory_destination_is_rejected() {
     for suffix in ["", "."] {
         let temporary = tempfile::tempdir().unwrap();
         let directory = temporary.path().join("out");
@@ -327,7 +327,7 @@ fn a_destination_that_names_a_directory_is_refused() {
 }
 
 #[test]
-fn a_destination_name_ending_in_a_dot_publishes() {
+fn trailing_dot_destination_publishes() {
     for &strategy in STRATEGIES {
         with_strategy(strategy, || {
             let temporary = tempfile::tempdir().unwrap();
@@ -354,7 +354,7 @@ fn ordinary_output_is_staged_private() {
 }
 
 #[test]
-fn a_parent_that_is_not_a_directory_fails_at_staging() {
+fn staging_rejects_nondirectory_parent() {
     let temporary = tempfile::tempdir().unwrap();
     let file_path = temporary.path().join("regular");
     std::fs::write(&file_path, b"").unwrap();
@@ -363,7 +363,7 @@ fn a_parent_that_is_not_a_directory_fails_at_staging() {
 }
 
 #[test]
-fn publication_errors_name_the_publish_or_replace_action() {
+fn publication_errors_identify_action() {
     for (action, stage) in [("publish output", MODES[0]), ("replace output", MODES[1])] {
         with_strategy(Strategy::Named, || {
             let temporary = tempfile::tempdir().unwrap();
@@ -380,7 +380,7 @@ fn publication_errors_name_the_publish_or_replace_action() {
 }
 
 #[test]
-fn failed_or_abandoned_staging_leaves_no_entries() {
+fn abandoned_staging_cleans_up_entries() {
     for &strategy in STRATEGIES {
         with_strategy(strategy, || {
             let temporary = tempfile::tempdir().unwrap();

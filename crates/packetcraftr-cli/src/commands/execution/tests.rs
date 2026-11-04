@@ -104,7 +104,7 @@ impl<T: output::stream::StreamRecord> output::stream::StreamRecord for Counted<T
 }
 
 #[test]
-fn bounded_ndjson_followup_sink_uses_no_workflow_handoff_and_flushes_each_record() {
+fn cooperative_ndjson_flushes_without_handoff() {
     let writer = Writer::default();
     let writer_runtime = Runtime::new(1).unwrap();
     let workflow_runtime = Runtime::new(0).unwrap();
@@ -200,7 +200,7 @@ fn bounded_ndjson_followup_sink_uses_no_workflow_handoff_and_flushes_each_record
 }
 
 #[test]
-fn text_and_unisolated_writers_publish_callbacks_on_a_worker_thread() {
+fn unisolated_writers_publish_on_workers() {
     for format in [Format::Text, Format::Ndjson] {
         let writer = Writer::default();
         let workflow_runtime = Runtime::new(1).unwrap();
@@ -280,7 +280,7 @@ impl Write for GateWriter {
 }
 
 #[test]
-fn cooperative_followup_publication_retains_parent_control_inside_the_writer_wait() {
+fn cooperative_writer_wait_retains_parent_control() {
     for frozen in [false, true] {
         let writer_runtime = Runtime::new(1).unwrap();
         let workflow_runtime = Runtime::new(0).unwrap();
@@ -376,7 +376,7 @@ fn cooperative_followup_publication_retains_parent_control_inside_the_writer_wai
 }
 
 #[test]
-fn invocation_without_duration_applies_cancellation_to_initial_and_replacement_outputs() {
+fn cancellation_reaches_replacement_outputs() {
     for replace in [false, true] {
         let runtime = Runtime::new(1).unwrap();
         let (entered, writing) = mpsc::channel();

@@ -148,7 +148,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn duration_bounds_preserve_each_ceiling_and_error_precedence() {
+    fn duration_bounds_preserve_error_precedence() {
         let tick = Duration::from_nanos(1);
         for (attempt_timeout, cache_ttl, invalid_field) in [
             (Duration::ZERO, tick, Some("attempt_timeout")),

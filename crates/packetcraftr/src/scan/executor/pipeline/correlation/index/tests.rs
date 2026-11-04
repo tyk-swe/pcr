@@ -221,7 +221,7 @@ fn conservative(
 }
 
 #[test]
-fn actual_observation_comparisons_do_not_scan_unrelated_pending_ports() {
+fn correlation_skips_unrelated_pending_ports() {
     for count in [32, 128, 512] {
         let probes = (0..count)
             .map(|n| {
@@ -291,7 +291,7 @@ fn actual_observation_comparisons_do_not_scan_unrelated_pending_ports() {
 }
 
 #[test]
-fn direct_and_quoted_supported_families_match_the_conservative_oracle() {
+fn direct_and_quoted_replies_match_oracle() {
     let mut probes = Vec::new();
     for ipv6 in [false, true] {
         for endpoint in [
@@ -326,7 +326,7 @@ fn direct_and_quoted_supported_families_match_the_conservative_oracle() {
 }
 
 #[test]
-fn collisions_scopes_reuse_and_retirement_preserve_every_member() {
+fn index_lifecycle_preserves_all_members() {
     let p = probe(Endpoint::Udp { port: 1000 }, 1, false);
     let sent = request(&p);
     let response = reply(&p, &sent);
@@ -394,7 +394,7 @@ impl codec::Codec for ProxyCodec {
 }
 
 #[test]
-fn custom_matcher_defaults_to_scoped_conservative_lookup() {
+fn custom_matcher_uses_scoped_fallback() {
     let mut builder = packetcraftr_core::registry::Builder::default();
     builder.register_codec(ProxyCodec("tcp"), &[]).unwrap();
     builder.register_matcher("tcp", Arbitrary).unwrap();
@@ -456,7 +456,7 @@ fn materialized_sent(
 }
 
 #[test]
-fn indexed_correlation_preserves_generation_freshness_deadlines_interfaces_and_late_replies() {
+fn indexed_correlation_preserves_reply_eligibility() {
     let native = packetcraftr_netio::interface::Id {
         index: 1,
         name: "candidate0".to_owned(),
@@ -592,7 +592,7 @@ fn indexed_correlation_preserves_generation_freshness_deadlines_interfaces_and_l
 }
 
 #[test]
-fn ipv6_extension_ip_replies_and_truncated_or_bad_integrity_packets_use_the_same_oracle() {
+fn ipv6_and_malformed_packets_match_oracle() {
     let p = probe(Endpoint::Ip { protocol: 0 }, 1, true);
     let sent = request(&p);
     let mut response = response_base(&sent);
@@ -656,7 +656,7 @@ fn ipv6_extension_ip_replies_and_truncated_or_bad_integrity_packets_use_the_same
 }
 
 #[test]
-fn unknown_custom_decoded_identity_and_unrecognized_tunnels_use_conservative_fallback() {
+fn unknown_identity_and_tunnels_use_fallback() {
     let mut builder = packetcraftr_core::registry::Builder::default();
     builder.register_codec(ProxyCodec("ipv4"), &[]).unwrap();
     builder.register_matcher("ipv4", Arbitrary).unwrap();
@@ -687,7 +687,7 @@ fn unknown_custom_decoded_identity_and_unrecognized_tunnels_use_conservative_fal
 }
 
 #[test]
-fn encapsulated_udp_probe_preserves_inner_matching_and_outer_quoted_identity() {
+fn encapsulated_udp_matches_inner_and_outer_identity() {
     use packetcraftr_core::protocol::{link::Ethernet, tunnel::Vxlan};
     let mut p = probe(Endpoint::Udp { port: 4789 }, 7, false);
     let mut payload = Packet::default();
@@ -758,7 +758,7 @@ fn encapsulated_udp_probe_preserves_inner_matching_and_outer_quoted_identity() {
 }
 
 #[test]
-fn long_eviction_history_leaves_no_historical_keys_or_members() {
+fn eviction_removes_historical_keys_and_members() {
     let mut index = CandidateIndex::new(2, 2);
     for generation in 0..4096 {
         let p = probe(

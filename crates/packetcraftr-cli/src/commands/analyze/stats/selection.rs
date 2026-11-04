@@ -288,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn duration_ranking_uses_volume_and_stream_ties_before_top() {
+    fn duration_ranking_breaks_ties_before_truncation() {
         let mut report = report();
         report.conversations = vec![
             conversation(4, 10, 5, 100),
@@ -315,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn minimum_frames_filters_before_ranking_without_changing_overview_totals() {
+    fn filtering_preserves_overview_totals() {
         let mut report = report();
         report.frames = 50;
         report.protocol_count = 2;
@@ -391,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn minimum_frames_applies_to_ports_and_io_and_zero_keeps_rows() {
+    fn minimum_frames_filters_ports_and_io() {
         let mut report = report();
         report.ports = vec![PortStat {
             transport: StreamTransport::Tcp,
@@ -468,7 +468,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_selection_matches_full_stable_sort_for_all_tables() {
+    fn partial_selection_matches_stable_sort() {
         let mut seed = 42_u64;
         for size in [0, 1, 2, 19, 257] {
             let mut original = report();
@@ -552,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn small_top_uses_fewer_comparisons_than_full_sort() {
+    fn small_top_reduces_comparisons() {
         use std::cell::Cell;
         let mut seed = 23_u64;
         let original = (0..10_000)

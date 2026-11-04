@@ -52,7 +52,7 @@ fn delivery(
 }
 
 #[test]
-fn rejected_admission_preserves_previous_bytes_and_sources() {
+fn rejected_admission_preserves_bytes_and_sources() {
     for source_limit in [false, true] {
         for resume in [false, true] {
             let limits = Limits {
@@ -128,7 +128,7 @@ fn rejected_admission_preserves_previous_bytes_and_sources() {
 }
 
 #[test]
-fn framing_limit_error_keeps_received_bytes_for_finalization() {
+fn framing_limit_preserves_received_bytes() {
     let mut collector = Collector::new(
         Limits {
             max_buffer_bytes: 8,
@@ -168,7 +168,7 @@ fn framing_limit_error_keeps_received_bytes_for_finalization() {
 }
 
 #[test]
-fn provenance_allocation_error_keeps_received_bytes_for_finalization() {
+fn provenance_failure_preserves_received_bytes() {
     let source_charge = 256 + std::mem::size_of::<SourceFrame>();
     let tracker = Tracker::new(2048 + 512 + 3 * source_charge - 1, 32).unwrap();
     let data = delivery(&tracker, 1, &[0xc0, 0], 0);
@@ -206,7 +206,7 @@ fn provenance_allocation_error_keeps_received_bytes_for_finalization() {
     );
 }
 #[test]
-fn split_mqtt_and_coalesced_messages_keep_sources() {
+fn mqtt_framing_preserves_sources() {
     let wire = [0x30, 4, 0, 1, b'a', b'x'];
     for split in 1..wire.len() {
         let mut c = Collector::new(
@@ -268,7 +268,7 @@ fn gap_stops_direction_until_new_generation() {
 }
 
 #[test]
-fn every_tcp_protocol_accepts_split_and_coalesced_frames() {
+fn tcp_protocols_accept_split_and_coalesced_frames() {
     let manifest: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../../examples/captures/protocols.manifest.json"
     ))
@@ -359,7 +359,7 @@ fn every_tcp_protocol_accepts_split_and_coalesced_frames() {
 }
 
 #[test]
-fn declared_length_is_rejected_before_large_allocation() {
+fn oversized_length_rejected_before_allocation() {
     let mut framer = Framer::new(crate::codec::Framing::OpcuaTcp, "opcua_tcp");
     assert!(framer.progress(b"MSGF\xff\xff\xff\x7f", 1024).is_err());
     let mut framer = Framer::new(crate::codec::Framing::Resp, "resp");
@@ -405,7 +405,7 @@ fn port_overrides_drive_stream_selection() {
 }
 
 #[test]
-fn capture_pipeline_reassembles_and_attributes_messages() {
+fn capture_reassembles_and_attributes_messages() {
     let registry = crate::protocol::builtin::registry();
     let collector =
         Collector::new(Limits::default(), registry.clone(), [BuiltinProtocol::Mqtt]).unwrap();
@@ -481,7 +481,7 @@ fn deliver_on(
 }
 
 #[test]
-fn selected_source_port_is_not_hidden_by_an_unselected_destination() {
+fn unselected_destination_preserves_source_selection() {
     let mut collector = Collector::new(
         Limits::default(),
         crate::protocol::builtin::registry(),
@@ -506,7 +506,7 @@ fn selected_source_port_is_not_hidden_by_an_unselected_destination() {
 }
 
 #[test]
-fn mqtt5_stays_opaque_in_both_directions_until_a_new_generation() {
+fn mqtt5_stays_opaque_until_generation_changes() {
     let connect5 = b"\x10\x0d\0\x04MQTT\x05\x02\0\x3c\0\0\0";
     let publish5 = b"\x30\x05\0\x01a\0x";
     for split in 1..connect5.len() {
@@ -571,7 +571,7 @@ fn mqtt5_stays_opaque_in_both_directions_until_a_new_generation() {
 }
 
 #[test]
-fn events_before_the_first_delivery_disable_the_generation() {
+fn early_events_disable_generation() {
     for event in [
         application::Event::Gap {
             flow: flow(),
@@ -636,7 +636,7 @@ fn events_before_the_first_delivery_disable_the_generation() {
 }
 
 #[test]
-fn amqp_unsupported_version_keeps_both_directions_opaque() {
+fn unsupported_amqp_stays_opaque() {
     let mut collector = Collector::new(
         Limits::default(),
         crate::protocol::builtin::registry(),
@@ -678,7 +678,7 @@ fn amqp_unsupported_version_keeps_both_directions_opaque() {
 }
 
 #[test]
-fn capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
+fn capture_faults_disable_until_tuple_reuse() {
     use crate::{
         codec::Addresses,
         frame::{Frame, LinkType},
@@ -769,7 +769,7 @@ fn capture_stops_early_conflicts_and_gaps_until_tuple_reuse() {
 }
 
 #[test]
-fn server_first_payload_uses_the_handshake_server_port() {
+fn server_first_payload_uses_handshake_port() {
     use crate::{
         codec::Addresses,
         frame::{Frame, LinkType},
@@ -865,7 +865,7 @@ fn server_first_payload_uses_the_handshake_server_port() {
 }
 
 #[test]
-fn sip_keepalives_across_deliveries_do_not_disable_messages() {
+fn split_sip_keepalives_preserve_messages() {
     let message = b"OPTIONS sip:service SIP/2.0\r\nContent-Length: 0\r\n\r\n";
     let mut bytes = b"\r\n".to_vec();
     bytes.extend_from_slice(message);
@@ -936,7 +936,7 @@ fn sip_keepalives_across_deliveries_do_not_disable_messages() {
 }
 
 #[test]
-fn modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
+fn modbus_preserves_roles_and_ambiguous_pdus() {
     use crate::{
         codec::Addresses,
         frame::{Frame, LinkType},
@@ -1063,7 +1063,7 @@ fn modbus_uses_handshake_roles_and_preserves_ambiguous_pdus() {
 }
 
 #[test]
-fn many_coalesced_messages_preserve_the_layer_budget_and_stream() {
+fn coalesced_messages_preserve_budget_and_stream() {
     use crate::{
         codec::Addresses,
         frame::{Frame, LinkType},
@@ -1139,7 +1139,7 @@ fn many_coalesced_messages_preserve_the_layer_budget_and_stream() {
 }
 
 #[test]
-fn declared_buffer_limits_are_policy_errors_for_every_segmentation() {
+fn segmentation_preserves_buffer_policy_errors() {
     let mut mqtt = vec![0x30, 103, 0, 1, b'a'];
     mqtt.extend_from_slice(&[b'x'; 100]);
     let mut resp = b"$100\r\n".to_vec();
@@ -1209,7 +1209,7 @@ fn declared_buffer_limits_are_policy_errors_for_every_segmentation() {
 }
 
 #[test]
-fn receive_buffers_reuse_capacity_and_keep_partial_messages() {
+fn receive_buffers_reuse_capacity_without_loss() {
     let tracker = Tracker::new(1 << 20, 32).unwrap();
     let mut collector = Collector::new(
         Limits {
@@ -1284,7 +1284,7 @@ fn receive_buffers_reuse_capacity_and_keep_partial_messages() {
 }
 
 #[test]
-fn cached_capacity_is_reclaimed_for_other_directions() {
+fn directions_share_reclaimed_capacity() {
     let tracker = Tracker::new(1 << 20, 32).unwrap();
     let mut collector = Collector::new(
         Limits {

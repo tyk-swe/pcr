@@ -206,7 +206,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn inline_and_block_examples_survive_short_help() {
+    fn short_help_preserves_examples() {
         assert_eq!(
             short_examples("About.\n\nExample: packetcraftr packet build --help").as_deref(),
             Some("packetcraftr packet build --help")
@@ -218,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn rendered_read_help_groups_every_with_the_frame_selection_options() {
+    fn read_help_groups_frame_selection_options() {
         use clap::CommandFactory;
 
         let mut command = crate::app::cli::Cli::command();

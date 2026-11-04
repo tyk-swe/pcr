@@ -35,14 +35,14 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn a_live_deadline_is_not_expired_and_preparation_proceeds() {
+    fn live_deadline_allows_preparation() {
         let deadline = Deadline::new(Duration::from_secs(60));
         assert!(!expired(&deadline));
         assert!(ensure_preparation_deadline(&deadline).is_ok());
     }
 
     #[test]
-    fn spent_deadlines_are_expired_and_stop_preparation() {
+    fn expired_deadline_stops_preparation() {
         for deadline in [Deadline::new(Duration::ZERO), Deadline::immediate(None)] {
             assert!(expired(&deadline));
             assert!(matches!(

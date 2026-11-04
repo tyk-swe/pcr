@@ -250,7 +250,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bounded_hex_preserves_syntax_and_classifies_size_errors() {
+    fn bounded_hex_classifies_syntax_and_size_errors() {
         assert_eq!(
             hex_frame_bytes(b" \t0X00:ab-CD\n", 3).unwrap(),
             [0, 0xab, 0xcd]
@@ -277,7 +277,7 @@ mod tests {
     }
 
     #[test]
-    fn bounded_hex_rejects_oversized_text_and_extra_nibbles() {
+    fn bounded_hex_rejects_oversized_input() {
         assert!(hex_frame_bytes(&vec![b' '; hex_text_limit(1) + 1], 1).is_err());
         let error = hex_frame_bytes(b"aabbc", 2).unwrap_err();
         assert_eq!(error.classification.kind, Kind::Policy);

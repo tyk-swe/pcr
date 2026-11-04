@@ -44,7 +44,7 @@ class CheckLayersTests(unittest.TestCase):
         })
         self.assertEqual(problems, [])
 
-    def test_upward_dependencies_fail_in_plain_and_grouped_paths(self):
+    def test_upward_dependencies_are_rejected(self):
         problems = self.check({
             "low.rs": "use crate::high::Thing;",
             "engine/stats.rs": "use crate::{engine::Run, high::Other};",
@@ -54,7 +54,7 @@ class CheckLayersTests(unittest.TestCase):
         self.assertTrue(any("engine::stats (layer 1) depends on engine::Run (layer 3)" in p for p in problems))
         self.assertTrue(any("engine::stats (layer 1) depends on high::Other (layer 2)" in p for p in problems))
 
-    def test_relative_super_paths_resolve_against_the_owning_module(self):
+    def test_super_paths_resolve_from_owner(self):
         problems = self.check({
             "low/child.rs": "use super::super::high::Thing;",
             "high/child.rs": "use super::super::low::Thing;",
@@ -62,7 +62,7 @@ class CheckLayersTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("low::child (layer 1) depends on high::Thing (layer 2)", problems[0])
 
-    def test_grouped_self_and_glob_imports_keep_their_prefix(self):
+    def test_grouped_imports_preserve_prefix(self):
         problems = self.check({
             "low.rs": "use crate::high::{self as workflows};",
             "engine/stats.rs": "use crate::high::*;",
@@ -81,7 +81,7 @@ class CheckLayersTests(unittest.TestCase):
         })
         self.assertEqual(problems, [])
 
-    def test_inline_modules_resolve_relative_to_their_own_scope(self):
+    def test_inline_modules_resolve_own_scope(self):
         problems = self.check({
             "engine/stats.rs": "mod inner { use super::super::high::Thing; }",
         })
@@ -91,7 +91,7 @@ class CheckLayersTests(unittest.TestCase):
             problems[0],
         )
 
-    def test_inline_modules_keep_their_own_layer_for_comparison(self):
+    def test_inline_modules_use_own_layer(self):
         problems = self.check({
             "engine.rs": "mod stats { use crate::high::Thing; }",
         })
@@ -100,7 +100,7 @@ class CheckLayersTests(unittest.TestCase):
             "engine::stats (layer 1) depends on high::Thing (layer 2)", problems[0]
         )
 
-    def test_cfg_test_fields_do_not_swallow_following_production_code(self):
+    def test_test_fields_preserve_following_code(self):
         problems = self.check({
             "low.rs": (
                 "struct Inner { pending: u32, #[cfg(test)] refuse: bool, }\n"
@@ -112,7 +112,7 @@ class CheckLayersTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("low (layer 1) depends on high::Thing (layer 2)", problems[0])
 
-    def test_cfg_test_blocks_and_macros_do_not_swallow_following_code(self):
+    def test_test_blocks_preserve_following_code(self):
         problems = self.check({
             "low.rs": (
                 "pub fn f() { #[cfg(test)] { check(); } let _ = crate::high::Thing; }\n"
@@ -123,7 +123,7 @@ class CheckLayersTests(unittest.TestCase):
         self.assertEqual(len(problems), 2)
         self.assertTrue(all("high::Thing" in p for p in problems))
 
-    def test_raw_byte_strings_do_not_hide_following_code(self):
+    def test_raw_strings_preserve_following_code(self):
         problems = self.check({
             "low.rs": (
                 'const S: &[u8] = br#"a" /*"#;\n'
@@ -133,7 +133,7 @@ class CheckLayersTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("high::Thing", problems[0])
 
-    def test_test_code_comments_and_strings_do_not_create_dependencies(self):
+    def test_ignores_nonproduction_dependencies(self):
         problems = self.check({
             "low.rs": (
                 "// use crate::high::Thing;\n"
@@ -201,7 +201,7 @@ class CheckLayersTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("stale allowlist entry low -> high::Special", problems[0])
 
-    def test_module_missing_from_the_layer_table_fails(self):
+    def test_unmapped_module_fails(self):
         problems = self.check({"mystery.rs": "pub struct Thing;"})
         self.assertEqual(len(problems), 1)
         self.assertIn("module mystery is not in the layer table", problems[0])

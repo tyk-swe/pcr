@@ -26,7 +26,7 @@ fn capture(format: Format, frames: &[Frame]) -> Vec<u8> {
 }
 
 #[test]
-fn empty_captures_read_back_with_zero_frames_in_both_formats() {
+fn empty_captures_yield_zero_frames() {
     for format in [Format::Pcap, Format::PcapNg] {
         let mut reader =
             Reader::with_limits(Cursor::new(capture(format, &[])), Default::default()).unwrap();
@@ -39,7 +39,7 @@ fn empty_captures_read_back_with_zero_frames_in_both_formats() {
 }
 
 #[test]
-fn truncated_packet_data_errors_after_complete_frames_without_yielding_a_partial_frame() {
+fn truncation_errors_after_complete_frames() {
     let complete = frame(1_700_001_000, 123_456_789, 0x11, 32);
     let cut_short = frame(1_700_001_001, 987_654_321, 0x22, 32);
     let mut bytes = capture(Format::Pcap, &[complete.clone(), cut_short]);
@@ -52,7 +52,7 @@ fn truncated_packet_data_errors_after_complete_frames_without_yielding_a_partial
 }
 
 #[test]
-fn corrupt_inputs_are_rejected_instead_of_yielding_frames() {
+fn corrupt_inputs_yield_no_frames() {
     assert!(matches!(
         Reader::with_limits(Cursor::new(Vec::new()), Default::default()),
         Err(Error::EmptyInput)
@@ -84,7 +84,7 @@ fn corrupt_inputs_are_rejected_instead_of_yielding_frames() {
 }
 
 #[test]
-fn reader_limits_accept_input_at_the_limit_and_reject_input_past_it() {
+fn reader_limits_enforce_exact_boundaries() {
     let written = frame(1_700_001_200, 123_456_789, 0x44, 48);
     let bytes = capture(Format::Pcap, std::slice::from_ref(&written));
     let limit = written.bytes().len();
@@ -123,7 +123,7 @@ fn reader_limits_accept_input_at_the_limit_and_reject_input_past_it() {
 }
 
 #[test]
-fn buffered_readback_preserves_frames_errors_rewind_and_cancellation_with_fewer_reads() {
+fn buffered_readback_preserves_semantics() {
     use std::cell::Cell;
     use std::io::{BufReader, Read, Seek, SeekFrom};
     use std::rc::Rc;

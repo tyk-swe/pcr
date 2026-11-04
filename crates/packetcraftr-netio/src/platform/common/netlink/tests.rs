@@ -21,7 +21,7 @@ fn request() -> NetlinkRequest {
 }
 
 #[test]
-fn queued_and_executing_requests_prevent_idle_retirement() {
+fn pending_requests_prevent_retirement() {
     let inbox = Inbox::new();
     let deadline = Deadline::new(Duration::from_secs(5));
     assert!(
@@ -51,7 +51,7 @@ fn queued_and_executing_requests_prevent_idle_retirement() {
 }
 
 #[test]
-fn request_arrival_and_retirement_have_no_unreachable_accepted_request() {
+fn retirement_preserves_accepted_requests() {
     for _ in 0..128 {
         let inbox = Arc::new(Inbox::new());
         let start = Arc::new(Barrier::new(2));
@@ -83,7 +83,7 @@ fn request_arrival_and_retirement_have_no_unreachable_accepted_request() {
 }
 
 #[test]
-fn an_empty_inbox_retires_and_an_abandoned_initializer_stops() {
+fn idle_and_abandoned_initializers_stop() {
     let idle = Inbox::new();
     assert!(idle.next_with_idle(Duration::ZERO).is_none());
     assert!(!idle.serving());
@@ -131,7 +131,7 @@ fn fake_worker(
 }
 
 #[test]
-fn sequential_historical_identities_recover_resident_capacity_and_root_headroom() {
+fn retired_identities_release_capacity_and_headroom() {
     let pool = Arc::new(crate::workers::Pool::new(8));
     let mut workers = super::Workers::new();
     let directory = std::env::temp_dir().join(format!(
@@ -195,7 +195,7 @@ fn sequential_historical_identities_recover_resident_capacity_and_root_headroom(
 }
 
 #[test]
-fn checked_out_registry_wait_observes_inherited_elapsed_control() {
+fn registry_wait_respects_parent_elapsed_limit() {
     use std::sync::atomic::{AtomicU64, Ordering};
     let held_registry = super::shared_workers(
         &Deadline::new(Duration::from_secs(5)),
@@ -234,7 +234,7 @@ fn checked_out_registry_wait_observes_inherited_elapsed_control() {
 }
 
 #[test]
-fn full_inbox_wait_observes_inherited_elapsed_control_without_accepting_an_expired_request() {
+fn full_inbox_rejects_expired_requests() {
     use std::sync::atomic::{AtomicU64, Ordering};
     let inbox = Arc::new(Inbox::new());
     for _ in 0..super::NETLINK_QUEUE_DEPTH {
@@ -303,7 +303,7 @@ fn native_operation_wait_checks_parent_cancellation() {
 }
 
 #[test]
-fn native_operation_wait_retains_inherited_elapsed_control_as_well_as_wall_timeout() {
+fn native_wait_respects_parent_and_local_limits() {
     let advanced = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let time = Arc::clone(&advanced);
     let origin = Instant::now();
@@ -342,7 +342,7 @@ fn native_operation_wait_retains_inherited_elapsed_control_as_well_as_wall_timeo
 }
 
 #[test]
-fn ready_native_operation_cannot_report_success_after_it_interrupts_its_parent() {
+fn parent_interruption_prevents_native_success() {
     use std::sync::atomic::{AtomicU64, Ordering};
     for elapsed in [false, true] {
         let advanced = Arc::new(AtomicU64::new(0));

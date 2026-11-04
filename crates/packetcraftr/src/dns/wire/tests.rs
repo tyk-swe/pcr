@@ -70,7 +70,7 @@ fn decode(bytes: &[u8]) -> Result<crate::dns::ValidatedResponse, Error> {
 }
 
 #[test]
-fn encode_query_builds_the_exact_wire_question() {
+fn query_encodes_exact_question() {
     let bytes = encode_query("example.test", QueryType::A, ID, true, None).unwrap();
     let mut expected = vec![0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0, 7];
     expected.extend_from_slice(b"example");
@@ -85,7 +85,7 @@ fn encode_query_builds_the_exact_wire_question() {
 }
 
 #[test]
-fn encode_query_root_name_and_edns_additional() {
+fn query_encodes_root_and_edns() {
     let root = encode_query(".", QueryType::A, ID, false, None).unwrap();
     assert_eq!(root.len(), 17);
     assert_eq!(root[12], 0);
@@ -118,7 +118,7 @@ fn encode_query_root_name_and_edns_additional() {
 }
 
 #[test]
-fn canonical_names_normalize_and_reject_bad_labels() {
+fn canonical_names_reject_invalid_labels() {
     assert_eq!(
         canonical_query_name("Example.TEST").unwrap(),
         "example.test."
@@ -159,7 +159,7 @@ fn canonical_names_normalize_and_reject_bad_labels() {
 }
 
 #[test]
-fn decode_response_accepts_a_relevant_answer_and_metadata() {
+fn response_decodes_answer_and_metadata() {
     let bytes = message(|dns| {
         dns.authenticated_data = true;
         dns.checking_disabled = true;
@@ -185,7 +185,7 @@ fn decode_response_accepts_a_relevant_answer_and_metadata() {
 }
 
 #[test]
-fn decode_response_rejects_header_and_question_mismatches() {
+fn response_rejects_header_and_question_mismatches() {
     let mut not_response = valid_response();
     mutate_flags(&mut not_response, |flags| flags & !0x8000);
     assert_eq!(decode(&not_response), Err(Error::NotResponse));
@@ -266,7 +266,7 @@ fn decode_response_bounds_truncation_and_rcode() {
 }
 
 #[test]
-fn decode_response_validates_edns_placement_and_extended_rcode() {
+fn response_validates_edns_and_extended_rcode() {
     let extended = message(|dns| dns.additionals.push(opt(1, 0)));
     let response = decode(&extended).unwrap();
     assert_eq!(response.metadata.response_code, 16);
@@ -296,7 +296,7 @@ fn decode_response_validates_edns_placement_and_extended_rcode() {
 }
 
 #[test]
-fn decode_tcp_frame_checks_the_length_prefix() {
+fn tcp_frame_validates_length_prefix() {
     let payload = valid_response();
     let mut frame = u16::try_from(payload.len()).unwrap().to_be_bytes().to_vec();
     frame.extend_from_slice(&payload);
@@ -404,7 +404,7 @@ fn only_correlation_mismatches_are_unrelated() {
 }
 
 #[test]
-fn decode_response_reports_clear_flags_as_false() {
+fn clear_response_flags_decode_false() {
     let bytes = message(|dns| {
         dns.authoritative_answer = false;
         dns.recursion_desired = false;
@@ -420,7 +420,7 @@ fn decode_response_reports_clear_flags_as_false() {
 }
 
 #[test]
-fn decode_accepts_messages_exactly_at_the_size_limit() {
+fn decoding_accepts_exact_size_limit() {
     let payload = valid_response();
     let limits = MessageLimits {
         max_message_bytes: payload.len(),
@@ -451,7 +451,7 @@ fn decode_accepts_messages_exactly_at_the_size_limit() {
 }
 
 #[test]
-fn canonical_name_at_the_exact_wire_limit_is_accepted() {
+fn canonical_name_accepts_exact_wire_limit() {
     let at_limit = [
         "a".repeat(63),
         "b".repeat(63),
@@ -466,7 +466,7 @@ fn canonical_name_at_the_exact_wire_limit_is_accepted() {
 }
 
 #[test]
-fn classifications_delegate_sources_and_separate_query_faults() {
+fn classifications_preserve_sources_and_query_faults() {
     use packetcraftr_core::error::Classified;
 
     let encode_source = packetcraftr_core::codec::Error::LengthOverflow {

@@ -20,7 +20,7 @@ def identity():
 
 
 class BuildManifestTests(unittest.TestCase):
-    def test_version_and_compiler_payload_cannot_be_blank(self):
+    def test_version_and_compiler_require_content(self):
         for field, value in (('version', 'packetcraftr '), ('rustc', 'rustc ')):
             document = identity()
             document[field] = value
@@ -40,7 +40,7 @@ class BuildManifestTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             manifest.validate_identity(document)
 
-    def test_binary_name_is_not_an_archive_path(self):
+    def test_binary_name_rejects_paths(self):
         for name in ['../packetcraftr', 'a/b', r'a\b', 'C:binary', '..', 'bad\nname',
                      'bad*name', 'bad?name', 'bad"name', 'bad<name', 'bad>name',
                      'bad|name', 'name.', 'name ', 'CON.exe', 'lPt1', 'NUL', 'PRN  .x']:
@@ -49,7 +49,7 @@ class BuildManifestTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 manifest.validate_identity(document)
 
-    def test_compiler_identity_preserves_multiline_but_rejects_controls(self):
+    def test_compiler_accepts_multiline_without_controls(self):
         document = identity()
         document['rustc'] = 'rustc 1.98.1\r\nbinary:\trustc\nhost: test'
         manifest.validate_identity(document)
@@ -79,13 +79,13 @@ class BuildManifestTests(unittest.TestCase):
                 manifest.main(['--binary', 'missing'])
             digest.assert_not_called()
 
-    def test_invalid_release_inputs_do_not_execute_binary(self):
+    def test_invalid_release_inputs_prevent_execution(self):
         with patch.object(manifest.subprocess, 'check_output') as command:
             with self.assertRaises(SystemExit):
                 manifest.main(['--binary', 'missing', '--verify', 'metadata', '--commit', 'short'])
             command.assert_not_called()
 
-    def test_binary_mutation_during_version_query_is_rejected(self):
+    def test_version_query_rejects_binary_mutation(self):
         with patch.object(manifest.subprocess, 'check_output', return_value='packetcraftr 1\n'):
             with patch.object(manifest, 'digest', return_value='changed'):
                 with self.assertRaisesRegex(ValueError, 'changed'):

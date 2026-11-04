@@ -106,7 +106,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn published_security_fields_and_nulls_are_frozen() {
+    fn published_fields_preserve_nulls() {
         let mut report = library::Report::new("hunt");
         let mut finding = library::Finding::new(
             "ioc.match",

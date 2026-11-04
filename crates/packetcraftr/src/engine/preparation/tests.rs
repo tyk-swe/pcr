@@ -189,7 +189,7 @@ fn packet(bytes: usize) -> Packet {
 }
 
 #[test]
-fn streaming_uses_one_session_without_bypassing_policy_or_cancellation() {
+fn streaming_session_respects_policy_and_cancellation() {
     let (client, _, _, tx) = fixture();
     let cancellation = Cancellation::default();
     let client = client.with_cancellation(cancellation.clone());
@@ -219,7 +219,7 @@ fn streaming_uses_one_session_without_bypassing_policy_or_cancellation() {
 }
 
 #[test]
-fn interrupted_neighbor_io_preserves_sent_request_statistics() {
+fn interrupted_neighbor_preserves_request_statistics() {
     let (client, routes, _, _) = fixture();
     let operation = Execution::new(&client, Duration::from_secs(10));
     let deadline = operation.deadline(&client, Duration::from_secs(10));
@@ -278,7 +278,7 @@ fn interrupted_neighbor_io_preserves_sent_request_statistics() {
 }
 
 #[test]
-fn multipath_source_change_is_rejected_before_capture_or_transmission() {
+fn multipath_source_change_prevents_io() {
     let (client, routes, _, tx) = fixture();
     let operation = Execution::new(&client, Duration::from_secs(10));
     let options = options();
@@ -306,7 +306,7 @@ fn multipath_source_change_is_rejected_before_capture_or_transmission() {
 }
 
 #[test]
-fn route_name_accounting_uses_owned_capacities_and_counts_scoped_names() {
+fn route_names_charge_owned_capacity() {
     let (client, _, interfaces, _) = fixture();
     let operation = Execution::new(&client, Duration::from_secs(10));
     let deadline = operation.deadline(&client, Duration::from_secs(10));
@@ -341,7 +341,7 @@ fn route_name_accounting_uses_owned_capacities_and_counts_scoped_names() {
 }
 
 #[test]
-fn stable_preview_avoids_second_build_but_refreshes_route_and_preserves_exact_bytes() {
+fn preview_reuses_bytes_with_fresh_route() {
     let (client, routes, _, tx) = fixture();
     let operation = Execution::new(&client, Duration::from_secs(10));
     let deadline = operation.deadline(&client, Duration::from_secs(10));
@@ -393,7 +393,7 @@ fn stable_preview_avoids_second_build_but_refreshes_route_and_preserves_exact_by
 }
 
 #[test]
-fn bounded_windows_measure_actual_builds_and_fresh_route_lookups() {
+fn windows_count_builds_and_route_lookups() {
     for count in [4, 32] {
         for retain in [false, true] {
             let (client, routes, _, _) = fixture();
@@ -450,7 +450,7 @@ fn bounded_windows_measure_actual_builds_and_fresh_route_lookups() {
 }
 
 #[test]
-fn changed_final_declaration_is_authorized_before_fresh_provider_lookup() {
+fn changed_declaration_authorized_before_lookup() {
     let (client, routes, _, tx) = fixture();
     let operation = Execution::new(&client, Duration::from_secs(10));
     let deadline = operation.deadline(&client, Duration::from_secs(10));
@@ -479,7 +479,7 @@ fn changed_final_declaration_is_authorized_before_fresh_provider_lookup() {
 }
 
 #[test]
-fn borrowed_materialization_keeps_one_cumulative_admission_budget() {
+fn borrowed_materialization_shares_admission_budget() {
     let (mut client, routes, _, tx) = fixture();
     Arc::make_mut(&mut client.policy).max_bytes_per_operation = 200;
     let operation = Execution::new(&client, Duration::from_secs(10));
@@ -542,7 +542,7 @@ fn borrowed_materialization_keeps_one_cumulative_admission_budget() {
 }
 
 #[test]
-fn changed_source_rebuilds_and_changed_mtu_fails_before_discovery() {
+fn source_and_mtu_changes_revalidate_preparation() {
     for (mode, shrink_mtu) in [
         (Mode::Layer3, false),
         (Mode::Layer3, true),
@@ -592,7 +592,7 @@ fn changed_source_rebuilds_and_changed_mtu_fails_before_discovery() {
 }
 
 #[test]
-fn interface_selectors_are_resolved_again_and_capture_identity_change_is_refused() {
+fn interface_refresh_rejects_changed_capture_identity() {
     let (client, routes, interfaces, tx) = fixture();
     let operation = Execution::new(&client, Duration::from_secs(10));
     let deadline = operation.deadline(&client, Duration::from_secs(10));
@@ -625,7 +625,7 @@ fn interface_selectors_are_resolved_again_and_capture_identity_change_is_refused
 }
 
 #[test]
-fn cancellation_and_other_admission_costs_cannot_enter_reuse() {
+fn reuse_rejects_cancellation_and_mismatched_costs() {
     for foreign_cost in [false, true] {
         let (client, routes, _, _) = fixture();
         let signal = Cancellation::default();
@@ -668,7 +668,7 @@ fn cancellation_and_other_admission_costs_cannot_enter_reuse() {
 }
 
 #[test]
-fn changed_wire_length_and_cumulative_budget_are_refused_before_discovery() {
+fn wire_and_budget_changes_rejected_before_discovery() {
     for mode in [Mode::Layer2, Mode::Layer3] {
         let (mut client, routes, _, tx) = fixture();
         Arc::make_mut(&mut client.policy).max_bytes_per_operation = 150;

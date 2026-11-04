@@ -265,7 +265,7 @@ mod tests {
     ];
 
     #[test]
-    fn fields_serialize_identically_to_the_eager_map() {
+    fn serialization_matches_eager_map() {
         let dns = Dns::from_wire_with_limits(Bytes::from_static(WIRE), Limits::default()).unwrap();
         let map = Fields(dns.clone()).to_map();
         assert!(!map.is_empty());

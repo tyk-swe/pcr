@@ -368,7 +368,7 @@ mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
-    fn threshold_validation_reports_each_invalid_field_and_accepts_boundaries() {
+    fn threshold_validation_accepts_exact_boundaries() {
         for (options, field) in [
             (
                 DnsOptions {
@@ -532,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn controlled_finalization_preserves_events_summary_and_completeness() {
+    fn controlled_finalization_preserves_evidence() {
         let run = analysis::Summary::default();
         let (expected_events, expected_report) = collector().finish(&run).unwrap();
         let mut events = Vec::new();
@@ -554,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn controlled_finalization_stops_on_sink_error_expiry_and_cancellation() {
+    fn finalization_stops_on_errors_and_interrupts() {
         let run = analysis::Summary::default();
         let mut delivered = 0;
         let error = collector()
@@ -591,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn directly_constructed_hunt_documents_are_validated_and_normalized() {
+    fn constructed_hunts_validate_and_normalize() {
         let document = |id: &str, value: &str| Document {
             schema: SCHEMA.into(),
             indicators: vec![Indicator {
@@ -630,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn nanosecond_beacon_intervals_retain_precision_at_modern_epochs() {
+    fn beacon_intervals_preserve_nanosecond_precision() {
         let options = BeaconOptions {
             min_attempts: 3,
             min_interval_seconds: 1e-10,
@@ -718,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn dns_checks_inner_labels_and_groups_by_following_domain_with_existing_budget() {
+    fn dns_groups_inner_labels_within_budget() {
         let options = DnsOptions {
             min_label_length: 4,
             min_entropy: 1.0,

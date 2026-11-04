@@ -202,7 +202,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn error_handling_context_and_secondary_failure_preserve_primary_details() {
+    fn secondary_failure_preserves_primary_details() {
         let classification = Classification::new(
             packetcraftr_core::error::Code::PacketTest,
             Kind::Packet,

@@ -486,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dns_payload_to_the_dns_port_materializes_as_dns_without_a_profile() {
+    fn dns_port_selects_dns_payload_without_profile() {
         assert_eq!(
             payload_protocol(&udp_probe(crate::dns::DEFAULT_SERVER_PORT)),
             Some(BuiltinProtocol::Dns)
@@ -494,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dns_payload_to_another_port_stays_raw() {
+    fn other_ports_keep_dns_payload_raw() {
         assert_eq!(
             payload_protocol(&udp_probe(9_999)),
             Some(BuiltinProtocol::Raw)

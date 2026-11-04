@@ -70,7 +70,7 @@ fn capture_frames(path: &Path) -> Vec<Vec<u8>> {
 }
 
 #[test]
-fn help_exits_zero_and_names_the_tool() {
+fn help_succeeds_with_tool_name() {
     let args = ["--help"];
     let output = run(&args);
     let text = assert_success(&output, &args);
@@ -147,7 +147,7 @@ fn invalid_output_format_is_rejected() {
 }
 
 #[test]
-fn packet_build_raw_exits_zero_with_built_bytes() {
+fn raw_build_outputs_packet_bytes() {
     let args = ["packet", "build", "--packet", "raw(text=hello)"];
     let output = run(&args);
     let text = assert_success(&output, &args);
@@ -159,7 +159,7 @@ fn packet_build_raw_exits_zero_with_built_bytes() {
 }
 
 #[test]
-fn files_read_dns_capture_with_dissect_exits_zero() {
+fn dns_capture_dissects_successfully() {
     let capture = capture_path("dns-response.pcap");
     let capture = capture.to_string_lossy().into_owned();
     let args = ["files", "read", capture.as_str(), "--dissect"];
@@ -172,7 +172,7 @@ fn files_read_dns_capture_with_dissect_exits_zero() {
 }
 
 #[test]
-fn analyze_dns_on_dns_capture_exits_zero() {
+fn dns_capture_analysis_succeeds() {
     let capture = capture_path("dns-response.pcap");
     let capture = capture.to_string_lossy().into_owned();
     let args = ["analyze", "dns", capture.as_str()];
@@ -185,7 +185,7 @@ fn analyze_dns_on_dns_capture_exits_zero() {
 }
 
 #[test]
-fn files_read_mqtt_capture_as_json_exits_zero_with_json_envelope() {
+fn mqtt_capture_outputs_json_envelope() {
     let capture = capture_path("protocol-mqtt.pcap");
     let capture = capture.to_string_lossy().into_owned();
     let args = [
@@ -442,7 +442,7 @@ fn files_merge_preserves_order_and_provenance() {
 }
 
 #[test]
-fn files_merge_rejects_clock_regression_without_publishing() {
+fn merge_rejects_clock_regression_before_publication() {
     use packetcraftr_core::capture_file::Format;
 
     for (times, window) in [(vec![2, 1], "0"), (vec![2, 3, 1], "2")] {
@@ -523,7 +523,7 @@ fn files_export_honors_capture_limits() {
 }
 
 #[test]
-fn verify_forwarding_applies_capture_limits_to_both_inputs() {
+fn forwarding_limits_apply_to_both_inputs() {
     let ingress = capture_path("dns-response.pcap");
     let egress = capture_path("http-stream.pcap");
     let ingress_size = std::fs::metadata(&ingress).unwrap().len();
@@ -570,7 +570,7 @@ fn analyze_http2_json(capture_name: &str) -> serde_json::Value {
 }
 
 #[test]
-fn analyze_http2_multiplexed_capture_reports_streams_and_push() {
+fn http2_analysis_reports_streams_and_push() {
     let json = analyze_http2_json("http2-multiplexed.pcapng");
     let result = &json["result"];
     let connections = result["connections"].as_array().unwrap();
@@ -614,7 +614,7 @@ fn analyze_http2_multiplexed_capture_reports_streams_and_push() {
 }
 
 #[test]
-fn analyze_http2_upgrade_capture_reports_h2c_startup() {
+fn http2_analysis_reports_h2c_startup() {
     let json = analyze_http2_json("http2-upgrade.pcapng");
     let result = &json["result"];
     let connections = result["connections"].as_array().unwrap();
@@ -644,7 +644,7 @@ fn analyze_http2_upgrade_capture_reports_h2c_startup() {
 }
 
 #[test]
-fn analyze_scan_diff_reports_changes_and_input_provenance() {
+fn scan_diff_reports_changes_and_provenance() {
     use serde_json::json;
     use sha2::{Digest, Sha256};
 
@@ -725,7 +725,7 @@ fn analyze_scan_diff_reports_changes_and_input_provenance() {
 }
 
 #[test]
-fn analyze_scan_diff_rejects_invalid_scan_input() {
+fn scan_diff_rejects_invalid_input() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("invalid.json");
     std::fs::write(&path, br#"{"schema":"packetcraftr.output/v19","command":"scan","mode":"aggregate","status":"failure"}"#).unwrap();
@@ -811,7 +811,7 @@ mod differential {
     }
 
     #[test]
-    fn differential_join_preserves_answers_when_merging_another_log() {
+    fn differential_join_preserves_existing_answers() {
         let first = join(&campaign(), &reception(u32::MAX));
         let report = result(&first);
         assert_eq!(report["result"]["rows"][0]["verdict"], "flaky");
@@ -834,7 +834,7 @@ mod differential {
     }
 
     #[test]
-    fn differential_join_rejects_an_attempt_that_would_alias_a_reception() {
+    fn differential_join_rejects_reception_aliasing() {
         let mut value: Value = serde_json::from_slice(&campaign()).unwrap();
         value["result"]["attempts"][0]["attempt_seq"] = json!(u64::from(u32::MAX) + 1);
         let output = join(&serde_json::to_vec(&value).unwrap(), &reception(u32::MAX));
@@ -842,7 +842,7 @@ mod differential {
     }
 
     #[test]
-    fn differential_join_requires_a_current_successful_campaign_and_source_identity() {
+    fn differential_join_validates_campaign_and_source() {
         let original: Value = serde_json::from_slice(&campaign()).unwrap();
         for (field, replacement) in [
             (
@@ -887,7 +887,7 @@ mod differential {
     }
 
     #[test]
-    fn differential_join_bounds_both_files_before_parsing() {
+    fn differential_join_bounds_inputs_before_parsing() {
         let mut oversized = campaign();
         oversized.resize(16 * 1024 * 1024 + 1, b' ');
         for output in [join(&oversized, b""), join(&campaign(), &oversized)] {
@@ -966,7 +966,7 @@ mod stalled_inputs {
     }
 
     #[test]
-    fn capture_stdin_without_bytes_honors_the_deadline() {
+    fn empty_capture_stdin_reaches_deadline() {
         let args = [
             "--output",
             "json",
@@ -983,7 +983,7 @@ mod stalled_inputs {
     }
 
     #[test]
-    fn document_stdin_without_bytes_honors_the_deadline() {
+    fn empty_document_stdin_reaches_deadline() {
         let capture = super::capture_path("dns-response.pcap");
         let capture = capture.to_str().unwrap();
         let args = [
@@ -1004,7 +1004,7 @@ mod stalled_inputs {
     }
 
     #[test]
-    fn partial_capture_header_then_stall_honors_the_deadline() {
+    fn partial_capture_header_reaches_deadline() {
         let args = [
             "--output",
             "json",
@@ -1025,7 +1025,7 @@ mod stalled_inputs {
     }
 
     #[test]
-    fn record_stall_after_a_complete_header_honors_the_deadline() {
+    fn stalled_capture_record_reaches_deadline() {
         let args = [
             "--output",
             "json",
@@ -1105,7 +1105,7 @@ mod stalled_inputs {
 
     #[test]
     #[cfg(target_os = "linux")]
-    fn differential_join_cancels_while_either_input_is_stalled() {
+    fn differential_join_cancels_stalled_inputs() {
         let directory = tempfile::tempdir().unwrap();
         let campaign = directory.path().join("campaign.json");
         let log = directory.path().join("receptions.jsonl");

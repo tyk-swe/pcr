@@ -44,7 +44,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn numeric_link_types_use_unsigned_decimal_syntax() {
+    fn numeric_link_types_require_unsigned_decimal() {
         for invalid in ["+1", "-1", "0x1", "", "4294967296"] {
             assert!(parse(invalid).is_err(), "{invalid:?}");
         }

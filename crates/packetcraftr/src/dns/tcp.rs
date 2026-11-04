@@ -591,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn buffered_query_flushes_the_complete_request_before_reading() {
+    fn buffered_query_flushes_before_reading() {
         for flush_errors in [
             VecDeque::new(),
             VecDeque::from([
@@ -612,7 +612,7 @@ mod tests {
     }
 
     #[test]
-    fn permanent_flush_failure_retains_written_bytes_without_reading() {
+    fn flush_failure_preserves_written_bytes() {
         let (result, reads) = buffered_query(VecDeque::from([io::ErrorKind::BrokenPipe]), None);
         let Error::Write {
             written,
@@ -629,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    fn retrying_flush_observes_cancellation_without_reading() {
+    fn cancelled_flush_prevents_reading() {
         let cancellation = Cancellation::default();
         let (result, reads) = buffered_query(
             VecDeque::from([io::ErrorKind::Interrupted]),
@@ -647,7 +647,7 @@ mod tests {
     }
 
     #[test]
-    fn retrying_flush_stops_at_the_write_deadline() {
+    fn flush_retries_stop_at_deadline() {
         let reads = Arc::new(AtomicUsize::new(0));
         let mut stream = BufferedStream {
             pending: Vec::new(),

@@ -42,7 +42,7 @@ fn fingerprint(cases: &[Case]) -> Vec<(u64, u64, crate::fuzz::Mutation, Vec<crat
 }
 
 #[test]
-fn prepare_emits_the_requested_number_of_reproducible_cases() {
+fn preparation_reproduces_requested_case_count() {
     let requested = 5;
     let request = Request {
         seed: 0x5eed,

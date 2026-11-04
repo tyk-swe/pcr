@@ -222,7 +222,7 @@ mod tests {
     use crate::policy::{Error as PolicyError, Operation, Policy};
 
     #[test]
-    fn batch_aggregation_sums_tcp_socket_limits_for_policy_authorization() {
+    fn batch_policy_sums_tcp_socket_limits() {
         let udp = WireLimits::new(1, 10);
         let tcp = SocketLimits::new(2, 3, 40);
         let batched = batch_limits(

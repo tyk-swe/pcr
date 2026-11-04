@@ -282,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn join_only_answers_on_full_identity_match() {
+    fn join_requires_full_identity_match() {
         let aggregate = Aggregate {
             valid: false,
             provisional: true,
@@ -320,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn spoofed_join_requires_the_spoofed_source_tuple() {
+    fn spoofed_join_requires_source_tuple() {
         let spoofed = std::net::Ipv4Addr::new(192, 0, 2, 99);
         let aggregate = Aggregate {
             valid: false,

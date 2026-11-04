@@ -24,7 +24,7 @@ impl<F: FnMut(usize) -> Result<bool, BoundaryError> + Send + 'static> Sink<usize
 }
 
 #[test]
-fn cooperative_publication_preserves_ack_and_has_no_worker_handoffs() {
+fn cooperative_publication_acks_without_handoff() {
     let runtime = Runtime::new(0).unwrap();
     let count = Arc::new(AtomicUsize::new(0));
     let observed = Arc::clone(&count);
@@ -45,7 +45,7 @@ fn cooperative_publication_preserves_ack_and_has_no_worker_handoffs() {
 }
 
 #[test]
-fn cancellation_during_cooperative_callback_prevents_success() {
+fn cancelled_cooperative_callback_prevents_success() {
     let signal = Cancellation::default();
     let cancel = signal.clone();
     let sink = Cooperative(move |_| {
@@ -66,7 +66,7 @@ fn cancellation_during_cooperative_callback_prevents_success() {
 }
 
 #[test]
-fn cooperative_errors_and_isolated_default_remain_explicit() {
+fn cooperative_errors_preserve_isolated_default() {
     let sink = Cooperative(|_| {
         Err(BoundaryError::new(
             "refused",
@@ -91,7 +91,7 @@ fn cooperative_errors_and_isolated_default_remain_explicit() {
 }
 
 #[test]
-fn forwarding_preserves_declared_delivery_and_generic_acknowledgements() {
+fn forwarding_preserves_delivery_and_acknowledgements() {
     let runtime = Runtime::new(0).unwrap();
     let caller = std::thread::current().id();
     let forwarded = forwarding(Delivery::Cooperative, move |number: usize, control| {

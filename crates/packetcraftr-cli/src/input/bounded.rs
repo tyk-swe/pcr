@@ -329,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn error_handling_reads_retain_file_or_stdin_and_causes() {
+    fn read_errors_preserve_source_and_cause() {
         let path = Path::new("inputs/targets.txt");
         let error = read_file_reader_capped(FailingReader, path, 16).unwrap_err();
         assert!(error.message.contains(&path.display().to_string()));
@@ -342,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn error_handling_file_bounds_and_missing_files_retain_paths_and_codes() {
+    fn file_errors_preserve_paths_and_codes() {
         let invocation = &source::test_invocation(None, Default::default());
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("frame.bin");
@@ -371,7 +371,7 @@ mod tests {
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
-    fn stalled_fifo_document_reports_the_invocation_deadline() {
+    fn stalled_fifo_reports_invocation_deadline() {
         let directory = tempfile::tempdir().unwrap();
         let fifo = directory.path().join("document.fifo");
         let status = std::process::Command::new("mkfifo")

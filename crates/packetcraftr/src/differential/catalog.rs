@@ -180,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn every_variant_builds_and_baseline_is_first() {
+    fn variants_build_with_baseline_first() {
         let registry = builtin::registry();
         let payload = vec![0xAB; 1024];
         assert_eq!(catalog()[0].id, "baseline");
@@ -194,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn ttl_variant_differs_from_baseline_only_in_ttl_and_checksum() {
+    fn ttl_variant_changes_only_ttl_and_checksum() {
         let registry = builtin::registry();
         let payload = vec![0xAB; 256];
         let baseline = built_bytes(

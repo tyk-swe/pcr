@@ -112,7 +112,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn checked_add_sums_every_field_and_rejects_overflow() {
+    fn counter_addition_rejects_overflow() {
         let summed = Stats {
             received_frames: 1,
             received_bytes: 2,
@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn any_single_drop_counter_alone_is_evidence_loss() {
+    fn each_drop_counter_indicates_loss() {
         for stats in [
             Stats {
                 dropped_frames: 1,
@@ -282,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn evidence_loss_prefers_overflow_over_plain_loss() {
+    fn overflow_precedes_plain_evidence_loss() {
         assert!(Stats::default().evidence_loss_error().is_none());
         let loss = Stats {
             dropped_frames: 4,

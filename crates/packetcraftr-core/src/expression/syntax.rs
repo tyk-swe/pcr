@@ -150,7 +150,7 @@ enum ScanFailure {
 mod tests {
     use super::*;
     #[test]
-    fn crossed_delimiters_fail_at_the_crossing_and_quotes_are_preserved() {
+    fn crossed_delimiters_report_crossing_offset() {
         for (input, offset) in [("([)]", 2), ("{[}]", 2), ("[(])", 2)] {
             assert!(
                 matches!(split_top_level_bounded(0, input, ',', None), Err(Error::Syntax { offset: found, .. }) if found == offset)
@@ -166,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn quotes_and_backslashes_preserve_top_level_parts() {
+    fn quoted_delimiters_preserve_parts() {
         let base = 7;
         for (input, first) in [
             (r#""a\",b",tail"#, r#""a\",b""#),
@@ -185,7 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn unterminated_quotes_report_the_end_byte_offset() {
+    fn unterminated_quotes_report_end_offset() {
         let base = 7;
         for input in [r#""é"#, r#""é\"#, r#""é\""#] {
             assert!(
@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn unbalanced_delimiters_report_the_byte_offset_after_quotes() {
+    fn unbalanced_delimiters_report_offset() {
         let base = 7;
         let prefix = r#""é\",([)]",(["#;
         let input = format!("{prefix})");

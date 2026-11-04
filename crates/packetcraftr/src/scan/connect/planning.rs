@@ -331,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn plans_discovery_first_and_respects_probe_and_memory_limits() {
+    fn discovery_precedes_probes_within_limits() {
         let request = request();
         let deadline = Deadline::new(Duration::from_secs(5));
         let mut authorizer = RecordingAuthorizer::default();
@@ -369,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn overlapping_port_membership_preserves_input_duplicates_and_order() {
+    fn overlapping_ports_preserve_duplicates_and_order() {
         let discovery = [u16::MAX, 64, 64, 1];
         let ports = [65, u16::MAX, 65, 63, 64, 1, 63];
         assert_eq!(

@@ -98,14 +98,14 @@ mod tests {
     }
 
     #[test]
-    fn bundled_payloads_parse_compile_and_publish_their_version() {
+    fn bundled_payloads_compile_with_published_version() {
         assert!(!bundled().is_empty());
         assert_eq!(data_set().version, CURATED_UDP_PAYLOADS_VERSION);
         assert_eq!(data_set().name, "udp-payloads");
     }
 
     #[test]
-    fn curated_payload_applies_only_to_planned_udp_endpoints() {
+    fn curated_payloads_require_planned_udp_endpoints() {
         let port = *bundled().keys().next().unwrap();
         let applied = merge(BTreeMap::new(), &[probe::Endpoint::Udp { port }]);
         assert_eq!(applied.applied, [port]);
@@ -117,7 +117,7 @@ mod tests {
     }
 
     #[test]
-    fn operator_profile_overrides_the_curated_payload_for_its_port() {
+    fn operator_profile_overrides_curated_port_payload() {
         let port = *bundled().keys().next().unwrap();
         let operator = operator_profile();
         let merged = merge(

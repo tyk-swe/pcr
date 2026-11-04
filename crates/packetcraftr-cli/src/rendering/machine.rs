@@ -180,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn error_handling_json_serialization_failure_never_publishes_a_second_document() {
+    fn serialization_failure_prevents_second_document() {
         for length in [0, 70_000] {
             let invocation = invocation();
             let mut bytes = Vec::new();
@@ -203,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn error_handling_json_write_and_flush_failures_do_not_retry_buffered_bytes() {
+    fn json_write_failures_prevent_retries() {
         for fail_flush in [false, true] {
             let invocation = invocation();
             let mut writer = FailingWriter {
@@ -223,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn error_handling_json_prepublication_cancellation_still_allows_terminal_report() {
+    fn prepublication_cancellation_allows_terminal_report() {
         let invocation = invocation();
         invocation.cancellation.cancel();
         let mut bytes = Vec::new();
@@ -242,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn emitted_envelope_identity_matches_the_published_schema() {
+    fn envelope_identity_matches_published_schema() {
         let published: serde_json::Value = serde_json::from_slice(
             &std::fs::read(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -419,13 +419,13 @@ mod tests {
     }
 
     #[test]
-    fn construction_accepts_a_read_only_field_left_at_its_default() {
+    fn construction_accepts_default_readonly_field() {
         let layer = TlsCodec.construct(&fields(false)).unwrap();
         assert_eq!(layer.field("ech"), Some(field::Value::Bool(false)),);
     }
 
     #[test]
-    fn construction_rejects_a_read_only_field_changed_from_its_default() {
+    fn construction_rejects_changed_readonly_field() {
         assert!(TlsCodec.construct(&fields(true)).is_err());
     }
 }

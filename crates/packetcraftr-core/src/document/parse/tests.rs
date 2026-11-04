@@ -8,7 +8,7 @@ use crate::error::{Classified, Kind};
 const YAML: &str = "schema: packetcraftr.packet/v1\nlayers:\n  - protocol: raw\n    fields: {}\n";
 
 #[test]
-fn yaml_accepts_one_document_with_comments_and_terminators() {
+fn yaml_accepts_comments_and_terminators() {
     let expected = Packet::parse(YAML, Format::Yaml, YAML.len()).unwrap();
     assert_eq!(expected.schema, PACKET_DOCUMENT_SCHEMA_V1);
     assert_eq!(expected.layers.len(), 1);
@@ -41,7 +41,7 @@ fn assert_yaml_syntax_error(input: &str) {
 }
 
 #[test]
-fn yaml_rejects_second_documents_including_empty_ones() {
+fn yaml_rejects_multiple_documents() {
     for suffix in [
         "---\n{}\n",
         "---\nnull\n",

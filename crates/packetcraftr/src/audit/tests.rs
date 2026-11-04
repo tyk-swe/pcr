@@ -355,7 +355,7 @@ fn assert_traffic_byte_limit<T: std::fmt::Debug>(result: Result<T, Error>) {
 }
 
 #[test]
-fn tls_audit_completes_within_the_reserved_connection_steps_and_bytes() {
+fn tls_audit_respects_reserved_resources() {
     for policy in [
         budget(TLS_UNITS, TLS_BYTES),
         budget(TLS_UNITS + 1, TLS_BYTES + 1),
@@ -374,7 +374,7 @@ fn tls_audit_completes_within_the_reserved_connection_steps_and_bytes() {
 }
 
 #[test]
-fn tls_audit_never_writes_past_its_reservation_when_the_handshake_needs_more() {
+fn tls_handshake_respects_write_reservation() {
     for (max_steps, max_wire_bytes_sent) in [(8, MAX_WIRE_BYTES_SENT), (MAX_STEPS, 64)] {
         let limits = tls::Limits {
             max_steps,
@@ -406,7 +406,7 @@ fn tls_audit_never_writes_past_its_reservation_when_the_handshake_needs_more() {
 }
 
 #[test]
-fn tls_audit_over_the_reservation_is_rejected_before_connecting() {
+fn tls_overbudget_rejected_before_connect() {
     let (client, observed) = fake_client(&budget(TLS_UNITS - 1, TLS_BYTES), Server::Tls, None);
     assert_traffic_unit_limit(client.audit_tls(&tls_request(CA)));
     observed.lock().unwrap().assert_untouched();
@@ -417,7 +417,7 @@ fn tls_audit_over_the_reservation_is_rejected_before_connecting() {
 }
 
 #[test]
-fn one_connection_and_one_message_cannot_admit_a_multi_write_tls_session() {
+fn tls_rejects_single_message_budget() {
     let policy = budget(2, TLS_BYTES);
     let (client, observed) = fake_client(&policy, Server::Tls, None);
     let result = client.audit_tls(&tls_request(CA));
@@ -449,7 +449,7 @@ fn one_connection_and_one_message_cannot_admit_a_multi_write_tls_session() {
 }
 
 #[test]
-fn https_audit_sends_the_exact_request_inside_the_tls_reservation() {
+fn https_request_fits_tls_reservation() {
     let policy = budget(TLS_UNITS, TLS_BYTES);
     let (client, observed) = fake_client(&policy, Server::Tls, None);
     let report = client.audit_http(&https_request(CA)).unwrap();
@@ -464,7 +464,7 @@ fn https_audit_sends_the_exact_request_inside_the_tls_reservation() {
 }
 
 #[test]
-fn https_audit_over_the_reservation_is_rejected_before_connecting() {
+fn https_overbudget_rejected_before_connect() {
     let (client, observed) = fake_client(&budget(TLS_UNITS - 1, TLS_BYTES), Server::Tls, None);
     assert_traffic_unit_limit(client.audit_http(&https_request(CA)));
     observed.lock().unwrap().assert_untouched();
@@ -475,7 +475,7 @@ fn https_audit_over_the_reservation_is_rejected_before_connecting() {
 }
 
 #[test]
-fn https_audit_withholds_the_request_when_the_certificate_is_untrusted() {
+fn untrusted_certificate_prevents_http_request() {
     let policy = budget(TLS_UNITS, TLS_BYTES);
     let (client, observed) = fake_client(&policy, Server::Tls, None);
     let report = client.audit_http(&https_request(UNTRUSTED_CA)).unwrap();
@@ -495,7 +495,7 @@ fn https_audit_withholds_the_request_when_the_certificate_is_untrusted() {
 }
 
 #[test]
-fn plain_http_audit_sends_one_request_message_across_short_writes() {
+fn http_short_writes_preserve_single_request() {
     let (units, bytes) = plain_units_and_bytes();
     let policy = budget(units, bytes);
     let (client, observed) = fake_client(&policy, Server::Plain, None);
@@ -509,7 +509,7 @@ fn plain_http_audit_sends_one_request_message_across_short_writes() {
 }
 
 #[test]
-fn plain_http_audit_over_one_connection_and_request_is_rejected_before_connecting() {
+fn http_overbudget_rejected_before_connect() {
     let (units, bytes) = plain_units_and_bytes();
     let (client, observed) = fake_client(&budget(units, bytes - 1), Server::Plain, None);
     assert_traffic_byte_limit(client.audit_http(&HttpRequest::new(ENDPOINT)));
@@ -552,7 +552,7 @@ fn excluded_destination_is_rejected_before_connecting() {
 }
 
 #[test]
-fn provider_reporting_another_peer_is_rejected_before_any_write() {
+fn wrong_peer_rejected_before_write() {
     let policy = budget(TLS_UNITS, TLS_BYTES);
     let other = Some(SocketAddr::from(([127, 0, 0, 2], 443)));
     for server in [Server::Tls, Server::Plain] {
@@ -572,7 +572,7 @@ fn provider_reporting_another_peer_is_rejected_before_any_write() {
 }
 
 #[test]
-fn unusable_tls_requests_are_rejected_before_connecting() {
+fn unusable_tls_rejected_before_connect() {
     let policy = budget(TLS_UNITS, TLS_BYTES);
     let port_zero = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
     for request in [
@@ -594,7 +594,7 @@ fn unusable_tls_requests_are_rejected_before_connecting() {
 }
 
 #[test]
-fn a_one_hour_tls_timeout_is_admitted() {
+fn hourlong_tls_timeout_is_accepted() {
     let request = TlsRequest {
         timeout: Duration::from_secs(3600),
         ..tls_request(CA)
@@ -604,7 +604,7 @@ fn a_one_hour_tls_timeout_is_admitted() {
 }
 
 #[test]
-fn unusable_http_requests_are_rejected_before_connecting() {
+fn unusable_http_rejected_before_connect() {
     let policy = budget(u64::MAX, u64::MAX);
     for request in [
         HttpRequest {
@@ -652,7 +652,7 @@ fn unusable_http_requests_are_rejected_before_connecting() {
 }
 
 #[test]
-fn the_longest_http_host_and_path_are_admitted() {
+fn maximum_http_host_and_path_accepted() {
     let request = HttpRequest {
         host: "a".repeat(1024),
         path: format!("/{}", "a".repeat(8191)),
@@ -663,7 +663,7 @@ fn the_longest_http_host_and_path_are_admitted() {
 }
 
 #[test]
-fn an_exchange_io_failure_is_reported_as_io_not_incomplete() {
+fn exchange_io_failure_preserves_classification() {
     let (client, observed) = client_with(
         &budget(2, u64::MAX),
         fake_tcp(Server::Plain, None, RESPONSE, true, None),
@@ -677,7 +677,7 @@ fn an_exchange_io_failure_is_reported_as_io_not_incomplete() {
 }
 
 #[test]
-fn an_exchange_timeout_reports_the_deadline_error() {
+fn exchange_timeout_reports_deadline() {
     let jump = Arc::new(AtomicBool::new(false));
     let tcp = fake_tcp(
         Server::Plain,
@@ -702,7 +702,7 @@ fn an_exchange_timeout_reports_the_deadline_error() {
 }
 
 #[test]
-fn the_final_response_is_the_last_informational_or_terminal_head() {
+fn final_response_uses_last_head() {
     for (response, status) in [
         (b"HTTP/1.1 101 Switching Protocols\r\n\r\n" as &[u8], 101),
         (

@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn output_byte_limits_preserve_boundaries_and_option_errors() {
+    fn output_limits_validate_bounds_and_options() {
         let defaults = TestArgs::parse_from(["analysis"]).application;
         for (value, valid) in [
             (0, false),

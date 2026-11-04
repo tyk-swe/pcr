@@ -39,17 +39,17 @@ class CheckFileLengthsTests(unittest.TestCase):
             path.write_text(text)
         return root
 
-    def test_counting_excludes_comments_blanks_and_closing_only_lines(self):
+    def test_counts_only_substantive_lines(self):
         self.assertEqual(lengths.rust_code_lines(RUST), 3)
         self.assertEqual(lengths.python_code_lines(PYTHON), 3)
 
-    def test_comment_markers_inside_strings_do_not_hide_code(self):
+    def test_string_comment_markers_preserve_code(self):
         text = 'fn f() {\n    let open = "/*";\n    let a = 1;\n    let close = "*/";\n}\n'
         self.assertEqual(lengths.rust_code_lines(text), 4)
         raw = 'const S: &[u8] = br#"a" /*"#;\nlet a = 1;\nlet b = 2;\n'
         self.assertEqual(lengths.rust_code_lines(raw), 3)
 
-    def test_oversized_non_test_file_fails_but_test_file_only_ranks(self):
+    def test_length_limit_excludes_tests(self):
         big = "\n".join(f"let v{i} = {i};" for i in range(20))
         root = self.workspace({
             "crates/x/src/big.rs": big,
@@ -62,7 +62,7 @@ class CheckFileLengthsTests(unittest.TestCase):
         rendered = "\n".join(lengths.render(rows, 10, 2))
         self.assertIn("files over 10 code lines: 2 total, 1 non-test", rendered)
 
-    def test_target_named_sources_count_but_build_output_is_skipped(self):
+    def test_counts_sources_excluding_build_output(self):
         big = "\n".join(f"let v{i} = {i};" for i in range(20))
         root = self.workspace({
             "crates/x/src/target/model.rs": big,

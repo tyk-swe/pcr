@@ -81,7 +81,7 @@ fn record(count: &Arc<AtomicUsize>, value: &serde_json::Value) -> Record {
 }
 
 #[test]
-fn ndjson_application_serializes_once_and_charges_exact_result_bytes_with_line_visibility() {
+fn ndjson_serializes_once_with_exact_charges() {
     let tape = Tape::default();
     let invocation = invocation(StreamEncoder::new(Command::Http, tape.clone()));
     let count = Arc::new(AtomicUsize::new(0));
@@ -132,7 +132,7 @@ fn ndjson_application_serializes_once_and_charges_exact_result_bytes_with_line_v
 }
 
 #[test]
-fn budget_and_serialization_failures_write_no_prefix_and_allow_one_error_terminal() {
+fn encoding_failure_allows_one_terminal_error() {
     for serialize_failure in [false, true] {
         let tape = Tape::default();
         let invocation = invocation(StreamEncoder::new(Command::Http, tape.clone()));
@@ -179,7 +179,7 @@ impl Write for FailedWriter {
 }
 
 #[test]
-fn writer_failure_keeps_exact_charge_and_prevents_false_success_or_repair_terminal() {
+fn failed_writer_stays_charged_without_completion() {
     let invocation = invocation(StreamEncoder::new(Command::Http, FailedWriter));
     let count = Arc::new(AtomicUsize::new(0));
     let value = serde_json::json!({"body": "hello"});
@@ -208,7 +208,7 @@ fn writer_failure_keeps_exact_charge_and_prevents_false_success_or_repair_termin
 }
 
 #[test]
-fn cancellation_during_serialization_refuses_write_and_terminal_cleanup_remains_usable() {
+fn serialization_cancellation_allows_terminal_cleanup() {
     struct CancelValue {
         cancellation: Cancellation,
     }
@@ -260,7 +260,7 @@ fn stream_index_diagnostics() -> Arc<Diagnostics> {
 }
 
 #[test]
-fn diagnostics_observe_live_settings_on_initial_and_replacement_outputs() {
+fn diagnostics_follow_reconfigured_settings() {
     for replace in [false, true] {
         for diagnostics in [Some(stream_index_diagnostics()), None] {
             let tape = Tape::default();
@@ -331,7 +331,7 @@ fn diagnostics_observe_live_settings_on_initial_and_replacement_outputs() {
 }
 
 #[test]
-fn preexisting_encoder_deadline_survives_initial_and_replacement_configuration() {
+fn reconfiguration_preserves_encoder_deadline() {
     for replace in [false, true] {
         let tape = Tape::default();
         let base = Instant::now();

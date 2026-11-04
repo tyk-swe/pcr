@@ -55,7 +55,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fractional_seconds_scale_without_losing_leading_zeroes() {
+    fn fractional_seconds_preserve_leading_zeroes() {
         for (text, nanos) in [
             ("1.1", 100_000_000),
             ("1.000001", 1_000),

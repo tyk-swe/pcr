@@ -203,7 +203,7 @@ impl Reference {
 }
 
 #[test]
-fn fragment_traces_match_byte_reference_for_order_overlap_and_conflicts() {
+fn fragment_traces_match_byte_reference() {
     let payload: Vec<u8> = (0..128).map(|index| (index * 13) as u8).collect();
     for version in [Version::V4, Version::V6] {
         for policy in [
@@ -285,7 +285,7 @@ fn reverse_fragment_payload_copying_scales_linearly() {
 }
 
 #[test]
-fn reverse_fragment_copying_stays_linear_with_tight_memory_limits() {
+fn reverse_fragments_copy_linearly_within_budget() {
     for count in [96usize, 192, 384, 768] {
         let payload_length = count * 8;
         let previous_capacity = payload_length.next_power_of_two() / 2;
@@ -319,7 +319,7 @@ fn reverse_fragment_copying_stays_linear_with_tight_memory_limits() {
 }
 
 #[test]
-fn partial_overlaps_bridge_ranges_with_first_seen_and_last_seen_bytes() {
+fn overlapping_fragments_respect_byte_precedence() {
     let payload: Vec<u8> = (0..64).map(|index| index as u8).collect();
     for version in [Version::V4, Version::V6] {
         for policy in [
@@ -359,7 +359,7 @@ fn partial_overlaps_bridge_ranges_with_first_seen_and_last_seen_bytes() {
 }
 
 #[test]
-fn capacity_growth_respects_tight_limits_and_rejection_is_transactional() {
+fn capacity_limits_reject_growth_transactionally() {
     for (limit, succeeds) in [(4263, false), (4268, true)] {
         let limits = Limits {
             max_aggregate_bytes: limit,
@@ -399,7 +399,7 @@ fn capacity_growth_respects_tight_limits_and_rejection_is_transactional() {
 }
 
 #[test]
-fn completion_uses_smaller_growth_when_datagram_peak_is_tight() {
+fn completion_growth_respects_datagram_peak() {
     let limits = Limits {
         max_aggregate_bytes: 4332,
         ..Limits::default()

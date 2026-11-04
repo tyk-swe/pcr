@@ -157,7 +157,7 @@ mod tests {
         .0
     }
     #[test]
-    fn secure_headers_pass_and_cookie_values_never_escape() {
+    fn secure_headers_pass_without_leaking_cookies() {
         let h = head(
             "Content-Security-Policy: default-src 'self'; frame-ancestors 'none'\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: strict-origin\r\nStrict-Transport-Security: max-age=31536000\r\nSet-Cookie: sid=secret-token; Secure; HttpOnly; SameSite=Lax\r\n",
         );
@@ -176,7 +176,7 @@ mod tests {
         );
     }
     #[test]
-    fn referrer_fallback_and_wildcard_framing_are_not_overstated() {
+    fn uncertain_header_protection_remains_unconfirmed() {
         let report = audit(
             &head(
                 "Referrer-Policy: no-referrer, unsafe-url\r\nContent-Security-Policy: frame-ancestors *\r\n",
@@ -221,14 +221,14 @@ mod tests {
     }
 
     #[test]
-    fn wildcard_frame_ancestors_overrides_x_frame_options_deny() {
+    fn wildcard_csp_overrides_frame_options() {
         assert!(framed(
             b"Content-Security-Policy: frame-ancestors *\r\nX-Frame-Options: DENY\r\n"
         ));
     }
 
     #[test]
-    fn unconfirmed_frame_ancestors_overrides_x_frame_options() {
+    fn unconfirmed_csp_overrides_frame_options() {
         assert_framing(
             true,
             &[
@@ -242,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn x_frame_options_applies_when_no_policy_has_frame_ancestors() {
+    fn frame_options_applies_without_ancestors() {
         assert_framing(
             false,
             &[
@@ -291,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn frame_ancestors_admitting_any_origin_do_not_protect() {
+    fn unrestricted_ancestors_provide_no_protection() {
         assert_framing(
             true,
             &[
@@ -327,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_first_frame_ancestors_directive_in_a_policy_counts() {
+    fn first_frame_ancestors_directive_wins() {
         assert!(framed(
             b"Content-Security-Policy: frame-ancestors *; frame-ancestors 'none'\r\n"
         ));
@@ -358,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_first_hsts_field_is_effective() {
+    fn first_hsts_field_wins() {
         let report = report(
             "Strict-Transport-Security: max-age=0\r\nStrict-Transport-Security: max-age=1\r\n",
         );
@@ -371,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn cookie_attribute_whitespace_does_not_hide_protection() {
+    fn cookie_whitespace_preserves_protection() {
         let report =
             report("Set-Cookie: sid=private; Secure = yes; HttpOnly = yes; SameSite = Lax\r\n");
         assert!(
@@ -384,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn the_last_samesite_attribute_is_not_skipped_when_bare() {
+    fn bare_final_samesite_overrides_previous() {
         let report =
             report("Set-Cookie: sid=private; Secure; HttpOnly; SameSite=Lax; SameSite\r\n");
         assert!(

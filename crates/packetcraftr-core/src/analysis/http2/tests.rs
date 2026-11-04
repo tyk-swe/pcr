@@ -424,7 +424,7 @@ fn h2c_upgrade() {
 }
 
 #[test]
-fn h2c_upgrade_preserves_sources_across_a_partial_body() {
+fn partial_h2c_body_preserves_sources() {
     let mut rig = rig();
     rig.send(b"POST / HTTP/1.1\r\nHost: example.test\r\nConnection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: AAMAAABk\r\nContent-Length: 6\r\n\r\nabc");
     rig.send(b"def");
@@ -1916,7 +1916,7 @@ fn limit_field(error: &Error) -> &'static str {
 }
 
 #[test]
-fn evidence_follows_the_frames_that_carried_each_byte() {
+fn evidence_tracks_source_frames() {
     let mut rig = rig();
     let mut preface = CLIENT_PREFACE.to_vec();
     preface.extend_from_slice(&settings(&[]));
@@ -2064,7 +2064,7 @@ fn application_limits_stop_the_collector() {
 }
 
 #[test]
-fn settings_ack_waits_for_the_peer_settings() {
+fn settings_ack_waits_for_peer() {
     let mut rig = rig();
     rig.send(CLIENT_PREFACE);
     let mut server = settings(&[]);
@@ -2099,7 +2099,7 @@ fn expired_deadline_stops_analysis() {
 }
 
 #[test]
-fn transport_fault_targets_both_generations_in_order_and_keeps_other_connections_live() {
+fn transport_faults_isolate_connection_generations() {
     let mut rig = rig();
     let forward = flow();
     let reverse = forward.reverse();
@@ -2148,7 +2148,7 @@ fn transport_fault_targets_both_generations_in_order_and_keeps_other_connections
 }
 
 #[test]
-fn flow_failure_and_generation_replacement_visit_only_owned_flows() {
+fn flow_cleanup_visits_owned_flows() {
     for population in [8u16, 256, 1000] {
         let mut rig = rig();
         let forward = flow();
@@ -2179,7 +2179,7 @@ fn flow_failure_and_generation_replacement_visit_only_owned_flows() {
 }
 
 #[test]
-fn removing_an_old_generation_preserves_reassigned_flow_ownership() {
+fn generation_removal_preserves_reassigned_flows() {
     let mut rig = rig();
     let key = flow();
     rig.collector.associate_flow(key.clone(), (1, 0));
@@ -2191,7 +2191,7 @@ fn removing_an_old_generation_preserves_reassigned_flow_ownership() {
 }
 
 #[test]
-fn termination_releases_decoder_and_stream_state_once_and_retains_terminal_evidence() {
+fn termination_releases_state_and_preserves_evidence() {
     for mode in 0..3 {
         let mut rig = rig();
         handshake(&mut rig);
@@ -2261,7 +2261,7 @@ fn termination_releases_decoder_and_stream_state_once_and_retains_terminal_evide
 }
 
 #[test]
-fn trailing_eviction_finishes_without_a_transport_fault() {
+fn trailing_eviction_avoids_transport_fault() {
     let mut rig = rig();
     handshake(&mut rig);
     rig.collector.tcp.associate_test(flow(), 0);

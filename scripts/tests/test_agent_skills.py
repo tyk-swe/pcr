@@ -49,7 +49,7 @@ class AgentSkillsTests(unittest.TestCase):
             self.assertFalse(copy.is_symlink())
             self.assertEqual((copy / 'SKILL.md').read_text(), 'canonical skill\n')
 
-    def test_check_detects_missing_stale_and_divergent_copies(self) -> None:
+    def test_check_detects_invalid_copies(self) -> None:
         skills.generate(self.root, copies=True)
         copy = self.root / '.claude' / 'skills' / 'example'
         (copy / 'SKILL.md').write_text('edited copy')
@@ -84,7 +84,7 @@ class AgentSkillsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'unexpected'):
             skills.generate(self.root, copies=True)
 
-    def test_materialized_git_links_can_be_replaced_with_copies(self) -> None:
+    def test_materialized_links_convert_to_copies(self) -> None:
         for name in skills.ADAPTERS:
             base = self.root / name / 'skills'
             base.mkdir(parents=True)
@@ -122,7 +122,7 @@ class AgentSkillsTests(unittest.TestCase):
         self.assertEqual((outside / 'marker').read_text(), 'preserved')
         self.assertFalse((outside / 'skills').exists())
 
-    def test_wrong_link_and_unrelated_file_are_rejected(self) -> None:
+    def test_rejects_wrong_links_and_unrelated_files(self) -> None:
         self.require_symlinks()
         skills.generate(self.root, copies=False)
         path = self.root / '.claude' / 'skills' / 'example'

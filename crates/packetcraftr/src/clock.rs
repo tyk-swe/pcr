@@ -24,12 +24,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rate_delay_without_a_rate_never_waits() {
+    fn absent_rate_has_no_delay() {
         assert_eq!(rate_delay(10, None), Some(Duration::ZERO));
     }
 
     #[test]
-    fn rate_delay_spaces_items_evenly_and_rounds_up() {
+    fn rate_delay_rounds_up_even_spacing() {
         assert_eq!(rate_delay(1, Some(1_000)), Some(Duration::from_millis(1)));
         assert_eq!(rate_delay(2, Some(2)), Some(Duration::from_secs(1)));
         assert_eq!(
@@ -40,7 +40,7 @@ mod tests {
     }
 
     #[test]
-    fn rate_delay_rejects_a_zero_rate_and_unrepresentable_delays() {
+    fn rate_delay_rejects_zero_and_overflow() {
         assert_eq!(rate_delay(1, Some(0)), None);
         assert_eq!(rate_delay(usize::MAX, Some(1)), None);
     }

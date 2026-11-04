@@ -321,7 +321,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cleanup_causes_include_every_remaining_failure_after_the_first_chain() {
+    fn cleanup_preserves_all_failure_causes() {
         let inner = Error::CaptureReadiness {
             message: "wrapped failure".to_owned(),
         };
@@ -362,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn plain_error_causes_carry_no_invented_entries() {
+    fn plain_errors_have_no_invented_causes() {
         assert!(Error::UnresolvedLinkMode.causes().is_empty());
         let sourced = Error::InvalidSendEvidence {
             fault: SendEvidenceFault::AcceptedBytesDiffer,

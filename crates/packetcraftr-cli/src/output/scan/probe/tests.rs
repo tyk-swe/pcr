@@ -67,7 +67,7 @@ fn expected(extra: Value) -> Value {
 }
 
 #[test]
-fn serialized_probe_record_follows_the_endpoint_variant() {
+fn probe_serialization_matches_endpoint_variant() {
     let cases: [(probe::Endpoint, IpAddr, Value); 9] = [
         (
             probe::Endpoint::Tcp { port: 443 },

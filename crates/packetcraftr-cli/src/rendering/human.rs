@@ -257,7 +257,7 @@ mod tests {
     use std::process::ExitCode;
 
     #[test]
-    fn error_handling_text_renders_coordinates_and_sanitizes_details() {
+    fn text_errors_sanitize_details_with_locations() {
         for (context, expected) in [
             (Coordinate::SourceFrame(7), "source frame 7"),
             (Coordinate::ProbeSequence(8), "probe sequence 8"),
@@ -283,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn error_handling_reporting_failure_keeps_original_and_stops_after_fallback() {
+    fn reporting_fallback_preserves_original_failure() {
         let error = CliError::new(Kind::Usage, "invalid argument");
         let code = report_structured_error(
             error,
@@ -306,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn error_handling_successful_reporting_keeps_requested_exit_status() {
+    fn successful_reporting_preserves_exit_status() {
         for code in [2, 3, 4, 5, 6, 70, 130] {
             assert_eq!(
                 report_structured_error(

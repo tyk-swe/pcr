@@ -57,7 +57,7 @@ fn accessors_return_the_composed_parts() {
 }
 
 #[test]
-fn the_injected_clock_drives_now_and_wall_now() {
+fn injected_clock_drives_both_times() {
     let now = Instant::now();
     let wall = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let client = composed().with_clock(FixedClock { now, wall });
@@ -77,7 +77,7 @@ fn check_cancelled_follows_the_composed_signal() {
 }
 
 #[test]
-fn a_deadline_ceiling_cannot_be_extended_by_a_later_deadline() {
+fn deadline_ceiling_cannot_be_extended() {
     let now = Instant::now();
     let clock = FixedClock {
         now,
@@ -95,7 +95,7 @@ fn a_deadline_ceiling_cannot_be_extended_by_a_later_deadline() {
 }
 
 #[test]
-fn neighbor_options_replace_the_state_or_report_the_invalid_bounds() {
+fn neighbor_options_validate_before_replacement() {
     let client = composed()
         .with_neighbor_options(neighbor::Options::default())
         .unwrap();

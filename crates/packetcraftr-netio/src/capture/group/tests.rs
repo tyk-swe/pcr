@@ -164,7 +164,7 @@ fn control(control: &Arc<Control>) -> Deadline {
 }
 
 #[test]
-fn inherited_elapsed_group_readiness_cannot_report_success_after_provider_callback() {
+fn expired_parent_prevents_readiness_success() {
     let observed = Arc::new(Control::default());
     let mut group = group(&observed, true, false);
     let outcome = group.wait_ready(&control(&observed));
@@ -176,7 +176,7 @@ fn inherited_elapsed_group_readiness_cannot_report_success_after_provider_callba
 }
 
 #[test]
-fn inherited_elapsed_quiet_group_wait_stops_without_restarting_local_allowances() {
+fn quiet_wait_preserves_parent_elapsed_limit() {
     let observed = Arc::new(Control::default());
     let (entered, reading) = mpsc::sync_channel(1);
     *observed.entered.lock().unwrap() = Some(entered);
@@ -207,7 +207,7 @@ fn inherited_elapsed_quiet_group_wait_stops_without_restarting_local_allowances(
 }
 
 #[test]
-fn zero_duration_group_poll_still_drains_an_already_queued_record() {
+fn zero_duration_poll_drains_queued_record() {
     let observed = Arc::new(Control::default());
     let mut group = group(&observed, false, true);
     group

@@ -50,7 +50,7 @@ fn invocation(format: Format, writer: Writer) -> Invocation {
 }
 
 #[test]
-fn generator_cancellation_maps_to_interrupt_status_after_diagnostic_write() {
+fn generator_cancellation_reports_interrupt() {
     let invocation = invocation(Format::Text, Writer::default());
     invocation.cancellation.cancel();
     let error = invocation.cancellation.check().unwrap_err();
@@ -62,7 +62,7 @@ fn generator_cancellation_maps_to_interrupt_status_after_diagnostic_write() {
 }
 
 #[test]
-fn generator_diagnostic_write_failure_precedes_cancellation_status() {
+fn generator_write_failure_precedes_cancellation() {
     let invocation = invocation(Format::Text, Writer::default());
     invocation.cancellation.cancel();
     let code = generation_exit(
@@ -74,7 +74,7 @@ fn generator_diagnostic_write_failure_precedes_cancellation_status() {
 }
 
 #[test]
-fn error_handling_json_reporting_failure_keeps_original_diagnostics() {
+fn json_reporting_failure_preserves_diagnostics() {
     let invocation = invocation(Format::Json, Writer::default());
     let error = CliError::from_classification(
         Classification::new(
@@ -112,7 +112,7 @@ fn error_handling_json_reporting_failure_keeps_original_diagnostics() {
 }
 
 #[test]
-fn error_handling_json_after_publication_uses_stderr_and_prioritizes_output_failure() {
+fn published_json_errors_prioritize_output_failure() {
     for (cancelled, output_failed, expected) in
         [(false, false, 3), (true, false, 130), (true, true, 5)]
     {
@@ -147,7 +147,7 @@ fn error_handling_json_after_publication_uses_stderr_and_prioritizes_output_fail
 }
 
 #[test]
-fn error_handling_ndjson_cancellation_reports_one_terminal_record_or_io_failure() {
+fn ndjson_cancellation_reports_terminal_or_failure() {
     for fail in [false, true] {
         let writer = Writer {
             fail,
@@ -192,7 +192,7 @@ fn error_handling_ndjson_cancellation_reports_one_terminal_record_or_io_failure(
 }
 
 #[test]
-fn error_handling_failed_ndjson_preserves_context_and_original_cause() {
+fn ndjson_failure_preserves_context_and_cause() {
     let writer = Writer {
         fail: true,
         ..Default::default()

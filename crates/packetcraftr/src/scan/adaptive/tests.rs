@@ -82,7 +82,7 @@ fn completed_prefix_discovery_is_linear() {
 }
 
 #[test]
-fn unadmitted_selections_remain_eligible_and_retry_identity_is_stable() {
+fn unadmitted_retries_keep_eligibility_and_identity() {
     let now = Instant::now();
     let mut controller = Controller::new(config(), Duration::from_millis(100), 4);
     let mut work = controller.open_stage(&targets(2), 2, 2, 17, now);
@@ -142,7 +142,7 @@ fn unadmitted_selections_remain_eligible_and_retry_identity_is_stable() {
 }
 
 #[test]
-fn expiry_counts_unsent_attempts_once_and_pending_settlement_remains_valid() {
+fn expiry_counts_unsent_attempts_once() {
     let now = Instant::now();
     let mut controller = Controller::new(config(), Duration::from_millis(100), 4);
     let mut work = controller.open_stage(&targets(1), 3, 2, 0, now);
@@ -282,7 +282,7 @@ impl ConservativeWork {
 }
 
 #[test]
-fn indexed_readiness_matches_conservative_transitions_with_pacing_retries_and_expiry() {
+fn indexed_readiness_matches_conservative_transitions() {
     for hosts in [1, 3, 8] {
         let start = Instant::now();
         let mut settings = config();
@@ -392,7 +392,7 @@ fn indexed_readiness_matches_conservative_transitions_with_pacing_retries_and_ex
 }
 
 #[test]
-fn paced_host_cannot_queue_again_before_its_admission_commits_or_is_omitted() {
+fn paced_host_waits_for_admission_resolution() {
     for omit in [false, true] {
         let now = Instant::now();
         let mut controller = Controller::new(config(), Duration::from_millis(100), 4);
@@ -445,7 +445,7 @@ fn paced_host_cannot_queue_again_before_its_admission_commits_or_is_omitted() {
 }
 
 #[test]
-fn provisional_silence_retries_neutrally_and_only_final_clean_quality_promotes_losses() {
+fn loss_promotion_requires_final_clean_quality() {
     for coverage in [
         crate::scan::Coverage::NoReportedLoss,
         crate::scan::Coverage::Incomplete,
@@ -500,7 +500,7 @@ fn provisional_silence_retries_neutrally_and_only_final_clean_quality_promotes_l
 }
 
 #[test]
-fn deferred_interface_admission_preserves_host_pacing_across_refill_polls() {
+fn deferred_admission_preserves_host_pacing() {
     let now = Instant::now();
     let mut controller = Controller::new(config(), Duration::from_millis(100), 3);
     let targets = targets(2);

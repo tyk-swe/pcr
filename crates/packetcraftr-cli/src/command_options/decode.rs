@@ -158,7 +158,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decode_as_ports_are_unsigned_decimal_with_whitespace() {
+    fn decode_ports_require_unsigned_decimal() {
         for port in ["+53", "-53", "", "0", "65536", "٥٣"] {
             let args = DecodeArgs {
                 ports: vec![],

@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_noop_selections_keep_verbatim_fast_path() {
+    fn noop_selection_preserves_verbatim_path() {
         for frames in [None, Some("1-"), Some("1-10,11-")] {
             for every in [None, Some(1)] {
                 let selection = FrameSelectionArgs {

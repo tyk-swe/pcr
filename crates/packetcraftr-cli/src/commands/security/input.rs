@@ -92,19 +92,19 @@ mod tests {
     }
 
     #[test]
-    fn current_published_security_output_is_accepted_as_report_input() {
+    fn current_security_output_is_accepted() {
         assert_eq!(report(&current_hunt()).unwrap().kind, "hunt");
     }
 
     #[test]
-    fn ambiguous_v1_report_input_is_rejected_with_regeneration_guidance() {
+    fn v1_reports_require_regeneration() {
         let message = rejection(&hunt_with_schema("packetcraftr.output/v1"));
         assert!(message.contains("ambiguous"), "{message}");
         assert!(message.contains("regenerate"), "{message}");
     }
 
     #[test]
-    fn other_output_identities_are_rejected_without_the_v1_explanation() {
+    fn unrelated_output_identity_is_rejected() {
         for schema in [
             "packetcraftr.output/v2",
             "packetcraftr.output/v18",
@@ -116,14 +116,14 @@ mod tests {
     }
 
     #[test]
-    fn deeply_nested_report_json_fails_closed_instead_of_recursing() {
+    fn deeply_nested_report_json_is_rejected() {
         let depth = 100_000;
         let nested = [vec![b'['; depth], vec![b']'; depth]].concat();
         assert!(report(&nested).is_err());
     }
 
     #[test]
-    fn single_stdin_validation_precedes_io_and_hashes_consumed_bytes() {
+    fn stdin_validation_precedes_io_and_hashes_input() {
         assert!(validate_stdin_sources([Path::new("-"), Path::new("missing.json")]).is_ok());
         assert!(validate_stdin_sources([Path::new("-"), Path::new("-")]).is_err());
         assert!(validate_stdin_sources([Path::new("missing.json")]).is_ok());

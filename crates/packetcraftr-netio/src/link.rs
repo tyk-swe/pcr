@@ -67,7 +67,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn supports_matches_each_concrete_mode_and_never_auto() {
+    fn supported_modes_exclude_auto() {
         let cases = [
             (Capability::Layer2, Mode::Layer2, true),
             (Capability::Layer2, Mode::Layer3, false),

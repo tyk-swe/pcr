@@ -47,7 +47,7 @@ impl StreamRecord for NamedData {
 }
 
 #[test]
-fn reserved_events_leave_output_budget_and_sequence_unchanged() {
+fn reserved_events_preserve_budget_and_sequence() {
     for counted in [false, true] {
         let writer = RecordingWriter(Arc::default());
         let stream = StreamEncoder::new(Command::Http, writer.clone());
@@ -109,7 +109,7 @@ fn reserved_events_leave_output_budget_and_sequence_unchanged() {
 }
 
 #[test]
-fn complete_record_limit_includes_newline_and_serialization_failure_never_writes() {
+fn record_limit_includes_newline() {
     let value = serde_json::json!({"value": "abc"});
     let bytes = serde_json::to_vec(&value).unwrap();
     let exact = serialize_line(&value, 0, bytes.len() + 1, None).unwrap();
@@ -149,7 +149,7 @@ impl Write for PartialWriter {
 }
 
 #[test]
-fn failed_partial_write_is_terminally_failed_without_a_false_complete_or_later_flush() {
+fn partial_write_failure_is_terminal() {
     let runtime = Runtime::new(1).unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let flushes = Arc::new(AtomicUsize::new(0));
@@ -208,7 +208,7 @@ impl Write for BlockedWriter {
 }
 
 #[test]
-fn cancelled_bounded_writer_keeps_actual_work_charged_and_never_returns_complete() {
+fn cancelled_writer_charges_work_without_completion() {
     let runtime = Runtime::new(1).unwrap();
     let (entered, writing) = mpsc::channel();
     let release = Arc::new((Mutex::new(false), Condvar::new()));
@@ -269,7 +269,7 @@ fn cancelled_bounded_writer_keeps_actual_work_charged_and_never_returns_complete
 }
 
 #[test]
-fn a_started_complete_write_can_finish_after_cancellation_without_acknowledging_success() {
+fn cancelled_write_cannot_acknowledge_success() {
     let runtime = Runtime::new(1).unwrap();
     let (entered, writing) = mpsc::channel();
     let release = Arc::new((Mutex::new(false), Condvar::new()));

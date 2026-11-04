@@ -30,12 +30,12 @@ class ForwardingConsumerTests(unittest.TestCase):
             with self.subTest(name=name):
                 consumer.consume(io.BytesIO(json.dumps(value).encode() + b'\n'), mode, code)
 
-    def test_ambiguous_v1_output_is_rejected_with_regeneration_guidance(self):
+    def test_v1_output_requires_regeneration(self):
         value = envelope() | {'schema': 'packetcraftr.output/v1'}
         with self.assertRaisesRegex(consumer.ContractError, 'ambiguous.*regenerate'):
             consume(value)
 
-    def test_other_output_identities_are_rejected_without_the_v1_explanation(self):
+    def test_unrelated_output_identity_is_rejected(self):
         for schema in ('packetcraftr.output/v2', 'packetcraftr.output/v18',
                        'packetcraftr.output/v20', '', None):
             value = envelope() | {'schema': schema}
@@ -78,7 +78,7 @@ class ForwardingConsumerTests(unittest.TestCase):
                 with self.assertRaises(consumer.ContractError):
                     consume(value)
 
-    def test_identity_groups_are_unique_even_with_additive_wrapper_metadata(self):
+    def test_additive_metadata_preserves_unique_identity(self):
         value = envelope()
         first, second = value['result']['matches']
         second['key'] = copy.deepcopy(first['key'])
@@ -86,7 +86,7 @@ class ForwardingConsumerTests(unittest.TestCase):
         with self.assertRaisesRegex(consumer.ContractError, 'identity occurs'):
             consume(value)
 
-    def test_object_identity_is_hashable_and_ignores_member_order(self):
+    def test_object_identity_ignores_member_order(self):
         value = envelope()
         first, second = value['result']['matches']
         a = {'type': 'unsigned', 'value': 1}
@@ -97,7 +97,7 @@ class ForwardingConsumerTests(unittest.TestCase):
         with self.assertRaisesRegex(consumer.ContractError, 'identity occurs'):
             consume(value)
 
-    def test_utf8_scalar_and_finite_numbers_apply_to_additive_fields(self):
+    def test_additive_fields_require_valid_scalars(self):
         for extra in ('1e9999', '"\\ud800"', '{"\\ud800": 0}'):
             data = json.dumps(envelope()).encode()[:-1] + b', "future": ' + extra.encode() + b'}'
             with self.subTest(extra=extra), self.assertRaises(consumer.ContractError):
@@ -134,14 +134,14 @@ class ForwardingConsumerTests(unittest.TestCase):
         with self.assertRaises(consumer.ContractError):
             consumer.consume(io.BytesIO(stream.encode()), 'ndjson', 0)
 
-    def test_every_check_kind_validates_its_typed_operands(self):
+    def test_checks_validate_typed_operands(self):
         for kind in ('preserve_presence', 'expect', 'expect_absent'):
             check = dict(check={'kind': kind}, outcome='violated', actual_state='observed',
                          expected_state=None, actual={'type': 'unsigned', 'value': True})
             with self.subTest(kind=kind), self.assertRaises(consumer.ContractError):
                 consumer.validate_check(check)
 
-    def test_observed_and_absent_states_agree_with_values(self):
+    def test_observation_states_match_values(self):
         for state, actual in (('observed', None), ('absent', {'type': 'unsigned', 'value': 1})):
             check = dict(check={'kind': 'expect_absent'}, outcome='unevaluable',
                          actual_state=state, expected_state=None, actual=actual)
@@ -175,7 +175,7 @@ class ForwardingConsumerTests(unittest.TestCase):
         with self.assertRaises(consumer.ContractError):
             consume(value)
 
-    def test_violation_evidence_is_not_an_unchecked_side_channel(self):
+    def test_violation_evidence_is_validated(self):
         value = envelope()
         report = value['result']
         pair = report['matches'][0]

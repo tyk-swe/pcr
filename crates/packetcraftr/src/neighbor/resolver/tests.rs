@@ -69,7 +69,7 @@ impl capture::Provider for Captures {
     }
 }
 #[test]
-fn incomplete_capture_identity_never_reaches_injected_provider() {
+fn incomplete_capture_identity_skips_provider() {
     for interface in [
         packetcraftr_netio::interface::Id {
             name: String::new(),
@@ -100,7 +100,7 @@ fn incomplete_capture_identity_never_reaches_injected_provider() {
     }
 }
 #[test]
-fn parent_cancellation_reaches_reads_and_prevents_unsent_attempts() {
+fn parent_cancellation_stops_reads_and_attempts() {
     for cancel_before_send in [false, true] {
         let request = Request {
             interface: packetcraftr_netio::interface::Id {
@@ -222,7 +222,7 @@ impl capture::Provider for InterruptedCapture {
 }
 
 #[test]
-fn interrupted_read_retains_sent_attempt_and_capture_evidence() {
+fn interrupted_read_preserves_attempt_and_evidence() {
     let request = Request {
         interface: packetcraftr_netio::interface::Id {
             name: "test0".into(),
@@ -383,7 +383,7 @@ fn cache_insert_and_get_round_trip() {
 }
 
 #[test]
-fn cache_refresh_expiry_and_oldest_insertion_follow_per_entry_ttls() {
+fn cache_operations_respect_individual_ttls() {
     let cache = NeighborCache::default();
     let other = NeighborCache::default();
     let start = Instant::now();
@@ -451,7 +451,7 @@ fn cache_refresh_expiry_and_oldest_insertion_follow_per_entry_ttls() {
 }
 
 #[test]
-fn cache_churn_matches_a_per_entry_ttl_reference() {
+fn cache_churn_matches_ttl_reference() {
     use std::collections::HashMap;
 
     let cache = NeighborCache::default();
@@ -496,7 +496,7 @@ fn cache_churn_matches_a_per_entry_ttl_reference() {
 }
 
 #[test]
-fn cache_expiry_work_and_storage_follow_changed_entries() {
+fn cache_expiry_scales_with_changed_entries() {
     let start = Instant::now();
     let options = cache_options(4096, 100);
     let mac = MacAddress([2, 0, 0, 0, 0, 1]);
@@ -538,7 +538,7 @@ fn cache_expiry_work_and_storage_follow_changed_entries() {
 }
 
 #[test]
-fn concurrent_cache_get_and_refresh_keep_indexes_consistent() {
+fn concurrent_cache_refresh_preserves_indexes() {
     let cache = Arc::new(NeighborCache::default());
     let start = Instant::now();
     let threads: Vec<_> = (0..8u16)
@@ -565,7 +565,7 @@ fn concurrent_cache_get_and_refresh_keep_indexes_consistent() {
 }
 
 #[test]
-fn cache_samples_expiration_after_waiting_for_the_lock() {
+fn cache_expiration_sampled_after_lock() {
     use std::sync::mpsc;
 
     let cache = Arc::new(NeighborCache::default());
@@ -619,7 +619,7 @@ fn cache_samples_expiration_after_waiting_for_the_lock() {
 }
 
 #[test]
-fn cache_insertion_ttl_starts_before_waiting_for_the_lock() {
+fn cache_insertion_ttl_includes_lock_wait() {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::mpsc;
 

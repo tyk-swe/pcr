@@ -210,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_transfers_and_retries_preserve_exact_request_and_response() {
+    fn partial_transfer_retries_preserve_bytes() {
         let mut stream = ScriptedStream::new([
             Step::Write(b"ping", Err(io::ErrorKind::Interrupted)),
             Step::Write(b"ping", Ok(2)),
@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn failures_retain_completed_io_and_stop_further_transfers() {
+    fn failures_preserve_io_and_stop_transfers() {
         for (steps, sent, response, error) in [
             (
                 vec![
@@ -282,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_requests_read_without_writing_or_flushing_and_retain_bytes_on_eof() {
+    fn empty_requests_read_without_writing() {
         let mut stream = ScriptedStream::new([Step::Read(Ok(b"po")), Step::Read(Ok(b""))]);
         let deadline = stream.deadline();
         let result = exchange(&mut stream, b"", 4, &deadline, |_| false).unwrap();
@@ -293,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn full_unrecognized_response_is_truncated_without_reading_more() {
+    fn full_unrecognized_response_stops_reading() {
         let mut stream = ScriptedStream::new([Step::Read(Ok(b"pong"))]);
         let deadline = stream.deadline();
         let result = exchange(&mut stream, b"", 4, &deadline, |_| false).unwrap();
@@ -303,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn cancellation_after_read_retains_bytes_and_precedes_completion_or_eof() {
+    fn read_cancellation_preserves_bytes_without_success() {
         for response in [b"".as_slice(), b"po", b"pong"] {
             let mut stream = ScriptedStream::new([Step::CancelRead(response)]);
             let deadline = stream.deadline();
@@ -316,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn expired_deadline_prevents_io_and_takes_priority_over_completion() {
+    fn expired_deadline_prevents_io_and_completion() {
         for request in [b"".as_slice(), b"ping"] {
             let mut stream = ScriptedStream::new([]);
             let result = exchange(

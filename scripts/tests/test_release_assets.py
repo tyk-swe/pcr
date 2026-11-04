@@ -29,14 +29,14 @@ class ReleaseAssetTests(unittest.TestCase):
             with self.subTest(entry=entry), self.assertRaises(ValueError):
                 assets.validate_manifest(manifest)
 
-    def test_duplicates_and_source_generated_collisions_are_rejected(self):
+    def test_asset_name_collisions_are_rejected(self):
         for category in ('source_assets', 'generated_assets'):
             manifest = copy.deepcopy(assets.MANIFEST)
             manifest[category].append(manifest['source_assets'][0])
             with self.subTest(category=category), self.assertRaises(ValueError):
                 assets.validate_manifest(manifest)
 
-    def test_device_components_and_ancestor_collisions_are_rejected(self):
+    def test_device_paths_and_ancestor_collisions_rejected(self):
         for entry in ('CON', 'dir/nUl.txt', 'COM1.log', 'lpt9', 'CONIN$', 'a/COM¹.txt', 'CON .txt', 'AUX .log'):
             manifest = copy.deepcopy(assets.MANIFEST)
             manifest['source_assets'].append(entry)
@@ -49,7 +49,7 @@ class ReleaseAssetTests(unittest.TestCase):
             with self.subTest(first=first), self.assertRaisesRegex(ValueError, 'collision'):
                 assets.validate_manifest(manifest)
 
-    def test_all_protocol_fixture_references_exist_and_are_packaged(self):
+    def test_protocol_fixtures_exist_and_are_packaged(self):
         root = Path(assets.__file__).resolve().parent.parent
         assets.validate_protocol_fixtures(root, assets.MANIFEST)
         manifest = copy.deepcopy(assets.MANIFEST)

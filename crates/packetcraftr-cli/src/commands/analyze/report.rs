@@ -133,7 +133,7 @@ fn redact(value: &mut serde_json::Value) {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn source_provenance_preserves_first_seen_order_and_distinct_hashes() {
+    fn provenance_preserves_order_and_distinct_hashes() {
         use super::*;
         let mut report = Report::new("report");
         let mut seen = BTreeSet::new();

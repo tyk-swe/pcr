@@ -138,7 +138,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn credential_snapshot_detects_privilege_drops_and_missing_fields() {
+    fn credentials_detect_privilege_drops_and_omissions() {
         let status = CREDENTIAL_FIELDS
             .iter()
             .map(|field| format!("{field}:\t1\n"))

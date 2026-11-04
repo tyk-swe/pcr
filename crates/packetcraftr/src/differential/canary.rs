@@ -145,7 +145,7 @@ mod tests {
     const TOKEN: [u8; TOKEN_LEN] = [0x42; TOKEN_LEN];
 
     #[test]
-    fn probe_round_trips_and_reply_names_the_probe() {
+    fn probe_round_trip_preserves_reply_identity() {
         let payload = build_probe(&TOKEN, 3, 7, 256);
         let probe = parse_probe(&payload).expect("probe parses");
         assert_eq!(probe.variant_index, 3);
@@ -166,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn reply_is_smaller_than_probe_and_wrong_kind_is_rejected() {
+    fn replies_are_smaller_and_kind_checked() {
         let payload = build_probe(&TOKEN, 0, 0, 256);
         assert!(build_reply(&parse_probe(&payload).expect("probe")).len() < payload.len());
         assert!(parse_reply(&payload).is_none());

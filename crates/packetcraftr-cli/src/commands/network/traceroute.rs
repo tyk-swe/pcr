@@ -208,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn multipath_arguments_require_opt_in_and_preserve_legacy_defaults() {
+    fn multipath_requires_opt_in() {
         assert!(arguments(&["--flows", "2"]).is_err());
         assert!(arguments(&["--multipath", "--flows", "65"]).is_err());
         assert!(arguments(&["--multipath", "--flows", "0"]).is_err());

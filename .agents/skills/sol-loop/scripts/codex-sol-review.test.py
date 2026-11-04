@@ -15,7 +15,7 @@ def msg(phase, text):
 
 
 class PickMessage(unittest.TestCase):
-    def test_partial_and_final_answers_are_kept_in_order(self):
+    def test_partial_and_final_answer_order(self):
         got = csr.pick_message(
             [
                 msg("commentary", "looking"),
@@ -29,7 +29,7 @@ class PickMessage(unittest.TestCase):
         got = csr.pick_message([msg("final_answer", "VERDICT: APPROVE")])
         self.assertEqual(got, "VERDICT: APPROVE")
 
-    def test_no_answer_phase_falls_back_to_last_message(self):
+    def test_missing_phase_uses_last_message(self):
         got = csr.pick_message([msg("commentary", "only this")])
         self.assertEqual(got, "only this")
 
@@ -47,11 +47,11 @@ class SelectSolTier(unittest.TestCase):
         models = [sol("gpt-6-sol", ["priority"]), sol("gpt-6.1-sol", ["priority", "ultrafast"])]
         self.assertEqual(csr.select_sol(models, None, "ultrafast"), "gpt-6.1-sol")
 
-    def test_skips_a_newer_sol_that_lacks_the_tier(self):
+    def test_skips_newer_sol_without_tier(self):
         models = [sol("gpt-7-sol", ["priority"]), sol("gpt-6.1-sol", ["ultrafast"])]
         self.assertEqual(csr.select_sol(models, None, "ultrafast"), "gpt-6.1-sol")
 
-    def test_fails_when_no_sol_offers_the_tier(self):
+    def test_unavailable_tier_fails(self):
         with self.assertRaises(csr.SetupError):
             csr.select_sol([sol("gpt-6-sol", ["priority"])], None, "ultrafast")
 
@@ -59,7 +59,7 @@ class SelectSolTier(unittest.TestCase):
         with self.assertRaises(csr.SetupError):
             csr.select_sol([sol("gpt-6-sol", ["priority"])], "gpt-6-sol", "ultrafast")
 
-    def test_named_sol_with_the_tier_is_kept(self):
+    def test_keeps_named_sol_with_tier(self):
         models = [sol("gpt-6.1-sol", ["ultrafast"]), sol("gpt-7-sol", ["ultrafast"])]
         self.assertEqual(csr.select_sol(models, "gpt-6.1-sol", "ultrafast"), "gpt-6.1-sol")
 
@@ -67,7 +67,7 @@ class SelectSolTier(unittest.TestCase):
         models = [sol("gpt-6-sol", []), sol("gpt-6.1-sol", [])]
         self.assertEqual(csr.select_sol(models, None, None), "gpt-6.1-sol")
 
-    def test_additional_speed_tiers_count_when_service_tiers_absent(self):
+    def test_missing_service_tiers_uses_additional_tiers(self):
         models = [{"model": "gpt-6.1-sol", "additionalSpeedTiers": ["fast", "ultrafast"]}]
         self.assertEqual(csr.select_sol(models, None, "ultrafast"), "gpt-6.1-sol")
 

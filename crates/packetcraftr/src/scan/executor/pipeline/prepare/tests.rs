@@ -25,7 +25,7 @@ fn probe(sequence: u64, address: IpAddr, scope: Option<ResolvedZone>) -> Probe {
 }
 
 #[test]
-fn route_map_scope_source_table_and_materialized_names_have_distinct_charges() {
+fn route_resources_have_distinct_charges() {
     let client = crate::engine::preparation::tests::client_for_plan();
     let operation = Operation::new(&client, Duration::from_secs(10));
     let deadline = operation.deadline(&client, Duration::from_secs(10));
@@ -155,7 +155,7 @@ fn route_map_scope_source_table_and_materialized_names_have_distinct_charges() {
 }
 
 #[test]
-fn optional_previews_preserve_the_minimum_admitted_resource_profile() {
+fn optional_previews_preserve_minimum_resource_budget() {
     for hosts in [1, 8] {
         let mut client = crate::engine::preparation::tests::client_for_plan();
         Arc::make_mut(&mut client.policy)

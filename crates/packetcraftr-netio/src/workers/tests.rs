@@ -32,7 +32,7 @@ fn connect_headroom(pool: &Arc<Pool>) -> usize {
 }
 
 #[test]
-fn established_data_keeps_one_root_charge_without_execution_and_leaves_control_headroom() {
+fn established_data_preserves_control_headroom() {
     let pool = Arc::new(Pool::new(4));
     let mut sockets: Vec<SocketPermit> = Vec::new();
     for _ in 0..3 {
@@ -54,7 +54,7 @@ fn established_data_keeps_one_root_charge_without_execution_and_leaves_control_h
 }
 
 #[test]
-fn a_socket_transfer_keeps_execution_until_the_work_really_finishes() {
+fn socket_transfer_retains_unfinished_execution() {
     let pool = Arc::new(Pool::new(4));
     let permit = pool.admit_connect().unwrap();
     let (published, received) = mpsc::sync_channel(1);
@@ -81,7 +81,7 @@ fn a_socket_transfer_keeps_execution_until_the_work_really_finishes() {
 }
 
 #[test]
-fn cancelled_unfinished_work_stays_charged_until_actual_completion() {
+fn cancelled_work_remains_charged_until_completion() {
     let pool = Arc::new(Pool::new(1));
     let permit = pool.admit().unwrap();
     let (release, held) = mpsc::sync_channel(1);
@@ -98,7 +98,7 @@ fn cancelled_unfinished_work_stays_charged_until_actual_completion() {
 }
 
 #[test]
-fn a_root_lease_retains_admission_without_retaining_finished_execution() {
+fn root_lease_retains_only_admission() {
     let pool = Arc::new(Pool::new(1));
     let permit = pool.admit().unwrap();
     let lease = permit.lease();
@@ -116,7 +116,7 @@ fn a_root_lease_retains_admission_without_retaining_finished_execution() {
 }
 
 #[test]
-fn unpromoted_socket_reservations_release_every_charge() {
+fn unpromoted_reservations_release_all_charges() {
     let pool = Arc::new(Pool::new(4));
     let assert_released = || {
         assert_eq!(connect_headroom(&pool), 3);
@@ -139,7 +139,7 @@ fn unpromoted_socket_reservations_release_every_charge() {
 }
 
 #[test]
-fn rejected_connect_dispatch_drops_captures_outside_lock_before_releasing_admission() {
+fn rejected_dispatch_drops_captures_before_admission() {
     struct CaptureDrop {
         pool: Arc<Pool>,
         report: mpsc::Sender<(usize, usize)>,
@@ -212,7 +212,7 @@ impl Drop for GatedPanicPayload {
 }
 
 #[test]
-fn work_panic_payload_cleanup_stays_charged_after_caller_cancellation() {
+fn cancelled_panic_cleanup_retains_work_charge() {
     let pool = Arc::new(Pool::new(1));
     let (entered, dropping) = mpsc::channel();
     let gate = Arc::new(PanicPayloadGate {
@@ -266,7 +266,7 @@ impl crate::tcp::Provider for PanickingConnect {
 }
 
 #[test]
-fn tcp_operation_budget_stays_charged_through_opaque_panic_cleanup() {
+fn tcp_panic_cleanup_retains_operation_budget() {
     let pool = Arc::new(Pool::new(2));
     let budget = crate::tcp::ConnectBudget::new(1);
     let (entered, dropping) = mpsc::channel();
@@ -317,7 +317,7 @@ fn tcp_operation_budget_stays_charged_through_opaque_panic_cleanup() {
 }
 
 #[test]
-fn nested_lookup_allocation_stays_charged_through_cancelled_panic_cleanup() {
+fn cancelled_lookup_panic_cleanup_retains_allocation() {
     let root = Arc::new(Pool::new(2));
     let allocation = Arc::new(Pool::new(1));
     let (entered, dropping) = mpsc::channel();

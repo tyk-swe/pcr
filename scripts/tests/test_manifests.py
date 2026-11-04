@@ -55,7 +55,7 @@ class ManifestTests(unittest.TestCase):
         for crate in ('packetcraftr', 'packetcraftr-core', 'packetcraftr-netio'):
             self.assertEqual(dependencies[crate]['version'], version, crate)
 
-    def test_every_crate_agrees_with_the_workspace_package_pins(self):
+    def test_crates_match_workspace_pins(self):
         pins = self.workspace['workspace']['package']
         for name, manifest in self.manifests.items():
             package = manifest['package']

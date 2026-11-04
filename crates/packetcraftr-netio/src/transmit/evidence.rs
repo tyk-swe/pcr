@@ -182,7 +182,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validate_exact_accepts_only_the_exact_submitted_bytes() {
+    fn exact_validation_requires_submitted_bytes() {
         let expected = Bytes::from_static(b"exact");
         assert!(
             Report::committed(expected.len(), expected.clone())
@@ -268,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn committed_and_completed_reports_have_consistent_timing() {
+    fn report_timestamps_are_consistent() {
         let report = Report::committed(3, Bytes::from_static(b"abc"));
         assert!(report.timing().is_consistent());
         assert_eq!(

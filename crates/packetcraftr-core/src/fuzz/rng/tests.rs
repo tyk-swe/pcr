@@ -11,7 +11,7 @@ fn words(seed: u64, count: usize) -> Vec<u64> {
 }
 
 #[test]
-fn same_seed_reproduces_the_same_word_sequence() {
+fn same_seed_reproduces_words() {
     for seed in [0, 1, 42, u64::MAX] {
         assert_eq!(words(seed, 32), words(seed, 32), "seed {seed}");
     }
@@ -25,14 +25,14 @@ fn different_seeds_produce_different_word_sequences() {
 }
 
 #[test]
-fn successive_words_from_one_seed_do_not_repeat() {
+fn successive_words_do_not_repeat() {
     let sequence = words(7, 64);
     let distinct = sequence.iter().collect::<BTreeSet<_>>();
     assert_eq!(distinct.len(), sequence.len());
 }
 
 #[test]
-fn bytes_returns_exactly_the_requested_length_for_the_seed() {
+fn seeded_bytes_match_requested_length() {
     for length in [0, 1, 7, 8, 9, 31, 64] {
         let bytes = SplitMix64::new(9).bytes(length);
         assert_eq!(bytes.len(), length);

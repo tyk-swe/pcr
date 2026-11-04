@@ -122,7 +122,7 @@ fn packet_documents_round_trip_through_build() {
 }
 
 #[test]
-fn headers_agree_with_codec_decode_on_captures() {
+fn headers_match_capture_decoding() {
     let manifest: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../../examples/captures/protocols.manifest.json"
     ))
@@ -222,7 +222,7 @@ fn headers_agree_with_codec_decode_on_captures() {
 }
 
 #[test]
-fn layout_indices_resolve_and_ranges_stay_inside_layers() {
+fn layout_indices_and_ranges_are_valid() {
     let manifest: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../../examples/captures/protocols.manifest.json"
     ))

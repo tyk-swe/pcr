@@ -38,7 +38,7 @@ fn sources(flow: &ScopedFlowKey) -> TcpSources {
 }
 
 #[test]
-fn held_segments_match_first_seen_trace_across_wrap_and_late_gaps() {
+fn held_segments_preserve_first_seen_order() {
     const SIZE: usize = 512;
     let tracker = Tracker::new(1 << 20, 32).unwrap();
     let flow = flow();
@@ -124,7 +124,7 @@ fn held_segments_match_first_seen_trace_across_wrap_and_late_gaps() {
 }
 
 #[test]
-fn retransmission_removes_only_the_current_frames_overlapping_sources() {
+fn retransmission_removes_current_overlapping_sources() {
     let tracker = Tracker::new(1 << 20, 32).unwrap();
     let flow = flow();
     let mut actual = sources(&flow);
@@ -213,7 +213,7 @@ fn retransmission_removes_only_the_current_frames_overlapping_sources() {
 }
 
 #[test]
-fn held_gap_work_grows_with_intersections_not_retained_population() {
+fn held_gap_work_scales_with_intersections() {
     let tracker = Tracker::new(1 << 20, 32).unwrap();
     let flow = flow();
     let provenance = source(&tracker, 1);
@@ -261,7 +261,7 @@ fn held_gap_work_grows_with_intersections_not_retained_population() {
 }
 
 #[test]
-fn moving_anchor_survives_multiple_wraps_with_a_future_span_held() {
+fn moving_anchor_survives_sequence_wraps() {
     let tracker = Tracker::new(1 << 20, 32).unwrap();
     let flow = flow();
     let mut actual = sources(&flow);
@@ -325,7 +325,7 @@ fn moving_anchor_survives_multiple_wraps_with_a_future_span_held() {
 }
 
 #[test]
-fn reset_touches_only_currently_owned_flows_and_keeps_reassigned_sources() {
+fn reset_preserves_reassigned_flow_sources() {
     let tracker = Tracker::new(1 << 20, 32).unwrap();
     for population in [8u16, 256, 1000] {
         let first = flow();

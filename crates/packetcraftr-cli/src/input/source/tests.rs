@@ -43,7 +43,7 @@ fn mkfifo(directory: &Path) -> PathBuf {
 }
 
 #[test]
-fn cancellation_interrupts_a_read_waiting_for_pipe_data() {
+fn cancellation_interrupts_pipe_read() {
     let cancellation = Cancellation::default();
     let invocation = test_invocation(None, cancellation.clone());
     let (mut source, _writer) = polled_pipe(&invocation);
@@ -60,7 +60,7 @@ fn cancellation_interrupts_a_read_waiting_for_pipe_data() {
 }
 
 #[test]
-fn deadline_interrupts_a_read_waiting_for_pipe_data() {
+fn deadline_interrupts_pipe_read() {
     let invocation = test_invocation(Some(Duration::from_millis(200)), Cancellation::default());
     let (mut source, _writer) = polled_pipe(&invocation);
     let started = Instant::now();
@@ -70,7 +70,7 @@ fn deadline_interrupts_a_read_waiting_for_pipe_data() {
 }
 
 #[test]
-fn data_that_arrives_later_is_read_and_writer_close_is_eof() {
+fn delayed_data_precedes_writer_eof() {
     let invocation = test_invocation(Some(PROMPTLY), Cancellation::default());
     let (mut source, mut writer) = polled_pipe(&invocation);
     let mut bytes = Vec::new();
@@ -88,7 +88,7 @@ fn data_that_arrives_later_is_read_and_writer_close_is_eof() {
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[test]
-fn fifo_without_a_writer_opens_and_waits_instead_of_reading_eof() {
+fn fifo_waits_for_writer() {
     let directory = tempfile::tempdir().unwrap();
     let fifo = mkfifo(directory.path());
 
@@ -112,7 +112,7 @@ fn fifo_without_a_writer_opens_and_waits_instead_of_reading_eof() {
 }
 
 #[test]
-fn a_silent_unix_socket_stops_at_the_deadline() {
+fn silent_socket_reaches_deadline() {
     let (reader, writer) = UnixStream::pair().unwrap();
     let invocation = test_invocation(Some(LATER), Cancellation::default());
     let mut source = classify(&invocation, File::from(OwnedFd::from(reader))).unwrap();
@@ -128,7 +128,7 @@ fn a_silent_unix_socket_stops_at_the_deadline() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn a_non_retryable_read_error_surfaces_instead_of_retrying_until_the_deadline() {
+fn permanent_read_error_stops_retries() {
     let inotify = rustix::fs::inotify::init(rustix::fs::inotify::CreateFlags::CLOEXEC).unwrap();
     let directory = tempfile::tempdir().unwrap();
     rustix::fs::inotify::add_watch(
@@ -150,7 +150,7 @@ fn a_non_retryable_read_error_surfaces_instead_of_retrying_until_the_deadline() 
 }
 
 #[test]
-fn duplicated_stdin_leaves_the_shared_descriptor_flags_and_open_state() {
+fn duplicated_stdin_preserves_descriptor_state() {
     let (reader, mut writer) = io::pipe().unwrap();
     let flags = rustix::fs::fcntl_getfl(reader.as_fd()).unwrap();
     let invocation = test_invocation(Some(Duration::from_millis(100)), Cancellation::default());
@@ -174,7 +174,7 @@ fn entries(directory: &str) -> usize {
 }
 
 #[test]
-fn repeated_cancellations_leak_no_descriptors_or_threads() {
+fn repeated_cancellations_release_resources() {
     #[cfg(target_os = "linux")]
     let before = (entries("/proc/self/fd"), entries("/proc/self/task"));
     for _ in 0..20 {
@@ -210,7 +210,7 @@ fn repeated_cancellations_leak_no_descriptors_or_threads() {
 
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 #[test]
-fn a_fifo_is_read_in_full_through_an_ordinary_blocking_open() {
+fn blocking_fifo_reads_complete_data() {
     let directory = tempfile::tempdir().unwrap();
     let fifo = mkfifo(directory.path());
     let invocation = test_invocation(Some(PROMPTLY), Cancellation::default());

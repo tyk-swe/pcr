@@ -315,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn equally_ranked_sources_keep_the_first_address() {
+    fn tied_sources_keep_first_address() {
         for (destination, first, second) in [
             (
                 "10.0.1.10",
@@ -339,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn fallback_skips_unspecified_multicast_and_wrong_family_sources() {
+    fn fallback_rejects_invalid_source_addresses() {
         let destination = "192.0.2.10".parse().unwrap();
         let addresses = [
             address("0.0.0.0", 0),
@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn route_mtu_uses_the_smallest_positive_route_or_interface_value() {
+    fn route_mtu_uses_smallest_positive_value() {
         for (route_mtu, interface_mtu, expected) in [
             (None, None, None),
             (Some(0), Some(0), None),
@@ -392,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn interface_only_route_requires_a_positive_interface_mtu() {
+    fn interface_route_requires_positive_mtu() {
         assert_eq!(interface_decision(interface(Some(1400))).unwrap().mtu, 1400);
         for mtu in [None, Some(0)] {
             assert!(matches!(interface_decision(interface(mtu)),

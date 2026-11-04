@@ -171,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn outbound_dispatches_on_resolved_mode_and_rejects_auto() {
+    fn outbound_uses_resolved_mode() {
         let decision = decision();
         let bytes = Bytes::from_static(b"frame");
         assert!(matches!(
@@ -189,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn accessors_return_the_exact_submitted_frame_and_counts() {
+    fn accessors_preserve_submitted_frame_and_counts() {
         let decision = decision();
         let bytes = Bytes::from_static(b"frame");
         let frame = Layer2Frame::try_new(&bytes, route(&decision, Mode::Layer2)).unwrap();

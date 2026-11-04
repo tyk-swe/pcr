@@ -191,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn domains_have_at_most_one_root_terminator() {
+    fn domains_allow_one_root_terminator() {
         assert!(document("dns", Kind::Domain, "example.test.").is_ok());
         assert!(document("dns", Kind::Domain, "example.test..").is_err());
     }
@@ -203,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn blank_identifiers_are_not_useful_evidence_names() {
+    fn blank_evidence_identifiers_are_rejected() {
         assert!(document("   ", Kind::Ip, "192.0.2.1").is_err());
         assert!(document("dns name", Kind::Domain, "example.test").is_ok());
     }
@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn deeply_nested_json_fails_closed_instead_of_recursing() {
+    fn deeply_nested_json_is_rejected() {
         let depth = 100_000;
         let nested = [vec![b'['; depth], vec![b']'; depth]].concat();
         assert!(nested.len() < MAX_DOCUMENT_BYTES);
@@ -236,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn public_indicators_match_case_insensitively_without_normalization() {
+    fn public_indicators_match_ignoring_case() {
         let indicator = Indicator {
             id: "dns".into(),
             kind: Kind::DomainSuffix,

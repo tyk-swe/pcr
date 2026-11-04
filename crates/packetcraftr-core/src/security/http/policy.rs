@@ -275,7 +275,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hsts_rejects_duplicate_directives_case_insensitively() {
+    fn hsts_rejects_duplicates_ignoring_case() {
         for value in [
             "max-age=0; max-age=1",
             "max-age=1; MAX-AGE=1",
@@ -286,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn hsts_accepts_quoted_values_and_quoted_pairs() {
+    fn hsts_accepts_quoted_values_and_pairs() {
         assert!(positive_hsts(br#"max-age="123""#));
         assert!(positive_hsts(br#"max-age="\1\2\3"; extension="a;b""#));
     }
@@ -297,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn hsts_delta_seconds_are_digits_not_signed_integers() {
+    fn hsts_lifetime_requires_unsigned_digits() {
         for value in [
             "max-age=+1",
             "max-age=-1",
@@ -310,12 +310,12 @@ mod tests {
     }
 
     #[test]
-    fn hsts_positive_lifetime_need_not_fit_u64() {
+    fn hsts_lifetime_accepts_beyond_u64() {
         assert!(positive_hsts(b"max-age=184467440737095516160"));
     }
 
     #[test]
-    fn malformed_extensions_invalidate_the_entire_hsts_field() {
+    fn malformed_extensions_invalidate_hsts() {
         for value in [
             "max-age=1; includeSubDomains=yes",
             "max-age=1; bad@name",
@@ -340,12 +340,12 @@ mod tests {
     }
 
     #[test]
-    fn csp_directive_names_are_ascii_case_insensitive() {
+    fn csp_directive_names_ignore_ascii_case() {
         assert_eq!(policy("FrAmE-AnCeStOrS 'none'"), FrameAncestors::Restricted);
     }
 
     #[test]
-    fn csp_uses_the_first_directive_in_each_policy() {
+    fn first_csp_directive_wins() {
         assert_eq!(
             policy("frame-ancestors *; frame-ancestors 'none'"),
             FrameAncestors::Unconfirmed
@@ -361,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn csp_does_not_treat_unicode_whitespace_as_a_separator() {
+    fn csp_preserves_unicode_whitespace() {
         assert_eq!(
             policy("frame-ancestors\u{a0}'none'"),
             FrameAncestors::Absent
@@ -369,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn present_but_unconfirmed_frame_ancestors_is_distinct_from_absent() {
+    fn unconfirmed_frame_ancestors_differs_from_absent() {
         assert_eq!(policy("default-src 'self'"), FrameAncestors::Absent);
         for value in [
             "frame-ancestors",

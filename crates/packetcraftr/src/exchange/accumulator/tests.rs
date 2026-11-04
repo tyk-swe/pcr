@@ -5,7 +5,7 @@ use super::Accumulator;
 use packetcraftr_netio::capture::ObservationQuality;
 
 #[test]
-fn every_matched_reply_refusal_qualifies_missing_observations() {
+fn reply_refusal_qualifies_missing_observations() {
     for limit in [
         "exchange.response_limit",
         "exchange.capture_frame_limit",
@@ -40,7 +40,7 @@ fn every_matched_reply_refusal_qualifies_missing_observations() {
 }
 
 #[test]
-fn clean_local_retention_does_not_promote_unknown_or_missing_ingress() {
+fn local_retention_cannot_establish_ingress_quality() {
     let mut captured = Accumulator::new(1);
     assert_eq!(
         captured.observation_quality(ObservationQuality::Unknown),

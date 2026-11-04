@@ -245,7 +245,7 @@ mod tests {
     use crate::target::{Error as TargetError, Hostname, Resolver, Target};
 
     #[test]
-    fn resolution_policy_denial_preserves_classification_and_causes() {
+    fn resolution_denial_preserves_error_details() {
         let policy = Policy::default();
         let target: Target = "example.test".parse().unwrap();
         let error = policy
@@ -268,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn resolution_target_failure_preserves_classification_and_causes() {
+    fn resolution_failure_preserves_error_details() {
         struct FailingResolver;
         impl Resolver for FailingResolver {
             fn resolve(&self, hostname: &Hostname, _: usize) -> Result<Vec<IpAddr>, TargetError> {
@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn resolution_deadline_interruption_preserves_target_control() {
+    fn resolution_deadline_preserves_target_control() {
         let policy = Policy::default();
         let target: Target = "127.0.0.1".parse().unwrap();
         let error = policy
@@ -374,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn default_policy_denies_public_destinations_and_allowlist_never_grants_them() {
+    fn allowlisting_cannot_grant_public_destinations() {
         let public_v4: IpAddr = "1.2.3.4".parse().unwrap();
         let public_v6: IpAddr = "2606:4700:4700::1111".parse().unwrap();
         let policy = Policy::default();

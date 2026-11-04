@@ -34,14 +34,14 @@ def with_const(value):
 
 
 class IdentityTests(unittest.TestCase):
-    def test_identity_is_read_from_the_runtime_constant(self):
+    def test_identity_matches_runtime_constant(self):
         source = 'use x;\n/// doc\npub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v19";\n'
         identity = checker.read_identity(source)
         self.assertEqual(identity, checker.Identity('packetcraftr.output/v19', 19))
         self.assertEqual(identity.schema_path, 'schemas/packetcraftr.output.v19.schema.json')
         self.assertEqual(identity.urn, 'urn:packetcraftr:output:v19')
 
-    def test_missing_or_malformed_runtime_constant_is_an_error(self):
+    def test_invalid_runtime_constant_fails(self):
         for source in ('', 'pub const SCHEMA_V1: &str = "packetcraftr.output/v1";',
                        'pub const OUTPUT_SCHEMA: &str = "packetcraftr.output/v0";',
                        'pub const OUTPUT_SCHEMA: &str = "packetcraftr.packet/v1";'):
@@ -75,7 +75,7 @@ class ReleaseAssetTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn(self.CURRENT, problems[0])
 
-    def test_historical_or_superseded_output_schemas_are_reported(self):
+    def test_reports_obsolete_output_schemas(self):
         for extra in ('schemas/packetcraftr.output.v1.schema.json',
                       'schemas/historical/packetcraftr.output.v1-reset-4766fe78.schema.json'):
             with self.subTest(extra=extra):
@@ -88,7 +88,7 @@ class DocumentValidationTests(unittest.TestCase):
     def setUp(self):
         self.validator = checker.load_validator(SCHEMA)
 
-    def test_example_json_and_ndjson_records_are_validated(self):
+    def test_validates_json_and_ndjson_examples(self):
         with tempfile.TemporaryDirectory() as directory:
             documents = Path(directory) / 'examples' / 'documents'
             documents.mkdir(parents=True)
@@ -113,7 +113,7 @@ class DocumentValidationTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn('doc', problems[0])
 
-    def test_missing_jsonschema_fails_with_installation_guidance(self):
+    def test_missing_jsonschema_reports_install_steps(self):
         with patch.dict(sys.modules, {'jsonschema': None}):
             with self.assertRaisesRegex(checker.CheckError, 'jsonschema'):
                 checker.load_validator(SCHEMA)
@@ -149,11 +149,11 @@ class RuntimeValidationTests(unittest.TestCase):
     def test_conforming_runtime_output_passes(self):
         self.assertEqual(self.problems(), [])
 
-    def test_nonconforming_runtime_output_is_reported_per_command(self):
+    def test_reports_invalid_output_per_command(self):
         problems = self.problems(dict(VALID, schema='packetcraftr.output/v1'))
         self.assertEqual(len(problems), len(self.COMMANDS), problems)
 
-    def test_empty_or_non_json_runtime_output_is_reported(self):
+    def test_reports_empty_and_nonjson_output(self):
         for stdout in ('', 'not json\n'):
             with self.subTest(stdout=stdout):
                 self.assertEqual(len(self.problems(stdout=stdout)), len(self.COMMANDS))
@@ -238,7 +238,7 @@ class RegistryTests(unittest.TestCase):
         root = self.workspace(REGISTRY_SOURCE)
         self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA), [])
 
-    def test_stale_definition_and_unclaimed_def_are_reported(self):
+    def test_reports_unused_schema_definitions(self):
         root = self.workspace(REGISTRY_SOURCE.replace('buildSuccess"', 'goneSuccess"'))
         problems = checker.registry_problems(root, REGISTRY_SCHEMA)
         self.assertTrue(any('no such schema definition' in problem for problem in problems))
@@ -252,7 +252,7 @@ class RegistryTests(unittest.TestCase):
 
 
 class RepositoryTests(unittest.TestCase):
-    def test_repository_examples_identity_and_assets_agree_with_the_current_schema(self):
+    def test_repository_outputs_match_current_schema(self):
         self.assertEqual(checker.check(ROOT), [])
 
 

@@ -1,8 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::invalid;
-use crate::{errors::CliError, resources::Settings};
+use crate::{command_options::OutputBytes, errors::CliError, resources::Settings};
 use clap::{Args, ValueEnum};
 use packetcraftr_core::security::{self, Severity};
 
@@ -62,9 +61,7 @@ impl Bounds {
             max_observations: self.max_observations,
         };
         limits.validate().map_err(CliError::classified)?;
-        if self.max_result_bytes == 0 || self.max_result_bytes > 256 * 1024 * 1024 {
-            return Err(invalid("max-result-bytes must be in 1..=268435456"));
-        }
+        OutputBytes::new(self.max_result_bytes, "max-result-bytes")?;
         Ok(limits)
     }
     pub(in crate::commands) fn resources(&self, settings: &mut Settings<'_>) {
@@ -86,6 +83,51 @@ mod tests {
     struct TestArgs {
         #[command(flatten)]
         bounds: Bounds,
+    }
+
+    #[test]
+    fn output_byte_limits_preserve_boundaries_and_error_precedence() {
+        let defaults = TestArgs::parse_from(["security"]).bounds;
+        for (value, valid) in [
+            (0, false),
+            (1, true),
+            (OutputBytes::MAX, true),
+            (OutputBytes::MAX + 1, false),
+        ] {
+            let result = Bounds {
+                max_result_bytes: value,
+                ..defaults
+            }
+            .core();
+            if valid {
+                assert!(result.is_ok());
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(
+                    error.classification.kind,
+                    packetcraftr_core::error::Kind::Usage
+                );
+                assert_eq!(
+                    error.message,
+                    format!("max-result-bytes must be in 1..={}", OutputBytes::MAX)
+                );
+            }
+        }
+        let core_error = Bounds {
+            max_findings: 0,
+            ..defaults
+        }
+        .core()
+        .unwrap_err();
+        let both_invalid = Bounds {
+            max_findings: 0,
+            max_result_bytes: 0,
+            ..defaults
+        }
+        .core()
+        .unwrap_err();
+        assert_eq!(both_invalid.message, core_error.message);
+        assert_eq!(both_invalid.classification, core_error.classification);
     }
 
     #[test]

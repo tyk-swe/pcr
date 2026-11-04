@@ -293,6 +293,33 @@ mod tests {
     }
 
     #[test]
+    fn preparation_rejects_incomplete_interface_identities() {
+        let (bytes, destination) = ipv6();
+        for interface in [
+            Id {
+                name: String::new(),
+                index: LOOPBACK_IFINDEX,
+            },
+            Id {
+                name: "interface".into(),
+                index: 0,
+            },
+        ] {
+            let route = Decision {
+                interface,
+                ..decision(LOOPBACK_IFINDEX, destination)
+            };
+            let Outbound::Layer3(frame) = outbound(&bytes, &route, destination) else {
+                unreachable!();
+            };
+            assert!(
+                matches!(prepare(frame), Err(Error::InvalidTransmissionFrame { message })
+                if message == "route-selected interface identity is incomplete")
+            );
+        }
+    }
+
+    #[test]
     fn loopback_reuses_one_family_socket_and_validates_every_frame() {
         let counts = Arc::new(Counts::default());
         let session = session(&counts);

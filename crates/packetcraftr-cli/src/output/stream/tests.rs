@@ -23,6 +23,91 @@ impl StreamRecord for Data {
     }
 }
 
+#[derive(Clone)]
+struct RecordingWriter(Arc<Mutex<Vec<u8>>>);
+
+impl Write for RecordingWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Serialize)]
+struct NamedData(&'static str);
+
+impl StreamRecord for NamedData {
+    fn event_name(&self) -> &'static str {
+        self.0
+    }
+}
+
+#[test]
+fn reserved_events_leave_output_budget_and_sequence_unchanged() {
+    for counted in [false, true] {
+        let writer = RecordingWriter(Arc::default());
+        let stream = StreamEncoder::new(Command::Http, writer.clone());
+        let budget = 1024;
+        let mut remaining = budget;
+        for event in ["", "complete", "error"] {
+            let result = if counted {
+                stream.emit_data_counted(NamedData(event), Vec::new(), &mut remaining)
+            } else {
+                stream
+                    .emit_published(Published::new(NamedData(event), Vec::new()))
+                    .map_err(MeteredError::Encode)
+            };
+            assert!(matches!(
+                result,
+                Err(MeteredError::Encode(EncodeError::ReservedEvent))
+            ));
+            assert_eq!(remaining, budget);
+            assert!(writer.0.lock().unwrap().is_empty());
+            assert!(stream.is_open());
+        }
+        if counted {
+            stream
+                .emit_data_counted(NamedData("message"), Vec::new(), &mut remaining)
+                .unwrap();
+            assert_eq!(
+                budget - remaining,
+                serde_json::to_vec(&NamedData("message")).unwrap().len()
+            );
+        } else {
+            stream
+                .emit_published(Published::new(NamedData("message"), Vec::new()))
+                .unwrap();
+        }
+        stream
+            .complete_published(Published::new((), Vec::new()))
+            .unwrap();
+        assert!(stream.is_complete());
+        let bytes = writer.0.lock().unwrap().clone();
+        let records: Vec<serde_json::Value> = serde_json::Deserializer::from_slice(&bytes)
+            .into_iter()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["sequence"], 0);
+        assert_eq!(records[0]["event"], "message");
+        assert_eq!(records[1]["sequence"], 1);
+        assert_eq!(records[1]["event"], "complete");
+        assert!(matches!(
+            stream.emit_published(Published::new(NamedData("complete"), Vec::new())),
+            Err(EncodeError::ReservedEvent)
+        ));
+        assert!(matches!(
+            stream.emit_data_counted(NamedData("error"), Vec::new(), &mut remaining),
+            Err(MeteredError::Encode(EncodeError::ReservedEvent))
+        ));
+        assert_eq!(*writer.0.lock().unwrap(), bytes);
+    }
+}
+
 #[test]
 fn complete_record_limit_includes_newline_and_serialization_failure_never_writes() {
     let value = serde_json::json!({"value": "abc"});

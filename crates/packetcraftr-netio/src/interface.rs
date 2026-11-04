@@ -21,6 +21,13 @@ pub struct Id {
     pub index: u32,
 }
 
+impl Id {
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        !self.name.is_empty() && self.index != 0
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Address {
     pub address: IpAddr,

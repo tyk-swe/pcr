@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::Duration;
-
 pub(crate) const MAX_RATE: u32 = 1_000_000;
 
 pub(crate) fn check_rate<E>(
@@ -21,8 +19,4 @@ pub(crate) fn check_rate<E>(
         )),
         _ => Ok(()),
     }
-}
-
-pub(crate) fn duration_violation(value: Duration, maximum: Duration) -> bool {
-    value.is_zero() || value > maximum
 }

@@ -9,7 +9,8 @@ use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 use packetcraftr_netio::deadline::MAX_WAIT;
 
-use crate::engine::execution::limits::{check_rate, duration_violation};
+use crate::deadline::duration_violation;
+use crate::engine::execution::limits::check_rate;
 use crate::evidence::Limits as EvidenceLimits;
 use crate::{exchange, route, send};
 

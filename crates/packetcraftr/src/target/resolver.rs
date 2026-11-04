@@ -199,7 +199,7 @@ pub(crate) fn valid_zone_interface(
     zone: &Zone,
     interface: packetcraftr_netio::interface::Id,
 ) -> Result<packetcraftr_netio::interface::Id, Error> {
-    if interface.index == 0 || interface.name.is_empty() {
+    if !interface.is_complete() {
         return Err(Error::InvalidZoneInterface {
             zone: zone.clone(),
             interface,
@@ -241,6 +241,45 @@ pub(crate) fn distinct_addresses(
 mod tests {
     use super::distinct_addresses;
     use crate::target::Error as TargetError;
+
+    #[test]
+    fn zone_resolution_requires_a_complete_identity() {
+        use packetcraftr_netio::interface::Id;
+
+        for (zone, interface) in [
+            (
+                "1",
+                Id {
+                    name: String::new(),
+                    index: 1,
+                },
+            ),
+            (
+                "test0",
+                Id {
+                    name: "test0".into(),
+                    index: 0,
+                },
+            ),
+        ] {
+            let zone = zone.parse().unwrap();
+            assert!(
+                matches!(super::resolve_zone_from(&zone, [interface.clone()]),
+                Err(TargetError::InvalidZoneInterface { zone: actual_zone, interface: actual_interface })
+                    if actual_zone == zone && actual_interface == interface)
+            );
+        }
+        let interface = Id {
+            name: "test0".into(),
+            index: 1,
+        };
+        for zone in ["1", "test0"] {
+            assert_eq!(
+                super::resolve_zone_from(&zone.parse().unwrap(), [interface.clone()]).unwrap(),
+                interface
+            );
+        }
+    }
 
     #[test]
     fn distinct_resolver_order_and_limit() {

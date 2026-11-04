@@ -5,9 +5,14 @@
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::Error;
+use std::time::Duration;
 
 /// Allowance for a passive route or interface lookup whose operation has no deadline.
 pub const PASSIVE_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+pub(crate) fn duration_violation(value: Duration, maximum: Duration) -> bool {
+    value.is_zero() || value > maximum
+}
 
 /// The boundary itself is expired: no time remains once nothing is left.
 #[must_use]

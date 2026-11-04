@@ -193,9 +193,7 @@ impl StreamEncoder {
         remaining: &mut usize,
     ) -> Result<(), MeteredError> {
         let event = result.event_name();
-        if event.is_empty() || matches!(event, "complete" | "error") {
-            return Err(MeteredError::Encode(EncodeError::ReservedEvent));
-        }
+        validate_data_event(event).map_err(MeteredError::Encode)?;
         let meter = ResultMeter::new(*remaining);
         let outcome = self.write_success(
             event,
@@ -222,9 +220,7 @@ impl StreamEncoder {
         published: Published<T>,
     ) -> Result<(), EncodeError> {
         let event = published.result.event_name();
-        if event.is_empty() || matches!(event, "complete" | "error") {
-            return Err(EncodeError::ReservedEvent);
-        }
+        validate_data_event(event)?;
         self.write_success(event, published, false, None)
     }
 
@@ -359,6 +355,13 @@ impl StreamEncoder {
     fn state(&self) -> Option<EncoderState> {
         self.output.try_lock().ok().map(|output| output.state)
     }
+}
+
+fn validate_data_event(event: &str) -> Result<(), EncodeError> {
+    if event.is_empty() || matches!(event, "complete" | "error") {
+        return Err(EncodeError::ReservedEvent);
+    }
+    Ok(())
 }
 
 fn write_line(

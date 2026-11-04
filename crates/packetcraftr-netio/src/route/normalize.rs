@@ -400,4 +400,27 @@ mod tests {
                     if message == "interface test0 reported no usable MTU"));
         }
     }
+
+    #[test]
+    fn interface_only_route_rejects_incomplete_identity() {
+        for id in [
+            InterfaceId {
+                name: String::new(),
+                index: 1,
+            },
+            InterfaceId {
+                name: "test0".into(),
+                index: 0,
+            },
+        ] {
+            let info = interface::Info {
+                id,
+                ..interface(Some(1500))
+            };
+            assert!(
+                matches!(interface_decision(info), Err(route::Error::InvalidResponse { message })
+                if message == "operating system returned an incomplete interface identity")
+            );
+        }
+    }
 }

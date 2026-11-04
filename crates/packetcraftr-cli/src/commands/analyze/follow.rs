@@ -71,8 +71,10 @@ pub(super) fn run(
     }
     let capture_limits = arguments.limits.capture.limits()?;
     let prepared = prepare(capture_limits, arguments.limits, None, &arguments.decode)?;
-    let max_output_bytes =
-        crate::command_options::OutputBytes::try_from(arguments.max_application_output_bytes)?;
+    let max_output_bytes = crate::command_options::OutputBytes::new(
+        arguments.max_application_output_bytes,
+        "--max-application-output-bytes",
+    )?;
     let mut files = arguments
         .write
         .as_deref()

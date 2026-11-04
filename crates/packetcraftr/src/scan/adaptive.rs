@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use packetcraftr_netio::deadline::MAX_WAIT;
 
-use crate::engine::execution::limits::duration_violation;
+use crate::deadline::duration_violation;
 use crate::target::ResolvedZone;
 
 use super::Error;

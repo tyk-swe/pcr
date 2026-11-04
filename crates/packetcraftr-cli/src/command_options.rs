@@ -51,7 +51,10 @@ mod timestamp;
 pub(crate) use timestamp::parse_timestamp;
 
 mod application;
-pub(crate) use application::{ApplicationLimits, ApplicationLimitsArgs, OutputBytes};
+pub(crate) use application::{ApplicationLimits, ApplicationLimitsArgs};
+
+mod output_bytes;
+pub(crate) use output_bytes::OutputBytes;
 
 pub(crate) fn parse_target(
     target: String,

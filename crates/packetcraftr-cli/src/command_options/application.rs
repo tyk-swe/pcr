@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use super::OutputBytes;
 use crate::errors::CliError;
 use packetcraftr_core::analysis::application::Limits;
 #[derive(Clone, Copy, Debug, clap::Args)]
@@ -52,33 +53,11 @@ impl ApplicationLimitsArgs {
                 max_retained_bytes: self.max_application_retained_bytes,
                 max_source_spans: self.max_application_source_spans,
             },
-            max_output_bytes: OutputBytes::try_from(self.max_application_output_bytes)?,
+            max_output_bytes: OutputBytes::new(
+                self.max_application_output_bytes,
+                "--max-application-output-bytes",
+            )?,
         })
-    }
-}
-
-/// `--max-application-output-bytes` after the `1..=268435456` check; only
-/// `TryFrom` can build one.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct OutputBytes(usize);
-
-impl OutputBytes {
-    pub(crate) const fn get(self) -> usize {
-        self.0
-    }
-}
-
-impl TryFrom<usize> for OutputBytes {
-    type Error = CliError;
-
-    fn try_from(value: usize) -> Result<Self, CliError> {
-        if value == 0 || value > 256 * 1024 * 1024 {
-            return Err(CliError::new(
-                packetcraftr_core::error::Kind::Usage,
-                "--max-application-output-bytes must be in 1..=268435456",
-            ));
-        }
-        Ok(Self(value))
     }
 }
 
@@ -97,5 +76,48 @@ impl ApplicationLimits {
 
     pub(crate) const fn max_output_bytes(self) -> usize {
         self.max_output_bytes.get()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+    use packetcraftr_core::error::Kind;
+
+    #[derive(Parser)]
+    struct TestArgs {
+        #[command(flatten)]
+        application: ApplicationLimitsArgs,
+    }
+
+    #[test]
+    fn output_byte_limits_preserve_boundaries_and_option_errors() {
+        let defaults = TestArgs::parse_from(["analysis"]).application;
+        for (value, valid) in [
+            (0, false),
+            (1, true),
+            (OutputBytes::MAX, true),
+            (OutputBytes::MAX + 1, false),
+        ] {
+            let result = ApplicationLimitsArgs {
+                max_application_output_bytes: value,
+                ..defaults
+            }
+            .limits();
+            if valid {
+                assert_eq!(result.unwrap().max_output_bytes(), value);
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(error.classification.kind, Kind::Usage);
+                assert_eq!(
+                    error.message,
+                    format!(
+                        "--max-application-output-bytes must be in 1..={}",
+                        OutputBytes::MAX
+                    )
+                );
+            }
+        }
     }
 }

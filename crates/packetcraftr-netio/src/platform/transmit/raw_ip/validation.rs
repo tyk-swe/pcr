@@ -33,7 +33,7 @@ pub(super) fn validate(
             decision.mtu
         )));
     }
-    if decision.interface.name.is_empty() || decision.interface.index == 0 {
+    if !decision.interface.is_complete() {
         return Err(invalid_frame(
             "route-selected interface identity is incomplete".to_owned(),
         ));

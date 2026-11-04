@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use super::Error;
 use super::error::invalid_options;
+use crate::deadline::duration_violation;
 use packetcraftr_netio::capture;
 
 const MAX_CONFIGURED_ATTEMPTS: u32 = 10;
@@ -45,12 +46,12 @@ impl Options {
                 "max_attempts must be within 1..={MAX_CONFIGURED_ATTEMPTS}"
             )));
         }
-        if self.attempt_timeout.is_zero() || self.attempt_timeout > MAX_CONFIGURED_ATTEMPT_TIMEOUT {
+        if duration_violation(self.attempt_timeout, MAX_CONFIGURED_ATTEMPT_TIMEOUT) {
             return Err(invalid_options(format!(
                 "attempt_timeout must be within 1ns..={MAX_CONFIGURED_ATTEMPT_TIMEOUT:?}"
             )));
         }
-        if self.cache_ttl.is_zero() || self.cache_ttl > MAX_CONFIGURED_CACHE_TTL {
+        if duration_violation(self.cache_ttl, MAX_CONFIGURED_CACHE_TTL) {
             return Err(invalid_options(format!(
                 "cache_ttl must be within 1ns..={MAX_CONFIGURED_CACHE_TTL:?}"
             )));
@@ -138,6 +139,46 @@ impl Options {
             max_bytes: self.max_captured_bytes,
             snap_length: self.snap_length,
             overflow_policy: capture::OverflowPolicy::Fail,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duration_bounds_preserve_each_ceiling_and_error_precedence() {
+        let tick = Duration::from_nanos(1);
+        for (attempt_timeout, cache_ttl, invalid_field) in [
+            (Duration::ZERO, tick, Some("attempt_timeout")),
+            (tick, Duration::ZERO, Some("cache_ttl")),
+            (tick, tick, None),
+            (
+                MAX_CONFIGURED_ATTEMPT_TIMEOUT,
+                MAX_CONFIGURED_CACHE_TTL,
+                None,
+            ),
+            (
+                MAX_CONFIGURED_ATTEMPT_TIMEOUT + tick,
+                tick,
+                Some("attempt_timeout"),
+            ),
+            (tick, MAX_CONFIGURED_CACHE_TTL + tick, Some("cache_ttl")),
+            (Duration::ZERO, Duration::ZERO, Some("attempt_timeout")),
+        ] {
+            let result = Options {
+                attempt_timeout,
+                cache_ttl,
+                ..Options::default()
+            }
+            .validate();
+            match invalid_field {
+                Some(field) => assert!(
+                    matches!(result, Err(Error::InvalidOptions { message, source: None }) if message.starts_with(field))
+                ),
+                None => assert!(result.is_ok()),
+            }
         }
     }
 }

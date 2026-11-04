@@ -9,7 +9,7 @@ use packetcraftr_netio::deadline::MAX_WAIT;
 use super::canary::{MIN_PAYLOAD_LEN, TOKEN_LEN};
 use super::catalog::catalog;
 use super::error::Error;
-use crate::engine::execution::limits::duration_violation;
+use crate::deadline::duration_violation;
 use crate::{exchange, route, send};
 
 pub const DEFAULT_SOURCE_PORT: u16 = 53210;

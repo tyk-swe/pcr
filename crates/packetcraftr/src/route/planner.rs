@@ -266,7 +266,7 @@ fn validate_route_contract(
     requested: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<(), Error> {
-    if route.interface.name.is_empty() || route.interface.index == 0 {
+    if !route.interface.is_complete() {
         return Err(Error::InvalidRouteIdentity {
             interface: route.interface.clone(),
         });

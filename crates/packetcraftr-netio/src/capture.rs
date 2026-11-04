@@ -166,7 +166,7 @@ pub struct Request {
 impl Request {
     pub fn validate(&self) -> Result<(), Error> {
         validate_filter_length(self.filter.as_deref())?;
-        if self.interface.name.is_empty() || self.interface.index == 0 {
+        if !self.interface.is_complete() {
             return Err(Error::Device {
                 interface: self.interface.name.clone(),
                 message: "capture requires a non-empty interface name and nonzero index".to_owned(),

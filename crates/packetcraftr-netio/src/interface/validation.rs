@@ -4,7 +4,7 @@
 use crate::{interface, route};
 
 pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(), route::Error> {
-    if interface.id.name.is_empty() || interface.id.index == 0 {
+    if !interface.id.is_complete() {
         return Err(invalid_response(
             "operating system returned an incomplete interface identity".to_owned(),
         ));

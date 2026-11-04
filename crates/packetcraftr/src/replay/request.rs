@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use super::error::Error;
 use super::routing::Routing;
+use crate::deadline::duration_violation;
 use crate::route::Interface;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -123,7 +124,7 @@ impl Limits {
                 reason: "cannot exceed max_transmitted_bytes",
             });
         }
-        if self.max_duration.is_zero() || self.max_duration > MAX_WAIT {
+        if duration_violation(self.max_duration, MAX_WAIT) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,
                 maximum: MAX_WAIT,
@@ -313,4 +314,44 @@ pub(super) fn validate<R>(source: &Source<R>, options: &Options) -> Result<(), E
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duration_bounds_preserve_limits_and_error_precedence() {
+        for (value, valid) in [
+            (Duration::ZERO, false),
+            (Duration::from_nanos(1), true),
+            (MAX_WAIT, true),
+            (MAX_WAIT + Duration::from_nanos(1), false),
+        ] {
+            let result = Limits {
+                max_duration: value,
+                ..Limits::default()
+            }
+            .validate();
+            if valid {
+                assert!(result.is_ok());
+            } else {
+                assert!(
+                    matches!(result, Err(Error::InvalidDuration { value: actual, maximum }) if actual == value && maximum == MAX_WAIT)
+                );
+            }
+        }
+        let invalid = Limits {
+            max_source_frames: 0,
+            max_duration: Duration::ZERO,
+            ..Limits::default()
+        };
+        assert!(matches!(
+            invalid.validate(),
+            Err(Error::InvalidLimit {
+                field: "max_source_frames",
+                ..
+            })
+        ));
+    }
 }

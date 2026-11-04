@@ -8,7 +8,7 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_netio::deadline::MAX_WAIT;
 
 use super::selection::Observed;
-use crate::engine::execution::limits::duration_violation;
+use crate::deadline::duration_violation;
 use crate::engine::execution::rate_delay;
 use crate::evidence::limits::check_limits;
 use crate::probe::{Reply, Transport};

@@ -299,6 +299,176 @@ fn files_merge_honors_capture_limits() {
     }
 }
 
+fn write_merge_source(
+    path: &Path,
+    source: usize,
+    times: &[u64],
+    format: packetcraftr_core::capture_file::Format,
+) {
+    use packetcraftr_core::capture_file::Writer;
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    let mut writer = Writer::new(
+        std::fs::File::create(path).unwrap(),
+        format,
+        LinkType::ETHERNET,
+    )
+    .unwrap();
+    for (number, &time) in times.iter().enumerate() {
+        let frame = Frame::new(
+            Some(UNIX_EPOCH + Duration::from_micros(time)),
+            LinkType::ETHERNET,
+            vec![u8::try_from(source).unwrap(), u8::try_from(number).unwrap()],
+        )
+        .unwrap();
+        writer.write_frame(&frame).unwrap();
+    }
+    writer.flush().unwrap();
+}
+
+#[test]
+fn files_merge_preserves_order_and_provenance() {
+    use packetcraftr_core::capture_file::{Format, MAX_MERGE_SOURCES, Reader};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    let cases = [
+        (
+            "chronological",
+            0,
+            vec![
+                vec![],
+                vec![1, 2, 2, 7],
+                vec![],
+                vec![1, 2, 3],
+                vec![2],
+                vec![],
+            ],
+        ),
+        ("chronological", 0, vec![vec![1, 1]; MAX_MERGE_SOURCES]),
+        ("chronological", 0, vec![vec![], vec![]]),
+        ("chronological", 2, vec![vec![2, 1, 2, 4, 3], vec![1, 3, 3]]),
+        ("append", 0, vec![vec![], vec![3, 1, 1], vec![2, 1], vec![]]),
+    ];
+    for (order, window, sources) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let paths: Vec<_> = sources
+            .iter()
+            .enumerate()
+            .map(|(source, times)| {
+                let path = dir.path().join(format!("source-{source}"));
+                let format = if source % 2 == 0 {
+                    Format::Pcap
+                } else {
+                    Format::PcapNg
+                };
+                write_merge_source(&path, source, times, format);
+                path
+            })
+            .collect();
+        let destination = dir.path().join("merged.pcapng");
+        let window = window.to_string();
+        let args: Vec<_> = ["--output", "json", "files", "merge"]
+            .into_iter()
+            .chain(paths.iter().map(|path| path.to_str().unwrap()))
+            .chain([
+                "--write",
+                destination.to_str().unwrap(),
+                "--order",
+                order,
+                "--max-reorder-frames",
+                &window,
+            ])
+            .collect();
+        let report: serde_json::Value =
+            serde_json::from_str(&assert_success(&run(&args), &args)).unwrap();
+        let result = &report["result"];
+        let mut expected: Vec<_> = sources
+            .iter()
+            .enumerate()
+            .flat_map(|(source, times)| {
+                times
+                    .iter()
+                    .enumerate()
+                    .map(move |(number, &time)| (time, source, number))
+            })
+            .collect();
+        if order == "chronological" {
+            expected.sort_unstable();
+        }
+        let frames: Vec<_> = Reader::with_limits(
+            std::fs::File::open(&destination).unwrap(),
+            Default::default(),
+        )
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+        assert_eq!(frames.len(), expected.len());
+        assert_eq!(result["frames"], frames.len());
+        assert_eq!(
+            result["captured_bytes"],
+            frames
+                .iter()
+                .map(|frame| u64::from(frame.captured_length()))
+                .sum::<u64>()
+        );
+        assert_eq!(
+            result["source_frames"],
+            serde_json::json!(sources.iter().map(Vec::len).collect::<Vec<_>>())
+        );
+        let interfaces = result["interfaces"].as_array().unwrap();
+        assert_eq!(
+            interfaces.len(),
+            sources.iter().filter(|times| !times.is_empty()).count()
+        );
+        for (frame, (time, source, number)) in frames.iter().zip(expected) {
+            assert_eq!(
+                frame.timestamp,
+                Some(UNIX_EPOCH + Duration::from_micros(time))
+            );
+            assert_eq!(
+                frame.bytes().as_ref(),
+                &[u8::try_from(source).unwrap(), u8::try_from(number).unwrap()]
+            );
+            let interface = interfaces
+                .iter()
+                .find(|interface| interface["output_interface"] == frame.interface.unwrap())
+                .unwrap();
+            assert_eq!(interface["source"], source);
+            assert_eq!(interface["source_name"], paths[source].to_str().unwrap());
+            assert_eq!(interface["global_interface"], 0);
+        }
+    }
+}
+
+#[test]
+fn files_merge_rejects_clock_regression_without_publishing() {
+    use packetcraftr_core::capture_file::Format;
+
+    for (times, window) in [(vec![2, 1], "0"), (vec![2, 3, 1], "2")] {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first.pcap");
+        let second = dir.path().join("second.pcapng");
+        let destination = dir.path().join("rejected.pcapng");
+        write_merge_source(&first, 0, &times, Format::Pcap);
+        write_merge_source(&second, 1, &[1, 4], Format::PcapNg);
+        let args = [
+            "--output",
+            "json",
+            "files",
+            "merge",
+            first.to_str().unwrap(),
+            second.to_str().unwrap(),
+            "--write",
+            destination.to_str().unwrap(),
+            "--max-reorder-frames",
+            window,
+        ];
+        assert_error(&run(&args), "packet.capture_merge_order");
+        assert!(!destination.exists());
+    }
+}
+
 #[test]
 fn files_export_honors_capture_limits() {
     let source = capture_path("dns-response.pcap");

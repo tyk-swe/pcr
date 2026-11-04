@@ -11,7 +11,7 @@ use super::{
 use crate::frame::Frame;
 use serde::Serialize;
 use std::{
-    cmp::Ordering,
+    cmp::{Ordering, Reverse},
     collections::{BinaryHeap, HashMap},
     io::{Read, Write},
     time::SystemTime,
@@ -207,8 +207,15 @@ pub fn merge<R: Read, W: Write>(
             limits,
         )?);
     }
+    let mut chronological = (limits.order == MergeOrder::Chronological).then(|| {
+        let mut heads = BinaryHeap::with_capacity(sources.len());
+        heads.extend(pending.iter().enumerate().filter_map(|(index, slot)| {
+            slot.as_ref().map(|pending| Reverse((pending.time, index)))
+        }));
+        heads
+    });
     let mut mappings = HashMap::new();
-    while let Some((index, mut current)) = take_next(&mut pending, limits.order) {
+    while let Some((index, mut current)) = take_next(&mut pending, &mut chronological) {
         let key = (index, current.global);
         let id = if let Some(id) = mappings.get(&key) {
             *id
@@ -252,22 +259,21 @@ pub fn merge<R: Read, W: Write>(
             &mut budget,
             limits,
         )?;
+        if let (Some(heads), Some(next)) = (&mut chronological, &pending[index]) {
+            heads.push(Reverse((next.time, index)));
+        }
     }
     output.flush()?;
     Ok(report)
 }
 
-fn take_next(pending: &mut [Option<Pending>], order: MergeOrder) -> Option<(usize, Pending)> {
-    let index = match order {
-        MergeOrder::Chronological => {
-            pending
-                .iter()
-                .enumerate()
-                .filter_map(|(index, slot)| slot.as_ref().map(|pending| (pending.time, index)))
-                .min()?
-                .1
-        }
-        MergeOrder::Append => pending.iter().position(Option::is_some)?,
+fn take_next(
+    pending: &mut [Option<Pending>],
+    chronological: &mut Option<BinaryHeap<Reverse<(SystemTime, usize)>>>,
+) -> Option<(usize, Pending)> {
+    let index = match chronological {
+        Some(heads) => heads.pop()?.0.1,
+        None => pending.iter().position(Option::is_some)?,
     };
     pending[index].take().map(|pending| (index, pending))
 }

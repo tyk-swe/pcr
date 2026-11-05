@@ -39,8 +39,7 @@ impl crate::commands::Spec for Args {
 }
 
 fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<(), CliError> {
-    let inputs =
-        crate::input::campaign::load(invocation, &arguments.campaign, &arguments.responder_log)?;
+    let inputs = super::campaign::load(invocation, &arguments.campaign, &arguments.responder_log)?;
     let joined = lib::join_receptions(inputs.campaign, &inputs.receptions);
     invocation.check()?;
     let published = output::envelope::Published::<

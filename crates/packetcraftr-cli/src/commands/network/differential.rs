@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+mod campaign;
 pub(in crate::commands) mod join;
 pub(in crate::commands) mod output;
 mod rendering;

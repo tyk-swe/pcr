@@ -408,18 +408,15 @@ fn write_line(
     timeout_override: Option<Duration>,
 ) -> Result<(), EncodeError> {
     check_publication_budget(deadline, "publication")?;
-    let line = if output.pending.is_empty() && !batches(output, next_state) {
-        line
-    } else {
+    if batches(output, next_state) && output.pending.len() + line.len() < BATCH_BYTES {
         output.pending.extend_from_slice(&line);
-        if batches(output, next_state) && output.pending.len() < BATCH_BYTES {
-            output.state = next_state;
-            return Ok(());
-        }
-        std::mem::take(&mut output.pending)
-    };
+        output.state = next_state;
+        return Ok(());
+    }
     let written = match &mut output.writer {
-        EncoderWriter::Direct(writer) => writer.write_all(&line).and_then(|()| writer.flush()),
+        EncoderWriter::Direct(writer) => writer
+            .write_all(&take_batch(&mut output.pending, line))
+            .and_then(|()| writer.flush()),
         EncoderWriter::Bounded { sink, timeout } => {
             let timeout = timeout_override.unwrap_or(*timeout);
             let wait = match deadline {
@@ -433,7 +430,8 @@ fn write_line(
                 }
                 None => Deadline::new(timeout),
             };
-            sink.emit(line, &wait).map_err(io::Error::other)
+            sink.emit(take_batch(&mut output.pending, line), &wait)
+                .map_err(io::Error::other)
         }
     };
     if let Err(source) = written {
@@ -442,6 +440,14 @@ fn write_line(
     }
     output.state = next_state;
     Ok(())
+}
+
+fn take_batch(pending: &mut Vec<u8>, line: Vec<u8>) -> Vec<u8> {
+    if pending.is_empty() {
+        return line;
+    }
+    pending.extend_from_slice(&line);
+    std::mem::take(pending)
 }
 
 fn batches(output: &EncoderOutput, next_state: EncoderState) -> bool {

@@ -402,6 +402,66 @@ fn regular_file_records_match_the_unbatched_stream_through_either_terminal() {
 }
 
 #[test]
+fn expired_batch_admission_preserves_accepted_records_for_terminal_error() {
+    for complete in [false, true] {
+        let runtime = Runtime::new(1).unwrap();
+        let writer = CountingWriter::default();
+        let stream = bounded_stream(&runtime, writer.clone());
+        stream.observe_input(true);
+        emit_records(&stream, 3);
+        assert!(writer.published.lock().unwrap().is_empty());
+
+        let now = Instant::now();
+        let stream = stream.with_deadline(Arc::new(Deadline::with_time_source(
+            Duration::ZERO,
+            move || now,
+        )));
+        let result = if complete {
+            stream.complete_published(Published::new((), Vec::new()))
+        } else {
+            stream.observe_input(false);
+            stream.emit_published(Published::new(Data { value: 3 }, Vec::new()))
+        };
+        assert!(matches!(
+            result,
+            Err(EncodeError::Deadline {
+                phase: "publication",
+                ..
+            })
+        ));
+        assert!(stream.is_open());
+        stream
+            .terminal()
+            .emit_error(Error::new(
+                Classification::new(
+                    packetcraftr_core::error::Code::IoOutputDeadline,
+                    Kind::Io,
+                    None,
+                ),
+                "stopped",
+                Vec::new(),
+            ))
+            .unwrap();
+
+        let bytes = writer.published.lock().unwrap();
+        let records: Vec<serde_json::Value> = serde_json::Deserializer::from_slice(&bytes)
+            .into_iter()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(records.len(), 4);
+        for (sequence, record) in records.iter().enumerate() {
+            assert_eq!(record["sequence"], sequence);
+            if sequence < 3 {
+                assert_eq!(record["event"], "message");
+                assert_eq!(record["result"]["value"], sequence);
+            } else {
+                assert_eq!(record["event"], "error");
+            }
+        }
+    }
+}
+
+#[test]
 fn regular_file_records_coalesce_their_writes() {
     let runtime = Runtime::new(1).unwrap();
     let writer = CountingWriter::default();

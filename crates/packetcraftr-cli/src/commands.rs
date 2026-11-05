@@ -14,6 +14,7 @@ use crate::output::contract::Format;
 use crate::resources::Settings;
 
 pub(crate) use dispatch::Launch;
+pub use network::differential::output::Report as DifferentialReport;
 pub use registry::Command;
 pub(crate) use registry::CommandLine;
 

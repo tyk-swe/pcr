@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(in crate::commands) mod output;
 use crate::output::contract::Format;
 
 use packetcraftr_core::error::Kind;
@@ -114,7 +115,7 @@ pub(super) fn run(
     let pass = session
         .observe(
             &mut reader,
-            crate::rendering::ip_event_sink(format, stream),
+            crate::commands::offline_analysis::ip_event_sink(format, stream),
             &mut sink,
         )
         .map_err(CliError::classified)?;

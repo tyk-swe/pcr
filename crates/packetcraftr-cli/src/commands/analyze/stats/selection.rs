@@ -9,7 +9,8 @@ use packetcraftr_core::{
 };
 
 use super::arguments::Sort;
-use crate::{output::stats::Table, rendering::omitted_diagnostic};
+use super::output::Table;
+use crate::rendering::omitted_diagnostic;
 
 fn rank<T>(
     rows: &mut Vec<T>,

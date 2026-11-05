@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::errors::CliError;
-use crate::output;
 use crate::rendering::{SpacedHex, duration_text, write_summary_line};
 
 pub(super) fn frame_line(
-    frame: &output::replay::Frame,
+    frame: &super::output::Frame,
     presentation: crate::invocation::Presentation,
 ) -> String {
     format!(

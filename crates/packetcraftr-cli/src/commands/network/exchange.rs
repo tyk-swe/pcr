@@ -2,14 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+pub(in crate::commands) mod output;
 mod rendering;
 
 use crate::output::contract::Format;
 
 use packetcraftr_core::capture_file as capture;
 use packetcraftr_core::error::Kind;
-
-use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;
@@ -102,8 +101,8 @@ pub(super) fn run(
             if format == Format::Json {
                 crate::rendering::emit_published(
                     invocation,
-                    output::contract::Command::Exchange,
-                    output::envelope::Published::<output::exchange::Report>::try_from(report)
+                    crate::output::contract::Command::Exchange,
+                    crate::output::envelope::Published::<output::Report>::try_from(report)
                         .map_err(CliError::classified)?,
                 )
             } else {

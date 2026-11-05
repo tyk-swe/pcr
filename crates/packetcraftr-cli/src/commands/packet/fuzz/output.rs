@@ -1,0 +1,402 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use crate::output::published_enum;
+use serde::Serialize;
+
+use packetcraftr::fuzz as live_fuzz;
+use packetcraftr_core::fuzz::{self as packet_fuzz, Totals};
+
+use crate::output::contract::Error as ContractError;
+use crate::output::envelope::{Error as OutputError, Published, Stats};
+use crate::output::frame::{Captured, Wire};
+use packetcraftr_core::diagnostic::Diagnostic;
+
+fn operation_stats(value: &packet_fuzz::Stats) -> Stats {
+    Stats {
+        packets_attempted: value.cases_generated,
+        packets_completed: value.cases_built,
+        bytes: value.bytes,
+        elapsed: value.elapsed,
+        capture: Default::default(),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    Offline,
+    Live,
+}
+
+impl Mode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Offline => "offline",
+            Self::Live => "live",
+        }
+    }
+}
+
+published_enum! {
+    pub enum Strategy from packet_fuzz::Strategy {
+        Boundary => "boundary",
+        Random => "random",
+        BitFlip => "bit_flip",
+        Malformed => "malformed",
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+pub enum Outcome {
+    #[serde(rename = "built")]
+    Built,
+    #[serde(rename = "rejected")]
+    Rejected,
+    #[serde(rename = "response")]
+    Response,
+    #[serde(rename = "timeout")]
+    Timeout,
+}
+
+impl Outcome {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Built => "built",
+            Self::Rejected => "rejected",
+            Self::Response => "response",
+            Self::Timeout => "timeout",
+        }
+    }
+}
+
+impl std::fmt::Display for Outcome {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl From<live_fuzz::Outcome> for Outcome {
+    fn from(value: live_fuzz::Outcome) -> Self {
+        match value {
+            live_fuzz::Outcome::Response => Self::Response,
+            live_fuzz::Outcome::Timeout => Self::Timeout,
+        }
+    }
+}
+
+impl From<packet_fuzz::CaseOutcome> for Outcome {
+    fn from(value: packet_fuzz::CaseOutcome) -> Self {
+        match value {
+            packet_fuzz::CaseOutcome::Built => Self::Built,
+            packet_fuzz::CaseOutcome::Rejected => Self::Rejected,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Mutation {
+    pub layer: usize,
+    pub protocol: String,
+    pub field: String,
+    pub strategy: Strategy,
+    pub original: packetcraftr_core::field::Value,
+    pub value: packetcraftr_core::field::Value,
+}
+
+impl From<packet_fuzz::Mutation> for Mutation {
+    fn from(value: packet_fuzz::Mutation) -> Self {
+        Self {
+            layer: value.layer,
+            protocol: value.protocol,
+            field: value.field,
+            strategy: value.strategy.into(),
+            original: value.original,
+            value: value.value,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct Reproduction {
+    pub operation_seed: u64,
+    pub case_index: u64,
+    pub case_seed: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Case {
+    pub index: u64,
+    pub seed: u64,
+    pub mutation: Mutation,
+    pub reproduction: Reproduction,
+    pub shrink_values: Vec<packetcraftr_core::field::Value>,
+    pub recipe: packetcraftr_core::document::Packet,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame: Option<Wire>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decoded: Option<packetcraftr_core::document::Packet>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requires_live_opt_in: Option<bool>,
+    pub outcome: Outcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<OutputError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent: Option<Captured>,
+    pub responses: Vec<Captured>,
+    pub unmatched: Vec<Captured>,
+    pub undecoded: Vec<Captured>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Report {
+    pub seed: u64,
+    pub first_case: u64,
+    pub mode: Mode,
+    pub cases_generated: u64,
+    pub cases_built: u64,
+    pub cases_rejected: u64,
+    pub cases: Vec<Case>,
+}
+
+impl TryFrom<packet_fuzz::Report> for Published<Report> {
+    type Error = ContractError;
+
+    fn try_from(result: packet_fuzz::Report) -> Result<Self, ContractError> {
+        let totals = Totals::try_from(&result)?;
+        let packet_fuzz::Report {
+            seed,
+            first_case,
+            cases,
+            stats,
+        } = result;
+        let cases = cases
+            .into_iter()
+            .map(Case::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self::new(
+            report(seed, first_case, Mode::Offline, totals, cases),
+            Vec::new(),
+        )
+        .with_stats(operation_stats(&stats)))
+    }
+}
+
+impl TryFrom<live_fuzz::Aggregate> for Published<Report> {
+    type Error = ContractError;
+
+    fn try_from(result: live_fuzz::Aggregate) -> Result<Self, ContractError> {
+        let totals = Totals::try_from(&result)?;
+        let live_fuzz::Aggregate {
+            seed,
+            first_case,
+            trials: cases,
+            campaign: _,
+            stats,
+        } = result;
+        let cases = cases
+            .into_iter()
+            .map(Case::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self::new(
+            report(seed, first_case, Mode::Live, totals, cases),
+            Vec::new(),
+        )
+        .with_stats(stats))
+    }
+}
+
+fn report(seed: u64, first_case: u64, mode: Mode, totals: Totals, cases: Vec<Case>) -> Report {
+    Report {
+        seed,
+        first_case,
+        mode,
+        cases_generated: totals.generated,
+        cases_built: totals.built,
+        cases_rejected: totals.rejected,
+        cases,
+    }
+}
+
+impl TryFrom<packet_fuzz::Case> for Case {
+    type Error = ContractError;
+
+    fn try_from(case: packet_fuzz::Case) -> Result<Self, ContractError> {
+        let outcome = case.outcome.into();
+        convert_case(case, outcome, None, Vec::new(), Vec::new(), Vec::new())
+    }
+}
+
+impl TryFrom<live_fuzz::Trial> for Case {
+    type Error = ContractError;
+
+    fn try_from(trial: live_fuzz::Trial) -> Result<Self, ContractError> {
+        let live_fuzz::Trial { case, evidence } = trial;
+        match evidence {
+            Some(live_fuzz::Evidence {
+                sent,
+                outcome,
+                responses,
+                unmatched,
+                undecoded,
+            }) => convert_case(
+                case,
+                outcome.into(),
+                Some(sent),
+                responses,
+                unmatched,
+                undecoded,
+            ),
+            None => case.try_into(),
+        }
+    }
+}
+
+fn convert_case(
+    case: packet_fuzz::Case,
+    outcome: Outcome,
+    sent: Option<packetcraftr_core::frame::Frame>,
+    responses: Vec<packetcraftr_core::frame::Frame>,
+    unmatched: Vec<packetcraftr_core::frame::Frame>,
+    undecoded: Vec<packetcraftr_core::frame::Frame>,
+) -> Result<Case, ContractError> {
+    let packet_fuzz::Case {
+        operation_seed,
+        index,
+        seed,
+        mutation,
+        shrink_values,
+        recipe,
+        built,
+        decoded,
+        error,
+        diagnostics,
+        ..
+    } = case;
+    let frame = built.as_ref().map(|built| Wire::from(built.bytes.clone()));
+    let requires_live_opt_in = built
+        .as_ref()
+        .map(packetcraftr::policy::requires_live_opt_in);
+    let decoded = decoded
+        .as_ref()
+        .map(|decoded| packetcraftr_core::document::Packet::from_packet(&decoded.packet));
+    let captured = |frames: Vec<packetcraftr_core::frame::Frame>| {
+        frames
+            .into_iter()
+            .map(Captured::try_from)
+            .collect::<Result<Vec<_>, _>>()
+    };
+    Ok(Case {
+        index,
+        seed,
+        mutation: mutation.into(),
+        reproduction: Reproduction {
+            operation_seed,
+            case_index: index,
+            case_seed: seed,
+        },
+        shrink_values,
+        recipe: packetcraftr_core::document::Packet::from_packet(&recipe),
+        frame,
+        decoded,
+        requires_live_opt_in,
+        outcome,
+        error: error.as_ref().map(OutputError::classified),
+        sent: sent.map(Captured::try_from).transpose()?,
+        responses: captured(responses)?,
+        unmatched: captured(unmatched)?,
+        undecoded: captured(undecoded)?,
+        diagnostics,
+    })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum Event {
+    Case {
+        operation_seed: u64,
+        case: Box<Case>,
+    },
+    Complete {
+        operation_seed: u64,
+        first_case: u64,
+        mode: Mode,
+        cases_generated: u64,
+        cases_built: u64,
+        cases_rejected: u64,
+    },
+}
+
+impl TryFrom<packet_fuzz::Case> for Event {
+    type Error = ContractError;
+
+    fn try_from(case: packet_fuzz::Case) -> Result<Self, ContractError> {
+        let operation_seed = case.operation_seed;
+        Ok(Self::Case {
+            operation_seed,
+            case: Box::new(case.try_into()?),
+        })
+    }
+}
+
+impl TryFrom<live_fuzz::Event> for Event {
+    type Error = ContractError;
+
+    fn try_from(event: live_fuzz::Event) -> Result<Self, ContractError> {
+        let live_fuzz::Event::Case(trial) = event;
+        let operation_seed = trial.case.operation_seed;
+        Ok(Self::Case {
+            operation_seed,
+            case: Box::new(trial.try_into()?),
+        })
+    }
+}
+
+impl TryFrom<packet_fuzz::Summary> for Published<Event> {
+    type Error = ContractError;
+
+    fn try_from(summary: packet_fuzz::Summary) -> Result<Self, ContractError> {
+        let totals = Totals::try_from(&summary.stats)?;
+        Ok(Self::new(
+            complete(summary.seed, summary.first_case, Mode::Offline, totals),
+            Vec::new(),
+        )
+        .with_stats(operation_stats(&summary.stats)))
+    }
+}
+
+impl TryFrom<live_fuzz::Report> for Published<Event> {
+    type Error = ContractError;
+
+    fn try_from(report: live_fuzz::Report) -> Result<Self, ContractError> {
+        let totals = Totals::try_from(&report.campaign)?;
+        Ok(Self::new(
+            complete(report.seed, report.first_case, Mode::Live, totals),
+            Vec::new(),
+        )
+        .with_stats(report.stats))
+    }
+}
+
+const fn complete(seed: u64, first_case: u64, mode: Mode, totals: Totals) -> Event {
+    Event::Complete {
+        operation_seed: seed,
+        first_case,
+        mode,
+        cases_generated: totals.generated,
+        cases_built: totals.built,
+        cases_rejected: totals.rejected,
+    }
+}
+
+impl crate::output::stream::StreamRecord for Event {
+    fn event_name(&self) -> &'static str {
+        match self {
+            Self::Case { .. } => "case",
+            Self::Complete { .. } => "complete",
+        }
+    }
+}

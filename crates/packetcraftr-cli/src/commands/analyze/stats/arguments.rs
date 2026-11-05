@@ -4,7 +4,6 @@
 use std::path::PathBuf;
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
-use crate::output;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Offline capture statistics. Conversation indices (`tcp.stream`, `udp.stream`)
 and the `fragments` table are computed capture-globally before `--filter`.
@@ -57,7 +56,7 @@ pub(crate) struct Args {
     pub(crate) limits: OfflineLimitsArgs,
 }
 
-/// The `--table` selector for [`output::stats::Table`].
+/// The `--table` selector for [`super::output::Table`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum Table {
     Conversations,
@@ -69,7 +68,7 @@ pub(crate) enum Table {
     Overview,
 }
 
-impl From<Table> for output::stats::Table {
+impl From<Table> for super::output::Table {
     fn from(value: Table) -> Self {
         match value {
             Table::Conversations => Self::Conversations,

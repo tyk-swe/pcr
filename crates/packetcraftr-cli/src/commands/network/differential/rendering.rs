@@ -10,7 +10,7 @@ use crate::rendering::write_stdout_line;
 
 pub(super) fn render_plan_text(
     invocation: &crate::invocation::Invocation,
-    plan: &output::differential::PlanReport,
+    plan: &super::output::PlanReport,
 ) -> Result<(), CliError> {
     write_stdout_line(invocation, format_args!("plan_digest={}", plan.plan_digest))?;
     write_stdout_line(invocation, format_args!("token={}", plan.token))?;
@@ -35,7 +35,7 @@ pub(super) fn render_plan_text(
 
 pub(super) fn render_report_text(
     invocation: &crate::invocation::Invocation,
-    report: &output::differential::Report,
+    report: &super::output::Report,
 ) -> Result<(), CliError> {
     write_stdout_line(
         invocation,
@@ -57,38 +57,40 @@ pub(super) fn render_report_text(
 }
 
 pub(super) fn emit_event(event: lib::Event, stream: &StreamEncoder) -> Result<(), CliError> {
-    let published = output::envelope::Published::<output::differential::Event>::try_from(event)
+    let published = output::envelope::Published::<super::output::Event>::try_from(event)
         .map_err(CliError::classified)?;
     Ok(stream.emit_published(published)?)
 }
 
 pub(super) fn render_complete(report: lib::Report, stream: &StreamEncoder) -> Result<(), CliError> {
-    Ok(stream.complete_published(
-        output::envelope::Published::<output::differential::Event>::from(report),
-    )?)
+    Ok(
+        stream.complete_published(output::envelope::Published::<super::output::Event>::from(
+            report,
+        ))?,
+    )
 }
 
 pub(super) fn emit_responder_event(
     event: lib::ResponderEvent,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    Ok(stream.emit_published(output::envelope::Published::<
-        output::differential::ResponderEvent,
-    >::from(event))?)
+    Ok(stream.emit_published(
+        output::envelope::Published::<super::output::ResponderEvent>::from(event),
+    )?)
 }
 
 pub(super) fn render_responder_complete(
     report: lib::ResponderReport,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    Ok(stream.complete_published(output::envelope::Published::<
-        output::differential::ResponderEvent,
-    >::from(report))?)
+    Ok(stream.complete_published(
+        output::envelope::Published::<super::output::ResponderEvent>::from(report),
+    )?)
 }
 
 pub(super) fn render_responder_text(
     invocation: &crate::invocation::Invocation,
-    report: &output::differential::ResponderReport,
+    report: &super::output::ResponderReport,
 ) -> Result<(), CliError> {
     write_stdout_line(
         invocation,

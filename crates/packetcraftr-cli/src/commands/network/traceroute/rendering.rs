@@ -15,7 +15,7 @@ pub(super) mod multipath;
 
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
-    published: output::envelope::Published<output::traceroute::Report>,
+    published: output::envelope::Published<super::output::Report>,
     presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
@@ -65,7 +65,7 @@ pub(super) fn emit_event(
     event: packetcraftr::traceroute::Event,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let published = output::envelope::Published::<output::traceroute::Event>::try_from(event)
+    let published = output::envelope::Published::<super::output::Event>::try_from(event)
         .map_err(CliError::classified)?;
     Ok(stream.emit_published(published)?)
 }
@@ -74,16 +74,18 @@ pub(super) fn emit_complete(
     summary: packetcraftr::traceroute::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    Ok(stream.complete_published(
-        output::envelope::Published::<output::traceroute::Event>::from(summary),
-    )?)
+    Ok(
+        stream.complete_published(output::envelope::Published::<super::output::Event>::from(
+            summary,
+        ))?,
+    )
 }
 
 /// One probe's evidence line after `lead`, with its frame beneath.
 pub(in crate::commands) fn render_probe_text(
     invocation: &crate::invocation::Invocation,
     lead: &str,
-    probe: &output::traceroute::Probe,
+    probe: &super::output::Probe,
     presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     write_stdout_line(
@@ -95,7 +97,7 @@ pub(in crate::commands) fn render_probe_text(
             probe.status.as_str(),
             probe
                 .response_kind
-                .map_or("none", output::traceroute::ResponseKind::as_str),
+                .map_or("none", super::output::ResponseKind::as_str),
             probe.sent_at,
             render_optional(probe.received_at, |value| value.to_string()),
             render_optional(probe.responder, |value| value.to_string()),

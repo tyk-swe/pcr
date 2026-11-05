@@ -19,8 +19,8 @@ use packetcraftr_core::diagnostic::{Diagnostic, Severity};
 pub(super) struct Request {
     pub(super) selection: Selection,
     pub(super) origins: Vec<Declaration>,
-    pub(super) ports: Option<output::scan::plan::Ports>,
-    pub(super) ip_protocols: Option<output::scan::plan::IpProtocols>,
+    pub(super) ports: Option<super::output::plan::Ports>,
+    pub(super) ip_protocols: Option<super::output::plan::IpProtocols>,
     pub(super) family: AddressFamily,
     pub(super) max_targets: usize,
     pub(super) max_duration: Duration,
@@ -72,7 +72,7 @@ pub(super) fn run(
         }
         Format::Json => {
             let origins = published_origins(&origins);
-            let published = output::scan::list::Report::new(report, &origins, ports, ip_protocols);
+            let published = super::output::list::Report::new(report, &origins, ports, ip_protocols);
             crate::rendering::emit_published(
                 invocation,
                 output::contract::Command::Scan,
@@ -81,16 +81,16 @@ pub(super) fn run(
         }
         Format::Ndjson => {
             let origins = published_origins(&origins);
-            let published = output::scan::list::Report::new(report, &origins, ports, ip_protocols);
+            let published = super::output::list::Report::new(report, &origins, ports, ip_protocols);
             for target in &published.targets {
                 stream.emit_published(Published::new(
-                    output::scan::list::TargetEvent::from(target),
+                    super::output::list::TargetEvent::from(target),
                     Vec::new(),
                 ))?;
             }
             stream
                 .complete_published(Published::new(
-                    output::scan::list::Complete::from(published),
+                    super::output::list::Complete::from(published),
                     diagnostics,
                 ))
                 .map_err(CliError::from)
@@ -100,11 +100,11 @@ pub(super) fn run(
 }
 
 /// Each declaration's published origin, at its declaration index.
-fn published_origins(declarations: &[Declaration]) -> Vec<output::scan::list::Origin> {
+fn published_origins(declarations: &[Declaration]) -> Vec<super::output::list::Origin> {
     declarations
         .iter()
         .zip(0_u32..)
-        .map(|(declaration, index)| output::scan::list::Origin {
+        .map(|(declaration, index)| super::output::list::Origin {
             index,
             source: declaration.source.to_string(),
             line: declaration.line,
@@ -132,8 +132,8 @@ fn render_text(
     invocation: &crate::invocation::Invocation,
     report: &plan::Report,
     origins: &[Declaration],
-    ports: Option<&output::scan::plan::Ports>,
-    ip_protocols: Option<&output::scan::plan::IpProtocols>,
+    ports: Option<&super::output::plan::Ports>,
+    ip_protocols: Option<&super::output::plan::IpProtocols>,
 ) -> Result<(), CliError> {
     write_stdout_line(
         invocation,

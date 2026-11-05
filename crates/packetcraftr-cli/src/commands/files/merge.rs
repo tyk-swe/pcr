@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+pub(in crate::commands) mod output;
 
 use self::arguments::{Args, OrderArg};
-use crate::output;
 use crate::{errors::CliError, rendering::write_summary_line};
 use packetcraftr_core::{capture_file, error::Kind};
 use std::path::Path;
@@ -100,10 +100,10 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
     let _ = writer.into_inner().finish().map_err(CliError::classified)?;
     staged.sync()?;
     staged.persist()?;
-    let report = output::merge::Report::from((args.write.display().to_string(), report));
+    let report = output::Report::from((args.write.display().to_string(), report));
     crate::commands::offline_analysis::complete_application(
         invocation,
-        output::contract::Command::Merge,
+        crate::output::contract::Command::Merge,
         report,
         |report| report,
         |invocation, report| {

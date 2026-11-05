@@ -3,6 +3,7 @@
 
 pub(in crate::commands) mod arguments;
 mod csv;
+pub(in crate::commands) mod output;
 mod rendering;
 mod selection;
 
@@ -14,13 +15,11 @@ use std::time::Duration;
 use packetcraftr_core as core;
 use packetcraftr_core::analysis;
 
-use crate::output;
-
 use self::arguments::Args;
+use self::output::Table;
 use crate::commands::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
-use crate::output::stats::Table;
 use crate::rendering::emit_published;
 
 impl crate::commands::Spec for Args {
@@ -124,16 +123,16 @@ pub(super) fn run(
             presentation,
         ),
         Format::Json => {
-            let result = output::stats::Report::try_from((table, report, frames_read))
+            let result = output::Report::try_from((table, report, frames_read))
                 .map_err(CliError::classified)?;
             emit_published(
                 invocation,
-                output::contract::Command::Stats,
+                crate::output::contract::Command::Stats,
                 Published::new(result, diagnostics),
             )
         }
         Format::Csv => {
-            let result = output::stats::Report::try_from((table, report, frames_read))
+            let result = output::Report::try_from((table, report, frames_read))
                 .map_err(CliError::classified)?;
             csv::render(invocation, &result)?;
             crate::rendering::render_diagnostics_stderr(&diagnostics)

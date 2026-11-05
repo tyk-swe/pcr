@@ -3,6 +3,7 @@
 
 pub(in crate::commands) mod arguments;
 mod capture_output;
+pub(in crate::commands) mod output;
 mod rendering;
 mod session;
 
@@ -12,7 +13,6 @@ use std::time::Duration;
 
 use crate::output::contract::Format;
 
-use crate::output;
 use packetcraftr_core as core;
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Classified as _;
@@ -149,7 +149,7 @@ pub(super) fn run(
         .as_ref()
         .map(|capture| capture.writer(limits))
         .transpose()?;
-    let mut summary = output::build::Complete::default();
+    let mut summary = output::Complete::default();
     let mut diagnostics = Vec::new();
     let result = (|| {
         for packet in packets {
@@ -184,7 +184,7 @@ pub(super) fn run(
                 })?;
             } else if format == Format::Ndjson {
                 stream.emit_published(
-                    output::envelope::Published::<output::build::PacketEvent>::from((
+                    crate::output::envelope::Published::<output::PacketEvent>::from((
                         summary.packets_built,
                         built,
                     )),

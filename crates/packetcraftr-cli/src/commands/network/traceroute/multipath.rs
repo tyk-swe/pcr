@@ -28,7 +28,7 @@ pub(super) fn run<P: PacketProviders + TargetProviders, K: Clock>(
         return crate::rendering::emit_published(
             invocation,
             output::contract::Command::Traceroute,
-            Published::<output::traceroute::multipath::Report>::try_from(result)
+            Published::<super::output::multipath::Report>::try_from(result)
                 .map_err(CliError::classified)?,
         );
     }
@@ -36,7 +36,7 @@ pub(super) fn run<P: PacketProviders + TargetProviders, K: Clock>(
     let emitter = crate::commands::execution::emitter(invocation, move |event, stream| {
         if format == Format::Ndjson {
             return Ok(stream.emit_published(
-                Published::<output::traceroute::multipath::Event>::try_from(event)
+                Published::<super::output::multipath::Event>::try_from(event)
                     .map_err(CliError::classified)?,
             )?);
         }
@@ -50,9 +50,8 @@ pub(super) fn run<P: PacketProviders + TargetProviders, K: Clock>(
     invocation.check()?;
     if format == Format::Ndjson {
         Ok(
-            stream.complete_published(Published::<output::traceroute::multipath::Event>::from(
-                report,
-            ))?,
+            stream
+                .complete_published(Published::<super::output::multipath::Event>::from(report))?,
         )
     } else {
         render_complete(invocation, &report)

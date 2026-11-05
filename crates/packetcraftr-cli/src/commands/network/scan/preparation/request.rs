@@ -16,7 +16,6 @@ use super::super::selection::{DiscoveryRequest, EndpointRequest};
 use crate::command_options::{AddressFamily, CaptureLimitsArgs, MaxDurationArgs, TimeoutArgs};
 use crate::errors::CliError;
 use crate::input::manifest;
-use crate::output;
 use crate::system::collection;
 
 pub(super) struct EndpointInputs {
@@ -77,7 +76,7 @@ pub(super) struct RequestInputs {
 pub(super) struct Built {
     pub(super) request: packetcraftr::scan::Request,
     pub(super) excluded_endpoints: usize,
-    pub(super) curated: Option<output::scan::plan::CuratedPayloads>,
+    pub(super) curated: Option<crate::commands::network::scan::output::plan::CuratedPayloads>,
     pub(super) discovery_excluded: usize,
     pub(super) queue_limits: packetcraftr_netio::capture::Limits,
 }

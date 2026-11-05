@@ -21,7 +21,6 @@ use super::selection::{EndpointRequest, transports};
 use super::{connect, list, raw, traceroute};
 use crate::errors::CliError;
 use crate::input::manifest;
-use crate::output;
 use request::{
     DiscoveryInputs, EndpointInputs, LimitInputs, RequestInputs, ScheduleInputs, UdpInputs,
     build_request,
@@ -155,11 +154,13 @@ pub(super) fn prepare(
         let (ports, ip_protocols) = if ip_only {
             (
                 None,
-                selected.as_ref().map(output::scan::plan::IpProtocols::from),
+                selected
+                    .as_ref()
+                    .map(super::output::plan::IpProtocols::from),
             )
         } else {
             let ports = selected.as_ref().map(|selected| {
-                let ports = output::scan::plan::Ports::from(selected);
+                let ports = super::output::plan::Ports::from(selected);
                 if requested == method::Requested::Connect {
                     ports
                 } else {
@@ -359,35 +360,35 @@ fn publication_plan(
     selection: method::Selection,
     request: &packetcraftr::scan::Request,
     excluded_endpoints: usize,
-    curated: Option<output::scan::plan::CuratedPayloads>,
+    curated: Option<super::output::plan::CuratedPayloads>,
     discovery_excluded: usize,
     reverse_dns: &Option<String>,
     reverse_dns_port: u16,
-) -> output::scan::plan::Plan {
+) -> super::output::plan::Plan {
     let selected_method = selection.method;
-    output::scan::plan::Plan {
+    super::output::plan::Plan {
         tcp_scan: (selected_method == method::Method::Raw
             && request
                 .endpoints
                 .iter()
                 .any(|endpoint| endpoint.transport() == Transport::Tcp))
-        .then(|| output::scan::plan::TcpScan::from(request.tcp_scan)),
+        .then(|| super::output::plan::TcpScan::from(request.tcp_scan)),
         sctp_scan: (selected_method == method::Method::Raw
             && request
                 .endpoints
                 .iter()
                 .any(|endpoint| endpoint.transport() == Transport::Sctp))
-        .then(|| output::scan::plan::SctpScan::from(request.sctp_scan)),
+        .then(|| super::output::plan::SctpScan::from(request.sctp_scan)),
         method: selection.into(),
         port_catalog: packetcraftr::scan::catalog::data_set().into(),
         excluded_endpoints,
         curated_udp_payloads: curated,
-        discovery: output::scan::plan::Discovery::new(
+        discovery: super::output::plan::Discovery::new(
             &request.discovery,
             discovery_excluded,
             reverse_dns
                 .as_ref()
-                .map(|server| output::scan::plan::ReverseDnsServer {
+                .map(|server| super::output::plan::ReverseDnsServer {
                     server: server.clone(),
                     port: reverse_dns_port,
                 }),

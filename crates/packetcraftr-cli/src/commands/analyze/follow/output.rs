@@ -1,0 +1,135 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use serde::Serialize;
+
+use packetcraftr_core::analysis::{self as library, follow};
+
+use crate::commands::offline_analysis::output::{Clock, Endpoint, Scope, StreamTransport};
+use crate::output::contract::Error;
+use crate::output::hex::compact_hex;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub(crate) enum PeerDirection {
+    #[serde(rename = "client")]
+    ClientToServer,
+    #[serde(rename = "server")]
+    ServerToClient,
+}
+
+impl From<follow::PeerDirection> for PeerDirection {
+    fn from(value: follow::PeerDirection) -> Self {
+        match value {
+            follow::PeerDirection::ClientToServer => Self::ClientToServer,
+            follow::PeerDirection::ServerToClient => Self::ServerToClient,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct Chunk {
+    pub direction: PeerDirection,
+    pub direction_generation: u64,
+    pub frame: u64,
+    pub bytes_hex: String,
+}
+
+impl From<follow::Chunk> for Chunk {
+    fn from(value: follow::Chunk) -> Self {
+        Self {
+            direction: value.direction.into(),
+            direction_generation: value.direction_generation,
+            frame: value.number,
+            bytes_hex: compact_hex(&value.bytes),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct WrittenFile {
+    pub direction: PeerDirection,
+    pub path: String,
+    pub bytes: u64,
+}
+
+impl From<(follow::PeerDirection, String, u64)> for WrittenFile {
+    fn from((direction, path, bytes): (follow::PeerDirection, String, u64)) -> Self {
+        Self {
+            direction: direction.into(),
+            path,
+            bytes,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct Report {
+    pub clock: Clock,
+    pub transport: StreamTransport,
+    pub stream: u64,
+    pub scope: Option<Scope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client: Option<Endpoint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server: Option<Endpoint>,
+    pub frames: u64,
+    pub client_bytes: u64,
+    pub server_bytes: u64,
+    pub undelivered_bytes: u64,
+    pub chunks: Vec<Chunk>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub written: Vec<WrittenFile>,
+    pub ip_reassembly: crate::commands::offline_analysis::output::reassembly::Report,
+}
+
+impl
+    TryFrom<(
+        library::StreamRef,
+        follow::Summary,
+        Vec<Chunk>,
+        &library::IpReassemblyReport,
+        Vec<WrittenFile>,
+    )> for Report
+{
+    type Error = Error;
+
+    fn try_from(
+        (selector, summary, chunks, ip_reassembly, written): (
+            library::StreamRef,
+            follow::Summary,
+            Vec<Chunk>,
+            &library::IpReassemblyReport,
+            Vec<WrittenFile>,
+        ),
+    ) -> Result<Self, Error> {
+        let endpoint = |address, port| Endpoint { address, port };
+        let (client, server) = match &summary.client_flow {
+            Some(flow) => (
+                Some(endpoint(flow.source, flow.source_port)),
+                Some(endpoint(flow.destination, flow.destination_port)),
+            ),
+            None => (None, None),
+        };
+        Ok(Self {
+            clock: summary.clock.into(),
+            transport: selector.transport.into(),
+            stream: selector.index,
+            client,
+            server,
+            scope: summary.scope.map(Scope::try_from).transpose()?,
+            frames: summary.frames,
+            client_bytes: summary.client_bytes,
+            server_bytes: summary.server_bytes,
+            undelivered_bytes: summary.undelivered_bytes,
+            chunks,
+            written,
+            ip_reassembly: ip_reassembly.into(),
+        })
+    }
+}
+
+impl crate::output::stream::StreamRecord for Chunk {
+    fn event_name(&self) -> &'static str {
+        "chunk"
+    }
+}

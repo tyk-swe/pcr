@@ -4,20 +4,18 @@
 use crate::output::contract::Format;
 use crate::output::envelope::Published;
 
-use crate::output;
-
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
 use crate::rendering::{FieldTree, render_frame, write_hex_line};
 
 pub(super) fn render_record(
     invocation: &crate::invocation::Invocation,
-    record: output::read::Frame,
+    record: super::output::Frame,
     format: Format,
     stream: &StreamEncoder,
     tree: Option<&mut FieldTree>,
 ) -> Result<(), CliError> {
-    let output::read::Frame {
+    let super::output::Frame {
         source_frame,
         frame,
         decoded,
@@ -43,7 +41,7 @@ pub(super) fn render_record(
         },
         Format::Hex => write_hex_line(frame.bytes()),
         Format::Ndjson => Ok(stream.emit_published(Published::new(
-            output::read::Event::from(record),
+            super::output::Event::from(record),
             Vec::new(),
         ))?),
         Format::Json | Format::Pcap | Format::PcapNg => Err(CliError::new(

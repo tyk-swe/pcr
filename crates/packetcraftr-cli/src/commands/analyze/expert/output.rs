@@ -1,0 +1,95 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use serde::Serialize;
+
+use packetcraftr_core::analysis::{self as library, expert};
+
+use crate::commands::offline_analysis::output::{Clock, StreamTransport};
+use packetcraftr_core::diagnostic::Severity;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct Finding {
+    pub severity: Severity,
+    pub code: &'static str,
+    pub frame: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport: Option<StreamTransport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<u64>,
+    pub message: String,
+}
+
+impl From<expert::Finding> for Finding {
+    fn from(value: expert::Finding) -> Self {
+        Self {
+            severity: value.severity,
+            code: value.code,
+            frame: value.number,
+            transport: value.stream.map(|stream| stream.transport.into()),
+            stream: value.stream.map(|stream| stream.index),
+            message: value.message,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct CodeCount {
+    pub code: &'static str,
+    pub findings: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct Report {
+    pub clock: Clock,
+    pub frames_read: u64,
+    pub frames_matched: u64,
+    pub errors: u64,
+    pub warnings: u64,
+    pub notes: u64,
+    pub codes: Vec<CodeCount>,
+    pub findings: Vec<Finding>,
+    pub ip_reassembly: crate::commands::offline_analysis::output::reassembly::Report,
+}
+
+impl
+    From<(
+        expert::Summary,
+        u64,
+        u64,
+        Vec<Finding>,
+        &library::IpReassemblyReport,
+    )> for Report
+{
+    fn from(
+        (summary, frames_read, frames_matched, findings, ip_reassembly): (
+            expert::Summary,
+            u64,
+            u64,
+            Vec<Finding>,
+            &library::IpReassemblyReport,
+        ),
+    ) -> Self {
+        Self {
+            clock: summary.clock.into(),
+            frames_read,
+            frames_matched,
+            errors: summary.errors,
+            warnings: summary.warnings,
+            notes: summary.notes,
+            codes: summary
+                .codes
+                .into_iter()
+                .map(|(code, findings)| CodeCount { code, findings })
+                .collect(),
+            findings,
+            ip_reassembly: ip_reassembly.into(),
+        }
+    }
+}
+
+impl crate::output::stream::StreamRecord for Finding {
+    fn event_name(&self) -> &'static str {
+        "finding"
+    }
+}

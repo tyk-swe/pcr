@@ -16,12 +16,11 @@ use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
 use crate::rendering::Retained;
 use crate::rendering::{
-    comma_separated, duration_text, emit_published, encapsulation_text, render_optional,
-    write_stdout_line,
+    comma_separated, duration_text, emit_published, render_optional, write_stdout_line,
 };
 
+use super::output::{Client, Server, Session, Summary};
 use analysis::tls::{ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING};
-use output::tls::{Client, Server, Session, Summary};
 
 pub(super) struct State {
     retained: Retained<Session>,
@@ -64,7 +63,7 @@ pub(super) fn render_session(
             Ok(())
         }
         Format::Ndjson => Ok(stream.emit_published(Published::new(
-            output::tls::Event::from(session),
+            super::output::Event::from(session),
             Vec::new(),
         ))?),
         other => other.unreachable(),
@@ -104,7 +103,7 @@ pub(super) fn render_aggregate(
         invocation,
         output::contract::Command::Tls,
         Published::new(
-            output::tls::Report::from((state.retained.into_items(), summary)),
+            super::output::Report::from((state.retained.into_items(), summary)),
             Vec::new(),
         ),
     )
@@ -112,7 +111,7 @@ pub(super) fn render_aggregate(
 
 pub(super) fn render_stream(summary: Summary, stream: &StreamEncoder) -> Result<(), CliError> {
     Ok(stream.complete_published(Published::new(
-        output::tls::Event::from(summary),
+        super::output::Event::from(summary),
         Vec::new(),
     ))?)
 }
@@ -250,7 +249,7 @@ fn session_line(session: &Session) -> String {
         " scope={} interface={} encapsulation={}",
         session.scope.id,
         render_optional(session.scope.interface, |value| value.to_string()),
-        encapsulation_text(&session.scope.encapsulation)
+        crate::commands::offline_analysis::encapsulation_text(&session.scope.encapsulation)
     );
     if session.hello_retry {
         line.push_str(" hello_retry=true");
@@ -325,7 +324,7 @@ fn alpn_text(client: Option<&Client>) -> String {
     }
 }
 
-fn alert_text(alert: &output::tls::Alert) -> String {
+fn alert_text(alert: &super::output::Alert) -> String {
     let level = match alert.level {
         ALERT_LEVEL_WARNING => "warning".to_owned(),
         ALERT_LEVEL_FATAL => "fatal".to_owned(),

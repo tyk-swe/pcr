@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 mod aggregate;
-mod analysis;
-mod application;
 mod capture_file;
 mod capture_writer;
 mod dns;
@@ -14,13 +12,10 @@ mod ndjson;
 mod presentation;
 mod projection;
 mod retained;
-pub(crate) mod security;
 mod stdout;
 mod style;
 
 pub(crate) use aggregate::render_aggregate_rows;
-pub(crate) use analysis::{ip_event_sink, render_clock, render_scope};
-pub(crate) use application::EventOutput;
 pub(crate) use capture_file::{stream_capture_error, stream_limits, write_capture_file};
 pub(crate) use capture_writer::{LinkCaptureWriter, SourceCaptureWriter, finish_compressed_output};
 
@@ -29,13 +24,13 @@ pub(crate) use frame::{CapturedFrameText, FieldTree, render_frame, render_undeco
 
 pub(crate) use human::{
     HumanWriteError, comma_separated, document_spelling, duration_text, emit_stderr_document,
-    emit_stderr_error, emit_stderr_message, emit_stdout_document, encapsulation_text,
-    flush_stdout_batch, push_stdout_line, render_diagnostics_stderr, render_diagnostics_text,
-    render_optional, report_structured_error, write_stdout_block, write_stdout_line,
+    emit_stderr_error, emit_stderr_message, emit_stdout_document, flush_stdout_batch,
+    push_stdout_line, render_diagnostics_stderr, render_diagnostics_text, render_optional,
+    report_structured_error, write_stdout_block, write_stdout_line,
     write_stdout_line_with_interrupt, write_summary_line,
 };
 
-pub(crate) use machine::{bounded_json_len, emit_json, emit_published};
+pub(crate) use machine::{bounded_json_len, emit_json, emit_published, serialization_error};
 
 pub(crate) use ndjson::{stdout_stream, write_unattributed_error};
 

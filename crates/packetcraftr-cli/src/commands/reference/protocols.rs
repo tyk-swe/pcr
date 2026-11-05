@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(in crate::commands) mod output;
 mod rendering;
 
 use crate::output::contract::Format;
@@ -9,8 +10,6 @@ use crate::output::envelope::Published;
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
 use packetcraftr_core::protocol::BuiltinProtocol;
-
-use crate::output;
 
 use crate::errors::CliError;
 use crate::rendering::emit_published;
@@ -58,10 +57,10 @@ fn list_protocols(
     invocation: &crate::invocation::Invocation,
     format: Format,
 ) -> Result<(), CliError> {
-    let result = output::protocols::ListResult::from(BuiltinProtocol::ALL);
+    let result = output::ListResult::from(BuiltinProtocol::ALL);
     crate::rendering::render_aggregate_rows(
         invocation,
-        output::contract::Command::Protocols,
+        crate::output::contract::Command::Protocols,
         format,
         &result,
         &result.protocols,
@@ -86,14 +85,14 @@ fn describe_protocol(
         })
         .ok_or_else(|| unknown_protocol(name))?;
     let registry = packetcraftr_core::protocol::builtin::registry();
-    let detail = output::protocols::Detail::try_from((registry.as_ref(), protocol))
-        .map_err(CliError::classified)?;
+    let detail =
+        output::Detail::try_from((registry.as_ref(), protocol)).map_err(CliError::classified)?;
     match format {
         Format::Text => rendering::render_detail(invocation, &detail),
         Format::Json => emit_published(
             invocation,
-            output::contract::Command::Protocols,
-            Published::new(output::protocols::DetailResult::from(detail), Vec::new()),
+            crate::output::contract::Command::Protocols,
+            Published::new(output::DetailResult::from(detail), Vec::new()),
         ),
         other => other.unreachable(),
     }

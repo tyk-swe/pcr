@@ -1,16 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(in crate::commands) mod output;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use packetcraftr::os as library;
 use packetcraftr_core::document::os_fingerprints;
 
+use crate::output::contract::Format;
 use crate::{
     command_options::{Bounded, NumericPolicyArgs, RouteSelectionArgs, parse_target},
     errors::CliError,
     input::{InputKind, read_bounded_file},
-    output::{self, contract::Format},
     rendering::write_stdout_line,
     system::{Runtime, prepare_workflow},
 };
@@ -147,7 +148,7 @@ impl crate::commands::Spec for Args {
                 let emit = crate::commands::execution::emitter(invocation, |event, stream| {
                     stream
                         .emit_published(
-                            output::envelope::Published::<output::os::Event>::try_from(event)
+                            crate::output::envelope::Published::<output::Event>::try_from(event)
                                 .map_err(CliError::classified)?,
                         )
                         .map(|_| ())
@@ -158,7 +159,7 @@ impl crate::commands::Spec for Args {
                     .map_err(CliError::classified)?;
                 invocation.check()?;
                 stream
-                    .complete_published(output::envelope::Published::<output::os::Event>::from(
+                    .complete_published(crate::output::envelope::Published::<output::Event>::from(
                         summary,
                     ))
                     .map(|_| ())
@@ -176,8 +177,8 @@ impl crate::commands::Spec for Args {
                 if format == Format::Json {
                     crate::rendering::emit_published(
                         invocation,
-                        output::contract::Command::IdentifyOs,
-                        output::envelope::Published::<output::os::Report>::try_from(report)
+                        crate::output::contract::Command::IdentifyOs,
+                        crate::output::envelope::Published::<output::Report>::try_from(report)
                             .map_err(CliError::classified)?,
                     )
                 } else {

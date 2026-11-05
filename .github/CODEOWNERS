@@ -41,6 +41,8 @@
 
 /crates/packetcraftr-cli/src/output.rs @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-cli/src/output/** @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-cli/src/commands/**/output.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-cli/src/commands/**/output/** @tyk-swe @rkdxodud-tyk
 /schemas/** @tyk-swe @rkdxodud-tyk
 /examples/documents/** @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-core/src/document.rs @tyk-swe @rkdxodud-tyk

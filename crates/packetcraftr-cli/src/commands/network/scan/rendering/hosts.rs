@@ -4,18 +4,18 @@
 //! Text rendering for host discovery and reverse-DNS evidence.
 
 use super::listed;
+use crate::errors::CliError;
 use crate::rendering::{render_optional, write_stdout_line};
-use crate::{errors::CliError, output};
 
 /// Host records, when discovery or a reverse lookup was requested; the plan
 /// line already says when neither was.
 pub(super) fn render_hosts_text<P>(
     invocation: &crate::invocation::Invocation,
-    plan: &output::scan::plan::Plan,
-    hosts: &[output::scan::host::Host<P>],
+    plan: &crate::commands::network::scan::output::plan::Plan,
+    hosts: &[crate::commands::network::scan::output::host::Host<P>],
     probe_text: impl Fn(&P) -> Result<(), CliError>,
 ) -> Result<(), CliError> {
-    if plan.discovery.mode == output::scan::plan::DiscoveryMode::Omitted
+    if plan.discovery.mode == crate::commands::network::scan::output::plan::DiscoveryMode::Omitted
         && plan.discovery.reverse_dns.is_none()
     {
         return Ok(());
@@ -63,7 +63,7 @@ pub(super) fn render_hosts_text<P>(
 
 /// A host's neighbor line, with when its outcome was observed: a silent,
 /// routed, or inapplicable outcome has no reason that would carry it.
-fn neighbor_text(neighbor: &output::scan::host::Neighbor) -> String {
+fn neighbor_text(neighbor: &crate::commands::network::scan::output::host::Neighbor) -> String {
     format!(
         "neighbor={} interface={} attempts={} link={} next-hop={} next-hop-link={} observed={}",
         neighbor.outcome,
@@ -80,7 +80,7 @@ fn neighbor_text(neighbor: &output::scan::host::Neighbor) -> String {
 
 /// A host's reverse-DNS line, which marks names the scan's evidence byte
 /// limit dropped so a partial list never reads as the whole answer.
-fn reverse_dns_text(lookup: &output::scan::host::ReverseDns) -> String {
+fn reverse_dns_text(lookup: &crate::commands::network::scan::output::host::ReverseDns) -> String {
     format!(
         "reverse-dns={} status={} outcome={} names={} names_truncated={}{}",
         lookup.query_name,
@@ -95,7 +95,7 @@ fn reverse_dns_text(lookup: &output::scan::host::ReverseDns) -> String {
     )
 }
 
-fn link_text(link: Option<&output::scan::host::Link>) -> String {
+fn link_text(link: Option<&crate::commands::network::scan::output::host::Link>) -> String {
     render_optional(
         link.map(|link| format!("{}/{}", link.address, link.entry.as_str())),
         |value| value.to_string(),

@@ -16,7 +16,7 @@ pub(crate) struct CliError {
     context: Option<Coordinate>,
     pub(crate) causes: Vec<String>,
     capture: Option<Box<output::capture::Snapshot>>,
-    scan: Option<Box<output::scan::Failure>>,
+    scan: Option<Box<output::scan_failure::Failure>>,
 }
 
 impl CliError {
@@ -103,7 +103,7 @@ impl CliError {
         self
     }
 
-    pub(crate) fn with_scan(mut self, scan: output::scan::Failure) -> Self {
+    pub(crate) fn with_scan(mut self, scan: output::scan_failure::Failure) -> Self {
         self.scan = Some(Box::new(scan));
         self
     }
@@ -219,7 +219,7 @@ mod tests {
             },
             stats: Default::default(),
         };
-        let scan = output::scan::Failure {
+        let scan = output::scan_failure::Failure {
             stats: Default::default(),
             pending: Vec::new(),
             failed_probe: None,

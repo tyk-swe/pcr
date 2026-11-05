@@ -1,11 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(in crate::commands) mod output;
 mod rendering;
 
 use crate::command_options::InterfaceSelector;
 use crate::errors::CliError;
-use crate::output::{self, contract::Format};
+use crate::output::contract::Format;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr network interfaces
@@ -68,7 +69,7 @@ pub(super) fn run(
             Ok((info, timestamp_types))
         })
         .collect::<Result<Vec<_>, CliError>>()?;
-    let result = output::interfaces::Report::from(interfaces);
+    let result = output::Report::from(interfaces);
     if format == Format::Text && !presentation.verbose && !arguments.timestamp_types {
         crate::rendering::table_row(
             invocation,
@@ -82,7 +83,7 @@ pub(super) fn run(
     }
     crate::rendering::render_aggregate_rows(
         invocation,
-        output::contract::Command::Interfaces,
+        crate::output::contract::Command::Interfaces,
         format,
         &result,
         &result.interfaces,

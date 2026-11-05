@@ -4,16 +4,18 @@
 //! Bodies are counted and discarded, never retained.
 
 pub(in crate::commands) mod arguments;
+pub(in crate::commands) mod output;
 mod rendering;
 
 use packetcraftr_core::analysis::http::{Collector, Event};
 
 use self::arguments::Args;
+use self::output as wire;
 use crate::commands::offline_analysis::{
     Inspection, complete_application, inspect, require_tcp_stream,
 };
 use crate::errors::CliError;
-use crate::output::{contract::Command, http as wire};
+use crate::output::contract::Command;
 
 impl crate::commands::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[

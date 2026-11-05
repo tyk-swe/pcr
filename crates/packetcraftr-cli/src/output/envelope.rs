@@ -59,7 +59,7 @@ pub struct Error {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capture: Option<Box<super::capture::Snapshot>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub scan: Option<Box<super::scan::Failure>>,
+    pub scan: Option<Box<super::scan_failure::Failure>>,
 }
 
 impl Error {
@@ -92,7 +92,7 @@ impl Error {
     }
 
     #[must_use]
-    pub fn with_scan(mut self, scan: Option<Box<super::scan::Failure>>) -> Self {
+    pub fn with_scan(mut self, scan: Option<Box<super::scan_failure::Failure>>) -> Self {
         self.scan = scan;
         self
     }
@@ -127,7 +127,7 @@ impl<T> Published<T> {
     }
 }
 
-pub(super) const fn is_zero(value: &u64) -> bool {
+pub(crate) const fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 

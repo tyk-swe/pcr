@@ -7,19 +7,19 @@
 macro_rules! published_enum {
     (
         $(#[$meta:meta])*
-        pub enum $name:ident from $source:ty {
+        $vis:vis enum $name:ident from $source:ty {
             $($(#[$variant_meta:meta])* $variant:ident => $text:literal),+ $(,)?
         }
     ) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
-        pub enum $name {
+        $vis enum $name {
             $($(#[$variant_meta])* #[serde(rename = $text)] $variant,)+
         }
 
         impl $name {
             #[must_use]
-            pub const fn as_str(self) -> &'static str {
+            $vis const fn as_str(self) -> &'static str {
                 match self {
                     $(Self::$variant => $text,)+
                 }
@@ -42,48 +42,17 @@ macro_rules! published_enum {
         }
     };
 }
+pub(crate) use published_enum;
 
-pub mod analysis;
-pub mod build;
+pub use crate::commands::DifferentialReport;
+
 pub mod capture;
 pub mod contract;
-pub mod differential;
-pub mod dissect;
-pub mod dns;
-pub mod dns_read;
 pub mod envelope;
-pub mod exchange;
-pub mod expert;
-pub mod export;
-pub mod follow;
-pub mod fragment;
 pub mod frame;
-pub mod fuzz;
 pub mod hex;
-pub mod http;
-pub mod http2;
-pub mod identify;
-pub mod interfaces;
-pub mod merge;
 pub mod network;
-pub mod os;
-pub mod plan;
 pub mod projection;
-pub mod protocols;
-pub mod provenance;
-pub mod read;
-pub mod reassembly;
-pub mod replay;
 pub mod resources;
-pub mod rewrite;
-pub mod routes;
-pub mod scan;
-pub mod security;
-pub mod send;
-pub mod stats;
+pub mod scan_failure;
 pub mod stream;
-pub mod tls;
-pub mod traceroute;
-pub mod verify_forwarding;
-
-pub mod messages;

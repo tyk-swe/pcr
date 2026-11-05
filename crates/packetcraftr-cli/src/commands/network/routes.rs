@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(in crate::commands) mod output;
 use crate::output::contract::Format;
 
-use crate::output;
 use packetcraftr_netio as net;
 
 use crate::errors::CliError;
@@ -53,10 +53,10 @@ pub(super) fn run(
         || crate::system::interfaces(invocation, None),
         |interfaces| crate::system::interface_routes(invocation, interfaces),
     )?;
-    let result = output::routes::Report::from(routes);
+    let result = output::Report::from(routes);
     crate::rendering::render_aggregate_rows(
         invocation,
-        output::contract::Command::Routes,
+        crate::output::contract::Command::Routes,
         format,
         &result,
         &result.routes,
@@ -82,7 +82,7 @@ fn collect_routes(
     Ok(routes)
 }
 
-fn route_line(route: &output::network::Decision) -> String {
+fn route_line(route: &crate::output::network::Decision) -> String {
     format!(
         "{} (index {}): source={} mtu={} capability={} link_type={}",
         route.interface.name,

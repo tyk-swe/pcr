@@ -3,8 +3,8 @@
 
 use std::time::Duration;
 
+use super::output::{Report, TableData};
 use crate::errors::CliError;
-use crate::output::stats::{Report, TableData};
 
 fn duration(value: Duration) -> String {
     format!("{}.{:09}", value.as_secs(), value.subsec_nanos())

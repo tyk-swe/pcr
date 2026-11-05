@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(in crate::commands) mod output;
 use crate::command_options::Bounded as _;
 use crate::output::contract::Format;
 use crate::output::envelope::Published;
@@ -12,8 +13,6 @@ use std::sync::Arc;
 
 use packetcraftr_core as core;
 use packetcraftr_core::layer::selector::Selector;
-
-use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;
@@ -186,7 +185,7 @@ fn execute_offline(
     match format {
         Format::Ndjson => {
             let emit = crate::commands::execution::emitter(invocation, |case, stream| {
-                let event = output::fuzz::Event::try_from(case).map_err(CliError::classified)?;
+                let event = output::Event::try_from(case).map_err(CliError::classified)?;
                 Ok(stream.emit_published(Published::new(event, Vec::new()))?)
             });
             let summary = publish_offline(
@@ -224,14 +223,15 @@ fn execute_offline(
             if format == Format::Json {
                 crate::rendering::emit_published(
                     invocation,
-                    output::contract::Command::Fuzz,
-                    output::envelope::Published::<output::fuzz::Report>::try_from(report)
+                    crate::output::contract::Command::Fuzz,
+                    crate::output::envelope::Published::<output::Report>::try_from(report)
                         .map_err(CliError::classified)?,
                 )
             } else {
                 rendering::render_text(
                     invocation,
-                    output::envelope::Published::try_from(report).map_err(CliError::classified)?,
+                    crate::output::envelope::Published::try_from(report)
+                        .map_err(CliError::classified)?,
                     stream.presentation(),
                 )
             }
@@ -257,7 +257,7 @@ fn execute_live(
     match format {
         Format::Ndjson => {
             let emit = crate::commands::execution::emitter(invocation, |event, stream| {
-                let event = output::fuzz::Event::try_from(event).map_err(CliError::classified)?;
+                let event = output::Event::try_from(event).map_err(CliError::classified)?;
                 Ok(stream.emit_published(Published::new(event, Vec::new()))?)
             });
             let summary = client
@@ -278,14 +278,15 @@ fn execute_live(
             if format == Format::Json {
                 crate::rendering::emit_published(
                     invocation,
-                    output::contract::Command::Fuzz,
-                    output::envelope::Published::<output::fuzz::Report>::try_from(report)
+                    crate::output::contract::Command::Fuzz,
+                    crate::output::envelope::Published::<output::Report>::try_from(report)
                         .map_err(CliError::classified)?,
                 )
             } else {
                 rendering::render_text(
                     invocation,
-                    output::envelope::Published::try_from(report).map_err(CliError::classified)?,
+                    crate::output::envelope::Published::try_from(report)
+                        .map_err(CliError::classified)?,
                     stream.presentation(),
                 )
             }

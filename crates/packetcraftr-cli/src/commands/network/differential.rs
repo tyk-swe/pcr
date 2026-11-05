@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+mod campaign;
 pub(in crate::commands) mod join;
+pub(in crate::commands) mod output;
 mod rendering;
 pub(in crate::commands) mod responder;
 
@@ -11,7 +13,6 @@ use packetcraftr_core::error::Kind;
 
 use crate::command_options::Bounded as _;
 use crate::errors::CliError;
-use crate::output;
 use crate::output::contract::Format;
 use crate::system::{Runtime, prepare_workflow};
 
@@ -105,14 +106,13 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
             .differential_plan(request)
             .map_err(CliError::classified)?;
         invocation.check()?;
-        let plan =
-            output::differential::PlanReport::from_summary(summary, &token, arguments.repeats);
+        let plan = output::PlanReport::from_summary(summary, &token, arguments.repeats);
         return match format {
             Format::Text => rendering::render_plan_text(invocation, &plan),
             Format::Json => crate::rendering::emit_published(
                 invocation,
-                output::contract::Command::Differential,
-                output::envelope::Published::new(plan, Vec::new()),
+                crate::output::contract::Command::Differential,
+                crate::output::envelope::Published::new(plan, Vec::new()),
             ),
             other => other.unreachable(),
         };
@@ -135,13 +135,13 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
             let aggregate = collector.finish(report);
             invocation.check()?;
             let published =
-                output::envelope::Published::<output::differential::Report>::try_from(aggregate)
+                crate::output::envelope::Published::<output::Report>::try_from(aggregate)
                     .map_err(CliError::classified)?;
             match format {
                 Format::Text => rendering::render_report_text(invocation, &published.result),
                 Format::Json => crate::rendering::emit_published(
                     invocation,
-                    output::contract::Command::Differential,
+                    crate::output::contract::Command::Differential,
                     published,
                 ),
                 other => other.unreachable(),

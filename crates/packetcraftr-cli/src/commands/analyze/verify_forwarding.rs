@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+pub(in crate::commands) mod output;
 mod rendering;
 
 use std::path::Path;
@@ -19,7 +20,7 @@ use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::open_capture_hashed;
 use crate::invocation::StreamEncoder;
-use crate::output::verify_forwarding::CaptureSource;
+use crate::output::capture::CaptureSource;
 
 const VERDICT_NOT_PASS: u8 = 1;
 

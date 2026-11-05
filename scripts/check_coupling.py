@@ -166,7 +166,9 @@ BOUNDARY_MODULES = (
     "build.rs",
     "input/",
     "rendering/",
+    "/rendering.rs",
     "output/",
+    "/output.rs",
     "template.rs",
 )
 

@@ -5,16 +5,16 @@
 
 pub(super) mod input;
 mod options;
+pub(in crate::commands) mod output;
+pub(super) mod rendering;
 
+use self::output::FindingRecord;
 use super::CommandExit;
 use crate::output::envelope::Published;
 use crate::{
     errors::CliError,
     invocation::Invocation,
-    output::{
-        contract::{Command, Format},
-        security::FindingRecord,
-    },
+    output::contract::{Command, Format},
 };
 pub(super) use input::{read, source};
 pub(super) use options::Bounds;
@@ -42,7 +42,7 @@ pub(super) fn publish(
         }));
     }
     let fail = bounds.fails(&report);
-    let report = crate::output::security::Report::from(&report);
+    let report = output::Report::from(&report);
     crate::rendering::bounded_json_len(
         &report,
         bounds.max_result_bytes,
@@ -62,7 +62,7 @@ pub(super) fn publish(
             i.output
                 .complete_published(Published::new(report, Vec::new()))?;
         }
-        Format::Text => crate::rendering::security::text(i, &report)?,
+        Format::Text => rendering::text(i, &report)?,
         other => other.unreachable(),
     }
     Ok(CommandExit::status(u8::from(fail)))

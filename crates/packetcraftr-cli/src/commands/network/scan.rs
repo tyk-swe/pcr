@@ -5,6 +5,7 @@ pub(in crate::commands) mod arguments;
 mod connect;
 mod inputs;
 mod list;
+pub(in crate::commands) mod output;
 mod preparation;
 mod raw;
 mod rendering;
@@ -96,7 +97,7 @@ fn scan_error(error: packetcraftr::scan::Error) -> CliError {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
     while let Some(error) = source {
         if let Some(pipeline) = error.downcast_ref::<packetcraftr::scan::PipelineFailure>() {
-            match crate::output::scan::Failure::try_from(pipeline) {
+            match crate::output::scan_failure::Failure::try_from(pipeline) {
                 Ok(partial) => cli = cli.with_scan(partial),
                 Err(error) => cli
                     .causes
@@ -112,7 +113,7 @@ fn scan_error(error: packetcraftr::scan::Error) -> CliError {
 /// Each host's PTR lookup, by position; empty when no lookup was requested.
 pub(super) fn reverse_dns_hosts(
     lookups: Option<followup::ReverseLookups>,
-) -> Vec<Option<crate::output::scan::host::ReverseDns>> {
+) -> Vec<Option<output::host::ReverseDns>> {
     lookups
         .map(|lookups| {
             lookups

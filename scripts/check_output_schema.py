@@ -359,6 +359,8 @@ def registry_problems(root: Path, schema: Any) -> list[str]:
         for rust_type in row.rust_types:
             if not _type_defined(root, rust_type, sources):
                 problems.append(f'{label}: rust type {rust_type} is not defined')
+            if 'output' not in rust_type.split('::'):
+                problems.append(f'{label}: rust type {rust_type} is outside an output module')
         if not (root / row.example).is_file():
             problems.append(f'{label}: example {row.example} does not exist')
             continue

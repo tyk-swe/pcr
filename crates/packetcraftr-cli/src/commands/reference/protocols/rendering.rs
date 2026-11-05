@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::errors::CliError;
-use crate::output;
 use crate::rendering::write_stdout_line;
 
-pub(super) fn protocol_line(protocol: &output::protocols::Summary) -> String {
+pub(super) fn protocol_line(protocol: &super::output::Summary) -> String {
     format!(
         "{} aliases=[{}] build={} dissect={} exact_round_trip={} matcher={} decode_only={} stream_decode={} transports=[{}]",
         protocol.protocol,
@@ -22,7 +21,7 @@ pub(super) fn protocol_line(protocol: &output::protocols::Summary) -> String {
 
 pub(super) fn render_detail(
     invocation: &crate::invocation::Invocation,
-    protocol: &output::protocols::Detail,
+    protocol: &super::output::Detail,
 ) -> Result<(), CliError> {
     let summary = &protocol.summary;
     write_stdout_line(invocation, format_args!("protocol: {}", summary.protocol))?;

@@ -132,8 +132,8 @@ fn cooperative_ndjson_flushes_without_handoff() {
             .unwrap()
             .push(std::thread::current().id());
         let scan::connect::Event::Probe(probe) = event;
-        let value =
-            output::scan::connect::ProbeEvent::try_from(probe).map_err(CliError::classified)?;
+        let value = crate::commands::network::scan::output::connect::ProbeEvent::try_from(probe)
+            .map_err(CliError::classified)?;
         stream
             .emit_published(Published::new(
                 Counted {
@@ -221,7 +221,7 @@ fn unisolated_writers_publish_on_workers() {
             let scan::connect::Event::Probe(probe) = event;
             stream
                 .emit_published(Published::new(
-                    output::scan::connect::ProbeEvent::try_from(probe)
+                    crate::commands::network::scan::output::connect::ProbeEvent::try_from(probe)
                         .map_err(CliError::classified)?,
                     Vec::new(),
                 ))
@@ -307,7 +307,7 @@ fn cooperative_writer_wait_retains_parent_control() {
             let scan::connect::Event::Probe(probe) = event;
             stream
                 .emit_published(Published::new(
-                    output::scan::connect::ProbeEvent::try_from(probe)
+                    crate::commands::network::scan::output::connect::ProbeEvent::try_from(probe)
                         .map_err(CliError::classified)?,
                     Vec::new(),
                 ))

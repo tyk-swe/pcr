@@ -11,7 +11,6 @@ use crate::{
     clock::Clock,
     engine::execution::{Executor, ExecutorFault},
     exchange::{WorkflowExecutor, WorkflowOverrides},
-    neighbor::Resolver,
     probe::runner::{Batch, Evidence},
     providers::PacketProviders,
 };
@@ -30,14 +29,6 @@ pub struct Preparation {
     pub target: Option<std::net::IpAddr>,
 }
 
-pub(super) trait OsExecutor: Executor<Batch<PlannedProbe>> {
-    fn prepare(
-        &mut self,
-        probe: &PlannedProbe,
-        deadline: &Deadline,
-    ) -> Result<Preparation, BoundaryError>;
-}
-
 pub(super) struct Native<'a, P, K> {
     pub client: &'a Client<P, K>,
     pub operation: &'a mut crate::engine::operation::Operation,
@@ -46,8 +37,8 @@ pub(super) struct Native<'a, P, K> {
     pub collection: crate::exchange::Collection,
 }
 
-impl<P: PacketProviders, K: Clock> OsExecutor for Native<'_, P, K> {
-    fn prepare(
+impl<P: PacketProviders, K: Clock> Native<'_, P, K> {
+    pub(super) fn prepare(
         &mut self,
         probe: &PlannedProbe,
         deadline: &Deadline,

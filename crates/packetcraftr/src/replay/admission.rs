@@ -18,21 +18,6 @@ use super::evidence::network_envelope;
 /// Replay's two admission steps for one captured frame: `admit_frame` checks
 /// limits and exact bytes before route work, and `authorize_final_wire` applies
 /// source policy to the final route before delay or transmission.
-pub(crate) trait ReplayAdmission {
-    fn admit_frame(
-        &mut self,
-        limits: WireLimits,
-        frame: &Frame,
-        mode: Mode,
-    ) -> Result<(), BoundaryError>;
-
-    fn authorize_final_wire(
-        &mut self,
-        frame: &Frame,
-        route: &crate::route::Plan,
-    ) -> Result<(), BoundaryError>;
-}
-
 pub(super) struct FrameAdmission<'c> {
     policy: &'c crate::policy::Policy,
     registry: Arc<Registry>,
@@ -216,8 +201,8 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
     Ok(())
 }
 
-impl ReplayAdmission for FrameAdmission<'_> {
-    fn admit_frame(
+impl FrameAdmission<'_> {
+    pub(super) fn admit_frame(
         &mut self,
         limits: WireLimits,
         frame: &Frame,
@@ -229,7 +214,7 @@ impl ReplayAdmission for FrameAdmission<'_> {
         self.authorize_frame(frame, mode)
     }
 
-    fn authorize_final_wire(
+    pub(super) fn authorize_final_wire(
         &mut self,
         frame: &Frame,
         route: &crate::route::Plan,

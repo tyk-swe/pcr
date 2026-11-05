@@ -48,10 +48,6 @@ struct ExchangeOutcome {
     evidence_truncated: bool,
 }
 
-pub(crate) trait Resolver {
-    fn resolve(&self, request: &Request, deadline: &Deadline) -> Result<Resolution, Error>;
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct State {
     options: Options,
@@ -209,12 +205,16 @@ pub(crate) struct Active<'a, T, C> {
     state: &'a State,
 }
 
-impl<T, C> Resolver for Active<'_, T, C>
+impl<T, C> Active<'_, T, C>
 where
     T: transmit::Provider,
     C: capture::Provider,
 {
-    fn resolve(&self, request: &Request, deadline: &Deadline) -> Result<Resolution, Error> {
+    pub(crate) fn resolve(
+        &self,
+        request: &Request,
+        deadline: &Deadline,
+    ) -> Result<Resolution, Error> {
         validate_request(request)?;
         let cache_key = NeighborCacheKey::from(request);
         if let Some(mac_address) = self.state.lookup(&cache_key)? {

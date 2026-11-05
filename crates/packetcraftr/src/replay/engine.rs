@@ -17,7 +17,7 @@ use crate::route::{self, Materialized as MaterializedRoute, Plan as RoutePlan};
 use crate::{Client, Sink};
 use packetcraftr_core::error::BoundaryError;
 
-use super::admission::{FrameAdmission, ReplayAdmission};
+use super::admission::FrameAdmission;
 use super::error::Error;
 use super::evidence::{FrameEvidence, Transmission, validate_transmission};
 use super::executor::{Executor, ProviderExecutor};
@@ -114,18 +114,18 @@ impl Session {
     }
 }
 
-struct Run<'a, 'x, 'c, S, A, X, C, F> {
+struct Run<'a, 'x, 'c, 'p, S, X, C, F> {
     options: &'a Options,
     selector: S,
-    authorizer: &'a mut A,
+    authorizer: &'a mut FrameAdmission<'p>,
     executor: &'x mut X,
     clock: &'c mut C,
     emit: F,
 }
 
-pub(crate) fn run<R, S, A, X, C, F>(
+pub(crate) fn run<R, S, X, C, F>(
     parts: Parts<R, S>,
-    authorizer: &mut A,
+    authorizer: &mut FrameAdmission<'_>,
     executor: &mut X,
     clock: &mut C,
     deadline: Deadline,
@@ -134,7 +134,6 @@ pub(crate) fn run<R, S, A, X, C, F>(
 where
     R: Read,
     S: Selector,
-    A: ReplayAdmission,
     X: Executor,
     C: Clock,
     F: FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
@@ -202,10 +201,9 @@ where
     })
 }
 
-impl<S, A, X, C, F> Run<'_, '_, '_, S, A, X, C, F>
+impl<S, X, C, F> Run<'_, '_, '_, '_, S, X, C, F>
 where
     S: Selector,
-    A: ReplayAdmission,
     X: Executor,
     C: Clock,
     F: FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
@@ -432,8 +430,8 @@ fn capture_interface<R: Read>(
         })
 }
 
-fn authorize_frame<A: ReplayAdmission>(
-    authorizer: &mut A,
+fn authorize_frame(
+    authorizer: &mut FrameAdmission<'_>,
     deadline: &Deadline,
     source_index: u64,
     plan: &FramePlan,
@@ -478,8 +476,8 @@ fn plan_frame_route<X: Executor>(
     Ok(route)
 }
 
-fn authorize_final_wire<A: ReplayAdmission>(
-    authorizer: &mut A,
+fn authorize_final_wire(
+    authorizer: &mut FrameAdmission<'_>,
     deadline: &Deadline,
     source_index: u64,
     frame: &Frame,

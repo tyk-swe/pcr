@@ -99,7 +99,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
                 self.output
                     .event(PipelineEvent::Diagnostic(Diagnostic::new(
                         Severity::Warning,
-                        "capture.ingress_time_unavailable",
+                        packetcraftr_core::error::Code::CaptureIngressTimeUnavailable.as_str(),
                         "capture lacks a monotonic ingress marker and was not correlated",
                     )))?;
             }

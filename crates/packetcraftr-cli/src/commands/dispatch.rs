@@ -223,7 +223,7 @@ fn command_failure_with(
     let output_failed = incomplete
         || (format == Format::Json
             && invocation.json_attempted()
-            && error.classification.code.as_str() == "io.stdout");
+            && error.classification.code == packetcraftr_core::error::Code::IoStdout);
     if output_failed {
         exit_code = error.exit_code();
     }

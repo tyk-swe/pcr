@@ -127,7 +127,7 @@ impl<P: PacketProviders, K: Clock> Pipeline<'_, P, K> {
                 self.output
                     .event(PipelineEvent::Diagnostic(Diagnostic::new(
                         Severity::Warning,
-                        "capture.evidence_incomplete",
+                        packetcraftr_core::error::Code::CaptureEvidenceIncomplete.as_str(),
                         format!(
                             "source {} on interface {} (index {}): {loss}",
                             source.index,

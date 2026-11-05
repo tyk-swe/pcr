@@ -235,7 +235,6 @@ fn write_human_stdout(
     written.map_err(HumanWriteError::Write)
 }
 
-/// Writes what [`Invocation::batch_stdout`](crate::invocation::Invocation::batch_stdout) held back.
 pub(crate) fn flush_stdout_batch(
     invocation: &crate::invocation::Invocation,
 ) -> Result<(), CliError> {

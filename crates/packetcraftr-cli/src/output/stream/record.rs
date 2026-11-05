@@ -59,6 +59,9 @@ impl<T: Serialize> Serialize for Counted<'_, T> {
 /// Maximum encoded NDJSON record bytes, including its newline.
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 
+/// Fits a typical dissected frame, so most records never reallocate.
+const LINE_CAPACITY: usize = 8 * 1024;
+
 pub(super) fn serialize_line(
     record: &impl Serialize,
     sequence: u64,
@@ -72,6 +75,7 @@ pub(super) fn serialize_line(
         exceeded: bool,
     }
     impl Write for BoundedLine<'_> {
+        #[inline]
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
             if let Some(meter) = self.meter.filter(|meter| meter.active.get()) {
                 if bytes.len() > meter.limit.saturating_sub(meter.bytes.get()) {
@@ -104,7 +108,7 @@ pub(super) fn serialize_line(
     }
     let mut line = BoundedLine {
         meter,
-        bytes: Vec::new(),
+        bytes: Vec::with_capacity(LINE_CAPACITY),
         limit,
         exceeded: false,
     };

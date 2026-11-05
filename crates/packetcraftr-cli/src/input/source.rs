@@ -159,6 +159,12 @@ impl Read for Polled {
     }
 }
 
+impl Source {
+    pub(super) fn is_regular_file(&self) -> bool {
+        matches!(self, Self::File(file) if file.metadata().is_ok_and(|metadata| metadata.is_file()))
+    }
+}
+
 #[cfg(test)]
 pub(super) fn test_invocation(
     duration: Option<std::time::Duration>,

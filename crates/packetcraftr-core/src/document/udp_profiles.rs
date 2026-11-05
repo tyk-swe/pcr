@@ -142,12 +142,7 @@ mod hex {
         value: &Bytes,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        use std::fmt::Write;
-        let mut text = String::with_capacity(value.len() * 2);
-        for byte in value {
-            write!(text, "{byte:02x}").expect("string write");
-        }
-        serializer.serialize_str(&text)
+        serializer.collect_str(&crate::field::hex::CompactHex(value))
     }
 
     pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(

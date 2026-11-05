@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 
 use packetcraftr_core as core;
@@ -31,7 +31,11 @@ pub(crate) fn open_capture(
     path: &Path,
     limits: OfflineCaptureLimits,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
-    capture_reader(invocation, capture_source(invocation, path)?, limits)
+    let source = capture_source(invocation, path)?;
+    invocation
+        .output
+        .observe_input(source.is_regular_file() && !io::stdout().is_terminal());
+    capture_reader(invocation, source, limits)
 }
 
 pub(crate) fn open_capture_hashed(

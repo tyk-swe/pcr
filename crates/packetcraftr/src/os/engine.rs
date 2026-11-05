@@ -6,11 +6,8 @@ use std::sync::Arc;
 use packetcraftr_core::{budget::Deadline, document::os_fingerprints as core, registry::Registry};
 
 use super::{
-    Collector, Error, Event, Match, Outcome, Probe, Report, Request,
-    error::probe_error,
-    evidence::Fingerprints,
-    executor::{Native, OsExecutor},
-    plan::PlannedProbe,
+    Collector, Error, Event, Match, Outcome, Probe, Report, Request, error::probe_error,
+    evidence::Fingerprints, executor::Native, plan::PlannedProbe,
 };
 use crate::{
     Client, Sink,
@@ -69,18 +66,19 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     }
 }
 
-pub(super) fn run<A, E, C, F>(
+pub(super) fn run<A, P, K, C, F>(
     request: &Request,
     registry: &Arc<Registry>,
     deadline: &mut Deadline,
     clock: &mut C,
     authorizer: &mut A,
-    executor: &mut E,
+    executor: &mut Native<'_, P, K>,
     mut publish: F,
 ) -> Result<Report, Error>
 where
     A: Authorizer + ResolveTarget,
-    E: OsExecutor,
+    P: PacketProviders,
+    K: Clock,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {

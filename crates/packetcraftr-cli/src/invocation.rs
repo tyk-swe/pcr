@@ -13,7 +13,7 @@ use crate::{
 use packetcraftr_core::budget::{Cancellation, Deadline, Interrupted};
 use std::{
     sync::{
-        Arc,
+        Arc, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -29,6 +29,7 @@ pub(crate) struct Invocation {
     pub(crate) cancellation: Cancellation,
     pub(crate) diagnostics: Option<Arc<Diagnostics>>,
     json_attempted: Arc<AtomicBool>,
+    stdout_batch: Arc<Mutex<Option<Vec<u8>>>>,
 }
 
 impl Invocation {
@@ -49,8 +50,21 @@ impl Invocation {
             cancellation,
             diagnostics,
             json_attempted: Arc::new(AtomicBool::new(false)),
+            stdout_batch: Arc::default(),
         }
         .configure_output()
+    }
+
+    /// Holds human stdout back until flushed. Only commands that write nothing to stderr
+    /// before they finish may call this, or the two streams could trade places.
+    pub(crate) fn batch_stdout(&self) {
+        *self.stdout_batch() = Some(Vec::new());
+    }
+
+    pub(crate) fn stdout_batch(&self) -> MutexGuard<'_, Option<Vec<u8>>> {
+        self.stdout_batch
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     pub(crate) fn with_output(mut self, output: StreamEncoder) -> Self {

@@ -167,26 +167,4 @@ impl Classified for Error {
     }
 }
 
-pub(crate) fn probe_error(sequence: u64, failure: crate::error::Failure) -> Error {
-    match failure {
-        crate::error::Failure::InvalidLimit {
-            field,
-            value,
-            reason,
-        } => Error::InvalidLimit {
-            field,
-            value,
-            reason,
-        },
-        crate::error::Failure::Authorization(source) => Error::Authorization(source),
-        crate::error::Failure::DurationLimit(source) => source.into(),
-        crate::error::Failure::Interrupted(source) => source.into(),
-        crate::error::Failure::Clock(source) => Error::Clock { sequence, source },
-        crate::error::Failure::Execution(source) => Error::Execution { sequence, source },
-        crate::error::Failure::InvalidEvidence(source) => Error::InvalidEvidence {
-            sequence,
-            message: WORKFLOW.describe_evidence(&source),
-        },
-        crate::error::Failure::StatsOverflow(_source) => Error::StatisticsOverflow { sequence },
-    }
-}
+crate::error::workflow_probe_error!();

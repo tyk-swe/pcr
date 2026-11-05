@@ -9,6 +9,8 @@ from pathlib import Path
 import re
 import sys
 
+from rust_source import is_test_path
+
 ROOT = Path(__file__).resolve().parent.parent
 
 BASELINE = {
@@ -172,8 +174,7 @@ BOUNDARY_MODULES = (
 def production_sources(root: Path = ROOT) -> list[Path]:
     sources = []
     for path in sorted((root / "crates").rglob("*.rs")):
-        parts = path.parts
-        if "tests" in parts or path.name == "tests.rs":
+        if is_test_path(path.relative_to(root)):
             continue
         sources.append(path)
     return sources

@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import sys
 
-from rust_source import blank_comments_and_strings
+from rust_source import blank_comments_and_strings, is_test_path
 
 LAYERS = {
     "packetcraftr-core": {
@@ -322,11 +322,6 @@ def owner_path(src: Path, path: Path) -> tuple[str, ...] | None:
     return tuple(parts)
 
 
-def is_test_path(src: Path, path: Path) -> bool:
-    rel = path.relative_to(src)
-    return rel.name == "tests.rs" or "tests" in rel.parts[:-1]
-
-
 def allowlisted(
     allowlist, crate: str, owner: tuple[str, ...], target: tuple[str, ...]
 ) -> int | None:
@@ -346,7 +341,7 @@ def check_crate(
     problems = []
     for path in sorted(src.rglob("*.rs")):
         owner = owner_path(src, path)
-        test_file = owner is not None and is_test_path(src, path)
+        test_file = owner is not None and is_test_path(path.relative_to(src))
         if owner is None or (test_file and not include_tests):
             continue
         owner_layer = layer_of(table, owner)

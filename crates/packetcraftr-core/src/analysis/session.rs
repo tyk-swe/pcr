@@ -14,6 +14,69 @@ use super::scope::Definition;
 use super::{FrameRecord, IpEventRecord, Options, Plan, StreamRef, Summary};
 use crate::capture_file::Reader;
 
+/// The `Collector` glue shared by the application analyses whose inherent `observe`
+/// and `finalize` report their own `Error`. Expands where those items are in scope.
+macro_rules! application_collector {
+    ($($need:ident: $value:expr),* $(,)?) => {
+        impl Collector {
+            pub fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), Error> {
+                let mut output = Vec::new();
+                let summary = self.finalize(
+                    run,
+                    || Ok(()),
+                    |events| {
+                        output.extend(events);
+                        Ok(())
+                    },
+                )?;
+                Ok((output, summary))
+            }
+        }
+
+        impl session::Collector for Collector {
+            type Event = Event;
+            type Summary = Summary;
+
+            fn needs(&self) -> CollectorNeeds {
+                CollectorNeeds {
+                    tcp_stream: true,
+                    tcp_events: true,
+                    track_sources: true,
+                    $($need: $value,)*
+                    ..CollectorNeeds::default()
+                }
+            }
+
+            fn scopes(&self) -> Vec<Definition> {
+                Self::scopes(self).cloned().collect()
+            }
+
+            fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, BoundaryError> {
+                Self::observe(self, record).map_err(BoundaryError::from_error)
+            }
+
+            fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
+                Self::finish(self, run).map_err(BoundaryError::from_error)
+            }
+
+            fn finish_controlled(
+                self,
+                run: &RunSummary,
+                deadline: &crate::budget::Deadline,
+                event_sink: &mut dyn FnMut(Event) -> Result<(), BoundaryError>,
+            ) -> Result<Summary, BoundaryError> {
+                self.finalize(
+                    run,
+                    || session::check(deadline).map_err(Error::Output),
+                    |events| session::deliver(deadline, events, event_sink).map_err(Error::Output),
+                )
+                .map_err(BoundaryError::from_error)
+            }
+        }
+    };
+}
+pub(super) use application_collector;
+
 /// A stream index keeps IP reconstruction on: stream numbering follows reconstructed conversations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CollectorNeeds {

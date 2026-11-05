@@ -30,8 +30,8 @@ pub(crate) use frame::{CapturedFrameText, FieldTree, render_frame, render_undeco
 pub(crate) use human::{
     HumanWriteError, comma_separated, document_spelling, duration_text, emit_stderr_document,
     emit_stderr_error, emit_stderr_message, emit_stdout_document, encapsulation_text,
-    push_stdout_line, render_diagnostics_stderr, render_diagnostics_text, render_optional,
-    report_structured_error, write_stdout_block, write_stdout_line,
+    flush_stdout_batch, push_stdout_line, render_diagnostics_stderr, render_diagnostics_text,
+    render_optional, report_structured_error, write_stdout_block, write_stdout_line,
     write_stdout_line_with_interrupt, write_summary_line,
 };
 
@@ -42,7 +42,7 @@ pub(crate) use ndjson::{stdout_stream, write_unattributed_error};
 pub(crate) use projection::{Projector, missing_fields_error};
 pub(crate) use retained::{Retained, omitted_diagnostic};
 pub(crate) use stdout::{write_hex_line, write_raw};
-pub(crate) use style::terminal_document;
+pub(crate) use style::{escaped, terminal_document};
 
 pub(crate) use presentation::table_row;
 

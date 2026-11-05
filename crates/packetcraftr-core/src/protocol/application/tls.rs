@@ -54,12 +54,4 @@ impl From<crate::codec::Error> for Error {
     }
 }
 
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-
-    let mut text = String::with_capacity(bytes.len().saturating_mul(2));
-    for byte in bytes {
-        let _ = write!(text, "{byte:02x}");
-    }
-    text
-}
+use crate::field::hex::compact_hex as hex;

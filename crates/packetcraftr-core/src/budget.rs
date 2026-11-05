@@ -7,6 +7,12 @@ use std::time::{Duration, Instant};
 
 pub const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
+/// Whether a configured duration is zero or above its finite `maximum`.
+#[must_use]
+pub fn duration_violation(value: Duration, maximum: Duration) -> bool {
+    value.is_zero() || value > maximum
+}
+
 /// A blocked provider cannot be interrupted; callers check before and after each provider boundary.
 #[derive(Clone)]
 pub struct Deadline {

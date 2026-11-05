@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::protocol::application::http::token;
+use crate::protocol::application::http::{ows, token};
 
 /// RFC 6797 sections 6.1 and 8.1: validate the entire first STS field,
 /// including extensions, before recognizing a positive max-age.
@@ -13,7 +13,7 @@ pub(super) fn positive_hsts(mut input: &[u8]) -> bool {
     let mut seen = BTreeSet::new();
     let mut positive = false;
     while !input.is_empty() {
-        input = trim_start(input);
+        input = ows(input);
         if input.is_empty() {
             break;
         }
@@ -29,9 +29,9 @@ pub(super) fn positive_hsts(mut input: &[u8]) -> bool {
         if !seen.insert(name.clone()) {
             return false;
         }
-        input = trim_start(&input[length..]);
+        input = ows(&input[length..]);
         let value = if input.first() == Some(&b'=') {
-            input = trim_start(&input[1..]);
+            input = ows(&input[1..]);
             let Some(value) = directive_value(&mut input) else {
                 return false;
             };
@@ -53,22 +53,12 @@ pub(super) fn positive_hsts(mut input: &[u8]) -> bool {
             b"includesubdomains" if value.is_some() => return false,
             _ => {}
         }
-        input = trim_start(input);
+        input = ows(input);
         if !input.is_empty() && input[0] != b';' {
             return false;
         }
     }
     positive
-}
-
-fn trim_start(mut input: &[u8]) -> &[u8] {
-    while input
-        .first()
-        .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
-    {
-        input = &input[1..];
-    }
-    input
 }
 
 fn directive_value(input: &mut &[u8]) -> Option<Vec<u8>> {

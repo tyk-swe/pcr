@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::ffi::c_int;
+use std::ffi::{CStr, c_char, c_int};
 use std::fmt;
 
 use packetcraftr_core::error::Source;
@@ -9,7 +9,10 @@ use packetcraftr_core::frame::LinkType;
 
 use crate::{
     Error,
-    capture::{NativeSettings, Realized, RealizedSettings, TimestampPrecision, TimestampSource},
+    capture::{
+        MAX_TIMESTAMP_TYPES, NativeSettings, Realized, RealizedSettings, TimestampPrecision,
+        TimestampSource,
+    },
     interface::Id as InterfaceId,
 };
 
@@ -244,6 +247,59 @@ pub(in crate::platform) fn validate_effective_snapshot_length(
         });
     }
     Ok(effective)
+}
+
+/// Bounds one runtime's timestamp type list and copies it out exactly once. `free` and
+/// `copy` wrap the runtime's list, which a zero count leaves unallocated.
+pub(in crate::platform) fn timestamp_type_list(
+    backend: &str,
+    interface: &InterfaceId,
+    count: c_int,
+    error_message: impl FnOnce() -> String,
+    free: impl FnOnce(),
+    copy: impl FnOnce(usize) -> Vec<c_int>,
+) -> Result<Vec<c_int>, Error> {
+    if count < 0 {
+        return Err(Error::Capture {
+            message: format!(
+                "{backend} could not enumerate timestamp types for {}",
+                interface.name
+            ),
+            source: Diagnostic::new(Some(count), error_message()).into_source(),
+        });
+    }
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    let count = usize::try_from(count).unwrap_or(0);
+    if count > MAX_TIMESTAMP_TYPES {
+        free();
+        return Err(Error::Capture {
+            message: format!(
+                "{backend} reported {count} timestamp types for {}, above the {MAX_TIMESTAMP_TYPES} bound",
+                interface.name
+            ),
+            source: None,
+        });
+    }
+    let values = copy(count);
+    free();
+    Ok(values)
+}
+
+/// # Safety
+///
+/// `raw` is NULL or points to a static NUL-terminated string the pcap runtime owns.
+#[expect(unsafe_code, reason = "reads a C string returned by the pcap runtime")]
+pub(in crate::platform) unsafe fn tstamp_type_string(raw: *const c_char) -> Option<String> {
+    if raw.is_null() {
+        return None;
+    }
+    // SAFETY: `raw` is non-NULL and the caller guarantees it is NUL-terminated.
+    let value = unsafe { CStr::from_ptr(raw) }
+        .to_string_lossy()
+        .into_owned();
+    (!value.is_empty()).then_some(value)
 }
 
 // Open and send failures report only error-buffer text, so matching it is the only classifier.

@@ -3,7 +3,9 @@
 
 use crate::errors::CliError;
 use crate::output::http as wire;
-use crate::rendering::{comma_separated, render_optional, write_stdout_line, write_summary_line};
+use crate::rendering::{
+    comma_separated, escaped, render_optional, write_stdout_line, write_summary_line,
+};
 
 pub(super) fn render_message(
     invocation: &crate::invocation::Invocation,
@@ -92,9 +94,4 @@ pub(super) fn render_complete(
             complete.summary.requests_without_final_response
         ),
     )
-}
-
-/// Escaped so captured header bytes can neither drive the terminal nor forge another line.
-fn escaped(value: &str) -> String {
-    value.chars().flat_map(char::escape_default).collect()
 }

@@ -50,8 +50,10 @@ impl TlsRequest {
         self.limits.validate()?;
         self.name().validate()?;
         if self.endpoint.port() == 0
-            || self.timeout.is_zero()
-            || self.timeout > Duration::from_secs(3600)
+            || crate::deadline::duration_violation(
+                self.timeout,
+                packetcraftr_netio::deadline::MAX_WAIT,
+            )
         {
             return Err(Error::Invalid(
                 "nonzero port and timeout at most one hour required".into(),
@@ -213,10 +215,7 @@ fn tls_report(request: &TlsRequest, evidence: &tls::Evidence) -> Report {
             evidence
                 .certificates
                 .iter()
-                .map(|c| Sha256::digest(c)
-                    .iter()
-                    .map(|b| format!("{b:02x}"))
-                    .collect::<String>())
+                .map(|c| packetcraftr_core::field::hex::compact_hex(&Sha256::digest(c)))
                 .collect::<Vec<_>>()
         ),
     );

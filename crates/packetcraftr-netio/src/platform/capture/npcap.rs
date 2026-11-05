@@ -5,7 +5,7 @@
 
 use packetcraftr_core::clock::{Clock, SystemClock};
 use std::{
-    ffi::{CStr, CString, c_int},
+    ffi::{CString, c_int},
     ptr::{NonNull, null_mut},
     sync::Arc,
 };
@@ -20,13 +20,11 @@ use crate::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
         NativeCaptureStats, NativeCapturedPacket, monotonic_packet_time, system_time,
     },
-    capture::{
-        Limits, MAX_TIMESTAMP_TYPES, Metadata, NativeSettings, TimestampPrecision, TimestampType,
-    },
+    capture::{Limits, Metadata, NativeSettings, TimestampPrecision, TimestampType},
     interface::Id as InterfaceId,
     platform::common::pcap_api::{
         Diagnostic, canonical_link_type, realize_settings, timestamp_source_of_value,
-        validate_effective_snapshot_length,
+        timestamp_type_list, tstamp_type_string, validate_effective_snapshot_length,
     },
 };
 use bytes::Bytes;
@@ -118,36 +116,16 @@ pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampTy
     // SAFETY: handle is a live unactivated capture; Npcap fills the writable
     // out-pointer with an allocation pcap_free_tstamp_types owns.
     let count = unsafe { list_types(handle.raw.as_ptr(), &mut list) };
-    if count < 0 {
-        return Err(Error::Capture {
-            message: format!(
-                "Npcap could not enumerate timestamp types for {}",
-                interface.name
-            ),
-            source: Diagnostic::new(Some(count), handle.error_message()).into_source(),
-        });
-    }
-    // Npcap returns no allocation for a zero count, so the null list must not become a slice.
-    if count == 0 {
-        return Ok(Vec::new());
-    }
-    let count = usize::try_from(count).unwrap_or(0);
-    if count > MAX_TIMESTAMP_TYPES {
-        // SAFETY: list is a live Npcap allocation released exactly once.
-        unsafe { free(list) };
-        return Err(Error::Capture {
-            message: format!(
-                "Npcap reported {count} timestamp types for {}, above the {MAX_TIMESTAMP_TYPES} bound",
-                interface.name
-            ),
-            source: None,
-        });
-    }
-    // SAFETY: list points to `count` consecutive c_int values Npcap owns;
-    // they are copied out before the single pcap_free_tstamp_types call.
-    let values = unsafe { std::slice::from_raw_parts(list, count) }.to_vec();
-    // SAFETY: list is the unchanged Npcap allocation from above.
-    unsafe { free(list) };
+    let values = timestamp_type_list(
+        "Npcap",
+        interface,
+        count,
+        || handle.error_message(),
+        // SAFETY: list is the unchanged Npcap allocation, released exactly once.
+        || unsafe { free(list) },
+        // SAFETY: list points to `count` consecutive c_int values Npcap owns.
+        |count| unsafe { std::slice::from_raw_parts(list, count) }.to_vec(),
+    )?;
     Ok(values
         .into_iter()
         .map(|value| {
@@ -170,17 +148,6 @@ pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampTy
             }
         })
         .collect())
-}
-
-unsafe fn tstamp_type_string(raw: *const std::ffi::c_char) -> Option<String> {
-    if raw.is_null() {
-        return None;
-    }
-    // SAFETY: `raw` is non-NULL and points to a static NUL-terminated Npcap string.
-    let value = unsafe { CStr::from_ptr(raw) }
-        .to_string_lossy()
-        .into_owned();
-    (!value.is_empty()).then_some(value)
 }
 
 fn install_capture_filter(

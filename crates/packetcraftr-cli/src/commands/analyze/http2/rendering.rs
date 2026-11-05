@@ -3,7 +3,9 @@
 
 use crate::errors::CliError;
 use crate::output::http2 as wire;
-use crate::rendering::{comma_separated, render_optional, write_stdout_line, write_summary_line};
+use crate::rendering::{
+    comma_separated, escaped, render_optional, write_stdout_line, write_summary_line,
+};
 
 pub(super) fn render_frame(
     invocation: &crate::invocation::Invocation,
@@ -131,8 +133,4 @@ pub(super) fn render_complete(
             complete.summary.issues
         ),
     )
-}
-
-fn escaped(value: &str) -> String {
-    value.chars().flat_map(char::escape_default).collect()
 }

@@ -162,8 +162,10 @@ impl Request {
         ] {
             if limit.attempts == 0
                 || limit.attempts > MAX_ATTEMPTS
-                || limit.timeout.is_zero()
-                || limit.timeout > Duration::from_secs(3600)
+                || crate::deadline::duration_violation(
+                    limit.timeout,
+                    packetcraftr_netio::deadline::MAX_WAIT,
+                )
                 || limit.write_bytes > MAX_OPERATION_BYTES
                 || limit.read_bytes == 0
                 || limit.read_bytes > MAX_OPERATION_BYTES

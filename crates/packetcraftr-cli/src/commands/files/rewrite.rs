@@ -5,17 +5,11 @@ pub(in crate::commands) mod arguments;
 
 use self::arguments::Args;
 use crate::command_options::Bounded as _;
-use crate::output::envelope::Published;
-use crate::output::{
-    self,
-    contract::{Command, Format},
-    rewrite::MAX_REPORTED_CHANGES,
-};
+use crate::output::{self, contract::Command, rewrite::MAX_REPORTED_CHANGES};
 use crate::{
     errors::CliError,
     filtering,
-    invocation::StreamEncoder,
-    rendering::{Retained, emit_published, write_summary_line},
+    rendering::{Retained, write_summary_line},
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -50,18 +44,11 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
-pub(crate) fn run(
-    invocation: &crate::invocation::Invocation,
-    args: Args,
-    format: Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
     let capture_limits = args.limits.limits()?;
     let checksum_mode = args
         .checksum_mode
@@ -221,23 +208,19 @@ pub(crate) fn run(
         changes.into_items(),
         changes_omitted,
     ));
-    match format {
-        Format::Json => emit_published(
-            invocation,
-            Command::Rewrite,
-            Published::new(report, Vec::new()),
-        ),
-        Format::Ndjson => stream
-            .complete_published(Published::new(report, Vec::new()))
-            .map_err(Into::into),
-        Format::Text => {
-            stream
+    crate::commands::offline_analysis::complete_application(
+        invocation,
+        Command::Rewrite,
+        report,
+        |report| report,
+        |invocation, report| {
+            invocation
+                .output
                 .presentation()
-                .details(invocation, "Rewrite evidence", &report)?;
-            render_text(invocation, &report)
-        }
-        other => other.unreachable(),
-    }
+                .details(invocation, "Rewrite evidence", report)?;
+            render_text(invocation, report)
+        },
+    )
 }
 
 fn render_text(

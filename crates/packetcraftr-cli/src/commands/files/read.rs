@@ -120,7 +120,10 @@ pub(super) fn run(
         let result = output.write(invocation, &mut reader, limits, selection, &mut destination);
         return finish_compressed_output(result, destination);
     }
-    records::run(
+    if format == Format::Text && stream.batches_records() {
+        invocation.batch_stdout();
+    }
+    let result = records::run(
         invocation,
         &mut reader,
         limits,
@@ -128,7 +131,8 @@ pub(super) fn run(
         format,
         stream,
         tree.as_mut(),
-    )
+    );
+    result.and(crate::rendering::flush_stdout_batch(invocation))
 }
 
 fn validate_dissect_format(dissect: bool, format: Format) -> Result<(), CliError> {

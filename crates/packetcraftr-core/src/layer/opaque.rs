@@ -181,10 +181,8 @@ reflective_layer! {
     layout fn malformed_layout(length: usize);
 }
 
-/// Parses hexadecimal raw bytes with optional `0x`, whitespace, colon, or dash separators.
-pub fn parse_hex(input: &str) -> Result<Bytes, crate::codec::Error> {
-    let protocol = Raw::ID;
-    let compact = input
+fn hex_digits(input: &str) -> impl Iterator<Item = char> {
+    input
         .strip_prefix("0x")
         .or_else(|| input.strip_prefix("0X"))
         .unwrap_or(input)
@@ -192,7 +190,18 @@ pub fn parse_hex(input: &str) -> Result<Bytes, crate::codec::Error> {
         .filter(|character| {
             !character.is_ascii_whitespace() && *character != ':' && *character != '-'
         })
-        .collect::<String>();
+}
+
+/// The bytes [`parse_hex`] retains from `input` once its prefix and separators are removed.
+#[must_use]
+pub fn hex_digit_bytes(input: &str) -> usize {
+    hex_digits(input).map(char::len_utf8).sum()
+}
+
+/// Parses hexadecimal raw bytes with optional `0x`, whitespace, colon, or dash separators.
+pub fn parse_hex(input: &str) -> Result<Bytes, crate::codec::Error> {
+    let protocol = Raw::ID;
+    let compact = hex_digits(input).collect::<String>();
     if compact.len() % 2 != 0 {
         return Err(crate::codec::Error::invalid(
             protocol,

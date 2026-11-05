@@ -231,18 +231,7 @@ impl ConnectionState {
         context.check_streams()?;
         self.streams.admitted += 1;
         context.charge(&mut self.charge, budget::STREAM_OVERHEAD)?;
-        let windows = PerSide::new(
-            i64::from(
-                self.control.settings[Side::Server]
-                    .acknowledged
-                    .initial_window_size,
-            ),
-            i64::from(
-                self.control.settings[Side::Client]
-                    .acknowledged
-                    .initial_window_size,
-            ),
-        );
+        let windows = self.initial_windows();
         let mut promised_stream = StreamState::reserved(stream_id, windows);
         promised_stream.request = Some(index);
         promised_stream.method = promised_method;

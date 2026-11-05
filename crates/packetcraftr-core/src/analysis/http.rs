@@ -127,7 +127,11 @@ impl Collector {
     ) -> Result<Self, Error> {
         limits.validate()?;
         let ports = application::normalize_ports(ports, "http_ports")?;
-        super::error::check_ceiling("max_http_body_bytes", max_body_bytes, 256 * 1024 * 1024)?;
+        super::error::check_ceiling(
+            "max_http_body_bytes",
+            max_body_bytes,
+            super::http2::MAX_BODY_BYTES,
+        )?;
         Ok(Self {
             limits,
             max_body_bytes,
@@ -150,18 +154,6 @@ impl Collector {
             self.event(event, record.number, &mut output)?;
         }
         Ok(output)
-    }
-    pub fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), Error> {
-        let mut output = Vec::new();
-        let summary = self.finalize(
-            run,
-            || Ok(()),
-            |events| {
-                output.extend(events);
-                Ok(())
-            },
-        )?;
-        Ok((output, summary))
     }
 
     fn finalize(
@@ -563,45 +555,7 @@ impl Collector {
     }
 }
 
-impl session::Collector for Collector {
-    type Event = Event;
-    type Summary = Summary;
-
-    fn needs(&self) -> CollectorNeeds {
-        CollectorNeeds {
-            tcp_stream: true,
-            tcp_events: true,
-            track_sources: true,
-            ..CollectorNeeds::default()
-        }
-    }
-
-    fn scopes(&self) -> Vec<Definition> {
-        Self::scopes(self).cloned().collect()
-    }
-
-    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, BoundaryError> {
-        Self::observe(self, record).map_err(BoundaryError::from_error)
-    }
-
-    fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
-        Self::finish(self, run).map_err(BoundaryError::from_error)
-    }
-
-    fn finish_controlled(
-        self,
-        run: &RunSummary,
-        deadline: &crate::budget::Deadline,
-        event_sink: &mut dyn FnMut(Event) -> Result<(), BoundaryError>,
-    ) -> Result<Summary, BoundaryError> {
-        self.finalize(
-            run,
-            || session::check(deadline).map_err(Error::Output),
-            |events| session::deliver(deadline, events, event_sink).map_err(Error::Output),
-        )
-        .map_err(BoundaryError::from_error)
-    }
-}
+session::application_collector!();
 fn bare_crlf_offset(prev: Option<u8>, run: &[u8]) -> Option<usize> {
     if prev == Some(b'\r') && run.first() != Some(&b'\n') {
         return Some(0);

@@ -4,7 +4,7 @@
 //! RTSP/1.0 requests/responses with byte-preserving ordered headers and Content-Length bodies.
 
 use crate::codec::{DecodeContext, EncodeContext, Error};
-use crate::protocol::common::{invalid, unsupported};
+use crate::protocol::common::invalid;
 use crate::protocol::message::{Reader, Records, Writer, message_codec, record};
 use bytes::Bytes;
 
@@ -117,35 +117,8 @@ impl Rtsp {
                 r.take_layouts(),
             ));
         }
-        let (start_line, headers, body) = super::text_message::parse(NAME, &b)?;
-        let text =
-            std::str::from_utf8(&start_line).map_err(|_| invalid(NAME, "invalid start line"))?;
-        let parts: Vec<_> = text.splitn(3, ' ').collect();
-        if parts.len() != 3
-            || !(parts[0] == "RTSP/1.0"
-                && parts[1].len() == 3
-                && parts[1].bytes().all(|b| b.is_ascii_digit())
-                || parts[2] == "RTSP/1.0"
-                    && !parts[1].is_empty()
-                    && super::text_message::is_token(NAME, parts[0].as_bytes()))
-        {
-            return Err(unsupported(NAME, "unsupported start line or version"));
-        }
-        let body_start = b.len() - body.len();
-        let fields = vec![
-            crate::layout::FieldLayout {
-                index: 0,
-                range: crate::layout::ByteRange::new(0, start_line.len()),
-            },
-            crate::layout::FieldLayout {
-                index: 1,
-                range: crate::layout::ByteRange::new(start_line.len() + 2, body_start - 2),
-            },
-            crate::layout::FieldLayout {
-                index: 2,
-                range: crate::layout::ByteRange::new(body_start, b.len()),
-            },
-        ];
+        let (start_line, headers, body, fields) =
+            super::text_message::parse_versioned(NAME, "RTSP/1.0", &b)?;
         Ok((
             Self {
                 start_line,

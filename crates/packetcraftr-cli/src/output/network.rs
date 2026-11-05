@@ -107,8 +107,7 @@ pub struct MacAddress(pub [u8; 6]);
 
 impl std::fmt::Display for MacAddress {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let [a, b, c, d, e, f] = self.0;
-        write!(formatter, "{a:02x}:{b:02x}:{c:02x}:{d:02x}:{e:02x}:{f:02x}")
+        library_packet::MacAddress(self.0).fmt(formatter)
     }
 }
 

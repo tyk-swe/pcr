@@ -7,6 +7,11 @@ pub(crate) fn terminal_document(value: &str) -> String {
     terminal_safe_document(&anstream::adapter::strip_str(value).to_string())
 }
 
+/// Escaped so captured header bytes can neither drive the terminal nor forge another line.
+pub(crate) fn escaped(value: &str) -> String {
+    value.chars().flat_map(char::escape_default).collect()
+}
+
 pub(crate) fn terminal_safe(value: &str) -> String {
     terminal_safe_with_layout(value, false)
 }

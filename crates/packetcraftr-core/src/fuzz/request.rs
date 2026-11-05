@@ -180,7 +180,7 @@ impl Limits {
                 reason: Constraint::AtMostMaxTotalBytes,
             });
         }
-        if self.max_duration.is_zero() || self.max_duration > MAX_DURATION {
+        if crate::budget::duration_violation(self.max_duration, MAX_DURATION) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,
                 maximum: MAX_DURATION,

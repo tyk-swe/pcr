@@ -217,18 +217,9 @@ fn hex_frame_bytes(text: &[u8], max_packet_size: usize) -> Result<Vec<u8>, CliEr
     }
     let text =
         std::str::from_utf8(text).map_err(|source| CliError::caused(Kind::Usage, &source))?;
-    let trimmed = text.trim_start();
-    let digits = trimmed
-        .strip_prefix("0x")
-        .or_else(|| trimmed.strip_prefix("0X"))
-        .unwrap_or(trimmed);
     // Count the same bytes the parser retains before it allocates its compact
     // string and decoded buffer. Round up so an extra nibble also respects the budget.
-    let actual = digits
-        .bytes()
-        .filter(|byte| !byte.is_ascii_whitespace() && !matches!(*byte, b':' | b'-'))
-        .count()
-        .div_ceil(2);
+    let actual = core::layer::hex_digit_bytes(text.trim_start()).div_ceil(2);
     if actual > max_packet_size {
         return Err(CliError::classified(core::decode::Error::PacketSizeLimit {
             actual,

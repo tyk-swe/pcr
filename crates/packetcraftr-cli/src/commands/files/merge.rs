@@ -4,13 +4,8 @@
 pub(in crate::commands) mod arguments;
 
 use self::arguments::{Args, OrderArg};
-use crate::output::envelope::Published;
-use crate::output::{self, contract::Format};
-use crate::{
-    errors::CliError,
-    invocation::StreamEncoder,
-    rendering::{emit_published, write_summary_line},
-};
+use crate::output;
+use crate::{errors::CliError, rendering::write_summary_line};
 use packetcraftr_core::{capture_file, error::Kind};
 use std::path::Path;
 
@@ -34,18 +29,11 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
-pub(crate) fn run(
-    invocation: &crate::invocation::Invocation,
-    args: Args,
-    format: Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
     let limits = args.limits.limits()?;
     let reorder = args.max_reorder_frames > 0;
     if reorder && args.order == OrderArg::Append {
@@ -113,19 +101,16 @@ pub(crate) fn run(
     staged.sync()?;
     staged.persist()?;
     let report = output::merge::Report::from((args.write.display().to_string(), report));
-    match format {
-        Format::Json => emit_published(
-            invocation,
-            output::contract::Command::Merge,
-            Published::new(report, Vec::new()),
-        ),
-        Format::Ndjson => stream
-            .complete_published(Published::new(report, Vec::new()))
-            .map_err(Into::into),
-        Format::Text => {
-            stream
+    crate::commands::offline_analysis::complete_application(
+        invocation,
+        output::contract::Command::Merge,
+        report,
+        |report| report,
+        |invocation, report| {
+            invocation
+                .output
                 .presentation()
-                .details(invocation, "Capture sources", &report)?;
+                .details(invocation, "Capture sources", report)?;
             write_summary_line(
                 invocation,
                 format_args!(
@@ -136,7 +121,6 @@ pub(crate) fn run(
                     report.path
                 ),
             )
-        }
-        other => other.unreachable(),
-    }
+        },
+    )
 }

@@ -58,12 +58,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             |error| (probe_error)(0_u64, crate::error::Failure::DurationLimit(error)),
             |source| Error::Output { source },
         )?;
-        let send = crate::send::Options {
-            destination: None,
-            plan: request.route.clone(),
-            build: packetcraftr_core::build::Options::default(),
-            allow_permissive_live: false,
-        };
+        let send = crate::traceroute::request::send_options(&request.route);
         // The trace resolves its own neighbors, so its executor authorizes
         // each neighbor request like a probe whether or not the caller did.
         request.validate()?;
@@ -241,12 +236,7 @@ fn plan_hosts(request: &Request, targets: &[SelectedAddress]) -> Result<Plan, Er
             Choice::Traced(selection) => {
                 let strategy = selection.strategy;
                 if request.dont_fragment && target.address.is_ipv6() {
-                    return Err(Error::InvalidProbeOption {
-                        option: "dont_fragment",
-                        reason:
-                            "the IPv4 Don't Fragment flag does not exist for an IPv6 destination"
-                                .to_owned(),
-                    });
+                    return Err(crate::traceroute::request::ipv6_dont_fragment());
                 }
                 if strategy.transport == Transport::Tcp && request.payload_size > 0 {
                     return Err(tcp_payload());

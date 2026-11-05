@@ -899,7 +899,7 @@ mod differential {
 
 #[cfg(unix)]
 mod stalled_inputs {
-    use std::io::Write;
+    use std::io::{BufRead, BufReader, Write};
     use std::process::{Child, ChildStdin, Command, Output, Stdio};
     use std::time::{Duration, Instant};
 
@@ -1167,6 +1167,139 @@ mod stalled_inputs {
                 "io.cancelled",
                 "cancelled",
             );
+        }
+    }
+
+    #[test]
+    fn piped_capture_publishes_each_frame_before_its_input_ends() {
+        let capture =
+            std::fs::read(super::capture_path("dns-response.pcap")).expect("read capture");
+        for format in ["ndjson", "text"] {
+            let args = ["--output", format, "files", "read", "-"];
+            let (mut child, mut stdin) = spawn_with_open_stdin(&args);
+            let stdout = child.stdout.take().expect("piped stdout");
+            let (lines, first) = std::sync::mpsc::channel();
+            let reader = std::thread::spawn(move || {
+                let mut stdout = BufReader::new(stdout);
+                let mut line = String::new();
+                stdout.read_line(&mut line).expect("read first record");
+                lines.send(line).expect("receive first record");
+                std::io::copy(&mut stdout, &mut std::io::sink()).expect("drain stdout");
+            });
+            stdin.write_all(&capture).expect("write capture");
+            stdin.flush().expect("flush capture");
+            let line = first
+                .recv_timeout(EXIT_WITHIN)
+                .expect("a frame record while stdin stays open");
+            assert!(!line.is_empty(), "{format}");
+            drop(stdin);
+            let output = wait_bounded(child, &args);
+            reader.join().expect("join stdout reader");
+            assert!(output.status.success(), "{output:?}");
+        }
+    }
+
+    /// Enough frames to overflow an output batch, and optionally a record cut short.
+    fn synthetic_pcap(truncated: bool) -> Vec<u8> {
+        let frame = [0x45_u8; 20];
+        let header = [
+            0xa1b2_c3d4_u32.to_le_bytes().as_slice(),
+            &2_u16.to_le_bytes(),
+            &4_u16.to_le_bytes(),
+            &[0; 8],
+            &65_535_u32.to_le_bytes(),
+            &228_u32.to_le_bytes(),
+        ]
+        .concat();
+        let record = [
+            [0_u8; 8].as_slice(),
+            &20_u32.to_le_bytes(),
+            &20_u32.to_le_bytes(),
+            &frame,
+        ]
+        .concat();
+        let frames = record.repeat(2000);
+        let tail: &[u8] = if truncated { &record[..30] } else { &[] };
+        [header.as_slice(), &frames, tail].concat()
+    }
+
+    fn read_piped(args: &[&str], capture: Vec<u8>) -> Output {
+        let (child, mut stdin) = spawn_with_open_stdin(args);
+        let writer = std::thread::spawn(move || {
+            stdin.write_all(&capture).expect("write capture");
+        });
+        let output = child.wait_with_output().expect("wait for child");
+        writer.join().expect("join stdin writer");
+        output
+    }
+
+    /// A datagram socket keeps write boundaries, so each received message is one write.
+    #[cfg(target_os = "linux")]
+    fn count_stdout_writes(args: &[&str]) -> usize {
+        use std::os::unix::net::UnixDatagram;
+        let (received, sent) = UnixDatagram::pair().expect("create socket pair");
+        received.set_nonblocking(true).expect("set nonblocking");
+        let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(std::os::fd::OwnedFd::from(sent))
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn packetcraftr");
+        let started = Instant::now();
+        let mut message = vec![0_u8; 1 << 20];
+        let mut writes = 0;
+        loop {
+            match received.recv(&mut message) {
+                Ok(_) => writes += 1,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if let Some(status) = child.try_wait().expect("poll child status") {
+                        assert!(status.success(), "{args:?}: {status:?}");
+                        return writes;
+                    }
+                    assert!(started.elapsed() < EXIT_WITHIN, "{args:?} did not exit");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("receive stdout: {error}"),
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn regular_file_input_coalesces_stdout_writes() {
+        let file = tempfile::NamedTempFile::new().expect("create capture");
+        std::fs::write(file.path(), synthetic_pcap(false)).expect("write capture");
+        let path = file.path().to_string_lossy();
+        for format in ["text", "ndjson"] {
+            let writes = count_stdout_writes(&["--output", format, "files", "read", path.as_ref()]);
+            assert!((1..200).contains(&writes), "{format} took {writes} writes");
+        }
+    }
+
+    #[test]
+    fn regular_file_output_matches_piped_output_through_success_and_failure() {
+        for truncated in [false, true] {
+            let capture = synthetic_pcap(truncated);
+            let file = tempfile::NamedTempFile::new().expect("create capture");
+            std::fs::write(file.path(), &capture).expect("write capture");
+            let path = file.path().to_string_lossy();
+            for format in ["text", "ndjson"] {
+                let piped =
+                    read_piped(&["--output", format, "files", "read", "-"], capture.clone());
+                let regular = super::run(&["--output", format, "files", "read", path.as_ref()]);
+                assert_eq!(
+                    String::from_utf8_lossy(&regular.stdout),
+                    String::from_utf8_lossy(&piped.stdout),
+                    "{format} truncated={truncated}"
+                );
+                assert_eq!(
+                    regular.status, piped.status,
+                    "{format} truncated={truncated}"
+                );
+                assert_eq!(regular.status.success(), !truncated, "{format}");
+                assert!(piped.stdout.len() > 16 * 1024, "{format}");
+            }
         }
     }
 

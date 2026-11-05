@@ -33,7 +33,6 @@ use super::Request;
 use super::discovery::{Link, Neighbor, NeighborOutcome, NextHop};
 use super::evidence::classify_response;
 use super::plan::packet::sent_probe_matches;
-use crate::neighbor::Resolver as _;
 use crate::target::SelectedAddress;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::interface;

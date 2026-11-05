@@ -10,7 +10,7 @@ use packetcraftr_netio::Error as LiveIoError;
 
 use crate::{policy, target};
 
-pub(crate) use failure::Failure;
+pub(crate) use failure::{Failure, workflow_probe_error};
 
 #[derive(Debug, ThisError)]
 #[non_exhaustive]

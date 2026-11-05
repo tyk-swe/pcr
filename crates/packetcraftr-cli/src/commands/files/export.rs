@@ -4,16 +4,8 @@
 pub(in crate::commands) mod arguments;
 
 use self::arguments::Args;
-use crate::output::envelope::Published;
-use crate::output::{
-    self,
-    contract::{Command, Format},
-};
-use crate::{
-    errors::CliError,
-    invocation::StreamEncoder,
-    rendering::{emit_published, write_summary_line},
-};
+use crate::output::{self, contract::Command};
+use crate::{errors::CliError, rendering::write_summary_line};
 use packetcraftr_core::{analysis, capture_file};
 
 impl crate::commands::Spec for Args {
@@ -41,18 +33,11 @@ impl crate::commands::Spec for Args {
         self,
         invocation: &crate::invocation::Invocation,
     ) -> Result<crate::commands::CommandExit, CliError> {
-        let format = invocation.format;
-        let stream = &invocation.output;
-        run(invocation, self, format, stream).map(|()| crate::commands::CommandExit::SUCCESS)
+        run(invocation, self).map(|()| crate::commands::CommandExit::SUCCESS)
     }
 }
 
-pub(crate) fn run(
-    invocation: &crate::invocation::Invocation,
-    args: Args,
-    format: Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Result<(), CliError> {
     let streams = args
         .streams
         .iter()
@@ -103,16 +88,12 @@ pub(crate) fn run(
         .map_err(CliError::classified)?;
     staged.sync()?;
     staged.persist()?;
-    match format {
-        Format::Json => emit_published(
-            invocation,
-            Command::Export,
-            Published::new(report, Vec::new()),
-        ),
-        Format::Ndjson => stream
-            .complete_published(Published::new(report, Vec::new()))
-            .map_err(Into::into),
-        Format::Text => {
+    crate::commands::offline_analysis::complete_application(
+        invocation,
+        Command::Export,
+        report,
+        |report| report,
+        |invocation, report| {
             for selected in &report.matched_streams {
                 crate::rendering::write_stdout_line(
                     invocation,
@@ -151,9 +132,10 @@ pub(crate) fn run(
                     format_args!("{} source outcomes omitted", report.source_outcomes_omitted),
                 )?;
             }
-            stream
+            invocation
+                .output
                 .presentation()
-                .details(invocation, "Export sources", &report)?;
+                .details(invocation, "Export sources", report)?;
             write_summary_line(
                 invocation,
                 format_args!(
@@ -167,7 +149,6 @@ pub(crate) fn run(
                     report.unmatched_datagram_frames.len()
                 ),
             )
-        }
-        other => other.unreachable(),
-    }
+        },
+    )
 }

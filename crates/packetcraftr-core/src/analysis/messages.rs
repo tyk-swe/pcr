@@ -204,18 +204,6 @@ impl Collector {
         }
         Ok(events)
     }
-    pub fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), Error> {
-        let mut out = Vec::new();
-        let summary = self.finalize(
-            run,
-            || Ok(()),
-            |events| {
-                out.extend(events);
-                Ok(())
-            },
-        )?;
-        Ok((out, summary))
-    }
     fn finalize(
         mut self,
         run: &RunSummary,
@@ -723,40 +711,7 @@ fn compact_buffer(direction: &mut Direction) {
 thread_local! {
     static BUFFER_STATS: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
 }
-impl session::Collector for Collector {
-    type Event = Event;
-    type Summary = Summary;
-    fn needs(&self) -> CollectorNeeds {
-        CollectorNeeds {
-            tcp_stream: true,
-            tcp_events: true,
-            track_sources: true,
-            ..CollectorNeeds::default()
-        }
-    }
-    fn scopes(&self) -> Vec<Definition> {
-        Self::scopes(self).cloned().collect()
-    }
-    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, BoundaryError> {
-        Self::observe(self, record).map_err(BoundaryError::from_error)
-    }
-    fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
-        Self::finish(self, run).map_err(BoundaryError::from_error)
-    }
-    fn finish_controlled(
-        self,
-        run: &RunSummary,
-        deadline: &crate::budget::Deadline,
-        event_sink: &mut dyn FnMut(Event) -> Result<(), BoundaryError>,
-    ) -> Result<Summary, BoundaryError> {
-        self.finalize(
-            run,
-            || session::check(deadline).map_err(Error::Output),
-            |events| session::deliver(deadline, events, event_sink).map_err(Error::Output),
-        )
-        .map_err(BoundaryError::from_error)
-    }
-}
+session::application_collector!();
 
 #[cfg(test)]
 mod tests;

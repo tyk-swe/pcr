@@ -3,7 +3,7 @@
 
 mod arp;
 mod eapol;
-pub(crate) mod ether_type;
+pub mod ether_type;
 mod ethernet;
 mod llc;
 mod lldp;

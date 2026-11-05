@@ -94,15 +94,7 @@ pub enum Error {
     OptionValue { kind: u8, length: usize },
 }
 
-impl crate::error::Classified for Error {
-    fn classification(&self) -> crate::error::Classification {
-        crate::error::Classification::new(
-            crate::error::Code::PacketCodec,
-            crate::error::Kind::Packet,
-            Some("correct the layer bytes or field values the codec refused"),
-        )
-    }
-}
+super::packet_codec_error!();
 
 /// A Neighbor Discovery option. Options whose kind is not modelled, or whose
 /// length does not fit the layout their kind defines, stay [`Other`] so the
@@ -287,13 +279,6 @@ impl MessageOption {
             kind,
             value: Bytes::copy_from_slice(value),
         })
-    }
-}
-
-fn field_range(field: &'static str, value: impl Into<u64>) -> Error {
-    Error::FieldRange {
-        field,
-        value: value.into(),
     }
 }
 

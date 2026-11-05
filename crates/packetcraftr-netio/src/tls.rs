@@ -64,8 +64,10 @@ impl Limits {
             || !(1..=4096).contains(&self.max_steps)
             || !(1..=64).contains(&self.max_certificates)
             || self.max_certificate_bytes > 65_536
-            || self.handshake_timeout.is_zero()
-            || self.handshake_timeout > Duration::from_secs(3600)
+            || packetcraftr_core::budget::duration_violation(
+                self.handshake_timeout,
+                crate::deadline::MAX_WAIT,
+            )
         {
             return Err(Error::InvalidLimits);
         }

@@ -15,7 +15,7 @@ pub use error::{Error, FailureEvidence};
 pub use model::Resolution;
 pub(crate) use model::{MAX_VLAN_TAGS, Request};
 pub use options::Options;
-pub(crate) use resolver::{Resolver, State};
+pub(crate) use resolver::{Active, State};
 pub(crate) use wire::build_request_frame as request_frame;
 
 // Allowance for one ARP request or NDP neighbor solicitation: Ethernet

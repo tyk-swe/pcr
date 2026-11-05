@@ -3,18 +3,10 @@
 
 #![no_main]
 
-use std::sync::{Arc, OnceLock};
-
 use libfuzzer_sys::fuzz_target;
 use packetcraftr_core::decode::{Dissector, Options};
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::protocol::builtin;
-use packetcraftr_core::registry::Registry;
-
-fn registry() -> Arc<Registry> {
-    static REGISTRY: OnceLock<Arc<Registry>> = OnceLock::new();
-    Arc::clone(REGISTRY.get_or_init(builtin::registry))
-}
+use packetcraftr_fuzz::registry;
 
 fuzz_target!(|data: &[u8]| {
     let Some((selector, payload)) = data.split_first() else {

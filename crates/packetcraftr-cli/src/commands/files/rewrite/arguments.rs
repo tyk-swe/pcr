@@ -181,7 +181,7 @@ fn vlan(value: &str) -> Result<VlanRewrite, CliError> {
     let parts: Vec<_> = value.split(':').collect();
     let tag = match parts.as_slice() {
         [id] => VlanRewrite {
-            ether_type: 0x8100,
+            ether_type: packetcraftr_core::packet::VlanKind::Ieee8021Q.ether_type(),
             identifier: number(id)?,
             priority: 0,
             drop_eligible: false,

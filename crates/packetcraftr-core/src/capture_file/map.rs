@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::pcapng::validate_rewritable_packet_flags;
-use super::wire::{PCAPNG_OPTION_END, PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL};
+use super::wire::{
+    PCAPNG_OPTION_END, PCAPNG_OPTION_IF_RXSPEED, PCAPNG_OPTION_IF_SPEED, PCAPNG_OPTION_IF_TSOFFSET,
+    PCAPNG_OPTION_IF_TSRESOL, PCAPNG_OPTION_IF_TXSPEED,
+};
 use super::{
-    Budget, CaptureHeader, Error, Format, Interface, Limits, MetadataBlockKind, PcapNgOption,
-    Reader, RecordKind, Writer,
+    Budget, CaptureHeader, Endianness, Error, Format, Interface, Limits, MetadataBlockKind,
+    PcapNgOption, Reader, RecordKind, Writer,
 };
 use crate::{error::BoundaryError, frame::Frame};
 use std::io::{Read, Write};
@@ -46,7 +49,7 @@ where
     reader.refuse_declared_fcs()?;
     if matches!(reader.header(), CaptureHeader::Pcap(_)) {
         for interface in reader.interfaces() {
-            let id = add_interface(output, interface.clone(), &[], maximum_growth)?;
+            let id = add_interface(output, interface.clone(), &[], maximum_growth, endianness)?;
             if id as usize != report.interfaces {
                 return Err(Error::TransformMetadata("nonempty output interface table"));
             }
@@ -66,7 +69,8 @@ where
                         ..
                     } => {
                         reader.refuse_declared_fcs()?;
-                        let id = add_interface(output, interface, &options, maximum_growth)?;
+                        let id =
+                            add_interface(output, interface, &options, maximum_growth, endianness)?;
                         if id != global_id {
                             return Err(Error::TransformMetadata(
                                 "nonempty output interface table",
@@ -129,6 +133,7 @@ fn add_interface<W: Write>(
     mut interface: Interface,
     options: &[PcapNgOption],
     growth: usize,
+    source_endianness: Endianness,
 ) -> Result<u32, Error> {
     if interface.snap_len != 0 {
         interface.snap_len =
@@ -140,7 +145,7 @@ fn add_interface<W: Write>(
                     reason: "rewritten interface snapshot length overflows",
                 })?;
     }
-    let retained: Vec<_> = options
+    let retained = options
         .iter()
         .filter(|option| {
             !matches!(
@@ -148,7 +153,31 @@ fn add_interface<W: Write>(
                 PCAPNG_OPTION_END | PCAPNG_OPTION_IF_TSRESOL | PCAPNG_OPTION_IF_TSOFFSET
             )
         })
-        .cloned()
-        .collect();
+        .map(|option| rewrite_interface_option(option, source_endianness, output.endianness()))
+        .collect::<Result<Vec<_>, _>>()?;
     output.add_interface_description_with_options(interface, &retained)
+}
+
+fn rewrite_interface_option(
+    option: &PcapNgOption,
+    source: Endianness,
+    target: Endianness,
+) -> Result<PcapNgOption, Error> {
+    if source == target
+        || !matches!(
+            option.code,
+            PCAPNG_OPTION_IF_SPEED | PCAPNG_OPTION_IF_TXSPEED | PCAPNG_OPTION_IF_RXSPEED
+        )
+    {
+        return Ok(option.clone());
+    }
+    let value: [u8; 8] = option
+        .value
+        .as_ref()
+        .try_into()
+        .map_err(|_| Error::TransformMetadata("malformed interface speed"))?;
+    Ok(PcapNgOption {
+        code: option.code,
+        value: value.into_iter().rev().collect::<Vec<_>>().into(),
+    })
 }

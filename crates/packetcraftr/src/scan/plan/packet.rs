@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_core::protocol::identity;
+use packetcraftr_core::protocol::link::ether_type;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -150,9 +151,9 @@ const ICMP_IDENTITY_TAG: u8 = 0x43;
 const NTP_PORT: u16 = 123;
 const VXLAN_PORT: u16 = 4789;
 const GENEVE_PORT: u16 = 6081;
-const GENEVE_ETHERNET: u16 = 0x6558;
-const GENEVE_IPV4: u16 = 0x0800;
-const GENEVE_IPV6: u16 = 0x86dd;
+const GENEVE_ETHERNET: u16 = ether_type::TRANSPARENT_ETHERNET_BRIDGING;
+const GENEVE_IPV4: u16 = ether_type::IPV4;
+const GENEVE_IPV6: u16 = ether_type::IPV6;
 
 // Materialize recognized payloads under their registered UDP ports so strict
 // construction retains the same application bytes and protocol identity.

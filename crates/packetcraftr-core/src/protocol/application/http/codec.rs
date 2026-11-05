@@ -304,7 +304,7 @@ fn take_token<'a>(input: &mut &'a [u8]) -> &'a [u8] {
     *input = rest;
     name
 }
-fn ows(mut input: &[u8]) -> &[u8] {
+pub(crate) fn ows(mut input: &[u8]) -> &[u8] {
     while input.first().is_some_and(|b| matches!(b, b' ' | b'\t')) {
         input = &input[1..];
     }

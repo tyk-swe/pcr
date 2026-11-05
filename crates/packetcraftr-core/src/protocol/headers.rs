@@ -280,8 +280,8 @@ impl EthernetHeader {
 
     fn ip_version(&self) -> Option<u8> {
         match self.ether_type {
-            0x0800 => Some(4),
-            0x86dd => Some(6),
+            super::link::ether_type::IPV4 => Some(4),
+            super::link::ether_type::IPV6 => Some(6),
             _ => None,
         }
     }

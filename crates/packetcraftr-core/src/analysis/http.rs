@@ -127,7 +127,11 @@ impl Collector {
     ) -> Result<Self, Error> {
         limits.validate()?;
         let ports = application::normalize_ports(ports, "http_ports")?;
-        super::error::check_ceiling("max_http_body_bytes", max_body_bytes, 256 * 1024 * 1024)?;
+        super::error::check_ceiling(
+            "max_http_body_bytes",
+            max_body_bytes,
+            super::http2::MAX_BODY_BYTES,
+        )?;
         Ok(Self {
             limits,
             max_body_bytes,

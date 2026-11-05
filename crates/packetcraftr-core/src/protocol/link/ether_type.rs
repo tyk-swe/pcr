@@ -15,21 +15,21 @@ use crate::protocol::common::{
 
 const LINK_RAW_FALLBACK_DISCRIMINATOR: u16 = MAX_FRAME_LENGTH + 1;
 
-pub(crate) const IPV4: u16 = 0x0800;
-pub(crate) const ARP: u16 = 0x0806;
-pub(crate) const VLAN: u16 = 0x8100;
-pub(crate) const VLAN_8021AD: u16 = 0x88a8;
-pub(crate) const MPLS_UNICAST: u16 = 0x8847;
-pub(crate) const MPLS_MULTICAST: u16 = 0x8848;
-pub(crate) const PPPOE_DISCOVERY_STAGE: u16 = 0x8863;
-pub(crate) const PPPOE_SESSION_STAGE: u16 = 0x8864;
-pub(crate) const EAPOL: u16 = 0x888e;
-pub(crate) const LLDP: u16 = 0x88cc;
-pub(crate) const SLOW_PROTOCOLS: u16 = 0x8809;
-pub(crate) const IPV6: u16 = 0x86dd;
-pub(crate) const TRANSPARENT_ETHERNET_BRIDGING: u16 = 0x6558;
-pub(crate) const ERSPAN_TYPE_II: u16 = 0x88be;
-pub(crate) const ERSPAN_TYPE_III: u16 = 0x22eb;
+pub const IPV4: u16 = 0x0800;
+pub const ARP: u16 = 0x0806;
+pub const VLAN: u16 = 0x8100;
+pub const VLAN_8021AD: u16 = 0x88a8;
+pub const MPLS_UNICAST: u16 = 0x8847;
+pub const MPLS_MULTICAST: u16 = 0x8848;
+pub const PPPOE_DISCOVERY_STAGE: u16 = 0x8863;
+pub const PPPOE_SESSION_STAGE: u16 = 0x8864;
+pub const EAPOL: u16 = 0x888e;
+pub const LLDP: u16 = 0x88cc;
+pub const SLOW_PROTOCOLS: u16 = 0x8809;
+pub const IPV6: u16 = 0x86dd;
+pub const TRANSPARENT_ETHERNET_BRIDGING: u16 = 0x6558;
+pub const ERSPAN_TYPE_II: u16 = 0x88be;
+pub const ERSPAN_TYPE_III: u16 = 0x22eb;
 
 pub(super) fn link_payload_selection(
     name: &'static str,

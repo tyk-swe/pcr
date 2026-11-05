@@ -52,7 +52,7 @@ impl Default for Arp {
     fn default() -> Self {
         Self {
             hardware_type: 1,
-            protocol_type: 0x0800,
+            protocol_type: super::ether_type::IPV4,
             hardware_len: WireValue::Auto,
             protocol_len: WireValue::Auto,
             operation: Self::OPERATION_REQUEST,
@@ -96,7 +96,7 @@ impl Codec for ArpCodec {
     ) -> Result<Encoded, crate::codec::Error> {
         let layer = typed_layer::<Arp>(NAME, layer)?;
         let mut diagnostics = Vec::new();
-        if layer.hardware_type != 1 || layer.protocol_type != 0x0800 {
+        if layer.hardware_type != 1 || layer.protocol_type != super::ether_type::IPV4 {
             let message = format!(
                 "typed ARP requires Ethernet/IPv4 types (htype={}, ptype=0x{:04x})",
                 layer.hardware_type, layer.protocol_type
@@ -159,7 +159,11 @@ impl Codec for ArpCodec {
         let protocol_len = head[5];
         let hardware_type = u16::from_be_bytes([head[0], head[1]]);
         let protocol_type = u16::from_be_bytes([head[2], head[3]]);
-        if hardware_type != 1 || protocol_type != 0x0800 || hardware_len != 6 || protocol_len != 4 {
+        if hardware_type != 1
+            || protocol_type != super::ether_type::IPV4
+            || hardware_len != 6
+            || protocol_len != 4
+        {
             return Err(unsupported(
                 NAME,
                 format!(

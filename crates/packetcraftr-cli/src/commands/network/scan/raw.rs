@@ -16,7 +16,7 @@ use crate::system::{Runtime, prepare_workflow};
 /// endpoints, method, publication plan, and optional follow-up stages.
 pub(super) struct Request {
     pub(super) request: packetcraftr::scan::Request,
-    pub(super) plan: output::scan::plan::Plan,
+    pub(super) plan: crate::commands::network::scan::output::plan::Plan,
     pub(super) policy: crate::command_options::HostnamePolicyArgs,
     pub(super) route: crate::command_options::RouteSelectionArgs,
     pub(super) queue_limits: packetcraftr_netio::capture::Limits,
@@ -86,7 +86,7 @@ pub(super) fn run(
                 .map_err(super::followup_error)?;
             report.scan.stats = report.stats;
             let traceroute = trace_plan.zip(report.trace).map(|(plan, traced)| {
-                output::traceroute::hosts::Complete {
+                crate::commands::network::traceroute::output::hosts::Complete {
                     plan,
                     retained_evidence_bytes: traced.retained_evidence_bytes,
                 }
@@ -119,13 +119,15 @@ pub(super) fn run(
             }
             let traced = trace_plan.zip(trace);
             invocation.check()?;
-            let published = output::scan::Report::publish(
+            let published = crate::commands::network::scan::output::Report::publish(
                 scan,
                 plan,
                 super::reverse_dns_hosts(reverse_dns),
                 traced
                     .map(|(plan, aggregate)| {
-                        output::traceroute::hosts::Report::new(plan, aggregate)
+                        crate::commands::network::traceroute::output::hosts::Report::new(
+                            plan, aggregate,
+                        )
                     })
                     .transpose()
                     .map_err(CliError::classified)?,
@@ -147,8 +149,8 @@ pub(super) fn run(
 pub(super) struct Streamed {
     pub(super) report: packetcraftr::scan::Report,
     pub(super) endpoints: Vec<packetcraftr::scan::Endpoint>,
-    pub(super) plan: output::scan::plan::Plan,
+    pub(super) plan: crate::commands::network::scan::output::plan::Plan,
     /// Each host's PTR lookup, by position; empty when none ran.
-    pub(super) reverse_dns: Vec<Option<output::scan::host::ReverseDns>>,
-    pub(super) traceroute: Option<output::traceroute::hosts::Complete>,
+    pub(super) reverse_dns: Vec<Option<crate::commands::network::scan::output::host::ReverseDns>>,
+    pub(super) traceroute: Option<crate::commands::network::traceroute::output::hosts::Complete>,
 }

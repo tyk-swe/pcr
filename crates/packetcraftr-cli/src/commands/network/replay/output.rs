@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::published_enum;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -8,20 +9,20 @@ use serde::Serialize;
 use packetcraftr::replay as library;
 use packetcraftr_netio::link::Mode as NetworkLinkMode;
 
-use super::contract::Error;
-use super::envelope::Stats;
-use super::frame::Captured;
-use super::network::{InterfaceId, LinkMode};
+use crate::output::contract::Error;
+use crate::output::envelope::Stats;
+use crate::output::frame::Captured;
+use crate::output::network::{InterfaceId, LinkMode};
 
 published_enum! {
-    pub enum SourceFormat from packetcraftr_core::capture_file::Format {
+    pub(crate) enum SourceFormat from packetcraftr_core::capture_file::Format {
         Pcap => "pcap",
         PcapNg => "pcap_ng",
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
-pub enum Timing {
+pub(crate) enum Timing {
     #[serde(rename = "original")]
     Original,
     #[serde(rename = "scaled")]
@@ -62,7 +63,7 @@ pub(crate) fn stats(summary: &library::Report, elapsed: Duration) -> Stats {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub source_format: SourceFormat,
     pub timing: Timing,
     pub requested_interface: Option<InterfaceId>,
@@ -113,7 +114,7 @@ impl<I: Into<InterfaceId>> TryFrom<(library::Report, Option<I>, NetworkLinkMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Frame {
+pub(crate) struct Frame {
     pub pass: u32,
     #[serde(rename = "source_sequence")]
     pub source_index: u64,

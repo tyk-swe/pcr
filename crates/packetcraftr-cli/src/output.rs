@@ -44,40 +44,30 @@ macro_rules! published_enum {
 }
 pub(crate) use published_enum;
 
+pub use crate::commands::DifferentialReport;
+
 pub mod analysis;
 pub mod capture;
 pub mod contract;
-pub mod differential;
-pub mod dns;
 pub mod dns_read;
 pub mod envelope;
-pub mod exchange;
 pub mod expert;
 pub mod follow;
 pub mod frame;
 pub mod hex;
 pub mod http;
 pub mod http2;
-pub mod identify;
-pub mod interfaces;
 pub mod network;
-pub mod os;
-pub mod plan;
 pub mod projection;
 pub mod protocols;
 pub mod provenance;
 pub mod reassembly;
-pub mod replay;
 pub mod resources;
-pub mod routes;
-pub mod scan;
 pub mod scan_failure;
 pub mod security;
-pub mod send;
 pub mod stats;
 pub mod stream;
 pub mod tls;
-pub mod traceroute;
 pub mod verify_forwarding;
 
 pub mod messages;

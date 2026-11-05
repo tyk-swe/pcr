@@ -6,7 +6,7 @@ use packetcraftr_core::document::service_probes as core;
 use packetcraftr_core::error::{Classification, Kind};
 
 use crate::errors::CliError;
-use crate::output::{self, stream::MAX_RECORD_BYTES};
+use crate::output::stream::MAX_RECORD_BYTES;
 
 // Reserve envelope/resource metadata separately from per-attempt fixed fields,
 // addresses, timestamps and the bounded native/parser diagnostics. Peer bytes,
@@ -130,40 +130,42 @@ fn endpoint_bound(
             } else {
                 1
             };
-            let candidate = output::identify::Candidate {
+            let candidate = crate::commands::network::identify::output::Candidate {
                 product: rule.product.clone(),
                 version: rule
                     .version
                     .as_ref()
                     .map(|version| "0".repeat(version.max_bytes)),
-                confidence: output::identify::Confidence::Protocol,
-                hostname: rule
-                    .hostname_field
-                    .map(|field| output::identify::SupportedValue {
+                confidence: crate::commands::network::identify::output::Confidence::Protocol,
+                hostname: rule.hostname_field.map(|field| {
+                    crate::commands::network::identify::output::SupportedValue {
                         value: "x".repeat(254),
-                        source: output::identify::ValueSource::ObservedField {
-                            field: field.into(),
-                            index: core::MAX_OBSERVED_FIELDS - 1,
-                        },
-                    }),
-                device_type: rule.device_type.as_ref().map(|value| {
-                    output::identify::SupportedValue {
-                        value: value.clone(),
-                        source: output::identify::ValueSource::MatchRule {
-                            reference: rule.metadata.reference.clone(),
-                        },
+                        source:
+                            crate::commands::network::identify::output::ValueSource::ObservedField {
+                                field: field.into(),
+                                index: core::MAX_OBSERVED_FIELDS - 1,
+                            },
                     }
                 }),
-                cpe: rule
-                    .cpe
-                    .as_ref()
-                    .map(|value| output::identify::SupportedValue {
+                device_type: rule.device_type.as_ref().map(|value| {
+                    crate::commands::network::identify::output::SupportedValue {
                         value: value.clone(),
-                        source: output::identify::ValueSource::MatchRule {
-                            reference: rule.metadata.reference.clone(),
-                        },
-                    }),
-                provenance: output::identify::Provenance {
+                        source:
+                            crate::commands::network::identify::output::ValueSource::MatchRule {
+                                reference: rule.metadata.reference.clone(),
+                            },
+                    }
+                }),
+                cpe: rule.cpe.as_ref().map(|value| {
+                    crate::commands::network::identify::output::SupportedValue {
+                        value: value.clone(),
+                        source:
+                            crate::commands::network::identify::output::ValueSource::MatchRule {
+                                reference: rule.metadata.reference.clone(),
+                            },
+                    }
+                }),
+                provenance: crate::commands::network::identify::output::Provenance {
                     corpus: request.corpus.name.clone(),
                     version: request.corpus.version.clone(),
                     probe: probe.id.clone(),

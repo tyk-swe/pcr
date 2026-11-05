@@ -175,21 +175,21 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "planSuccess",
         command: "plan",
-        rust_types: &["crate::output::plan::Report"],
+        rust_types: &["crate::commands::network::plan::output::Report"],
         events: &[],
         example: "examples/documents/output-plan-success.json",
     },
     PublishedType {
         definition: "sendSuccess",
         command: "send",
-        rust_types: &["crate::output::send::Report"],
+        rust_types: &["crate::commands::network::send::output::Report"],
         events: &[],
         example: "examples/documents/output-send-success.json",
     },
     PublishedType {
         definition: "exchangeSuccess",
         command: "exchange",
-        rust_types: &["crate::output::exchange::Report"],
+        rust_types: &["crate::commands::network::exchange::output::Report"],
         events: &[],
         example: "examples/documents/output-exchange-success.json",
     },
@@ -197,8 +197,8 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
         definition: "differentialSuccess",
         command: "differential",
         rust_types: &[
-            "crate::output::differential::PlanReport",
-            "crate::output::differential::Report",
+            "crate::commands::network::differential::output::PlanReport",
+            "crate::commands::network::differential::output::Report",
         ],
         events: &[],
         example: "examples/documents/output-differential-plan-success.json",
@@ -206,14 +206,14 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "differentialResponderSuccess",
         command: "differential-responder",
-        rust_types: &["crate::output::differential::ResponderReport"],
+        rust_types: &["crate::commands::network::differential::output::ResponderReport"],
         events: &[],
         example: "examples/documents/output-differential-responder-success.json",
     },
     PublishedType {
         definition: "differentialJoinSuccess",
         command: "differential-join",
-        rust_types: &["crate::output::differential::Report"],
+        rust_types: &["crate::commands::network::differential::output::Report"],
         events: &[],
         example: "examples/documents/output-differential-join-success.json",
     },
@@ -234,14 +234,14 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "replaySuccess",
         command: "replay",
-        rust_types: &["crate::output::replay::Report"],
+        rust_types: &["crate::commands::network::replay::output::Report"],
         events: &[],
         example: "examples/documents/output-replay-bit-rate-success.json",
     },
     PublishedType {
         definition: "scanSuccess",
         command: "scan",
-        rust_types: &["crate::output::scan::Report"],
+        rust_types: &["crate::commands::network::scan::output::Report"],
         events: &[],
         example: "examples/documents/output-scan-ip-protocol.json",
     },
@@ -263,8 +263,8 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
         definition: "tracerouteSuccess",
         command: "traceroute",
         rust_types: &[
-            "crate::output::traceroute::Report",
-            "crate::output::traceroute::multipath::Report",
+            "crate::commands::network::traceroute::output::Report",
+            "crate::commands::network::traceroute::output::multipath::Report",
         ],
         events: &[],
         example: "examples/documents/output-traceroute-multipath-success.json",
@@ -272,7 +272,7 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "dnsSuccess",
         command: "dns",
-        rust_types: &["crate::output::dns::BatchResult"],
+        rust_types: &["crate::commands::network::dns::output::BatchResult"],
         events: &[],
         example: "examples/documents/output-dns-any-success.json",
     },
@@ -286,14 +286,14 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "interfacesSuccess",
         command: "interfaces",
-        rust_types: &["crate::output::interfaces::Report"],
+        rust_types: &["crate::commands::network::interfaces::output::Report"],
         events: &[],
         example: "examples/documents/output-interfaces-success.json",
     },
     PublishedType {
         definition: "routesSuccess",
         command: "routes",
-        rust_types: &["crate::output::routes::Report"],
+        rust_types: &["crate::commands::network::routes::output::Report"],
         events: &[],
         example: "examples/documents/output-routes-success.json",
     },
@@ -328,14 +328,14 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "scanConnectSuccess",
         command: "scan",
-        rust_types: &["crate::output::scan::connect::Report"],
+        rust_types: &["crate::commands::network::scan::output::connect::Report"],
         events: &[],
         example: "examples/documents/output-scan-connect-success.json",
     },
     PublishedType {
         definition: "targetListSuccess",
         command: "scan",
-        rust_types: &["crate::output::scan::list::Report"],
+        rust_types: &["crate::commands::network::scan::output::list::Report"],
         events: &[],
         example: "examples/documents/output-scan-list-aggregate.json",
     },
@@ -391,14 +391,14 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "identifySuccess",
         command: "identify",
-        rust_types: &["crate::output::identify::Report"],
+        rust_types: &["crate::commands::network::identify::output::Report"],
         events: &[],
         example: "examples/documents/output-identify-success.json",
     },
     PublishedType {
         definition: "osSuccess",
         command: "identify-os",
-        rust_types: &["crate::output::os::Report"],
+        rust_types: &["crate::commands::network::identify_os::output::Report"],
         events: &[],
         example: "examples/documents/output-os.json",
     },
@@ -525,7 +525,7 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "exchangeStreamSuccess",
         command: "exchange",
-        rust_types: &["crate::output::exchange::Event"],
+        rust_types: &["crate::commands::network::exchange::output::Event"],
         events: &[
             "complete",
             "diagnostic",
@@ -540,14 +540,14 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "differentialStreamSuccess",
         command: "differential",
-        rust_types: &["crate::output::differential::Event"],
+        rust_types: &["crate::commands::network::differential::output::Event"],
         events: &["attempt", "complete", "diagnostic"],
         example: "examples/documents/output-differential-attempt-event.json",
     },
     PublishedType {
         definition: "differentialResponderStreamSuccess",
         command: "differential-responder",
-        rust_types: &["crate::output::differential::ResponderEvent"],
+        rust_types: &["crate::commands::network::differential::output::ResponderEvent"],
         events: &["complete", "received"],
         example: "examples/documents/output-differential-responder-complete.json",
     },
@@ -555,8 +555,8 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
         definition: "replayFrameSuccess",
         command: "replay",
         rust_types: &[
-            "crate::output::replay::Frame",
-            "crate::output::replay::Report",
+            "crate::commands::network::replay::output::Frame",
+            "crate::commands::network::replay::output::Report",
         ],
         events: &["complete", "frame"],
         example: "examples/documents/output-replay-complete.json",
@@ -565,9 +565,9 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
         definition: "scanStreamSuccess",
         command: "scan",
         rust_types: &[
-            "crate::output::scan::event::Event",
-            "crate::output::scan::host::Host",
-            "crate::output::traceroute::hosts::Event",
+            "crate::commands::network::scan::output::event::Event",
+            "crate::commands::network::scan::output::host::Host",
+            "crate::commands::network::traceroute::output::hosts::Event",
         ],
         events: &[
             "complete",
@@ -589,9 +589,9 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
         definition: "tracerouteStreamSuccess",
         command: "traceroute",
         rust_types: &[
-            "crate::output::traceroute::Event",
-            "crate::output::traceroute::hosts::Event",
-            "crate::output::traceroute::multipath::Event",
+            "crate::commands::network::traceroute::output::Event",
+            "crate::commands::network::traceroute::output::hosts::Event",
+            "crate::commands::network::traceroute::output::multipath::Event",
         ],
         events: &[
             "complete",
@@ -608,7 +608,7 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "dnsStreamSuccess",
         command: "dns",
-        rust_types: &["crate::output::dns::report::Event"],
+        rust_types: &["crate::commands::network::dns::output::report::Event"],
         events: &[
             "attempt",
             "complete",
@@ -693,9 +693,9 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
         definition: "scanConnectStreamSuccess",
         command: "scan",
         rust_types: &[
-            "crate::output::scan::connect::EndpointEvent",
-            "crate::output::scan::connect::ProbeEvent",
-            "crate::output::scan::connect::Report",
+            "crate::commands::network::scan::output::connect::EndpointEvent",
+            "crate::commands::network::scan::output::connect::ProbeEvent",
+            "crate::commands::network::scan::output::connect::Report",
         ],
         events: &["complete", "connect_endpoint", "connect_probe"],
         example: "examples/documents/output-scan-connect-complete.json",
@@ -704,8 +704,8 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
         definition: "targetListStreamSuccess",
         command: "scan",
         rust_types: &[
-            "crate::output::scan::list::Complete",
-            "crate::output::scan::list::TargetEvent",
+            "crate::commands::network::scan::output::list::Complete",
+            "crate::commands::network::scan::output::list::TargetEvent",
         ],
         events: &["complete", "target"],
         example: "examples/documents/output-scan-list-complete.json",
@@ -798,8 +798,8 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
         definition: "identifyStreamSuccess",
         command: "identify",
         rust_types: &[
-            "crate::output::identify::Complete",
-            "crate::output::identify::Record",
+            "crate::commands::network::identify::output::Complete",
+            "crate::commands::network::identify::output::Record",
         ],
         events: &["complete", "identify_endpoint"],
         example: "examples/documents/output-identify-complete.json",
@@ -807,7 +807,7 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "osStreamSuccess",
         command: "identify-os",
-        rust_types: &["crate::output::os::Event"],
+        rust_types: &["crate::commands::network::identify_os::output::Event"],
         events: &[
             "complete",
             "diagnostic",

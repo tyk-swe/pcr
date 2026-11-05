@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+pub(in crate::commands) mod output;
 mod rendering;
 
 use crate::command_options::Bounded as _;
@@ -9,8 +10,6 @@ use crate::output::contract::Format;
 
 use packetcraftr_core as core;
 use packetcraftr_netio as net;
-
-use crate::output;
 
 use self::arguments::Args;
 use crate::command_options::parse_target;
@@ -103,14 +102,14 @@ pub(super) fn run(
                 if format == Format::Json {
                     crate::rendering::emit_published(
                         invocation,
-                        output::contract::Command::Dns,
-                        output::envelope::Published::<output::dns::Report>::try_from(report)
+                        crate::output::contract::Command::Dns,
+                        crate::output::envelope::Published::<output::Report>::try_from(report)
                             .map_err(CliError::classified)?,
                     )
                 } else {
                     rendering::render_text(
                         invocation,
-                        output::envelope::Published::try_from(report)
+                        crate::output::envelope::Published::try_from(report)
                             .map_err(CliError::classified)?,
                         stream.presentation(),
                     )
@@ -147,14 +146,15 @@ pub(super) fn run(
             if format == Format::Json {
                 crate::rendering::emit_published(
                     invocation,
-                    output::contract::Command::Dns,
-                    output::envelope::Published::<output::dns::BatchResult>::try_from(report)
+                    crate::output::contract::Command::Dns,
+                    crate::output::envelope::Published::<output::BatchResult>::try_from(report)
                         .map_err(CliError::classified)?,
                 )
             } else {
                 rendering::render_batch_text(
                     invocation,
-                    output::envelope::Published::try_from(report).map_err(CliError::classified)?,
+                    crate::output::envelope::Published::try_from(report)
+                        .map_err(CliError::classified)?,
                     stream.presentation(),
                 )
             }

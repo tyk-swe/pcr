@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(in crate::commands) mod output;
 use crate::command_options::Bounded as _;
 use crate::output::contract::Format;
 
@@ -9,8 +10,6 @@ mod multipath;
 pub(super) mod rendering;
 
 use packetcraftr_netio as net;
-
-use crate::output;
 
 use self::arguments::Args;
 use crate::command_options::parse_target;
@@ -113,14 +112,15 @@ pub(super) fn run(
             if format == Format::Json {
                 crate::rendering::emit_published(
                     invocation,
-                    output::contract::Command::Traceroute,
-                    output::envelope::Published::<output::traceroute::Report>::try_from(report)
+                    crate::output::contract::Command::Traceroute,
+                    crate::output::envelope::Published::<output::Report>::try_from(report)
                         .map_err(CliError::classified)?,
                 )
             } else {
                 rendering::render_text(
                     invocation,
-                    output::envelope::Published::try_from(report).map_err(CliError::classified)?,
+                    crate::output::envelope::Published::try_from(report)
+                        .map_err(CliError::classified)?,
                     stream.presentation(),
                 )
             }

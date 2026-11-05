@@ -1,17 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::published_enum;
 use std::net::IpAddr;
 use std::time::Duration;
 
 use serde::Serialize;
 
-pub mod hosts;
-pub mod multipath;
+pub(crate) mod hosts;
+pub(crate) mod multipath;
 
-use super::contract::Error;
-use super::envelope::Published;
-use super::frame::{Captured, Timestamp};
+use crate::output::contract::Error;
+use crate::output::envelope::Published;
+use crate::output::frame::{Captured, Timestamp};
 use packetcraftr::probe::{self, Transport};
 
 use packetcraftr::traceroute as library;

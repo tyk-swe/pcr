@@ -1,12 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(in crate::commands) mod output;
 use crate::command_options::{
     DestinationAllowlistArgs, HostnameResolutionArgs, PublicDestinationArgs, RouteArgs,
 };
 use crate::errors::CliError;
+use crate::output::contract::Format;
 use crate::output::envelope::Published;
-use crate::output::{self, contract::Format};
 use crate::rendering::{emit_published, render_optional, write_stdout_line};
 use crate::resources::Settings;
 use crate::system::prepare_plan;
@@ -88,7 +89,7 @@ pub(super) fn run(
             &invocation.passive_lookup(),
         )
         .map_err(CliError::classified)?;
-    let result = output::plan::Report::from(route);
+    let result = output::Report::from(route);
     match format {
         Format::Text => {
             render_text(invocation, &result.plan)?;
@@ -96,7 +97,7 @@ pub(super) fn run(
         }
         Format::Json => emit_published(
             invocation,
-            output::contract::Command::Plan,
+            crate::output::contract::Command::Plan,
             Published::new(result, Vec::new()),
         ),
         other => other.unreachable(),
@@ -105,7 +106,7 @@ pub(super) fn run(
 
 fn render_text(
     invocation: &crate::invocation::Invocation,
-    route: &output::network::Plan,
+    route: &crate::output::network::Plan,
 ) -> Result<(), CliError> {
     write_stdout_line(
         invocation,

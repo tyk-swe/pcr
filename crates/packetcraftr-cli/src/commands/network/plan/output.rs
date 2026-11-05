@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::output::network::Plan;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     #[serde(rename = "route")]
     pub plan: Plan,
 }

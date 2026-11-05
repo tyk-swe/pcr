@@ -3,21 +3,21 @@
 
 //! Text rendering for a scan’s traceroute follow-up.
 
+use crate::errors::CliError;
 use crate::rendering::{
     comma_separated, duration_text, render_optional, render_undecoded, write_stdout_line,
     write_summary_line,
 };
-use crate::{errors::CliError, output};
 
 /// The trace stage: one line per host, then its hops in hop order. A reused
 /// hop is a claim from another host's trace, so it is marked apart from the
 /// probes that observed a hop for this host.
 pub(super) fn render_traceroute_text(
     invocation: &crate::invocation::Invocation,
-    trace: &output::traceroute::hosts::Report,
+    trace: &crate::commands::network::traceroute::output::hosts::Report,
     presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
-    use output::traceroute::hosts::Basis;
+    use crate::commands::network::traceroute::output::hosts::Basis;
 
     let plan = &trace.plan;
     write_stdout_line(
@@ -73,7 +73,11 @@ pub(super) fn render_traceroute_text(
                 },
             ),
         )?;
-        let mut hops: Vec<(u8, Option<&output::traceroute::Hop>, Option<&_>)> = host
+        let mut hops: Vec<(
+            u8,
+            Option<&crate::commands::network::traceroute::output::Hop>,
+            Option<&_>,
+        )> = host
             .hops
             .iter()
             .map(|hop| (hop.hop_limit, Some(hop), None))
@@ -135,15 +139,15 @@ pub(super) fn render_traceroute_text(
 }
 
 /// Count complete and incomplete traces, excluding not-traced records.
-fn traced_hosts(trace: &output::traceroute::hosts::Report) -> usize {
+fn traced_hosts(trace: &crate::commands::network::traceroute::output::hosts::Report) -> usize {
     trace
         .hosts
         .iter()
         .filter(|host| {
             matches!(
                 host.summary.status,
-                output::traceroute::hosts::Status::Complete
-                    | output::traceroute::hosts::Status::Incomplete
+                crate::commands::network::traceroute::output::hosts::Status::Complete
+                    | crate::commands::network::traceroute::output::hosts::Status::Incomplete
             )
         })
         .count()

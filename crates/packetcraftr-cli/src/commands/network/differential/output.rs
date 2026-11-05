@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::published_enum;
 use serde::Serialize;
 
 use packetcraftr::differential as lib;
@@ -26,14 +27,14 @@ fn variant_id(index: usize) -> String {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct PlanRow {
+pub(crate) struct PlanRow {
     pub variant: String,
     pub hypothesis: String,
     pub packets_per_attempt: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct PlanReport {
+pub(crate) struct PlanReport {
     pub plan_digest: String,
     pub token: String,
     pub repeats: u64,
@@ -44,7 +45,7 @@ pub struct PlanReport {
 
 impl PlanReport {
     #[must_use]
-    pub fn from_summary(summary: lib::PlanSummary, token: &[u8; 16], repeats: u32) -> Self {
+    pub(crate) fn from_summary(summary: lib::PlanSummary, token: &[u8; 16], repeats: u32) -> Self {
         Self {
             plan_digest: summary.digest,
             token: lib::hex(token),

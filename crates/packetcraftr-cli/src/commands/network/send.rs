@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+pub(in crate::commands) mod output;
 
 use crate::output::contract::Format;
 
 use packetcraftr_core as core;
 use packetcraftr_core::capture_file as capture;
-
-use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;
@@ -120,9 +119,10 @@ pub(super) fn run(
                                 )?;
                             }
                             if presentation.verbose {
-                                let route =
-                                    output::network::MaterializedRoute::try_from(route.clone())
-                                        .map_err(CliError::classified)?;
+                                let route = crate::output::network::MaterializedRoute::try_from(
+                                    route.clone(),
+                                )
+                                .map_err(CliError::classified)?;
                                 presentation.details(
                                     invocation,
                                     "Route and neighbor evidence",
@@ -159,9 +159,13 @@ pub(super) fn run(
         }
         Format::Json => {
             let report = collect(prepared)?;
-            let published = output::envelope::Published::<output::send::Report>::try_from(report)
+            let published = crate::output::envelope::Published::<output::Report>::try_from(report)
                 .map_err(CliError::classified)?;
-            emit_published(invocation, output::contract::Command::Send, published)
+            emit_published(
+                invocation,
+                crate::output::contract::Command::Send,
+                published,
+            )
         }
         Format::Hex => prepared
             .client

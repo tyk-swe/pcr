@@ -10,7 +10,7 @@ use crate::rendering::write_stdout_line;
 
 pub(super) fn render_plan_text(
     invocation: &crate::invocation::Invocation,
-    plan: &output::differential::PlanReport,
+    plan: &crate::commands::network::differential::output::PlanReport,
 ) -> Result<(), CliError> {
     write_stdout_line(invocation, format_args!("plan_digest={}", plan.plan_digest))?;
     write_stdout_line(invocation, format_args!("token={}", plan.token))?;
@@ -35,7 +35,7 @@ pub(super) fn render_plan_text(
 
 pub(super) fn render_report_text(
     invocation: &crate::invocation::Invocation,
-    report: &output::differential::Report,
+    report: &crate::commands::network::differential::output::Report,
 ) -> Result<(), CliError> {
     write_stdout_line(
         invocation,
@@ -57,15 +57,17 @@ pub(super) fn render_report_text(
 }
 
 pub(super) fn emit_event(event: lib::Event, stream: &StreamEncoder) -> Result<(), CliError> {
-    let published = output::envelope::Published::<output::differential::Event>::try_from(event)
-        .map_err(CliError::classified)?;
+    let published = output::envelope::Published::<
+        crate::commands::network::differential::output::Event,
+    >::try_from(event)
+    .map_err(CliError::classified)?;
     Ok(stream.emit_published(published)?)
 }
 
 pub(super) fn render_complete(report: lib::Report, stream: &StreamEncoder) -> Result<(), CliError> {
-    Ok(stream.complete_published(
-        output::envelope::Published::<output::differential::Event>::from(report),
-    )?)
+    Ok(stream.complete_published(output::envelope::Published::<
+        crate::commands::network::differential::output::Event,
+    >::from(report))?)
 }
 
 pub(super) fn emit_responder_event(
@@ -73,7 +75,7 @@ pub(super) fn emit_responder_event(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     Ok(stream.emit_published(output::envelope::Published::<
-        output::differential::ResponderEvent,
+        crate::commands::network::differential::output::ResponderEvent,
     >::from(event))?)
 }
 
@@ -82,13 +84,13 @@ pub(super) fn render_responder_complete(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     Ok(stream.complete_published(output::envelope::Published::<
-        output::differential::ResponderEvent,
+        crate::commands::network::differential::output::ResponderEvent,
     >::from(report))?)
 }
 
 pub(super) fn render_responder_text(
     invocation: &crate::invocation::Invocation,
-    report: &output::differential::ResponderReport,
+    report: &crate::commands::network::differential::output::ResponderReport,
 ) -> Result<(), CliError> {
     write_stdout_line(
         invocation,

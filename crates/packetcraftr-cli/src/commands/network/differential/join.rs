@@ -43,8 +43,10 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         crate::input::campaign::load(invocation, &arguments.campaign, &arguments.responder_log)?;
     let joined = lib::join_receptions(inputs.campaign, &inputs.receptions);
     invocation.check()?;
-    let published = output::envelope::Published::<output::differential::Report>::try_from(joined)
-        .map_err(CliError::classified)?;
+    let published = output::envelope::Published::<
+        crate::commands::network::differential::output::Report,
+    >::try_from(joined)
+    .map_err(CliError::classified)?;
     match invocation.format {
         Format::Text => rendering::render_report_text(invocation, &published.result),
         Format::Json => crate::rendering::emit_published(

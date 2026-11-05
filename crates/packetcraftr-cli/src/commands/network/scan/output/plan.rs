@@ -3,12 +3,13 @@
 
 //! How a scan was planned, and the port inferences drawn from its attempts.
 
+use crate::output::published_enum;
 use serde::Serialize;
 
 use packetcraftr::probe::Transport;
 
 use crate::output::scan_failure::icmp_request;
-pub use crate::output::scan_failure::{SctpScan, TcpScan};
+pub(crate) use crate::output::scan_failure::{SctpScan, TcpScan};
 use packetcraftr::scan as library;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -170,7 +171,7 @@ pub struct Plan {
 
 /// The port endpoints a scan would probe on every target, after exclusions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Ports {
+pub(crate) struct Ports {
     pub port_catalog: DataSet,
     pub excluded_endpoints: usize,
     /// Present when an endpoint is TCP and the raw method would probe it.
@@ -184,7 +185,7 @@ pub struct Ports {
 
 impl Ports {
     #[must_use]
-    pub fn with_tcp_scan(mut self, mode: library::TcpScan) -> Self {
+    pub(crate) fn with_tcp_scan(mut self, mode: library::TcpScan) -> Self {
         let tcp = self
             .endpoints
             .iter()
@@ -194,7 +195,7 @@ impl Ports {
     }
 
     #[must_use]
-    pub fn with_sctp_scan(mut self, mode: library::SctpScan) -> Self {
+    pub(crate) fn with_sctp_scan(mut self, mode: library::SctpScan) -> Self {
         let sctp = self
             .endpoints
             .iter()
@@ -206,7 +207,7 @@ impl Ports {
 
 /// The IP protocol numbers a scan would probe on every target, after exclusions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct IpProtocols {
+pub(crate) struct IpProtocols {
     pub excluded_protocols: usize,
     pub protocols: Vec<u8>,
 }
@@ -225,7 +226,7 @@ impl From<&library::Selected> for IpProtocols {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct PortEndpoint {
+pub(crate) struct PortEndpoint {
     pub transport: Transport,
     pub port: u16,
     #[serde(skip_serializing_if = "Option::is_none")]

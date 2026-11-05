@@ -160,16 +160,17 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
     match format {
         Format::Ndjson => Ok(()),
         Format::Text => {
-            let published =
-                output::envelope::Published::<output::differential::ResponderReport>::from(
-                    aggregate,
-                );
+            let published = output::envelope::Published::<
+                crate::commands::network::differential::output::ResponderReport,
+            >::from(aggregate);
             rendering::render_responder_text(invocation, &published.result)
         }
         Format::Json => crate::rendering::emit_published(
             invocation,
             output::contract::Command::DifferentialResponder,
-            output::envelope::Published::<output::differential::ResponderReport>::from(aggregate),
+            output::envelope::Published::<
+                crate::commands::network::differential::output::ResponderReport,
+            >::from(aggregate),
         ),
         other => other.unreachable(),
     }

@@ -14,7 +14,7 @@ use packetcraftr::target::plan;
 const METHOD: &str = "target_list";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Origin {
+pub(crate) struct Origin {
     pub index: u32,
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -22,7 +22,7 @@ pub struct Origin {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Target {
+pub(crate) struct Target {
     method: &'static str,
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,7 +31,7 @@ pub struct Target {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct TargetEvent {
+pub(crate) struct TargetEvent {
     #[serde(flatten)]
     target: Target,
 }
@@ -51,7 +51,7 @@ impl StreamRecord for TargetEvent {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     method: &'static str,
     pub target: String,
     pub resolution_performed: bool,
@@ -105,7 +105,7 @@ impl Report {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct Complete {
+pub(crate) struct Complete {
     method: &'static str,
     pub target: String,
     pub resolution_performed: bool,

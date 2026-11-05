@@ -3,6 +3,7 @@
 
 pub(in crate::commands) mod arguments;
 mod conversion;
+pub(in crate::commands) mod output;
 mod rendering;
 
 use crate::command_options::Bounded as _;
@@ -30,7 +31,7 @@ use crate::filtering;
 use crate::input::open_capture_file;
 use crate::invocation::StreamEncoder;
 use crate::output::envelope::source_causes;
-use crate::output::{self, contract::Format, stream::EncodeError};
+use crate::output::{contract::Format, stream::EncodeError};
 use crate::rendering::{
     HumanWriteError, SourceCaptureWriter, emit_published, finish_compressed_output,
     stream_capture_error, write_stdout_line_with_interrupt,
@@ -275,12 +276,12 @@ fn replay_aggregate<P: PacketProviders, K: Clock, R: Read>(
         Ok(())
     })?;
     let frames = std::mem::take(&mut *frames.lock().unwrap_or_else(PoisonError::into_inner));
-    let stats = output::replay::stats(&report, started.elapsed());
-    let result = output::replay::Report::try_from((report, requested_interface, link_mode, frames))
+    let stats = output::stats(&report, started.elapsed());
+    let result = output::Report::try_from((report, requested_interface, link_mode, frames))
         .map_err(CliError::classified)?;
     emit_published(
         invocation,
-        output::contract::Command::Replay,
+        crate::output::contract::Command::Replay,
         Published::new(result, Vec::new()).with_stats(stats),
     )
 }
@@ -297,8 +298,8 @@ fn replay_stream<P: PacketProviders, K: Clock, R: Read>(
     let report = drive(client, request, move |Event::Frame(evidence): Event| {
         render_stream_record(&records, evidence)
     })?;
-    let stats = output::replay::stats(&report, started.elapsed());
-    let result = output::replay::Report::try_from((report, interface, link_mode, Vec::new()))
+    let stats = output::stats(&report, started.elapsed());
+    let result = output::Report::try_from((report, interface, link_mode, Vec::new()))
         .map_err(CliError::classified)?;
     Ok(stream.complete_published(Published::new(result, Vec::new()).with_stats(stats))?)
 }
@@ -416,8 +417,8 @@ fn output_failure(
     BoundaryError::with_source(message, classification, source_causes(&source), source)
 }
 
-fn output_frame(evidence: FrameEvidence) -> Result<output::replay::Frame, BoundaryError> {
-    output::replay::Frame::try_from(evidence)
+fn output_frame(evidence: FrameEvidence) -> Result<output::Frame, BoundaryError> {
+    output::Frame::try_from(evidence)
         .map_err(|source| output_failure("replay frame output failed", source))
 }
 

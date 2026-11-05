@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::published_enum;
 use crate::output::{contract::Error, frame::Timestamp, stream::StreamRecord};
 use packetcraftr::scan::connect;
 use serde::Serialize;
@@ -12,7 +13,7 @@ use std::{
 use super::{Classification, Rtt};
 
 published_enum! {
-    pub enum Outcome from connect::Outcome {
+    pub(crate) enum Outcome from connect::Outcome {
         Connected => "connected",
         Refused => "refused",
         TimedOut => "timed_out",
@@ -23,7 +24,7 @@ published_enum! {
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
-pub struct Stats {
+pub(crate) struct Stats {
     pub connections_scheduled: u64,
     pub connections_attempted: u64,
     pub connections_succeeded: u64,
@@ -46,13 +47,13 @@ impl From<connect::Stats> for Stats {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct SocketError {
+pub(crate) struct SocketError {
     pub kind: String,
     pub os_code: Option<i32>,
     pub message: String,
 }
 #[derive(Clone, Debug, Serialize)]
-pub struct Probe {
+pub(crate) struct Probe {
     pub sequence: u64,
     pub stage: super::Stage,
     pub address: IpAddr,
@@ -97,7 +98,7 @@ impl TryFrom<connect::ProbeEvidence> for Probe {
     }
 }
 #[derive(Clone, Debug, Serialize)]
-pub struct Endpoint {
+pub(crate) struct Endpoint {
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<super::Scope>,
@@ -112,7 +113,7 @@ pub struct Endpoint {
     pub probes: Vec<Probe>,
 }
 #[derive(Clone, Debug, Serialize)]
-pub struct Summary {
+pub(crate) struct Summary {
     method: &'static str,
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
@@ -126,7 +127,7 @@ pub struct Summary {
     pub scheduling: super::Scheduling,
 }
 impl Summary {
-    pub fn new(
+    pub(crate) fn new(
         report: connect::Report,
         plan: super::plan::Plan,
         reverse_dns_stats: Option<packetcraftr::Stats>,
@@ -144,7 +145,7 @@ impl Summary {
     }
 }
 #[derive(Clone, Debug, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     #[serde(flatten)]
     pub summary: Summary,
     pub hosts: Vec<super::host::Host<Probe>>,
@@ -154,7 +155,7 @@ impl Report {
     /// `reverse_dns` holds each host's lookup by position and
     /// `reverse_dns_stats` their packet statistics; both are empty when none
     /// ran.
-    pub fn publish(
+    pub(crate) fn publish(
         aggregate: connect::Aggregate,
         plan: super::plan::Plan,
         reverse_dns: Vec<Option<super::host::ReverseDns>>,
@@ -196,7 +197,7 @@ impl Report {
     }
 }
 #[derive(Clone, Debug, Serialize)]
-pub struct ProbeEvent {
+pub(crate) struct ProbeEvent {
     method: &'static str,
     #[serde(flatten)]
     pub probe: Probe,
@@ -219,7 +220,7 @@ impl StreamRecord for ProbeEvent {
 /// One per endpoint after the last probe, before `complete`: the inference
 /// over attempts already published as `connect_probe` records.
 #[derive(Clone, Debug, Serialize)]
-pub struct EndpointEvent {
+pub(crate) struct EndpointEvent {
     method: &'static str,
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]

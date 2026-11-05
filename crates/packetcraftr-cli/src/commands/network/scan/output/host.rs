@@ -4,6 +4,7 @@
 //! Host records: what discovery observed for each selected target, and
 //! whether the scan stage probed it.
 
+use crate::output::published_enum;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
@@ -14,14 +15,14 @@ use packetcraftr::scan::discovery;
 use packetcraftr::scan::followup;
 
 use super::Scope;
+use crate::commands::network::dns::output::{Outcome, QuestionStatus};
 use crate::output::contract::Error;
-use crate::output::dns::{Outcome, QuestionStatus};
 use crate::output::frame::Timestamp;
 use crate::output::network::{InterfaceId, MacAddress};
 use crate::output::stream::StreamRecord;
 
 published_enum! {
-    pub enum State from discovery::State {
+    pub(crate) enum State from discovery::State {
         NotRequested => "not_requested",
         Skipped => "skipped",
         Responded => "responded",
@@ -30,7 +31,7 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum Scan from discovery::Scan {
+    pub(crate) enum Scan from discovery::Scan {
         Scanned => "scanned",
         Skipped => "skipped",
         NotRequested => "not_requested",
@@ -39,7 +40,7 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum Evidence from discovery::Evidence {
+    pub(crate) enum Evidence from discovery::Evidence {
         Wire => "wire",
         Socket => "socket",
         Cache => "cache",
@@ -47,7 +48,7 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum Basis from discovery::Basis {
+    pub(crate) enum Basis from discovery::Basis {
         Direct => "direct",
         Cached => "cached",
         PossibleProxy => "possible_proxy",
@@ -89,7 +90,7 @@ const fn reason_kind(kind: discovery::ReasonKind) -> &'static str {
 
 /// Why a host counts as responded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Reason {
+pub(crate) struct Reason {
     pub kind: &'static str,
     pub evidence: Evidence,
     pub basis: Basis,
@@ -121,7 +122,7 @@ impl TryFrom<discovery::Reason> for Reason {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Entry {
+pub(crate) enum Entry {
     /// A reply to this request's ARP or NDP.
     Fresh,
     /// A neighbor cache entry left by an earlier reply.
@@ -130,7 +131,7 @@ pub enum Entry {
 
 impl Entry {
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Fresh => "fresh",
             Self::Cached => "cached",
@@ -139,7 +140,7 @@ impl Entry {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct Link {
+pub(crate) struct Link {
     pub address: MacAddress,
     pub entry: Entry,
 }
@@ -160,14 +161,14 @@ impl From<discovery::Link> for Link {
 /// The gateway a routed host is reached through; its link address is the
 /// gateway's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct NextHop {
+pub(crate) struct NextHop {
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link: Option<Link>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Neighbor {
+pub(crate) struct Neighbor {
     /// `resolved`, `silent`, `routed`, or `not_applicable`.
     pub outcome: &'static str,
     /// The interface the host's route selected, where any reply was observed.
@@ -216,7 +217,7 @@ impl TryFrom<discovery::Neighbor> for Neighbor {
 /// A PTR lookup's result: what the server answered, never authenticated
 /// identity.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ReverseDns {
+pub(crate) struct ReverseDns {
     pub query_name: String,
     pub status: QuestionStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -237,22 +238,6 @@ const fn is_false(value: &bool) -> bool {
     !*value
 }
 
-impl ReverseDns {
-    /// A lookup that ended without a DNS workflow result.
-    #[must_use]
-    pub fn ended(query_name: String, status: QuestionStatus, error: Option<String>) -> Self {
-        Self {
-            query_name,
-            status,
-            outcome: None,
-            response_code: None,
-            names: Vec::new(),
-            names_truncated: false,
-            error,
-        }
-    }
-}
-
 impl From<followup::ReverseLookup> for ReverseDns {
     fn from(lookup: followup::ReverseLookup) -> Self {
         Self {
@@ -270,7 +255,7 @@ impl From<followup::ReverseLookup> for ReverseDns {
 /// One record per selected target. JSON embeds the discovery probes; stream
 /// records list their sequence numbers, which `probe` records already carried.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Host<P> {
+pub(crate) struct Host<P> {
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
@@ -285,7 +270,7 @@ pub struct Host<P> {
 }
 
 impl<P> Host<P> {
-    pub fn publish(
+    pub(crate) fn publish(
         host: discovery::Host,
         probes: Vec<P>,
         reverse_dns: Option<ReverseDns>,
@@ -310,7 +295,7 @@ impl<P> Host<P> {
 impl Host<u64> {
     /// The stream record, sent after the last endpoint record and before
     /// `complete`.
-    pub fn summarize(
+    pub(crate) fn summarize(
         host: discovery::Host,
         reverse_dns: Option<ReverseDns>,
     ) -> Result<Self, Error> {

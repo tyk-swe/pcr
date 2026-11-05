@@ -11,7 +11,7 @@ use crate::{errors::CliError, invocation::StreamEncoder};
 /// The validated connect-scan boundary.
 pub(super) struct Request {
     pub(super) followup: followup::ConnectRequest,
-    pub(super) plan: output::scan::plan::Plan,
+    pub(super) plan: crate::commands::network::scan::output::plan::Plan,
     pub(super) policy: crate::command_options::HostnamePolicyArgs,
 }
 
@@ -71,8 +71,10 @@ pub(super) fn run(
             merge_lookup_elapsed(&mut aggregate.report.stats, lookups.as_ref());
             invocation.check()?;
             let diagnostics = std::mem::take(&mut aggregate.report.diagnostics);
-            let report = output::scan::connect::Report::publish(aggregate, plan, names, lookups)
-                .map_err(CliError::classified)?;
+            let report = crate::commands::network::scan::output::connect::Report::publish(
+                aggregate, plan, names, lookups,
+            )
+            .map_err(CliError::classified)?;
             if format == Format::Json {
                 crate::rendering::emit_published(
                     invocation,
@@ -106,7 +108,7 @@ fn emit_streamed(streamed: Streamed, stream: &StreamEncoder) -> Result<(), CliEr
     } = streamed;
     for endpoint in endpoints {
         stream.emit_published(Published::new(
-            output::scan::connect::EndpointEvent::from(endpoint),
+            crate::commands::network::scan::output::connect::EndpointEvent::from(endpoint),
             Vec::new(),
         ))?;
     }
@@ -114,7 +116,11 @@ fn emit_streamed(streamed: Streamed, stream: &StreamEncoder) -> Result<(), CliEr
     let diagnostics = std::mem::take(&mut report.diagnostics);
     stream
         .complete_published(Published::new(
-            output::scan::connect::Summary::new(report, plan, reverse_dns_stats),
+            crate::commands::network::scan::output::connect::Summary::new(
+                report,
+                plan,
+                reverse_dns_stats,
+            ),
             diagnostics,
         ))
         .map_err(CliError::from)
@@ -123,13 +129,14 @@ fn emit_streamed(streamed: Streamed, stream: &StreamEncoder) -> Result<(), CliEr
 struct Streamed {
     report: connect::Report,
     endpoints: Vec<connect::Endpoint>,
-    plan: output::scan::plan::Plan,
-    reverse_dns: Vec<Option<output::scan::host::ReverseDns>>,
+    plan: crate::commands::network::scan::output::plan::Plan,
+    reverse_dns: Vec<Option<crate::commands::network::scan::output::host::ReverseDns>>,
     reverse_dns_stats: Option<packetcraftr::Stats>,
 }
 
 fn emit_event(event: connect::Event, stream: &StreamEncoder) -> Result<(), CliError> {
     let connect::Event::Probe(probe) = event;
-    let event = output::scan::connect::ProbeEvent::try_from(probe).map_err(CliError::classified)?;
+    let event = crate::commands::network::scan::output::connect::ProbeEvent::try_from(probe)
+        .map_err(CliError::classified)?;
     Ok(stream.emit_published(Published::new(event, Vec::new()))?)
 }

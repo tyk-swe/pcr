@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+pub(in crate::commands) mod output;
 mod publication;
 mod rendering;
 
@@ -15,7 +16,7 @@ use packetcraftr_core::document::{service_exclusions, service_probes};
 use crate::command_options::Bounded;
 use crate::errors::CliError;
 use crate::input::{InputKind, read_bounded_file};
-use crate::output::{self, contract::Format};
+use crate::output::contract::Format;
 use crate::system::{Runtime, client};
 
 use self::arguments::Args;
@@ -146,12 +147,12 @@ impl crate::commands::Spec for Args {
         .identify(&request)
         .map_err(CliError::classified)?;
         invocation.check()?;
-        let report = output::identify::Report::try_from(report).map_err(CliError::classified)?;
+        let report = output::Report::try_from(report).map_err(CliError::classified)?;
         match format {
             Format::Text => rendering::render_text(invocation, &report, stream.presentation())?,
             Format::Json => crate::rendering::emit_published(
                 invocation,
-                output::contract::Command::Identify,
+                crate::output::contract::Command::Identify,
                 Published::new(report, Vec::new()),
             )?,
             Format::Ndjson => {
@@ -160,7 +161,7 @@ impl crate::commands::Spec for Args {
                     stream.emit_published(Published::new(record, Vec::new()))?;
                 }
                 stream.complete_published(Published::new(
-                    output::identify::Complete::from(report),
+                    output::Complete::from(report),
                     Vec::new(),
                 ))?;
             }

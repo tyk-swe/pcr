@@ -1,28 +1,29 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-pub mod connect;
-pub mod event;
-pub mod host;
-pub mod list;
-pub mod plan;
-pub mod probe;
+pub(crate) mod connect;
+pub(crate) mod event;
+pub(crate) mod host;
+pub(crate) mod list;
+pub(crate) mod plan;
+pub(crate) mod probe;
 
+use crate::output::published_enum;
 use std::net::IpAddr;
 use std::time::Duration;
 
 use serde::Serialize;
 
-use super::contract::Error;
-use super::envelope::Published;
-use super::frame::Captured;
+use crate::output::contract::Error;
+use crate::output::envelope::Published;
+use crate::output::frame::Captured;
 use packetcraftr::probe::Transport;
 
 use packetcraftr::scan as library;
 
-pub use super::scan_failure::{Protocol, Scope, Sent, Stage};
-pub use event::{EndpointSummary, Event};
-pub use probe::{ApplicationEvidence, ApplicationStatus, Measurement, Probe, Qualification};
+pub(crate) use crate::output::scan_failure::{Scope, Sent, Stage};
+pub(crate) use event::Event;
+pub(crate) use probe::{ApplicationStatus, Probe};
 
 published_enum! {
     pub enum Classification from library::Classification {
@@ -87,7 +88,7 @@ impl From<library::Rtt> for Rtt {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Endpoint {
+pub(crate) struct Endpoint {
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
@@ -209,7 +210,7 @@ impl From<library::Scheduling> for Scheduling {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub planned_duration: Duration,
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
@@ -223,7 +224,7 @@ pub struct Report {
     pub scheduling: Scheduling,
     /// Present only when the scan traced its hosts.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub traceroute: Option<super::traceroute::hosts::Report>,
+    pub traceroute: Option<crate::commands::network::traceroute::output::hosts::Report>,
 }
 
 /// A correlated frame no probe outcome carries.
@@ -251,11 +252,11 @@ impl TryFrom<library::Unattributed> for Unattributed {
 impl Report {
     /// `reverse_dns` holds each host's lookup by position; it is empty when
     /// none ran.
-    pub fn publish(
+    pub(crate) fn publish(
         aggregate: library::Aggregate,
         plan: plan::Plan,
         reverse_dns: Vec<Option<host::ReverseDns>>,
-        traceroute: Option<super::traceroute::hosts::Report>,
+        traceroute: Option<crate::commands::network::traceroute::output::hosts::Report>,
     ) -> Result<Published<Self>, Error> {
         let library::Aggregate {
             planned_duration,

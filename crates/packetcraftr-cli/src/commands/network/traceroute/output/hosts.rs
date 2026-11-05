@@ -3,6 +3,7 @@
 
 //! Multi-host traces published as the `traceroute` stage of a scan.
 
+use crate::output::published_enum;
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -12,14 +13,14 @@ use packetcraftr::probe::Transport;
 use packetcraftr::traceroute::hosts as library;
 
 use super::{Completion, Hop, Probe};
+use crate::commands::network::scan::output::host::reply_name;
+use crate::commands::network::scan::output::{Scope, Stage};
 use crate::output::contract::Error;
 use crate::output::frame::{Captured, Timestamp};
-use crate::output::scan::host::reply_name;
-use crate::output::scan::{Scope, Stage};
 use crate::output::stream::StreamRecord;
 
 published_enum! {
-    pub enum Reason from library::NotTraced {
+    pub(crate) enum Reason from library::NotTraced {
         NoResponsiveProbe => "no_responsive_probe",
         ScopedTarget => "scoped_target",
     }
@@ -27,7 +28,7 @@ published_enum! {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Status {
+pub(crate) enum Status {
     Complete,
     Incomplete,
     NotTraced,
@@ -35,7 +36,7 @@ pub enum Status {
 
 impl Status {
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Complete => "complete",
             Self::Incomplete => "incomplete",
@@ -46,14 +47,14 @@ impl Status {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Basis {
+pub(crate) enum Basis {
     Observed,
     Requested,
 }
 
 impl Basis {
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Observed => "observed",
             Self::Requested => "requested",
@@ -88,7 +89,7 @@ pub struct Plan {
 
 /// The scan probe a host's trace rests on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct Observation {
+pub(crate) struct Observation {
     pub stage: Stage,
     pub sequence: u64,
     pub reply: &'static str,
@@ -97,7 +98,7 @@ pub struct Observation {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct Selection {
+pub(crate) struct Selection {
     pub strategy: Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
@@ -133,7 +134,7 @@ impl TryFrom<&library::Selection> for Selection {
 
 /// A hop another host's trace observed, claimed for this host.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ReusedHop {
+pub(crate) struct ReusedHop {
     pub hop_limit: u8,
     pub source: IpAddr,
     pub probes: Vec<u64>,
@@ -160,7 +161,7 @@ impl TryFrom<&library::ReusedHop> for ReusedHop {
 
 /// A host's record without its probes, which the stream carries separately.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Summary {
+pub(crate) struct Summary {
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
@@ -204,14 +205,14 @@ impl TryFrom<&library::Host> for Summary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Host {
+pub(crate) struct Host {
     #[serde(flatten)]
     pub summary: Summary,
     pub hops: Vec<Hop>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Undecoded {
+pub(crate) struct Undecoded {
     pub destination: IpAddr,
     pub hop_limit: u8,
     pub frame: Captured,
@@ -231,7 +232,7 @@ impl TryFrom<library::UndecodedEvidence> for Undecoded {
 
 /// The scan result's `traceroute` member.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub plan: Plan,
     pub hosts: Vec<Host>,
     pub undecoded: Vec<Undecoded>,
@@ -240,7 +241,7 @@ pub struct Report {
 
 impl Report {
     /// Statistics and diagnostics stay with the command's own accounting.
-    pub fn new(plan: Plan, aggregate: library::Aggregate) -> Result<Self, Error> {
+    pub(crate) fn new(plan: Plan, aggregate: library::Aggregate) -> Result<Self, Error> {
         let library::Aggregate {
             hosts,
             undecoded,
@@ -290,7 +291,7 @@ pub struct Complete {
 /// A trace record streamed while the stage runs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
-pub enum Event {
+pub(crate) enum Event {
     Probe(Probe),
     Undecoded(Undecoded),
     Host {
@@ -302,7 +303,7 @@ pub enum Event {
 
 impl Event {
     /// A diagnostic is not a trace record; it streams as the scan's own.
-    pub fn publish(event: library::Event) -> Result<Option<Self>, Error> {
+    pub(crate) fn publish(event: library::Event) -> Result<Option<Self>, Error> {
         Ok(match event {
             library::Event::Probe(probe) => Some(Self::Probe(probe.try_into()?)),
             library::Event::Undecoded(evidence) => Some(Self::Undecoded(evidence.try_into()?)),

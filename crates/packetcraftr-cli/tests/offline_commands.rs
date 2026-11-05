@@ -740,7 +740,7 @@ fn scan_diff_rejects_invalid_input() {
 
 mod differential {
     use packetcraftr::differential as lib;
-    use packetcraftr_cli::output::{contract::Command, differential::Report, envelope};
+    use packetcraftr_cli::output::{DifferentialReport as Report, contract::Command, envelope};
     use serde_json::{Value, json};
     use std::process::Output;
 

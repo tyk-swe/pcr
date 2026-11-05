@@ -12,7 +12,6 @@ use packetcraftr::traceroute::hosts;
 
 use crate::commands::network::traceroute::arguments::Strategy;
 use crate::errors::CliError;
-use crate::output;
 use packetcraftr_core::error::Kind;
 
 /// The `--traceroute-*` options.
@@ -29,7 +28,7 @@ pub(super) struct Options {
 /// The trace request every scanned host shares, validated before any probe.
 pub(super) struct Stage {
     trace: followup::Trace,
-    plan: output::traceroute::hosts::Plan,
+    plan: crate::commands::network::traceroute::output::hosts::Plan,
 }
 
 impl Stage {
@@ -82,23 +81,25 @@ impl Stage {
             runtime: None,
         };
         trace.validate(scan).map_err(super::followup_error)?;
-        let plan = output::traceroute::hosts::Plan {
+        let plan = crate::commands::network::traceroute::output::hosts::Plan {
             first_hop: options.first_hop,
             max_hops: options.max_hops,
             attempts: options.attempts,
             max_probes: options.max_probes,
-            strategy: strategy.map(|strategy| output::traceroute::hosts::StrategyPlan {
-                strategy: strategy.transport,
-                destination_port: strategy.destination_port,
+            strategy: strategy.map(|strategy| {
+                crate::commands::network::traceroute::output::hosts::StrategyPlan {
+                    strategy: strategy.transport,
+                    destination_port: strategy.destination_port,
+                }
             }),
-            reuse: options
-                .reuse_max_age
-                .map(|max_age| output::traceroute::hosts::ReusePlan { max_age }),
+            reuse: options.reuse_max_age.map(|max_age| {
+                crate::commands::network::traceroute::output::hosts::ReusePlan { max_age }
+            }),
         };
         Ok(Self { trace, plan })
     }
 
-    pub(super) const fn plan(&self) -> output::traceroute::hosts::Plan {
+    pub(super) const fn plan(&self) -> crate::commands::network::traceroute::output::hosts::Plan {
         self.plan
     }
 

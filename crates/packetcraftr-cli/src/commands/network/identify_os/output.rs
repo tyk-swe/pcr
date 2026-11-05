@@ -3,12 +3,13 @@
 
 use serde::Serialize;
 
-use super::{
-    contract::Error,
-    envelope::Published,
-    frame::{Captured, Timestamp},
-    hex::compact_hex,
-};
+use crate::output::contract::Error;
+
+use crate::output::envelope::Published;
+
+use crate::output::frame::{Captured, Timestamp};
+
+use crate::output::hex::compact_hex;
 use packetcraftr::os as library;
 
 #[derive(Clone, Debug, Serialize)]
@@ -68,7 +69,7 @@ pub enum Event {
     },
 }
 
-impl super::stream::StreamRecord for Event {
+impl crate::output::stream::StreamRecord for Event {
     fn event_name(&self) -> &'static str {
         match self {
             Self::Preparation { .. } => "os_preparation",

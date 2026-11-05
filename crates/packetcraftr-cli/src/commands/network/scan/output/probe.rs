@@ -3,6 +3,7 @@
 
 //! Per-probe evidence records: what the scan observed for a single probe.
 
+use crate::output::published_enum;
 use std::net::IpAddr;
 use std::time::Duration;
 

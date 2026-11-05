@@ -9,7 +9,7 @@ use packetcraftr_netio::interface::Info;
 use crate::output::network::Interface;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub interfaces: Vec<Interface>,
 }
 

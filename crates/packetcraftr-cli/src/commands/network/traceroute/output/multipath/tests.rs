@@ -181,7 +181,7 @@ fn aggregate_and_stream_preserve_multipath_evidence() {
 #[test]
 fn stream_fixture_reconstructs_aggregate_topology() {
     let aggregate: Value = serde_json::from_str(include_str!(
-        "../../../../../../examples/documents/output-traceroute-multipath-success.json"
+        "../../../../../../../../examples/documents/output-traceroute-multipath-success.json"
     ))
     .unwrap();
     let mut nodes = std::collections::BTreeMap::new();
@@ -189,7 +189,7 @@ fn stream_fixture_reconstructs_aggregate_topology() {
     let mut probes = Vec::new();
     let mut completed = 0;
     for (sequence, line) in include_str!(
-        "../../../../../../examples/documents/output-traceroute-multipath-stream.ndjson"
+        "../../../../../../../../examples/documents/output-traceroute-multipath-stream.ndjson"
     )
     .lines()
     .enumerate()

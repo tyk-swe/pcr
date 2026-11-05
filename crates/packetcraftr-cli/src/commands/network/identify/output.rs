@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::published_enum;
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -8,9 +9,10 @@ use packetcraftr::identify as library;
 use packetcraftr_core::document::service_probes as core;
 use serde::Serialize;
 
-use super::hex::compact_hex;
-use super::stream::StreamRecord;
-use super::{contract::Error, frame::Timestamp};
+use crate::output::contract::Error;
+use crate::output::frame::Timestamp;
+use crate::output::hex::compact_hex;
+use crate::output::stream::StreamRecord;
 
 published_enum! {
     pub enum Transport from core::Transport {
@@ -329,7 +331,7 @@ impl StreamRecord for &Record {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Usage {
+pub(crate) struct Usage {
     pub attempts: u64,
     pub write_bytes: u64,
     pub read_bytes: u64,
@@ -337,7 +339,7 @@ pub struct Usage {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub corpus: String,
     pub corpus_version: String,
     pub exclusion_set: String,
@@ -377,7 +379,7 @@ impl TryFrom<library::Report> for Report {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Complete {
+pub(crate) struct Complete {
     pub corpus: String,
     pub corpus_version: String,
     pub exclusion_set: String,

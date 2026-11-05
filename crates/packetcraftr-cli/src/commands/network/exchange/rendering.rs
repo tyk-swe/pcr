@@ -97,7 +97,10 @@ pub(super) fn emit_event(
     event: packetcraftr::exchange::Event,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let published = output::envelope::Published::<output::exchange::Event>::try_from(event)
+    let published =
+        output::envelope::Published::<crate::commands::network::exchange::output::Event>::try_from(
+            event,
+        )
         .map_err(CliError::classified)?;
     Ok(stream.emit_published(published)?)
 }
@@ -106,7 +109,7 @@ pub(super) fn render_complete(
     summary: packetcraftr::exchange::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    Ok(stream.complete_published(
-        output::envelope::Published::<output::exchange::Event>::from(summary),
-    )?)
+    Ok(stream.complete_published(output::envelope::Published::<
+        crate::commands::network::exchange::output::Event,
+    >::from(summary))?)
 }

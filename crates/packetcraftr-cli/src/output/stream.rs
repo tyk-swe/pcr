@@ -59,7 +59,7 @@ enum EncoderState {
 }
 
 /// The output timeout covers one write, so a consumer must drain this much per timeout.
-const BATCH_BYTES: usize = 16 * 1024;
+pub(crate) const BATCH_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Batching {
@@ -202,8 +202,9 @@ impl StreamEncoder {
             .is_ok_and(|output| matches!(output.writer, EncoderWriter::Bounded { .. }))
     }
 
-    /// Records batch only while every input is a regular file. A pipe, socket or
-    /// device can stall indefinitely, so a consumer must see each record promptly.
+    /// Records batch only while every input is a regular file nobody is watching. A pipe,
+    /// socket or device can stall indefinitely and a terminal has a reader waiting, so both
+    /// must see each record promptly.
     pub(crate) fn observe_input(&self, regular_file: bool) {
         let Ok(mut output) = self.output.lock() else {
             return;
@@ -212,6 +213,12 @@ impl StreamEncoder {
             (Batching::Refused, _) | (_, false) => Batching::Refused,
             (Batching::Off | Batching::On, true) => Batching::On,
         };
+    }
+
+    pub(crate) fn batches_records(&self) -> bool {
+        self.output
+            .lock()
+            .is_ok_and(|output| output.batching == Batching::On)
     }
 
     pub(crate) fn emit_data_counted<T: StreamRecord>(

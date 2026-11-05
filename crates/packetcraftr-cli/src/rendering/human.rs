@@ -15,6 +15,7 @@ use super::style::{
 };
 use crate::errors::CliError;
 use crate::output;
+use crate::output::stream::BATCH_BYTES;
 
 fn diagnostic_line(diagnostic: impl Into<packetcraftr_core::diagnostic::Diagnostic>) -> String {
     let diagnostic = diagnostic.into();
@@ -226,9 +227,49 @@ fn write_human_stdout(
     invocation
         .check_interrupted()
         .map_err(HumanWriteError::Interrupted)?;
-    let stdout = anstream::stdout();
-    let mut stdout = stdout.lock();
-    write_terminated(&mut stdout, rendered, append_newline).map_err(HumanWriteError::Write)
+    let mut batch = invocation.stdout_batch();
+    let written = match batch.as_mut() {
+        None => write_terminated(&mut styled_stdout(), rendered, append_newline),
+        Some(pending) => hold_line(pending, rendered, append_newline, styled_stdout),
+    };
+    written.map_err(HumanWriteError::Write)
+}
+
+/// Writes what [`Invocation::batch_stdout`](crate::invocation::Invocation::batch_stdout) held back.
+pub(crate) fn flush_stdout_batch(
+    invocation: &crate::invocation::Invocation,
+) -> Result<(), CliError> {
+    let mut batch = invocation.stdout_batch();
+    let Some(pending) = batch.as_mut() else {
+        return Ok(());
+    };
+    write_batch(pending, styled_stdout())
+        .map_err(|source| stdout_error("write stdout failed", source))
+}
+
+fn hold_line<W: Write>(
+    pending: &mut Vec<u8>,
+    rendered: &str,
+    append_newline: bool,
+    stdout: impl FnOnce() -> W,
+) -> io::Result<()> {
+    write_terminated(pending, rendered, append_newline)?;
+    if pending.len() < BATCH_BYTES {
+        return Ok(());
+    }
+    write_batch(pending, stdout())
+}
+
+fn write_batch(pending: &mut Vec<u8>, mut stdout: impl Write) -> io::Result<()> {
+    let written = stdout.write_all(pending).and_then(|()| stdout.flush());
+    pending.clear();
+    written
+}
+
+fn styled_stdout() -> anstream::AutoStream<io::StdoutLock<'static>> {
+    static CHOICE: std::sync::LazyLock<anstream::ColorChoice> =
+        std::sync::LazyLock::new(|| anstream::stdout().current_choice());
+    anstream::AutoStream::new(io::stdout(), *CHOICE).lock()
 }
 
 fn write_human_stderr(rendered: &str, append_newline: bool) -> Result<(), CliError> {
@@ -255,6 +296,28 @@ mod tests {
     use super::*;
     use packetcraftr_core::error::Classification;
     use std::process::ExitCode;
+
+    #[test]
+    fn held_lines_reach_stdout_in_order_once_a_batch_fills() {
+        let line = "x".repeat(99);
+        let lines = BATCH_BYTES / 100;
+        let mut pending = Vec::new();
+        let mut written = Vec::new();
+        for _ in 0..lines - 1 {
+            hold_line(&mut pending, &line, true, || &mut written).unwrap();
+        }
+        assert!(written.is_empty());
+        for _ in 0..lines {
+            hold_line(&mut pending, &line, true, || &mut written).unwrap();
+        }
+        assert!(written.len() >= BATCH_BYTES);
+        assert!(pending.len() < BATCH_BYTES);
+        written.extend_from_slice(&pending);
+        assert_eq!(
+            written,
+            format!("{line}\n").repeat(2 * lines - 1).into_bytes()
+        );
+    }
 
     #[test]
     fn text_errors_sanitize_details_with_locations() {

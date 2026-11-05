@@ -171,6 +171,64 @@ fn mqtt_fields_are_editable() {
 }
 
 #[test]
+fn eap_rejects_uncarried_methods() {
+    use crate::protocol::link::eap::Eap;
+
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for code in [3, 4] {
+            for method in [2, 25, 255] {
+                let mut packet = Packet::default();
+                packet.push(Eap {
+                    code,
+                    method,
+                    ..Default::default()
+                });
+                let error = build_in(packet, mode).unwrap_err();
+                assert!(
+                    error.ends_with("success/failure cannot contain method"),
+                    "{mode:?}, code {code}, method {method}: {error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn eap_methods_and_terminal_defaults_round_trip() {
+    use crate::protocol::link::eap::Eap;
+
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for code in [1, 2, 3, 4] {
+            let methods: &[u8] = if code <= 2 { &[1, 25, 255] } else { &[0, 1] };
+            for &method in methods {
+                let mut packet = Packet::default();
+                packet.push(Eap {
+                    code,
+                    identifier: 7,
+                    method,
+                    data: if code <= 2 {
+                        Bytes::from_static(b"data")
+                    } else {
+                        Bytes::new()
+                    },
+                });
+                let built = build_in(packet, mode).unwrap();
+                let expected = if code <= 2 {
+                    vec![code, 7, 0, 9, method, b'd', b'a', b't', b'a']
+                } else {
+                    vec![code, 7, 0, 4]
+                };
+                assert_eq!(built.bytes.as_ref(), expected);
+                assert!(built.diagnostics.is_empty());
+                round_trip("eap", &built.bytes);
+                let rebuilt = build_in(built.packet, mode).unwrap();
+                assert_eq!(rebuilt.bytes, built.bytes);
+            }
+        }
+    }
+}
+
+#[test]
 fn protocol_expansion_reference_vectors() {
     round_trip("mqtt", &[48, 4, 0, 1, 97, 120]);
     round_trip("coap", &[64, 1, 18, 52, 180, 116, 101, 115, 116]);

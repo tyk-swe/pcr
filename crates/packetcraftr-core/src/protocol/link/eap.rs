@@ -42,6 +42,9 @@ impl Eap {
         if !(1..=4).contains(&self.code) {
             return Err(unsupported(NAME, "unsupported EAP code"));
         }
+        if self.code >= 3 && self.method != 0 && self.method != Self::default().method {
+            return Err(invalid(NAME, "success/failure cannot contain method"));
+        }
         if self.code >= 3 && !self.data.is_empty() {
             return Err(invalid(NAME, "success/failure cannot contain data"));
         }

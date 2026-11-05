@@ -2589,3 +2589,97 @@ fn rtsp_text_and_binary_round_trip() {
         assert_eq!(rebuilt.bytes, built.bytes, "{expected:?}");
     }
 }
+
+#[test]
+fn bgp_fields_follow_message_type() {
+    use crate::protocol::application::bgp::Bgp;
+    let prefix = field::Value::List(vec![field::Value::Object(record([
+        ("length", 24_u8.into()),
+        ("prefix", Bytes::from_static(&[192, 0, 2]).into()),
+    ]))]);
+    let fields = [
+        (1, "version", 3_u8.into()),
+        (1, "my_as", 64512_u16.into()),
+        (1, "hold_time", 30_u16.into()),
+        (
+            1,
+            "identifier",
+            field::Value::Ipv4("192.0.2.1".parse().unwrap()),
+        ),
+        (
+            1,
+            "parameters",
+            field::Value::List(vec![field::Value::Object(record([
+                ("kind", 2_u8.into()),
+                ("value", Bytes::from_static(&[2, 0]).into()),
+            ]))]),
+        ),
+        (2, "withdrawn", prefix.clone()),
+        (
+            2,
+            "attributes",
+            field::Value::List(vec![field::Value::Object(record([
+                ("flags", 64_u8.into()),
+                ("kind", 1_u8.into()),
+                ("value", Bytes::from_static(&[0]).into()),
+            ]))]),
+        ),
+        (2, "nlri", prefix),
+        (3, "error_code", 3_u8.into()),
+        (3, "error_subcode", 1_u8.into()),
+        (3, "data", Bytes::from_static(b"data").into()),
+    ];
+    let registry = builtin::registry();
+    let build = |bgp: Bgp, mode| {
+        let mut packet = Packet::default();
+        packet.push(Ethernet::default());
+        packet.push(Ipv4::default());
+        packet.push(Tcp {
+            destination_port: 179,
+            ..Default::default()
+        });
+        packet.push(bgp);
+        build_in(packet, mode)
+    };
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for message_type in 1..=4 {
+            let baseline = Bgp {
+                message_type,
+                ..Default::default()
+            };
+            let built = build(baseline.clone(), mode).unwrap();
+            let decoded = crate::decode::Dissector::new(registry.clone())
+                .decode(
+                    Frame::new(None, LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+                    Default::default(),
+                )
+                .unwrap();
+            assert_eq!(decoded.packet.get::<Bgp>(), Some(&baseline));
+            assert_eq!(build_in(decoded.packet, mode).unwrap().bytes, built.bytes);
+            for (carried_by, field, value) in &fields {
+                let mut bgp = baseline.clone();
+                bgp.set_field(field, value.clone()).unwrap();
+                let result = build(bgp.clone(), mode);
+                if message_type != *carried_by {
+                    let error = result.unwrap_err();
+                    assert!(
+                        error.ends_with(&format!("does not carry field {field}")),
+                        "{mode:?} {message_type}: {error}"
+                    );
+                } else if *field == "version" {
+                    assert!(result.unwrap_err().contains("only BGP version 4"));
+                } else {
+                    let built = result.unwrap();
+                    let decoded = crate::decode::Dissector::new(registry.clone())
+                        .decode(
+                            Frame::new(None, LinkType::ETHERNET, built.bytes.clone()).unwrap(),
+                            Default::default(),
+                        )
+                        .unwrap();
+                    assert_eq!(decoded.packet.get::<Bgp>(), Some(&bgp));
+                    assert_eq!(build_in(decoded.packet, mode).unwrap().bytes, built.bytes);
+                }
+            }
+        }
+    }
+}

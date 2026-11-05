@@ -236,6 +236,22 @@ pub(super) fn check_collection(
     Ok(())
 }
 
+pub(super) fn send_options(route: &crate::route::Options) -> crate::send::Options {
+    crate::send::Options {
+        destination: None,
+        plan: route.clone(),
+        build: packetcraftr_core::build::Options::default(),
+        allow_permissive_live: false,
+    }
+}
+
+pub(super) fn ipv6_dont_fragment() -> Error {
+    Error::InvalidProbeOption {
+        option: "dont_fragment",
+        reason: "the IPv4 Don't Fragment flag does not exist for an IPv6 destination".to_owned(),
+    }
+}
+
 pub(super) fn tcp_payload() -> Error {
     Error::InvalidProbeOption {
         option: "payload_size",

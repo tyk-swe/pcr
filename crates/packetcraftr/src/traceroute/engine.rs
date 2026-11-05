@@ -57,12 +57,7 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             |error| (probe_error)(0_u64, crate::error::Failure::DurationLimit(error)),
             |source| Error::Output { source },
         )?;
-        let send = crate::send::Options {
-            destination: None,
-            plan: request.route.clone(),
-            build: packetcraftr_core::build::Options::default(),
-            allow_permissive_live: false,
-        };
+        let send = crate::traceroute::request::send_options(&request.route);
         run(
             &request,
             &mut admission,
@@ -160,11 +155,7 @@ fn approve_traceroute<A: Authorizer + ResolveTarget>(
                     .first()
                     .is_some_and(|target| target.address.is_ipv6())
             {
-                return Err(Error::InvalidProbeOption {
-                    option: "dont_fragment",
-                    reason: "the IPv4 Don't Fragment flag does not exist for an IPv6 destination"
-                        .to_owned(),
-                });
+                return Err(crate::traceroute::request::ipv6_dont_fragment());
             }
             let total_probes = request.total_probe_count()?;
             validate_probe_plan(request, total_probes)?;

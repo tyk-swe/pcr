@@ -11,7 +11,6 @@ use packetcraftr_core::{
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::protocol::semantics;
 
-use super::plan::packet::sent_probe_matches;
 use super::{Event, Probe, ProbeEvidence, ResponseKind, Termination, UndecodedEvidence};
 use crate::engine::correlation::{self, Correlation};
 use crate::evidence::SentPacket;
@@ -109,6 +108,38 @@ pub(super) fn probe_evidence(
     evidence
 }
 
+/// The correlation half of [`Classifier`], common to every traceroute classifier.
+macro_rules! correlated_probe_methods {
+    () => {
+        fn sent_matches(&self, probe: &Probe, sent: &Packet) -> bool {
+            crate::traceroute::plan::packet::sent_probe_matches(probe, sent)
+        }
+
+        fn classify(
+            &self,
+            probe: &Probe,
+            sent: &SentPacket,
+            response: &DecodedPacket,
+        ) -> Option<CorrelatedResponse> {
+            crate::traceroute::evidence::classify_response(
+                self.registry,
+                probe.target.transport(),
+                &sent.built().packet,
+                response,
+            )
+        }
+
+        fn rank(&self, observation: &CorrelatedResponse) -> u8 {
+            observation.kind.rank()
+        }
+
+        fn responder(&self, observation: &CorrelatedResponse) -> IpAddr {
+            observation.responder
+        }
+    };
+}
+pub(super) use correlated_probe_methods;
+
 pub(super) struct ProbeClassifier<'a> {
     pub(super) registry: &'a Registry,
     pub(super) target: Arc<str>,
@@ -144,31 +175,7 @@ impl Classifier for ProbeClassifier<'_> {
     type Observation = CorrelatedResponse;
     type Event = Event;
 
-    fn sent_matches(&self, probe: &Probe, sent: &Packet) -> bool {
-        sent_probe_matches(probe, sent)
-    }
-
-    fn classify(
-        &self,
-        probe: &Probe,
-        sent: &SentPacket,
-        response: &DecodedPacket,
-    ) -> Option<CorrelatedResponse> {
-        classify_response(
-            self.registry,
-            probe.target.transport(),
-            &sent.built().packet,
-            response,
-        )
-    }
-
-    fn rank(&self, observation: &CorrelatedResponse) -> u8 {
-        observation.kind.rank()
-    }
-
-    fn responder(&self, observation: &CorrelatedResponse) -> IpAddr {
-        observation.responder
-    }
+    correlated_probe_methods!();
 
     fn evidence(
         &mut self,

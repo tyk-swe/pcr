@@ -20,11 +20,8 @@ use crate::probe::runner::{BatchEvidence, Classifier, Outcome as ProbeOutcome};
 use crate::probe::{self, Batch, Transport, enforce_deadline};
 use crate::target::ResolvedZone;
 use crate::traceroute::error::probe_error;
-use crate::traceroute::evidence::{fold_termination, probe_evidence};
-use crate::traceroute::plan::packet::sent_probe_matches;
-use crate::traceroute::{
-    CorrelatedResponse, Error, Probe, ResponseKind, Termination, classify_response,
-};
+use crate::traceroute::evidence::{correlated_probe_methods, fold_termination, probe_evidence};
+use crate::traceroute::{CorrelatedResponse, Error, Probe, ResponseKind, Termination};
 
 #[derive(Clone, Debug)]
 pub(super) struct Outcome {
@@ -62,31 +59,7 @@ impl Classifier for HostsClassifier<'_> {
     type Observation = CorrelatedResponse;
     type Event = Event;
 
-    fn sent_matches(&self, probe: &Probe, sent: &Packet) -> bool {
-        sent_probe_matches(probe, sent)
-    }
-
-    fn classify(
-        &self,
-        probe: &Probe,
-        sent: &SentPacket,
-        response: &DecodedPacket,
-    ) -> Option<CorrelatedResponse> {
-        classify_response(
-            self.registry,
-            probe.target.transport(),
-            &sent.built().packet,
-            response,
-        )
-    }
-
-    fn rank(&self, observation: &CorrelatedResponse) -> u8 {
-        observation.kind.rank()
-    }
-
-    fn responder(&self, observation: &CorrelatedResponse) -> IpAddr {
-        observation.responder
-    }
+    correlated_probe_methods!();
 
     fn evidence(
         &mut self,

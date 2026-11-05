@@ -1736,6 +1736,81 @@ fn text_targets_and_content_lengths() {
 }
 
 #[test]
+fn text_start_lines_reject_embedded_line_endings() {
+    let registry = builtin::registry();
+    for (name, port, start) in [
+        ("ssdp", 1900, "M-SEARCH * HTTP/1.1"),
+        ("sip", 5060, "SIP/2.0 200 OK"),
+        ("rtsp", 554, "RTSP/1.0 200 OK"),
+    ] {
+        for separator in ["\r\n", "\r", "\n"] {
+            let message = format!("{start}{separator}X-Test: first\r\nContent-Length: 0\r\n\r\n");
+            let mut packet = Packet::default();
+            packet.push(Ethernet::default());
+            packet.push(Ipv4::default());
+            if name == "rtsp" {
+                packet.push(Tcp {
+                    destination_port: port,
+                    ..Default::default()
+                });
+            } else {
+                packet.push(Udp {
+                    destination_port: port,
+                    ..Default::default()
+                });
+            }
+            packet.push(crate::layer::Raw::new(Bytes::from(message)));
+            let original = build_in(packet, Mode::Permissive).unwrap().bytes;
+            let decoded = crate::decode::Dissector::new(registry.clone())
+                .decode(
+                    Frame::new(None, LinkType::ETHERNET, original.clone()).unwrap(),
+                    Default::default(),
+                )
+                .unwrap();
+            let valid = separator == "\r\n";
+            if valid {
+                round_trip(
+                    name,
+                    format!("{start}\r\nX-Test: first\r\n second\r\nContent-Length: 0\r\n\r\n")
+                        .as_bytes(),
+                );
+            }
+            assert_eq!(
+                decoded
+                    .packet
+                    .iter()
+                    .any(|layer| layer.protocol_id().as_str() == name),
+                valid,
+                "{name} {separator:?}"
+            );
+            if valid {
+                assert!(
+                    decoded.diagnostics.is_empty(),
+                    "{name}: {:?}",
+                    decoded.diagnostics
+                );
+            } else {
+                assert!(
+                    decoded
+                        .diagnostics
+                        .iter()
+                        .any(|d| d.message.contains("invalid start line")),
+                    "{name}: {:?}",
+                    decoded.diagnostics
+                );
+            }
+            let mode = if valid {
+                Mode::Strict
+            } else {
+                Mode::Permissive
+            };
+            let rebuilt = build_in(decoded.packet, mode).unwrap();
+            assert_eq!(rebuilt.bytes, original, "{name} {separator:?}");
+        }
+    }
+}
+
+#[test]
 fn resp_framing_matches_decoder_depth() {
     for number in ["+1", "01", "-0", " 1"] {
         for tag in [":", "$", "*"] {

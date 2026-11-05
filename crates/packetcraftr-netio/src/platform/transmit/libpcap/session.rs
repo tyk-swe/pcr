@@ -10,12 +10,12 @@ use std::mem::size_of;
 
 use crate::Error;
 use crate::interface::Id;
-use crate::platform::transmit::namespace::ExecutionContext;
+use crate::platform::transmit::namespace::{ExecutionContext, Reuse};
 use crate::platform::transmit::session::{Backend as SessionBackend, Preparation};
 use crate::transmit::{Layer2Frame, Outbound, Provider, Report, SystemProvider};
 
 pub(super) struct Backend {
-    context: Result<ExecutionContext, Error>,
+    context: ExecutionContext,
 }
 
 impl Backend {
@@ -35,7 +35,9 @@ impl SessionBackend for Backend {
         &self,
         outbound: Outbound<'a>,
     ) -> Result<Preparation<Id, Layer2Frame<'a>>, Error> {
-        self.context.as_ref().map_err(Clone::clone)?.verify()?;
+        let Reuse::Verified = self.context.verify()? else {
+            return Ok(Preparation::Fallback);
+        };
         let Outbound::Layer2(frame) = outbound else {
             return Ok(Preparation::Fallback);
         };
@@ -76,5 +78,80 @@ impl SessionBackend for Backend {
 
     fn fallback(&self, outbound: Outbound<'_>) -> Result<Report, Error> {
         SystemProvider.send(outbound)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use packetcraftr_core::frame::LinkType;
+
+    use super::*;
+    use crate::platform::transmit::namespace::tests::thread_root;
+    use crate::{
+        link::{Capability, Mode},
+        route::{Decision, Scope, SelectionReason},
+        transmit::Route,
+    };
+
+    fn decision() -> Decision {
+        Decision {
+            interface: Id {
+                name: "test0".to_owned(),
+                index: u32::MAX,
+            },
+            source_mac: None,
+            selected_source: None,
+            preferred_source: None,
+            next_hop: None,
+            selection_reason: SelectionReason::OnLink,
+            destination_scope: Scope::Link,
+            mtu: 1500,
+            capability: Capability::Layer2AndLayer3,
+            link_type: LinkType::ETHERNET,
+        }
+    }
+
+    fn frame() -> Bytes {
+        Bytes::from_static(&[0; 60])
+    }
+
+    fn outbound<'a>(bytes: &'a Bytes, decision: &'a Decision) -> Outbound<'a> {
+        Outbound::try_new(
+            bytes,
+            Route {
+                decision,
+                mode: Mode::Layer2,
+                lookup_destination: None,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn missing_snapshot_selects_one_shot_send() {
+        let empty_root = tempfile::tempdir().unwrap();
+        let backend = Backend {
+            context: ExecutionContext::capture_at(empty_root.path()),
+        };
+        let (bytes, decision) = (frame(), decision());
+        assert!(matches!(
+            backend.prepare(outbound(&bytes, &decision)),
+            Ok(Preparation::Fallback)
+        ));
+    }
+
+    #[test]
+    fn changed_context_rejects_before_any_send() {
+        let root = thread_root();
+        let backend = Backend {
+            context: ExecutionContext::capture_at(root.path()),
+        };
+        std::fs::remove_file(root.path().join("status")).unwrap();
+        let (bytes, decision) = (frame(), decision());
+        assert!(matches!(
+            backend.prepare(outbound(&bytes, &decision)),
+            Err(Error::Privilege { .. })
+        ));
     }
 }

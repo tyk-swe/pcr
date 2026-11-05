@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use crate::Error;
 use crate::interface::Id;
-use crate::platform::transmit::namespace::ExecutionContext;
+use crate::platform::transmit::namespace::{ExecutionContext, Reuse};
 use crate::platform::transmit::session::{Backend as SessionBackend, Bounded, Preparation};
 use crate::transmit::{Outbound, Provider, Report};
 
@@ -28,15 +28,15 @@ struct Key {
 }
 
 trait Environment: Send + Sync {
-    fn verify(&self) -> Result<(), Error>;
+    fn verify(&self) -> Result<Reuse, Error>;
     fn verify_interface(&self, interface: &Id) -> Result<(), Error>;
 }
 
-struct NativeEnvironment(Result<ExecutionContext, Error>);
+struct NativeEnvironment(ExecutionContext);
 
 impl Environment for NativeEnvironment {
-    fn verify(&self) -> Result<(), Error> {
-        self.0.as_ref().map_err(Clone::clone)?.verify()
+    fn verify(&self) -> Result<Reuse, Error> {
+        self.0.verify()
     }
 
     fn verify_interface(&self, interface: &Id) -> Result<(), Error> {
@@ -77,7 +77,9 @@ impl<P: Provider, E: Environment, T: Transport> SessionBackend for Backend<P, E,
     type Resource = T::Socket;
 
     fn prepare(&self, outbound: Outbound<'_>) -> Result<Preparation<Key, PreparedRawIp>, Error> {
-        self.environment.verify()?;
+        let Reuse::Verified = self.environment.verify()? else {
+            return Ok(Preparation::Fallback);
+        };
         let Outbound::Layer3(frame) = outbound else {
             return Ok(Preparation::Fallback);
         };
@@ -157,7 +159,7 @@ mod tests {
     struct FakeEnvironment(Arc<Counts>);
 
     impl Environment for FakeEnvironment {
-        fn verify(&self) -> Result<(), Error> {
+        fn verify(&self) -> Result<Reuse, Error> {
             if self.0.bad_credentials.load(Ordering::SeqCst) {
                 return Err(Error::Privilege {
                     message: "credentials changed".to_owned(),
@@ -170,7 +172,7 @@ mod tests {
                     source: None,
                 });
             }
-            Ok(())
+            Ok(Reuse::Verified)
         }
 
         fn verify_interface(&self, _interface: &Id) -> Result<(), Error> {
@@ -406,6 +408,32 @@ mod tests {
         assert_eq!(counts.fallbacks.load(Ordering::SeqCst), 0);
         assert_eq!(counts.opens.load(Ordering::SeqCst), 1);
         assert_eq!(counts.drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn missing_snapshot_sends_every_frame_one_shot() {
+        let counts = Arc::new(Counts::default());
+        let empty_root = tempfile::tempdir().unwrap();
+        let session = Bounded::new(Backend {
+            fallback: FakeFallback(counts.clone()),
+            environment: NativeEnvironment(ExecutionContext::capture_at(empty_root.path())),
+            transport: FakeTransport(counts.clone()),
+        });
+        let (bytes, destination) = ipv4();
+        let loopback = decision(LOOPBACK_IFINDEX, destination);
+        let other = decision(LOOPBACK_IFINDEX + 1, destination);
+
+        for route in [&loopback, &loopback, &other] {
+            session
+                .send(outbound(&bytes, route, destination))
+                .unwrap()
+                .validate_exact(&bytes)
+                .unwrap();
+        }
+
+        assert_eq!(counts.fallbacks.load(Ordering::SeqCst), 3);
+        assert_eq!(counts.opens.load(Ordering::SeqCst), 0);
+        assert!(counts.frames.lock().unwrap().is_empty());
     }
 
     #[test]

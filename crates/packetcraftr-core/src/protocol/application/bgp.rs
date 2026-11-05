@@ -79,6 +79,40 @@ message_codec!(BgpCodec, Bgp, bgp_schema);
 
 const NAME: &str = "bgp";
 impl Bgp {
+    fn reject_uncarried_fields(&self) -> Result<(), Error> {
+        let default = Self::default();
+        let fields = [
+            ("version", 1, self.version == default.version),
+            ("my_as", 1, self.my_as == default.my_as),
+            ("hold_time", 1, self.hold_time == default.hold_time),
+            ("identifier", 1, self.identifier == default.identifier),
+            ("parameters", 1, self.parameters == default.parameters),
+            ("withdrawn", 2, self.withdrawn == default.withdrawn),
+            ("attributes", 2, self.attributes == default.attributes),
+            ("nlri", 2, self.nlri == default.nlri),
+            ("error_code", 3, self.error_code == default.error_code),
+            (
+                "error_subcode",
+                3,
+                self.error_subcode == default.error_subcode,
+            ),
+            ("data", 3, self.data == default.data),
+        ];
+        if let Some((field, ..)) = fields
+            .iter()
+            .find(|(_, carried_by, unchanged)| *carried_by != self.message_type && !unchanged)
+        {
+            return Err(invalid(
+                NAME,
+                format!(
+                    "message type {} does not carry field {field}",
+                    self.message_type
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
         let mut p = Writer::new(NAME, c.remaining_packet_bytes);
         match self.message_type {
@@ -139,6 +173,7 @@ impl Bgp {
             4 => {}
             _ => return Err(unsupported(NAME, "unsupported message type")),
         }
+        self.reject_uncarried_fields()?;
         let mut w = Writer::new(NAME, c.remaining_packet_bytes.min(4096));
         w.put(&[255; 16])?;
         w.u16(

@@ -8,12 +8,12 @@ use serde::Serialize;
 
 use packetcraftr_core::analysis::stats as library;
 
-use super::analysis::{Clock, Scope, StreamTransport as Transport};
-use super::contract::Error;
-use super::frame::Timestamp;
+use crate::commands::offline_analysis::output::{Clock, Scope, StreamTransport as Transport};
+use crate::output::contract::Error;
+use crate::output::frame::Timestamp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Table {
+pub(crate) enum Table {
     Conversations,
     Endpoints,
     Protocols,
@@ -24,7 +24,7 @@ pub enum Table {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Endpoint {
+pub(crate) struct Endpoint {
     pub address: IpAddr,
     pub tx_frames: u64,
     pub tx_bytes: u64,
@@ -45,7 +45,7 @@ impl From<library::EndpointStat> for Endpoint {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Protocol {
+pub(crate) struct Protocol {
     pub protocol: String,
     pub frames: u64,
     pub bytes: u64,
@@ -62,7 +62,7 @@ impl From<library::ProtocolStat> for Protocol {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Port {
+pub(crate) struct Port {
     pub transport: Transport,
     pub port: u16,
     pub frames: u64,
@@ -81,7 +81,7 @@ impl From<library::PortStat> for Port {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct IoBucket {
+pub(crate) struct IoBucket {
     pub offset: Duration,
     pub frames: u64,
     pub bytes: u64,
@@ -98,7 +98,7 @@ impl From<library::IoBucketStat> for IoBucket {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Conversation {
+pub(crate) struct Conversation {
     pub transport: Transport,
     pub stream: u64,
     pub scope: Scope,
@@ -116,7 +116,7 @@ pub struct Conversation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Io {
+pub(crate) struct Io {
     pub origin: Option<Timestamp>,
     pub underflow_frames: u64,
     pub interval: Duration,
@@ -124,14 +124,14 @@ pub struct Io {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Interface {
+pub(crate) struct Interface {
     pub id: u32,
     pub link_type: u32,
     pub snap_length: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub clock: Clock,
     #[serde(flatten)]
     pub table: TableData,
@@ -155,7 +155,7 @@ pub struct Report {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "table", rename_all = "snake_case")]
-pub enum TableData {
+pub(crate) enum TableData {
     Overview {
         protocol_count: usize,
         endpoint_count: usize,
@@ -180,7 +180,7 @@ pub enum TableData {
         io: Io,
     },
     Fragments {
-        fragments: super::reassembly::Report,
+        fragments: crate::commands::offline_analysis::output::reassembly::Report,
     },
 }
 

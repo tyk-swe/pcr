@@ -1,7 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::{errors::CliError, invocation::Invocation, output::security::Report};
+use crate::errors::CliError;
+
+use crate::invocation::Invocation;
+
+use crate::commands::security::output::Report;
 use std::fmt::Write as _;
 
 const FILTER_SCRIPT: &str = r"
@@ -180,7 +184,7 @@ mod tests {
             path: "<source>".into(),
             sha256: "a".repeat(64),
         });
-        let page = super::html(&crate::output::security::Report::from(&report));
+        let page = super::html(&crate::commands::security::output::Report::from(&report));
         assert!(page.contains("&lt;img src=x onerror=alert(1)&gt;"));
         assert!(page.contains("&lt;/script&gt;&lt;script&gt;"));
         assert!(page.contains("&lt;source&gt;"));

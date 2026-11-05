@@ -6,7 +6,7 @@ use packetcraftr_core::{analysis::http2 as analysis, protocol::application::http
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, Serialize)]
-pub struct Priority {
+pub(crate) struct Priority {
     pub exclusive: bool,
     pub dependency: u32,
     pub weight: u16,
@@ -22,7 +22,7 @@ impl From<wire::Priority> for Priority {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
-pub struct Setting {
+pub(crate) struct Setting {
     pub id: u16,
     pub value: u32,
 }
@@ -37,7 +37,7 @@ impl From<wire::Setting> for Setting {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum Control {
+pub(crate) enum Control {
     Headers {
         fragment_hex: String,
         priority: Option<Priority>,
@@ -79,7 +79,7 @@ pub enum Control {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Frame {
+pub(crate) struct Frame {
     pub index: u64,
     pub stream: u64,
     pub generation: u64,

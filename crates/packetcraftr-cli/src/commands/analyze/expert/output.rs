@@ -5,11 +5,11 @@ use serde::Serialize;
 
 use packetcraftr_core::analysis::{self as library, expert};
 
-use super::analysis::{Clock, StreamTransport};
+use crate::commands::offline_analysis::output::{Clock, StreamTransport};
 use packetcraftr_core::diagnostic::Severity;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Finding {
+pub(crate) struct Finding {
     pub severity: Severity,
     pub code: &'static str,
     pub frame: u64,
@@ -34,13 +34,13 @@ impl From<expert::Finding> for Finding {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct CodeCount {
+pub(crate) struct CodeCount {
     pub code: &'static str,
     pub findings: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub clock: Clock,
     pub frames_read: u64,
     pub frames_matched: u64,
@@ -49,7 +49,7 @@ pub struct Report {
     pub notes: u64,
     pub codes: Vec<CodeCount>,
     pub findings: Vec<Finding>,
-    pub ip_reassembly: super::reassembly::Report,
+    pub ip_reassembly: crate::commands::offline_analysis::output::reassembly::Report,
 }
 
 impl

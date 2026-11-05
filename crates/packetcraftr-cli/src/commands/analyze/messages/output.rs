@@ -1,19 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    analysis::{ScopedFlowKey, analysis_complete},
-    contract::Error,
-    hex::compact_hex,
-    provenance::Source,
-    stream::StreamRecord,
-};
+use crate::commands::offline_analysis::output::{ScopedFlowKey, analysis_complete};
+
+use crate::output::contract::Error;
+
+use crate::output::hex::compact_hex;
+
+use crate::commands::analyze::dns::output::provenance::Source;
+
+use crate::output::stream::StreamRecord;
 use packetcraftr_core::analysis::messages as core;
 use serde::Serialize;
 
-pub use core::Status;
+pub(crate) use core::Status;
 #[derive(Debug, Serialize)]
-pub struct Message {
+pub(crate) struct Message {
     pub index: u64,
     pub protocol: String,
     pub stream: u64,
@@ -56,7 +58,7 @@ impl StreamRecord for Message {
     }
 }
 #[derive(Debug, Serialize)]
-pub struct Issue {
+pub(crate) struct Issue {
     pub number: u64,
     pub flow: ScopedFlowKey,
     pub stream: u64,
@@ -77,10 +79,10 @@ impl StreamRecord for Issue {
         "protocol_issue"
     }
 }
-pub type Summary = core::Summary;
+pub(crate) type Summary = core::Summary;
 analysis_complete!(core::Summary);
 #[derive(Debug, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub messages: Vec<Message>,
     pub issues: Vec<Issue>,
     #[serde(flatten)]

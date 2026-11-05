@@ -1,6 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+mod event_output;
+pub(in crate::commands) mod output;
+mod rendering;
+
+use self::event_output::EventOutput;
+pub(super) use self::rendering::{encapsulation_text, ip_event_sink, render_clock, render_scope};
 use crate::command_options::Bounded as _;
 use crate::output::envelope::Published;
 use std::sync::Arc;
@@ -19,7 +25,7 @@ use crate::command_options::{DecodeArgs, OfflineLimitsArgs, Selector};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::output::contract::{Command, Format};
-use crate::rendering::{EventOutput, emit_published, ip_event_sink};
+use crate::rendering::emit_published;
 
 pub(super) struct AnalysisSetup {
     pub(super) registry: Arc<Registry>,

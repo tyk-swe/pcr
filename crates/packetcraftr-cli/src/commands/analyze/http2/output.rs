@@ -1,23 +1,27 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-pub mod frame;
+pub(crate) mod frame;
 
-pub use frame::{Control, Frame, Priority, Setting};
+pub(crate) use frame::Frame;
 
-use super::{
-    analysis::{ScopedFlowKey, analysis_complete},
-    contract::Error,
-    hex::compact_hex,
-    http as http1,
-    provenance::Source,
-    stream::StreamRecord,
-};
+use crate::commands::offline_analysis::output::{ScopedFlowKey, analysis_complete};
+use crate::output::published_enum;
+
+use crate::output::contract::Error;
+
+use crate::output::hex::compact_hex;
+
+use crate::commands::analyze::http::output as http1;
+
+use crate::commands::analyze::dns::output::provenance::Source;
+
+use crate::output::stream::StreamRecord;
 use packetcraftr_core::analysis::http2 as analysis;
 use serde::Serialize;
 
 published_enum! {
-    pub enum Status from analysis::Status {
+    pub(crate) enum Status from analysis::Status {
         Complete => "complete",
         Incomplete => "incomplete",
         Malformed => "malformed",
@@ -32,7 +36,7 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum Startup from analysis::Startup {
+    pub(crate) enum Startup from analysis::Startup {
         PriorKnowledge => "prior_knowledge",
         H2c => "h2c",
         Unknown => "unknown",
@@ -40,7 +44,7 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum MessageKind from analysis::MessageKind {
+    pub(crate) enum MessageKind from analysis::MessageKind {
         Request => "request",
         Response => "response",
         Informational => "informational",
@@ -49,7 +53,7 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum Certainty from analysis::Certainty {
+    pub(crate) enum Certainty from analysis::Certainty {
         Confirmed => "confirmed",
         ObservedOrder => "observed_order",
         Indeterminate => "indeterminate",
@@ -57,7 +61,7 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum IssueScope from analysis::IssueScope {
+    pub(crate) enum IssueScope from analysis::IssueScope {
         Connection => "connection",
         Stream => "stream",
         Compression => "compression",
@@ -66,7 +70,7 @@ published_enum! {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Header {
+pub(crate) struct Header {
     pub name: String,
     pub name_hex: String,
     pub value: String,
@@ -86,7 +90,7 @@ impl From<analysis::Header> for Header {
 }
 
 #[derive(Debug, Serialize)]
-pub struct UpgradeHead {
+pub(crate) struct UpgradeHead {
     pub start: http1::StartLine,
     pub headers: Vec<http1::Header>,
     pub wire_hex: String,
@@ -118,7 +122,7 @@ fn optional_sources(
 }
 
 #[derive(Debug, Serialize)]
-pub struct Message {
+pub(crate) struct Message {
     pub index: u64,
     pub stream: u64,
     pub generation: u64,
@@ -170,7 +174,7 @@ impl StreamRecord for Message {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Issue {
+pub(crate) struct Issue {
     pub number: u64,
     pub stream: u64,
     pub generation: u64,
@@ -210,7 +214,7 @@ impl StreamRecord for Issue {
 }
 
 #[derive(Debug, Serialize)]
-pub struct PeerSettings {
+pub(crate) struct PeerSettings {
     pub header_table_size: u32,
     pub enable_push: bool,
     pub max_concurrent_streams: Option<u32>,
@@ -232,7 +236,7 @@ impl From<analysis::PeerSettings> for PeerSettings {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Connection {
+pub(crate) struct Connection {
     pub stream: u64,
     pub generation: u64,
     pub flow: ScopedFlowKey,
@@ -280,7 +284,7 @@ impl StreamRecord for Connection {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Summary {
+pub(crate) struct Summary {
     pub connections: u64,
     pub prior_knowledge_connections: u64,
     pub upgraded_connections: u64,
@@ -314,7 +318,7 @@ impl From<analysis::Summary> for Summary {
 }
 analysis_complete!(analysis::Summary);
 #[derive(Debug, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub frames: Vec<Frame>,
     pub messages: Vec<Message>,
     pub issues: Vec<Issue>,

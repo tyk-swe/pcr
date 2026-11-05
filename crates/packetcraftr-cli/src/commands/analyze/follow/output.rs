@@ -5,12 +5,12 @@ use serde::Serialize;
 
 use packetcraftr_core::analysis::{self as library, follow};
 
-use super::analysis::{Clock, Endpoint, Scope, StreamTransport};
-use super::contract::Error;
-use super::hex::compact_hex;
+use crate::commands::offline_analysis::output::{Clock, Endpoint, Scope, StreamTransport};
+use crate::output::contract::Error;
+use crate::output::hex::compact_hex;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub enum PeerDirection {
+pub(crate) enum PeerDirection {
     #[serde(rename = "client")]
     ClientToServer,
     #[serde(rename = "server")]
@@ -27,7 +27,7 @@ impl From<follow::PeerDirection> for PeerDirection {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Chunk {
+pub(crate) struct Chunk {
     pub direction: PeerDirection,
     pub direction_generation: u64,
     pub frame: u64,
@@ -46,7 +46,7 @@ impl From<follow::Chunk> for Chunk {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct WrittenFile {
+pub(crate) struct WrittenFile {
     pub direction: PeerDirection,
     pub path: String,
     pub bytes: u64,
@@ -63,7 +63,7 @@ impl From<(follow::PeerDirection, String, u64)> for WrittenFile {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub clock: Clock,
     pub transport: StreamTransport,
     pub stream: u64,
@@ -79,7 +79,7 @@ pub struct Report {
     pub chunks: Vec<Chunk>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub written: Vec<WrittenFile>,
-    pub ip_reassembly: super::reassembly::Report,
+    pub ip_reassembly: crate::commands::offline_analysis::output::reassembly::Report,
 }
 
 impl

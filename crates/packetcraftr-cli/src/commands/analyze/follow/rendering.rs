@@ -19,7 +19,7 @@ use analysis::StreamRef;
 use analysis::follow::{Chunk, Summary};
 
 pub(super) struct State {
-    retained: Retained<output::follow::Chunk>,
+    retained: Retained<crate::commands::analyze::follow::output::Chunk>,
 }
 
 impl State {
@@ -50,7 +50,7 @@ pub(super) fn render_record(
             ),
         ),
         Format::Hex => {
-            let rendered = output::follow::Chunk::from(chunk.clone());
+            let rendered = crate::commands::analyze::follow::output::Chunk::from(chunk.clone());
             write_stdout_line(
                 invocation,
                 format_args!(
@@ -68,7 +68,7 @@ pub(super) fn render_record(
             Ok(())
         }
         Format::Ndjson => Ok(stream.emit_published(Published::new(
-            output::follow::Chunk::from(chunk),
+            crate::commands::analyze::follow::output::Chunk::from(chunk),
             Vec::new(),
         ))?),
         other => other.unreachable(),
@@ -88,9 +88,9 @@ pub(super) fn render_text(
     summary: &Summary,
     written: &[super::write::Written],
 ) -> Result<(), CliError> {
-    crate::rendering::render_clock(invocation, &summary.clock)?;
+    crate::commands::offline_analysis::render_clock(invocation, &summary.clock)?;
     if let Some(scope) = &summary.scope {
-        crate::rendering::render_scope(invocation, scope)?;
+        crate::commands::offline_analysis::render_scope(invocation, scope)?;
     }
     let transport = selector.transport.as_str();
     match &summary.client_flow {
@@ -136,7 +136,7 @@ pub(super) fn render_aggregate(
         state.retained.omitted(),
         "--max-frames",
     );
-    let report = output::follow::Report::try_from((
+    let report = crate::commands::analyze::follow::output::Report::try_from((
         selector,
         summary,
         state.retained.into_items(),
@@ -161,7 +161,7 @@ pub(super) fn render_stream(
     stream: &StreamEncoder,
     written: Vec<super::write::Written>,
 ) -> Result<(), CliError> {
-    let report = output::follow::Report::try_from((
+    let report = crate::commands::analyze::follow::output::Report::try_from((
         selector,
         summary,
         Vec::new(),

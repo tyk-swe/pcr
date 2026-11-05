@@ -3,6 +3,7 @@
 
 //! Published security fields, independent of the library's Serde representation.
 
+use crate::output::published_enum;
 use std::collections::BTreeMap;
 
 use packetcraftr_core::security as library;
@@ -10,7 +11,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 published_enum! {
-    pub enum Severity from library::Severity {
+    pub(crate) enum Severity from library::Severity {
         Info => "info",
         Low => "low",
         Medium => "medium",
@@ -20,13 +21,13 @@ published_enum! {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Completeness<'a> {
+pub(crate) struct Completeness<'a> {
     pub complete: bool,
     pub reasons: &'a [String],
 }
 
 #[derive(Debug, Serialize)]
-pub struct Finding<'a> {
+pub(crate) struct Finding<'a> {
     pub rule_id: &'a str,
     pub severity: Severity,
     pub subject: &'a str,
@@ -55,13 +56,13 @@ impl<'a> From<&'a library::Finding> for Finding<'a> {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Source<'a> {
+pub(crate) struct Source<'a> {
     pub path: &'a str,
     pub sha256: &'a str,
 }
 
 #[derive(Debug, Serialize)]
-pub struct Report<'a> {
+pub(crate) struct Report<'a> {
     pub kind: &'a str,
     pub findings: Vec<Finding<'a>>,
     pub completeness: Completeness<'a>,
@@ -94,7 +95,7 @@ impl<'a> From<&'a library::Report> for Report<'a> {
 #[derive(Serialize)]
 pub(crate) struct FindingRecord<'a>(pub(crate) &'a Finding<'a>);
 
-impl super::stream::StreamRecord for FindingRecord<'_> {
+impl crate::output::stream::StreamRecord for FindingRecord<'_> {
     fn event_name(&self) -> &'static str {
         "finding"
     }

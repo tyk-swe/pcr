@@ -1,23 +1,24 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::published_enum;
 use serde::Serialize;
 
 use packetcraftr_core::analysis::forwarding as analysis;
 use packetcraftr_core::field;
 
-use super::capture::CaptureSource;
-use super::contract::Error;
-use super::frame::{SourceFrame, Timestamp};
+use crate::output::capture::CaptureSource;
+use crate::output::contract::Error;
+use crate::output::frame::{SourceFrame, Timestamp};
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
-pub struct Sided<T> {
+pub(crate) struct Sided<T> {
     pub ingress: T,
     pub egress: T,
 }
 
 published_enum! {
-    pub enum Verdict from analysis::Verdict {
+    pub(crate) enum Verdict from analysis::Verdict {
         Pass => "pass",
         Fail => "fail",
         Inconclusive => "inconclusive",
@@ -25,14 +26,14 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum Incomplete from analysis::Incomplete {
+    pub(crate) enum Incomplete from analysis::Incomplete {
         Truncated => "truncated",
         FieldBudget => "field_budget",
     }
 }
 
 published_enum! {
-    pub enum ValueState from analysis::ValueState {
+    pub(crate) enum ValueState from analysis::ValueState {
         Observed => "observed",
         Absent => "absent",
         Truncated => "truncated",
@@ -42,7 +43,7 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum CheckKind from analysis::CheckKind {
+    pub(crate) enum CheckKind from analysis::CheckKind {
         Preserve => "preserve",
         Expect => "expect",
         PreservePresence => "preserve_presence",
@@ -51,7 +52,7 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum Outcome from analysis::Outcome {
+    pub(crate) enum Outcome from analysis::Outcome {
         Satisfied => "satisfied",
         Violated => "violated",
         Unevaluable => "unevaluable",
@@ -59,14 +60,14 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum ComparisonKind from analysis::ComparisonKind {
+    pub(crate) enum ComparisonKind from analysis::ComparisonKind {
         CorrespondenceOnly => "correspondence_only",
         PropertyChecks => "property_checks",
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Check {
+pub(crate) struct Check {
     pub kind: CheckKind,
     pub field: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -84,7 +85,7 @@ impl From<analysis::Check> for Check {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct CheckEvaluation {
+pub(crate) struct CheckEvaluation {
     pub check: Check,
     pub outcome: Outcome,
     pub expected_state: Option<ValueState>,
@@ -109,19 +110,19 @@ impl From<analysis::CheckEvaluation> for CheckEvaluation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct RuleWarning {
+pub(crate) struct RuleWarning {
     pub code: &'static str,
     pub message: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ExpectationRule {
+pub(crate) struct ExpectationRule {
     pub field: String,
     pub value: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct RequestedRules {
+pub(crate) struct RequestedRules {
     pub comparison: ComparisonKind,
     pub warnings: Vec<RuleWarning>,
     pub preserve_presence: Vec<String>,
@@ -160,7 +161,7 @@ impl From<analysis::RequestedRules> for RequestedRules {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Summary {
+pub(crate) struct Summary {
     pub unique_matches: u64,
     pub reordered_pairs: u64,
     pub ingress_only: u64,
@@ -191,7 +192,7 @@ impl From<analysis::Summary> for Summary {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Omissions {
+pub(crate) struct Omissions {
     pub matches: u64,
     pub violations: u64,
     pub unmatched_ingress: u64,
@@ -218,13 +219,13 @@ impl From<analysis::Omissions> for Omissions {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DecodeContext {
+pub(crate) struct DecodeContext {
     pub tls_ports: Vec<u16>,
     pub bindings: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Capture {
+pub(crate) struct Capture {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<CaptureSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -240,7 +241,7 @@ pub struct Capture {
 
 /// A reference to one frame inside its own capture.
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Evidence {
+pub(crate) struct Evidence {
     pub frame: SourceFrame,
     /// The frame's capture timestamp, retained as per-capture evidence. It is
     /// never subtracted across captures and never labelled latency.
@@ -274,7 +275,7 @@ fn evidence_list(values: &[analysis::Evidence]) -> Result<Vec<Evidence>, Error> 
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Match {
+pub(crate) struct Match {
     pub key: Vec<field::Value>,
     pub ingress: Evidence,
     pub egress: Evidence,
@@ -302,7 +303,7 @@ impl TryFrom<&analysis::Match> for Match {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Violation {
+pub(crate) struct Violation {
     pub check: Check,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<Vec<field::Value>>,
@@ -331,7 +332,7 @@ impl TryFrom<&analysis::Violation> for Violation {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Unkeyed {
+pub(crate) struct Unkeyed {
     pub evidence: Evidence,
     pub key: Vec<Option<field::Value>>,
 }
@@ -348,7 +349,7 @@ impl TryFrom<&analysis::UnkeyedObservation> for Unkeyed {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct AmbiguousGroup {
+pub(crate) struct AmbiguousGroup {
     pub key: Vec<field::Value>,
     pub ingress: Vec<Evidence>,
     pub egress: Vec<Evidence>,
@@ -385,7 +386,7 @@ impl From<(Vec<u16>, Vec<String>)> for DecodeContext {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decode: Option<DecodeContext>,
     pub verdict: Verdict,
@@ -403,7 +404,7 @@ pub struct Report {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Input {
+pub(crate) struct Input {
     pub path: String,
     pub source: Option<CaptureSource>,
     pub selection_filter: Option<String>,

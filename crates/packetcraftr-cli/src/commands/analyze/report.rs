@@ -68,7 +68,7 @@ impl Spec for Assessment {
                 std::iter::once(source(path, &bytes)).chain(result.sources),
             );
             crate::rendering::bounded_json_len(
-                &crate::output::security::Report::from(&report),
+                &crate::commands::security::output::Report::from(&report),
                 self.bounds.max_result_bytes,
                 serde_json::ser::CompactFormatter,
             )
@@ -78,13 +78,14 @@ impl Spec for Assessment {
             .measurements
             .insert("html".into(), serde_json::json!(self.html));
         crate::rendering::bounded_json_len(
-            &crate::output::security::Report::from(&report),
+            &crate::commands::security::output::Report::from(&report),
             self.bounds.max_result_bytes,
             serde_json::ser::CompactFormatter,
         )
         .map_err(|e| e.into_cli_error(|| invalid("report exceeds --max-result-bytes")))?;
-        let html =
-            crate::rendering::security::html(&crate::output::security::Report::from(&report));
+        let html = crate::commands::security::rendering::html(
+            &crate::commands::security::output::Report::from(&report),
+        );
         if html.len() > self.bounds.max_result_bytes.saturating_mul(8) {
             return Err(invalid("HTML exceeds bounded report expansion"));
         }

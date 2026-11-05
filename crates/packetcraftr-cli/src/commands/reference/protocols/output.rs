@@ -8,10 +8,10 @@ use packetcraftr_core::layer::FieldSchema;
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::registry::{FilterFieldBinding, Registry};
 
-use super::contract::Error;
+use crate::output::contract::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub enum Kind {
+pub(crate) enum Kind {
     #[serde(rename = "bool")]
     Bool,
     #[serde(rename = "unsigned")]
@@ -38,7 +38,7 @@ pub enum Kind {
 
 impl Kind {
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Bool => "bool",
             Self::Unsigned => "unsigned",
@@ -87,7 +87,7 @@ impl TryFrom<field::Kind> for Kind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Summary {
+pub(crate) struct Summary {
     pub protocol: String,
     pub aliases: Vec<String>,
     pub build: bool,
@@ -127,7 +127,7 @@ impl From<BuiltinProtocol> for Summary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Field {
+pub(crate) struct Field {
     pub name: String,
     pub kind: Kind,
     pub required: bool,
@@ -185,21 +185,21 @@ impl Field {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Binding {
+pub(crate) struct Binding {
     pub parent: String,
     pub discriminator: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum FilterKind {
+pub(crate) enum FilterKind {
     Direct,
     Either,
     Bits,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct FilterField {
+pub(crate) struct FilterField {
     pub path: String,
     pub kind: FilterKind,
     pub fields: Vec<String>,
@@ -264,7 +264,7 @@ impl TryFrom<(&str, &FilterFieldBinding)> for FilterField {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Detail {
+pub(crate) struct Detail {
     #[serde(flatten)]
     pub summary: Summary,
     pub fields: Vec<Field>,
@@ -310,7 +310,7 @@ impl TryFrom<(&Registry, BuiltinProtocol)> for Detail {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ListResult {
+pub(crate) struct ListResult {
     pub protocols: Vec<Summary>,
 }
 
@@ -323,7 +323,7 @@ impl From<&[BuiltinProtocol]> for ListResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DetailResult {
+pub(crate) struct DetailResult {
     pub protocol: Detail,
 }
 

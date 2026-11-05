@@ -1,18 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    analysis::{ScopedFlowKey, analysis_complete},
-    contract::Error,
-    hex::compact_hex,
-    provenance::Source,
-    stream::StreamRecord,
-};
+use crate::commands::offline_analysis::output::{ScopedFlowKey, analysis_complete};
+use crate::output::published_enum;
+
+use crate::output::contract::Error;
+
+use crate::output::hex::compact_hex;
+
+use crate::commands::analyze::dns::output::provenance::Source;
+
+use crate::output::stream::StreamRecord;
 use packetcraftr_core::{analysis::http as analysis, protocol::application::http};
 use serde::Serialize;
 
 published_enum! {
-    pub enum Status from analysis::Status {
+    pub(crate) enum Status from analysis::Status {
         Complete => "complete",
         Incomplete => "incomplete",
         Malformed => "malformed",
@@ -27,7 +30,7 @@ published_enum! {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", content = "length")]
-pub enum Body {
+pub(crate) enum Body {
     #[serde(rename = "none")]
     None,
     #[serde(rename = "length")]
@@ -54,7 +57,7 @@ impl From<http::Body> for Body {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum StartLine {
+pub(crate) enum StartLine {
     Request {
         method: String,
         target: String,
@@ -96,7 +99,7 @@ impl From<http::StartLine> for StartLine {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Header {
+pub(crate) struct Header {
     pub name: String,
     pub value: String,
     pub value_hex: String,
@@ -112,7 +115,7 @@ impl From<http::Header> for Header {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Message {
+pub(crate) struct Message {
     pub index: u64,
     pub stream: u64,
     pub generation: u64,
@@ -166,7 +169,7 @@ impl StreamRecord for Message {
     }
 }
 #[derive(Debug, Serialize)]
-pub struct Issue {
+pub(crate) struct Issue {
     pub number: u64,
     pub flow: ScopedFlowKey,
     pub stream: u64,
@@ -188,7 +191,7 @@ impl StreamRecord for Issue {
     }
 }
 #[derive(Debug, Serialize)]
-pub struct Summary {
+pub(crate) struct Summary {
     pub messages: u64,
     pub complete_messages: u64,
     pub incomplete_messages: u64,
@@ -212,7 +215,7 @@ impl From<analysis::Summary> for Summary {
 }
 analysis_complete!(analysis::Summary);
 #[derive(Debug, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub messages: Vec<Message>,
     pub issues: Vec<Issue>,
     #[serde(flatten)]

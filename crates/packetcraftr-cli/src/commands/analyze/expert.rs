@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+pub(in crate::commands) mod output;
 mod rendering;
 
 use crate::output::contract::Format;
@@ -73,7 +74,7 @@ pub(super) fn run(
     let outcome = session
         .run(
             &mut reader,
-            crate::rendering::ip_event_sink(format, stream),
+            crate::commands::offline_analysis::ip_event_sink(format, stream),
             |finding| {
                 if selector.matches(&finding) {
                     state.count(&finding);

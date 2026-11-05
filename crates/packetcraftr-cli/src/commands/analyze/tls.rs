@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(in crate::commands) mod output;
 use crate::output::contract::Format;
 
 use packetcraftr_core::error::Kind;
@@ -9,8 +10,6 @@ pub(in crate::commands) mod arguments;
 mod rendering;
 
 use packetcraftr_core::analysis;
-
-use crate::output;
 
 use self::arguments::Args;
 use crate::commands::offline_analysis::prepare;
@@ -106,7 +105,7 @@ pub(super) fn run(
     let outcome = session
         .run(
             &mut reader,
-            crate::rendering::ip_event_sink(format, stream),
+            crate::commands::offline_analysis::ip_event_sink(format, stream),
             |event| {
                 if selector.matches(&event.session) {
                     rendering::render_session(
@@ -133,7 +132,7 @@ pub(super) fn run(
     }
 
     let (selected, omitted) = state.counts();
-    let summary = output::tls::Summary::from((outcome.summary, &outcome.run, selected, omitted));
+    let summary = output::Summary::from((outcome.summary, &outcome.run, selected, omitted));
     match format {
         Format::Text => rendering::render_text(invocation, &state, &summary, &prepared.registry),
         Format::Json => rendering::render_aggregate(invocation, state, summary),

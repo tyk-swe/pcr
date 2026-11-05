@@ -7,11 +7,11 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use packetcraftr::os as library;
 use packetcraftr_core::document::os_fingerprints;
 
+use crate::output::contract::Format;
 use crate::{
     command_options::{Bounded, NumericPolicyArgs, RouteSelectionArgs, parse_target},
     errors::CliError,
     input::{InputKind, read_bounded_file},
-    output::contract::Format,
     rendering::write_stdout_line,
     system::{Runtime, prepare_workflow},
 };

@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use crate::output::analysis::{Scope, StreamRef};
+use crate::commands::analyze::dns::output::provenance::Source;
+use crate::commands::offline_analysis::output::reassembly::DatagramKey;
+use crate::commands::offline_analysis::output::{Scope, StreamRef};
 use crate::output::contract::Error;
-use crate::output::provenance::Source;
-use crate::output::reassembly::DatagramKey;
 use packetcraftr_core::analysis::export::Plan;
 use packetcraftr_core::capture_file;
 use serde::Serialize;
@@ -49,7 +49,7 @@ pub(crate) struct Report {
     pub unselected_incomplete_datagrams: usize,
     pub source_outcomes_omitted: u64,
     pub scopes: Vec<Scope>,
-    pub ip_reassembly: crate::output::reassembly::Report,
+    pub ip_reassembly: crate::commands::offline_analysis::output::reassembly::Report,
 }
 impl TryFrom<(String, capture_file::SelectionReport, Plan)> for Report {
     type Error = Error;

@@ -2,16 +2,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+pub(in crate::commands) mod output;
 mod rendering;
 
 use packetcraftr_core::analysis::http2::{Collector, Event};
 
 use self::arguments::Args;
+use self::output as wire;
 use crate::commands::offline_analysis::{
     Inspection, complete_application, inspect, require_tcp_stream,
 };
 use crate::errors::CliError;
-use crate::output::{contract::Command, http2 as wire};
+use crate::output::contract::Command;
 
 impl crate::commands::Spec for Args {
     const FORMATS: &'static [crate::output::contract::Format] = &[

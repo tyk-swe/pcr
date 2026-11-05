@@ -14,7 +14,6 @@ use super::style::{
     terminal_safe,
 };
 use crate::errors::CliError;
-use crate::output;
 use crate::output::stream::BATCH_BYTES;
 
 fn diagnostic_line(diagnostic: impl Into<packetcraftr_core::diagnostic::Diagnostic>) -> String {
@@ -60,14 +59,6 @@ pub(crate) fn render_optional<T>(value: Option<T>, render: impl FnOnce(T) -> Str
 /// A duration in milliseconds to the microsecond, such as `12.345ms`.
 pub(crate) fn duration_text(duration: std::time::Duration) -> String {
     format!("{:.3}ms", duration.as_secs_f64() * 1_000.0)
-}
-
-pub(crate) fn encapsulation_text(path: &[output::analysis::EncapsulationIdentifier]) -> String {
-    if path.is_empty() {
-        "none".to_owned()
-    } else {
-        comma_separated(path)
-    }
 }
 
 pub(crate) fn document_spelling(value: &impl serde::Serialize) -> String {

@@ -1,13 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    analysis::{ScopedFlowKey, StreamTransport, analysis_complete},
-    contract::Error,
-    hex::compact_hex,
-    provenance::Source,
-    stream::StreamRecord,
+pub(in crate::commands) mod provenance;
+use crate::commands::analyze::dns::output::provenance::Source;
+use crate::commands::offline_analysis::output::{
+    ScopedFlowKey, StreamTransport, analysis_complete,
 };
+use crate::output::contract::Error;
+use crate::output::hex::compact_hex;
+use crate::output::published_enum;
+use crate::output::stream::StreamRecord;
 use packetcraftr_core::{
     analysis::{dns, provenance::SourceSet},
     field,
@@ -17,7 +19,7 @@ use serde::{Serialize, ser::SerializeMap};
 use std::collections::BTreeMap;
 
 published_enum! {
-    pub enum Status from dns::Status {
+    pub(crate) enum Status from dns::Status {
         Complete => "complete",
         Malformed => "malformed",
         Incomplete => "incomplete",
@@ -29,7 +31,7 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum TransactionStatus from dns::TransactionStatus {
+    pub(crate) enum TransactionStatus from dns::TransactionStatus {
         Matched => "matched",
         Unanswered => "unanswered",
         OrphanResponse => "orphan_response",
@@ -38,7 +40,7 @@ published_enum! {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct Latency {
+pub(crate) struct Latency {
     pub nanoseconds: u128,
     pub negative: bool,
 }
@@ -57,10 +59,10 @@ fn sources(value: &SourceSet) -> Result<Vec<Source>, Error> {
 }
 
 #[derive(Debug)]
-pub struct Fields(packetcraftr_core::protocol::application::dns::Dns);
+pub(crate) struct Fields(packetcraftr_core::protocol::application::dns::Dns);
 
 impl Fields {
-    pub fn to_map(&self) -> BTreeMap<String, field::Value> {
+    pub(crate) fn to_map(&self) -> BTreeMap<String, field::Value> {
         self.0
             .schema()
             .fields
@@ -101,7 +103,7 @@ impl Serialize for Fields {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Message {
+pub(crate) struct Message {
     pub index: u64,
     pub transport: StreamTransport,
     pub stream: u64,
@@ -140,7 +142,7 @@ impl StreamRecord for Message {
     }
 }
 #[derive(Debug, Serialize)]
-pub struct Transaction {
+pub(crate) struct Transaction {
     pub status: TransactionStatus,
     pub transport: StreamTransport,
     pub stream: u64,
@@ -179,7 +181,7 @@ impl StreamRecord for Transaction {
     }
 }
 #[derive(Debug, Serialize)]
-pub struct Issue {
+pub(crate) struct Issue {
     pub number: u64,
     pub flow: ScopedFlowKey,
     pub stream: u64,
@@ -201,7 +203,7 @@ impl StreamRecord for Issue {
     }
 }
 #[derive(Debug, Serialize)]
-pub struct Summary {
+pub(crate) struct Summary {
     pub messages: u64,
     pub complete_messages: u64,
     pub transactions: u64,
@@ -225,7 +227,7 @@ impl From<dns::Summary> for Summary {
 }
 analysis_complete!(dns::Summary);
 #[derive(Debug, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub messages: Vec<Message>,
     pub transactions: Vec<Transaction>,
     pub issues: Vec<Issue>,

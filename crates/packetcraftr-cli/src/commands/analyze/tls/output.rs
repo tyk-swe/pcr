@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::published_enum;
 use serde::Serialize;
 
 use packetcraftr_core::analysis::{self as library, tls};
@@ -8,13 +9,13 @@ use packetcraftr_core::protocol::application::tls::{
     alert_description_name, cipher_suite_name, named_group_name, version_name,
 };
 
-use super::analysis::{Clock, Endpoint, Scope};
-use super::contract::Error;
-use super::envelope::is_zero;
-use super::hex::compact_hex;
+use crate::commands::offline_analysis::output::{Clock, Endpoint, Scope};
+use crate::output::contract::Error;
+use crate::output::envelope::is_zero;
+use crate::output::hex::compact_hex;
 
 published_enum! {
-    pub enum Status from tls::Status {
+    pub(crate) enum Status from tls::Status {
         Complete => "complete",
         ClientOnly => "client_only",
         Retry => "retry",
@@ -26,7 +27,7 @@ published_enum! {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Alert {
+pub(crate) struct Alert {
     /// `warning` (1) or `fatal` (2).
     pub level: u8,
     pub description: u8,
@@ -45,7 +46,7 @@ impl From<tls::Alert> for Alert {
 
 /// What one client offered, in wire order, with GREASE code points kept.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Client {
+pub(crate) struct Client {
     pub legacy_version: u16,
     pub legacy_version_name: Option<&'static str>,
     pub sni: Option<String>,
@@ -89,7 +90,7 @@ impl From<tls::ClientSummary> for Client {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Server {
+pub(crate) struct Server {
     pub selected_version: u16,
     pub selected_version_name: Option<&'static str>,
     pub cipher_suite: u16,
@@ -121,7 +122,7 @@ impl From<tls::ServerSummary> for Server {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Session {
+pub(crate) struct Session {
     /// Monotonic 0-based index in first-seen order. Unique for the run, which
     /// [`Session::tcp_stream`] is not: a four-tuple reused after a clean close
     /// carries several sessions on one stream.
@@ -174,7 +175,7 @@ impl TryFrom<tls::Session> for Session {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct StatusCounts {
+pub(crate) struct StatusCounts {
     pub complete: u64,
     pub client_only: u64,
     pub retry: u64,
@@ -199,7 +200,7 @@ impl StatusCounts {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Summary {
+pub(crate) struct Summary {
     pub clock: Clock,
     pub frames_read: u64,
     pub frames_matched: u64,
@@ -211,7 +212,7 @@ pub struct Summary {
     pub sessions_omitted: u64,
     pub buffer_limit_hits: u64,
     pub udp_443_frames: u64,
-    pub ip_reassembly: super::reassembly::Report,
+    pub ip_reassembly: crate::commands::offline_analysis::output::reassembly::Report,
 }
 
 impl From<(tls::Summary, &library::Summary, u64, u64)> for Summary {
@@ -240,7 +241,7 @@ impl From<(tls::Summary, &library::Summary, u64, u64)> for Summary {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub sessions: Vec<Session>,
     pub summary: Summary,
 }
@@ -253,7 +254,7 @@ impl From<(Vec<Session>, Summary)> for Report {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
-pub enum Event {
+pub(crate) enum Event {
     Session {
         #[serde(flatten)]
         session: Box<Session>,

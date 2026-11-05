@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(in crate::commands) mod output;
+use self::output as wire;
 use crate::commands::offline_analysis::{
     Inspection, complete_application, inspect, require_tcp_stream,
 };
@@ -9,10 +11,7 @@ use crate::{
         ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, Selector, stream_selector,
     },
     errors::CliError,
-    output::{
-        contract::{Command, Format},
-        messages as wire,
-    },
+    output::contract::{Command, Format},
     rendering::write_stdout_line,
 };
 use packetcraftr_core::{

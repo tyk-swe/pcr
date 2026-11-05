@@ -1,9 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::commands::analyze::verify_forwarding::output::Report;
+use crate::output;
 use crate::output::contract::Format;
 use crate::output::envelope::Published;
-use crate::output::{self, verify_forwarding::Report};
 use packetcraftr_core::analysis::forwarding as analysis;
 use packetcraftr_core::field;
 
@@ -44,21 +45,23 @@ pub(super) fn render(
             let document = Report::try_from((
                 report,
                 analysis::Sided {
-                    ingress: output::verify_forwarding::Input::from((
+                    ingress: crate::commands::analyze::verify_forwarding::output::Input::from((
                         arguments.ingress.as_path(),
                         Some(sources.ingress),
                         arguments.ingress_filter.as_deref(),
                     )),
-                    egress: output::verify_forwarding::Input::from((
+                    egress: crate::commands::analyze::verify_forwarding::output::Input::from((
                         arguments.egress.as_path(),
                         Some(sources.egress),
                         arguments.egress_filter.as_deref(),
                     )),
                 },
-                Some(output::verify_forwarding::DecodeContext::from((
-                    arguments.decode.ports.clone(),
-                    arguments.decode.bindings.clone(),
-                ))),
+                Some(
+                    crate::commands::analyze::verify_forwarding::output::DecodeContext::from((
+                        arguments.decode.ports.clone(),
+                        arguments.decode.bindings.clone(),
+                    )),
+                ),
             ))
             .map_err(CliError::classified)?;
             let diagnostics = omitted_diagnostic(

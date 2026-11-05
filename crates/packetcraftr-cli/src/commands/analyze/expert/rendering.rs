@@ -15,7 +15,7 @@ use crate::rendering::{emit_published, write_stdout_line};
 
 pub(super) struct State {
     selected: analysis::expert::Summary,
-    retained: Retained<output::expert::Finding>,
+    retained: Retained<crate::commands::analyze::expert::output::Finding>,
 }
 
 impl State {
@@ -35,7 +35,7 @@ impl State {
 pub(super) fn render_record(
     invocation: &crate::invocation::Invocation,
     format: Format,
-    finding: output::expert::Finding,
+    finding: crate::commands::analyze::expert::output::Finding,
     state: &mut State,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
@@ -77,7 +77,7 @@ pub(super) fn render_text(
     summary: &analysis::Summary,
     state: &State,
 ) -> Result<(), CliError> {
-    crate::rendering::render_clock(invocation, &summary.clock)?;
+    crate::commands::offline_analysis::render_clock(invocation, &summary.clock)?;
     let selected = &state.selected;
     for (code, findings) in &selected.codes {
         write_stdout_line(invocation, format_args!("code={code} findings={findings}"))?;
@@ -122,13 +122,16 @@ pub(super) fn render_stream(
     Ok(stream.complete_published(Published::new(result(summary, state), Vec::new()))?)
 }
 
-fn result(summary: &analysis::Summary, state: State) -> output::expert::Report {
+fn result(
+    summary: &analysis::Summary,
+    state: State,
+) -> crate::commands::analyze::expert::output::Report {
     let State {
         mut selected,
         retained,
     } = state;
     selected.clock = summary.clock.clone();
-    output::expert::Report::from((
+    crate::commands::analyze::expert::output::Report::from((
         selected,
         summary.frames_read,
         summary.frames_matched,

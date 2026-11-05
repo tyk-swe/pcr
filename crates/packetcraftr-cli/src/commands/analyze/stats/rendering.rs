@@ -6,8 +6,8 @@ use std::net::SocketAddr;
 use packetcraftr_core as core;
 use packetcraftr_core::analysis;
 
+use crate::commands::analyze::stats::output::Table;
 use crate::errors::CliError;
-use crate::output::stats::Table;
 use crate::rendering::{
     duration_text, render_diagnostics_text, render_optional, write_stdout_line, write_summary_line,
 };
@@ -56,14 +56,14 @@ pub(super) fn render_text(
                 ),
             )?;
         }
-        crate::rendering::render_clock(invocation, &report.clock)?;
+        crate::commands::offline_analysis::render_clock(invocation, &report.clock)?;
     } else if report.clock.regressions > 0 {
-        crate::rendering::render_clock(invocation, &report.clock)?;
+        crate::commands::offline_analysis::render_clock(invocation, &report.clock)?;
     }
     match table {
         Table::Conversations => {
             for row in &report.conversations {
-                crate::rendering::render_scope(invocation, &row.scope)?;
+                crate::commands::offline_analysis::render_scope(invocation, &row.scope)?;
                 write_stdout_line(
                     invocation,
                     format_args!(
@@ -221,7 +221,7 @@ pub(super) fn render_text(
                 )?;
             }
             for row in &report.conversations {
-                crate::rendering::render_scope(invocation, &row.scope)?;
+                crate::commands::offline_analysis::render_scope(invocation, &row.scope)?;
                 write_stdout_line(
                     invocation,
                     format_args!(

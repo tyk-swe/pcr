@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::published_enum;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use serde::Serialize;
@@ -13,14 +14,14 @@ use packetcraftr_core::analysis::{
 };
 
 published_enum! {
-    pub enum Family from ip::Family {
+    pub(crate) enum Family from ip::Family {
         Ipv4 => "ipv4",
         Ipv6 => "ipv6",
     }
 }
 
 published_enum! {
-    pub enum OverlapPolicy from ip::OverlapPolicy {
+    pub(crate) enum OverlapPolicy from ip::OverlapPolicy {
         Reject => "reject",
         First => "first",
         Last => "last",
@@ -28,14 +29,14 @@ published_enum! {
 }
 
 published_enum! {
-    pub enum IncompleteReason from ip::IncompleteReason {
+    pub(crate) enum IncompleteReason from ip::IncompleteReason {
         IdleExpired => "idle_expired",
         EndOfCapture => "end_of_capture",
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Ipv4DatagramKey {
+pub(crate) struct Ipv4DatagramKey {
     pub scope: u32,
     pub source: Ipv4Addr,
     pub destination: Ipv4Addr,
@@ -44,7 +45,7 @@ pub struct Ipv4DatagramKey {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Ipv6DatagramKey {
+pub(crate) struct Ipv6DatagramKey {
     pub scope: u32,
     pub source: Ipv6Addr,
     pub destination: Ipv6Addr,
@@ -53,7 +54,7 @@ pub struct Ipv6DatagramKey {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "family")]
-pub enum DatagramKey {
+pub(crate) enum DatagramKey {
     #[serde(rename = "ipv4")]
     Ipv4(Ipv4DatagramKey),
     #[serde(rename = "ipv6")]
@@ -81,7 +82,7 @@ impl From<ip::DatagramKey> for DatagramKey {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct IncompleteDatagram {
+pub(crate) struct IncompleteDatagram {
     pub key: DatagramKey,
     pub reason: IncompleteReason,
     pub fragment_count: usize,
@@ -108,7 +109,7 @@ impl From<ip::IncompleteDatagram> for IncompleteDatagram {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "status")]
-pub enum DatagramOutcome {
+pub(crate) enum DatagramOutcome {
     #[serde(rename = "completed")]
     Completed {
         key: DatagramKey,
@@ -149,7 +150,7 @@ impl From<AnalysisOutcome> for DatagramOutcome {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Counters {
+pub(crate) struct Counters {
     pub physical_fragments: u64,
     pub atomic_fragments: u64,
     pub admitted_fragments: u64,
@@ -186,14 +187,14 @@ impl From<&AnalysisFamilyCounters> for Counters {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct FamilyCounters {
+pub(crate) struct FamilyCounters {
     pub family: Family,
     #[serde(flatten)]
     pub counters: Counters,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub families: Vec<FamilyCounters>,
     pub outcomes: Vec<DatagramOutcome>,
     pub outcomes_omitted: u64,
@@ -226,8 +227,8 @@ impl From<&AnalysisReport> for Report {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
-pub enum Event {
-    IpOverlapResolved {
+pub(crate) enum Event {
+    OverlapResolved {
         frame: u64,
         key: DatagramKey,
         policy: OverlapPolicy,
@@ -235,11 +236,11 @@ pub enum Event {
         fragment_count: usize,
         unique_bytes: usize,
     },
-    IpDatagramCompleted {
+    DatagramCompleted {
         frame: u64,
         outcome: DatagramOutcome,
     },
-    IpDatagramIncomplete {
+    DatagramIncomplete {
         frame: u64,
         outcome: DatagramOutcome,
     },
@@ -254,7 +255,7 @@ impl From<AnalysisEventRecord> for Event {
                 affected_bytes,
                 fragment_count,
                 unique_bytes,
-            } => Self::IpOverlapResolved {
+            } => Self::OverlapResolved {
                 frame: value.number,
                 key: key.into(),
                 policy: policy.into(),
@@ -263,11 +264,11 @@ impl From<AnalysisEventRecord> for Event {
                 unique_bytes,
             },
             AnalysisEvent::Outcome(outcome) => match outcome {
-                outcome @ AnalysisOutcome::Completed { .. } => Self::IpDatagramCompleted {
+                outcome @ AnalysisOutcome::Completed { .. } => Self::DatagramCompleted {
                     frame: value.number,
                     outcome: outcome.into(),
                 },
-                outcome @ AnalysisOutcome::Incomplete(_) => Self::IpDatagramIncomplete {
+                outcome @ AnalysisOutcome::Incomplete(_) => Self::DatagramIncomplete {
                     frame: value.number,
                     outcome: outcome.into(),
                 },
@@ -279,9 +280,9 @@ impl From<AnalysisEventRecord> for Event {
 impl crate::output::stream::StreamRecord for Event {
     fn event_name(&self) -> &'static str {
         match self {
-            Self::IpOverlapResolved { .. } => "ip_overlap_resolved",
-            Self::IpDatagramCompleted { .. } => "ip_datagram_completed",
-            Self::IpDatagramIncomplete { .. } => "ip_datagram_incomplete",
+            Self::OverlapResolved { .. } => "ip_overlap_resolved",
+            Self::DatagramCompleted { .. } => "ip_datagram_completed",
+            Self::DatagramIncomplete { .. } => "ip_datagram_incomplete",
         }
     }
 }

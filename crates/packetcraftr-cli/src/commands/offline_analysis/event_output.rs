@@ -35,7 +35,7 @@ impl<'a> EventOutput<'a> {
                     crate::output::stream::MeteredError::Limit => limit_error(),
                     crate::output::stream::MeteredError::Encode(error) => CliError::from(error),
                     crate::output::stream::MeteredError::Serialize(error) => {
-                        super::machine::serialization_error(error)
+                        crate::rendering::serialization_error(error)
                     }
                 });
         }

@@ -17,7 +17,7 @@ pub(crate) fn ip_event_sink(
         if let Some(stream) = &stream {
             stream
                 .emit_published(Published::new(
-                    crate::output::reassembly::Event::from(event),
+                    crate::commands::offline_analysis::output::reassembly::Event::from(event),
                     Vec::new(),
                 ))
                 .map_err(|error| CliError::from(error).into_boundary_error())?;
@@ -30,14 +30,14 @@ pub(crate) fn render_scope(
     invocation: &crate::invocation::Invocation,
     scope: &analysis::scope::Definition,
 ) -> Result<(), CliError> {
-    let scope = crate::output::analysis::Scope::try_from(scope.clone())?;
+    let scope = crate::commands::offline_analysis::output::Scope::try_from(scope.clone())?;
     crate::rendering::write_stdout_line(
         invocation,
         format_args!(
             "scope {}: interface {}, encapsulation {}",
             scope.id,
             crate::rendering::render_optional(scope.interface, |value| value.to_string()),
-            crate::rendering::encapsulation_text(&scope.encapsulation)
+            encapsulation_text(&scope.encapsulation)
         ),
     )
 }
@@ -57,4 +57,12 @@ pub(crate) fn render_clock(
                 .to_string()),
         ),
     )
+}
+
+pub(crate) fn encapsulation_text(path: &[super::output::EncapsulationIdentifier]) -> String {
+    if path.is_empty() {
+        "none".to_owned()
+    } else {
+        crate::rendering::comma_separated(path)
+    }
 }

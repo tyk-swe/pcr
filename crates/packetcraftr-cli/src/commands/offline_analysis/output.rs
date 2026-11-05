@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(in crate::commands) mod reassembly;
+use crate::output::published_enum;
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -8,11 +10,11 @@ use serde::Serialize;
 
 use packetcraftr_core::analysis::{self as library, reassembly::tcp, scope};
 
-use super::contract::Error;
+use crate::output::contract::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "kind")]
-pub enum EncapsulationIdentifier {
+pub(crate) enum EncapsulationIdentifier {
     #[serde(rename = "vlan")]
     Vlan { vlan_id: u16 },
     #[serde(rename = "vlan8021ad")]
@@ -106,7 +108,7 @@ impl TryFrom<scope::EncapsulationIdentifier> for EncapsulationIdentifier {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Scope {
+pub(crate) struct Scope {
     pub id: u32,
     pub interface: Option<u32>,
     pub encapsulation: Vec<EncapsulationIdentifier>,
@@ -140,14 +142,15 @@ impl TryFrom<&scope::Definition> for Scope {
 macro_rules! analysis_complete {
     ($library:ty) => {
         #[derive(Debug, ::serde::Serialize)]
-        pub struct Complete {
-            pub frames_read: u64,
-            pub frames_matched: u64,
-            pub summary: Summary,
-            pub scopes: Vec<$crate::output::analysis::Scope>,
-            pub incomplete_datagrams: usize,
-            pub source_outcomes_omitted: u64,
-            pub ip_reassembly: $crate::output::reassembly::Report,
+        pub(crate) struct Complete {
+            pub(crate) frames_read: u64,
+            pub(crate) frames_matched: u64,
+            pub(crate) summary: Summary,
+            pub(crate) scopes: Vec<$crate::commands::offline_analysis::output::Scope>,
+            pub(crate) incomplete_datagrams: usize,
+            pub(crate) source_outcomes_omitted: u64,
+            pub(crate) ip_reassembly:
+                $crate::commands::offline_analysis::output::reassembly::Report,
         }
 
         impl
@@ -172,7 +175,7 @@ macro_rules! analysis_complete {
                     summary: summary.into(),
                     scopes: scopes
                         .into_iter()
-                        .map($crate::output::analysis::Scope::try_from)
+                        .map($crate::commands::offline_analysis::output::Scope::try_from)
                         .collect::<Result<_, _>>()?,
                     incomplete_datagrams: run.incomplete_sources.len(),
                     source_outcomes_omitted: run.source_outcomes_omitted,
@@ -182,10 +185,10 @@ macro_rules! analysis_complete {
         }
     };
 }
-pub(super) use analysis_complete;
+pub(crate) use analysis_complete;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Clock {
+pub(crate) struct Clock {
     pub regressions: u64,
     pub max_regression: Duration,
     pub max_forward_step: Duration,
@@ -204,14 +207,14 @@ impl From<library::ClockReport> for Clock {
 }
 
 published_enum! {
-    pub enum StreamTransport from library::StreamTransport {
+    pub(crate) enum StreamTransport from library::StreamTransport {
         Tcp => "tcp",
         Udp => "udp",
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub struct StreamRef {
+pub(crate) struct StreamRef {
     pub transport: StreamTransport,
     pub index: u64,
 }
@@ -226,7 +229,7 @@ impl From<library::StreamRef> for StreamRef {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct Endpoint {
+pub(crate) struct Endpoint {
     pub address: IpAddr,
     pub port: u16,
 }
@@ -247,7 +250,7 @@ impl From<library::Endpoint> for Endpoint {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct FlowKey {
+pub(crate) struct FlowKey {
     pub source: IpAddr,
     pub source_port: u16,
     pub destination: IpAddr,
@@ -266,7 +269,7 @@ impl From<tcp::FlowKey> for FlowKey {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ScopedFlowKey {
+pub(crate) struct ScopedFlowKey {
     pub scope: u32,
     pub flow: FlowKey,
 }

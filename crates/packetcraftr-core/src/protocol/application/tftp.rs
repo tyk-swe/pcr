@@ -11,7 +11,7 @@ use crate::{
     protocol::{
         application::byte_string_field,
         common::{
-            ensure_encode_budget, invalid,
+            ensure_encode_budget, invalid, payload_without_padding,
             structured::{Encoder, Object, list, member, object},
             typed_layer, unsupported,
         },
@@ -338,7 +338,7 @@ impl Codec for TftpCodec {
         payload: &[u8],
         context: &EncodeContext<'_>,
     ) -> Result<Encoded, crate::codec::Error> {
-        if !payload.is_empty() {
+        if !payload_without_padding(NAME, payload, context)?.is_empty() {
             return Err(invalid(NAME, "TFTP is a complete UDP payload"));
         }
         let layer = typed_layer::<Tftp>(NAME, layer)?;

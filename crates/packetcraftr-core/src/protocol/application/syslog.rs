@@ -12,8 +12,8 @@ use crate::{
     protocol::{
         application::byte_string_field,
         common::{
-            ensure_encode_budget, invalid, out_of_range, strict_or_diagnostic, structured::Encoder,
-            typed_layer, wrong_type,
+            ensure_encode_budget, invalid, out_of_range, payload_without_padding,
+            strict_or_diagnostic, structured::Encoder, typed_layer, wrong_type,
         },
     },
 };
@@ -449,7 +449,7 @@ impl Codec for SyslogCodec {
         payload: &[u8],
         context: &EncodeContext<'_>,
     ) -> Result<Encoded, crate::codec::Error> {
-        if !payload.is_empty() {
+        if !payload_without_padding(NAME, payload, context)?.is_empty() {
             return Err(invalid(NAME, "syslog is a complete UDP payload"));
         }
         let layer = typed_layer::<Syslog>(NAME, layer)?;

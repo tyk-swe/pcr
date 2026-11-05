@@ -37,6 +37,7 @@ native-layer3 = ["native-route"]
 
 [dev-dependencies]
 serde_json.workspace = true
+tempfile.workspace = true
 
 [dependencies]
 webpki-roots.workspace = true

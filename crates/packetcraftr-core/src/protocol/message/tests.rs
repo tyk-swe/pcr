@@ -1413,42 +1413,83 @@ fn sip_preserves_trailing_datagram_bytes() {
 fn ethernet_padding_preserves_datagram_framing() {
     let registry = builtin::registry();
     let builder = crate::build::Builder::new(registry.clone());
-    let mut packet = Packet::default();
-    packet.push(Ethernet::default());
-    packet.push(Ipv4::default());
-    packet.push(Udp {
-        destination_port: 5683,
-        ..Default::default()
-    });
-    packet.push(crate::protocol::application::coap::Coap::default());
-    let mut padded = builder
-        .build(packet, Addresses::default(), Default::default())
-        .unwrap()
-        .bytes
-        .to_vec();
-    padded.resize(60, 0);
-    let decoded = crate::decode::Dissector::new(registry)
-        .decode(
-            Frame::new(None, LinkType::ETHERNET, Bytes::copy_from_slice(&padded)).unwrap(),
-            Default::default(),
-        )
-        .unwrap();
-    assert_eq!(
-        decoded
-            .packet
-            .get::<crate::layer::Padding>()
-            .unwrap()
-            .outside_layer,
-        Some(1)
-    );
-    assert_eq!(
-        builder
-            .build(decoded.packet, Addresses::default(), Default::default())
+    for (network, port, application) in [
+        ("ipv4", 5683, "coap()"),
+        ("ipv4", 53, "dns()"),
+        ("ipv6", 53, "dns()"),
+        ("ipv4", 69, "tftp(opcode=4,block=1)"),
+        ("ipv6", 69, "tftp(opcode=4,block=1)"),
+        ("ipv4", 123, "ntp()"),
+        ("ipv6", 123, "ntp()"),
+        ("ipv4", 514, "syslog()"),
+        ("ipv6", 514, "syslog()"),
+        ("ipv4", 67, "dhcpv4()"),
+        ("ipv6", 547, "dhcpv6()"),
+    ] {
+        let expression = format!("ethernet()/{network}()/udp(dport={port})/{application}");
+        let packet = crate::expression::parse(&expression, &registry, Default::default()).unwrap();
+        let protocol = application.split_once('(').unwrap().0;
+        if protocol != "coap" {
+            let mut with_child = packet.clone();
+            with_child.push(crate::layer::Raw::new(Bytes::from_static(b"x")));
+            with_child.push(crate::layer::Padding::after_layer(
+                Bytes::from_static(b"pad"),
+                1,
+            ));
+            let error = builder
+                .build(
+                    with_child,
+                    Addresses::default(),
+                    crate::build::Options {
+                        mode: Mode::Permissive,
+                        ..Default::default()
+                    },
+                )
+                .unwrap_err();
+            assert!(
+                matches!(&error, crate::build::Error::Codec { protocol: refused, .. } if refused.as_str() == protocol),
+                "{expression}: {error}"
+            );
+        }
+        let mut padded = builder
+            .build(packet, Addresses::default(), Default::default())
             .unwrap()
             .bytes
-            .as_ref(),
-        padded
-    );
+            .to_vec();
+        padded.resize(padded.len().max(46) + 14, 0xa5);
+        let decoded = crate::decode::Dissector::new(registry.clone())
+            .decode(
+                Frame::new(None, LinkType::ETHERNET, Bytes::copy_from_slice(&padded)).unwrap(),
+                Default::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            decoded.packet.layer(3).unwrap().protocol_id().as_str(),
+            protocol,
+            "{expression}"
+        );
+        assert_eq!(
+            decoded
+                .packet
+                .get::<crate::layer::Padding>()
+                .unwrap()
+                .outside_layer,
+            Some(1)
+        );
+        for mode in [Mode::Strict, Mode::Permissive] {
+            let rebuilt = builder
+                .build(
+                    decoded.packet.clone(),
+                    Addresses::default(),
+                    crate::build::Options {
+                        mode,
+                        ..Default::default()
+                    },
+                )
+                .unwrap_or_else(|error| panic!("{expression} ({mode:?}): {error}"));
+            assert_eq!(rebuilt.bytes.as_ref(), padded, "{expression} ({mode:?})");
+        }
+    }
 }
 
 #[test]

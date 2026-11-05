@@ -13,7 +13,10 @@ use crate::{
     layer::Layer,
     protocol::{
         BuiltinProtocol,
-        common::{ensure_encode_budget, invalid, rejected, truncated, typed_layer},
+        common::{
+            ensure_encode_budget, invalid, payload_without_padding, rejected, truncated,
+            typed_layer,
+        },
     },
 };
 
@@ -159,7 +162,11 @@ impl Codec for DnsCodec {
         let tcp = context
             .parent
             .is_some_and(|parent| parent.is_builtin(BuiltinProtocol::Tcp.id()));
-        if (!tcp && (context.child.is_some() || !payload.is_empty()))
+        if (!tcp
+            && (context
+                .child
+                .is_some_and(|child| !child.is_builtin(BuiltinProtocol::Padding.id()))
+                || !payload_without_padding(NAME, payload, context)?.is_empty()))
             || (tcp
                 && context.child.is_some_and(|child| {
                     !child.is_builtin(BuiltinProtocol::Raw.id())

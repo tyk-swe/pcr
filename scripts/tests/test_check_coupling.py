@@ -37,6 +37,18 @@ class CheckCouplingTests(unittest.TestCase):
         self.assertEqual(measured["instant_now"], 1)
         self.assertEqual(measured["dynamic_field_sites"], 0)
 
+    def test_checkout_under_a_tests_directory_keeps_its_sources(self):
+        root = self.workspace({
+            "tests/checkout/crates/mini/src/lib.rs": "",
+            "tests/checkout/crates/mini/src/tests.rs": "",
+            "tests/checkout/crates/mini/src/tests/case.rs": "",
+        }) / "tests" / "checkout"
+
+        self.assertEqual(
+            [path.relative_to(root).as_posix() for path in coupling.production_sources(root)],
+            ["crates/mini/src/lib.rs"],
+        )
+
     def test_cast_outside_allowlist_is_counted(self):
         root = self.workspace({
             "crates/packetcraftr-core/src/protocol/catalog.rs":

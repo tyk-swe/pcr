@@ -4,6 +4,13 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
+
+
+def is_test_path(path: Path) -> bool:
+    """`path` must be relative to the repository, so its checkout location cannot match."""
+    return path.name == "tests.rs" or "tests" in path.parts[:-1]
+
 
 CHAR_LITERAL = re.compile(r"'(?:\\.|[^\\'])'")
 RAW_PREFIX = re.compile(r'(?:br|cr|r)(#+)?"')

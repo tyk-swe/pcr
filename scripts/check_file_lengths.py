@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 import sys
 
-from rust_source import blank_comments_and_strings
+from rust_source import blank_comments_and_strings, is_test_path
 
 CLOSING_ONLY = {"}", ")", "]", "};", ");", "],", "},"}
 SOURCE_GLOBS = ("crates/**/*.rs", "scripts/**/*.py", "examples/**/*.rs", "fuzz/**/*.rs")
@@ -46,10 +46,6 @@ def python_code_lines(text: str) -> int:
 def code_lines(path: Path) -> int:
     text = path.read_text(errors="replace")
     return rust_code_lines(text) if path.suffix == ".rs" else python_code_lines(text)
-
-
-def is_test_path(path: Path) -> bool:
-    return path.name == "tests.rs" or "tests" in path.parts
 
 
 def rank_files(root: Path, globs=SOURCE_GLOBS) -> list[dict]:

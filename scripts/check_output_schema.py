@@ -12,6 +12,7 @@ import subprocess
 import sys
 from typing import Any, Iterable, NamedTuple
 
+from rust_source import is_test_path
 from script_support import read_json, strict_json
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -280,7 +281,7 @@ def _consts(node: Any, key: str) -> list[str]:
 def _production_sources(root: Path) -> list[Path]:
     base = root / CLI_SRC
     return [path for path in sorted(base.rglob('*.rs'))
-            if 'tests' not in path.parts and path.name != 'tests.rs']
+            if not is_test_path(path.relative_to(root))]
 
 
 def _stream_record_types(root: Path) -> set[str]:

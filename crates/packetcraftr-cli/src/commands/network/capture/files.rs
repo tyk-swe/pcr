@@ -35,9 +35,12 @@ impl Options {
         if self.max_files == 0
             || self.max_files > MAX_FILES
             || self.rotate_bytes == Some(0)
-            || self
-                .rotate_after
-                .is_some_and(|duration| duration.is_zero() || duration > Duration::from_secs(3600))
+            || self.rotate_after.is_some_and(|duration| {
+                packetcraftr_core::budget::duration_violation(
+                    duration,
+                    packetcraftr_netio::deadline::MAX_WAIT,
+                )
+            })
         {
             return Err(Error::Invalid(
                 "rotation requires positive byte/time limits and 1..=64 files",

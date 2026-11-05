@@ -21,12 +21,6 @@ pub(super) enum Source {
     Stdin(io::StdinLock<'static>),
 }
 
-impl Source {
-    pub(super) fn is_regular_file(&self) -> bool {
-        matches!(self, Self::File(file) if file.metadata().is_ok_and(|metadata| metadata.is_file()))
-    }
-}
-
 impl Read for Source {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         match self {
@@ -162,6 +156,12 @@ impl Read for Polled {
                 result => return result,
             }
         }
+    }
+}
+
+impl Source {
+    pub(super) fn is_regular_file(&self) -> bool {
+        matches!(self, Self::File(file) if file.metadata().is_ok_and(|metadata| metadata.is_file()))
     }
 }
 

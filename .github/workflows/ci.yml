@@ -393,7 +393,7 @@ jobs:
             mqtt)
               gate -p packetcraftr-core \
                 -f crates/packetcraftr-core/src/protocol/application/mqtt.rs -F uncarried ;;
-            # Staged output and cancellable input: 52 caught, 7 timeouts, 20 unviable.
+            # Staged output and cancellable input: 54 caught, 7 timeouts, 20 unviable.
             # Exclusions: `|` to `^` on disjoint open flags is equivalent; the
             # cfg(not(unix)) bodies are not compiled on Linux; CLOEXEC and
             # NOFOLLOW on an unpredictable 64-bit staging name, the renameat2

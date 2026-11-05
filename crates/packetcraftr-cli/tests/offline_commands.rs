@@ -1233,6 +1233,50 @@ mod stalled_inputs {
         output
     }
 
+    /// A datagram socket keeps write boundaries, so each received message is one write.
+    #[cfg(target_os = "linux")]
+    fn count_stdout_writes(args: &[&str]) -> usize {
+        use std::os::unix::net::UnixDatagram;
+        let (received, sent) = UnixDatagram::pair().expect("create socket pair");
+        received.set_nonblocking(true).expect("set nonblocking");
+        let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(std::os::fd::OwnedFd::from(sent))
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn packetcraftr");
+        let started = Instant::now();
+        let mut message = vec![0_u8; 1 << 20];
+        let mut writes = 0;
+        loop {
+            match received.recv(&mut message) {
+                Ok(_) => writes += 1,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if let Some(status) = child.try_wait().expect("poll child status") {
+                        assert!(status.success(), "{args:?}: {status:?}");
+                        return writes;
+                    }
+                    assert!(started.elapsed() < EXIT_WITHIN, "{args:?} did not exit");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("receive stdout: {error}"),
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn regular_file_input_coalesces_stdout_writes() {
+        let file = tempfile::NamedTempFile::new().expect("create capture");
+        std::fs::write(file.path(), synthetic_pcap(false)).expect("write capture");
+        let path = file.path().to_string_lossy();
+        for format in ["text", "ndjson"] {
+            let writes = count_stdout_writes(&["--output", format, "files", "read", path.as_ref()]);
+            assert!((1..200).contains(&writes), "{format} took {writes} writes");
+        }
+    }
+
     #[test]
     fn regular_file_output_matches_piped_output_through_success_and_failure() {
         for truncated in [false, true] {

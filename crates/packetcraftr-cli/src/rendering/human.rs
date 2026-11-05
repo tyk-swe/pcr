@@ -317,6 +317,13 @@ mod tests {
             written,
             format!("{line}\n").repeat(2 * lines - 1).into_bytes()
         );
+
+        let mut pending = Vec::new();
+        let mut written = Vec::new();
+        let exactly_full = "x".repeat(BATCH_BYTES - 1);
+        hold_line(&mut pending, &exactly_full, true, || &mut written).unwrap();
+        assert_eq!(written.len(), BATCH_BYTES);
+        assert!(pending.is_empty());
     }
 
     #[test]

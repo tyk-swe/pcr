@@ -1,0 +1,9 @@
+# Keep published types beside the command that owns them
+
+The CLI used to keep every published type in `crates/packetcraftr-cli/src/output/`, one file per feature, so changing a command meant editing folders far apart. A type now lives in `commands/<group>/<command>/output.rs` when one command owns it, and feature-specific rendering moves with it. `output/` keeps only what lower layers or several commands publish, which is the envelope, stream records, frames, network and capture records, resources, projections, and the scan evidence that the error envelope carries. A type used by a few commands stays with the command that owns it, and the others import it from there.
+
+This changes where files live and leaves the dependency rule from ADR 0001 alone. `output` stays layer 1 and `commands` stays layer 6, so shared output still cannot depend on a command without a named allowlist entry. That is why the scan failure types moved down into `output/scan_failure.rs` instead of the error envelope reaching up into the scan command.
+
+The published surface is now spread across many folders, so we keep it explicit in two ways. `scripts/check_output_schema.py` fails when a `PUBLISHED_TYPES` row names a type outside a module called `output`, and CODEOWNERS routes those modules to the same reviewers as `output/`. A published type therefore cannot skip contract review by living somewhere else in a command.
+
+We left `input/manifest.rs` in `input/` although only the scan command calls it, because its test relies on a test helper in `input/source.rs`, whose mutation gate pins exclusions to line numbers. We also left `crates/packetcraftr-netio/src/platform/` as it is because it is the one module allowed to contain `unsafe`, and the split between `protocol` and `analysis` in `packetcraftr-core` is out of scope for this decision.

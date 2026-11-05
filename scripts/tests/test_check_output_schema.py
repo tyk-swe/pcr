@@ -250,6 +250,25 @@ class RegistryTests(unittest.TestCase):
         problems = checker.registry_problems(root, REGISTRY_SCHEMA)
         self.assertTrue(any('PacketEvent' in problem for problem in problems))
 
+    def registered_at(self, module):
+        relative = module.removeprefix('crate::').replace('::', '/')
+        root = self.workspace(REGISTRY_SOURCE.replace('crate::output::build::Report',
+                                                      f'{module}::Report'))
+        path = root / checker.CLI_SRC / f'{relative}.rs'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('pub struct Report {}\n')
+        return checker.registry_problems(root, REGISTRY_SCHEMA)
+
+    def test_published_type_in_a_command_output_module_passes(self):
+        self.assertEqual(self.registered_at('crate::commands::packet::build::output'), [])
+
+    def test_published_type_outside_an_output_module_is_reported(self):
+        for module in ('crate::commands::packet::build', 'crate::staged_output'):
+            with self.subTest(module=module):
+                problems = self.registered_at(module)
+                self.assertEqual(len(problems), 1)
+                self.assertIn('outside an output module', problems[0])
+
 
 class RepositoryTests(unittest.TestCase):
     def test_repository_outputs_match_current_schema(self):

@@ -213,10 +213,7 @@ fn tls_report(request: &TlsRequest, evidence: &tls::Evidence) -> Report {
             evidence
                 .certificates
                 .iter()
-                .map(|c| Sha256::digest(c)
-                    .iter()
-                    .map(|b| format!("{b:02x}"))
-                    .collect::<String>())
+                .map(|c| packetcraftr_core::field::hex::compact_hex(&Sha256::digest(c)))
                 .collect::<Vec<_>>()
         ),
     );

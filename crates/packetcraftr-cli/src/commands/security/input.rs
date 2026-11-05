@@ -42,10 +42,7 @@ pub(in crate::commands) fn validate_stdin_sources<'a>(
 pub(in crate::commands) fn source(path: &Path, bytes: &[u8]) -> Source {
     Source {
         path: path.display().to_string(),
-        sha256: Sha256::digest(bytes)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>(),
+        sha256: crate::output::hex::compact_hex(&Sha256::digest(bytes)),
     }
 }
 

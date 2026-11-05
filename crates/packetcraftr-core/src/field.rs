@@ -9,6 +9,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 mod error;
+pub mod hex;
 mod path;
 pub use error::Error;
 pub use path::Path;
@@ -218,19 +219,10 @@ impl fmt::Display for Value {
             Self::Unsigned(value) => write!(formatter, "{value}"),
             Self::Signed(value) => write!(formatter, "{value}"),
             Self::Text(value) => formatter.write_str(value),
-            Self::Bytes(value) => {
-                for byte in value {
-                    write!(formatter, "{byte:02x}")?;
-                }
-                Ok(())
-            }
+            Self::Bytes(value) => hex::CompactHex(value).fmt(formatter),
             Self::Ipv4(value) => write!(formatter, "{value}"),
             Self::Ipv6(value) => write!(formatter, "{value}"),
-            Self::Mac(value) => write!(
-                formatter,
-                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                value[0], value[1], value[2], value[3], value[4], value[5]
-            ),
+            Self::Mac(value) => crate::packet::MacAddress(*value).fmt(formatter),
             Self::Object(values) => {
                 formatter.write_str("{")?;
                 for (index, (name, value)) in values.iter().enumerate() {

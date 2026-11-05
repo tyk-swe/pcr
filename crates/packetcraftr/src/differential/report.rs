@@ -255,7 +255,7 @@ pub fn join_receptions(mut aggregate: Aggregate, records: &[ReceptionRecord]) ->
 
 #[must_use]
 pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    packetcraftr_core::field::hex::compact_hex(bytes)
 }
 
 #[cfg(test)]

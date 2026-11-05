@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt::{self, Write as _};
+use std::fmt;
 use std::sync::Arc;
 
 use packetcraftr_core::document;
@@ -257,18 +257,11 @@ fn scalar_text(value: &field::Value) -> String {
             if count == 0 {
                 return format!("({count} {unit})");
             }
-            let mut text = String::with_capacity(count.saturating_mul(2).saturating_add(16));
-            for byte in bytes.iter() {
-                let _ = write!(text, "{byte:02x}");
-            }
-            let _ = write!(text, " ({count} {unit})");
-            text
+            format!("{} ({count} {unit})", crate::output::hex::CompactHex(bytes))
         }
         field::Value::Ipv4(address) => address.to_string(),
         field::Value::Ipv6(address) => address.to_string(),
-        field::Value::Mac([a, b, c, d, e, f]) => {
-            format!("{a:02x}:{b:02x}:{c:02x}:{d:02x}:{e:02x}:{f:02x}")
-        }
+        field::Value::Mac(mac) => packetcraftr_core::packet::MacAddress(*mac).to_string(),
         field::Value::List(_) => "[]".to_owned(),
         field::Value::Object(_) => "{}".to_owned(),
         // `field::Value` is non-exhaustive; a future kind must not print as nothing.

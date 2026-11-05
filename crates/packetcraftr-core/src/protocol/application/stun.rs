@@ -7,7 +7,7 @@ use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
 use crate::protocol::common::{invalid, unsupported};
 use crate::protocol::message::{
-    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, optional_bytes, record,
 };
 use bytes::Bytes;
 
@@ -61,7 +61,7 @@ impl Stun {
             body.u16(u16::try_from(v.len()).map_err(|_| invalid(NAME, "attribute too long"))?)?;
             body.put(v)?;
             let pad = (4 - v.len() % 4) % 4;
-            if let Some(field::Value::Bytes(b)) = a.get("padding") {
+            if let Some(b) = optional_bytes(a, "padding", NAME)? {
                 if b.len() != pad {
                     return Err(invalid(NAME, "invalid padding"));
                 }

@@ -42,7 +42,7 @@ pub(crate) use ndjson::{stdout_stream, write_unattributed_error};
 pub(crate) use projection::{Projector, missing_fields_error};
 pub(crate) use retained::{Retained, omitted_diagnostic};
 pub(crate) use stdout::{write_hex_line, write_raw};
-pub(crate) use style::terminal_document;
+pub(crate) use style::{escaped, terminal_document};
 
 pub(crate) use presentation::table_row;
 

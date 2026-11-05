@@ -31,7 +31,9 @@ pub(crate) fn open_capture(
     path: &Path,
     limits: OfflineCaptureLimits,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
-    capture_reader(invocation, capture_source(invocation, path)?, limits)
+    let source = capture_source(invocation, path)?;
+    invocation.output.observe_input(source.is_regular_file());
+    capture_reader(invocation, source, limits)
 }
 
 pub(crate) fn open_capture_hashed(

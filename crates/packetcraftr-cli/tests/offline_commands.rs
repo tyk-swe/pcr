@@ -899,7 +899,7 @@ mod differential {
 
 #[cfg(unix)]
 mod stalled_inputs {
-    use std::io::Write;
+    use std::io::{BufRead, BufReader, Write};
     use std::process::{Child, ChildStdin, Command, Output, Stdio};
     use std::time::{Duration, Instant};
 
@@ -1168,6 +1168,36 @@ mod stalled_inputs {
                 "cancelled",
             );
         }
+    }
+
+    #[test]
+    fn piped_capture_publishes_each_frame_before_its_input_ends() {
+        let args = ["--output", "ndjson", "files", "read", "-"];
+        let capture =
+            std::fs::read(super::capture_path("dns-response.pcap")).expect("read capture");
+        let (mut child, mut stdin) = spawn_with_open_stdin(&args);
+        let stdout = child.stdout.take().expect("piped stdout");
+        let (lines, first) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut stdout = BufReader::new(stdout);
+            let mut line = String::new();
+            stdout.read_line(&mut line).expect("read first record");
+            lines.send(line).expect("receive first record");
+            std::io::copy(&mut stdout, &mut std::io::sink()).expect("drain stdout");
+        });
+        stdin.write_all(&capture).expect("write capture");
+        stdin.flush().expect("flush capture");
+        let line = first
+            .recv_timeout(EXIT_WITHIN)
+            .expect("a frame record while stdin stays open");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&line).expect("valid NDJSON")["event"],
+            "frame"
+        );
+        drop(stdin);
+        let output = wait_bounded(child, &args);
+        reader.join().expect("join stdout reader");
+        assert!(output.status.success(), "{output:?}");
     }
 
     #[test]

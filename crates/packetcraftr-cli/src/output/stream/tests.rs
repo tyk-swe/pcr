@@ -328,3 +328,133 @@ fn cancelled_write_cannot_acknowledge_success() {
     assert_eq!(writes.load(Ordering::Relaxed), 1);
     assert_eq!(flushes.load(Ordering::Relaxed), 1);
 }
+
+#[derive(Clone, Default)]
+struct CountingWriter {
+    published: Arc<Mutex<Vec<u8>>>,
+    writes: Arc<AtomicUsize>,
+}
+
+impl Write for CountingWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.writes.fetch_add(1, Ordering::Relaxed);
+        self.published.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn bounded_stream(runtime: &Runtime, writer: CountingWriter) -> StreamEncoder {
+    StreamEncoder::new_bounded(Command::Http, writer, runtime, Duration::from_secs(5)).unwrap()
+}
+
+fn emit_records(stream: &StreamEncoder, count: usize) {
+    for value in 0..count {
+        stream
+            .emit_published(Published::new(Data { value }, Vec::new()))
+            .unwrap();
+    }
+}
+
+#[test]
+fn regular_file_records_match_the_unbatched_stream_through_either_terminal() {
+    let terminals: [fn(&StreamEncoder); 2] = [
+        |stream| {
+            stream
+                .complete_published(Published::new((), Vec::new()))
+                .unwrap();
+        },
+        |stream| {
+            stream
+                .emit_error(Error::new(
+                    Classification::new(packetcraftr_core::error::Code::IoStdout, Kind::Io, None),
+                    "stopped",
+                    Vec::new(),
+                ))
+                .unwrap();
+        },
+    ];
+    for terminal in terminals {
+        for count in [0, 3, 2000] {
+            let runtime = Runtime::new(2).unwrap();
+            let unbatched = CountingWriter::default();
+            let stream = bounded_stream(&runtime, unbatched.clone());
+            emit_records(&stream, count);
+            terminal(&stream);
+            drop(stream);
+
+            let batched = CountingWriter::default();
+            let stream = bounded_stream(&runtime, batched.clone());
+            stream.observe_input(true);
+            emit_records(&stream, count);
+            terminal(&stream);
+            drop(stream);
+
+            assert_eq!(
+                *batched.published.lock().unwrap(),
+                *unbatched.published.lock().unwrap()
+            );
+        }
+    }
+}
+
+#[test]
+fn regular_file_records_coalesce_their_writes() {
+    let runtime = Runtime::new(1).unwrap();
+    let writer = CountingWriter::default();
+    let stream = bounded_stream(&runtime, writer.clone());
+    stream.observe_input(true);
+    emit_records(&stream, 2000);
+    stream
+        .complete_published(Published::new((), Vec::new()))
+        .unwrap();
+    assert!(writer.writes.load(Ordering::Relaxed) < 100);
+}
+
+#[test]
+fn any_stalling_input_publishes_each_record_at_once() {
+    for inputs in [&[false][..], &[true, false], &[false, true]] {
+        let runtime = Runtime::new(1).unwrap();
+        let writer = CountingWriter::default();
+        let stream = bounded_stream(&runtime, writer.clone());
+        for regular_file in inputs {
+            stream.observe_input(*regular_file);
+        }
+        emit_records(&stream, 1);
+        assert!(!writer.published.lock().unwrap().is_empty());
+        drop(stream);
+    }
+}
+
+#[test]
+fn stalled_consumer_still_fails_within_the_write_timeout_when_batching() {
+    let runtime = Runtime::new(1).unwrap();
+    let (entered, _writing) = mpsc::channel();
+    let release = Arc::new((Mutex::new(false), Condvar::new()));
+    let stream = StreamEncoder::new_bounded(
+        Command::Http,
+        BlockedWriter {
+            entered,
+            release: Arc::clone(&release),
+            writes: Arc::default(),
+            flushes: Arc::default(),
+            published: Arc::default(),
+        },
+        &runtime,
+        Duration::from_millis(50),
+    )
+    .unwrap();
+    stream.observe_input(true);
+    let failed = (0..BATCH_BYTES).any(|value| {
+        stream
+            .emit_published(Published::new(Data { value }, Vec::new()))
+            .is_err()
+    });
+    assert!(failed);
+    assert!(!stream.is_open());
+    *release.0.lock().unwrap() = true;
+    release.1.notify_all();
+}

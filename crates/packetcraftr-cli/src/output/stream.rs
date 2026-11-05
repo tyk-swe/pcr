@@ -58,10 +58,22 @@ enum EncoderState {
     Failed,
 }
 
+/// The output timeout covers one write, so a consumer must drain this much per timeout.
+const BATCH_BYTES: usize = 16 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Batching {
+    Off,
+    On,
+    Refused,
+}
+
 struct EncoderOutput {
     state: EncoderState,
     sequence: u64,
     writer: EncoderWriter,
+    batching: Batching,
+    pending: Vec<u8>,
 }
 
 enum EncoderWriter {
@@ -138,6 +150,8 @@ impl StreamEncoder {
                 state: EncoderState::Open,
                 sequence: 0,
                 writer: EncoderWriter::Direct(Box::new(writer)),
+                batching: Batching::Off,
+                pending: Vec::new(),
             })),
         }
     }
@@ -174,6 +188,8 @@ impl StreamEncoder {
                 state: EncoderState::Open,
                 sequence: 0,
                 writer: EncoderWriter::Bounded { sink, timeout },
+                batching: Batching::Off,
+                pending: Vec::new(),
             })),
         })
     }
@@ -184,6 +200,18 @@ impl StreamEncoder {
         self.output
             .try_lock()
             .is_ok_and(|output| matches!(output.writer, EncoderWriter::Bounded { .. }))
+    }
+
+    /// Records batch only while every input is a regular file. A pipe, socket or
+    /// device can stall indefinitely, so a consumer must see each record promptly.
+    pub(crate) fn observe_input(&self, regular_file: bool) {
+        let Ok(mut output) = self.output.lock() else {
+            return;
+        };
+        output.batching = match (output.batching, regular_file) {
+            (Batching::Refused, _) | (_, false) => Batching::Refused,
+            (Batching::Off | Batching::On, true) => Batching::On,
+        };
     }
 
     pub(crate) fn emit_data_counted<T: StreamRecord>(
@@ -373,6 +401,16 @@ fn write_line(
     timeout_override: Option<Duration>,
 ) -> Result<(), EncodeError> {
     check_publication_budget(deadline, "publication")?;
+    let line = if output.pending.is_empty() && !batches(output, next_state) {
+        line
+    } else {
+        output.pending.extend_from_slice(&line);
+        if batches(output, next_state) && output.pending.len() < BATCH_BYTES {
+            output.state = next_state;
+            return Ok(());
+        }
+        std::mem::take(&mut output.pending)
+    };
     let written = match &mut output.writer {
         EncoderWriter::Direct(writer) => writer.write_all(&line).and_then(|()| writer.flush()),
         EncoderWriter::Bounded { sink, timeout } => {
@@ -397,6 +435,10 @@ fn write_line(
     }
     output.state = next_state;
     Ok(())
+}
+
+fn batches(output: &EncoderOutput, next_state: EncoderState) -> bool {
+    output.batching == Batching::On && next_state == EncoderState::Open
 }
 
 fn check_publication_budget(

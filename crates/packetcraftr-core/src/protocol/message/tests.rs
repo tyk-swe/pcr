@@ -1545,6 +1545,140 @@ fn rtsp_sip_methods_accept_tokens() {
 }
 
 #[test]
+fn optional_padding_rejects_wrong_types_and_preserves_bytes() {
+    use crate::protocol::application::{ipfix::Ipfix, stun::Stun};
+
+    let registry = builtin::registry();
+    let builder = crate::build::Builder::new(registry.clone());
+    for padding in [
+        None,
+        Some(field::Value::Bool(true)),
+        Some(field::Value::Unsigned(3)),
+        Some(field::Value::Signed(-1)),
+        Some(field::Value::Text("ABC".into())),
+        Some(field::Value::List(vec![])),
+        Some(field::Value::Object(Default::default())),
+        Some(field::Value::Ipv4("192.0.2.1".parse().unwrap())),
+        Some(field::Value::Ipv6("2001:db8::1".parse().unwrap())),
+        Some(field::Value::Mac([0; 6])),
+        Some(Bytes::new().into()),
+        Some(Bytes::from_static(b"A").into()),
+        Some(Bytes::from_static(b"AB").into()),
+        Some(Bytes::from_static(b"ABC").into()),
+        Some(Bytes::from_static(b"ABCD").into()),
+    ] {
+        let padded = |fields| {
+            record(fields)
+                .into_iter()
+                .chain(padding.clone().map(|value| ("padding".to_owned(), value)))
+                .collect()
+        };
+        let template = |id: u16| Ipfix {
+            sets: Records(vec![padded([
+                ("id", id.into()),
+                (
+                    "records",
+                    field::Value::List(vec![field::Value::Object(record([
+                        ("template_id", 256_u16.into()),
+                        ("fields", field::Value::List(vec![])),
+                    ]))]),
+                ),
+            ])]),
+            ..Default::default()
+        };
+        let cases: [(Box<dyn Layer>, &str); 5] = [
+            (
+                Box::new(Stun {
+                    attributes: Records(vec![padded([
+                        ("kind", 0x8022_u16.into()),
+                        ("value", Bytes::from_static(b"a").into()),
+                    ])]),
+                    ..Default::default()
+                }),
+                "attributes[0].padding",
+            ),
+            (
+                Box::new(Sflow {
+                    samples: Records(vec![padded([
+                        ("format", 4096_u32.into()),
+                        ("data", Bytes::from_static(b"a").into()),
+                    ])]),
+                    ..Default::default()
+                }),
+                "samples[0].padding",
+            ),
+            (
+                Box::new(Sflow {
+                    samples: Records(vec![record([
+                        ("format", 2_u32.into()),
+                        ("sequence", 1_u32.into()),
+                        ("source_id", 1_u32.into()),
+                        (
+                            "records",
+                            field::Value::List(vec![field::Value::Object(padded([
+                                ("format", 4096_u32.into()),
+                                ("data", Bytes::from_static(b"a").into()),
+                            ]))]),
+                        ),
+                    ])]),
+                    ..Default::default()
+                }),
+                "samples[0].records[0].padding",
+            ),
+            (Box::new(template(2)), "sets[0].padding"),
+            (Box::new(template(3)), "sets[0].padding"),
+        ];
+        for (layer, path) in cases {
+            let name = layer.protocol_id().as_str().to_owned();
+            let expected = match &padding {
+                None => Some(if name == "ipfix" {
+                    Bytes::new()
+                } else {
+                    Bytes::from_static(&[0; 3])
+                }),
+                Some(field::Value::Bytes(bytes))
+                    if bytes.len() == 3 || name == "ipfix" && bytes.len() <= 3 =>
+                {
+                    Some(bytes.clone())
+                }
+                _ => None,
+            };
+            let mut packet = Packet::default();
+            packet.push_boxed(layer);
+            let json = serde_json::to_string(&document::Packet::from_packet(&packet)).unwrap();
+            let document =
+                document::Packet::parse(&json, document::Format::Json, json.len()).unwrap();
+            for mode in [Mode::Strict, Mode::Permissive] {
+                let result = builder.build(
+                    document.to_packet(&registry, 16).unwrap(),
+                    Addresses::default(),
+                    crate::build::Options {
+                        mode,
+                        ..Default::default()
+                    },
+                );
+                let Some(expected) = &expected else {
+                    assert!(result.is_err(), "{name} {path} {mode:?} {padding:?}");
+                    continue;
+                };
+                let built = result.unwrap();
+                assert!(built.diagnostics.is_empty());
+                assert_eq!(
+                    built
+                        .packet
+                        .layer(0)
+                        .unwrap()
+                        .field_path(&path.parse().unwrap()),
+                    Some(expected.clone().into()),
+                    "{name} {path} {mode:?} {padding:?}",
+                );
+                builder_round_trip(&name, &built.bytes);
+            }
+        }
+    }
+}
+
+#[test]
 fn rtcp_padding_preserves_report_boundaries() {
     use crate::protocol::application::rtcp::Rtcp;
 

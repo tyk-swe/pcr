@@ -7,7 +7,7 @@ use crate::codec::{DecodeContext, EncodeContext, Error};
 use crate::field;
 use crate::protocol::common::{invalid, unsupported};
 use crate::protocol::message::{
-    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, record,
+    MAX_RECORDS, Reader, Records, Writer, data, message_codec, number, optional_bytes, record,
 };
 use bytes::Bytes;
 
@@ -103,7 +103,7 @@ impl Ipfix {
                         }
                     }
                 }
-                if let Some(field::Value::Bytes(pad)) = set.get("padding") {
+                if let Some(pad) = optional_bytes(set, "padding", NAME)? {
                     if pad.len() > 3 {
                         return Err(invalid(NAME, "too much padding"));
                     }

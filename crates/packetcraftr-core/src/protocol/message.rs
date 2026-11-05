@@ -84,6 +84,18 @@ pub(crate) fn data<'a>(
     }
 }
 
+pub(crate) fn optional_bytes<'a>(
+    r: &'a BTreeMap<String, field::Value>,
+    key: &str,
+    name: &'static str,
+) -> Result<Option<&'a [u8]>, codec::Error> {
+    match r.get(key) {
+        None => Ok(None),
+        Some(field::Value::Bytes(bytes)) => Ok(Some(bytes)),
+        Some(_) => Err(invalid(name, format!("record requires bytes {key}"))),
+    }
+}
+
 pub(crate) struct Reader<'a> {
     pub(crate) name: &'static str,
     pub(crate) bytes: &'a [u8],

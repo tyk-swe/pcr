@@ -11,7 +11,7 @@ use crate::rendering::{CapturedFrameText, SpacedHex, render_diagnostics_text, wr
 
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
-    published: output::envelope::Published<output::fuzz::Report>,
+    published: output::envelope::Published<crate::commands::packet::fuzz::output::Report>,
     presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
@@ -106,7 +106,10 @@ pub(super) fn render_offline_complete(
     summary: core::fuzz::Summary,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let published = output::envelope::Published::<output::fuzz::Event>::try_from(summary)
+    let published =
+        output::envelope::Published::<crate::commands::packet::fuzz::output::Event>::try_from(
+            summary,
+        )
         .map_err(CliError::classified)?;
     Ok(stream.complete_published(published)?)
 }
@@ -115,7 +118,10 @@ pub(super) fn render_live_complete(
     report: packetcraftr::fuzz::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let published = output::envelope::Published::<output::fuzz::Event>::try_from(report)
+    let published =
+        output::envelope::Published::<crate::commands::packet::fuzz::output::Event>::try_from(
+            report,
+        )
         .map_err(CliError::classified)?;
     Ok(stream.complete_published(published)?)
 }

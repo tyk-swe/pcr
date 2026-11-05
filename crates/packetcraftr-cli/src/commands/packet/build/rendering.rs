@@ -37,7 +37,9 @@ pub(super) fn render_packet(
         Format::Json => emit_published(
             invocation,
             output::contract::Command::Build,
-            output::envelope::Published::<output::build::Report>::from(built),
+            output::envelope::Published::<crate::commands::packet::build::output::Report>::from(
+                built,
+            ),
         ),
         Format::Csv | Format::Ndjson | Format::Pcap | Format::PcapNg => Err(CliError::new(
             Kind::Internal,

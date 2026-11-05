@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(in crate::commands) mod output;
 use crate::output::contract::Format;
 use packetcraftr_core::clock::{Clock, SystemClock};
 
@@ -13,8 +14,6 @@ use std::sync::Arc;
 use packetcraftr_core as core;
 use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::frame::Frame;
-
-use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;
@@ -70,7 +69,7 @@ pub(super) fn run(
         &arguments.fields,
         arguments.max_projection_bytes,
         &registry,
-        output::contract::Command::Dissect,
+        crate::output::contract::Command::Dissect,
         format,
     )?;
     if projector
@@ -148,8 +147,8 @@ pub(super) fn run(
         Format::Raw => write_raw(decoded.frame.bytes()),
         Format::Json => emit_published(
             invocation,
-            output::contract::Command::Dissect,
-            output::envelope::Published::<output::dissect::AggregateResult>::from((kept, decoded)),
+            crate::output::contract::Command::Dissect,
+            crate::output::envelope::Published::<output::AggregateResult>::from((kept, decoded)),
         ),
         Format::Ndjson => Err(CliError::new(
             Kind::Internal,

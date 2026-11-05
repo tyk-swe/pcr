@@ -42,40 +42,33 @@ macro_rules! published_enum {
         }
     };
 }
+pub(crate) use published_enum;
 
 pub mod analysis;
-pub mod build;
 pub mod capture;
 pub mod contract;
 pub mod differential;
-pub mod dissect;
 pub mod dns;
 pub mod dns_read;
 pub mod envelope;
 pub mod exchange;
 pub mod expert;
-pub mod export;
 pub mod follow;
-pub mod fragment;
 pub mod frame;
-pub mod fuzz;
 pub mod hex;
 pub mod http;
 pub mod http2;
 pub mod identify;
 pub mod interfaces;
-pub mod merge;
 pub mod network;
 pub mod os;
 pub mod plan;
 pub mod projection;
 pub mod protocols;
 pub mod provenance;
-pub mod read;
 pub mod reassembly;
 pub mod replay;
 pub mod resources;
-pub mod rewrite;
 pub mod routes;
 pub mod scan;
 pub mod scan_failure;

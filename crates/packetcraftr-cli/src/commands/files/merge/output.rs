@@ -6,7 +6,7 @@ use serde::Serialize;
 use packetcraftr_core::capture_file::MergeReport;
 
 #[derive(Debug, Serialize)]
-pub struct Interface {
+pub(crate) struct Interface {
     pub source: usize,
     pub source_name: String,
     pub section: Option<u64>,
@@ -15,7 +15,7 @@ pub struct Interface {
     pub output_interface: u32,
 }
 #[derive(Debug, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub path: String,
     pub frames: u64,
     pub captured_bytes: u64,

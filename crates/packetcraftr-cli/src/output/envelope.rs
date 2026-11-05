@@ -127,7 +127,7 @@ impl<T> Published<T> {
     }
 }
 
-pub(super) const fn is_zero(value: &u64) -> bool {
+pub(crate) const fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 

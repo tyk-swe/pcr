@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+pub(in crate::commands) mod output;
 
 use self::arguments::Args;
-use crate::output::{self, contract::Command};
+use crate::output::contract::Command;
 use crate::{errors::CliError, rendering::write_summary_line};
 use packetcraftr_core::{analysis, capture_file};
 
@@ -84,7 +85,7 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
     .map_err(CliError::classified)?;
     let _ = writer.finish().map_err(CliError::classified)?;
     // Construct all fallible report fields before publishing the saved capture.
-    let report = output::export::Report::try_from((args.write.display().to_string(), report, plan))
+    let report = output::Report::try_from((args.write.display().to_string(), report, plan))
         .map_err(CliError::classified)?;
     staged.sync()?;
     staged.persist()?;

@@ -1,22 +1,23 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+use crate::output::published_enum;
 use serde::Serialize;
 
 use packetcraftr_core::{capture_file::MapReport, transform};
 
-use super::frame::ByteRange;
+use crate::output::frame::ByteRange;
 
-pub const MAX_REPORTED_CHANGES: usize = 4096;
+pub(crate) const MAX_REPORTED_CHANGES: usize = 4096;
 
 published_enum! {
-    pub enum ChangeOrigin from transform::ChangeOrigin {
+    pub(crate) enum ChangeOrigin from transform::ChangeOrigin {
         Requested => "requested",
         Derived => "derived",
     }
 }
 
 #[derive(Debug, Serialize)]
-pub struct Change {
+pub(crate) struct Change {
     pub frame: u64,
     pub rule: u64,
     pub field: String,
@@ -43,7 +44,7 @@ impl From<(u64, u64, transform::FieldChange)> for Change {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Mapping {
+pub(crate) struct Mapping {
     pub frames_read: u64,
     pub frames_changed: u64,
     pub captured_bytes_read: u64,
@@ -66,7 +67,7 @@ impl From<MapReport> for Mapping {
 }
 
 #[derive(Debug, serde::Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub path: String,
     pub rule_matches: Vec<u64>,
     #[serde(flatten)]
@@ -75,7 +76,7 @@ pub struct Report {
     pub dry_run: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub changes: Vec<Change>,
-    #[serde(skip_serializing_if = "super::envelope::is_zero")]
+    #[serde(skip_serializing_if = "crate::output::envelope::is_zero")]
     pub changes_omitted: u64,
 }
 

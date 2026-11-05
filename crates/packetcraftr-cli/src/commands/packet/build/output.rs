@@ -5,8 +5,8 @@ use serde::Serialize;
 
 use packetcraftr_core::build::BuiltPacket;
 
-use super::envelope::Published;
-use super::frame::{Layout, Wire};
+use crate::output::envelope::Published;
+use crate::output::frame::{Layout, Wire};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {
@@ -64,14 +64,14 @@ impl From<(u64, BuiltPacket)> for Published<PacketEvent> {
     }
 }
 
-impl super::stream::StreamRecord for PacketEvent {
+impl crate::output::stream::StreamRecord for PacketEvent {
     fn event_name(&self) -> &'static str {
         "packet"
     }
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize)]
-pub struct Complete {
+pub(crate) struct Complete {
     pub packets_built: u64,
     pub bytes_built: u64,
 }

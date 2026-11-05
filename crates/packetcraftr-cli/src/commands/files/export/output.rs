@@ -1,21 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::{
-    analysis::{Scope, StreamRef},
-    contract::Error,
-    provenance::Source,
-    reassembly::DatagramKey,
-};
+use crate::output::analysis::{Scope, StreamRef};
+use crate::output::contract::Error;
+use crate::output::provenance::Source;
+use crate::output::reassembly::DatagramKey;
 use packetcraftr_core::analysis::export::Plan;
 use packetcraftr_core::capture_file;
 use serde::Serialize;
 #[derive(Debug, Serialize)]
-pub struct Incomplete {
+pub(crate) struct Incomplete {
     pub key: DatagramKey,
     pub sources: Vec<Source>,
 }
 #[derive(Debug, Serialize)]
-pub struct Selection {
+pub(crate) struct Selection {
     pub format: &'static str,
     pub frames_read: u64,
     pub frames_selected: u64,
@@ -38,7 +36,7 @@ impl From<capture_file::SelectionReport> for Selection {
     }
 }
 #[derive(Debug, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub path: String,
     #[serde(flatten)]
     pub capture: Selection,
@@ -51,7 +49,7 @@ pub struct Report {
     pub unselected_incomplete_datagrams: usize,
     pub source_outcomes_omitted: u64,
     pub scopes: Vec<Scope>,
-    pub ip_reassembly: super::reassembly::Report,
+    pub ip_reassembly: crate::output::reassembly::Report,
 }
 impl TryFrom<(String, capture_file::SelectionReport, Plan)> for Report {
     type Error = Error;

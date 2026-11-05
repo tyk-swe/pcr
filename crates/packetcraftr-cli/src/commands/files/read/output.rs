@@ -5,13 +5,13 @@ use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::frame::Frame as CaptureFrame;
 use serde::Serialize;
 
-use super::contract::Error;
-use super::frame::{Captured, SourceFrame};
+use crate::output::contract::Error;
+use crate::output::frame::{Captured, SourceFrame};
 
-use super::frame::Stack;
+use crate::output::frame::Stack;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Frame {
+pub(crate) struct Frame {
     pub source_frame: SourceFrame,
     pub frame: Captured,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -51,7 +51,7 @@ impl crate::output::stream::StreamRecord for Frame {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Totals {
+pub(crate) struct Totals {
     pub frames_read: u64,
     pub frames_matched: u64,
     pub captured_bytes_read: u64,
@@ -69,7 +69,7 @@ impl From<(&packetcraftr_core::capture_file::Budget, u64)> for Totals {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
-pub enum Event {
+pub(crate) enum Event {
     Frame(Frame),
     Complete(Totals),
 }

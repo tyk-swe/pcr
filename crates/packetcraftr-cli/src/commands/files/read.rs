@@ -4,6 +4,7 @@
 pub(in crate::commands) mod arguments;
 mod capture_output;
 mod normalize;
+pub(in crate::commands) mod output;
 mod projection;
 mod records;
 mod rendering;

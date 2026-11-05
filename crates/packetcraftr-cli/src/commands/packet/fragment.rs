@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+pub(in crate::commands) mod output;
 
 use self::arguments::Args;
+use crate::output::contract::Format;
 use crate::output::envelope::Published;
-use crate::output::{self, contract::Format};
 use crate::{
     errors::CliError,
     invocation::StreamEncoder,
@@ -85,12 +86,12 @@ pub(crate) fn run(
             compression,
         );
     }
-    let summary = output::fragment::Complete::from((args.mtu, frames.as_slice()));
+    let summary = output::Complete::from((args.mtu, frames.as_slice()));
     let mut records = Vec::new();
     for (index, frame) in frames.into_iter().enumerate() {
         invocation.check()?;
-        let record = output::fragment::Fragment::try_from((index as u64, frame))
-            .map_err(CliError::classified)?;
+        let record =
+            output::Fragment::try_from((index as u64, frame)).map_err(CliError::classified)?;
         match format {
             Format::Json => records.push(record),
             Format::Ndjson => stream.emit_published(Published::new(record, Vec::new()))?,
@@ -116,11 +117,8 @@ pub(crate) fn run(
     match format {
         Format::Json => emit_published(
             invocation,
-            output::contract::Command::Fragment,
-            Published::new(
-                output::fragment::Report::from((summary, records)),
-                built.diagnostics,
-            ),
+            crate::output::contract::Command::Fragment,
+            Published::new(output::Report::from((summary, records)), built.diagnostics),
         ),
         Format::Ndjson => stream
             .complete_published(Published::new(summary, built.diagnostics))

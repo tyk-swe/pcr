@@ -1,14 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::published_enum;
 use serde::Serialize;
 
 use packetcraftr::fuzz as live_fuzz;
 use packetcraftr_core::fuzz::{self as packet_fuzz, Totals};
 
-use super::contract::Error as ContractError;
-use super::envelope::{Error as OutputError, Published, Stats};
-use super::frame::{Captured, Wire};
+use crate::output::contract::Error as ContractError;
+use crate::output::envelope::{Error as OutputError, Published, Stats};
+use crate::output::frame::{Captured, Wire};
 use packetcraftr_core::diagnostic::Diagnostic;
 
 fn operation_stats(value: &packet_fuzz::Stats) -> Stats {

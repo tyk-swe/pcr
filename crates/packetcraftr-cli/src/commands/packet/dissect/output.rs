@@ -5,8 +5,8 @@ use serde::Serialize;
 
 use packetcraftr_core::decode::DecodedPacket;
 
-use super::envelope::Published;
-use super::frame::{Layout, Wire};
+use crate::output::envelope::Published;
+use crate::output::frame::{Layout, Wire};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {

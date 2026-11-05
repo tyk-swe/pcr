@@ -4,10 +4,14 @@
 use packetcraftr_core::frame::Frame;
 use serde::Serialize;
 
-use super::{contract::Error, frame::Captured, stream::StreamRecord};
+use crate::output::contract::Error;
+
+use crate::output::frame::Captured;
+
+use crate::output::stream::StreamRecord;
 
 #[derive(Clone, Debug, Serialize)]
-pub struct Fragment {
+pub(crate) struct Fragment {
     pub fragment_index: u64,
     pub frame: Captured,
 }
@@ -28,7 +32,7 @@ impl StreamRecord for Fragment {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct Complete {
+pub(crate) struct Complete {
     pub mtu: usize,
     pub fragments: u64,
     pub bytes: u64,
@@ -43,7 +47,7 @@ impl From<(usize, &[Frame])> for Complete {
     }
 }
 #[derive(Clone, Debug, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     pub summary: Complete,
     pub fragments: Vec<Fragment>,
 }

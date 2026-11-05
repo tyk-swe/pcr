@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(in crate::commands) mod arguments;
+pub(in crate::commands) mod output;
 
 use self::arguments::Args;
+use self::output::MAX_REPORTED_CHANGES;
 use crate::command_options::Bounded as _;
-use crate::output::{self, contract::Command, rewrite::MAX_REPORTED_CHANGES};
+use crate::output::contract::Command;
 use crate::{
     errors::CliError,
     filtering,
@@ -183,8 +185,7 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
                 },
                 |index, applied| {
                     for change in applied {
-                        changes
-                            .push(|| output::rewrite::Change::from((number, index as u64, change)));
+                        changes.push(|| output::Change::from((number, index as u64, change)));
                     }
                     counts[index] += 1;
                 },
@@ -200,7 +201,7 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
         staged.persist()?;
     }
     let changes_omitted = changes.omitted();
-    let report = output::rewrite::Report::from((
+    let report = output::Report::from((
         args.write.display().to_string(),
         counts,
         report,
@@ -225,7 +226,7 @@ pub(crate) fn run(invocation: &crate::invocation::Invocation, args: Args) -> Res
 
 fn render_text(
     invocation: &crate::invocation::Invocation,
-    report: &output::rewrite::Report,
+    report: &output::Report,
 ) -> Result<(), CliError> {
     for change in &report.changes {
         crate::rendering::write_stdout_line(

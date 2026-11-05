@@ -154,14 +154,14 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "buildSuccess",
         command: "build",
-        rust_types: &["crate::output::build::Report"],
+        rust_types: &["crate::commands::packet::build::output::Report"],
         events: &[],
         example: "examples/documents/output-build-event.json",
     },
     PublishedType {
         definition: "dissectSuccess",
         command: "dissect",
-        rust_types: &["crate::output::dissect::Report"],
+        rust_types: &["crate::commands::packet::dissect::output::Report"],
         events: &[],
         example: "examples/documents/output-dissect-diagnostic-success.json",
     },
@@ -279,7 +279,7 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "fuzzSuccess",
         command: "fuzz",
-        rust_types: &["crate::output::fuzz::Report"],
+        rust_types: &["crate::commands::packet::fuzz::output::Report"],
         events: &[],
         example: "examples/documents/output-fuzz-success.json",
     },
@@ -300,14 +300,14 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "fragmentSuccess",
         command: "fragment",
-        rust_types: &["crate::output::fragment::Report"],
+        rust_types: &["crate::commands::packet::fragment::output::Report"],
         events: &[],
         example: "examples/documents/output-fragment-success.json",
     },
     PublishedType {
         definition: "mergeSuccess",
         command: "merge",
-        rust_types: &["crate::output::merge::Report"],
+        rust_types: &["crate::commands::files::merge::output::Report"],
         events: &[],
         example: "examples/documents/output-merge-complete.json",
     },
@@ -356,14 +356,14 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "exportSuccess",
         command: "export",
-        rust_types: &["crate::output::export::Report"],
+        rust_types: &["crate::commands::files::export::output::Report"],
         events: &[],
         example: "examples/documents/output-export-complete.json",
     },
     PublishedType {
         definition: "rewriteSuccess",
         command: "rewrite",
-        rust_types: &["crate::output::rewrite::Report"],
+        rust_types: &["crate::commands::files::rewrite::output::Report"],
         events: &[],
         example: "examples/documents/output-rewrite-complete.json",
     },
@@ -462,8 +462,8 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
         definition: "buildStreamSuccess",
         command: "build",
         rust_types: &[
-            "crate::output::build::Complete",
-            "crate::output::build::PacketEvent",
+            "crate::commands::packet::build::output::Complete",
+            "crate::commands::packet::build::output::PacketEvent",
         ],
         events: &["complete", "packet"],
         example: "examples/documents/output-build-complete.json",
@@ -471,7 +471,10 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "readSuccess",
         command: "read",
-        rust_types: &["crate::output::read::Event", "crate::output::read::Frame"],
+        rust_types: &[
+            "crate::commands::files::read::output::Event",
+            "crate::commands::files::read::output::Frame",
+        ],
         events: &["complete", "frame"],
         example: "examples/documents/output-read-complete.json",
     },
@@ -480,7 +483,7 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
         command: "capture",
         rust_types: &[
             "crate::output::capture::Summary",
-            "crate::output::read::Frame",
+            "crate::commands::files::read::output::Frame",
         ],
         events: &["complete", "frame"],
         example: "examples/documents/output-capture-complete.json",
@@ -619,7 +622,7 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "fuzzCaseSuccess",
         command: "fuzz",
-        rust_types: &["crate::output::fuzz::Event"],
+        rust_types: &["crate::commands::packet::fuzz::output::Event"],
         events: &["case", "complete"],
         example: "examples/documents/output-fuzz-complete.json",
     },
@@ -643,8 +646,8 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
         definition: "fragmentStreamSuccess",
         command: "fragment",
         rust_types: &[
-            "crate::output::fragment::Complete",
-            "crate::output::fragment::Fragment",
+            "crate::commands::packet::fragment::output::Complete",
+            "crate::commands::packet::fragment::output::Fragment",
         ],
         events: &["complete", "fragment"],
         example: "examples/documents/output-fragment-complete.json",
@@ -652,7 +655,7 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "mergeStreamSuccess",
         command: "merge",
-        rust_types: &["crate::output::merge::Report"],
+        rust_types: &["crate::commands::files::merge::output::Report"],
         events: &["complete"],
         example: "examples/documents/output-merge-complete.json",
     },
@@ -750,14 +753,14 @@ pub const PUBLISHED_TYPES: &[PublishedType] = &[
     PublishedType {
         definition: "exportStreamSuccess",
         command: "export",
-        rust_types: &["crate::output::export::Report"],
+        rust_types: &["crate::commands::files::export::output::Report"],
         events: &["complete"],
         example: "examples/documents/output-export-complete.json",
     },
     PublishedType {
         definition: "rewriteStreamSuccess",
         command: "rewrite",
-        rust_types: &["crate::output::rewrite::Report"],
+        rust_types: &["crate::commands::files::rewrite::output::Report"],
         events: &["complete"],
         example: "examples/documents/output-rewrite-complete.json",
     },

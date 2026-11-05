@@ -15,7 +15,6 @@ use crate::commands::increment_counter;
 use crate::errors::CliError;
 use crate::filtering;
 use crate::invocation::StreamEncoder;
-use crate::output;
 use crate::output::contract::Format;
 use crate::rendering::FieldTree;
 
@@ -43,7 +42,9 @@ pub(super) fn run(
     }
     if format == Format::Ndjson {
         stream.complete_published(Published::new(
-            output::read::Event::from(output::read::Totals::from((&budget, frames_matched))),
+            crate::commands::files::read::output::Event::from(
+                crate::commands::files::read::output::Totals::from((&budget, frames_matched)),
+            ),
             Vec::new(),
         ))?;
     }
@@ -54,9 +55,9 @@ fn convert_frame(
     frame: core::frame::Frame,
     source_frame: u64,
     decoding: Option<&Decoding>,
-) -> Result<Option<output::read::Frame>, CliError> {
+) -> Result<Option<crate::commands::files::read::output::Frame>, CliError> {
     let Some(decoding) = decoding else {
-        return output::read::Frame::try_from((source_frame, frame))
+        return crate::commands::files::read::output::Frame::try_from((source_frame, frame))
             .map(Some)
             .map_err(CliError::classified);
     };
@@ -68,9 +69,9 @@ fn convert_frame(
         return Ok(None);
     };
     if decoding.publish_layers {
-        output::read::Frame::try_from((source_frame, frame, &decoded))
+        crate::commands::files::read::output::Frame::try_from((source_frame, frame, &decoded))
     } else {
-        output::read::Frame::try_from((source_frame, frame))
+        crate::commands::files::read::output::Frame::try_from((source_frame, frame))
     }
     .map(Some)
     .map_err(CliError::classified)

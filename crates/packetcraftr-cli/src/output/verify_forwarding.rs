@@ -6,6 +6,7 @@ use serde::Serialize;
 use packetcraftr_core::analysis::forwarding as analysis;
 use packetcraftr_core::field;
 
+use super::capture::CaptureSource;
 use super::contract::Error;
 use super::frame::{SourceFrame, Timestamp};
 
@@ -214,13 +215,6 @@ impl From<analysis::Omissions> for Omissions {
             group_members: value.group_members,
         }
     }
-}
-
-/// SHA-256 of the exact encoded source stream consumed through successful EOF.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct CaptureSource {
-    pub sha256: String,
-    pub encoded_bytes: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

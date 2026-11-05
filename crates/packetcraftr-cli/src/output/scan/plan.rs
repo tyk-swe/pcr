@@ -6,6 +6,9 @@
 use serde::Serialize;
 
 use packetcraftr::probe::Transport;
+
+use crate::output::scan_failure::icmp_request;
+pub use crate::output::scan_failure::{SctpScan, TcpScan};
 use packetcraftr::scan as library;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -131,7 +134,7 @@ impl Discovery {
                     transport: probe.transport(),
                     port: probe.port(),
                     ip_protocol: probe.ip_protocol(),
-                    icmp_request: super::probe::icmp_request(*probe),
+                    icmp_request: icmp_request(*probe),
                     tcp_scan: matches!(probe, packetcraftr::probe::Endpoint::TcpAck { .. })
                         .then(|| TcpScan::from(library::TcpScan::Ack)),
                 })
@@ -140,38 +143,6 @@ impl Discovery {
             excluded_endpoints,
             unresponsive: options.unresponsive.into(),
             reverse_dns,
-        }
-    }
-}
-
-/// The effective TCP segment a raw scan sends to TCP scan endpoints.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct TcpScan {
-    pub mode: &'static str,
-    pub flags: u16,
-}
-
-impl From<library::TcpScan> for TcpScan {
-    fn from(mode: library::TcpScan) -> Self {
-        Self {
-            mode: mode.as_str(),
-            flags: mode.flags(),
-        }
-    }
-}
-
-/// The effective SCTP chunk a raw scan sends to SCTP scan endpoints.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct SctpScan {
-    pub mode: &'static str,
-    pub chunk_type: u8,
-}
-
-impl From<library::SctpScan> for SctpScan {
-    fn from(mode: library::SctpScan) -> Self {
-        Self {
-            mode: mode.as_str(),
-            chunk_type: mode.chunk_type(),
         }
     }
 }

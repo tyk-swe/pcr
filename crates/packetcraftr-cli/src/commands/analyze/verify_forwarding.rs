@@ -19,7 +19,7 @@ use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::open_capture_hashed;
 use crate::invocation::StreamEncoder;
-use crate::output::verify_forwarding::CaptureSource;
+use crate::output::capture::CaptureSource;
 
 const VERDICT_NOT_PASS: u8 = 1;
 

@@ -19,7 +19,7 @@ pub(super) fn render(
     stream: &StreamEncoder,
     report: &analysis::Report,
     arguments: &Args,
-    sources: analysis::Sided<output::verify_forwarding::CaptureSource>,
+    sources: analysis::Sided<output::capture::CaptureSource>,
 ) -> Result<(), CliError> {
     match format {
         Format::Text => {

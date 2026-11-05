@@ -13,34 +13,16 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use super::capture::Stats as CaptureStats;
 use super::contract::Error;
-use super::envelope::{Published, Stats};
+use super::envelope::Published;
 use super::frame::Captured;
-use super::network::InterfaceId;
 use packetcraftr::probe::Transport;
 
 use packetcraftr::scan as library;
 
+pub use super::scan_failure::{Protocol, Scope, Sent, Stage};
 pub use event::{EndpointSummary, Event};
-pub use probe::{
-    ApplicationEvidence, ApplicationStatus, Measurement, Probe, Protocol, Qualification, Sent,
-};
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Scope {
-    pub zone: String,
-    pub interface: InterfaceId,
-}
-
-impl From<&packetcraftr::target::ResolvedZone> for Scope {
-    fn from(scope: &packetcraftr::target::ResolvedZone) -> Self {
-        Self {
-            zone: scope.zone.as_str().to_owned(),
-            interface: (&scope.interface).into(),
-        }
-    }
-}
+pub use probe::{ApplicationEvidence, ApplicationStatus, Measurement, Probe, Qualification};
 
 published_enum! {
     pub enum Classification from library::Classification {
@@ -101,13 +83,6 @@ impl From<library::Rtt> for Rtt {
             avg: value.avg,
             max: value.max,
         }
-    }
-}
-
-published_enum! {
-    pub enum Stage from library::Stage {
-        Discovery => "discovery",
-        Scan => "scan",
     }
 }
 
@@ -352,86 +327,6 @@ impl TryFrom<library::Endpoint> for Endpoint {
                 .into_iter()
                 .map(Probe::try_from)
                 .collect::<Result<_, Error>>()?,
-        })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Pending {
-    pub sent: Sent,
-    pub response: Option<Captured>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct FailedProbe {
-    pub sequence: u64,
-    pub stage: Stage,
-    pub destination: IpAddr,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<Scope>,
-    pub destination_port: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ip_protocol: Option<u8>,
-    pub transport: Transport,
-    pub attempt: u32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct CaptureSource {
-    pub observation_quality: &'static str,
-    pub interface: InterfaceId,
-    pub ready: bool,
-    pub shutdown_confirmed: bool,
-    pub statistics_valid: bool,
-    pub statistics: CaptureStats,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Failure {
-    pub stats: Stats,
-    pub pending: Vec<Pending>,
-    pub failed_probe: Option<FailedProbe>,
-    pub capture_sources: Vec<CaptureSource>,
-}
-
-impl TryFrom<&library::PipelineFailure> for Failure {
-    type Error = Error;
-
-    fn try_from(error: &library::PipelineFailure) -> Result<Self, Error> {
-        Ok(Self {
-            stats: error.stats.clone(),
-            pending: error
-                .pending
-                .iter()
-                .map(|entry| {
-                    Ok(Pending {
-                        sent: entry.sent.clone().try_into()?,
-                        response: entry.response.clone().map(Captured::try_from).transpose()?,
-                    })
-                })
-                .collect::<Result<_, Error>>()?,
-            failed_probe: error.failed_probe.as_ref().map(|probe| FailedProbe {
-                sequence: probe.sequence,
-                stage: probe.stage.into(),
-                destination: probe.address,
-                scope: probe.scope.as_ref().map(Scope::from),
-                destination_port: probe.endpoint.port(),
-                ip_protocol: probe.endpoint.ip_protocol(),
-                transport: probe.endpoint.transport(),
-                attempt: probe.attempt,
-            }),
-            capture_sources: error
-                .capture_sources
-                .iter()
-                .map(|source| CaptureSource {
-                    observation_quality: probe::coverage(source.observation_quality.into()),
-                    interface: (&source.metadata.interface).into(),
-                    ready: source.ready,
-                    shutdown_confirmed: source.shutdown_confirmed,
-                    statistics_valid: source.statistics_valid,
-                    statistics: source.statistics,
-                })
-                .collect(),
         })
     }
 }

@@ -149,3 +149,10 @@ impl From<(&packetcraftr::capture::Report, Option<Files>)> for Snapshot {
         }
     }
 }
+
+/// SHA-256 of the exact encoded source stream consumed through successful EOF.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CaptureSource {
+    pub sha256: String,
+    pub encoded_bytes: u64,
+}

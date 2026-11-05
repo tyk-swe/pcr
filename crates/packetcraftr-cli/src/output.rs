@@ -7,19 +7,19 @@
 macro_rules! published_enum {
     (
         $(#[$meta:meta])*
-        pub enum $name:ident from $source:ty {
+        $vis:vis enum $name:ident from $source:ty {
             $($(#[$variant_meta:meta])* $variant:ident => $text:literal),+ $(,)?
         }
     ) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
-        pub enum $name {
+        $vis enum $name {
             $($(#[$variant_meta])* #[serde(rename = $text)] $variant,)+
         }
 
         impl $name {
             #[must_use]
-            pub const fn as_str(self) -> &'static str {
+            $vis const fn as_str(self) -> &'static str {
                 match self {
                     $(Self::$variant => $text,)+
                 }
@@ -78,6 +78,7 @@ pub mod resources;
 pub mod rewrite;
 pub mod routes;
 pub mod scan;
+pub mod scan_failure;
 pub mod security;
 pub mod send;
 pub mod stats;

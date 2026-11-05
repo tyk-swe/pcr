@@ -96,7 +96,7 @@ fn scan_error(error: packetcraftr::scan::Error) -> CliError {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
     while let Some(error) = source {
         if let Some(pipeline) = error.downcast_ref::<packetcraftr::scan::PipelineFailure>() {
-            match crate::output::scan::Failure::try_from(pipeline) {
+            match crate::output::scan_failure::Failure::try_from(pipeline) {
                 Ok(partial) => cli = cli.with_scan(partial),
                 Err(error) => cli
                     .causes

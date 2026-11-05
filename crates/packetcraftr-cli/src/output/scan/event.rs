@@ -13,8 +13,8 @@ use packetcraftr::probe::Transport;
 use packetcraftr::scan as library;
 
 use super::plan::{Inference, Plan};
-use super::probe::{Probe, Qualification, Sent};
-use super::{Classification, ClassificationCounts, Rtt, Scheduling, Scope, Unattributed};
+use super::probe::{Probe, Qualification};
+use super::{Classification, ClassificationCounts, Rtt, Scheduling, Scope, Sent, Unattributed};
 use crate::output::contract::Error;
 use crate::output::envelope::Published;
 use crate::output::frame::Captured;

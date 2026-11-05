@@ -121,7 +121,7 @@ pub(super) fn run(
                             }
                             if presentation.verbose {
                                 let route =
-                                    output::send::MaterializedRoute::try_from(route.clone())
+                                    output::network::MaterializedRoute::try_from(route.clone())
                                         .map_err(CliError::classified)?;
                                 presentation.details(
                                     invocation,

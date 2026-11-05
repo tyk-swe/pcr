@@ -8,14 +8,15 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr::probe::{self, Transport};
-
+use packetcraftr::probe;
 use packetcraftr::scan as library;
 
-use super::plan::{SctpScan, TcpScan};
-use super::{Classification, Scope, Stage};
+use super::Classification;
 use crate::output::contract::Error;
 use crate::output::frame::{Captured, Timestamp};
+use crate::output::scan_failure::{
+    Protocol, Scope, SctpScan, Stage, TcpScan, coverage, icmp_request,
+};
 
 published_enum! {
     pub enum ApplicationStatus from library::profile::Status {
@@ -44,45 +45,11 @@ impl From<library::profile::Evidence> for ApplicationEvidence {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Protocol {
-    Tcp,
-    Udp,
-    Sctp,
-    Icmpv4,
-    Icmpv6,
-    Ip,
-}
-
-impl From<(Transport, IpAddr)> for Protocol {
-    fn from((transport, address): (Transport, IpAddr)) -> Self {
-        match (transport, address) {
-            (Transport::Tcp, _) => Self::Tcp,
-            (Transport::Udp, _) => Self::Udp,
-            (Transport::Sctp, _) => Self::Sctp,
-            (Transport::Icmp, IpAddr::V4(_)) => Self::Icmpv4,
-            (Transport::Icmp, IpAddr::V6(_)) => Self::Icmpv6,
-            (Transport::Ip, _) => Self::Ip,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Measurement {
     Response,
     NoReply { coverage: &'static str },
     Unavailable,
-}
-
-pub(crate) fn coverage(value: library::Coverage) -> &'static str {
-    match value {
-        library::Coverage::Pending => "pending",
-        library::Coverage::Unknown => "unknown",
-        library::Coverage::NoReportedLoss => "no_reported_loss",
-        library::Coverage::Incomplete => "incomplete",
-        library::Coverage::TransportTimeout => "transport_timeout",
-    }
 }
 
 impl From<library::Measurement<library::Reply>> for Measurement {
@@ -155,70 +122,6 @@ pub struct Probe {
     /// The window the correlated TCP response advertised, as observed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tcp_window: Option<u16>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Sent {
-    pub sequence: u64,
-    pub stage: Stage,
-    pub protocol: Protocol,
-    pub destination: IpAddr,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<Scope>,
-    pub destination_port: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ip_protocol: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub icmp_request: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tcp_scan: Option<TcpScan>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sctp_scan: Option<SctpScan>,
-    pub attempt: u32,
-    pub sent_at: Timestamp,
-    pub udp_profile: Option<String>,
-    pub frame: crate::output::frame::Wire,
-    pub route: crate::output::send::MaterializedRoute,
-}
-
-/// The ICMP request kind an endpoint variant publishes; echo stays implicit.
-pub(crate) fn icmp_request(endpoint: probe::Endpoint) -> Option<&'static str> {
-    match endpoint {
-        probe::Endpoint::IcmpTimestamp => Some("timestamp"),
-        probe::Endpoint::IcmpNetmask => Some("netmask"),
-        _ => None,
-    }
-}
-
-impl TryFrom<library::SentProbe> for Sent {
-    type Error = Error;
-
-    fn try_from(value: library::SentProbe) -> Result<Self, Error> {
-        let probe = value.probe;
-        let sent = value.sent;
-        Ok(Self {
-            sequence: probe.sequence,
-            stage: probe.stage.into(),
-            udp_profile: probe
-                .udp_profile
-                .as_ref()
-                .map(|profile| profile.name().to_owned()),
-            protocol: (probe.endpoint.transport(), probe.address).into(),
-            destination: probe.address,
-            scope: probe.scope.as_ref().map(Scope::from),
-            destination_port: probe.endpoint.port(),
-            ip_protocol: probe.endpoint.ip_protocol(),
-            icmp_request: icmp_request(probe.endpoint),
-            tcp_scan: (probe.endpoint.transport() == Transport::Tcp)
-                .then(|| TcpScan::from(probe.tcp_scan)),
-            sctp_scan: (probe.endpoint.transport() == Transport::Sctp)
-                .then(|| SctpScan::from(probe.sctp_scan)),
-            attempt: probe.attempt,
-            sent_at: Timestamp::try_from(sent.timing().freshness_marker().wall_clock())?,
-            frame: sent.wire_bytes().clone().into(),
-            route: sent.route().clone().try_into()?,
-        })
-    }
 }
 
 impl TryFrom<library::ProbeEvidence> for Probe {

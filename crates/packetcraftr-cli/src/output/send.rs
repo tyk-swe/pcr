@@ -3,57 +3,10 @@
 
 use serde::Serialize;
 
-use crate::output::capture::Stats as CaptureStats;
 use crate::output::contract::Error;
 use crate::output::envelope::Published;
-use crate::output::frame::Captured;
 use crate::output::frame::Wire;
-use crate::output::network::Plan;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct MaterializedRoute {
-    pub plan: Plan,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub neighbor: Option<NeighborEvidence>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct NeighborEvidence {
-    pub mac_address: String,
-    pub attempts: u32,
-    pub cache_hit: bool,
-    pub captured: Vec<Captured>,
-    pub evidence_truncated: bool,
-    pub capture_statistics: CaptureStats,
-}
-
-impl TryFrom<packetcraftr::route::Materialized> for MaterializedRoute {
-    type Error = Error;
-
-    fn try_from(route: packetcraftr::route::Materialized) -> Result<Self, Error> {
-        let neighbor = route
-            .neighbor_resolution
-            .map(|resolution| {
-                Ok::<_, Error>(NeighborEvidence {
-                    mac_address: resolution.mac_address.to_string(),
-                    attempts: resolution.attempts,
-                    cache_hit: resolution.cache_hit,
-                    captured: resolution
-                        .captured
-                        .into_iter()
-                        .map(Captured::try_from)
-                        .collect::<Result<_, _>>()?,
-                    evidence_truncated: resolution.evidence_truncated,
-                    capture_statistics: resolution.capture_statistics,
-                })
-            })
-            .transpose()?;
-        Ok(Self {
-            plan: route.plan.into(),
-            neighbor,
-        })
-    }
-}
+use crate::output::network::MaterializedRoute;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct SentFrame {

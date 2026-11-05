@@ -76,15 +76,76 @@ pub enum Error {
     AuxiliaryLength { length: usize },
 }
 
-impl crate::error::Classified for Error {
-    fn classification(&self) -> crate::error::Classification {
-        crate::error::Classification::new(
-            crate::error::Code::PacketCodec,
-            crate::error::Kind::Packet,
-            Some("correct the layer bytes or field values the codec refused"),
-        )
-    }
+/// The source-list wire codec shared with MLD. Expands where `Error`, `ADDRESS_LENGTH`,
+/// `MAX_SOURCES` and `AUX_UNIT` are in scope.
+macro_rules! source_list_codec {
+    ($address:ty, $record:ty) => {
+        fn truncated(expected: usize, actual: usize) -> Error {
+            Error::Truncated { expected, actual }
+        }
+
+        fn limit(what: &'static str, count: usize, limit: usize) -> Error {
+            Error::LimitExceeded { what, count, limit }
+        }
+
+        /// A list length as the 16-bit wire count, refused above `maximum`.
+        fn checked_count(what: &'static str, count: usize, maximum: usize) -> Result<u16, Error> {
+            if count > maximum {
+                return Err(limit(what, count, maximum));
+            }
+            u16::try_from(count).map_err(|_| limit(what, count, maximum))
+        }
+
+        fn address(bytes: &[u8]) -> $address {
+            let mut octets = [0; ADDRESS_LENGTH];
+            octets.copy_from_slice(&bytes[..ADDRESS_LENGTH]);
+            <$address>::from(octets)
+        }
+
+        fn push_sources(body: &mut Vec<u8>, sources: &[$address]) {
+            for source in sources {
+                body.extend_from_slice(&source.octets());
+            }
+        }
+
+        fn push_record(body: &mut Vec<u8>, record: &$record) -> Result<(), Error> {
+            let sources = checked_count("source", record.sources.len(), MAX_SOURCES)?;
+            let aux_words = u8::try_from(record.aux_data.len() / AUX_UNIT)
+                .ok()
+                .filter(|_| record.aux_data.len() % AUX_UNIT == 0)
+                .ok_or(Error::AuxiliaryLength {
+                    length: record.aux_data.len(),
+                })?;
+            body.extend_from_slice(&[record.record_type, aux_words]);
+            body.extend_from_slice(&sources.to_be_bytes());
+            body.extend_from_slice(&record.group.octets());
+            push_sources(body, &record.sources);
+            body.extend_from_slice(&record.aux_data);
+            Ok(())
+        }
+
+        /// Reads `count` sources from the front of `rest` and returns the remainder.
+        fn read_sources_prefix(rest: &[u8], count: usize) -> Result<(Vec<$address>, &[u8]), Error> {
+            if count > MAX_SOURCES {
+                return Err(limit("source", count, MAX_SOURCES));
+            }
+            let length = count.saturating_mul(ADDRESS_LENGTH);
+            let Some((bytes, rest)) = rest.split_at_checked(length) else {
+                return Err(truncated(length, rest.len()));
+            };
+            let sources = bytes
+                .as_chunks::<ADDRESS_LENGTH>()
+                .0
+                .iter()
+                .map(|chunk| address(chunk))
+                .collect::<Vec<_>>();
+            Ok((sources, rest))
+        }
+    };
 }
+pub(super) use source_list_codec;
+
+super::packet_codec_error!();
 
 /// An IGMPv3 membership query. The generic layer's `code` is the maximum
 /// response code.
@@ -113,7 +174,7 @@ impl Query {
             return Err(truncated(QUERY_LENGTH, igmp.body.len()));
         };
         let count = usize::from(u16::from_be_bytes([fixed[6], fixed[7]]));
-        let (sources, rest) = read_sources(rest, count)?;
+        let (sources, rest) = read_sources_prefix(rest, count)?;
         no_trailing(rest)?;
         Ok(Self {
             max_response_code: igmp.code,
@@ -201,7 +262,7 @@ impl Report {
             };
             let aux_length = usize::from(header[1]) * AUX_UNIT;
             let sources = usize::from(u16::from_be_bytes([header[2], header[3]]));
-            let (sources, after) = read_sources(after, sources)?;
+            let (sources, after) = read_sources_prefix(after, sources)?;
             let Some((aux_data, after)) = after.split_at_checked(aux_length) else {
                 return Err(truncated(aux_length, after.len()));
             };
@@ -227,18 +288,7 @@ impl Report {
         body.extend_from_slice(&self.reserved2.to_be_bytes());
         body.extend_from_slice(&count.to_be_bytes());
         for record in &self.records {
-            let sources = checked_count("source", record.sources.len(), MAX_SOURCES)?;
-            let aux_words = u8::try_from(record.aux_data.len() / AUX_UNIT)
-                .ok()
-                .filter(|_| record.aux_data.len() % AUX_UNIT == 0)
-                .ok_or(Error::AuxiliaryLength {
-                    length: record.aux_data.len(),
-                })?;
-            body.extend_from_slice(&[record.record_type, aux_words]);
-            body.extend_from_slice(&sources.to_be_bytes());
-            body.extend_from_slice(&record.group.octets());
-            push_sources(&mut body, &record.sources);
-            body.extend_from_slice(&record.aux_data);
+            push_record(&mut body, record)?;
         }
         Ok(igmp(V3_MEMBERSHIP_REPORT, self.reserved, body))
     }
@@ -253,21 +303,6 @@ fn igmp(igmp_type: u8, code: u8, body: Vec<u8>) -> Igmp {
     }
 }
 
-fn truncated(expected: usize, actual: usize) -> Error {
-    Error::Truncated { expected, actual }
-}
-
-fn limit(what: &'static str, count: usize, limit: usize) -> Error {
-    Error::LimitExceeded { what, count, limit }
-}
-
-fn field_range(field: &'static str, value: impl Into<u64>) -> Error {
-    Error::FieldRange {
-        field,
-        value: value.into(),
-    }
-}
-
 fn no_trailing(rest: &[u8]) -> Result<(), Error> {
     if rest.is_empty() {
         Ok(())
@@ -276,40 +311,4 @@ fn no_trailing(rest: &[u8]) -> Result<(), Error> {
     }
 }
 
-/// A list length as the 16-bit wire count, refused above `maximum`.
-fn checked_count(what: &'static str, count: usize, maximum: usize) -> Result<u16, Error> {
-    if count > maximum {
-        return Err(limit(what, count, maximum));
-    }
-    u16::try_from(count).map_err(|_| limit(what, count, maximum))
-}
-
-fn address(bytes: &[u8]) -> Ipv4Addr {
-    let mut octets = [0; ADDRESS_LENGTH];
-    octets.copy_from_slice(&bytes[..ADDRESS_LENGTH]);
-    Ipv4Addr::from(octets)
-}
-
-fn push_sources(body: &mut Vec<u8>, sources: &[Ipv4Addr]) {
-    for source in sources {
-        body.extend_from_slice(&source.octets());
-    }
-}
-
-/// Reads `count` sources from the front of `rest` and returns the remainder.
-fn read_sources(rest: &[u8], count: usize) -> Result<(Vec<Ipv4Addr>, &[u8]), Error> {
-    if count > MAX_SOURCES {
-        return Err(limit("source", count, MAX_SOURCES));
-    }
-    let length = count.saturating_mul(ADDRESS_LENGTH);
-    let Some((bytes, rest)) = rest.split_at_checked(length) else {
-        return Err(truncated(length, rest.len()));
-    };
-    let sources = bytes
-        .as_chunks::<ADDRESS_LENGTH>()
-        .0
-        .iter()
-        .map(|chunk| address(chunk))
-        .collect::<Vec<_>>();
-    Ok((sources, rest))
-}
+source_list_codec!(Ipv4Addr, GroupRecord);

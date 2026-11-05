@@ -144,16 +144,16 @@ fn run(invocation: &crate::invocation::Invocation, arguments: Args) -> Result<()
         }
     };
 
-    if format == Format::Ndjson {
-        rendering::render_responder_complete(report.clone(), stream)?;
-    }
-    let aggregate = collector.finish(report);
+    let aggregate = collector.finish(report.clone());
     if let Some(staged) = &mut staged {
         write_log(staged, &aggregate.records)?;
         staged.sync()?;
     }
     if let Some(staged) = staged {
         staged.persist()?;
+    }
+    if format == Format::Ndjson {
+        rendering::render_responder_complete(report, stream)?;
     }
     invocation.check()?;
 
@@ -183,7 +183,9 @@ mod tests {
     use clap::Parser as _;
     use lib::canary;
     use packetcraftr_core::clock::{Clock, SystemClock};
+    use std::io::Write;
     use std::net::UdpSocket;
+    use std::sync::{Arc, Mutex};
     use std::thread;
 
     #[derive(clap::Parser)]
@@ -210,28 +212,209 @@ mod tests {
         panic!("responder never answered across retries");
     }
 
-    fn try_cancelled_run(log: &std::path::Path, _attempt: usize) -> bool {
-        let port = {
-            let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("reserve port");
-            socket.local_addr().expect("address").port()
-        };
-        let token_hex = "42".repeat(16);
-        let wrap = Wrap::try_parse_from([
+    fn parsed_args(port: u16, idle_ms: u64, duration_ms: u64, log: &std::path::Path) -> Args {
+        Wrap::try_parse_from([
             "test",
             "--bind",
             "127.0.0.1",
             "--port",
             &port.to_string(),
             "--token",
-            &token_hex,
+            &"42".repeat(16),
             "--idle-ms",
-            "0",
+            &idle_ms.to_string(),
             "--max-duration-ms",
-            "30000",
+            &duration_ms.to_string(),
             "--log-file",
             log.to_str().expect("log path is UTF-8"),
         ])
-        .expect("arguments parse");
+        .expect("arguments parse")
+        .args
+    }
+
+    fn free_port() -> u16 {
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("reserve port");
+        socket.local_addr().expect("address").port()
+    }
+
+    fn probe() -> Vec<u8> {
+        canary::build_probe(&[0x42; 16], 1, 7, 256)
+    }
+
+    fn probe_until_answered(port: u16, finished: impl Fn() -> bool) -> bool {
+        let probe_socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("probe socket");
+        probe_socket
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .expect("timeout");
+        let payload = probe();
+        let mut buffer = [0_u8; 128];
+        let probe_deadline = SystemClock.now() + Duration::from_secs(3);
+        while SystemClock.now() < probe_deadline && !finished() {
+            probe_socket
+                .send_to(&payload, (Ipv4Addr::LOCALHOST, port))
+                .expect("probe sends");
+            if probe_socket.recv_from(&mut buffer).is_ok() {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn holds_probe_record(contents: &str) -> bool {
+        let expected = lib::hex(&canary::payload_sha256(&probe()));
+        contents
+            .lines()
+            .filter_map(|line| serde_json::from_str::<lib::ReceptionRecord>(line).ok())
+            .any(|record| record.attempt_seq == 7 && record.payload_sha256 == expected)
+    }
+
+    #[derive(Clone, Default)]
+    struct Stdout(Arc<Mutex<Vec<u8>>>);
+
+    impl Stdout {
+        fn events(&self) -> Vec<String> {
+            String::from_utf8(self.0.lock().unwrap().clone())
+                .unwrap()
+                .lines()
+                .map(|line| {
+                    let record: serde_json::Value = serde_json::from_str(line).unwrap();
+                    record["event"].as_str().unwrap().to_owned()
+                })
+                .collect()
+        }
+    }
+
+    impl Write for Stdout {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct ClosedStdout;
+
+    impl Write for ClosedStdout {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn ndjson(writer: impl Write + Send + 'static, deadline: Option<Duration>) -> Invocation {
+        Invocation::new(
+            Format::Ndjson,
+            StreamEncoder::new(Command::DifferentialResponder, writer),
+            deadline,
+            Default::default(),
+            None,
+        )
+    }
+
+    fn run_with_traffic(
+        log: &std::path::Path,
+        idle_ms: u64,
+        duration_ms: u64,
+        stdout: Stdout,
+        deadline_ms: Option<u64>,
+        after_answer: impl Fn(),
+    ) -> Result<(), CliError> {
+        for _ in 0..3 {
+            let port = free_port();
+            let arguments = parsed_args(port, idle_ms, duration_ms, log);
+            let invocation = ndjson(stdout.clone(), deadline_ms.map(Duration::from_millis));
+            let handle = thread::spawn(move || run(&invocation, arguments));
+            let answered = probe_until_answered(port, || handle.is_finished());
+            if answered {
+                after_answer();
+            }
+            let outcome = handle.join().expect("responder thread finishes");
+            if answered {
+                return outcome;
+            }
+            let _ = std::fs::remove_file(log);
+            stdout.0.lock().unwrap().clear();
+        }
+        panic!("responder never answered across retries");
+    }
+
+    #[test]
+    fn ndjson_duration_expiry_publishes_empty_log() {
+        let directory = tempfile::tempdir().expect("test directory");
+        let log = directory.path().join("responder-log.jsonl");
+
+        let outcome = run(
+            &ndjson(Stdout::default(), Some(Duration::from_millis(100))),
+            parsed_args(free_port(), 0, 100, &log),
+        );
+
+        assert!(outcome.is_err(), "the expired invocation stays reported");
+        assert_eq!(std::fs::read_to_string(&log).expect("log published"), "");
+    }
+
+    #[test]
+    fn ndjson_duration_expiry_preserves_receptions() {
+        let directory = tempfile::tempdir().expect("test directory");
+        let log = directory.path().join("responder-log.jsonl");
+
+        let outcome = run_with_traffic(&log, 0, 1000, Stdout::default(), Some(1000), || {});
+
+        assert!(outcome.is_err(), "the expired invocation stays reported");
+        let contents = std::fs::read_to_string(&log).expect("log published");
+        assert!(holds_probe_record(&contents), "log contents: {contents}");
+    }
+
+    #[test]
+    fn failed_completion_write_keeps_published_log() {
+        let directory = tempfile::tempdir().expect("test directory");
+        let log = directory.path().join("responder-log.jsonl");
+
+        let outcome = run(
+            &ndjson(ClosedStdout, None),
+            parsed_args(free_port(), 0, 50, &log),
+        );
+
+        assert!(outcome.is_err(), "the failed write stays reported");
+        assert_eq!(std::fs::read_to_string(&log).expect("log published"), "");
+    }
+
+    #[test]
+    fn completion_follows_publication() {
+        let directory = tempfile::tempdir().expect("test directory");
+        let log = directory.path().join("responder-log.jsonl");
+        let stdout = Stdout::default();
+
+        run_with_traffic(&log, 20, 30_000, stdout.clone(), None, || {})
+            .expect("idle stop succeeds");
+
+        assert!(holds_probe_record(&std::fs::read_to_string(&log).unwrap()));
+        assert_eq!(stdout.events().last().map(String::as_str), Some("complete"));
+    }
+
+    #[test]
+    fn publication_conflict_keeps_existing_log_without_completion() {
+        let directory = tempfile::tempdir().expect("test directory");
+        let log = directory.path().join("responder-log.jsonl");
+        let stdout = Stdout::default();
+
+        let outcome = run_with_traffic(&log, 0, 1000, stdout.clone(), None, || {
+            std::fs::write(&log, "existing").expect("competing log");
+        });
+
+        assert!(outcome.is_err(), "the conflict stays reported");
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "existing");
+        assert!(!stdout.events().iter().any(|event| event == "complete"));
+    }
+
+    fn try_cancelled_run(log: &std::path::Path, _attempt: usize) -> bool {
+        let port = free_port();
+        let arguments = parsed_args(port, 0, 30_000, log);
         let invocation = Invocation::new(
             Format::Text,
             StreamEncoder::new(Command::DifferentialResponder, Vec::<u8>::new()),
@@ -240,48 +423,22 @@ mod tests {
             None,
         );
         let cancellation = invocation.cancellation.clone();
-        let handle = thread::spawn(move || run(&invocation, wrap.args));
+        let handle = thread::spawn(move || run(&invocation, arguments));
 
-        let probe_socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("probe socket");
-        probe_socket
-            .set_read_timeout(Some(Duration::from_millis(500)))
-            .expect("timeout");
-        let token = [0x42; 16];
-        let payload = canary::build_probe(&token, 1, 7, 256);
-        let target = (Ipv4Addr::LOCALHOST, port);
-        let mut buffer = [0_u8; 128];
-        let mut answered = false;
-        let probe_deadline = SystemClock.now() + Duration::from_secs(3);
-        while SystemClock.now() < probe_deadline {
-            if handle.is_finished() {
-                break;
-            }
-            probe_socket.send_to(&payload, target).expect("probe sends");
-            match probe_socket.recv_from(&mut buffer) {
-                Ok(_) => {
-                    answered = true;
-                    break;
-                }
-                Err(_) => thread::sleep(Duration::from_millis(50)),
-            }
-        }
-        if !answered {
+        if !probe_until_answered(port, || handle.is_finished()) {
             cancellation.cancel();
             let _ = handle.join();
             return false;
         }
-        thread::sleep(Duration::from_millis(300));
         cancellation.cancel();
         let outcome = handle.join().expect("responder thread finishes");
         assert!(outcome.is_err(), "cancellation reports as an error");
 
         let contents = std::fs::read_to_string(log).expect("reception log was published");
-        let expected = lib::hex(&canary::payload_sha256(&payload));
-        let found = contents
-            .lines()
-            .filter_map(|line| serde_json::from_str::<lib::ReceptionRecord>(line).ok())
-            .any(|record| record.attempt_seq == 7 && record.payload_sha256 == expected);
-        assert!(found, "log holds the reception record: {contents}");
+        assert!(
+            holds_probe_record(&contents),
+            "log holds the reception record: {contents}"
+        );
         true
     }
 }

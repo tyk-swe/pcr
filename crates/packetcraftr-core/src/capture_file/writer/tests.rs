@@ -271,3 +271,63 @@ fn mapped_interface_speeds_keep_their_values_across_byte_orders() {
         }
     }
 }
+
+#[test]
+fn mapped_interface_speeds_reject_malformed_widths_when_converting_byte_order() {
+    use crate::capture_file::{
+        Endianness, Interface, PcapNgOption, PcapNgOptions, TimestampResolution, map_frames,
+    };
+
+    for (source_order, target_order) in [
+        (Endianness::Little, Endianness::Big),
+        (Endianness::Big, Endianness::Little),
+    ] {
+        for code in [8, 16, 17] {
+            for length in [0, 7, 9] {
+                let mut source = Writer::pcapng_with_options(
+                    Vec::new(),
+                    PcapNgOptions {
+                        endianness: source_order,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                source
+                    .add_interface_description_with_options(
+                        Interface {
+                            link_type: LinkType::ETHERNET,
+                            snap_len: 65_535,
+                            timestamp_resolution: TimestampResolution::Decimal(9),
+                            timestamp_offset: 0,
+                        },
+                        &[PcapNgOption {
+                            code,
+                            value: vec![1; length].into(),
+                        }],
+                    )
+                    .unwrap();
+                let mut reader =
+                    Reader::with_limits(Cursor::new(source.into_inner()), Default::default())
+                        .unwrap();
+                let mut output = Writer::pcapng_with_options(
+                    Vec::new(),
+                    PcapNgOptions {
+                        endianness: target_order,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                assert!(matches!(
+                    map_frames(
+                        &mut reader,
+                        &mut output,
+                        Limits::default(),
+                        0,
+                        |_, frame| { Ok(frame.clone()) }
+                    ),
+                    Err(Error::TransformMetadata("malformed interface speed"))
+                ));
+            }
+        }
+    }
+}

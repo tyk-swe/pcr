@@ -2,10 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::protocol::{
-    common::{invalid, structured::member},
+    common::{invalid, structured::member, unsupported},
     message::{Records, Writer, data, record},
 };
-use crate::{codec::Error, field, layer::FieldSchema};
+use crate::{
+    codec::Error,
+    field,
+    layer::FieldSchema,
+    layout::{ByteRange, FieldLayout},
+};
 use bytes::Bytes;
 
 pub(super) const HEADERS: &[FieldSchema] = &[
@@ -46,6 +51,42 @@ pub(super) fn encode(
     w.put(body)?;
     Ok(w.bytes)
 }
+/// Parses a message whose start line carries `version`, with the layouts of its
+/// start line, headers and body.
+pub(super) fn parse_versioned(
+    name: &'static str,
+    version: &str,
+    b: &[u8],
+) -> Result<(Bytes, Records, Bytes, Vec<FieldLayout>), Error> {
+    let (start_line, headers, body) = parse(name, b)?;
+    let text = std::str::from_utf8(&start_line).map_err(|_| invalid(name, "invalid start line"))?;
+    let parts: Vec<_> = text.splitn(3, ' ').collect();
+    if parts.len() != 3
+        || !(parts[0] == version
+            && parts[1].len() == 3
+            && parts[1].bytes().all(|b| b.is_ascii_digit())
+            || parts[2] == version && !parts[1].is_empty() && is_token(name, parts[0].as_bytes()))
+    {
+        return Err(unsupported(name, "unsupported start line or version"));
+    }
+    let body_start = b.len() - body.len();
+    let fields = vec![
+        FieldLayout {
+            index: 0,
+            range: ByteRange::new(0, start_line.len()),
+        },
+        FieldLayout {
+            index: 1,
+            range: ByteRange::new(start_line.len() + 2, body_start - 2),
+        },
+        FieldLayout {
+            index: 2,
+            range: ByteRange::new(body_start, b.len()),
+        },
+    ];
+    Ok((start_line, headers, body, fields))
+}
+
 pub(super) fn parse(name: &'static str, b: &[u8]) -> Result<(Bytes, Records, Bytes), Error> {
     let head = parse_head(name, b)?;
     if head.length.is_some_and(|n| n != b.len() - head.end) {

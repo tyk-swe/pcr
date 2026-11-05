@@ -3,9 +3,10 @@
 
 use super::super::super::Error;
 use super::super::super::buffer::union_balanced;
-use super::super::super::model::{Certainty, Header, IssueScope, MessageKind, Status};
+use super::super::super::model::{Certainty, IssueScope, MessageKind, Status};
 use super::super::super::upgrade;
 use super::super::{ConnectionState, Context, Fault, Phase};
+use super::{PreludeHead, UnexpectedHead, record_head};
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::side::Side;
@@ -100,55 +101,16 @@ impl ConnectionState {
             // buffer; the next client delivery pumps this direction again.
             return Ok(false);
         }
-        let dir = self
-            .directions
-            .get_mut(Side::Server)
-            .ok_or(Error::Invariant("direction not found"))?;
-        let need = dir.buffer.len().min(http::MAX_HEADER_BYTES + 1);
-        let view = Bytes::copy_from_slice(&dir.buffer.bytes()[..need]);
-        let (head, consumed) = match http::parse_head(&view) {
-            Ok(Some(found)) => found,
-            Ok(None) => return Ok(false),
-            Err(error) => {
-                let flow = dir.flow.clone();
-                let take = dir.buffer.len();
-                let (wire, sets) = dir.buffer.take(take, context)?;
-                let sources = union_balanced(sets)?;
-                self.reject(
-                    context,
-                    Fault::new(
-                        flow,
-                        IssueScope::Connection,
-                        Status::Malformed,
-                        IssueCode::PreludeHead,
-                        error.to_string(),
-                    )
-                    .evidence(wire, sources),
-                )?;
-                return Ok(true);
-            }
+        let (head, head_wire_bytes, sets) = match self.take_prelude_head(
+            Side::Server,
+            |start| matches!(start, StartLine::Response { .. }),
+            UnexpectedHead::NOT_RESPONSE,
+            context,
+        )? {
+            PreludeHead::Incomplete => return Ok(false),
+            PreludeHead::Rejected => return Ok(true),
+            PreludeHead::Taken { head, wire, sets } => (head, wire, sets),
         };
-        if !matches!(head.start, StartLine::Response { .. }) {
-            let flow = dir.flow.clone();
-            let release_len = consumed.min(dir.buffer.len());
-            let sets = dir.buffer.consume(release_len, context)?;
-            let sources = union_balanced(sets)?;
-            self.reject(
-                context,
-                Fault::new(
-                    flow,
-                    IssueScope::Connection,
-                    Status::Malformed,
-                    IssueCode::PreludeNotResponse,
-                    "the server direction did not carry a response head",
-                )
-                .evidence(Bytes::copy_from_slice(&view[..consumed.min(256)]), sources),
-            )?;
-            return Ok(true);
-        }
-        let (head_wire_bytes, sets) = dir.buffer.take(consumed, context)?;
-        let (head, _) = http::parse_head(&head_wire_bytes)?
-            .ok_or(Error::Invariant("previously parsed complete HTTP/1 head"))?;
         let head_wire = head_wire_bytes.len();
         let status = head.status().ok_or(Error::Invariant("response"))?;
         let front = self.upgrade.prelude.as_mut().and_then(|p| {
@@ -227,27 +189,7 @@ impl ConnectionState {
             return Ok(true);
         }
         let mut msg = self.new_message(0, MessageKind::Response, context)?;
-        context.charge(&mut msg.charge, head_wire)?;
-        let header_charge = head
-            .headers
-            .iter()
-            .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
-            .sum::<usize>();
-        context.charge(&mut msg.charge, header_charge)?;
-        let headers: Vec<Header> = head
-            .headers
-            .iter()
-            .map(|header| Header {
-                name: Bytes::copy_from_slice(header.name.as_bytes()),
-                value: header.value.clone(),
-                never_indexed: false,
-            })
-            .collect();
-        msg.headers = headers;
-        for set in sets {
-            context.track(&mut msg.charge, &set)?;
-            msg.sets.push(set);
-        }
+        record_head(&mut msg, &head, head_wire, sets, context)?;
         if let Some((index, ..)) = front {
             msg.request = Some(index);
         }

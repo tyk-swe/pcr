@@ -11,15 +11,132 @@ use body::BodyStep;
 
 use super::super::Error;
 use super::super::buffer::union_balanced;
-use super::super::model::{IssueScope, Startup, Status};
+use super::super::model::{Header, IssueScope, Startup, Status};
 use super::super::stream::{MessageBuilder, StreamState};
 use super::super::upgrade::Offer;
 use super::{ConnectionState, Context, DirectionPhase, Fault, Phase};
-use crate::analysis::http2::side::{PerSide, Side};
+use crate::analysis::http2::side::Side;
+use crate::analysis::provenance::SourceSet;
 use crate::protocol::application::http;
 use bytes::Bytes;
 
+struct UnexpectedHead {
+    code: IssueCode,
+    detail: &'static str,
+}
+
+impl UnexpectedHead {
+    const NOT_REQUEST: Self = Self {
+        code: IssueCode::PreludeNotRequest,
+        detail: "the client direction did not carry a request head",
+    };
+    const NOT_RESPONSE: Self = Self {
+        code: IssueCode::PreludeNotResponse,
+        detail: "the server direction did not carry a response head",
+    };
+}
+
+enum PreludeHead {
+    Incomplete,
+    Rejected,
+    Taken {
+        head: http::Head,
+        wire: Bytes,
+        sets: Vec<SourceSet>,
+    },
+}
+
+fn record_head(
+    msg: &mut MessageBuilder,
+    head: &http::Head,
+    head_wire: usize,
+    sets: Vec<SourceSet>,
+    context: &mut Context<'_>,
+) -> Result<(), Error> {
+    context.charge(&mut msg.charge, head_wire)?;
+    let header_charge = head
+        .headers
+        .iter()
+        .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
+        .sum::<usize>();
+    context.charge(&mut msg.charge, header_charge)?;
+    msg.headers = head
+        .headers
+        .iter()
+        .map(|header| Header {
+            name: Bytes::copy_from_slice(header.name.as_bytes()),
+            value: header.value.clone(),
+            never_indexed: false,
+        })
+        .collect();
+    for set in sets {
+        context.track(&mut msg.charge, &set)?;
+        msg.sets.push(set);
+    }
+    Ok(())
+}
+
 impl ConnectionState {
+    fn take_prelude_head(
+        &mut self,
+        side: Side,
+        expected: fn(&http::StartLine) -> bool,
+        unexpected: UnexpectedHead,
+        context: &mut Context<'_>,
+    ) -> Result<PreludeHead, Error> {
+        let dir = self
+            .directions
+            .get_mut(side)
+            .ok_or(Error::Invariant("direction not found"))?;
+        let need = dir.buffer.len().min(http::MAX_HEADER_BYTES + 1);
+        let view = Bytes::copy_from_slice(&dir.buffer.bytes()[..need]);
+        let (head, consumed) = match http::parse_head(&view) {
+            Ok(Some(found)) => found,
+            Ok(None) => return Ok(PreludeHead::Incomplete),
+            Err(error) => {
+                let flow = dir.flow.clone();
+                let take = dir.buffer.len();
+                let (wire, sets) = dir.buffer.take(take, context)?;
+                let sources = union_balanced(sets)?;
+                self.reject(
+                    context,
+                    Fault::new(
+                        flow,
+                        IssueScope::Connection,
+                        Status::Malformed,
+                        IssueCode::PreludeHead,
+                        error.to_string(),
+                    )
+                    .evidence(wire, sources),
+                )?;
+                return Ok(PreludeHead::Rejected);
+            }
+        };
+        if !expected(&head.start) {
+            let flow = dir.flow.clone();
+            let sets = dir
+                .buffer
+                .consume(consumed.min(dir.buffer.len()), context)?;
+            let sources = union_balanced(sets)?;
+            self.reject(
+                context,
+                Fault::new(
+                    flow,
+                    IssueScope::Connection,
+                    Status::Malformed,
+                    unexpected.code,
+                    unexpected.detail,
+                )
+                .evidence(Bytes::copy_from_slice(&view[..consumed.min(256)]), sources),
+            )?;
+            return Ok(PreludeHead::Rejected);
+        }
+        let (wire, sets) = dir.buffer.take(consumed, context)?;
+        let (head, _) = http::parse_head(&wire)?
+            .ok_or(Error::Invariant("previously parsed complete HTTP/1 head"))?;
+        Ok(PreludeHead::Taken { head, wire, sets })
+    }
+
     pub(crate) fn prelude_step(
         &mut self,
         side: Side,
@@ -247,18 +364,7 @@ impl ConnectionState {
         self.upgrade.refused = false;
         self.streams.max_initiated[Side::Client] = 1;
         context.charge(&mut self.charge, budget::STREAM_OVERHEAD)?;
-        let windows = PerSide::new(
-            i64::from(
-                self.control.settings[Side::Server]
-                    .acknowledged
-                    .initial_window_size,
-            ),
-            i64::from(
-                self.control.settings[Side::Client]
-                    .acknowledged
-                    .initial_window_size,
-            ),
-        );
+        let windows = self.initial_windows();
         let mut stream = StreamState::open(Side::Client, windows);
         stream.request = Some(index);
         stream.method = method.map(Bytes::from);

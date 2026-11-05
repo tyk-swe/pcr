@@ -15,6 +15,21 @@ use crate::analysis::http2::side::{PerSide, Side};
 use bytes::Bytes;
 
 impl ConnectionState {
+    pub(super) fn initial_windows(&self) -> PerSide<i64> {
+        PerSide::new(
+            i64::from(
+                self.control.settings[Side::Server]
+                    .acknowledged
+                    .initial_window_size,
+            ),
+            i64::from(
+                self.control.settings[Side::Client]
+                    .acknowledged
+                    .initial_window_size,
+            ),
+        )
+    }
+
     pub(crate) fn opener_exhausted(&self, owner: Side) -> bool {
         self.clean_start
             && self
@@ -158,18 +173,7 @@ impl ConnectionState {
             self.streams.admitted += 1;
         }
         context.charge(&mut self.charge, budget::STREAM_OVERHEAD)?;
-        let windows = PerSide::new(
-            i64::from(
-                self.control.settings[Side::Server]
-                    .acknowledged
-                    .initial_window_size,
-            ),
-            i64::from(
-                self.control.settings[Side::Client]
-                    .acknowledged
-                    .initial_window_size,
-            ),
-        );
+        let windows = self.initial_windows();
         let mut state = StreamState::open(initiator, windows);
         state.early_response = early_response;
         state.ended[Side::Server] = early_response.is_some_and(|early| early.ended);

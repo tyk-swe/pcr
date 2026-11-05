@@ -17,7 +17,7 @@ use crate::rendering::{
 
 pub(super) fn render_batch_text(
     invocation: &crate::invocation::Invocation,
-    published: output::envelope::Published<crate::commands::network::dns::output::BatchResult>,
+    published: output::envelope::Published<super::output::BatchResult>,
     presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
@@ -61,7 +61,7 @@ pub(super) fn render_batch_text(
 
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
-    published: output::envelope::Published<crate::commands::network::dns::output::Report>,
+    published: output::envelope::Published<super::output::Report>,
     presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
@@ -114,18 +114,9 @@ pub(super) fn render_text(
         }
     }
     for (section, records) in [
-        (
-            crate::commands::network::dns::output::Section::Answer,
-            &result.answers,
-        ),
-        (
-            crate::commands::network::dns::output::Section::Authority,
-            &result.authorities,
-        ),
-        (
-            crate::commands::network::dns::output::Section::Additional,
-            &result.additionals,
-        ),
+        (super::output::Section::Answer, &result.answers),
+        (super::output::Section::Authority, &result.authorities),
+        (super::output::Section::Additional, &result.additionals),
     ] {
         for record in records {
             render_record(invocation, section, record)?;
@@ -191,8 +182,8 @@ pub(super) fn render_text(
 
 fn render_record(
     invocation: &crate::invocation::Invocation,
-    section: crate::commands::network::dns::output::Section,
-    record: &crate::commands::network::dns::output::Record,
+    section: super::output::Section,
+    record: &super::output::Record,
 ) -> Result<(), CliError> {
     let mut data = serde_json::to_value(&record.data).map_err(serialization_failure)?;
     let record_type = data
@@ -255,10 +246,7 @@ pub(super) fn emit_event(
     event: packetcraftr::dns::Event,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let published =
-        output::envelope::Published::<crate::commands::network::dns::output::Event>::try_from(
-            event,
-        )
+    let published = output::envelope::Published::<super::output::Event>::try_from(event)
         .map_err(CliError::classified)?;
     Ok(stream.emit_published(published)?)
 }
@@ -267,16 +255,20 @@ pub(super) fn emit_complete(
     report: packetcraftr::dns::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    Ok(stream.complete_published(output::envelope::Published::<
-        crate::commands::network::dns::output::Event,
-    >::from(report))?)
+    Ok(
+        stream.complete_published(output::envelope::Published::<super::output::Event>::from(
+            report,
+        ))?,
+    )
 }
 
 pub(super) fn emit_batch_complete(
     batch: packetcraftr::dns::batch::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    Ok(stream.complete_published(output::envelope::Published::<
-        crate::commands::network::dns::output::Event,
-    >::from(batch))?)
+    Ok(
+        stream.complete_published(output::envelope::Published::<super::output::Event>::from(
+            batch,
+        ))?,
+    )
 }

@@ -5,9 +5,9 @@
 
 use std::net::SocketAddr;
 
-use crate::commands::analyze::dns::output::Latency;
+use super::output::Latency;
 
-use crate::commands::analyze::dns::output as wire;
+use super::output as wire;
 use crate::errors::CliError;
 use crate::rendering::{
     comma_separated, render_dns_fields, render_optional, write_stdout_line, write_summary_line,
@@ -93,7 +93,7 @@ pub(super) fn render_complete(
     )
 }
 
-fn frames(sources: &[crate::commands::analyze::dns::output::provenance::Source]) -> String {
+fn frames(sources: &[super::output::provenance::Source]) -> String {
     or_none(comma_separated(sources.iter().map(|source| source.number)))
 }
 

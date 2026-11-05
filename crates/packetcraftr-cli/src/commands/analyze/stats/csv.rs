@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use crate::commands::analyze::stats::output::{Report, TableData};
+use super::output::{Report, TableData};
 use crate::errors::CliError;
 
 fn duration(value: Duration) -> String {

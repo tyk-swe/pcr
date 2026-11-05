@@ -15,7 +15,7 @@ use crate::rendering::{emit_published, write_stdout_line};
 
 pub(super) struct State {
     selected: analysis::expert::Summary,
-    retained: Retained<crate::commands::analyze::expert::output::Finding>,
+    retained: Retained<super::output::Finding>,
 }
 
 impl State {
@@ -35,7 +35,7 @@ impl State {
 pub(super) fn render_record(
     invocation: &crate::invocation::Invocation,
     format: Format,
-    finding: crate::commands::analyze::expert::output::Finding,
+    finding: super::output::Finding,
     state: &mut State,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
@@ -122,16 +122,13 @@ pub(super) fn render_stream(
     Ok(stream.complete_published(Published::new(result(summary, state), Vec::new()))?)
 }
 
-fn result(
-    summary: &analysis::Summary,
-    state: State,
-) -> crate::commands::analyze::expert::output::Report {
+fn result(summary: &analysis::Summary, state: State) -> super::output::Report {
     let State {
         mut selected,
         retained,
     } = state;
     selected.clock = summary.clock.clone();
-    crate::commands::analyze::expert::output::Report::from((
+    super::output::Report::from((
         selected,
         summary.frames_read,
         summary.frames_matched,

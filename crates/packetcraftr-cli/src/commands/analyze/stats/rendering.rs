@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use packetcraftr_core as core;
 use packetcraftr_core::analysis;
 
-use crate::commands::analyze::stats::output::Table;
+use super::output::Table;
 use crate::errors::CliError;
 use crate::rendering::{
     duration_text, render_diagnostics_text, render_optional, write_stdout_line, write_summary_line,

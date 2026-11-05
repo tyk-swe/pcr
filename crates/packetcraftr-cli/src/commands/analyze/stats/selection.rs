@@ -9,7 +9,7 @@ use packetcraftr_core::{
 };
 
 use super::arguments::Sort;
-use crate::commands::analyze::stats::output::Table;
+use super::output::Table;
 use crate::rendering::omitted_diagnostic;
 
 fn rank<T>(

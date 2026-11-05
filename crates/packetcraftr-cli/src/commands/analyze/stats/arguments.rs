@@ -56,7 +56,7 @@ pub(crate) struct Args {
     pub(crate) limits: OfflineLimitsArgs,
 }
 
-/// The `--table` selector for [`crate::commands::analyze::stats::output::Table`].
+/// The `--table` selector for [`super::output::Table`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum Table {
     Conversations,
@@ -68,7 +68,7 @@ pub(crate) enum Table {
     Overview,
 }
 
-impl From<Table> for crate::commands::analyze::stats::output::Table {
+impl From<Table> for super::output::Table {
     fn from(value: Table) -> Self {
         match value {
             Table::Conversations => Self::Conversations,

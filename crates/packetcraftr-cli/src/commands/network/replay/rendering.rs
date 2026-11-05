@@ -5,7 +5,7 @@ use crate::errors::CliError;
 use crate::rendering::{SpacedHex, duration_text, write_summary_line};
 
 pub(super) fn frame_line(
-    frame: &crate::commands::network::replay::output::Frame,
+    frame: &super::output::Frame,
     presentation: crate::invocation::Presentation,
 ) -> String {
     format!(

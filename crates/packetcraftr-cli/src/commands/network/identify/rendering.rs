@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::commands::network::identify::output::Report;
+use super::output::Report;
 use crate::errors::CliError;
 use crate::rendering::{duration_text, write_stdout_line};
 
@@ -21,10 +21,8 @@ pub(super) fn render_text(
         for probe in &record.probes {
             if !matches!(
                 probe.io_outcome,
-                crate::commands::network::identify::output::IoOutcome::Complete
-                    | crate::commands::network::identify::output::IoOutcome::Eof
-            ) || probe.observation.outcome
-                != crate::commands::network::identify::output::ObservationOutcome::Complete
+                super::output::IoOutcome::Complete | super::output::IoOutcome::Eof
+            ) || probe.observation.outcome != super::output::ObservationOutcome::Complete
             {
                 write_stdout_line(
                     invocation,

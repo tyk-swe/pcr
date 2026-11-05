@@ -42,9 +42,7 @@ pub(super) fn run(
     }
     if format == Format::Ndjson {
         stream.complete_published(Published::new(
-            crate::commands::files::read::output::Event::from(
-                crate::commands::files::read::output::Totals::from((&budget, frames_matched)),
-            ),
+            super::output::Event::from(super::output::Totals::from((&budget, frames_matched))),
             Vec::new(),
         ))?;
     }
@@ -55,9 +53,9 @@ fn convert_frame(
     frame: core::frame::Frame,
     source_frame: u64,
     decoding: Option<&Decoding>,
-) -> Result<Option<crate::commands::files::read::output::Frame>, CliError> {
+) -> Result<Option<super::output::Frame>, CliError> {
     let Some(decoding) = decoding else {
-        return crate::commands::files::read::output::Frame::try_from((source_frame, frame))
+        return super::output::Frame::try_from((source_frame, frame))
             .map(Some)
             .map_err(CliError::classified);
     };
@@ -69,9 +67,9 @@ fn convert_frame(
         return Ok(None);
     };
     if decoding.publish_layers {
-        crate::commands::files::read::output::Frame::try_from((source_frame, frame, &decoded))
+        super::output::Frame::try_from((source_frame, frame, &decoded))
     } else {
-        crate::commands::files::read::output::Frame::try_from((source_frame, frame))
+        super::output::Frame::try_from((source_frame, frame))
     }
     .map(Some)
     .map_err(CliError::classified)

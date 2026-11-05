@@ -4,9 +4,7 @@
 use crate::errors::CliError;
 use crate::rendering::write_stdout_line;
 
-pub(super) fn protocol_line(
-    protocol: &crate::commands::reference::protocols::output::Summary,
-) -> String {
+pub(super) fn protocol_line(protocol: &super::output::Summary) -> String {
     format!(
         "{} aliases=[{}] build={} dissect={} exact_round_trip={} matcher={} decode_only={} stream_decode={} transports=[{}]",
         protocol.protocol,
@@ -23,7 +21,7 @@ pub(super) fn protocol_line(
 
 pub(super) fn render_detail(
     invocation: &crate::invocation::Invocation,
-    protocol: &crate::commands::reference::protocols::output::Detail,
+    protocol: &super::output::Detail,
 ) -> Result<(), CliError> {
     let summary = &protocol.summary;
     write_stdout_line(invocation, format_args!("protocol: {}", summary.protocol))?;

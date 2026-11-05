@@ -19,7 +19,7 @@ use analysis::StreamRef;
 use analysis::follow::{Chunk, Summary};
 
 pub(super) struct State {
-    retained: Retained<crate::commands::analyze::follow::output::Chunk>,
+    retained: Retained<super::output::Chunk>,
 }
 
 impl State {
@@ -50,7 +50,7 @@ pub(super) fn render_record(
             ),
         ),
         Format::Hex => {
-            let rendered = crate::commands::analyze::follow::output::Chunk::from(chunk.clone());
+            let rendered = super::output::Chunk::from(chunk.clone());
             write_stdout_line(
                 invocation,
                 format_args!(
@@ -68,7 +68,7 @@ pub(super) fn render_record(
             Ok(())
         }
         Format::Ndjson => Ok(stream.emit_published(Published::new(
-            crate::commands::analyze::follow::output::Chunk::from(chunk),
+            super::output::Chunk::from(chunk),
             Vec::new(),
         ))?),
         other => other.unreachable(),
@@ -136,7 +136,7 @@ pub(super) fn render_aggregate(
         state.retained.omitted(),
         "--max-frames",
     );
-    let report = crate::commands::analyze::follow::output::Report::try_from((
+    let report = super::output::Report::try_from((
         selector,
         summary,
         state.retained.into_items(),
@@ -161,7 +161,7 @@ pub(super) fn render_stream(
     stream: &StreamEncoder,
     written: Vec<super::write::Written>,
 ) -> Result<(), CliError> {
-    let report = crate::commands::analyze::follow::output::Report::try_from((
+    let report = super::output::Report::try_from((
         selector,
         summary,
         Vec::new(),

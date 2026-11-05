@@ -10,12 +10,12 @@ use crate::rendering::{FieldTree, render_frame, write_hex_line};
 
 pub(super) fn render_record(
     invocation: &crate::invocation::Invocation,
-    record: crate::commands::files::read::output::Frame,
+    record: super::output::Frame,
     format: Format,
     stream: &StreamEncoder,
     tree: Option<&mut FieldTree>,
 ) -> Result<(), CliError> {
-    let crate::commands::files::read::output::Frame {
+    let super::output::Frame {
         source_frame,
         frame,
         decoded,
@@ -41,7 +41,7 @@ pub(super) fn render_record(
         },
         Format::Hex => write_hex_line(frame.bytes()),
         Format::Ndjson => Ok(stream.emit_published(Published::new(
-            crate::commands::files::read::output::Event::from(record),
+            super::output::Event::from(record),
             Vec::new(),
         ))?),
         Format::Json | Format::Pcap | Format::PcapNg => Err(CliError::new(

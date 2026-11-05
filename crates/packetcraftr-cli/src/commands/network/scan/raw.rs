@@ -16,7 +16,7 @@ use crate::system::{Runtime, prepare_workflow};
 /// endpoints, method, publication plan, and optional follow-up stages.
 pub(super) struct Request {
     pub(super) request: packetcraftr::scan::Request,
-    pub(super) plan: crate::commands::network::scan::output::plan::Plan,
+    pub(super) plan: super::output::plan::Plan,
     pub(super) policy: crate::command_options::HostnamePolicyArgs,
     pub(super) route: crate::command_options::RouteSelectionArgs,
     pub(super) queue_limits: packetcraftr_netio::capture::Limits,
@@ -119,7 +119,7 @@ pub(super) fn run(
             }
             let traced = trace_plan.zip(trace);
             invocation.check()?;
-            let published = crate::commands::network::scan::output::Report::publish(
+            let published = super::output::Report::publish(
                 scan,
                 plan,
                 super::reverse_dns_hosts(reverse_dns),
@@ -149,8 +149,8 @@ pub(super) fn run(
 pub(super) struct Streamed {
     pub(super) report: packetcraftr::scan::Report,
     pub(super) endpoints: Vec<packetcraftr::scan::Endpoint>,
-    pub(super) plan: crate::commands::network::scan::output::plan::Plan,
+    pub(super) plan: super::output::plan::Plan,
     /// Each host's PTR lookup, by position; empty when none ran.
-    pub(super) reverse_dns: Vec<Option<crate::commands::network::scan::output::host::ReverseDns>>,
+    pub(super) reverse_dns: Vec<Option<super::output::host::ReverseDns>>,
     pub(super) traceroute: Option<crate::commands::network::traceroute::output::hosts::Complete>,
 }

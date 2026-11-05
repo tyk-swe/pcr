@@ -17,7 +17,7 @@ use crate::rendering::{
 
 pub(super) fn render_text(
     invocation: &crate::invocation::Invocation,
-    published: output::envelope::Published<crate::commands::network::scan::output::Report>,
+    published: output::envelope::Published<super::output::Report>,
     presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     let output::envelope::Published {
@@ -127,7 +127,7 @@ pub(super) fn render_text(
 
 fn render_scheduling_text(
     invocation: &crate::invocation::Invocation,
-    scheduling: &crate::commands::network::scan::output::Scheduling,
+    scheduling: &super::output::Scheduling,
 ) -> Result<(), CliError> {
     let ceilings = match (scheduling.operation_ceiling, scheduling.process_ceiling) {
         (Some(operation), Some(process)) => {
@@ -175,7 +175,7 @@ fn render_scheduling_text(
 
 pub(super) fn render_plan_text(
     invocation: &crate::invocation::Invocation,
-    plan: &crate::commands::network::scan::output::plan::Plan,
+    plan: &super::output::plan::Plan,
 ) -> Result<(), CliError> {
     let method = &plan.method;
     write_stdout_line(
@@ -250,9 +250,7 @@ pub(super) fn render_plan_text(
 }
 
 /// The effective TCP segment, with the heuristic caveat for non-SYN modes.
-pub(super) fn tcp_scan_text(
-    tcp_scan: crate::commands::network::scan::output::plan::TcpScan,
-) -> String {
+pub(super) fn tcp_scan_text(tcp_scan: super::output::plan::TcpScan) -> String {
     let line = format!("tcp-scan={} flags={:#05x}", tcp_scan.mode, tcp_scan.flags);
     match tcp_scan.mode {
         "syn" => line,
@@ -266,9 +264,7 @@ pub(super) fn tcp_scan_text(
 }
 
 /// The effective SCTP chunk, with the heuristic caveat for COOKIE-ECHO.
-pub(super) fn sctp_scan_text(
-    sctp_scan: crate::commands::network::scan::output::plan::SctpScan,
-) -> String {
+pub(super) fn sctp_scan_text(sctp_scan: super::output::plan::SctpScan) -> String {
     let line = format!(
         "sctp-scan={} chunk-type={}",
         sctp_scan.mode, sctp_scan.chunk_type
@@ -282,15 +278,14 @@ pub(super) fn sctp_scan_text(
 }
 
 fn visible_probes(
-    probes: &[crate::commands::network::scan::output::Probe],
+    probes: &[super::output::Probe],
     presentation: crate::invocation::Presentation,
-) -> impl Iterator<Item = &crate::commands::network::scan::output::Probe> {
+) -> impl Iterator<Item = &super::output::Probe> {
     probes.iter().filter(move |evidence| {
         presentation.verbose
             || evidence.status == packetcraftr::probe::Status::Timeout
             || evidence.application.as_ref().is_some_and(|application| {
-                application.status
-                    == crate::commands::network::scan::output::ApplicationStatus::Rejected
+                application.status == super::output::ApplicationStatus::Rejected
             })
     })
 }
@@ -300,7 +295,7 @@ fn visible_probes(
 fn render_probe_text(
     invocation: &crate::invocation::Invocation,
     lead: &str,
-    evidence: &crate::commands::network::scan::output::Probe,
+    evidence: &super::output::Probe,
     presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     write_stdout_line(
@@ -364,7 +359,7 @@ fn render_probe_text(
 /// A connect discovery probe's evidence line.
 fn connect_probe_text(
     invocation: &crate::invocation::Invocation,
-    probe: &crate::commands::network::scan::output::connect::Probe,
+    probe: &super::output::connect::Probe,
 ) -> Result<(), CliError> {
     write_stdout_line(
         invocation,
@@ -407,7 +402,7 @@ fn throughput_text(planned: std::time::Duration, stats: &output::envelope::Stats
 pub(super) fn render_inference_text(
     invocation: &crate::invocation::Invocation,
     port_hint: Option<&str>,
-    inference: Option<&crate::commands::network::scan::output::plan::Inference>,
+    inference: Option<&super::output::plan::Inference>,
 ) -> Result<(), CliError> {
     let Some(inference) = inference else {
         return Ok(());
@@ -438,7 +433,7 @@ fn listed<T: std::fmt::Display>(values: &[T]) -> String {
 
 pub(super) fn render_connect_text(
     invocation: &crate::invocation::Invocation,
-    report: &crate::commands::network::scan::output::connect::Report,
+    report: &super::output::connect::Report,
     presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
     render_plan_text(invocation, &report.summary.plan)?;
@@ -492,9 +487,9 @@ pub(super) fn render_connect_text(
 
 fn endpoint_text(
     address: std::net::IpAddr,
-    scope: Option<&crate::commands::network::scan::output::Scope>,
+    scope: Option<&super::output::Scope>,
     endpoint_name: &str,
-    classification: crate::commands::network::scan::output::Classification,
+    classification: super::output::Classification,
 ) -> String {
     let address = match scope {
         Some(scope) => format!("{address}%{}", scope.zone),

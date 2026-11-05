@@ -5,7 +5,7 @@ use crate::errors::CliError;
 
 use crate::invocation::Invocation;
 
-use crate::commands::security::output::Report;
+use super::output::Report;
 use std::fmt::Write as _;
 
 const FILTER_SCRIPT: &str = r"

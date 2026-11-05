@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::commands::analyze::http2::output as wire;
+use super::output as wire;
 use crate::errors::CliError;
 use crate::rendering::{
     comma_separated, escaped, render_optional, write_stdout_line, write_summary_line,

@@ -130,42 +130,41 @@ fn endpoint_bound(
             } else {
                 1
             };
-            let candidate = crate::commands::network::identify::output::Candidate {
+            let candidate = super::output::Candidate {
                 product: rule.product.clone(),
                 version: rule
                     .version
                     .as_ref()
                     .map(|version| "0".repeat(version.max_bytes)),
-                confidence: crate::commands::network::identify::output::Confidence::Protocol,
-                hostname: rule.hostname_field.map(|field| {
-                    crate::commands::network::identify::output::SupportedValue {
+                confidence: super::output::Confidence::Protocol,
+                hostname: rule
+                    .hostname_field
+                    .map(|field| super::output::SupportedValue {
                         value: "x".repeat(254),
-                        source:
-                            crate::commands::network::identify::output::ValueSource::ObservedField {
-                                field: field.into(),
-                                index: core::MAX_OBSERVED_FIELDS - 1,
-                            },
-                    }
-                }),
-                device_type: rule.device_type.as_ref().map(|value| {
-                    crate::commands::network::identify::output::SupportedValue {
+                        source: super::output::ValueSource::ObservedField {
+                            field: field.into(),
+                            index: core::MAX_OBSERVED_FIELDS - 1,
+                        },
+                    }),
+                device_type: rule
+                    .device_type
+                    .as_ref()
+                    .map(|value| super::output::SupportedValue {
                         value: value.clone(),
-                        source:
-                            crate::commands::network::identify::output::ValueSource::MatchRule {
-                                reference: rule.metadata.reference.clone(),
-                            },
-                    }
-                }),
-                cpe: rule.cpe.as_ref().map(|value| {
-                    crate::commands::network::identify::output::SupportedValue {
+                        source: super::output::ValueSource::MatchRule {
+                            reference: rule.metadata.reference.clone(),
+                        },
+                    }),
+                cpe: rule
+                    .cpe
+                    .as_ref()
+                    .map(|value| super::output::SupportedValue {
                         value: value.clone(),
-                        source:
-                            crate::commands::network::identify::output::ValueSource::MatchRule {
-                                reference: rule.metadata.reference.clone(),
-                            },
-                    }
-                }),
-                provenance: crate::commands::network::identify::output::Provenance {
+                        source: super::output::ValueSource::MatchRule {
+                            reference: rule.metadata.reference.clone(),
+                        },
+                    }),
+                provenance: super::output::Provenance {
                     corpus: request.corpus.name.clone(),
                     version: request.corpus.version.clone(),
                     probe: probe.id.clone(),

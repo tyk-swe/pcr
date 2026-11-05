@@ -17,7 +17,7 @@ pub(crate) fn ip_event_sink(
         if let Some(stream) = &stream {
             stream
                 .emit_published(Published::new(
-                    crate::commands::offline_analysis::output::reassembly::Event::from(event),
+                    super::output::reassembly::Event::from(event),
                     Vec::new(),
                 ))
                 .map_err(|error| CliError::from(error).into_boundary_error())?;
@@ -30,7 +30,7 @@ pub(crate) fn render_scope(
     invocation: &crate::invocation::Invocation,
     scope: &analysis::scope::Definition,
 ) -> Result<(), CliError> {
-    let scope = crate::commands::offline_analysis::output::Scope::try_from(scope.clone())?;
+    let scope = super::output::Scope::try_from(scope.clone())?;
     crate::rendering::write_stdout_line(
         invocation,
         format_args!(

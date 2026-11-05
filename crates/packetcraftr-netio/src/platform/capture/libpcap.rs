@@ -22,15 +22,13 @@ use crate::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
         NativeCaptureStats, NativeCapturedPacket, monotonic_packet_time, system_time,
     },
-    capture::{
-        Limits, MAX_TIMESTAMP_TYPES, Metadata, NativeSettings, TimestampPrecision, TimestampType,
-    },
+    capture::{Limits, Metadata, NativeSettings, TimestampPrecision, TimestampType},
     interface::Id as InterfaceId,
     platform::common::READ_TIMEOUT_MILLIS,
     platform::common::libpcap::map_open_error,
     platform::common::pcap_api::{
-        Diagnostic, canonical_link_type, check_setting_status, realize_settings,
-        timestamp_precision_value, timestamp_source_of_value, timestamp_source_value,
+        canonical_link_type, check_setting_status, realize_settings, timestamp_precision_value,
+        timestamp_source_of_value, timestamp_source_value, timestamp_type_list, tstamp_type_string,
         validate_effective_snapshot_length,
     },
 };
@@ -193,36 +191,16 @@ pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampTy
     // SAFETY: handle is a live inactive capture; libpcap fills the writable
     // out-pointer with an allocation pcap_free_tstamp_types owns.
     let count = unsafe { pcap_list_tstamp_types(handle, &mut list) };
-    if count < 0 {
-        return Err(Error::Capture {
-            message: format!(
-                "libpcap could not enumerate timestamp types for {}",
-                interface.name
-            ),
-            source: Diagnostic::new(Some(count), inactive_error_message(handle)).into_source(),
-        });
-    }
-    // libpcap returns no allocation for a zero count, so the null list must not become a slice.
-    if count == 0 {
-        return Ok(Vec::new());
-    }
-    let count = usize::try_from(count).unwrap_or(0);
-    if count > MAX_TIMESTAMP_TYPES {
-        // SAFETY: list is a live libpcap allocation released exactly once.
-        unsafe { pcap_free_tstamp_types(list) };
-        return Err(Error::Capture {
-            message: format!(
-                "libpcap reported {count} timestamp types for {}, above the {MAX_TIMESTAMP_TYPES} bound",
-                interface.name
-            ),
-            source: None,
-        });
-    }
-    // SAFETY: list points to `count` consecutive c_int values libpcap owns;
-    // they are copied out before the single pcap_free_tstamp_types call.
-    let values = unsafe { std::slice::from_raw_parts(list, count) }.to_vec();
-    // SAFETY: list is the unchanged libpcap allocation from above.
-    unsafe { pcap_free_tstamp_types(list) };
+    let values = timestamp_type_list(
+        "libpcap",
+        interface,
+        count,
+        || inactive_error_message(handle),
+        // SAFETY: list is the unchanged libpcap allocation, released exactly once.
+        || unsafe { pcap_free_tstamp_types(list) },
+        // SAFETY: list points to `count` consecutive c_int values libpcap owns.
+        |count| unsafe { std::slice::from_raw_parts(list, count) }.to_vec(),
+    )?;
     Ok(values
         .into_iter()
         .map(|value| {
@@ -239,17 +217,6 @@ pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampTy
             }
         })
         .collect())
-}
-
-unsafe fn tstamp_type_string(raw: *const c_char) -> Option<String> {
-    if raw.is_null() {
-        return None;
-    }
-    // SAFETY: `raw` is non-NULL and points to a static NUL-terminated libpcap string.
-    let value = unsafe { CStr::from_ptr(raw) }
-        .to_string_lossy()
-        .into_owned();
-    (!value.is_empty()).then_some(value)
 }
 
 fn inactive_error_message(handle: *mut c_void) -> String {

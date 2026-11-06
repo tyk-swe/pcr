@@ -361,6 +361,33 @@ mod tests {
     }
 
     #[test]
+    fn neighbor_spacing_matches_probe_spacing() {
+        let client = crate::Client::new(
+            std::sync::Arc::new(packetcraftr_core::registry::Registry::default()),
+            crate::policy::Policy::default(),
+            (),
+        );
+        for rate in [None, Some(3), Some(7)] {
+            let request = Request {
+                probes_per_second: rate,
+                ..request()
+            };
+            let deadline = Deadline::new(Duration::from_secs(60));
+            let (_, plan) =
+                planned(&request, &mut RecordingAuthorizer::default(), &deadline, 0).unwrap();
+            let operation = crate::scan::NeighborBounds::authorize(
+                &request,
+                crate::engine::operation::Operation::new(&client, Duration::from_secs(60)),
+            )
+            .unwrap();
+            assert_eq!(operation.neighbor_pause, plan.delay);
+            if let Some(rate) = rate {
+                assert!(operation.neighbor_pause.as_nanos() * u128::from(rate) >= 1_000_000_000);
+            }
+        }
+    }
+
+    #[test]
     fn overlapping_ports_preserve_duplicates_and_order() {
         let discovery = [u16::MAX, 64, 64, 1];
         let ports = [65, u16::MAX, 65, 63, 64, 1, 63];

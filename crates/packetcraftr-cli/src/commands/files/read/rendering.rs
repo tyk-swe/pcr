@@ -3,6 +3,7 @@
 
 use crate::output::contract::Format;
 use crate::output::envelope::Published;
+use crate::output::frame::Record;
 
 use crate::errors::CliError;
 use crate::invocation::StreamEncoder;
@@ -10,12 +11,12 @@ use crate::rendering::{FieldTree, render_frame, write_hex_line};
 
 pub(super) fn render_record(
     invocation: &crate::invocation::Invocation,
-    record: super::output::Frame,
+    record: Record,
     format: Format,
     stream: &StreamEncoder,
     tree: Option<&mut FieldTree>,
 ) -> Result<(), CliError> {
-    let super::output::Frame {
+    let Record {
         source_frame,
         frame,
         decoded,

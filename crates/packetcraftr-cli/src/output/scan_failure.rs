@@ -97,14 +97,15 @@ pub(crate) fn coverage(value: library::Coverage) -> &'static str {
 /// The effective TCP segment a raw scan sends to TCP scan endpoints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct TcpScan {
-    pub mode: &'static str,
+    #[serde(serialize_with = "serialize_tcp_mode")]
+    pub mode: library::TcpScan,
     pub flags: u16,
 }
 
 impl From<library::TcpScan> for TcpScan {
     fn from(mode: library::TcpScan) -> Self {
         Self {
-            mode: mode.as_str(),
+            mode,
             flags: mode.flags(),
         }
     }
@@ -113,17 +114,32 @@ impl From<library::TcpScan> for TcpScan {
 /// The effective SCTP chunk a raw scan sends to SCTP scan endpoints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct SctpScan {
-    pub mode: &'static str,
+    #[serde(serialize_with = "serialize_sctp_mode")]
+    pub mode: library::SctpScan,
     pub chunk_type: u8,
 }
 
 impl From<library::SctpScan> for SctpScan {
     fn from(mode: library::SctpScan) -> Self {
         Self {
-            mode: mode.as_str(),
+            mode,
             chunk_type: mode.chunk_type(),
         }
     }
+}
+
+fn serialize_tcp_mode<S: serde::Serializer>(
+    mode: &library::TcpScan,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(mode.as_str())
+}
+
+fn serialize_sctp_mode<S: serde::Serializer>(
+    mode: &library::SctpScan,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(mode.as_str())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

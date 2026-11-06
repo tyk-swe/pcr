@@ -123,7 +123,7 @@ impl Codec for Ipv4Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        let expected_protocol = expected_discriminator(NAME, context, 255_u8, &layer.protocol);
+        let expected_protocol = expected_discriminator(context, 255_u8, &layer.protocol);
         validate_auto_raw_discriminator(
             NAME,
             "protocol",

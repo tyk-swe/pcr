@@ -52,7 +52,7 @@ impl crate::commands::Spec for Args {
             rust_types: &[
                 "crate::commands::network::scan::output::event::Event",
                 "crate::commands::network::scan::output::host::Host",
-                "crate::commands::network::traceroute::output::hosts::Event",
+                "crate::commands::network::scan::output::traceroute::Event",
             ],
             events: &[
                 "complete",

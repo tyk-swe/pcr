@@ -56,7 +56,7 @@ pub enum Event {
         rtt: Rtt,
         scheduling: Scheduling,
         #[serde(skip_serializing_if = "Option::is_none")]
-        traceroute: Option<crate::commands::network::traceroute::output::hosts::Complete>,
+        traceroute: Option<crate::commands::network::scan::output::traceroute::Complete>,
     },
 }
 
@@ -147,14 +147,14 @@ impl
     From<(
         library::Report,
         Plan,
-        Option<crate::commands::network::traceroute::output::hosts::Complete>,
+        Option<crate::commands::network::scan::output::traceroute::Complete>,
     )> for Published<Event>
 {
     fn from(
         (summary, plan, traceroute): (
             library::Report,
             Plan,
-            Option<crate::commands::network::traceroute::output::hosts::Complete>,
+            Option<crate::commands::network::scan::output::traceroute::Complete>,
         ),
     ) -> Self {
         Self::new(

@@ -191,24 +191,28 @@ pub(crate) fn collection(
     timeout: Duration,
     limits: net::capture::Limits,
 ) -> Result<packetcraftr::exchange::Collection, CliError> {
-    let mut collection = packetcraftr::exchange::Collection {
+    let maximum = net::deadline::MAX_WAIT;
+    // A zero window is left to the calling workflow's own limit error.
+    if !timeout.is_zero() && core::budget::duration_violation(timeout, maximum) {
+        return Err(CliError::classified(
+            packetcraftr::exchange::Error::InvalidRequest {
+                field: "timeout",
+                message: format!("must be greater than zero and not exceed {maximum:?}"),
+            },
+        ));
+    }
+    let collection = packetcraftr::exchange::Collection {
         max_unmatched_frames: limits.max_frames,
         max_responses: limits.max_frames,
         capture: limits,
-        ..packetcraftr::exchange::Collection::default()
+        decode: core::decode::Options {
+            limits: core::packet::Limits {
+                max_packet_size: limits.snap_length,
+                ..core::packet::Limits::default()
+            },
+        },
     };
-    collection.decode.limits.max_packet_size = limits.snap_length;
-    packetcraftr::exchange::Request {
-        // A zero window is left to the calling workflow's own limit error.
-        timeout: timeout.max(Duration::from_nanos(1)),
-        collection: collection.clone(),
-        ..packetcraftr::exchange::Request::new(
-            placeholder(),
-            packetcraftr::send::Options::default(),
-        )
-    }
-    .validate()
-    .map_err(CliError::classified)?;
+    collection.validate().map_err(CliError::classified)?;
     Ok(collection)
 }
 

@@ -160,3 +160,48 @@ fn probe_serialization_matches_endpoint_variant() {
         );
     }
 }
+
+#[test]
+fn diagnostic_modes_preserve_wire_identity_and_text_caveats() {
+    use crate::commands::network::scan::rendering::{sctp_scan_text, tcp_scan_text};
+
+    let endpoint = probe::Endpoint::Tcp { port: 443 };
+    let syn = Probe::try_from(evidence(endpoint, ADDRESS_V4)).unwrap();
+    let flags = library::TcpScan::Syn.flags();
+    let custom = Probe::try_from(library::ProbeEvidence {
+        tcp_scan: Some(library::TcpScan::Custom { flags }),
+        ..evidence(endpoint, ADDRESS_V4)
+    })
+    .unwrap();
+    let custom_json = serde_json::to_value(&custom).unwrap();
+    assert_eq!(
+        custom_json["tcp_scan"],
+        json!({"mode": "custom", "flags": flags})
+    );
+    let syn = syn.tcp_scan.unwrap();
+    let custom = custom.tcp_scan.unwrap();
+    assert_eq!(syn.flags, custom.flags);
+    assert_eq!(
+        tcp_scan_text(syn),
+        format!("tcp-scan=syn flags={flags:#05x}")
+    );
+    assert_eq!(
+        tcp_scan_text(custom),
+        format!(
+            "tcp-scan=custom flags={flags:#05x} (observation-only: replies are reported, no port state is inferred)"
+        )
+    );
+
+    let mode = library::SctpScan::CookieEcho;
+    let cookie = Probe::try_from(library::ProbeEvidence {
+        sctp_scan: Some(mode),
+        ..evidence(probe::Endpoint::Sctp { port: 80 }, ADDRESS_V4)
+    })
+    .unwrap();
+    let cookie_json = serde_json::to_value(&cookie).unwrap();
+    assert_eq!(
+        cookie_json["sctp_scan"],
+        json!({"mode": "cookie_echo", "chunk_type": mode.chunk_type()})
+    );
+    assert!(sctp_scan_text(cookie.sctp_scan.unwrap()).contains("stack-dependent heuristic"));
+}

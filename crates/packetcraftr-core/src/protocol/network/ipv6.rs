@@ -237,7 +237,7 @@ fn resolve_next_header(
     context: &EncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(u8, WireValue<u8>), crate::codec::Error> {
-    let expectation = expected_discriminator(name, context, ip_protocol::NO_NEXT_HEADER, value);
+    let expectation = expected_discriminator(context, ip_protocol::NO_NEXT_HEADER, value);
     validate_auto_raw_discriminator(name, "next_header", value, context, diagnostics)?;
     let (next, materialized) = resolve_u8(
         name,

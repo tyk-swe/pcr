@@ -585,3 +585,112 @@ inventory does, decode-as transports match to catalog variants without a
 string round trip or a panic-capable expect, and the stale-allowlist script
 test now asserts a known stale entry is reported, so it fails if that
 reporting is ever deleted.
+
+## Follow-up audit on 2026-11-06
+
+This pass audits all four crates, repository scripts, fuzz support, and
+release tooling from `3d9c9ab9`. The user declined optional comment and
+test cleanup. Existing behavior tests remain the safety net, with focused
+regressions added where structural changes expose a behavior gap. Initial
+layer, coupling, and file-length checks pass with unchanged thresholds.
+
+### Decisions and the problems they address
+
+- Share Rust token boundaries and production-source filtering across tools.
+  - `scripts/rust_source.py` implements comment and literal scanning twice,
+    in `blank_comments_and_strings` and `_skip_literal`.
+  - `scripts/check_layers.py` owns another test-item parser. Unlike the
+    shared parser, it includes `cfg(all(test, unix))` items in production.
+  - `scripts/check_output_schema.py` filters inline tests for registry rows
+    but rereads raw sources for stream types. Commented declarations can
+    also enter the inventory. All views should use the same sources.
+  - The confirmation audit found `scripts/check_coupling.py` excludes
+    inline tests only for cancellation polling. Other production metrics
+    change when an unchanged test moves between an inline module and a
+    test file. All counters should read the same production-source view,
+    with existing ceilings preserved.
+- Validate CLI collections through their existing public validator.
+  - `system/preparation.rs::collection` fabricates an exchange request and
+    placeholder packet to reach `Collection::validate` indirectly.
+  - Its one-nanosecond fallback satisfies that invented request. Preserve
+    the explicit oversized-timeout preflight and leave zero-timeout
+    validation to each workflow, keeping the established error order.
+- Give CLI output models their actual owner and keep scan modes typed.
+  - Live capture imports a frame record from file reading. Shared frame
+    output belongs to the existing common frame module.
+  - Multi-host trace output serves scan follow-ups but lives under the
+    standalone traceroute command.
+  - Scan text formatting converts typed modes into strings and then
+    compares their spellings to select behavior.
+- Put shared analysis limits below individual collectors.
+  - HTTP/1 and capture security import the HTTP/2 body ceiling although
+    neither operation depends on that collector.
+  - HTTP/2 duplicates `analysis::error::check_ceiling`. Use that validator
+    and retain the existing public constant path through a reexport.
+- Let HTTP/2 state own its repeated operations.
+  - Shutdown and SETTINGS handling repeat buffered ACK classification.
+  - Initial headers, push promises, and trailers repeat header charging,
+    raw-block retention, source tracking, and compression provenance.
+  - Trailers look up an already borrowed message again, creating an
+    unnecessary missing-message branch.
+- Remove redundant protocol inputs and derive inactive field defaults.
+  - `expected_discriminator` receives an unused parent name at eight sites.
+  - SNMP's inactive trap request ID check repeats a value owned by Default.
+- Use the existing rate-spacing rule for all scan traffic.
+  - Neighbor preparation and reverse-DNS follow-up divide a second locally
+    and round down, while `clock::rate_delay` owns ceiling-rounded spacing.
+  - Preserve invalid-input error precedence when using the shared helper.
+- Classify TLS outcomes once inside service identification.
+  - `identify/io.rs` repeats classification after handshake and exchange,
+    with different handling of nested I/O timeouts. Preserve diagnostics,
+    partial bytes, and TLS evidence at their existing boundaries.
+- Remove the forwarding-only `engine::correlation::outer_has_protocol`.
+  - Its two callers can use the established core identity helper directly.
+
+### Requirements retained after inspection
+
+TCP reassembly generations, application sessions, and expert handshake
+tracking have different retention and evidence requirements. DNS TCP keeps
+exact prefix/body framing, phase-specific errors, and transferred-byte
+accounting that the generic exchange does not provide. Platform capture
+adapters retain different unsafe ownership contracts. These boundaries
+remain explicit rather than being hidden behind mode flags.
+
+The shipped forwarding consumer remains standalone. Fuzz selectors remain
+an explicit byte-format contract between generator and targets. Release
+inventory validation remains the packaging entry point, and build metadata
+checks validate provenance before executing a binary. Earlier decisions
+about publication styles, cancellation polling, provider dispatch,
+raw-byte header walkers, and the protocol catalog remain applicable.
+
+### Verification
+
+Focused Rust validation passed 97 tests across HTTP/2 state and evidence,
+packet document round trips, SNMP validation, capture security, scan pacing
+and correlation, TLS outcomes, CLI validation, mode serialization, and
+publication coverage. The three affected library test targets compile
+with locked, offline dependencies. Formatting and library Clippy checks
+pass with warnings denied. A redundant struct update found by Clippy was
+removed before the final CLI tests.
+
+Independent confirmation reviews of the core, workflow, CLI, and tooling
+changes found no further actionable structural issues. The dependency
+graph still passes the documented layers. All 70 focused Python tests
+pass. Layer, coupling, file-length, and output-schema checks pass. Coupling
+counts and exemptions are unchanged after sharing the filtered source
+view, and no production file exceeds the existing size limit.
+
+Offline file reading was exercised in JSON and dissected NDJSON modes.
+HTTP/2 analysis was exercised in JSON and text modes. Every resulting
+JSON/NDJSON record validated against the current output schema. The
+following command's final output line preserves the fixture's complete
+connection and message evidence.
+
+```text
+$ target/debug/packetcraftr analyze http2 examples/captures/http2-multiplexed.pcapng
+1 HTTP/2 connections (1 prior knowledge, 0 h2c, 0 unsupported); 7 messages (7 complete, 0 incomplete, 0 malformed, 0 limited); 0 issues
+```
+
+The full integration suite, feature matrix, platform builds, coverage, and
+mutation jobs were not run locally. No check thresholds or allowlists were
+relaxed.

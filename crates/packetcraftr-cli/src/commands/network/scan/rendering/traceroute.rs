@@ -14,10 +14,10 @@ use crate::rendering::{
 /// probes that observed a hop for this host.
 pub(super) fn render_traceroute_text(
     invocation: &crate::invocation::Invocation,
-    trace: &crate::commands::network::traceroute::output::hosts::Report,
+    trace: &crate::commands::network::scan::output::traceroute::Report,
     presentation: crate::invocation::Presentation,
 ) -> Result<(), CliError> {
-    use crate::commands::network::traceroute::output::hosts::Basis;
+    use crate::commands::network::scan::output::traceroute::Basis;
 
     let plan = &trace.plan;
     write_stdout_line(
@@ -139,15 +139,15 @@ pub(super) fn render_traceroute_text(
 }
 
 /// Count complete and incomplete traces, excluding not-traced records.
-fn traced_hosts(trace: &crate::commands::network::traceroute::output::hosts::Report) -> usize {
+fn traced_hosts(trace: &crate::commands::network::scan::output::traceroute::Report) -> usize {
     trace
         .hosts
         .iter()
         .filter(|host| {
             matches!(
                 host.summary.status,
-                crate::commands::network::traceroute::output::hosts::Status::Complete
-                    | crate::commands::network::traceroute::output::hosts::Status::Incomplete
+                crate::commands::network::scan::output::traceroute::Status::Complete
+                    | crate::commands::network::scan::output::traceroute::Status::Incomplete
             )
         })
         .count()

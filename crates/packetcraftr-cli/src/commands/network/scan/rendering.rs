@@ -8,6 +8,7 @@ use hosts::render_hosts_text;
 use traceroute::render_traceroute_text;
 
 use crate::output;
+use packetcraftr::scan::{SctpScan, TcpScan};
 
 use crate::errors::CliError;
 use crate::rendering::{
@@ -211,7 +212,7 @@ pub(super) fn render_plan_text(
                     .iter()
                     .map(|probe| {
                         if let Some(port) = probe.port {
-                            if probe.tcp_scan.is_some_and(|scan| scan.mode == "ack") {
+                            if probe.tcp_scan.is_some_and(|scan| scan.mode == TcpScan::Ack) {
                                 format!("tcp-ack/{port}")
                             } else {
                                 format!("{}/{port}", probe.transport)
@@ -251,13 +252,22 @@ pub(super) fn render_plan_text(
 
 /// The effective TCP segment, with the heuristic caveat for non-SYN modes.
 pub(super) fn tcp_scan_text(tcp_scan: super::output::plan::TcpScan) -> String {
-    let line = format!("tcp-scan={} flags={:#05x}", tcp_scan.mode, tcp_scan.flags);
+    let line = format!(
+        "tcp-scan={} flags={:#05x}",
+        tcp_scan.mode.as_str(),
+        tcp_scan.flags
+    );
     match tcp_scan.mode {
-        "syn" => line,
-        "custom" => {
+        TcpScan::Syn => line,
+        TcpScan::Custom { .. } => {
             format!("{line} (observation-only: replies are reported, no port state is inferred)")
         }
-        _ => format!(
+        TcpScan::Ack
+        | TcpScan::Window
+        | TcpScan::Fin
+        | TcpScan::Null
+        | TcpScan::Xmas
+        | TcpScan::Maimon => format!(
             "{line} (stack-dependent heuristic: conclusions are inferences, never authenticated identity or proof of a listening service)"
         ),
     }
@@ -267,11 +277,12 @@ pub(super) fn tcp_scan_text(tcp_scan: super::output::plan::TcpScan) -> String {
 pub(super) fn sctp_scan_text(sctp_scan: super::output::plan::SctpScan) -> String {
     let line = format!(
         "sctp-scan={} chunk-type={}",
-        sctp_scan.mode, sctp_scan.chunk_type
+        sctp_scan.mode.as_str(),
+        sctp_scan.chunk_type
     );
     match sctp_scan.mode {
-        "init" => line,
-        _ => format!(
+        SctpScan::Init => line,
+        SctpScan::CookieEcho => format!(
             "{line} (stack-dependent heuristic: conclusions are inferences, never authenticated identity or proof of a listening service)"
         ),
     }
@@ -314,23 +325,27 @@ fn render_probe_text(
         ),
     )?;
     let nested = " ".repeat(lead.len() + 2);
-    if let Some(tcp_scan) = evidence.tcp_scan.filter(|scan| scan.mode != "syn") {
+    if let Some(tcp_scan) = evidence.tcp_scan.filter(|scan| scan.mode != TcpScan::Syn) {
         write_stdout_line(
             invocation,
             format_args!(
                 "{nested}tcp-scan={} flags={:#05x} tcp-window={}",
-                tcp_scan.mode,
+                tcp_scan.mode.as_str(),
                 tcp_scan.flags,
                 render_optional(evidence.tcp_window, |value| value.to_string()),
             ),
         )?;
     }
-    if let Some(sctp_scan) = evidence.sctp_scan.filter(|scan| scan.mode != "init") {
+    if let Some(sctp_scan) = evidence
+        .sctp_scan
+        .filter(|scan| scan.mode != SctpScan::Init)
+    {
         write_stdout_line(
             invocation,
             format_args!(
                 "{nested}sctp-scan={} chunk-type={}",
-                sctp_scan.mode, sctp_scan.chunk_type,
+                sctp_scan.mode.as_str(),
+                sctp_scan.chunk_type,
             ),
         )?;
     }

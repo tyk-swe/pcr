@@ -171,6 +171,21 @@ class CheckLayersTests(unittest.TestCase):
             )
         )
 
+    def test_conditional_tests_preserve_production_dependencies(self):
+        files = {
+            "low.rs": (
+                "#[cfg(all(test, unix))]\n"
+                "fn test_helper() { let _ = crate::high::Fixture; }\n"
+                "fn production() { let _ = crate::high::Required; }\n"
+            ),
+        }
+        production = self.check(files)
+        self.assertEqual(len(production), 1)
+        self.assertIn("high::Required", production[0])
+        tests = self.check_with_tests(files)
+        self.assertEqual(len(tests), 1)
+        self.assertIn("high::Fixture", tests[0])
+
     def test_test_report_ignores_production_dependencies(self):
         couplings = self.check_with_tests({
             "low.rs": "use crate::high::Thing;",

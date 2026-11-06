@@ -16,6 +16,7 @@ use crate::errors::CliError;
 use crate::filtering;
 use crate::invocation::StreamEncoder;
 use crate::output::contract::Format;
+use crate::output::frame::Record;
 use crate::rendering::FieldTree;
 
 pub(super) fn run(
@@ -53,9 +54,9 @@ fn convert_frame(
     frame: core::frame::Frame,
     source_frame: u64,
     decoding: Option<&Decoding>,
-) -> Result<Option<super::output::Frame>, CliError> {
+) -> Result<Option<Record>, CliError> {
     let Some(decoding) = decoding else {
-        return super::output::Frame::try_from((source_frame, frame))
+        return Record::try_from((source_frame, frame))
             .map(Some)
             .map_err(CliError::classified);
     };
@@ -67,9 +68,9 @@ fn convert_frame(
         return Ok(None);
     };
     if decoding.publish_layers {
-        super::output::Frame::try_from((source_frame, frame, &decoded))
+        Record::try_from((source_frame, frame, &decoded))
     } else {
-        super::output::Frame::try_from((source_frame, frame))
+        Record::try_from((source_frame, frame))
     }
     .map(Some)
     .map_err(CliError::classified)

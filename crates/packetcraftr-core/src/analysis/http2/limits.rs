@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::super::{Constraint, Error as AnalysisError};
+pub use super::super::application::MAX_BODY_BYTES;
+use super::super::error::check_ceiling;
 use super::Error;
 
 pub const MAX_FRAMES: u64 = 1_000_000;
@@ -14,7 +15,6 @@ pub const MAX_HEADERS: usize = 16_384;
 pub const MAX_TABLE_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_CONTINUATIONS: usize = 16_384;
 pub const MAX_PENDING_SETTINGS: usize = 4_096;
-pub const MAX_BODY_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -90,7 +90,7 @@ impl Limits {
             ),
             ("max_body_bytes", self.max_body_bytes, MAX_BODY_BYTES),
         ] {
-            check(field, value, maximum)?;
+            check_ceiling(field, value, maximum)?;
         }
         Ok(())
     }
@@ -102,19 +102,4 @@ impl Limits {
             max_table_bytes: self.max_table_bytes,
         }
     }
-}
-fn check(field: &'static str, value: u64, maximum: u64) -> Result<(), Error> {
-    let reason = if value == 0 {
-        Constraint::NonZero
-    } else if value > maximum {
-        Constraint::AtMost { maximum }
-    } else {
-        return Ok(());
-    };
-    Err(AnalysisError::InvalidLimit {
-        field,
-        value,
-        reason,
-    }
-    .into())
 }

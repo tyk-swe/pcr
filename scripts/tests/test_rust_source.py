@@ -67,6 +67,16 @@ class WithoutTestItemsTests(unittest.TestCase):
 
 
 class BlankCommentsTests(unittest.TestCase):
+    def test_multiline_literals_preserve_newlines_and_following_code(self):
+        for literal in ('"first\n/* still a string */\nlast"',
+                        'br##"first\n" // still raw\nlast"##'):
+            with self.subTest(literal=literal):
+                source = f'const TEXT: &str = {literal};\nfn live() {{}}\n'
+                blanked = rust_source.blank_comments_and_strings(source)
+                self.assertEqual(blanked.count("\n"), source.count("\n"))
+                self.assertNotIn("still", blanked)
+                self.assertIn("fn live() {}", blanked)
+
     def test_comments_blank_but_literals_survive(self):
         source = 'let a = "cli.live"; // see example.test.invalid\n/* api.example.test */ let b = "x//y";'
         blanked = rust_source.blank_comments(source)

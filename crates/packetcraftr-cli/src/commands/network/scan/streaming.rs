@@ -22,7 +22,7 @@ pub(super) fn emit_event(event: followup::Event, stream: &StreamEncoder) -> Resu
             ))?)
         }
         followup::Event::Trace(event) => {
-            let record = crate::commands::network::traceroute::output::hosts::Event::publish(event)
+            let record = crate::commands::network::scan::output::traceroute::Event::publish(event)
                 .map_err(CliError::classified)?
                 .expect("only diagnostics have no trace record");
             Ok(stream.emit_published(Published::new(record, Vec::new()))?)

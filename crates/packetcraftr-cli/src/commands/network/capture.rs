@@ -51,7 +51,7 @@ impl crate::commands::Spec for Args {
             command: "capture",
             rust_types: &[
                 "crate::output::capture::Summary",
-                "crate::commands::files::read::output::Frame",
+                "crate::output::frame::Record",
             ],
             events: &["complete", "frame"],
             example: "examples/documents/output-capture-complete.json",

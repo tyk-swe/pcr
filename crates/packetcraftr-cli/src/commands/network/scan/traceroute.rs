@@ -28,7 +28,7 @@ pub(super) struct Options {
 /// The trace request every scanned host shares, validated before any probe.
 pub(super) struct Stage {
     trace: followup::Trace,
-    plan: crate::commands::network::traceroute::output::hosts::Plan,
+    plan: crate::commands::network::scan::output::traceroute::Plan,
 }
 
 impl Stage {
@@ -81,25 +81,25 @@ impl Stage {
             runtime: None,
         };
         trace.validate(scan).map_err(super::followup_error)?;
-        let plan = crate::commands::network::traceroute::output::hosts::Plan {
+        let plan = crate::commands::network::scan::output::traceroute::Plan {
             first_hop: options.first_hop,
             max_hops: options.max_hops,
             attempts: options.attempts,
             max_probes: options.max_probes,
             strategy: strategy.map(|strategy| {
-                crate::commands::network::traceroute::output::hosts::StrategyPlan {
+                crate::commands::network::scan::output::traceroute::StrategyPlan {
                     strategy: strategy.transport,
                     destination_port: strategy.destination_port,
                 }
             }),
             reuse: options.reuse_max_age.map(|max_age| {
-                crate::commands::network::traceroute::output::hosts::ReusePlan { max_age }
+                crate::commands::network::scan::output::traceroute::ReusePlan { max_age }
             }),
         };
         Ok(Self { trace, plan })
     }
 
-    pub(super) const fn plan(&self) -> crate::commands::network::traceroute::output::hosts::Plan {
+    pub(super) const fn plan(&self) -> crate::commands::network::scan::output::traceroute::Plan {
         self.plan
     }
 

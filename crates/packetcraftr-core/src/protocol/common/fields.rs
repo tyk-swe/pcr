@@ -79,7 +79,7 @@ pub(crate) fn resolve_u16_discriminator(
         name,
         field,
         value,
-        expected_discriminator(name, context, 0_u16, value),
+        expected_discriminator(context, 0_u16, value),
         context.mode,
         diagnostics,
     )?;
@@ -170,7 +170,6 @@ where
 /// An explicit `value` that already selects this child is honoured as-is:
 /// several protocols are registered under more than one discriminator.
 pub(crate) fn expected_discriminator<T>(
-    _parent: &str,
     context: &EncodeContext<'_>,
     fallback: T,
     value: &WireValue<T>,

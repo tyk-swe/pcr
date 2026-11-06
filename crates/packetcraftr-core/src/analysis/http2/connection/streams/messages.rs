@@ -3,7 +3,7 @@
 
 //! Message construction, resource accounting, and ordered publication.
 
-use super::super::{ConnectionState, Context, Decoded, Fault, Head};
+use super::super::{ConnectionState, Context, Fault, Head};
 use crate::analysis::http2::Error;
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
@@ -11,8 +11,7 @@ use crate::analysis::http2::buffer::union_balanced;
 use crate::analysis::http2::headers::FieldRole;
 use crate::analysis::http2::model::{IssueScope, Message, MessageKind, Status};
 use crate::analysis::http2::side::Side;
-use crate::analysis::http2::stream::MessageBuilder;
-use bytes::Bytes;
+use crate::analysis::http2::stream::{Decoded, HeaderSection, MessageBuilder};
 
 impl ConnectionState {
     pub(crate) fn new_message(
@@ -25,23 +24,6 @@ impl ConnectionState {
         let mut msg = MessageBuilder::new(index, stream_id, kind);
         context.charge(&mut msg.charge, budget::MESSAGE_OVERHEAD)?;
         Ok(msg)
-    }
-
-    fn msg_content_charge(msg: &MessageBuilder) -> usize {
-        msg.headers
-            .iter()
-            .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
-            .sum::<usize>()
-            + msg
-                .trailers
-                .iter()
-                .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
-                .sum::<usize>()
-            + msg.header_blocks.iter().map(Bytes::len).sum::<usize>()
-            + msg
-                .upgrade_head
-                .as_ref()
-                .map_or(0, |head| head.wire().len())
     }
 
     pub(crate) fn emit_message(
@@ -129,7 +111,7 @@ impl ConnectionState {
         let compression_sources = union_balanced(std::mem::take(&mut build.compression))?;
         context.release_all(&mut build.charge)?;
         context.charge_retained(
-            Self::msg_content_charge(&build)
+            build.content_charge()
                 + budget::EVENT_OVERHEAD
                 + budget::MESSAGE_OVERHEAD
                 + budget::SET_OVERHEAD
@@ -168,12 +150,6 @@ impl ConnectionState {
         context: &mut Context<'_>,
     ) -> Result<(), Error> {
         let Head { role, meta, flawed } = head;
-        let Decoded {
-            headers,
-            block,
-            sources: block_sources,
-            compression,
-        } = decoded;
         let kind = match role {
             FieldRole::Request => MessageKind::Request,
             FieldRole::Response => match meta.status {
@@ -188,24 +164,9 @@ impl ConnectionState {
         if flawed {
             msg.failure = Some(Status::Malformed);
         }
-        let content_charge = headers
-            .iter()
-            .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
-            .sum::<usize>()
-            + block.len();
-        context.charge(&mut msg.charge, content_charge)?;
-        msg.headers = headers;
-        msg.header_blocks.push(block);
+        msg.retain_headers(HeaderSection::Initial, decoded, context)?;
         msg.content_length = meta.content_length;
         msg.status_code = meta.status;
-        if let Some(sources) = block_sources {
-            context.track(&mut msg.charge, &sources)?;
-            msg.sets.push(sources);
-        }
-        if let Some(set) = compression {
-            context.track(&mut msg.charge, &set)?;
-            msg.compression.push(set);
-        }
         let stream = self
             .streams
             .open

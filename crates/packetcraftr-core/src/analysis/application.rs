@@ -15,6 +15,8 @@ use crate::{
 use bytes::Bytes;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+pub const MAX_BODY_BYTES: u64 = 256 * 1024 * 1024;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub max_messages: usize,

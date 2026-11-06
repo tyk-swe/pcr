@@ -86,7 +86,7 @@ pub(super) fn run(
                 .map_err(super::followup_error)?;
             report.scan.stats = report.stats;
             let traceroute = trace_plan.zip(report.trace).map(|(plan, traced)| {
-                crate::commands::network::traceroute::output::hosts::Complete {
+                crate::commands::network::scan::output::traceroute::Complete {
                     plan,
                     retained_evidence_bytes: traced.retained_evidence_bytes,
                 }
@@ -125,7 +125,7 @@ pub(super) fn run(
                 super::reverse_dns_hosts(reverse_dns),
                 traced
                     .map(|(plan, aggregate)| {
-                        crate::commands::network::traceroute::output::hosts::Report::new(
+                        crate::commands::network::scan::output::traceroute::Report::new(
                             plan, aggregate,
                         )
                     })
@@ -152,5 +152,5 @@ pub(super) struct Streamed {
     pub(super) plan: super::output::plan::Plan,
     /// Each host's PTR lookup, by position; empty when none ran.
     pub(super) reverse_dns: Vec<Option<super::output::host::ReverseDns>>,
-    pub(super) traceroute: Option<crate::commands::network::traceroute::output::hosts::Complete>,
+    pub(super) traceroute: Option<crate::commands::network::scan::output::traceroute::Complete>,
 }

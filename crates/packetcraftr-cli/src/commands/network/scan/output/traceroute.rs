@@ -12,7 +12,7 @@ use serde::Serialize;
 use packetcraftr::probe::Transport;
 use packetcraftr::traceroute::hosts as library;
 
-use super::{Completion, Hop, Probe};
+use crate::commands::network::traceroute::output::{Completion, Hop, Probe};
 use crate::output::contract::Error;
 use crate::output::frame::{Captured, Timestamp};
 use crate::output::scan_failure::{Scope, Stage, reply_name};

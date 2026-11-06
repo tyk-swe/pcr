@@ -96,13 +96,6 @@ impl Fault {
     }
 }
 
-pub(crate) struct Decoded {
-    pub headers: Vec<super::model::Header>,
-    pub block: Bytes,
-    pub sources: Option<SourceSet>,
-    pub compression: Option<SourceSet>,
-}
-
 pub(crate) struct Head {
     pub role: super::headers::FieldRole,
     pub meta: super::headers::Meta,
@@ -427,17 +420,9 @@ impl ConnectionState {
         {
             return false;
         }
-        self.directions.get(side).is_some_and(|dir| {
-            let bytes = dir.buffer.bytes();
-            dir.saw_frame
-                && dir.chain.is_none()
-                && bytes.len() >= wire::HEADER_LEN
-                && wire::declared_length(bytes) == 0
-                && bytes[3] == wire::TYPE_SETTINGS
-                && bytes[4] & wire::FLAG_ACK != 0
-                && bytes[5] & 0x7f == 0
-                && bytes[6..9] == [0, 0, 0]
-        })
+        self.directions
+            .get(side)
+            .is_some_and(DirectionState::has_buffered_settings_ack)
     }
 
     fn next_want(&self, flow: &ScopedFlowKey) -> Option<usize> {

@@ -166,12 +166,8 @@ impl Collector {
             },
             http: if hunt {
                 Some(
-                    http::Collector::new(
-                        app,
-                        [80, 8080, 8000],
-                        crate::analysis::http2::MAX_BODY_BYTES,
-                    )
-                    .map_err(BoundaryError::from_error)?,
+                    http::Collector::new(app, [80, 8080, 8000], application::MAX_BODY_BYTES)
+                        .map_err(BoundaryError::from_error)?,
                 )
             } else {
                 None

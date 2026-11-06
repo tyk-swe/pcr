@@ -88,12 +88,8 @@ impl Codec for FragmentCodec {
         if layer.reserved_bits > 3 {
             return Err(invalid(NAME, "reserved bits exceed two bits"));
         }
-        let expectation = expected_discriminator(
-            NAME,
-            context,
-            ip_protocol::NO_NEXT_HEADER,
-            &layer.next_header,
-        );
+        let expectation =
+            expected_discriminator(context, ip_protocol::NO_NEXT_HEADER, &layer.next_header);
         let mut diagnostics = Vec::new();
         validate_auto_raw_discriminator(
             NAME,

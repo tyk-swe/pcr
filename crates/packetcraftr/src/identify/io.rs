@@ -48,19 +48,10 @@ impl Reply {
             bounded::Outcome::TimedOut => (IoOutcome::TimedOut, None),
             bounded::Outcome::Cancelled => (IoOutcome::Cancelled, None),
             bounded::Outcome::Failed(source) => {
-                let outcome = match source
+                let outcome = source
                     .get_ref()
                     .and_then(|source| source.downcast_ref::<tls::Error>())
-                {
-                    Some(tls::Error::WireLimit { .. } | tls::Error::StepLimit { .. }) => {
-                        IoOutcome::Truncated
-                    }
-                    Some(tls::Error::Interrupted(
-                        packetcraftr_core::budget::Interrupted::Cancelled(_),
-                    )) => IoOutcome::Cancelled,
-                    Some(tls::Error::Interrupted(_)) => IoOutcome::TimedOut,
-                    _ => IoOutcome::Failed,
-                };
+                    .map_or(IoOutcome::Failed, tls_outcome);
                 (outcome, Some(Source::new(source)))
             }
         };
@@ -106,6 +97,18 @@ impl Reply {
             outcome,
             ..Self::failed(source)
         }
+    }
+}
+
+fn tls_outcome(source: &tls::Error) -> IoOutcome {
+    match source {
+        tls::Error::Interrupted(packetcraftr_core::budget::Interrupted::Cancelled(_)) => {
+            IoOutcome::Cancelled
+        }
+        tls::Error::Interrupted(_) => IoOutcome::TimedOut,
+        tls::Error::Io(source) if bounded::timed_out(source) => IoOutcome::TimedOut,
+        tls::Error::WireLimit { .. } | tls::Error::StepLimit { .. } => IoOutcome::Truncated,
+        _ => IoOutcome::Failed,
     }
 }
 
@@ -256,19 +259,7 @@ fn tcp_exchange<P: TcpProviders>(
         let mut stream = match handshake.result {
             Ok(stream) => stream,
             Err(source) => {
-                let outcome = match &source {
-                    tls::Error::Interrupted(packetcraftr_core::budget::Interrupted::Cancelled(
-                        _,
-                    )) => IoOutcome::Cancelled,
-                    tls::Error::Interrupted(_) => IoOutcome::TimedOut,
-                    tls::Error::Io(source) if packetcraftr_netio::bounded::timed_out(source) => {
-                        IoOutcome::TimedOut
-                    }
-                    tls::Error::WireLimit { .. } | tls::Error::StepLimit { .. } => {
-                        IoOutcome::Truncated
-                    }
-                    _ => IoOutcome::Failed,
-                };
+                let outcome = tls_outcome(&source);
                 return Ok(Reply {
                     local: Some(local),
                     peer: Some(peer),
@@ -324,5 +315,70 @@ fn complete(probe: &Probe, bytes: &[u8]) -> bool {
         Request::Dns { .. } => bytes.get(..2).is_some_and(|prefix| {
             bytes.len() >= 2 + usize::from(u16::from_be_bytes([prefix[0], prefix[1]]))
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use packetcraftr_core::budget::{Cancelled, Interrupted};
+    use std::{io, time::Duration};
+
+    #[test]
+    fn tls_failure_retains_partial_reply_and_classifies_outcome() {
+        let expired = Deadline::new(Duration::ZERO).enforce().unwrap_err();
+        for (source, expected) in [
+            (
+                tls::Error::Interrupted(Interrupted::Cancelled(Cancelled)),
+                IoOutcome::Cancelled,
+            ),
+            (tls::Error::Interrupted(expired), IoOutcome::TimedOut),
+            (
+                tls::Error::Io(io::ErrorKind::TimedOut.into()),
+                IoOutcome::TimedOut,
+            ),
+            (
+                tls::Error::Io(io::ErrorKind::WouldBlock.into()),
+                IoOutcome::TimedOut,
+            ),
+            (
+                tls::Error::WireLimit {
+                    direction: tls::Direction::Read,
+                    limit: 1,
+                },
+                IoOutcome::Truncated,
+            ),
+            (tls::Error::StepLimit { limit: 1 }, IoOutcome::Truncated),
+            (
+                tls::Error::Io(io::ErrorKind::ConnectionReset.into()),
+                IoOutcome::Failed,
+            ),
+            (
+                tls::Error::Protocol(rustls::Error::DecryptError),
+                IoOutcome::Failed,
+            ),
+        ] {
+            let diagnostic = source.to_string();
+            let local = ([192, 0, 2, 1], 12_345).into();
+            let peer = ([192, 0, 2, 2], 443).into();
+            let response = Bytes::from_static(b"partial");
+            let reply = Reply::exchanged(
+                bounded::Exchange {
+                    response: response.clone(),
+                    bytes_sent: 4,
+                    outcome: bounded::Outcome::Failed(io::Error::other(source)),
+                },
+                local,
+                peer,
+            );
+            assert_eq!(reply.outcome, expected);
+            assert_eq!(reply.bytes, response.as_ref());
+            assert_eq!(reply.written, 4);
+            assert_eq!(reply.local, Some(local));
+            assert_eq!(reply.peer, Some(peer));
+            assert_eq!(reply.diagnostic.as_deref(), Some(diagnostic.as_str()));
+            assert_eq!(reply.source.unwrap().to_string(), diagnostic);
+        }
     }
 }

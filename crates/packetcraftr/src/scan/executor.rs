@@ -117,10 +117,7 @@ impl NeighborBounds {
         request: &Request,
         operation: crate::engine::operation::Operation,
     ) -> Result<crate::engine::operation::Operation, crate::neighbor::Error> {
-        let pause = request
-            .probes_per_second
-            .and_then(|rate| Duration::from_secs(1).checked_div(rate))
-            .unwrap_or_default();
+        let pause = crate::clock::rate_delay(1, request.probes_per_second).unwrap_or_default();
         let narrowed = Self::of(request).narrow(&operation.neighbors)?;
         Ok(operation
             .with_neighbors(narrowed)

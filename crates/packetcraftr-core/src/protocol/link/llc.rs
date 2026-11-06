@@ -247,12 +247,7 @@ impl Codec for SnapCodec {
             &mut diagnostics,
         )?;
         let expectation = if layer.oui == 0 {
-            crate::protocol::common::expected_discriminator(
-                SNAP_NAME,
-                context,
-                0_u16,
-                &layer.protocol_id,
-            )
+            crate::protocol::common::expected_discriminator(context, 0_u16, &layer.protocol_id)
         } else if matches!(layer.protocol_id, WireValue::Auto) {
             return Err(invalid(
                 SNAP_NAME,

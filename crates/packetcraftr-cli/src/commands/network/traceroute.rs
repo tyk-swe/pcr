@@ -36,7 +36,6 @@ impl crate::commands::Spec for Args {
             command: "traceroute",
             rust_types: &[
                 "crate::commands::network::traceroute::output::Event",
-                "crate::commands::network::traceroute::output::hosts::Event",
                 "crate::commands::network::traceroute::output::multipath::Event",
             ],
             events: &[
@@ -263,5 +262,36 @@ mod tests {
         args.source_port = Some(u16::MAX);
         args.flows = Some(2);
         assert!(prepare_request(&args, args.limits.clone().into_limits()).is_err());
+    }
+
+    #[test]
+    fn multipath_preserves_timeout_and_capture_error_precedence() {
+        let maximum = net::deadline::MAX_WAIT;
+        let oversized = (maximum.as_millis() + 1).to_string();
+        let args = arguments(&["--multipath", "--timeout-ms", &oversized]).unwrap();
+        let invalid_limits = net::capture::Limits {
+            snap_length: 0,
+            ..args.limits.clone().into_limits()
+        };
+        let error = prepare_request(&args, invalid_limits).unwrap_err();
+        assert_eq!(
+            error.classification.code,
+            packetcraftr_core::error::Code::CliExchangeLimit
+        );
+        assert!(error.message.contains("timeout"));
+
+        let args = arguments(&["--multipath", "--timeout-ms", "0"]).unwrap();
+        let error = prepare_request(&args, invalid_limits).unwrap_err();
+        let expected = CliError::classified(invalid_limits.validate().unwrap_err());
+        assert_eq!(error.classification, expected.classification);
+        assert_eq!(error.message, expected.message);
+
+        let error = prepare_request(&args, args.limits.clone().into_limits()).unwrap_err();
+        let expected = CliError::classified(packetcraftr::traceroute::Error::InvalidTimeout {
+            value: std::time::Duration::ZERO,
+            maximum,
+        });
+        assert_eq!(error.classification, expected.classification);
+        assert_eq!(error.message, expected.message);
     }
 }

@@ -4,7 +4,10 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 
-use packetcraftr_core::{packet::Packet, protocol::semantics};
+use packetcraftr_core::{
+    packet::Packet,
+    protocol::{identity, semantics},
+};
 use packetcraftr_netio::interface;
 
 use crate::scan::{Probe, plan::response_protocol};
@@ -62,7 +65,7 @@ impl ReplyHistory {
         let current = response_protocol(probe.endpoint, path.source.is_ipv6());
         counts.iter().enumerate().any(|(protocol, &count)| {
             count > u8::from(protocol == usize::from(current))
-                && crate::engine::correlation::outer_has_protocol(response, protocol as u8)
+                && identity::outer_has_protocol(response, protocol as u8)
         })
     }
 }

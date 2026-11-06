@@ -120,7 +120,10 @@ impl Snmp {
     fn validate_field_ownership(&self) -> Result<(), Error> {
         let trap = self.pdu_type == 0xa4;
         let stray = [
-            ("request_id", trap && self.request_id != 1),
+            (
+                "request_id",
+                trap && self.request_id != Self::default().request_id,
+            ),
             ("error_status", trap && self.error_status != 0),
             ("error_index", trap && self.error_index != 0),
             ("enterprise", !trap && !self.enterprise.is_empty()),

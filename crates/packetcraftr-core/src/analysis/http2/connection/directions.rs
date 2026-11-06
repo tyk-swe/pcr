@@ -10,7 +10,7 @@ use crate::analysis::http2::buffer::SourceBuffer;
 use crate::analysis::http2::side::Side;
 use crate::analysis::provenance::SourceSet;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
-use crate::protocol::application::http2::hpack;
+use crate::protocol::application::http2::{self as wire, hpack};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -67,6 +67,18 @@ impl DirectionState {
             garbage: false,
             origins_charge: Charge::default(),
         }
+    }
+
+    pub(crate) fn has_buffered_settings_ack(&self) -> bool {
+        let bytes = self.buffer.bytes();
+        self.saw_frame
+            && self.chain.is_none()
+            && bytes.len() >= wire::HEADER_LEN
+            && wire::declared_length(bytes) == 0
+            && bytes[3] == wire::TYPE_SETTINGS
+            && bytes[4] & wire::FLAG_ACK != 0
+            && bytes[5] & 0x7f == 0
+            && bytes[6..9] == [0, 0, 0]
     }
 
     pub(crate) fn release_all(&mut self, context: &mut Context<'_>) -> Result<(), Error> {

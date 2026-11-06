@@ -43,6 +43,46 @@ impl std::fmt::Display for SourceFrame {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct Record {
+    pub source_frame: SourceFrame,
+    pub frame: Captured,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decoded: Option<Stack>,
+}
+
+impl TryFrom<(u64, Frame)> for Record {
+    type Error = Error;
+
+    fn try_from((source_frame, frame): (u64, Frame)) -> Result<Self, Error> {
+        Ok(Self {
+            source_frame: source_frame.try_into()?,
+            frame: frame.try_into()?,
+            decoded: None,
+        })
+    }
+}
+
+impl TryFrom<(u64, Frame, &DecodedPacket)> for Record {
+    type Error = Error;
+
+    fn try_from(
+        (source_frame, frame, decoded): (u64, Frame, &DecodedPacket),
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            source_frame: source_frame.try_into()?,
+            frame: frame.try_into()?,
+            decoded: Some(Stack::from(decoded)),
+        })
+    }
+}
+
+impl crate::output::stream::StreamRecord for Record {
+    fn event_name(&self) -> &'static str {
+        "frame"
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Timestamp {
     pub unix_seconds: i64,

@@ -130,7 +130,7 @@ impl Collector {
         super::error::check_ceiling(
             "max_http_body_bytes",
             max_body_bytes,
-            super::http2::MAX_BODY_BYTES,
+            application::MAX_BODY_BYTES,
         )?;
         Ok(Self {
             limits,

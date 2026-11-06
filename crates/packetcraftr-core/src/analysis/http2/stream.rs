@@ -3,7 +3,8 @@
 
 //! Stream lifecycle and in-progress request and response message state.
 
-use super::budget::Charge;
+use super::Error;
+use super::budget::{self, Charge, Context};
 use super::model::{Header, MessageKind};
 use crate::analysis::http2::side::{PerSide, Side};
 use crate::analysis::provenance::SourceSet;
@@ -14,6 +15,25 @@ pub(crate) enum Phase {
     Reserved,
     Open,
     Closed,
+}
+
+pub(crate) struct Decoded {
+    pub headers: Vec<Header>,
+    pub block: Bytes,
+    pub sources: Option<SourceSet>,
+    pub compression: Option<SourceSet>,
+}
+
+pub(crate) enum HeaderSection {
+    Initial,
+    Trailers,
+}
+
+fn header_charge(headers: &[Header]) -> usize {
+    headers
+        .iter()
+        .map(|header| header.name.len() + header.value.len() + budget::HEADER_OVERHEAD)
+        .sum()
 }
 
 pub(crate) struct MessageBuilder {
@@ -59,6 +79,42 @@ impl MessageBuilder {
             status_code: None,
             charge: Charge::default(),
         }
+    }
+
+    pub(crate) fn retain_headers(
+        &mut self,
+        section: HeaderSection,
+        decoded: Decoded,
+        context: &mut Context<'_>,
+    ) -> Result<(), Error> {
+        context.charge(
+            &mut self.charge,
+            header_charge(&decoded.headers) + decoded.block.len(),
+        )?;
+        match section {
+            HeaderSection::Initial => self.headers = decoded.headers,
+            HeaderSection::Trailers => self.trailers.extend(decoded.headers),
+        }
+        self.header_blocks.push(decoded.block);
+        if let Some(sources) = decoded.sources {
+            context.track(&mut self.charge, &sources)?;
+            self.sets.push(sources);
+        }
+        if let Some(sources) = decoded.compression {
+            context.track(&mut self.charge, &sources)?;
+            self.compression.push(sources);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn content_charge(&self) -> usize {
+        header_charge(&self.headers)
+            + header_charge(&self.trailers)
+            + self.header_blocks.iter().map(Bytes::len).sum::<usize>()
+            + self
+                .upgrade_head
+                .as_ref()
+                .map_or(0, |head| head.wire().len())
     }
 }
 

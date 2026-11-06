@@ -965,13 +965,16 @@ fn trailers() {
     let mut rig = rig();
     handshake(&mut rig);
     rig.send(&frame(HEADERS, END_HEADERS, 1, &request_headers()));
+    let head_number = rig.number;
     rig.send(&frame(DATA, 0, 1, b"hi"));
+    let data_number = rig.number;
     rig.send(&frame(
         HEADERS,
         END_HEADERS | END_STREAM,
         1,
         &trailer_headers(),
     ));
+    let trailer_number = rig.number;
     rig.recv(&frame(
         HEADERS,
         END_HEADERS | END_STREAM,
@@ -980,6 +983,28 @@ fn trailers() {
     ));
     rig.client_close(false).server_close(false);
     let (events, _) = rig.finish();
+    let request = events
+        .iter()
+        .find_map(|event| match event {
+            Event::Message(message) if message.kind == MessageKind::Request => Some(message),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        request.header_blocks,
+        [
+            Bytes::from(request_headers()),
+            Bytes::from(trailer_headers())
+        ]
+    );
+    assert_eq!(
+        numbers(Some(&request.sources)),
+        [head_number, data_number, trailer_number]
+    );
+    assert_eq!(
+        numbers(request.compression_sources.as_ref()),
+        [head_number, trailer_number]
+    );
     pin(
         &events,
         &[
@@ -1385,6 +1410,51 @@ fn stream_window_overflow() {
             "connection PriorKnowledge Malformed streams=1 frames=6 issues=1 pending_settings=0 pending_pings=0",
         ],
     );
+}
+
+#[test]
+fn push_promises_preserve_headers_and_sources() {
+    for (index, method, status) in [
+        (0x82, b"GET".as_slice(), Status::Complete),
+        (0x83, b"POST".as_slice(), Status::Malformed),
+    ] {
+        let mut rig = rig();
+        handshake(&mut rig);
+        rig.send(&frame(HEADERS, END_HEADERS, 1, &request_headers()));
+        let block = [vec![index], request_headers()[1..].to_vec()].concat();
+        let payload = [2_u32.to_be_bytes().as_slice(), block.as_slice()].concat();
+        let wire = frame(PUSH_PROMISE, END_HEADERS, 1, &payload);
+        let split = wire.len() / 2;
+        rig.recv(&wire[..split]);
+        let first_number = rig.number;
+        rig.recv(&wire[split..]);
+        let last_number = rig.number;
+        let (events, _) = rig.finish();
+        let promise = events
+            .iter()
+            .find_map(|event| match event {
+                Event::Message(message) if message.kind == MessageKind::PushPromise => {
+                    Some(message)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(promise.status, status);
+        assert_eq!(promise.header_blocks, [Bytes::from(block)]);
+        assert_eq!(
+            promise
+                .headers
+                .iter()
+                .find(|header| header.name.as_ref() == b":method")
+                .map(|header| header.value.as_ref()),
+            Some(method)
+        );
+        assert_eq!(numbers(Some(&promise.sources)), [first_number, last_number]);
+        assert_eq!(
+            numbers(promise.compression_sources.as_ref()),
+            [first_number, last_number]
+        );
+    }
 }
 
 #[test]

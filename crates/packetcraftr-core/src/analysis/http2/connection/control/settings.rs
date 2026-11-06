@@ -30,16 +30,8 @@ impl ConnectionState {
                     .directions
                     .get(side.peer())
                     .filter(|dir| {
-                        let bytes = dir.buffer.bytes();
                         self.control.settings[side].pending.is_empty()
-                            && dir.saw_frame
-                            && dir.chain.is_none()
-                            && bytes.len() >= wire::HEADER_LEN
-                            && wire::declared_length(bytes) == 0
-                            && bytes[3] == wire::TYPE_SETTINGS
-                            && bytes[4] & wire::FLAG_ACK != 0
-                            && bytes[5] & 0x7f == 0
-                            && bytes[6..9] == [0, 0, 0]
+                            && dir.has_buffered_settings_ack()
                     })
                     .map(|dir| {
                         (

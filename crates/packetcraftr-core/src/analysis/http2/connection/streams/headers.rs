@@ -3,14 +3,14 @@
 
 //! Request, response, and trailer semantics for decoded stream headers.
 
-use super::super::{ChainHead, ConnectionState, Context, Decoded, Evidence, Fault, Head, Phase};
+use super::super::{ChainHead, ConnectionState, Context, Evidence, Fault, Head, Phase};
 use crate::analysis::http2::Error;
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::headers::{FieldRole, validate};
 use crate::analysis::http2::model::{Certainty, IssueScope, Status};
 use crate::analysis::http2::side::Side;
-use crate::analysis::http2::stream::Phase as StreamPhase;
+use crate::analysis::http2::stream::{Decoded, HeaderSection, Phase as StreamPhase};
 
 const RESPONSE_AFTER_GOAWAY: &str =
     "the server responded on a client stream above its own GOAWAY last_stream_id";
@@ -486,32 +486,16 @@ impl ConnectionState {
                     msg.failure = Some(Status::Malformed);
                 }
                 msg.trailers_seen = true;
-                let added = headers
-                    .iter()
-                    .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
-                    .sum::<usize>()
-                    + block.len();
-                let stream = self
-                    .streams
-                    .open
-                    .get_mut(&stream_id)
-                    .ok_or(Error::Invariant("stream"))?;
-                match stream.msgs[side].as_mut() {
-                    Some(msg) => {
-                        context.charge(&mut msg.charge, added)?;
-                        msg.trailers.extend(headers);
-                        msg.header_blocks.push(block);
-                        if let Some(sources) = block_sources {
-                            context.track(&mut msg.charge, &sources)?;
-                            msg.sets.push(sources);
-                        }
-                        if let Some(set) = compression {
-                            context.track(&mut msg.charge, &set)?;
-                            msg.compression.push(set);
-                        }
-                    }
-                    None => context.charge(&mut self.charge, added)?,
-                }
+                msg.retain_headers(
+                    HeaderSection::Trailers,
+                    Decoded {
+                        headers,
+                        block,
+                        sources: block_sources,
+                        compression,
+                    },
+                    context,
+                )?;
             } else {
                 failure = Some(Status::Malformed);
                 self.issue(

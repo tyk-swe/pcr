@@ -331,17 +331,13 @@ fn direct_ip_protocol_reply(request: &Packet, response: &Packet) -> Option<IpAdd
         }
         _ => match (request.get::<Ipv6>(), response.get::<Ipv6>()) {
             (Some(req), Some(_)) => match req.next_header {
-                WireValue::Exact(protocol) => outer_has_protocol(response, protocol),
+                WireValue::Exact(protocol) => identity::outer_has_protocol(response, protocol),
                 _ => false,
             },
             _ => false,
         },
     };
     protocol_matches.then_some(response_path.source)
-}
-
-pub(crate) fn outer_has_protocol(packet: &Packet, protocol: u8) -> bool {
-    packetcraftr_core::protocol::identity::outer_has_protocol(packet, protocol)
 }
 
 fn classify_icmp_error(

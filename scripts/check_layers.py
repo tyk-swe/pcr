@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import sys
 
-from rust_source import blank_comments_and_strings, is_test_path
+from rust_source import blank_comments_and_strings, is_test_path, without_test_items
 
 LAYERS = {
     "packetcraftr-core": {
@@ -73,7 +73,6 @@ ALLOWLIST = (
 
 SEGMENT = r"[A-Za-z_][A-Za-z0-9_]*"
 PATH_START = re.compile(rf"\b(crate|super|self)((?:::{SEGMENT})*)(::\{{)?")
-CFG_TEST = re.compile(r"#\[cfg\(test\)\]")
 
 
 def balanced_end(text: str, opening: int) -> int:
@@ -86,89 +85,6 @@ def balanced_end(text: str, opening: int) -> int:
             if depth == 0:
                 return i + 1
     return len(text)
-
-
-ITEM_START = re.compile(
-    r"\s*(?:#\[[^\]]*\]\s*)*"
-    r"(?:pub(?:\([^)]*\))?\s+)?"
-    r"(?:async\s+|unsafe\s+|const\s+|extern\s+(?:\"[^\"]*\"\s+)?)*"
-    r"(?:mod|fn|struct|enum|impl|trait|type|static|use|union|if|match|while|for|loop)\b"
-)
-
-
-def field_end(text: str, start: int) -> int:
-    paren = bracket = brace = angle = 0
-    for i in range(start, len(text)):
-        char = text[i]
-        if char == "(":
-            paren += 1
-        elif char == ")":
-            paren -= 1
-        elif char == "[":
-            bracket += 1
-        elif char == "]":
-            bracket -= 1
-        elif char == "{":
-            brace += 1
-        elif char == "}":
-            if paren == bracket == brace == angle == 0:
-                return i
-            brace -= 1
-        elif char == "<":
-            angle += 1
-        elif char == ">" and angle and text[i - 1] not in "-=":
-            angle -= 1
-        elif char in ",;" and paren == bracket == brace == angle == 0:
-            return i + 1
-    return len(text)
-
-
-MACRO_BRACE = re.compile(rf"(?:{SEGMENT}::)*{SEGMENT}!\s*\{{")
-
-
-def skip_attributes(text: str, start: int) -> int:
-    i = start
-    while True:
-        while i < len(text) and text[i].isspace():
-            i += 1
-        if text[i:i + 2] != "#[":
-            return i
-        depth = 0
-        while i < len(text):
-            if text[i] == "[":
-                depth += 1
-            elif text[i] == "]":
-                depth -= 1
-                if depth == 0:
-                    i += 1
-                    break
-            i += 1
-
-
-def strip_test_items(text: str) -> str:
-    while True:
-        match = CFG_TEST.search(text)
-        if match is None:
-            return text
-        span = skip_attributes(text, match.end())
-        macro = MACRO_BRACE.match(text, span)
-        if span < len(text) and text[span] == "{":
-            end = balanced_end(text, span)
-        elif macro:
-            end = balanced_end(text, macro.end() - 1)
-        elif ITEM_START.match(text, match.end()):
-            rest = text[match.end():]
-            brace = rest.find("{")
-            semi = rest.find(";")
-            if semi != -1 and (brace == -1 or semi < brace):
-                end = match.end() + semi + 1
-            elif brace != -1:
-                end = balanced_end(text, match.end() + brace)
-            else:
-                end = len(text)
-        else:
-            end = field_end(text, match.end())
-        text = text[:match.start()] + " " + text[end:]
 
 
 def split_top_level(group: str) -> list[str]:
@@ -281,7 +197,7 @@ def scoped_paths(
 def crate_paths(
     text: str, owner: tuple[str, ...] = ()
 ) -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
-    text = VISIBILITY.sub("pub", strip_test_items(blank_comments_and_strings(text)))
+    text = VISIBILITY.sub("pub", blank_comments_and_strings(without_test_items(text)))
     return scoped_paths(text, owner)
 
 

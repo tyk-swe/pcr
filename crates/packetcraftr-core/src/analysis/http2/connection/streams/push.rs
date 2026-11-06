@@ -3,14 +3,14 @@
 
 //! Push-promise validation, stream reservation, and parent reconciliation.
 
-use super::super::{ConnectionState, Context, Decoded, Fault};
+use super::super::{ConnectionState, Context, Fault};
 use crate::analysis::http2::Error;
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget;
 use crate::analysis::http2::headers::{FieldRole, validate};
 use crate::analysis::http2::model::{Certainty, IssueScope, MessageKind, Status};
 use crate::analysis::http2::side::{PerSide, Side};
-use crate::analysis::http2::stream::{Phase as StreamPhase, StreamState};
+use crate::analysis::http2::stream::{Decoded, HeaderSection, Phase as StreamPhase, StreamState};
 use bytes::Bytes;
 
 impl ConnectionState {
@@ -138,14 +138,16 @@ impl ConnectionState {
             Ok(meta)
         });
         let mut msg = self.new_message(promised, MessageKind::PushPromise, context)?;
-        let content_charge = headers
-            .iter()
-            .map(|h| h.name.len() + h.value.len() + budget::HEADER_OVERHEAD)
-            .sum::<usize>()
-            + block.len();
-        context.charge(&mut msg.charge, content_charge)?;
-        msg.headers = headers;
-        msg.header_blocks.push(block);
+        msg.retain_headers(
+            HeaderSection::Initial,
+            Decoded {
+                headers,
+                block,
+                sources: block_sources.clone(),
+                compression,
+            },
+            context,
+        )?;
         msg.promised_by = Some(stream_id);
         msg.request = self
             .streams
@@ -153,14 +155,6 @@ impl ConnectionState {
             .get(&stream_id)
             .and_then(|s| s.request)
             .or_else(|| self.streams.closed.get(&stream_id).and_then(|s| s.request));
-        if let Some(sources) = block_sources.clone() {
-            context.track(&mut msg.charge, &sources)?;
-            msg.sets.push(sources);
-        }
-        if let Some(set) = compression {
-            context.track(&mut msg.charge, &set)?;
-            msg.compression.push(set);
-        }
         let rejected = meta.is_err();
         let mut promised_method = None;
         if let Err(detail) = meta {

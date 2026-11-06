@@ -184,11 +184,8 @@ impl Lookup {
         // A batch paces its own questions; this pause keeps the scan's rate
         // between the last transmission before a batch, `last_sent` by the scan
         // or sent by an earlier batch, and the batch's first question.
-        let pause = self
-            .template
-            .queries_per_second
-            .and_then(|rate| Duration::from_secs(1).checked_div(rate))
-            .unwrap_or_default();
+        let pause =
+            crate::clock::rate_delay(1, self.template.queries_per_second).unwrap_or_default();
         let authorized = self.authorize(client, operation, hosts);
         // Questions the policy refused are never sent, so no batch waits for
         // them.

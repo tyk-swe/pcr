@@ -292,10 +292,10 @@ def _production_sources(root: Path) -> list[Path]:
             if not is_test_path(path.relative_to(root))]
 
 
-def _stream_record_types(root: Path) -> set[str]:
+def _stream_record_types(root: Path, sources: dict[Path, str]) -> set[str]:
     types = set()
-    for path in _production_sources(root):
-        lines = path.read_text(encoding='utf-8').splitlines()
+    for path, source in sources.items():
+        lines = source.splitlines()
         for index, line in enumerate(lines):
             if 'fn event_name' not in line:
                 continue
@@ -325,7 +325,7 @@ def _type_defined(root: Path, rust_type: str, sources: dict[Path, str]) -> bool:
 def registry_problems(root: Path, schema: Any, jsonschema: Any) -> list[str]:
     """The contract registry must agree with the schema, sources, and examples."""
     problems: list[str] = []
-    sources = {path: without_test_items(path.read_text(encoding='utf-8'))
+    sources = {path: blank_comments(without_test_items(path.read_text(encoding='utf-8')))
                for path in _production_sources(root)}
     rows = read_registry('\n'.join(sources.values()))
     if not rows:
@@ -386,7 +386,7 @@ def registry_problems(root: Path, schema: Any, jsonschema: Any) -> list[str]:
             if claimed.get(name, set()) != expected:
                 problems.append(f'{REGISTRY}: {name} claims '
                                 f'{sorted(claimed.get(name, set()))}, schema pins {sorted(expected)}')
-    for stream_type in sorted(_stream_record_types(root) - registered_types):
+    for stream_type in sorted(_stream_record_types(root, sources) - registered_types):
         problems.append(f'{REGISTRY}: stream record type {stream_type} is not registered')
     return problems
 

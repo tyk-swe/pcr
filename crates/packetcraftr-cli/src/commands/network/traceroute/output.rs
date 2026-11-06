@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-pub(crate) mod hosts;
 pub(crate) mod multipath;
 
 use crate::output::contract::Error;

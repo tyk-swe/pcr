@@ -138,7 +138,7 @@ impl Codec for GeneveCodec {
             NAME,
             "protocol_type",
             &layer.protocol_type,
-            expected_discriminator(NAME, context, 0_u16, &layer.protocol_type),
+            expected_discriminator(context, 0_u16, &layer.protocol_type),
             context.mode,
             &mut diagnostics,
         )?;

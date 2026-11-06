@@ -49,6 +49,43 @@ class CheckCouplingTests(unittest.TestCase):
             ["crates/mini/src/lib.rs"],
         )
 
+    def test_inline_tests_preserve_production_counts_and_exemptions(self):
+        fixtures = (
+            'Foo { canonical: "fixture", aliases: [] }\n'
+            'pub const LIMIT: usize = 64;\n'
+            'pub fn helper() {}\n'
+            'use crate::thing::*;\n'
+            'fn make_layer() {}\n'
+            'fn sample_layout_wire() {}\n'
+            'fn fixture() {\n'
+            '    FieldLayout { name: "field" };\n'
+            '    Id::new("foo"); layer.field("x");\n'
+            '    Instant::now(); SystemTime::now(); getrandom();\n'
+            '    layer.downcast_ref::<Tcp>(); control.check();\n'
+            '}\n'
+        )
+        files = {
+            relative: "" for relative in coupling.CRATE_ROOTS.values()
+        } | {
+            "crates/packetcraftr-core/src/protocol/catalog.rs":
+                'Foo { canonical: "foo", aliases: [] }',
+            "crates/packetcraftr-core/src/protocol/identity.rs": "",
+            "crates/packetcraftr/src/identify/io.rs": "",
+            "crates/mini/src/codec.rs": "",
+            "crates/mini/src/plain.rs": 'fn live() { Id::new("fixture"); }',
+        }
+        root = self.workspace(files | {"crates/mini/src/tests.rs": fixtures})
+        expected_counts = coupling.inventory(root)
+        expected_problems = coupling.allowlist_problems(root)
+
+        for relative, source in files.items():
+            (root / relative).write_text(
+                source + "\n#[cfg(all(test, unix))]\nmod tests {\n" + fixtures + "}\n"
+            )
+
+        self.assertEqual(coupling.inventory(root), expected_counts)
+        self.assertEqual(coupling.allowlist_problems(root), expected_problems)
+
     def test_cast_outside_allowlist_is_counted(self):
         root = self.workspace({
             "crates/packetcraftr-core/src/protocol/catalog.rs":

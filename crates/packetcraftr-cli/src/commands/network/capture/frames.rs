@@ -227,17 +227,15 @@ fn emit_frame(
                     ),
                 }
             }
-            Format::Ndjson => crate::commands::files::read::output::Frame::try_from((
-                source_frame,
-                frame,
-                &decoded,
-            ))
-            .map_err(CliError::classified)
-            .and_then(|record| {
-                stream
-                    .emit_published(Published::new(record, Vec::new()))
-                    .map_err(Into::into)
-            }),
+            Format::Ndjson => {
+                crate::output::frame::Record::try_from((source_frame, frame, &decoded))
+                    .map_err(CliError::classified)
+                    .and_then(|record| {
+                        stream
+                            .emit_published(Published::new(record, Vec::new()))
+                            .map_err(Into::into)
+                    })
+            }
             Format::Json | Format::Hex | Format::Pcap | Format::PcapNg => Err(CliError::new(
                 packetcraftr_core::error::Kind::Internal,
                 "decoded output requires text or NDJSON",
@@ -262,15 +260,13 @@ fn emit_frame(
         Format::Hex => output::frame::Captured::try_from(frame)
             .map_err(CliError::classified)
             .and_then(|frame| write_hex_line(frame.bytes())),
-        Format::Ndjson => {
-            crate::commands::files::read::output::Frame::try_from((source_frame, frame))
-                .map_err(CliError::classified)
-                .and_then(|record| {
-                    stream
-                        .emit_published(Published::new(record, Vec::new()))
-                        .map_err(Into::into)
-                })
-        }
+        Format::Ndjson => crate::output::frame::Record::try_from((source_frame, frame))
+            .map_err(CliError::classified)
+            .and_then(|record| {
+                stream
+                    .emit_published(Published::new(record, Vec::new()))
+                    .map_err(Into::into)
+            }),
         Format::Json => Ok(()),
         Format::Pcap | Format::PcapNg => writer::write_frame(
             writer.as_mut().expect("writer initialized before frames"),

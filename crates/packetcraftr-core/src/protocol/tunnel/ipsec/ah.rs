@@ -127,12 +127,7 @@ impl Codec for AhCodec {
             {
                 ValueExpectation::Required(89)
             } else {
-                expected_discriminator(
-                    NAME,
-                    context,
-                    ip_protocol::NO_NEXT_HEADER,
-                    &layer.next_header,
-                )
+                expected_discriminator(context, ip_protocol::NO_NEXT_HEADER, &layer.next_header)
             },
             context.mode,
             &mut diagnostics,

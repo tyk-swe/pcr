@@ -7,6 +7,7 @@ pub(crate) mod host;
 pub(crate) mod list;
 pub(crate) mod plan;
 pub(crate) mod probe;
+pub(crate) mod traceroute;
 
 use crate::output::published_enum;
 use std::net::IpAddr;
@@ -224,7 +225,7 @@ pub(crate) struct Report {
     pub scheduling: Scheduling,
     /// Present only when the scan traced its hosts.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub traceroute: Option<crate::commands::network::traceroute::output::hosts::Report>,
+    pub traceroute: Option<crate::commands::network::scan::output::traceroute::Report>,
 }
 
 /// A correlated frame no probe outcome carries.
@@ -256,7 +257,7 @@ impl Report {
         aggregate: library::Aggregate,
         plan: plan::Plan,
         reverse_dns: Vec<Option<host::ReverseDns>>,
-        traceroute: Option<crate::commands::network::traceroute::output::hosts::Report>,
+        traceroute: Option<crate::commands::network::scan::output::traceroute::Report>,
     ) -> Result<Published<Self>, Error> {
         let library::Aggregate {
             planned_duration,

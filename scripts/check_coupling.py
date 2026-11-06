@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable
 from pathlib import Path
 import re
 import sys
@@ -82,7 +83,7 @@ CONST_PATTERN = re.compile(
 POLL_PATTERN = re.compile(r"(?:invocation|control|cancellation|i)\.check(?:_interrupted)?\(")
 
 
-def cancellation_polls(sources: list[Path]) -> int:
+def cancellation_polls(sources: dict[Path, str]) -> int:
     """Manual Invocation/Control polls in CLI production sources.
 
     Whitespace is stripped first so a poll split across lines counts, and
@@ -90,23 +91,22 @@ def cancellation_polls(sources: list[Path]) -> int:
     `invocation.rs` itself defines the wrappers and is excluded.
     """
     total = 0
-    for path in sources:
+    for path, text in sources.items():
         if "packetcraftr-cli" not in str(path) or path.name == "invocation.rs":
             continue
-        text = without_test_items(path.read_text())
         total += len(POLL_PATTERN.findall("".join(text.split())))
     return total
 
 
-def duplicate_constants(sources: list[Path]) -> int:
+def duplicate_constants(sources: dict[Path, str]) -> int:
     """Module-level constants defined with the same literal in two files.
 
     Aliases (values naming another path) and scoped constants (associated
     or function-local) are single-sourced by construction and do not count.
     """
     seen: dict[tuple[str, str], set[Path]] = {}
-    for path in sources:
-        for name, value in CONST_PATTERN.findall(path.read_text()):
+    for path, text in sources.items():
+        for name, value in CONST_PATTERN.findall(text):
             value = " ".join(value.split())
             if "::" in value:
                 continue
@@ -125,18 +125,17 @@ CRATE_ROOTS = {
 }
 
 
-def public_items(root: Path) -> dict[str, int]:
+def public_items(root: Path, sources: dict[Path, str]) -> dict[str, int]:
     return {
-        name: len(PUBLIC_ITEM_PATTERN.findall((root / relative).read_text()))
-        if (root / relative).is_file() else 0
+        name: len(PUBLIC_ITEM_PATTERN.findall(sources.get(root / relative, "")))
         for name, relative in CRATE_ROOTS.items()
     }
 
 
-def cast_counts(root: Path, sources: list[Path]) -> dict[str, int]:
+def cast_counts(root: Path, sources: dict[Path, str]) -> dict[str, int]:
     return {
-        str(path.relative_to(root)): len(CAST_PATTERN.findall(path.read_text()))
-        for path in sources
+        str(path.relative_to(root)): len(CAST_PATTERN.findall(text))
+        for path, text in sources.items()
     }
 
 
@@ -154,8 +153,8 @@ def allowlist_problems(root: Path = ROOT) -> list[str]:
             problems.append(f"stale cast allowlist entry: {relative}")
     for module in BOUNDARY_MODULES:
         shielded = sum(
-            len(DYNAMIC_FIELD_PATTERN.findall(path.read_text()))
-            for path in sources
+            len(DYNAMIC_FIELD_PATTERN.findall(text))
+            for path, text in sources.items()
             if module in str(path.relative_to(root))
         )
         if shielded == 0:
@@ -178,18 +177,17 @@ BOUNDARY_MODULES = (
 )
 
 
-def production_sources(root: Path = ROOT) -> list[Path]:
-    sources = []
-    for path in sorted((root / "crates").rglob("*.rs")):
-        if is_test_path(path.relative_to(root)):
-            continue
-        sources.append(path)
-    return sources
+def production_sources(root: Path = ROOT) -> dict[Path, str]:
+    return {
+        path: without_test_items(path.read_text())
+        for path in sorted((root / "crates").rglob("*.rs"))
+        if not is_test_path(path.relative_to(root))
+    }
 
 
-def count(pattern: str, sources: list[Path], flags: int = 0) -> int:
+def count(pattern: str, sources: Iterable[str], flags: int = 0) -> int:
     regex = re.compile(pattern, flags)
-    return sum(len(regex.findall(path.read_text())) for path in sources)
+    return sum(len(regex.findall(text)) for text in sources)
 
 
 def inventory(root: Path = ROOT) -> dict[str, int]:
@@ -197,12 +195,11 @@ def inventory(root: Path = ROOT) -> dict[str, int]:
     catalog = root / "crates/packetcraftr-core/src/protocol/catalog.rs"
     builtin_names = set(re.findall(
         r'canonical: "([a-z0-9_]+)"',
-        catalog.read_text() if catalog.exists() else "",
+        sources.get(catalog, ""),
     ))
     id_literals = 0
     dynamic = 0
-    for path in sources:
-        text = path.read_text()
+    for path, text in sources.items():
         if path.name != "catalog.rs" and "layer/opaque.rs" not in str(path):
             for literal in re.findall(r'Id::new\("([a-z0-9_]+)"\)', text):
                 if literal in builtin_names:
@@ -214,10 +211,10 @@ def inventory(root: Path = ROOT) -> dict[str, int]:
             # .field(name, value) calls are formatting, not layer access.
             dynamic += len(DYNAMIC_FIELD_PATTERN.findall(text))
     non_clock = [
-        s for s in sources if str(s.relative_to(root)) != CLOCK_SEAM
+        text for path, text in sources.items() if str(path.relative_to(root)) != CLOCK_SEAM
     ]
     non_entropy = [
-        s for s in sources if str(s.relative_to(root)) != ENTROPY_SEAM
+        text for path, text in sources.items() if str(path.relative_to(root)) != ENTROPY_SEAM
     ]
     casts = cast_counts(root, sources)
     layer_casts = sum(casts.get(relative, 0) for relative in LAYER_CAST_FILES)
@@ -228,14 +225,14 @@ def inventory(root: Path = ROOT) -> dict[str, int]:
         if relative not in LAYER_CAST_FILES and relative not in ERROR_CAST_FILES
     )
     return {
-        "make_layer_impls": count(r"fn make_layer", sources),
+        "make_layer_impls": count(r"fn make_layer", sources.values()),
         "field_layout_literals": count(
             r"FieldLayout\s*\{[^}]*?name:",
-            [s for s in sources if "packetcraftr-core" in str(s)],
+            [text for path, text in sources.items() if "packetcraftr-core" in str(path)],
             re.S,
         ),
-        "hand_layout_fns": count(r"fn [a-z0-9_]+_layout_wire\(", sources),
-        "glob_imports": count(r"^use [^;]+::\*;", sources, re.M),
+        "hand_layout_fns": count(r"fn [a-z0-9_]+_layout_wire\(", sources.values()),
+        "glob_imports": count(r"^use [^;]+::\*;", sources.values(), re.M),
         "builtin_id_literals": id_literals,
         "instant_now": count(r"Instant::now", non_clock),
         "system_time_now": count(r"SystemTime::now", non_clock),
@@ -247,11 +244,11 @@ def inventory(root: Path = ROOT) -> dict[str, int]:
         "manual_cancellation_polls": cancellation_polls(sources),
         "catalog_public_items": count(
             r"^\s*pub (?:const )?fn ",
-            [root / "crates/packetcraftr-core/src/protocol/catalog.rs"],
+            [sources.get(catalog, "")],
             re.M,
         ),
         "duplicate_constants": duplicate_constants(sources),
-        **public_items(root),
+        **public_items(root, sources),
     }
 
 

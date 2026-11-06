@@ -116,7 +116,7 @@ fn link_type_expectation(
     {
         return Ok(ValueExpectation::Suggested(LINK_RAW_FALLBACK_DISCRIMINATOR));
     }
-    Ok(expected_discriminator(name, context, 0_u16, value))
+    Ok(expected_discriminator(context, 0_u16, value))
 }
 
 fn validate_link_length_form(

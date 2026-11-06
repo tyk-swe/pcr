@@ -261,6 +261,30 @@ class RegistryTests(unittest.TestCase):
         root = self.workspace(REGISTRY_SOURCE)
         self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema()), [])
 
+    def test_registry_ignores_comments_and_test_only_records(self):
+        root = self.workspace(REGISTRY_SOURCE + '\n/*\n' + REGISTRY_SOURCE + '\n*/\n')
+        output = root / checker.CLI_SRC / 'output/build.rs'
+        source = output.read_text()
+        output.write_text(source + '''
+#[cfg(test)]
+mod tests {
+    pub struct TestRecord;
+    impl StreamRecord for TestRecord {
+        fn event_name(&self) -> &'static str { "test" }
+    }
+}
+/*
+impl StreamRecord for CommentedRecord {
+    fn event_name(&self) -> &'static str { "commented" }
+}
+*/
+''')
+        self.assertEqual(checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema()), [])
+        output.write_text(source.replace('pub struct Report {}', '/* pub struct Report {} */'))
+        problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())
+        self.assertEqual(len(problems), 1)
+        self.assertIn('rust type crate::output::build::Report is not defined', problems[0])
+
     def test_reports_unused_schema_definitions(self):
         root = self.workspace(REGISTRY_SOURCE.replace('buildSuccess"', 'goneSuccess"'))
         problems = checker.registry_problems(root, REGISTRY_SCHEMA, checker.load_jsonschema())

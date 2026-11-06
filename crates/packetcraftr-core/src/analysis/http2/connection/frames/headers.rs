@@ -3,13 +3,14 @@
 
 //! Header-block assembly and bounded HPACK decoding.
 
-use super::super::{Chain, ChainHead, ConnectionState, Context, Decoded, Evidence, Fault, Pos};
+use super::super::{Chain, ChainHead, ConnectionState, Context, Evidence, Fault, Pos};
 use crate::analysis::http2::Error;
 use crate::analysis::http2::IssueCode;
 use crate::analysis::http2::budget::{self, Charge};
 use crate::analysis::http2::buffer::union_balanced;
 use crate::analysis::http2::model::{Certainty, Header, IssueScope, Status};
 use crate::analysis::http2::side::Side;
+use crate::analysis::http2::stream::Decoded;
 
 use crate::protocol::application::http2 as wire;
 use crate::protocol::application::http2::hpack;

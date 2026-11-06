@@ -42,7 +42,7 @@ impl crate::commands::Spec for Args {
             command: "read",
             rust_types: &[
                 "crate::commands::files::read::output::Event",
-                "crate::commands::files::read::output::Frame",
+                "crate::output::frame::Record",
             ],
             events: &["complete", "frame"],
             example: "examples/documents/output-read-complete.json",

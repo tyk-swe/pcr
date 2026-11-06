@@ -412,6 +412,21 @@ mod tests {
 
     #[test]
     fn blocked_live_output_does_not_send_a_reply_after_duration() {
+        assert_eq!(
+            blocked_live_output(false),
+            packetcraftr_core::error::Code::IoStdout
+        );
+    }
+
+    #[test]
+    fn cancelled_blocked_live_output_reports_cancellation() {
+        assert_eq!(
+            blocked_live_output(true),
+            packetcraftr_core::error::Code::IoCancelled
+        );
+    }
+
+    fn blocked_live_output(cancel: bool) -> packetcraftr_core::error::Code {
         struct BlockedWriter {
             entered: std::sync::mpsc::Sender<()>,
             release: Option<std::sync::mpsc::Receiver<()>>,
@@ -448,11 +463,12 @@ mod tests {
             Duration::from_secs(1),
         )
         .unwrap();
+        let cancellation = packetcraftr_core::budget::Cancellation::default();
         let invocation = Invocation::new(
             Format::Ndjson,
             stream.into(),
             arguments.publication_duration(),
-            Default::default(),
+            cancellation.clone(),
             None,
         );
         let handle = thread::spawn(move || run(&invocation, arguments));
@@ -472,6 +488,9 @@ mod tests {
             }
         }
         assert!(entered, "live event reached the blocked output");
+        if cancel {
+            cancellation.cancel();
+        }
         thread::sleep(Duration::from_millis(650));
         let stop_deadline = SystemClock.now() + Duration::from_millis(250);
         while !handle.is_finished() && SystemClock.now() < stop_deadline {
@@ -485,13 +504,9 @@ mod tests {
             .join()
             .unwrap()
             .expect_err("blocked output is reported");
-        assert_eq!(
-            error.classification.code,
-            packetcraftr_core::error::Code::IoStdout,
-            "{error:?}"
-        );
         assert!(stopped_before_release, "live output exceeded the duration");
         assert!(holds_probe_record(&std::fs::read_to_string(log).unwrap()));
+        error.classification.code
     }
 
     #[test]

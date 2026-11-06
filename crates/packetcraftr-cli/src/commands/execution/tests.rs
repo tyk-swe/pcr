@@ -360,7 +360,13 @@ fn cooperative_writer_wait_retains_parent_control() {
         let still_charged = writer_runtime.snapshot();
         release.send(()).unwrap();
         caller.join().unwrap();
-        assert!(returned_under_control.unwrap().is_err());
+        let error = returned_under_control
+            .unwrap()
+            .expect_err("blocked writer must not finish successfully");
+        if !frozen {
+            use packetcraftr_core::error::{Classified, Code};
+            assert_eq!(error.classification().code, Code::IoCancelled);
+        }
         assert_eq!(still_charged.active, 1);
         assert_eq!(still_charged.timed_out_retaining_capacity, 1);
         assert!(!invocation.output.is_complete());

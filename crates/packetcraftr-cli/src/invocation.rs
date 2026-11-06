@@ -10,7 +10,7 @@ use crate::{
     output::{contract::Format, envelope::Envelope},
     resources::Diagnostics,
 };
-use packetcraftr_core::budget::{Cancellation, Deadline, Interrupted};
+use packetcraftr_core::budget::{Cancellation, Cancelled, Deadline, Interrupted};
 use std::{
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
@@ -56,8 +56,12 @@ impl Control {
         })
     }
 
+    pub(crate) fn check_cancelled(&self) -> Result<(), Cancelled> {
+        self.cancellation.check()
+    }
+
     pub(crate) fn check_interrupted(&self) -> Result<(), Interrupted> {
-        self.cancellation.check()?;
+        self.check_cancelled()?;
         if let Some(deadline) = &self.deadline {
             deadline.enforce()?;
         }

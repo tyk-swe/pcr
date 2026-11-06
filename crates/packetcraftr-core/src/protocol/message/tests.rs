@@ -1645,6 +1645,96 @@ fn resp_supports_edits_filters_and_projection() {
 }
 
 #[test]
+fn bacnet_fields_follow_selected_headers() {
+    use crate::protocol::application::bacnet_ip::BacnetIp;
+
+    let registry = builtin::registry();
+    for bvlc_function in [0, 1, 4, 10, 11, 255] {
+        let npdu = matches!(bvlc_function, 4 | 10 | 11);
+        for control in [0, 8, 32, 40, 128, 136, 160, 168] {
+            for network_message_type in [0, 128, 255] {
+                if (!npdu && control != 0) || (control & 128 == 0 && network_message_type != 0) {
+                    continue;
+                }
+                let base = BacnetIp {
+                    bvlc_function,
+                    control,
+                    network_message_type,
+                    data: Bytes::from_static(b"\x10\x08"),
+                    ..Default::default()
+                };
+                let destination = npdu && control & 32 != 0;
+                let source = npdu && control & 8 != 0;
+                let network_message = npdu && control & 128 != 0;
+                let cases: [(&str, field::Value, bool); 9] = [
+                    (
+                        "forwarded_address",
+                        Bytes::from_static(b"\x01\x02\x03\x04\x05\x06").into(),
+                        bvlc_function == 4,
+                    ),
+                    ("control", u64::from(control | 1).into(), npdu),
+                    ("destination_network", 42_u64.into(), destination),
+                    (
+                        "destination_address",
+                        Bytes::from_static(b"\x01\x02").into(),
+                        destination,
+                    ),
+                    ("hop_count", 42_u64.into(), destination),
+                    ("source_network", 42_u64.into(), source),
+                    (
+                        "source_address",
+                        Bytes::from_static(b"\x03\x04").into(),
+                        source,
+                    ),
+                    (
+                        "network_message_type",
+                        u64::from(network_message_type ^ 1).into(),
+                        network_message,
+                    ),
+                    (
+                        "vendor_id",
+                        42_u64.into(),
+                        network_message && network_message_type >= 128,
+                    ),
+                ];
+                for mode in [Mode::Strict, Mode::Permissive] {
+                    for (field, value, carried) in &cases {
+                        for changed in [false, true] {
+                            let mut layer = base.clone();
+                            if changed {
+                                layer.set_field(field, value.clone()).unwrap();
+                            }
+                            let mut packet = Packet::default();
+                            packet.push(layer.clone());
+                            let json =
+                                serde_json::to_string(&document::Packet::from_packet(&packet))
+                                    .unwrap();
+                            let document =
+                                document::Packet::parse(&json, document::Format::Json, json.len())
+                                    .unwrap();
+                            let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                            if changed && !carried {
+                                let error = result.unwrap_err();
+                                assert!(error.contains(field), "{mode:?} {field}: {error}");
+                                continue;
+                            }
+                            let built = result.unwrap();
+                            assert!(built.diagnostics.is_empty(), "{mode:?} {layer:?}");
+                            assert_eq!(built.packet.get::<BacnetIp>(), Some(&layer));
+                            let decoded = decode("bacnet_ip", &built.bytes).unwrap();
+                            let mut packet = Packet::default();
+                            packet.push_boxed(decoded.layer);
+                            assert_eq!(packet.get::<BacnetIp>(), Some(&layer));
+                            assert_eq!(build_in(packet, mode).unwrap().bytes, built.bytes);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn bacnet_segment_ack_requires_window() {
     let ack = b"\x40\x01\x02\x01";
     for len in 0..=ack.len() {

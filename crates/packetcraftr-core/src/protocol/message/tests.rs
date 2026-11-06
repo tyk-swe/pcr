@@ -1118,6 +1118,101 @@ fn ethernet_ip_fields_follow_command_and_status() {
 }
 
 #[test]
+fn opcua_tcp_rejects_fields_outside_selected_message() {
+    use crate::protocol::application::opcua_tcp::OpcuaTcp;
+
+    let registry = builtin::registry();
+    let values = [
+        (
+            "protocol_version",
+            field::Value::Unsigned(1),
+            &[b"HEL", b"ACK"][..],
+        ),
+        ("receive_buffer", 8192_u32.into(), &[b"HEL", b"ACK"][..]),
+        ("send_buffer", 8192_u32.into(), &[b"HEL", b"ACK"][..]),
+        ("max_message_size", 999_u32.into(), &[b"HEL", b"ACK"][..]),
+        ("max_chunk_count", 8_u32.into(), &[b"HEL", b"ACK"][..]),
+        (
+            "endpoint_url",
+            Bytes::from_static(b"opc.tcp://example.invalid:4840").into(),
+            &[b"HEL", b"RHE"][..],
+        ),
+        ("endpoint_null", true.into(), &[b"HEL", b"RHE"][..]),
+        (
+            "server_uri",
+            Bytes::from_static(b"urn:example:server").into(),
+            &[b"RHE"][..],
+        ),
+        ("server_uri_null", true.into(), &[b"RHE"][..]),
+        ("status_code", 42_u32.into(), &[b"ERR"][..]),
+        (
+            "reason",
+            Bytes::from_static(b"test reason").into(),
+            &[b"ERR"][..],
+        ),
+        ("reason_null", true.into(), &[b"ERR"][..]),
+        (
+            "secure_channel",
+            42_u32.into(),
+            &[b"OPN", b"MSG", b"CLO"][..],
+        ),
+        (
+            "data",
+            Bytes::from_static(&[0xa5, 0x5a]).into(),
+            &[b"OPN", b"MSG", b"CLO"][..],
+        ),
+    ];
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for message_type in [b"HEL", b"ACK", b"ERR", b"RHE", b"OPN", b"MSG", b"CLO"] {
+            let chunks = if matches!(message_type, b"OPN" | b"MSG" | b"CLO") {
+                &b"FCA"[..]
+            } else {
+                &b"F"[..]
+            };
+            for chunk_type in chunks {
+                let default = OpcuaTcp {
+                    message_type: Bytes::from_static(message_type),
+                    chunk_type: *chunk_type,
+                    ..Default::default()
+                };
+                let cases = std::iter::once((default.clone(), None)).chain(values.iter().map(
+                    |(name, value, messages)| {
+                        let carried = messages.contains(&message_type);
+                        let mut layer = default.clone();
+                        if *name == "endpoint_null" && carried {
+                            layer.endpoint_url = Bytes::new();
+                        }
+                        layer.set_field(name, value.clone()).unwrap();
+                        (layer, (!carried).then_some(*name))
+                    },
+                ));
+                for (layer, rejected) in cases {
+                    let mut packet = Packet::default();
+                    packet.push(layer.clone());
+                    let document = document::Packet::from_packet(&packet);
+                    let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                    if let Some(name) = rejected {
+                        let error = result.unwrap_err();
+                        assert!(error.contains(name), "{message_type:?} {mode:?}: {error}");
+                        continue;
+                    }
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty());
+                    let decoded = decode("opcua_tcp", &built.bytes).unwrap();
+                    assert_eq!(decoded.layer.downcast_ref::<OpcuaTcp>(), Some(&layer));
+                    let mut packet = Packet::default();
+                    packet.push_boxed(decoded.layer);
+                    let document = document::Packet::from_packet(&packet);
+                    let rebuilt =
+                        build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                    assert_eq!(rebuilt.bytes, built.bytes);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn ipfix_options_template_withdrawals_round_trip() {
     for templates in [vec![256_u16], vec![256, 257], vec![3]] {
         let mut wire = vec![0, 10];

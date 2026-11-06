@@ -113,7 +113,7 @@ jobs:
             os: macos-15-intel
             archive_extension: tar.gz
           - triple: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
             archive_extension: tar.gz
           - triple: x86_64-pc-windows-msvc
             os: windows-2022

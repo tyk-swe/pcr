@@ -3100,3 +3100,63 @@ fn snmp_pdu_fields_survive_document_and_wire_round_trips() {
         }
     }
 }
+
+#[test]
+fn iec104_fields_follow_frame_type() {
+    use crate::protocol::application::iec104::{FrameType, Iec104};
+
+    let registry = builtin::registry();
+    let values = [
+        ("send_sequence", 123_u16.into(), [true, false, false]),
+        ("receive_sequence", 234_u16.into(), [true, true, false]),
+        ("u_control", 11_u8.into(), [false, false, true]),
+        ("asdu_type", 101_u8.into(), [true, false, false]),
+        ("variable_structure", 2_u8.into(), [true, false, false]),
+        ("cause", 7_u16.into(), [true, false, false]),
+        ("common_address", 2_u16.into(), [true, false, false]),
+        (
+            "objects",
+            field::Value::Bytes(Bytes::from_static(&[1, 2, 3, 4])),
+            [true, false, false],
+        ),
+    ];
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for (index, frame_type) in [FrameType::I, FrameType::S, FrameType::U]
+            .into_iter()
+            .enumerate()
+        {
+            let default = Iec104 {
+                frame_type,
+                ..Default::default()
+            };
+            let cases = std::iter::once((default.clone(), None)).chain(values.iter().map(
+                |(name, value, carried)| {
+                    let mut layer = default.clone();
+                    layer.set_field(name, value.clone()).unwrap();
+                    (layer, (!carried[index]).then_some(*name))
+                },
+            ));
+            for (layer, rejected) in cases {
+                let mut packet = Packet::default();
+                packet.push(layer.clone());
+                let document = document::Packet::from_packet(&packet);
+                let packet = document.to_packet(&registry, 16).unwrap();
+                let result = build_in(packet, mode);
+                if let Some(name) = rejected {
+                    let error = result.unwrap_err();
+                    assert!(error.contains(name), "{frame_type:?} {mode:?}: {error}");
+                    continue;
+                }
+                let built = result.unwrap();
+                assert!(built.diagnostics.is_empty());
+                let decoded = decode("iec104", &built.bytes).unwrap();
+                assert_eq!(decoded.layer.downcast_ref::<Iec104>(), Some(&layer));
+                let mut packet = Packet::default();
+                packet.push_boxed(decoded.layer);
+                let document = document::Packet::from_packet(&packet);
+                let rebuilt = build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                assert_eq!(rebuilt.bytes, built.bytes);
+            }
+        }
+    }
+}

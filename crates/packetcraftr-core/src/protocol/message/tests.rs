@@ -1045,6 +1045,79 @@ fn ethernet_ip_preserves_opaque_errors() {
 }
 
 #[test]
+fn ethernet_ip_fields_follow_command_and_status() {
+    use crate::protocol::application::ethernet_ip::EthernetIp;
+
+    let registry = builtin::registry();
+    let values = [
+        ("protocol_version", 2_u16.into(), &[0x65][..]),
+        ("flags", 1_u16.into(), &[0x65][..]),
+        ("interface_handle", 7_u32.into(), &[0x6f, 0x70][..]),
+        ("timeout", 23_u16.into(), &[0x6f, 0x70][..]),
+        (
+            "items",
+            field::Value::List(vec![field::Value::Object(record([
+                ("kind", 0xb2_u16.into()),
+                ("data", Bytes::from_static(&[0xa5, 0x5a]).into()),
+            ]))]),
+            &[0x6f, 0x70][..],
+        ),
+        (
+            "data",
+            field::Value::Bytes(Bytes::from_static(&[0xa5, 0x5a])),
+            &[0x63][..],
+        ),
+    ];
+    for mode in [Mode::Strict, Mode::Permissive] {
+        for command in [0x65, 0x66, 0x6f, 0x70, 0x63] {
+            for status in [0, 100] {
+                let default = EthernetIp {
+                    command,
+                    status,
+                    ..Default::default()
+                };
+                let cases = std::iter::once((default.clone(), None)).chain(values.iter().map(
+                    |(name, value, commands)| {
+                        let mut layer = default.clone();
+                        layer.set_field(name, value.clone()).unwrap();
+                        let carried = if status == 0 {
+                            commands.contains(&command)
+                        } else {
+                            *name == "data"
+                        };
+                        (layer, (!carried).then_some(*name))
+                    },
+                ));
+                for (layer, rejected) in cases {
+                    let mut packet = Packet::default();
+                    packet.push(layer.clone());
+                    let document = document::Packet::from_packet(&packet);
+                    let result = build_in(document.to_packet(&registry, 16).unwrap(), mode);
+                    if let Some(name) = rejected {
+                        let error = result.unwrap_err();
+                        assert!(
+                            error.contains(name),
+                            "{command:#x} {status} {mode:?}: {error}"
+                        );
+                        continue;
+                    }
+                    let built = result.unwrap();
+                    assert!(built.diagnostics.is_empty());
+                    let decoded = decode("ethernet_ip", &built.bytes).unwrap();
+                    assert_eq!(decoded.layer.downcast_ref::<EthernetIp>(), Some(&layer));
+                    let mut packet = Packet::default();
+                    packet.push_boxed(decoded.layer);
+                    let document = document::Packet::from_packet(&packet);
+                    let rebuilt =
+                        build_in(document.to_packet(&registry, 16).unwrap(), mode).unwrap();
+                    assert_eq!(rebuilt.bytes, built.bytes);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn ipfix_options_template_withdrawals_round_trip() {
     for templates in [vec![256_u16], vec![256, 257], vec![3]] {
         let mut wire = vec![0, 10];

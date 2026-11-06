@@ -67,7 +67,35 @@ message_codec!(EthernetIpCodec, EthernetIp, ethernetip_schema);
 
 const NAME: &str = crate::protocol::BuiltinProtocol::EthernetIp.as_str();
 impl EthernetIp {
+    fn reject_uncarried_fields(&self) -> Result<(), Error> {
+        let registration = self.status == 0 && self.command == 0x65;
+        let cpf = self.status == 0 && matches!(self.command, 0x6f | 0x70);
+        let opaque = self.status != 0 || !matches!(self.command, 0x65 | 0x66 | 0x6f | 0x70);
+        let fields = [
+            (
+                "protocol_version",
+                !registration && self.protocol_version != Self::default().protocol_version,
+            ),
+            ("flags", !registration && self.flags != 0),
+            ("interface_handle", !cpf && self.interface_handle != 0),
+            ("timeout", !cpf && self.timeout != 0),
+            ("items", !cpf && !self.items.0.is_empty()),
+            ("data", !opaque && !self.data.is_empty()),
+        ];
+        if let Some((field, _)) = fields.into_iter().find(|(_, uncarried)| *uncarried) {
+            return Err(invalid(
+                NAME,
+                format!(
+                    "{field} is not part of command {:#06x} with status {}",
+                    self.command, self.status
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     fn encode_wire(&self, c: &EncodeContext<'_>) -> Result<Vec<u8>, Error> {
+        self.reject_uncarried_fields()?;
         if self.sender_context.len() != 8 {
             return Err(invalid(NAME, "sender context requires eight bytes"));
         }
